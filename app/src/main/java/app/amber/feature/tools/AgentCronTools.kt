@@ -37,6 +37,7 @@ class AgentCronTools(
         name = "cron_task_create",
         description = "Create a mobile-side cron task. The task will trigger AmberAgent on this Android device and send the prompt to its own conversation when due. Supports 5-field cron expressions like '0 9 * * *', '*/30 * * * *', and '30 9 * * 1-5'.",
         needsApproval = true,
+        allowsAutoApproval = false,
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -68,6 +69,7 @@ class AgentCronTools(
         name = "cron_task_update",
         description = "Update an existing mobile cron task. Omitted fields are preserved.",
         needsApproval = true,
+        allowsAutoApproval = false,
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -101,6 +103,7 @@ class AgentCronTools(
         name = "cron_task_delete",
         description = "Delete a mobile cron task and cancel its scheduled work.",
         needsApproval = true,
+        allowsAutoApproval = false,
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {

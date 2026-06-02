@@ -24,7 +24,18 @@ class GenerationHandlerAutoApprovalTest {
     fun bypassesApprovalForRegularToolsWhenAutoApproveIsEnabled() {
         assertFalse(
             resolver.shouldPauseForApproval(
-                toolDef = approvalTool("terminal_execute"),
+                toolDef = approvalTool("safe_lookup"),
+                tool = toolCall("safe_lookup"),
+                autoApproveTools = true,
+            )
+        )
+    }
+
+    @Test
+    fun terminalExecuteStillPausesWithRegularAutoApprove() {
+        assertTrue(
+            resolver.shouldPauseForApproval(
+                toolDef = approvalTool("terminal_execute", allowsAutoApproval = false),
                 tool = toolCall("terminal_execute"),
                 autoApproveTools = true,
             )
@@ -35,8 +46,8 @@ class GenerationHandlerAutoApprovalTest {
     fun keepsHighRiskToolsManualWhenRegularAutoApproveIsEnabled() {
         assertTrue(
             resolver.shouldPauseForApproval(
-                toolDef = approvalTool("sms_send", allowsAutoApproval = false),
-                tool = toolCall("sms_send"),
+                toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                tool = toolCall("http_request", """{"method":"POST"}"""),
                 autoApproveTools = true,
             )
         )
@@ -45,6 +56,18 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun bypassesHighRiskToolsOnlyWhenHighRiskAutoApproveIsEnabled() {
         assertFalse(
+            resolver.shouldPauseForApproval(
+                toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                tool = toolCall("http_request", """{"method":"POST"}"""),
+                autoApproveTools = true,
+                autoApproveHighRiskTools = true,
+            )
+        )
+    }
+
+    @Test
+    fun alwaysAskToolsPauseEvenWithHighRiskAutoApproveEnabled() {
+        assertTrue(
             resolver.shouldPauseForApproval(
                 toolDef = approvalTool("sms_send", allowsAutoApproval = false),
                 tool = toolCall("sms_send"),
@@ -135,10 +158,10 @@ class GenerationHandlerAutoApprovalTest {
     }
 
     @Test
-    fun cronCreateCanUseGlobalAutoApproval() {
-        assertFalse(
+    fun cronCreateCannotUseGlobalAutoApproval() {
+        assertTrue(
             resolver.shouldPauseForApproval(
-                toolDef = approvalTool("cron_task_create"),
+                toolDef = approvalTool("cron_task_create", allowsAutoApproval = false),
                 tool = toolCall("cron_task_create", """{"prompt":"daily brief","cron_expression":"30 8 * * *"}"""),
                 autoApproveTools = true,
             )

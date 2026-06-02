@@ -93,6 +93,7 @@ class WorkspaceArtifactTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackArtifactTool("download_file", "下载文件", input, runtime = "HTTP -> SAF workspace") {
                 withContext(Dispatchers.IO) {
@@ -157,6 +158,7 @@ class WorkspaceArtifactTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackArtifactTool("archive_extract", "解压压缩包", input) {
                 val path = input.requiredString("path")
@@ -188,6 +190,7 @@ class WorkspaceArtifactTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackArtifactTool("archive_create", "创建压缩包", input) {
                 val format = input.string("format") ?: "zip"

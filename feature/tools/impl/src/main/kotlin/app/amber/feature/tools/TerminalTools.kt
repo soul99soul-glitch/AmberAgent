@@ -46,6 +46,7 @@ class TerminalTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             val result = terminalRuntime.execute(
                 command = input.requiredString("command"),
@@ -82,6 +83,7 @@ class TerminalTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             val snapshot = terminalRuntime.startJob(
                 command = input.requiredString("command"),
@@ -142,6 +144,7 @@ class TerminalTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             terminalRuntime.stopJob(input.requiredString("job_id")).toTextJson()
         }
@@ -161,6 +164,7 @@ class TerminalTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             terminalRuntime.installPackages(
                 packages = input.jsonObject["packages"]?.jsonArrayStrings().orEmpty(),
@@ -175,6 +179,7 @@ class TerminalTools(
         description = "Flush the app-private /workspace mirror back to the user-authorized SAF workspace.",
         parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = {
             val result = terminalRuntime.flushWorkspace()
             textJson {
@@ -189,6 +194,7 @@ class TerminalTools(
         description = "Start a persistent Alpine/proot terminal session in the AmberAgent runtime workspace. This is non-PTY; tmux/TUI support needs later PTY wiring.",
         parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackSessionTool("terminal_session_start", "启动终端会话", input) {
                 val session = terminalRuntime.startSession()
@@ -214,6 +220,7 @@ class TerminalTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackSessionTool("terminal_session_exec", "执行会话命令", input) {
                 val result = terminalRuntime.execSession(
@@ -264,6 +271,7 @@ class TerminalTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackSessionTool("terminal_session_stop", "停止终端会话", input) {
                 val result = terminalRuntime.stopSession(input.requiredString("session_id"))

@@ -39,6 +39,8 @@ internal fun createNotificationPostTool(context: Context, deps: SystemAccessDeps
             required = listOf("title", "text")
         )
     },
+    needsApproval = true,
+    allowsAutoApproval = false,
     execute = { input ->
         deps.trackSystemTool("notification_post", "发布通知", "apps", input.safePreview()) {
             val notificationManager = context.getSystemService(NotificationManager::class.java)

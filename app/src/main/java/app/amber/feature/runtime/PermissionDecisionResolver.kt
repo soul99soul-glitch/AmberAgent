@@ -64,8 +64,8 @@ data class PermissionDecisionTrace(
                 put("speculative_eligible", policy.speculativeEligible)
                 policy.speculativeBlockReason?.let { put("speculative_block_reason", it) }
                 put("output_budget_chars", policy.outputBudgetChars)
-                put("hard_blocked", policy.hardBlocked)
                 put("mandatory_approval", policy.mandatoryApproval)
+                put("always_ask", policy.alwaysAsk)
                 policy.reason?.let { put("reason", it) }
             })
         }
@@ -113,8 +113,8 @@ class PermissionDecisionResolver {
         if (tool.approvalState !is ToolApprovalState.Auto) {
             return decision(PermissionDecisionAction.ALLOW, "User already decided.", "approval_state", policy)
         }
-        if (policy.hardBlocked) {
-            return decision(PermissionDecisionAction.DENY, policy.reason ?: "Tool invocation is blocked.", "policy", policy)
+        if (policy.alwaysAsk) {
+            return decision(PermissionDecisionAction.ASK, "Tool always requires explicit human approval.", "always_ask", policy)
         }
         // Mandatory approval gate — stricter than regular auto-approval and
         // prior in-run trust, but still respects the explicit "auto approve
@@ -202,7 +202,7 @@ class PermissionDecisionResolver {
     ).action == PermissionDecisionAction.ASK
 
     private fun ToolInvocationPolicy.requiresSubAgentApproval(): Boolean =
-        mutates || risk != ToolRisk.Normal || category in setOf("screen", "terminal", "system", "external_file", "office")
+        mutates || risk != ToolRisk.Normal || category in setOf("screen", "terminal", "system", "external_file", "office", "cloud")
 
     private fun UIMessagePart.Tool.hasSessionGrant(): Boolean =
         runCatching {

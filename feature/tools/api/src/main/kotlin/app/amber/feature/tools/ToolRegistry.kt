@@ -53,9 +53,9 @@ data class ToolInvocationPolicy(
     val requiresForegroundAppPackage: String? = null,
     val speculativeEligible: Boolean = false,
     val speculativeBlockReason: String? = null,
-    val hardBlocked: Boolean = false,
     val reason: String? = null,
     val mandatoryApproval: Boolean = false,
+    val alwaysAsk: Boolean = false,
 )
 
 class ToolRegistry private constructor(
@@ -98,12 +98,21 @@ class ToolRegistry private constructor(
 
         private fun Tool.toMetadata(): ToolMetadata {
             val mutates = mutatesState()
-            val risk = risk()
+            val category = category()
+            val riskProfile = riskProfile()
+            val risk = riskProfile.risk
             val effectiveNeedsApproval = mandatoryApproval || needsApproval || mutates || risk == ToolRisk.High
-            val effectiveAutoApproval = !mandatoryApproval && allowsAutoApproval && risk != ToolRisk.High
+            val effectiveAutoApproval = !mandatoryApproval &&
+                allowsAutoApproval &&
+                risk != ToolRisk.High &&
+                !requiresFailClosedAutoApproval(
+                    mutates = mutates,
+                    category = category,
+                    riskExplicit = riskProfile.explicit,
+                )
             return ToolMetadata(
                 name = name,
-                category = category(),
+                category = category,
                 mutates = mutates,
                 sensitiveRead = sensitiveRead(),
                 needsApproval = effectiveNeedsApproval,
@@ -150,6 +159,11 @@ enum class ToolRisk {
     High,
 }
 
+private data class RiskProfile(
+    val risk: ToolRisk,
+    val explicit: Boolean,
+)
+
 fun Tool.invocationPolicy(inputText: String): ToolInvocationPolicy {
     val input = runCatching {
         JsonInstant.parseToJsonElement(inputText.ifBlank { "{}" })
@@ -159,9 +173,11 @@ fun Tool.invocationPolicy(inputText: String): ToolInvocationPolicy {
 
 fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     val baseMutates = mutatesState()
-    val baseRisk = risk()
+    val baseRiskProfile = riskProfile()
+    val baseRisk = baseRiskProfile.risk
     var mutates = baseMutates
     var risk = baseRisk
+    var riskExplicit = baseRiskProfile.explicit
     var mandatoryApprovalEffective = mandatoryApproval
     var needsApproval = mandatoryApprovalEffective || needsApproval || baseMutates || baseRisk == ToolRisk.High
     var autoApprovable = !mandatoryApprovalEffective && allowsAutoApproval && baseRisk != ToolRisk.High
@@ -173,6 +189,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             val safe = method in setOf("GET", "HEAD")
             mutates = !safe
             risk = if (safe) ToolRisk.Normal else ToolRisk.High
+            riskExplicit = true
             needsApproval = !safe
             autoApprovable = safe || (allowsAutoApproval && risk != ToolRisk.High)
             concurrencySafe = safe
@@ -187,6 +204,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             val readOnly = op.lowercase(Locale.ROOT) in setOf("read", "get", "list", "search", "status", "query")
             mutates = !readOnly
             risk = if (readOnly) ToolRisk.Normal else ToolRisk.High
+            riskExplicit = true
             needsApproval = !readOnly
             autoApprovable = readOnly || (allowsAutoApproval && risk != ToolRisk.High)
             concurrencySafe = readOnly
@@ -195,6 +213,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list" -> {
             mutates = false
             risk = ToolRisk.Normal
+            riskExplicit = true
             needsApproval = false
             autoApprovable = true
             concurrencySafe = true
@@ -205,6 +224,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             val readOnly = action == "get"
             mutates = !readOnly
             risk = if (readOnly) ToolRisk.Normal else ToolRisk.Sensitive
+            riskExplicit = true
             needsApproval = !readOnly
             autoApprovable = readOnly || allowsAutoApproval
             concurrencySafe = readOnly
@@ -213,6 +233,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         "mcp_call_tool" -> {
             mutates = true
             risk = ToolRisk.Sensitive
+            riskExplicit = true
             needsApproval = true
             autoApprovable = allowsAutoApproval
             concurrencySafe = false
@@ -223,6 +244,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             // mutation; always needs explicit approval.
             mutates = true
             risk = ToolRisk.High
+            riskExplicit = true
             needsApproval = true
             autoApprovable = false
             concurrencySafe = false
@@ -233,6 +255,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             // adapter system can pre-approve known-origin tools later.
             mutates = true
             risk = ToolRisk.Sensitive
+            riskExplicit = true
             needsApproval = true
             autoApprovable = allowsAutoApproval
             concurrencySafe = false
@@ -245,6 +268,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             // close in activity logs.
             mutates = true
             risk = ToolRisk.Normal
+            riskExplicit = true
             needsApproval = false
             autoApprovable = allowsAutoApproval
             concurrencySafe = false
@@ -258,6 +282,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             // pasting") don't require 10 confirmations.
             mutates = true
             risk = ToolRisk.Normal
+            riskExplicit = true
             needsApproval = false
             autoApprovable = true
             concurrencySafe = false
@@ -268,6 +293,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             // the site. Always require explicit per-call approval.
             mutates = true
             risk = ToolRisk.Sensitive
+            riskExplicit = true
             needsApproval = true
             autoApprovable = allowsAutoApproval
             concurrencySafe = false
@@ -282,6 +308,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             // Auto-approve so the agent can iterate on hints across a chat turn.
             mutates = true
             risk = ToolRisk.Normal
+            riskExplicit = true
             needsApproval = false
             autoApprovable = true
             concurrencySafe = false
@@ -297,6 +324,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             val safe = method in setOf("GET", "HEAD")
             mutates = !safe
             risk = if (safe) ToolRisk.Normal else ToolRisk.High
+            riskExplicit = true
             needsApproval = !safe
             autoApprovable = safe || (allowsAutoApproval && risk != ToolRisk.High)
             concurrencySafe = safe
@@ -306,6 +334,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             if (input.containsExternalCliCouncilSeat() || input.allowsExternalCliCouncil()) {
                 mutates = true
                 risk = ToolRisk.Sensitive
+                riskExplicit = true
                 needsApproval = true
                 autoApprovable = false
                 concurrencySafe = false
@@ -315,6 +344,10 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     }
 
     val category = category()
+    if (requiresFailClosedAutoApproval(mutates = mutates, category = category, riskExplicit = riskExplicit)) {
+        autoApprovable = false
+    }
+    val alwaysAsk = alwaysAsk(input)
     val foregroundRequirement = foregroundPackageRequirement()
     // For wm_* tools we want concurrent execution across different sessions
     // but strict serialization within a session, regardless of mutates/risk.
@@ -349,6 +382,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         speculativeEligible = speculativeBlockReason == null,
         speculativeBlockReason = speculativeBlockReason,
         mandatoryApproval = mandatoryApprovalEffective,
+        alwaysAsk = alwaysAsk,
     )
 }
 
@@ -390,10 +424,8 @@ internal fun Tool.category(): String = when {
 private fun Tool.mutatesState(): Boolean {
     if (name == "memory_tool") return true
     if (name == "deep_read_open") return true
-    return name.contains("_write") ||
-        name.contains("_edit") ||
-        name.contains("_move") ||
-        name.contains("_delete") ||
+    if (name == "run_plan_update") return false
+    return hasMutatingNameHint() ||
         name.contains("_install") ||
         name.contains("_stop") ||
         name == "pdf_render_page" ||
@@ -413,15 +445,33 @@ private fun Tool.mutatesState(): Boolean {
         name.startsWith("skill_disable")
 }
 
-private fun Tool.risk(): ToolRisk = when {
-    name == "http_request" -> ToolRisk.High
-    name == "memory_tool" -> ToolRisk.High
-    name == "mcp_call_tool" -> ToolRisk.Sensitive
-    name == "wm_eval" -> ToolRisk.High
-    name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select") -> ToolRisk.Sensitive
-    name in setOf("session_read", "session_expand") -> ToolRisk.Sensitive
-    name == "pdf_render_page" -> ToolRisk.High
-    name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> ToolRisk.Sensitive
+private fun String.hasToken(token: String): Boolean =
+    this == token || startsWith("${token}_") || endsWith("_$token") || contains("_${token}_")
+
+private fun Tool.hasMutatingNameHint(): Boolean {
+    val readOnlyName = name.hasToken("read") || name.hasToken("list") || name.hasToken("search") || name.hasToken("status")
+    return name.contains("_write") ||
+        name.contains("_edit") ||
+        name.contains("_move") ||
+        name.contains("_delete") ||
+        name.hasToken("create") ||
+        name.hasToken("append") ||
+        (name.hasToken("comment") && !readOnlyName) ||
+        (name.hasToken("post") && !readOnlyName) ||
+        name.hasToken("publish") ||
+        name.hasToken("send") ||
+        name.hasToken("update")
+}
+
+private fun Tool.riskProfile(): RiskProfile = when {
+    name == "http_request" -> RiskProfile(ToolRisk.High, explicit = true)
+    name == "memory_tool" -> RiskProfile(ToolRisk.High, explicit = true)
+    name == "mcp_call_tool" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name == "wm_eval" -> RiskProfile(ToolRisk.High, explicit = true)
+    name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name in setOf("session_read", "session_expand") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name == "pdf_render_page" -> RiskProfile(ToolRisk.High, explicit = true)
+    name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
     name == "officepro_read_screen" ||
         name == "officepro_capture_context" ||
         name == "officepro_context_digest" ||
@@ -433,13 +483,35 @@ private fun Tool.risk(): ToolRisk = when {
         name == "officepro_create_task_draft" ||
         name == "officepro_create_base_record_draft" ||
         name == "officepro_reply_draft" ||
-        name == "officepro_project_context" -> ToolRisk.High
-    name.startsWith("external_file_") && (name.contains("_write") || name.contains("_delete")) -> ToolRisk.High
-    name.startsWith("sms_") || name.startsWith("call_") || name.startsWith("contacts_write") -> ToolRisk.High
-    name.startsWith("screen_") || name == "vlm_task" -> ToolRisk.Sensitive
-    name.startsWith("terminal_") -> ToolRisk.Sensitive
-    else -> ToolRisk.Normal
+        name == "officepro_project_context" -> RiskProfile(ToolRisk.High, explicit = true)
+    name.startsWith("external_file_") && (name.contains("_write") || name.contains("_delete")) -> RiskProfile(ToolRisk.High, explicit = true)
+    name.startsWith("sms_") || name.startsWith("call_") || name.startsWith("contacts_write") -> RiskProfile(ToolRisk.High, explicit = true)
+    name.startsWith("screen_") || name == "vlm_task" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name.startsWith("terminal_") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    else -> RiskProfile(ToolRisk.Normal, explicit = false)
 }
+
+private fun Tool.alwaysAsk(input: JsonElement?): Boolean = when (name) {
+    "sms_send", "contacts_write" -> true
+    "call_phone" -> input.booleanValue("direct_call")
+    else -> false
+}
+
+private fun requiresFailClosedAutoApproval(
+    mutates: Boolean,
+    category: String,
+    riskExplicit: Boolean,
+): Boolean =
+    !riskExplicit && (mutates || category in FAIL_CLOSED_AUTO_APPROVAL_CATEGORIES)
+
+private val FAIL_CLOSED_AUTO_APPROVAL_CATEGORIES = setOf(
+    "cloud",
+    "system",
+    "external_file",
+    "terminal",
+    "screen",
+    "office",
+)
 
 private fun Tool.concurrencySafe(): Boolean = when {
     name in setOf("terminal_install_packages", "terminal_job_stop", "terminal_execute", "terminal_job_start") -> false

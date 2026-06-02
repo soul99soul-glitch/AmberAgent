@@ -86,6 +86,7 @@ class WorkspaceTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackWorkspaceTool("file_write", "写入文件", input) {
                 val entry = workspaceManager.writeText(
@@ -114,6 +115,7 @@ class WorkspaceTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackWorkspaceTool("file_edit", "编辑文件", input) {
                 val result = workspaceManager.editText(
@@ -174,6 +176,7 @@ class WorkspaceTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackWorkspaceTool("file_move", "移动文件", input) {
                 val entry = workspaceManager.move(

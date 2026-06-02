@@ -62,7 +62,7 @@ fun createToolPolicyExplainTool(registry: ToolRegistry): Tool = Tool(
                 put("speculative_eligible", it.speculativeEligible)
                 it.speculativeBlockReason?.let { reason -> put("speculative_block_reason", reason) }
                 put("output_budget_chars", it.outputBudgetChars)
-                put("hard_blocked", it.hardBlocked)
+                put("always_ask", it.alwaysAsk)
                 it.reason?.let { reason -> put("reason", reason) }
             }
         }

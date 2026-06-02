@@ -49,6 +49,7 @@ class ScreenAutomationTools(
         description = "Tap screen coordinates using AmberAgent Accessibility after user approval.",
         parameters = { coordinateSchema("x", "y") },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackScreenTool("screen_click", "点击屏幕", input) {
                 val service = requireService()
@@ -77,6 +78,7 @@ class ScreenAutomationTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackScreenTool("screen_long_click", "长按屏幕", input) {
                 val service = requireService()
@@ -111,6 +113,7 @@ class ScreenAutomationTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackScreenTool("screen_swipe", "滑动屏幕", input) {
                 val service = requireService()
@@ -148,6 +151,7 @@ class ScreenAutomationTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackScreenTool("screen_input_text", "输入文字", input) {
                 val service = requireService()
@@ -192,6 +196,7 @@ class ScreenAutomationTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackScreenTool("screen_open_app", "打开应用", input) {
                 val packageName = input.requiredString("package_name")
@@ -216,6 +221,7 @@ class ScreenAutomationTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackScreenTool("screen_open_url", "打开 URL", input, runtime = "Android Intent") {
                 val url = input.requiredString("url")
@@ -290,6 +296,7 @@ class ScreenAutomationTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackScreenTool("screen_tap_text", "点击文字", input) {
                 val service = requireService()
@@ -352,6 +359,7 @@ class ScreenAutomationTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackScreenTool("screen_scroll_until", "滚动查找文字", input) {
                 val service = requireService()

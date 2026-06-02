@@ -160,6 +160,7 @@ class ICloudDriveTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             trackICloudTool("icloud_write", "写入 iCloud", input.safeInputPreview()) {
                 val result = manager.writeText(

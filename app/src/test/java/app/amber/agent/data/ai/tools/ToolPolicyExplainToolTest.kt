@@ -80,7 +80,7 @@ class ToolPolicyExplainToolTest {
         assertEquals(false, payload.bool("needs_approval"))
         assertEquals(true, payload.bool("allows_auto_approval"))
         assertEquals(true, payload.bool("concurrency_safe"))
-        assertEquals(false, payload.bool("hard_blocked"))
+        assertEquals(false, payload.bool("always_ask"))
     }
 
     @Test
@@ -120,7 +120,7 @@ class ToolPolicyExplainToolTest {
         assertNull(payload["risk"])
         assertNull(payload["mutates"])
         assertNull(payload["needs_approval"])
-        assertNull(payload["hard_blocked"])
+        assertNull(payload["always_ask"])
     }
 
     @Test

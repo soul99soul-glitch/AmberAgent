@@ -14,23 +14,24 @@ class PermissionDecisionResolverTest {
     private val resolver = PermissionDecisionResolver()
 
     @Test
-    fun traceExplainsCronAutoApproval() {
+    fun traceExplainsCronApprovalHold() {
         val decision = resolver.resolve(
-            toolDef = approvalTool("cron_task_create"),
+            toolDef = approvalTool("cron_task_create", allowsAutoApproval = false),
             tool = toolCall("cron_task_create"),
             autoApproveTools = true,
             autoApproveHighRiskTools = false,
         )
 
-        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
-        assertEquals("settings", decision.source)
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("ui", decision.source)
         assertEquals("cron_task_create", decision.trace.toolName)
         assertTrue(decision.trace.autoApproveTools)
         assertFalse(decision.trace.autoApproveHighRiskTools)
+        assertFalse(decision.trace.policy!!.autoApprovable)
     }
 
     @Test
-    fun traceExplainsHighRiskHold() {
+    fun traceExplainsAlwaysAskHold() {
         val decision = resolver.resolve(
             toolDef = approvalTool("sms_send", allowsAutoApproval = false),
             tool = toolCall("sms_send"),
@@ -39,8 +40,133 @@ class PermissionDecisionResolverTest {
         )
 
         assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("always_ask", decision.source)
+        val policy = decision.trace.policy!!
+        assertEquals("high", policy.risk.name.lowercase())
+        assertTrue(policy.alwaysAsk)
+    }
+
+    @Test
+    fun highRiskToolStillHoldsWithoutHighRiskAutoApproval() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("http_request", allowsAutoApproval = false),
+            tool = toolCall("http_request", """{"method":"POST"}"""),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
         assertEquals("risk", decision.source)
-        assertEquals("high", decision.trace.policy!!.risk.name.lowercase())
+        assertEquals(ToolRisk.High, decision.trace.policy!!.risk)
+    }
+
+    @Test
+    fun writeActionToolFamiliesAskButReadOnlySiblingsAllowWithRegularAutoApproval() {
+        val writeOrActionTools = listOf(
+            "terminal_execute",
+            "terminal_job_start",
+            "terminal_job_stop",
+            "terminal_install_packages",
+            "terminal_workspace_flush",
+            "terminal_session_start",
+            "terminal_session_exec",
+            "terminal_session_stop",
+            "screen_click",
+            "screen_long_click",
+            "screen_swipe",
+            "screen_input_text",
+            "screen_open_app",
+            "screen_open_url",
+            "screen_tap_text",
+            "screen_scroll_until",
+            "icloud_write",
+        )
+        writeOrActionTools.forEach { toolName ->
+            val decision = resolver.resolve(
+                toolDef = approvalTool(toolName, allowsAutoApproval = false),
+                tool = toolCall(toolName),
+                autoApproveTools = true,
+                autoApproveHighRiskTools = false,
+            )
+
+            assertEquals("$toolName should still ask", PermissionDecisionAction.ASK, decision.action)
+            assertFalse("$toolName should not be auto-approvable", decision.trace.policy!!.autoApprovable)
+        }
+
+        val readOnlyTools = listOf(
+            "terminal_job_read",
+            "terminal_job_wait",
+            "terminal_session_read",
+            "screen_read_ui",
+            "screen_find_text",
+            "screen_screenshot",
+            "screen_wait_for_text",
+            "icloud_status",
+            "icloud_list",
+            "icloud_stat",
+            "icloud_read",
+            "icloud_search",
+        )
+        readOnlyTools.forEach { toolName ->
+            val decision = resolver.resolve(
+                toolDef = readOnlyTool(toolName),
+                tool = toolCall(toolName),
+                autoApproveTools = true,
+                autoApproveHighRiskTools = false,
+            )
+
+            assertEquals("$toolName should stay read-only", PermissionDecisionAction.ALLOW, decision.action)
+            assertFalse("$toolName should not need approval", decision.trace.policy!!.needsApproval)
+        }
+    }
+
+    @Test
+    fun implicitMutatingOrDangerousCategoryToolsFailClosedForAutoApproval() {
+        val mutatingName = resolver.resolve(
+            toolDef = approvalTool("adapter_create", allowsAutoApproval = true),
+            tool = toolCall("adapter_create"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+        )
+        val updateName = resolver.resolve(
+            toolDef = approvalTool("adapter_update", allowsAutoApproval = true),
+            tool = toolCall("adapter_update"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+        )
+        val cloudCategory = resolver.resolve(
+            toolDef = approvalTool("icloud_status", allowsAutoApproval = true),
+            tool = toolCall("icloud_status"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, mutatingName.action)
+        val mutatingNamePolicy = mutatingName.trace.policy!!
+        assertFalse(mutatingNamePolicy.autoApprovable)
+        assertEquals(PermissionDecisionAction.ASK, updateName.action)
+        val updateNamePolicy = updateName.trace.policy!!
+        assertTrue(updateNamePolicy.mutates)
+        assertFalse(updateNamePolicy.autoApprovable)
+        assertEquals(PermissionDecisionAction.ASK, cloudCategory.action)
+        val cloudCategoryPolicy = cloudCategory.trace.policy!!
+        assertEquals("cloud", cloudCategoryPolicy.category)
+        assertFalse(cloudCategoryPolicy.autoApprovable)
+    }
+
+    @Test
+    fun runPlanUpdateKeepsInternalReadOnlyPolicyDespiteUpdateToken() {
+        val decision = resolver.resolve(
+            toolDef = readOnlyTool("run_plan_update"),
+            tool = toolCall("run_plan_update"),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+        )
+
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        val policy = decision.trace.policy!!
+        assertFalse(policy.mutates)
+        assertFalse(policy.needsApproval)
     }
 
     @Test
@@ -126,6 +252,44 @@ class PermissionDecisionResolverTest {
 
         assertEquals(PermissionDecisionAction.ASK, decision.action)
         assertEquals("subagent", decision.source)
+    }
+
+    @Test
+    fun subAgentCloudToolStillAsksEvenWithHighRiskAutoApproval() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("icloud_status"),
+            tool = toolCall("icloud_status"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+            invocationContext = ToolInvocationContext.SubAgent,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("subagent", decision.source)
+        assertEquals("cloud", decision.trace.policy!!.category)
+    }
+
+    @Test
+    fun directPhoneCallAlwaysAsksButDialerCanUseHighRiskAutoApproval() {
+        val directCall = resolver.resolve(
+            toolDef = approvalTool("call_phone", allowsAutoApproval = false),
+            tool = toolCall("call_phone", """{"phone_number":"123","direct_call":true}"""),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+        )
+        val dialer = resolver.resolve(
+            toolDef = approvalTool("call_phone", allowsAutoApproval = false),
+            tool = toolCall("call_phone", """{"phone_number":"123","direct_call":false}"""),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, directCall.action)
+        assertEquals("always_ask", directCall.source)
+        assertTrue(directCall.trace.policy!!.alwaysAsk)
+        assertEquals(PermissionDecisionAction.ALLOW, dialer.action)
+        assertEquals("settings_high_risk", dialer.source)
+        assertFalse(dialer.trace.policy!!.alwaysAsk)
     }
 
     @Test
@@ -245,6 +409,13 @@ class PermissionDecisionResolverTest {
         description = "",
         needsApproval = true,
         allowsAutoApproval = allowsAutoApproval,
+        execute = { emptyList() },
+    )
+
+    private fun readOnlyTool(name: String) = Tool(
+        name = name,
+        description = "",
+        needsApproval = false,
         execute = { emptyList() },
     )
 
