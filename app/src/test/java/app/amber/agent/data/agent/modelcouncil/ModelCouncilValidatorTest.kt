@@ -383,6 +383,35 @@ class ModelCouncilValidatorTest {
     }
 
     @Test
+    fun externalCliFailureMessageRedactsLoginHints() {
+        val message = externalCliFailureMessage(
+            externalTool = "claude_code",
+            exitCode = 1,
+            failureError = null,
+            cliOutput = "",
+            outputTail = "If the browser does not open, visit https://claude.ai/oauth and paste code ABCD-1234.",
+        )
+
+        assertTrue(message.contains("Claude Code"))
+        assertTrue(message.contains("claude setup-token"))
+        assertFalse(message.contains("https://claude.ai/oauth"))
+        assertFalse(message.contains("ABCD-1234"))
+    }
+
+    @Test
+    fun externalCliFailureMessageKeepsOrdinaryFailureTailBounded() {
+        val message = externalCliFailureMessage(
+            externalTool = "codex_cli",
+            exitCode = 2,
+            failureError = null,
+            cliOutput = "",
+            outputTail = "fatal: provider rejected request",
+        )
+
+        assertEquals("fatal: provider rejected request", message)
+    }
+
+    @Test
     fun externalCliRunnerTypeAliasDoesNotFallBackToGemini() {
         val council = ModelCouncilRuntimeSetting(enabled = true)
 

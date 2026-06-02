@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AmberAgent is an Android AI agent platform evolving from a chat client toward a modular Agent Kernel + Surfaces architecture.
 Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
-Original LLM/markdown/highlight rendering infrastructure forked from rikkahub (Apache 2.0), independently evolving since 2026-05.
+Original LLM/markdown/highlight rendering infrastructure forked from rikkahub (AGPL v3 / commercial dual-license), independently evolving since 2026-05.
 
 ## Architecture Overview
 

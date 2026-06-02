@@ -111,7 +111,7 @@ object SubAgentValidator {
                 ).joinToString("|")
             )
         }
-        validateNarrowDynamicRole(id, description, systemPrompt)
+        validateNarrowDynamicRole(id, rawName, description, systemPrompt)
 
         val explicitTools = custom["tool_allowlist"]?.jsonArray
             ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
@@ -173,10 +173,13 @@ object SubAgentValidator {
         }
     }
 
-    fun validateNarrowDynamicRole(id: String, description: String, systemPrompt: String) {
+    fun validateNarrowDynamicRole(id: String, displayName: String, description: String, systemPrompt: String) {
         require(id.isNotBlank()) { "custom_subagent.name must produce a non-empty id" }
         require(!isGenericName(id)) {
             "Dynamic subagent name is too broad: $id"
+        }
+        require(!isGenericName(displayName)) {
+            "Dynamic subagent name is too broad: $displayName"
         }
         require(description.length >= 24 && description.hasInvocationCue()) {
             "custom_subagent.description must explain when this subagent should be invoked"

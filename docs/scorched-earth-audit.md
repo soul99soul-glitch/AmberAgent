@@ -115,8 +115,7 @@ These are NOT renamed in this rebrand — flagged explicitly so the final `grep 
 | `gradle/libs.versions.toml` | `com.github.rikkahub:markdown` | same |
 | `gradle/libs.versions.toml` | `com.github.rikkahub:hugeicons-compose` | same |
 | `gradle/libs.versions.toml` | `com.github.rikkahub:sqlite-android` | same |
-| `.github/FUNDING.yml` | `patreon: rikkahub` | user's personal patreon handle, not app codename |
-| `LICENSE` | "Forked from rikkahub" attribution | required by Apache 2.0 attribution |
+| `LICENSE` | "Forked from rikkahub" attribution | upstream licensing and attribution obligations |
 | `git log` / `git history` | commit messages with `rikkahub` | git history is immutable |
 | `docs/refactor-progress.md` historical entries | mentions in chronological log | history; gets a disclaimer header noting pre-rebrand entries |
 

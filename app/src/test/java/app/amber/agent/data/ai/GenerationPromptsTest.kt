@@ -67,6 +67,25 @@ class GenerationPromptsTest {
     }
 
     @Test
+    fun fullHtmlDeckPromptDoesNotDependOnStructuredOrChartSwitches() {
+        val prompt = buildGenerativeUiPrompt(
+            GenerativeUiSetting(
+                enabled = true,
+                enableStructuredRenderers = false,
+                enableInteractiveCharts = false,
+            )
+        )
+
+        assertTrue(prompt.contains("renderer \"${GuizangHtmlDeckValidator.RENDERER}\""))
+        assertTrue(prompt.contains("final full_html output shape"))
+        assertTrue(prompt.contains("spec.html"))
+        assertTrue(prompt.contains("""<div id="deck">"""))
+        assertTrue(prompt.contains("never emit a partial or truncated spec.html"))
+        assertFalse(prompt.contains("renderer \"vchart\""))
+        assertFalse(prompt.contains("renderer/spec only for compact chart"))
+    }
+
+    @Test
     fun generativeUiPromptAddsDeepSeekVisibleOutputGuidance() {
         val prompt = buildGenerativeUiPrompt(
             setting = GenerativeUiSetting(),

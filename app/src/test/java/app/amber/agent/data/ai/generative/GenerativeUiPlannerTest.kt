@@ -90,6 +90,25 @@ class GenerativeUiPlannerTest {
         assertTrue(requirement.expectFullHtmlDeck)
     }
 
+    @Test
+    fun slidesRouteDoesNotDependOnStructuredOrChartSwitches() {
+        val setting = GenerativeUiSetting(
+            enabled = true,
+            enableStructuredRenderers = false,
+            enableInteractiveCharts = false,
+        )
+        val messages = listOf(userMessage("做一份 5 页 PPT"))
+
+        val prompt = GenerativeUiPlanner.buildPrompt(setting = setting, messages = messages)
+        val requirement = GenerativeUiPlanner.widgetRequirement(setting = setting, messages = messages)
+
+        assertTrue(prompt.contains("renderer \"full_html\""))
+        assertTrue(prompt.contains("""<div id="deck">"""))
+        assertTrue(requirement.required)
+        assertTrue(requirement.expectSlides)
+        assertTrue(requirement.expectFullHtmlDeck)
+    }
+
     private fun userMessage(text: String) = UIMessage(
         role = MessageRole.USER,
         parts = listOf(UIMessagePart.Text(text)),

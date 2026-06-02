@@ -370,7 +370,7 @@ fun ExpandedGenerativeWidgetDialog(
     // button orders anyway — collapsing to one mode per renderer keeps things predictable.
     val isFullscreen = initialFullscreen
     val isGuizangRenderer = widget.renderer == GuizangHtmlDeckValidator.RENDERER
-    val isRichRenderer = widget.renderer in setOf("vchart", "slides", GuizangHtmlDeckValidator.RENDERER)
+    val isRichRenderer = shouldRenderRichWidgetRenderer(widget.renderer, setting)
     val isSlidesRenderer = widget.renderer == "slides"
     val isPresentationRenderer = isSlidesRenderer || isGuizangRenderer
 
@@ -467,10 +467,7 @@ fun ExpandedGenerativeWidgetDialog(
                                     toaster.show("暂时无法保存这张卡片", type = ToastType.Error)
                                     return@IconButton
                                 }
-                                val isPresentation = (widget.renderer == "slides" ||
-                                    widget.renderer == GuizangHtmlDeckValidator.RENDERER) &&
-                                    widget.specJson != null &&
-                                    setting.enableInteractiveCharts
+                                val isPresentation = isPresentationRenderer && widget.specJson != null
                                 if (isPresentation) {
                                     scope.launch {
                                         captureSlidesToJpg(
@@ -515,7 +512,7 @@ fun ExpandedGenerativeWidgetDialog(
                             .fillMaxWidth()
                             .weight(1f),
                     ) {
-                        if (isRichRenderer && widget.specJson != null && setting.enableInteractiveCharts) {
+                        if (isRichRenderer && widget.specJson != null) {
                             if (isGuizangRenderer) {
                                 GuizangHtmlDeckWebView(
                                     specJson = widget.specJson,
@@ -617,6 +614,15 @@ private fun FullscreenDialogWindowEffect() {
             }
         }
     }
+}
+
+internal fun shouldRenderRichWidgetRenderer(
+    renderer: String,
+    setting: GenerativeUiSetting,
+): Boolean = when (renderer) {
+    "slides", GuizangHtmlDeckValidator.RENDERER -> true
+    "vchart" -> setting.enableInteractiveCharts
+    else -> false
 }
 
 @Composable

@@ -21,6 +21,7 @@ import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.feature.subagent.toIsolatedSubAgentSettings
 import app.amber.feature.tools.AgentToolSetFactory
+import app.amber.feature.tools.DeepReadToolDescriptionContext
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationHandler
 import app.amber.core.settings.Settings
@@ -198,7 +199,14 @@ class DeepReadAgentRunManager(
             allowTitleFallback = seedUrl.isNullOrBlank(),
         )
         val verificationWriterTools = writer.tools()
-        val verificationTools = toolSetFactory.forDeepRead(settings, verificationWriterTools)
+        val verificationTools = toolSetFactory.forDeepRead(
+            settings = settings,
+            writerTools = verificationWriterTools,
+            descriptionContext = DeepReadToolDescriptionContext(
+                stageTimeoutSeconds = VERIFICATION_COLLECT_RUN_TIMEOUT_MS.toWholeSeconds(),
+                verification = true,
+            ),
+        )
             .map { it.withEvidenceRecording(evidenceRegistry) }
         val hiddenSettings = settings.toIsolatedSubAgentSettings()
         val assistant = DeepReadHiddenAssistantFactory.create(settings)
@@ -227,7 +235,17 @@ class DeepReadAgentRunManager(
                 val singleStage = listOf(stage)
                 val writerToolsForStage = writer.tools(stages = setOf(stage))
                     .filter { it.name == stage.writerToolName() }
-                val stageTools = toolSetFactory.forDeepRead(settings, writerToolsForStage)
+                val stageTimeoutMs = collectRunTimeoutFor(stage)
+                val stageTools = toolSetFactory.forDeepRead(
+                    settings = settings,
+                    writerTools = writerToolsForStage,
+                    descriptionContext = DeepReadToolDescriptionContext(
+                        stageLabel = stage.label,
+                        writerToolName = stage.writerToolName(),
+                        stageTimeoutSeconds = stageTimeoutMs.toWholeSeconds(),
+                        firstWriterTargetSeconds = firstWriterSoftDeadlineMs(stageTimeoutMs).toWholeSeconds(),
+                    ),
+                )
                     .map { it.withEvidenceRecording(evidenceRegistry) }
                 val stageWriterToolNamesSet = writerToolsForStage.map { it.name }.toSet()
                 val stageEvidence = evidencePack.cardsFor(
@@ -249,7 +267,7 @@ class DeepReadAgentRunManager(
                             articlePlan = articlePlan,
                             stageEvidence = stageEvidence,
                             targetStage = stage,
-                            stageTimeoutMs = collectRunTimeoutFor(stage),
+                            stageTimeoutMs = stageTimeoutMs,
                             playbookMarkdown = playbook.markdown,
                             coverageReport = coverageReport,
                         )
@@ -259,7 +277,7 @@ class DeepReadAgentRunManager(
                     val initialRequiredWrites = writer.requiredWriteCount
                     repeat(MAX_SUPERVISOR_PASSES) { pass ->
                         val beforeWrites = writer.requiredWriteCount
-                        messages = withTimeout(collectRunTimeoutFor(stage)) {
+                        messages = withTimeout(stageTimeoutMs) {
                             collectRun(
                                 settings = hiddenSettings,
                                 model = model,
@@ -303,7 +321,7 @@ class DeepReadAgentRunManager(
                         allowReadyRewrite = coverageReport != null,
                     )
                     if (!recovered && writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY) {
-                        writer.markFailed(stage, timeoutFailureMessage(stage, collectRunTimeoutFor(stage)))
+                        writer.markFailed(stage, timeoutFailureMessage(stage, stageTimeoutMs))
                     }
                 } catch (cancel: CancellationException) {
                     // External cancellation (e.g., user navigated away or parent
@@ -717,7 +735,7 @@ class DeepReadAgentRunManager(
         val stageSeconds = stageTimeoutMs.toWholeSeconds()
         val firstWriteSeconds = firstWriterSoftDeadlineMs(stageTimeoutMs).toWholeSeconds()
         appendLine("## 时间预算（硬约束）")
-        appendLine("- 本段外层运行预算约 ${stageSeconds} 秒；底层单次模型/工具链路在设备上可能约 ${PROVIDER_REQUEST_SOFT_TIMEOUT_MS.toWholeSeconds()} 秒中断。")
+        appendLine("- 本段外层运行预算约 ${stageSeconds} 秒；首个 writer tool 目标约 ${firstWriteSeconds} 秒。")
         appendLine("- 你必须把第一优先级放在 ${firstWriteSeconds} 秒内调用 ${stage.writerToolName()}；不要先输出长文、完整 JSON 或 Markdown 草稿。")
         appendLine("- 预抓证据包是主材料。除非关键事实缺失或互相矛盾，不要连续 search_web / scrape_web。")
         appendLine("- 如果证据不够完整，先基于现有证据写保守版本；系统后续会做 coverage check 和验真，不要为了补全而耗尽时间。")
@@ -820,10 +838,10 @@ class DeepReadAgentRunManager(
     }
 
     private fun buildWriterReminder(stages: List<DeepReadGenerationStage>, pass: Int): String = buildString {
-        val budgetMs = stages.map { collectRunTimeoutFor(it) }.maxOrNull() ?: PROVIDER_REQUEST_SOFT_TIMEOUT_MS
+        val budgetMs = stages.map { collectRunTimeoutFor(it) }.maxOrNull() ?: FIRST_WRITER_TARGET_WINDOW_MS
         val firstWriteSeconds = firstWriterSoftDeadlineMs(budgetMs).toWholeSeconds()
         appendLine("Supervisor reminder #${pass + 1}: 上一轮没有任何 deep_read_write_* 写入。")
-        appendLine("时间提醒：底层链路可能约 ${PROVIDER_REQUEST_SOFT_TIMEOUT_MS.toWholeSeconds()} 秒中断；现在请在 ${firstWriteSeconds} 秒内直接调用 writer tool。")
+        appendLine("时间提醒：本轮首个 writer tool 目标约 ${firstWriteSeconds} 秒；现在请直接调用 writer tool。")
         appendLine("UI 不会消费你的自由文本。请立刻继续研究缺口，然后调用以下 writer tool 中至少一个：")
         stages.forEach { stage -> appendLine("- ${stage.writerToolName()} for ${stage.label}") }
         appendLine("如果来源不足，只把当前段落写为 FAILED 的决定留给系统；不要用自由文本交差。")
@@ -840,7 +858,7 @@ class DeepReadAgentRunManager(
     ): String = buildString {
         appendLine("Final verification reminder #$pass:")
         appendLine("话题「$topicTitle」的四个段落已经写入。请在最终 finish 前执行验真 skill。")
-        appendLine("时间预算：验真外层约 ${VERIFICATION_COLLECT_RUN_TIMEOUT_MS.toWholeSeconds()} 秒；底层链路可能约 ${PROVIDER_REQUEST_SOFT_TIMEOUT_MS.toWholeSeconds()} 秒中断。优先抽 2-3 个核心声明，尽快调用 deep_read_verify_claims，再调用 deep_read_finish。")
+        appendLine("时间预算：验真外层约 ${VERIFICATION_COLLECT_RUN_TIMEOUT_MS.toWholeSeconds()} 秒。优先抽 2-3 个核心声明，尽快调用 deep_read_verify_claims，再调用 deep_read_finish。")
         if (previousPassMissingToolCall) {
             appendLine("上一轮没有调用 deep_read_verify_claims；本轮不要输出自由文本，")
             appendLine("必须调用 deep_read_verify_claims。")
@@ -1048,14 +1066,14 @@ class DeepReadAgentRunManager(
 
     private fun firstWriterSoftDeadlineMs(stageTimeoutMs: Long): Long =
         minOf(
-            PROVIDER_REQUEST_SOFT_TIMEOUT_MS - WRITER_DEADLINE_MARGIN_MS,
+            FIRST_WRITER_TARGET_WINDOW_MS - WRITER_DEADLINE_MARGIN_MS,
             stageTimeoutMs - STAGE_DEADLINE_MARGIN_MS,
         ).coerceAtLeast(MIN_FIRST_WRITER_DEADLINE_MS)
 
     private fun Long.toWholeSeconds(): Long = (this / 1_000L).coerceAtLeast(1L)
 
     private fun timeoutFailureMessage(stage: DeepReadGenerationStage, timeoutMs: Long): String =
-        "${stage.label}超时未完成（本段预算约 ${timeoutMs.toWholeSeconds()} 秒，底层链路可能约 ${PROVIDER_REQUEST_SOFT_TIMEOUT_MS.toWholeSeconds()} 秒中断）。"
+        "${stage.label}超时未完成（本段预算约 ${timeoutMs.toWholeSeconds()} 秒，首个 writer tool 目标约 ${firstWriterSoftDeadlineMs(timeoutMs).toWholeSeconds()} 秒）。"
 
     private fun stageFailureMessage(
         stage: DeepReadGenerationStage,
@@ -1097,10 +1115,10 @@ class DeepReadAgentRunManager(
         private const val MAX_SUPERVISOR_PASSES = 2
         private const val MAX_VERIFICATION_PASSES = 3
 
-        // Hard timeouts so a stuck generation cannot hang the hidden run forever.
-        // Analysis gets a larger budget because it reads the most context and is
-        // the stage most likely to time out on slower model/provider paths.
-        private const val PROVIDER_REQUEST_SOFT_TIMEOUT_MS = 45_000L
+        // Prompt-side target for getting the first writer tool call started.
+        // Real per-stage hard timeouts live in collectRunTimeoutFor(...);
+        // planning keeps its own PLANNING_COLLECT_RUN_TIMEOUT_MS below.
+        private const val FIRST_WRITER_TARGET_WINDOW_MS = 45_000L
         private const val WRITER_DEADLINE_MARGIN_MS = 10_000L
         private const val STAGE_DEADLINE_MARGIN_MS = 12_000L
         private const val MIN_FIRST_WRITER_DEADLINE_MS = 20_000L

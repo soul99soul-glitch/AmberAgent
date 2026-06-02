@@ -88,5 +88,6 @@ attribution requirements. New AmberAgent-specific agent features and refactors a
 
 ## License
 
-See [LICENSE](LICENSE). This project preserves upstream licensing obligations for RikkaHub-derived code. AmberAgent is
-currently maintained as a personal, non-commercial open-source project.
+See [LICENSE](LICENSE). AmberAgent preserves upstream licensing obligations for RikkaHub-derived code and is licensed
+under AGPL v3 with a commercial dual-license path. It is currently maintained as a personal, non-commercial open-source
+project.

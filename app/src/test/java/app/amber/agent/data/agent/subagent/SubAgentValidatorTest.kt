@@ -47,6 +47,18 @@ class SubAgentValidatorTest {
     }
 
     @Test
+    fun rosterModeRejectsChineseGenericName() {
+        val input = inputWithCustomSubagent(name = "万能助手")
+
+        val error = runCatching {
+            SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("too broad"))
+    }
+
+    @Test
     fun smartModeRejectsBuiltInSubagentId() {
         val input = inputWithSubagentId("explorer")
 
@@ -97,6 +109,21 @@ class SubAgentValidatorTest {
 
         assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
         assertFalse(result.definition.id.contains("general"))
+    }
+
+    @Test
+    fun smartModeReplacesChineseGenericNameInsteadOfFailing() {
+        val input = inputWithCustomSubagent(name = "万能助手")
+
+        val result = SubAgentValidator.resolveDefinition(
+            input,
+            setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            setOf("file_read"),
+        )
+
+        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
+        assertFalse(result.definition.name.contains("万能"))
+        assertTrue(result.definition.dynamic)
     }
 
     @Test

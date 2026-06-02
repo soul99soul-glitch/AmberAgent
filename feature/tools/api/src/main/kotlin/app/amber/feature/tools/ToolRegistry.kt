@@ -18,6 +18,16 @@ import app.amber.feature.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import app.amber.core.agent.utils.JsonInstant
 import java.util.Locale
 
+val EXTERNAL_CLI_COUNCIL_RUNNER_TYPES: Set<String> = setOf(
+    "external_cli",
+    "cli",
+    "gemini_cli",
+    "antigravity_cli",
+    "codex_cli",
+    "claude_code",
+    "kimi_cli",
+)
+
 data class ToolMetadata(
     val name: String,
     val category: String,
@@ -544,7 +554,7 @@ private fun JsonElement?.containsExternalCliSeat(): Boolean {
         val seat = runCatching { item.jsonObject }.getOrNull() ?: return@any false
         val runnerType = seat["runner_type"]?.jsonPrimitive?.contentOrNull?.lowercase(Locale.ROOT).orEmpty()
         val externalTool = seat["external_tool"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        runnerType in setOf("external_cli", "cli", "gemini_cli", "antigravity_cli", "codex_cli", "claude_code", "kimi_cli") ||
+        runnerType in EXTERNAL_CLI_COUNCIL_RUNNER_TYPES ||
             externalTool.isNotBlank()
     }
 }

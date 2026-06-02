@@ -2,6 +2,8 @@ package app.amber.feature.runtime
 
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
+import app.amber.feature.modelcouncil.ExternalCliToolRegistry
+import app.amber.feature.tools.EXTERNAL_CLI_COUNCIL_RUNNER_TYPES
 import app.amber.feature.tools.ToolRisk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -203,6 +205,39 @@ class PermissionDecisionResolverTest {
         assertEquals("settings_high_risk_mandatory", decision.source)
         assertEquals(ToolRisk.Sensitive, policy.risk)
         assertTrue(policy.mandatoryApproval)
+    }
+
+    @Test
+    fun externalCliRunnerTypeGuardStaysInSyncWithRegistry() {
+        assertTrue(EXTERNAL_CLI_COUNCIL_RUNNER_TYPES.contains("external_cli"))
+        assertTrue(EXTERNAL_CLI_COUNCIL_RUNNER_TYPES.contains("cli"))
+        assertTrue(EXTERNAL_CLI_COUNCIL_RUNNER_TYPES.containsAll(ExternalCliToolRegistry.supportedToolIds))
+
+        (setOf("external_cli", "cli") + ExternalCliToolRegistry.supportedToolIds).forEach { runnerType ->
+            val decision = resolver.resolve(
+                toolDef = approvalTool("model_council_start", allowsAutoApproval = false),
+                tool = toolCall(
+                    name = "model_council_start",
+                    input = """
+                        {
+                          "planned_seats": [
+                            {
+                              "name": "External CLI",
+                              "runner_type": "$runnerType"
+                            }
+                          ]
+                        }
+                    """.trimIndent(),
+                ),
+                autoApproveTools = true,
+                autoApproveHighRiskTools = false,
+            )
+
+            val policy = decision.trace.policy!!
+            assertEquals(PermissionDecisionAction.ASK, decision.action)
+            assertEquals(ToolRisk.Sensitive, policy.risk)
+            assertTrue(policy.mandatoryApproval)
+        }
     }
 
     private fun approvalTool(name: String, allowsAutoApproval: Boolean = true) = Tool(

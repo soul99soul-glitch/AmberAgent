@@ -86,11 +86,13 @@ class ExternalCliModelCouncilRunner(
             val cliOutput = ModelCouncilExternalCliCommandBuilder.extractFinalOutput(finished.outputTail).trim()
             if (finished.exitCode != 0) {
                 error(
-                    finished.error
-                        ?: cliOutput.ifBlank {
-                            finished.outputTail.take(1_000)
-                                .ifBlank { "External CLI seat failed with exit code ${finished.exitCode}." }
-                        },
+                    externalCliFailureMessage(
+                        externalTool = seat.externalTool,
+                        exitCode = finished.exitCode,
+                        failureError = finished.error,
+                        cliOutput = cliOutput,
+                        outputTail = finished.outputTail,
+                    ),
                 )
             }
             val parsed = cliOutput.ifBlank { finished.outputTail }.trim()
@@ -132,3 +134,40 @@ class ExternalCliModelCouncilRunner(
         $userPrompt
     """.trimIndent()
 }
+
+fun externalCliFailureMessage(
+    externalTool: String,
+    exitCode: Int?,
+    failureError: String?,
+    cliOutput: String,
+    outputTail: String,
+): String {
+    val combinedOutput = listOfNotNull(
+        failureError?.takeIf { it.isNotBlank() },
+        cliOutput.takeIf { it.isNotBlank() },
+        outputTail.takeIf { it.isNotBlank() },
+    ).joinToString("\n")
+    val loginHint = ExternalCliToolRegistry.detectLoginHint(combinedOutput)
+    if (loginHint.needsUserAction) {
+        val spec = runCatching { ExternalCliToolRegistry.requireSpec(externalTool) }.getOrNull()
+        val displayName = spec?.displayName ?: "External CLI"
+        val loginCommand = spec?.loginCommand ?: "the CLI login command"
+        return "External CLI $displayName is not ready. Run $loginCommand in the selected runtime, complete login, then retry. Council runs never start login."
+    }
+
+    failureError?.takeIf { it.isNotBlank() }?.let { return it }
+    if (cliOutput.isNotBlank()) return cliOutput
+    return outputTail
+        .redactExternalCliFailureArtifacts()
+        .take(1_000)
+        .ifBlank { "External CLI seat failed with exit code ${exitCode ?: "unknown"}." }
+}
+
+private fun String.redactExternalCliFailureArtifacts(): String =
+    replace(Regex("""https?://[^\s"'<>]+"""), "[redacted-url]")
+        .replace(
+            Regex(
+                """(?i)\b(?:verification code|authorization code|user code|code)\b(?:\s+(?:is|:|=))?[\s:=]*[A-Z0-9][A-Z0-9._-]{3,}"""
+            ),
+            "code [redacted]",
+        )

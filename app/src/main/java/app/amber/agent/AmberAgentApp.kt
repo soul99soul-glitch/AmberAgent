@@ -380,6 +380,11 @@ class AmberAgentApp : Application() {
 
     private fun ensureFirebaseInitialized() {
         if (FirebaseApp.getApps(this).isNotEmpty()) return
+        if (!BuildConfig.FIREBASE_LOCAL_FALLBACK_ALLOWED) {
+            val message = "Firebase config is missing for ${BuildConfig.APPLICATION_ID}; release builds require a real google-services client."
+            Log.e(TAG, message)
+            error(message)
+        }
         val options = FirebaseOptions.Builder()
             .setApplicationId("1:000000000000:android:0000000000000000000000")
             .setApiKey("local-firebase-disabled")

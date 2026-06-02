@@ -8,7 +8,7 @@
 
 The codebase historically carried two brand identities side-by-side:
 
-- `me.rerere.rikkahub.*` — the original fork name from rikkahub (Apache 2.0).
+- `me.rerere.rikkahub.*` — the original fork name from rikkahub (AGPL v3 / commercial dual-license).
 - `app.amber.agent.*` (in progress) — the AmberAgent rebrand.
 
 ADR-0001 froze 81 files in `me.rerere.rikkahub.*` to protect Room schema FQNs,
@@ -48,10 +48,8 @@ The following `rikkahub` references remain (each rationale):
   `sqlite-android`). These are upstream-fork repos under the user's GitHub
   org; renaming requires re-publishing the forks under a new org, out of
   this rebrand's scope.
-- `.github/FUNDING.yml: patreon: rikkahub` — user's personal Patreon handle,
-  not the app codename.
-- `LICENSE` — required Apache 2.0 attribution to the original `rikkahub`
-  fork.
+- `LICENSE` — upstream licensing and attribution obligations for the original
+  `rikkahub` fork.
 - `SettingAboutPage.kt` — 2 in-app links to
   `github.com/rikkahub/rikkahub` (forked-project attribution, akin to
   LICENSE).
