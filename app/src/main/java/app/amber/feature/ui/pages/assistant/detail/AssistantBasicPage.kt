@@ -34,6 +34,10 @@ import app.amber.ai.provider.ModelType
 import app.amber.agent.R
 import app.amber.core.model.MainAgentToolProfile
 import app.amber.core.model.Assistant
+import app.amber.core.model.withChatModelReasoningMemory
+import app.amber.core.settings.Settings
+import app.amber.core.settings.defaultReasoningLevelForModel
+import app.amber.core.settings.findModelById
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ai.ReasoningButton
 import app.amber.feature.ui.components.nav.BackButton
@@ -59,6 +63,7 @@ fun AssistantBasicPage(id: String) {
         }
     )
     val assistant by vm.assistant.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     val providers by vm.providers.collectAsStateWithLifecycle()
     val tags by vm.tags.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -82,6 +87,7 @@ fun AssistantBasicPage(id: String) {
         AssistantBasicContent(
             modifier = Modifier.padding(innerPadding),
             assistant = assistant,
+            settings = settings,
             providers = providers,
             tags = tags,
             onUpdate = { vm.update(it) },
@@ -103,6 +109,7 @@ private fun MainAgentToolProfile.label(): String = when (this) {
 internal fun AssistantBasicContent(
     modifier: Modifier = Modifier,
     assistant: Assistant,
+    settings: Settings,
     providers: List<app.amber.ai.provider.ProviderSetting>,
     tags: List<DataTag>,
     onUpdate: (Assistant) -> Unit,
@@ -221,9 +228,16 @@ internal fun AssistantBasicContent(
                         providers = providers,
                         type = ModelType.CHAT,
                         onSelect = {
+                            val currentModelId = assistant.chatModelId ?: settings.chatModelId
+                            val currentModel = settings.findModelById(currentModelId)
                             onUpdate(
-                                assistant.copy(
-                                    chatModelId = it.id
+                                assistant.withChatModelReasoningMemory(
+                                    currentModelId = currentModelId,
+                                    currentDefaultReasoningLevel = currentModel
+                                        ?.let { model -> settings.defaultReasoningLevelForModel(model) }
+                                        ?: settings.defaultReasoningLevelForModel(it),
+                                    selectedModelId = it.id,
+                                    selectedDefaultReasoningLevel = settings.defaultReasoningLevelForModel(it),
                                 )
                             )
                         },

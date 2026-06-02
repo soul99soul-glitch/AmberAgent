@@ -54,6 +54,9 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.FullScreen
 import app.amber.agent.R
 import app.amber.feature.subagent.SubAgentMode
+import app.amber.core.model.reasoningLevelForModel
+import app.amber.core.model.withReasoningLevelForModel
+import app.amber.core.settings.defaultReasoningLevelForModel
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.getQuickMessagesOfAssistant
@@ -291,10 +294,16 @@ internal fun TextInputRow(
                                     app.amber.ai.provider.ModelAbility.REASONING
                                 ) == true
                                 if (hasReasoning) {
+                                    val currentLevel = assistant.reasoningLevelForModel(
+                                        modelId = currentModel.id,
+                                        defaultReasoningLevel = settings.defaultReasoningLevelForModel(currentModel),
+                                    )
                                     SlashCommandThinkingFooter(
-                                        currentLevel = assistant.reasoningLevel,
+                                        currentLevel = currentLevel,
                                         levels = app.amber.feature.ui.components.ai.reasoningLevelsForModel(currentModel),
-                                        onChange = { update(assistant.copy(reasoningLevel = it)) },
+                                        onChange = { level ->
+                                            update(assistant.withReasoningLevelForModel(currentModel.id, level))
+                                        },
                                     )
                                 }
                             }

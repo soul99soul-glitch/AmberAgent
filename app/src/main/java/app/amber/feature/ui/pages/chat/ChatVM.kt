@@ -27,6 +27,8 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyInputMessage
 import app.amber.agent.LAST_CONVERSATION_ID_PREF
 import app.amber.agent.R
+import app.amber.core.settings.defaultReasoningLevelForModel
+import app.amber.core.settings.findModelById
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentChatModel
@@ -40,6 +42,7 @@ import app.amber.core.model.Avatar
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.model.NodeFavoriteTarget
+import app.amber.core.model.withChatModelReasoningMemory
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.FavoriteRepository
 import app.amber.core.service.ChatError
@@ -224,8 +227,15 @@ class ChatVM(
                 settings.copy(
                     assistants = settings.assistants.map {
                         if (it.id == assistant.id) {
-                            it.copy(
-                                chatModelId = model.id
+                            val currentModelId = it.chatModelId ?: settings.chatModelId
+                            val currentModel = settings.findModelById(currentModelId)
+                            it.withChatModelReasoningMemory(
+                                currentModelId = currentModelId,
+                                currentDefaultReasoningLevel = currentModel
+                                    ?.let { current -> settings.defaultReasoningLevelForModel(current) }
+                                    ?: settings.defaultReasoningLevelForModel(model),
+                                selectedModelId = model.id,
+                                selectedDefaultReasoningLevel = settings.defaultReasoningLevelForModel(model),
                             )
                         } else {
                             it

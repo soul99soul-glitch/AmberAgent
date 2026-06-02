@@ -30,8 +30,11 @@ import app.amber.core.settings.SeedRoutingQuickMessages
 import app.amber.core.settings.SeedSvgQuickMessageId
 import app.amber.core.settings.Settings
 import app.amber.core.settings.PreferencesKeys
+import app.amber.core.settings.defaultReasoningLevelForModel
+import app.amber.core.settings.findModelById
 import app.amber.core.settings.withAmberAgentAssistantBranding
 import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.model.withChatModelReasoningMemory
 import app.amber.core.settings.toMutableStateFlow
 import kotlin.uuid.Uuid
 
@@ -200,7 +203,21 @@ class SettingsAggregator(
             settings.copy(
                 assistants = settings.assistants.map { assistant ->
                     if (assistant.id == assistantId) {
-                        assistant.copy(chatModelId = modelId)
+                        val selectedModel = settings.findModelById(modelId)
+                        if (selectedModel == null) {
+                            assistant.copy(chatModelId = modelId)
+                        } else {
+                            val currentModelId = assistant.chatModelId ?: settings.chatModelId
+                            val currentModel = settings.findModelById(currentModelId)
+                            assistant.withChatModelReasoningMemory(
+                                currentModelId = currentModelId,
+                                currentDefaultReasoningLevel = currentModel
+                                    ?.let { settings.defaultReasoningLevelForModel(it) }
+                                    ?: settings.defaultReasoningLevelForModel(selectedModel),
+                                selectedModelId = modelId,
+                                selectedDefaultReasoningLevel = settings.defaultReasoningLevelForModel(selectedModel),
+                            )
+                        }
                     } else {
                         assistant
                     }

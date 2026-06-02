@@ -46,7 +46,55 @@ data class Assistant(
     val lorebookIds: Set<Uuid> = emptySet(),            // 关联的 Lorebook ID
     val enabledSkills: Set<String> = emptySet(),        // 启用的 skill 名称列表
     val enableTimeReminder: Boolean = false,            // 时间间隔提醒注入
+    val rememberedReasoningLevelsByModelId: Map<String, ReasoningLevel> = emptyMap(),
 )
+
+fun Assistant.reasoningLevelForModel(
+    modelId: Uuid?,
+    defaultReasoningLevel: ReasoningLevel,
+): ReasoningLevel {
+    val remembered = modelId?.let { rememberedReasoningLevelsByModelId[it.toString()] }
+    return remembered ?: if (reasoningLevel == ReasoningLevel.AUTO) {
+        defaultReasoningLevel
+    } else {
+        reasoningLevel
+    }
+}
+
+fun Assistant.withReasoningLevelForModel(
+    modelId: Uuid?,
+    level: ReasoningLevel,
+): Assistant {
+    val remembered = if (modelId == null) {
+        rememberedReasoningLevelsByModelId
+    } else {
+        rememberedReasoningLevelsByModelId + (modelId.toString() to level)
+    }
+    return copy(
+        reasoningLevel = level,
+        rememberedReasoningLevelsByModelId = remembered,
+    )
+}
+
+fun Assistant.withChatModelReasoningMemory(
+    currentModelId: Uuid?,
+    currentDefaultReasoningLevel: ReasoningLevel,
+    selectedModelId: Uuid,
+    selectedDefaultReasoningLevel: ReasoningLevel,
+): Assistant {
+    val currentLevel = reasoningLevelForModel(currentModelId, currentDefaultReasoningLevel)
+    val remembered = if (currentModelId == null) {
+        rememberedReasoningLevelsByModelId
+    } else {
+        rememberedReasoningLevelsByModelId + (currentModelId.toString() to currentLevel)
+    }
+    val selectedLevel = remembered[selectedModelId.toString()] ?: selectedDefaultReasoningLevel
+    return copy(
+        chatModelId = selectedModelId,
+        reasoningLevel = selectedLevel,
+        rememberedReasoningLevelsByModelId = remembered,
+    )
+}
 
 @Serializable
 data class QuickMessage(

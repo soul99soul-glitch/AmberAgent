@@ -392,6 +392,26 @@ fun Settings.getModelGroupSessionDefault(model: Model): ModelGroupSessionDefault
     return modelGroupSessionDefaults.firstOrNull { it.groupId == groupId }
 }
 
+fun Settings.defaultReasoningLevelForModel(model: Model): ReasoningLevel {
+    val groupDefault = getModelGroupSessionDefault(model)?.reasoningLevel
+    return if (groupDefault != null && groupDefault != ReasoningLevel.AUTO) {
+        groupDefault
+    } else {
+        model.defaultReasoningLevel()
+    }
+}
+
+fun Model.defaultReasoningLevel(): ReasoningLevel {
+    val id = modelId.lowercase()
+    return when {
+        id.contains("gpt") ||
+            id.contains("codex") ||
+            Regex("\\bo\\d+").containsMatchIn(id) -> ReasoningLevel.MEDIUM
+        id.contains("deepseek") -> ReasoningLevel.HIGH
+        else -> ReasoningLevel.AUTO
+    }
+}
+
 fun Settings.resolveSessionDefaults(
     assistant: Assistant,
     model: Model,
@@ -399,7 +419,7 @@ fun Settings.resolveSessionDefaults(
     val groupDefault = getModelGroupSessionDefault(model)
     return ResolvedSessionDefaults(
         reasoningLevel = if (assistant.reasoningLevel == ReasoningLevel.AUTO) {
-            groupDefault?.reasoningLevel ?: assistant.reasoningLevel
+            defaultReasoningLevelForModel(model)
         } else {
             assistant.reasoningLevel
         },

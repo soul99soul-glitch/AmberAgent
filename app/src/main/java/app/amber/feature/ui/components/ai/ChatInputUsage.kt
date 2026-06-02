@@ -512,6 +512,12 @@ private fun reasoningOptionsOf(vararg levels: ReasoningLevel): List<ReasoningOpt
 
 private fun ReasoningLevel.coerceToReasoningOptions(options: List<ReasoningOption>): ReasoningLevel {
     if (options.any { it.level == this }) return this
+    if (this == ReasoningLevel.AUTO) {
+        return options.firstOrNull { it.level == ReasoningLevel.MEDIUM }?.level
+            ?: options.firstOrNull { it.level == ReasoningLevel.HIGH }?.level
+            ?: options.firstOrNull()?.level
+            ?: ReasoningLevel.OFF
+    }
     if ((this == ReasoningLevel.XHIGH || this == ReasoningLevel.MAX) && options.any { it.level == ReasoningLevel.MAX }) {
         return ReasoningLevel.MAX
     }
@@ -561,15 +567,19 @@ private fun Model?.reasoningOptions(provider: ProviderSetting?): List<ReasoningO
         )
 
         ReasoningFamily.OPENAI_XHIGH -> reasoningOptionsOf(
-            ReasoningLevel.OFF,
-            ReasoningLevel.AUTO,
             ReasoningLevel.LOW,
             ReasoningLevel.MEDIUM,
             ReasoningLevel.HIGH,
             ReasoningLevel.XHIGH,
         )
 
-        ReasoningFamily.OPENAI,
+        ReasoningFamily.OPENAI -> reasoningOptionsOf(
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.XHIGH,
+        )
+
         ReasoningFamily.GEMINI -> reasoningOptionsOf(
             ReasoningLevel.OFF,
             ReasoningLevel.AUTO,
@@ -580,13 +590,13 @@ private fun Model?.reasoningOptions(provider: ProviderSetting?): List<ReasoningO
 
         ReasoningFamily.DEEPSEEK -> listOf(
             ReasoningOption(ReasoningLevel.OFF),
-            ReasoningOption(ReasoningLevel.AUTO, "on"),
+            ReasoningOption(ReasoningLevel.HIGH),
             ReasoningOption(ReasoningLevel.MAX),
         )
 
-        ReasoningFamily.BINARY -> listOf(
-            ReasoningOption(ReasoningLevel.OFF),
-            ReasoningOption(ReasoningLevel.AUTO, "on"),
+        ReasoningFamily.BINARY -> reasoningOptionsOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
         )
 
         ReasoningFamily.GENERIC -> reasoningOptionsOf(
@@ -621,7 +631,7 @@ private fun Model.reasoningFamily(provider: ProviderSetting?): ReasoningFamily {
         id.isQwenPlusBinaryReasoningModel() -> ReasoningFamily.BINARY
         provider is ProviderSetting.Google || providerKey == "gemini" -> ReasoningFamily.GEMINI
         id.contains("gpt-5.5") || id.contains("gpt-5.4") -> ReasoningFamily.OPENAI_XHIGH
-        id.contains("gpt-5") || Regex("\\bo\\d+").containsMatchIn(id) -> ReasoningFamily.OPENAI
+        id.contains("gpt-5") || id.contains("codex") || Regex("\\bo\\d+").containsMatchIn(id) -> ReasoningFamily.OPENAI
         ModelAbility.REASONING in abilities -> ReasoningFamily.GENERIC
         else -> ReasoningFamily.NONE
     }

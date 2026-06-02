@@ -1082,7 +1082,7 @@ internal fun reasoningLevelsForModel(model: Model): List<Pair<app.amber.ai.core.
             app.amber.ai.core.ReasoningLevel.XHIGH to "xhigh",
             app.amber.ai.core.ReasoningLevel.MAX to "max",
         )
-        id.contains("gpt") || id.contains("o1") || id.contains("o3") || id.contains("o4") -> listOf(
+        id.contains("gpt") || id.contains("codex") || id.contains("o1") || id.contains("o3") || id.contains("o4") -> listOf(
             app.amber.ai.core.ReasoningLevel.LOW to "low",
             app.amber.ai.core.ReasoningLevel.MEDIUM to "med",
             app.amber.ai.core.ReasoningLevel.HIGH to "high",
