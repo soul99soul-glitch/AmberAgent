@@ -16,7 +16,7 @@ class MiniAppOutputParser(
         val candidate = extractJsonObject(text) ?: return null
         return runCatching {
             val element = json.parseToJsonElement(candidate).jsonObject
-            json.decodeFromJsonElement<MiniAppGeneratedOutput>(element).also(::validateOutput)
+            json.decodeFromJsonElement<MiniAppGeneratedOutput>(element).normalize().also(::validateOutput)
         }.getOrElse { error ->
             if (error is MiniAppValidationException || error is SerializationException) null else throw error
         }
@@ -25,8 +25,15 @@ class MiniAppOutputParser(
     fun parse(text: String): MiniAppGeneratedOutput {
         val candidate = extractJsonObject(text) ?: throw MiniAppValidationException("No MiniApp JSON object found")
         val element: JsonObject = json.parseToJsonElement(candidate).jsonObject
-        return json.decodeFromJsonElement<MiniAppGeneratedOutput>(element).also(::validateOutput)
+        return json.decodeFromJsonElement<MiniAppGeneratedOutput>(element).normalize().also(::validateOutput)
     }
+
+    private fun MiniAppGeneratedOutput.normalize(): MiniAppGeneratedOutput =
+        copy(
+            permissions = permissions
+                .map { permission -> MiniAppPermissionAliases[permission] ?: MiniAppPermissionAliases[permission.lowercase()] ?: permission }
+                .distinct(),
+        )
 
     private fun validateOutput(output: MiniAppGeneratedOutput) {
         val title = output.title.trim()

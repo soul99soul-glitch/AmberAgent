@@ -67,6 +67,23 @@ class MiniAppOutputParserTest {
     }
 
     @Test
+    fun normalizesCommonPermissionAliases() {
+        val output = parser.parse(
+            """
+            {
+              "title": "感应面板",
+              "description": "读取网络和传感器",
+              "category": "tool",
+              "permissions": ["fetch", "Gyroscope", "light", "external_images"],
+              "html": "<!DOCTYPE html><html><body><script>fetch('https://example.com/api'); Amber.sensor.subscribe({type:'ambientLight'}, () => {});</script></body></html>"
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(listOf("network", "sensor", "externalImages"), output.permissions)
+    }
+
+    @Test
     fun rejectsUnknownPermissions() {
         val output = parser.parseOrNull(
             """

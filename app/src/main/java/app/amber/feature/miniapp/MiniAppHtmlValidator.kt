@@ -25,9 +25,8 @@ object MiniAppHtmlValidator {
         Regex("""(?is)\bnavigator\s*\.\s*mediaDevices\b""") to "mediaDevices is not allowed",
         Regex("""(?is)\bnavigator\s*\.\s*clipboard\b""") to "native clipboard is not allowed",
         Regex("""(?is)\bnavigator\s*\[\s*['"]\s*(geolocation|mediaDevices|clipboard)\s*['"]\s*\]""") to "computed access to blocked navigator APIs is not allowed",
-        Regex("""(?is)\bwindow\s*\[\s*['"]\s*(fetch|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB)\s*['"]\s*\]""") to "computed access to blocked browser APIs is not allowed",
-        Regex("""(?is)\bglobalThis\s*\[\s*['"]\s*(fetch|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB)\s*['"]\s*\]""") to "computed access to blocked browser APIs is not allowed",
-        Regex("""(?is)(^|[^A-Za-z0-9_$\.])fetch\s*\(""") to "native fetch() is not allowed",
+        Regex("""(?is)\bwindow\s*\[\s*['"]\s*(XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB)\s*['"]\s*\]""") to "computed access to blocked browser APIs is not allowed",
+        Regex("""(?is)\bglobalThis\s*\[\s*['"]\s*(XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB)\s*['"]\s*\]""") to "computed access to blocked browser APIs is not allowed",
     )
     private val quotedImageResourcePattern =
         Regex("""(?is)<\s*(img|source)\b[^>]*\b(src|srcset)\s*=\s*(['"])(.*?)\3""")

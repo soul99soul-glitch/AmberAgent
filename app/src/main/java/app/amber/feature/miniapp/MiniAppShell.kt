@@ -18,7 +18,6 @@ object MiniAppShell {
               const block = function (name) {
                 try { Object.defineProperty(window, name, { value: undefined, writable: false, configurable: false }); } catch (_) {}
               };
-              block('fetch');
               block('XMLHttpRequest');
               block('WebSocket');
               block('EventSource');

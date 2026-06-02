@@ -62,11 +62,11 @@ class MiniAppAiBridge(
 ) {
     private val prefs = context.getSharedPreferences("mini_app_ai_budget", Context.MODE_PRIVATE)
 
-    suspend fun generate(appId: String, params: JsonObject): JsonObject = withTimeout(60_000) {
-        val prompt = params.string("prompt").take(8_000)
+    suspend fun generate(appId: String, params: JsonObject): JsonObject = withTimeout(90_000) {
+        val prompt = params.string("prompt").take(16_000)
         if (prompt.isBlank()) throw MiniAppValidationException("Missing prompt")
-        val system = params.string("system").take(1_000)
-        val maxOutputChars = (params["maxOutputChars"]?.jsonPrimitive?.intOrNull ?: 4_000).coerceIn(1, 8_000)
+        val system = params.string("system").take(2_000)
+        val maxOutputChars = (params["maxOutputChars"]?.jsonPrimitive?.intOrNull ?: 6_000).coerceIn(1, 16_000)
         val temperature = params["temperature"]?.jsonPrimitive?.floatOrNull?.coerceIn(0f, 2f)
         consumeDailyBudget(appId)
 
@@ -101,7 +101,7 @@ class MiniAppAiBridge(
     private fun consumeDailyBudget(appId: String) {
         val key = "${appId}_${LocalDate.now()}"
         val count = prefs.getInt(key, 0)
-        if (count >= 20) throw MiniAppValidationException("Daily MiniApp AI budget exceeded")
+        if (count >= 50) throw MiniAppValidationException("Daily MiniApp AI budget exceeded")
         prefs.edit().putInt(key, count + 1).apply()
     }
 

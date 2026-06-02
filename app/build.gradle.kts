@@ -80,8 +80,8 @@ android {
         applicationId = baseApplicationId
         minSdk = 26
         targetSdk = 37
-        versionCode = 392
-        versionName = "2.6.1"
+        versionCode = 393
+        versionName = "2.6.5"
 
         testInstrumentationRunner = "app.amber.agent.AmberAgentAndroidTestRunner"
         manifestPlaceholders["xiaomiXmsAppId"] = xiaomiXmsAppId

@@ -22,6 +22,9 @@ class MiniAppHtmlValidatorTest {
             """<!DOCTYPE html><html><body><img src="https://example.com/a.png"><script>Amber.fetch({url:'https://example.com/api'}); Amber.search({query:'AI', limit:3});</script></body></html>"""
         )
         MiniAppHtmlValidator.validate(
+            """<!DOCTYPE html><html><body><script>fetch('https://example.com/api').then(r => r.json())</script></body></html>"""
+        )
+        MiniAppHtmlValidator.validate(
             """<!DOCTYPE html><html><body><script>Amber.ai.generate({prompt:'hi'}); Amber.host.getConversationContext({mode:'summary'}); Amber.clipboard.read(); Amber.location.getCurrent({accuracy:'coarse'});</script></body></html>"""
         )
     }
@@ -37,8 +40,6 @@ class MiniAppHtmlValidatorTest {
             """<!DOCTYPE html><html><source srcset="https://example.com/a.png 1x, http://example.com/a.png 2x"></html>""",
             """<!DOCTYPE html><html><style>@import "https://example.com/a.css";</style></html>""",
             """<!DOCTYPE html><html><iframe srcdoc="x"></iframe></html>""",
-            """<!DOCTYPE html><html><script>fetch('/x')</script></html>""",
-            """<!DOCTYPE html><html><script>window['fetch']('/x')</script></html>""",
             """<!DOCTYPE html><html><script>XMLHttpRequest</script></html>""",
             """<!DOCTYPE html><html><script>EventSource</script></html>""",
             """<!DOCTYPE html><html><script>localStorage.setItem('a','b')</script></html>""",
@@ -47,7 +48,6 @@ class MiniAppHtmlValidatorTest {
             """<!DOCTYPE html><html><script>navigator['geolocation'].getCurrentPosition(()=>{})</script></html>""",
             """<!DOCTYPE html><html><script>navigator['mediaDevices'].getUserMedia({audio:true})</script></html>""",
             """<!DOCTYPE html><html><script>navigator.clipboard.readText()</script></html>""",
-            """<!DOCTYPE html><html><script>globalThis['fetch']('/x')</script></html>""",
         ).forEach { html ->
             val failed = runCatching { MiniAppHtmlValidator.validate(html) }.isFailure
             assertTrue("Expected validation failure for $html", failed)
@@ -56,7 +56,7 @@ class MiniAppHtmlValidatorTest {
 
     @Test
     fun rejectsOversizedHtml() {
-        val html = "<!DOCTYPE html><html>${"x".repeat(512 * 1024)}</html>"
+        val html = "<!DOCTYPE html><html>${"x".repeat(768 * 1024)}</html>"
         assertTrue(runCatching { MiniAppHtmlValidator.validate(html) }.isFailure)
     }
 }

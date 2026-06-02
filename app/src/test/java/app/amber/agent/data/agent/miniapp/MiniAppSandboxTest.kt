@@ -41,8 +41,6 @@ class MiniAppSandboxTest {
             MiniAppPermission.HostContext,
             MiniAppPermission.HostSendToConversation,
             MiniAppPermission.HostCreateArtifact,
-            MiniAppPermission.AiGenerate,
-            MiniAppPermission.Sensor,
             MiniAppPermission.Location,
             MiniAppPermission.ClipboardRead,
         )
@@ -58,20 +56,20 @@ class MiniAppSandboxTest {
     }
 
     @Test
-    fun v3PlatformCapabilitiesDefaultClosed() {
-        val platform = listOf(
+    fun v3AppCapabilitiesDefaultOpen() {
+        val capabilities = listOf(
+            MiniAppPermission.AiGenerate,
+            MiniAppPermission.Sensor,
             MiniAppPermission.SharedStore,
             MiniAppPermission.EventBus,
             MiniAppPermission.Launch,
         )
-        platform.forEach { permission ->
+        capabilities.forEach { permission ->
             val sandbox = MiniAppSandbox(
                 appId = "app-1",
                 declaredPermissions = setOf(permission.value),
             )
-            assertTrue("Expected ${permission.value} to be disabled by default", runCatching {
-                sandbox.require(permission)
-            }.isFailure)
+            sandbox.require(permission)
         }
     }
 

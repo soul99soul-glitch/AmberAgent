@@ -161,7 +161,7 @@ class MiniAppBridge(
 
             "host.getConversationContext" -> {
                 sandbox.require(MiniAppPermission.HostContext)
-                val maxChars = (params["maxChars"]?.jsonPrimitive?.intOrNull ?: 4000).coerceIn(200, 4000)
+                val maxChars = (params["maxChars"]?.jsonPrimitive?.intOrNull ?: 6000).coerceIn(200, 8000)
                 confirm("允许读取上下文？", "「${appProvider().title}」想读取最小化会话上下文。") {
                     audit(method, MiniAppPermission.HostContext, "host.context", params)
                     appProvider().minimalHostContext(maxChars)
@@ -400,10 +400,15 @@ class MiniAppBridge(
     }
 
     private fun subscribeSensor(type: String, intervalMs: Int): String {
-        val sensorType = when (type) {
+        val sensorType = when (type.trim().replace('_', '-').lowercase()) {
             "accelerometer" -> Sensor.TYPE_ACCELEROMETER
+            "accel" -> Sensor.TYPE_ACCELEROMETER
             "gyroscope" -> Sensor.TYPE_GYROSCOPE
+            "gyro" -> Sensor.TYPE_GYROSCOPE
             "light" -> Sensor.TYPE_LIGHT
+            "ambientlight" -> Sensor.TYPE_LIGHT
+            "ambient-light" -> Sensor.TYPE_LIGHT
+            "illuminance" -> Sensor.TYPE_LIGHT
             else -> throw MiniAppValidationException("Unsupported sensor type")
         }
         val sensor = sensorManager.getDefaultSensor(sensorType)

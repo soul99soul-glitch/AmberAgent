@@ -1,5 +1,7 @@
 package app.amber.core.ai.transformers
 
+import app.amber.feature.subagent.SubAgentMode
+import app.amber.feature.subagent.SubAgentRuntimeSetting
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -51,5 +53,47 @@ class MiniAppPromptTransformerTest {
                 """.trimIndent(),
             ),
         )
+    }
+
+    @Test
+    fun miniAppInstructionRequiresSubAgentReviewWhenEnabled() {
+        val rosterInstruction = MiniAppPromptTransformer.miniAppInstruction(
+            SubAgentRuntimeSetting(enabled = true, mode = SubAgentMode.ROSTER)
+        )
+        assertTrue(rosterInstruction.contains("subagent_start"))
+        assertTrue(rosterInstruction.contains("MiniAppReviewer"))
+        assertTrue(rosterInstruction.contains("tool_profile=\"none\""))
+        assertTrue(rosterInstruction.contains("review/debug"))
+        assertTrue(rosterInstruction.contains("修一轮"))
+
+        val dynamicInstruction = MiniAppPromptTransformer.miniAppInstruction(
+            SubAgentRuntimeSetting(enabled = true, mode = SubAgentMode.SMART_DYNAMIC)
+        )
+        assertTrue(dynamicInstruction.contains("custom_subagent"))
+        assertTrue(dynamicInstruction.contains("MiniAppReviewer"))
+        assertTrue(dynamicInstruction.contains("tool_profile=\"none\""))
+    }
+
+    @Test
+    fun miniAppInstructionUsesOracleWhenDynamicSubAgentsAreDisabled() {
+        val instruction = MiniAppPromptTransformer.miniAppInstruction(
+            SubAgentRuntimeSetting(
+                enabled = true,
+                mode = SubAgentMode.ROSTER,
+                allowDynamicSubAgents = false,
+            )
+        )
+
+        assertTrue(instruction.contains("subagent_id=\"oracle\""))
+        assertTrue(instruction.contains("不读取外部文件/历史"))
+    }
+
+    @Test
+    fun miniAppInstructionFallsBackToSelfCheckWithoutSubAgent() {
+        val instruction = MiniAppPromptTransformer.miniAppInstruction(null)
+
+        assertTrue(instruction.contains("SubAgent 当前不可用"))
+        assertTrue(instruction.contains("生成后自检"))
+        assertFalse(instruction.contains("subagent_start"))
     }
 }

@@ -3,8 +3,8 @@ package app.amber.feature.miniapp
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val MINI_APP_MAX_HTML_BYTES = 512 * 1024
-internal const val MINI_APP_VERSION_KEEP_LIMIT = 20
+internal const val MINI_APP_MAX_HTML_BYTES = 768 * 1024
+internal const val MINI_APP_VERSION_KEEP_LIMIT = 30
 
 val MiniAppV2Permissions = setOf(
     "storage",
@@ -30,6 +30,28 @@ val MiniAppV3Permissions = MiniAppV2Permissions + setOf(
 )
 val MiniAppV1Permissions = MiniAppV3Permissions
 val MiniAppCategories = setOf("tool", "game", "info", "custom")
+
+val MiniAppPermissionAliases = mapOf(
+    "fetch" to "network",
+    "http" to "network",
+    "https" to "network",
+    "internet" to "network",
+    "联网" to "network",
+    "externalimages" to "externalImages",
+    "external-images" to "externalImages",
+    "external_images" to "externalImages",
+    "remoteImages" to "externalImages",
+    "gyro" to "sensor",
+    "gyroscope" to "sensor",
+    "accelerometer" to "sensor",
+    "accel" to "sensor",
+    "light" to "sensor",
+    "ambientLight" to "sensor",
+    "ambientlight" to "sensor",
+    "ambient-light" to "sensor",
+    "ambient_light" to "sensor",
+    "illuminance" to "sensor",
+)
 
 @Serializable
 data class MiniAppGeneratedOutput(

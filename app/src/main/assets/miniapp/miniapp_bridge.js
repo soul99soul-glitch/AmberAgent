@@ -23,6 +23,51 @@
     });
   }
 
+  function headersToObject(headers) {
+    const out = {};
+    if (!headers) return out;
+    if (typeof headers.forEach === 'function') {
+      headers.forEach(function (value, key) { out[key] = String(value); });
+      return out;
+    }
+    if (Array.isArray(headers)) {
+      headers.forEach(function (pair) {
+        if (Array.isArray(pair) && pair.length >= 2) out[String(pair[0])] = String(pair[1]);
+      });
+      return out;
+    }
+    if (typeof headers === 'object') {
+      Object.keys(headers).forEach(function (key) { out[key] = String(headers[key]); });
+    }
+    return out;
+  }
+
+  function bridgeFetch(input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url);
+    const options = init || {};
+    return call('fetch', {
+      url: String(url || ''),
+      method: options.method || 'GET',
+      headers: headersToObject(options.headers),
+      body: typeof options.body === 'string' ? options.body : undefined,
+      contentType: options.contentType,
+      responseType: 'text'
+    }, 15000).then(function (result) {
+      return Object.freeze({
+        ok: !!result.ok,
+        status: result.status || 0,
+        url: result.url || String(url || ''),
+        headers: Object.freeze({
+          get: function (name) {
+            return String(name || '').toLowerCase() === 'content-type' ? (result.contentType || '') : null;
+          }
+        }),
+        text: function () { return Promise.resolve(String(result.body || '')); },
+        json: function () { return Promise.resolve(JSON.parse(String(result.body || 'null'))); }
+      });
+    });
+  }
+
   window.AmberBridge = Object.freeze({
     _handleNativeResponse: function (response) {
       const entry = pending.get(response.id);
@@ -108,4 +153,7 @@
       createArtifact: function (options) { return call('host.createArtifact', options || {}); }
     })
   });
+  try {
+    Object.defineProperty(window, 'fetch', { value: bridgeFetch, writable: false, configurable: false });
+  } catch (_) {}
 })();
