@@ -189,6 +189,42 @@ class SubAgentValidatorTest {
     }
 
     @Test
+    fun customSubagentWinsOverPlaceholderSubagentId() {
+        val input = inputWithCustomSubagent(
+            name = "Micro Poet",
+            toolProfile = "none",
+            subagentId = "custom",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting,
+            availableToolNames = emptySet(),
+        )
+
+        assertEquals("micro-poet", result.definition.id)
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
+    fun customSubagentWinsOverRosterSubagentIdWhenBothArePresent() {
+        val input = inputWithCustomSubagent(
+            name = "Micro Poet",
+            toolProfile = "none",
+            subagentId = "fixer",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting,
+            availableToolNames = emptySet(),
+        )
+
+        assertEquals("micro-poet", result.definition.id)
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
     fun dynamicRoleToolProfileNarrowsToWebRead() {
         val input = inputWithCustomSubagent(
             toolProfile = "web_read",
@@ -352,7 +388,9 @@ class SubAgentValidatorTest {
         maxTurns: Int? = null,
         timeoutMs: Long? = null,
         outputBudgetChars: Int? = null,
+        subagentId: String? = null,
     ) = buildJsonObject {
+        subagentId?.let { put("subagent_id", it) }
         put("custom_subagent", buildJsonObject {
             name?.let { put("name", it) }
             put("description", "Use when a narrow read-only code review is needed for a specific file or behavior.")

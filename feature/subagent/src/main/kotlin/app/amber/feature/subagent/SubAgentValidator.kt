@@ -64,6 +64,10 @@ object SubAgentValidator {
         setting: SubAgentRuntimeSetting,
         availableToolNames: Set<String>,
     ): SubAgentValidationResult {
+        input["custom_subagent"]?.jsonObject?.let { custom ->
+            return resolveDynamicDefinition(input, custom, setting, availableToolNames)
+        }
+
         input["subagent_id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { id ->
             // Match against built-ins, then user-saved custom definitions, applying user overrides for built-ins.
             // Use builtIn.id (canonical) for override lookup — `find()` allows name-fallback,
@@ -81,7 +85,15 @@ object SubAgentValidator {
             return SubAgentValidationResult(custom.cappedBy(setting).safeSavedCustomDefinition(setting, availableToolNames))
         }
 
-        val custom = input["custom_subagent"]?.jsonObject ?: error("subagent_id or custom_subagent is required")
+        error("subagent_id or custom_subagent is required")
+    }
+
+    private fun resolveDynamicDefinition(
+        input: JsonObject,
+        custom: JsonObject,
+        setting: SubAgentRuntimeSetting,
+        availableToolNames: Set<String>,
+    ): SubAgentValidationResult {
         require(setting.allowDynamicSubAgents) { "Dynamic subagents are disabled in settings" }
         val smartMode = setting.mode == SubAgentMode.SMART_DYNAMIC
 

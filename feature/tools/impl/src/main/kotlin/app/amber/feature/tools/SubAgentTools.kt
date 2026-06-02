@@ -72,6 +72,7 @@ class SubAgentTools(
                     appendLine("You can delegate bounded subtasks to specialist subagents. Each subagent runs depth-1, with its own tool allowlist (and possibly its own model). Use them when a task is complex, clearly bounded, and benefits from isolation, a different model, or parallel viewpoints. Simple linear tasks must stay in the main agent.")
                     appendLine()
                     appendLine("To delegate: call subagent_start(subagent_id, task={objective, output_format, tools_and_sources, boundaries, context}). Run multiple in parallel by issuing back-to-back subagent_start calls before any subagent_wait. The user can watch the subagent's live Markdown panel; subagent_wait/read returns a compact structured result for you to synthesize.")
+                    appendLine("To dynamically create a temporary role: call subagent_start(custom_subagent={name, description, system_prompt, tool_profile}, task={...}) and omit subagent_id entirely. Do not use placeholder ids like \"custom\" or \"dynamic\". For pure creative/internal tasks, set tool_profile=\"none\".")
                 }
                 appendLine()
                 builtIns.forEach { agent ->
@@ -122,7 +123,7 @@ class SubAgentTools(
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("subagent_id", stringProp("Roster subagent id. In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. For OfficePro / terminal scenarios, call the underlying tools directly instead of dispatching a subagent."))
+                    put("subagent_id", stringProp("Roster subagent id. Omit this when using custom_subagent; do not pass placeholder ids like \"custom\" or \"dynamic\". In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. For OfficePro / terminal scenarios, call the underlying tools directly instead of dispatching a subagent."))
                     put("custom_subagent", buildJsonObject {
                         put("type", "object")
                         put("description", "Narrow dynamic subagent definition. Required in smart dynamic mode. Smart mode may omit name; the app assigns an English display name if name is missing or too generic.")
@@ -268,7 +269,7 @@ class SubAgentTools(
         if (subAgentManager.runtimeMode() == SubAgentMode.SMART_DYNAMIC) {
             "smart_dynamic: create temporary custom_subagent definitions; built-in ids are hidden/disabled; English name may be auto-assigned"
         } else {
-            "supported_with_validator: narrow name, invocation description, boundary prompt, report format, tool profile/allowlist, and budget caps are required"
+            "supported_with_validator: pass custom_subagent and omit subagent_id; narrow name, invocation description, boundary prompt, report format, tool profile/allowlist, and budget caps are required"
         }
 
     private fun toolProfileHelp(): String =

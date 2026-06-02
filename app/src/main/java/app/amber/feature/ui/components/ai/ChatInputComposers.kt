@@ -793,8 +793,9 @@ private fun buildSlashCommandItems(
                 description = "引导 Agent 按任务需要灵活使用 SubAgent",
                 action = SlashCommandAction.InsertText(
                     if (subAgentMode == SubAgentMode.SMART_DYNAMIC) {
-                        "请根据这个任务的复杂度，判断是否需要临时创建合适的英文名 SubAgent；" +
-                            "为它设计清晰 prompt、边界和只读工具范围，等待返回后再综合结论："
+                        "请根据这个任务的复杂度，判断是否需要用 custom_subagent 临时创建 SubAgent，不要使用 subagent_id；" +
+                            "名称可省略由应用分配英文名；纯创作或无需外部读取时设 tool_profile=none，" +
+                            "需要资料时再选择只读 profile；写清楚 prompt、边界和输出格式，等待返回后再综合结论："
                     } else {
                         "请根据这个任务的复杂度，主动拆分并灵活调用合适的 subagent 并行处理；" +
                             "等待它们返回后，再综合成一个可执行的结论："
