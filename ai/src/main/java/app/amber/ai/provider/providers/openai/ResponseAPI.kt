@@ -188,15 +188,21 @@ class ResponseAPI(
                 type: String?,
                 data: String
             ) {
-                if (data == "[DONE]") {
+                val payloads = normalizeOpenAIStreamDataLines(data)
+                if (payloads.isEmpty() && data.contains("[DONE]")) {
                     close()
                     return
                 }
                 Log.d(TAG, "onEvent: $id/$type $data")
-                val json = json.parseToJsonElement(data).jsonObject
-                val chunk = parseResponseDelta(json)
-                if (chunk != null) {
-                    trySend(chunk.normalizeAssistantId())
+                payloads.forEach { payload ->
+                    val json = json.parseToJsonElement(payload).jsonObject
+                    if (json["error"] != null) {
+                        throw json["error"]!!.parseErrorDetail()
+                    }
+                    val chunk = parseResponseDelta(json)
+                    if (chunk != null) {
+                        trySend(chunk.normalizeAssistantId())
+                    }
                 }
                 if (type == "response.completed") {
                     close()
@@ -212,7 +218,9 @@ class ResponseAPI(
                 val bodyRaw = response?.body?.stringSafe()
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(bodyRaw)
+                        val bodyElement = Json.parseToJsonElement(
+                            normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
+                        )
                         println(bodyElement)
                         exception = bodyElement.parseErrorDetail()
                         Log.i(TAG, "onFailure: $exception")

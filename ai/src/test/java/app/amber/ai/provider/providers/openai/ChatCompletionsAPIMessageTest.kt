@@ -111,6 +111,27 @@ class ChatCompletionsAPIMessageTest {
     }
 
     @Test
+    fun `stream payload normalization strips nested data prefix`() {
+        val payloads = normalizeOpenAIStreamDataLines(
+            """data:{"error":{"message":"unexpected end of data"}}"""
+        )
+
+        assertEquals(listOf("""{"error":{"message":"unexpected end of data"}}"""), payloads)
+    }
+
+    @Test
+    fun `stream payload normalization keeps normal json payloads`() {
+        val payloads = normalizeOpenAIStreamDataLines(
+            """
+            {"choices":[]}
+            data:[DONE]
+            """.trimIndent()
+        )
+
+        assertEquals(listOf("""{"choices":[]}"""), payloads)
+    }
+
+    @Test
     fun `forced reasoning content keeps deepseek thinking tool history valid`() {
         val messages = listOf(
             UIMessage.user("Use a tool"),

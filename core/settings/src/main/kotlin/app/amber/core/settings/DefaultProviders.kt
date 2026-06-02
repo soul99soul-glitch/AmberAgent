@@ -15,6 +15,7 @@ import kotlin.uuid.Uuid
 // matching on modelId (users could later rename it).
 val SeedOpenAIImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5d")
 val SeedGeminiImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5e")
+val SeedMiniMaxM3ModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5f")
 
 /**
  * gpt-image-2 entry seeded into the built-in OpenAI provider. Set as
@@ -45,6 +46,12 @@ val SeedGeminiImageModel = Model(
     type = ModelType.IMAGE,
     inputModalities = listOf(Modality.TEXT),
     outputModalities = listOf(Modality.IMAGE),
+)
+
+val SeedMiniMaxM3Model = Model(
+    id = SeedMiniMaxM3ModelId,
+    modelId = "MiniMax-M3",
+    displayName = "MiniMax-M3",
 )
 
 // Stable UUIDs for the three visual-routing slash commands. Each command's
@@ -96,6 +103,7 @@ private val XAIProviderId = Uuid.parse("ff3cde7e-0f65-43d7-8fb2-6475c99f5990")
 // it resurrected.
 private val ZhipuProviderId = Uuid.parse("9f3a6b2c-7d4e-4810-9a2f-3e8b5d142c01")
 private val MimoProviderId = Uuid.parse("9f3a6b2c-7d4e-4810-9a2f-3e8b5d142c02")
+private val MiniMaxProviderId = Uuid.parse("9f3a6b2c-7d4e-4810-9a2f-3e8b5d142c03")
 
 val REMOVED_DEFAULT_PROVIDER_IDS = setOf(
     Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce"), // AmberAgent
@@ -189,6 +197,15 @@ val DEFAULT_PROVIDERS = listOf(
         apiKey = "",
         enabled = false,
         brand = OpenAIBrand.MIMO,
+    ),
+    ProviderSetting.OpenAI(
+        id = MiniMaxProviderId,
+        name = "MiniMax",
+        baseUrl = "https://api.minimaxi.com/v1",
+        apiKey = "",
+        enabled = false,
+        brand = OpenAIBrand.MINIMAX,
+        models = listOf(SeedMiniMaxM3Model),
     ),
     ProviderSetting.OpenAI(
         id = XAIProviderId,

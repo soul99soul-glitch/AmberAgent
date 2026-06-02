@@ -72,6 +72,9 @@ enum class OpenAIAuthMode {
 
     @SerialName("mimo_coding_plan")
     MIMO_CODING_PLAN,
+
+    @SerialName("minimax_token_plan")
+    MINIMAX_TOKEN_PLAN,
 }
 
 /**
@@ -85,6 +88,7 @@ enum class OpenAIAuthMode {
  *  - ZHIPU   : 智谱 GLM (API_KEY + ZHIPU_CODING_PLAN)
  *  - KIMI    : Kimi / Moonshot (API_KEY + KIMI_CODING_PLAN)
  *  - MIMO    : 小米 MiMo (API_KEY + MIMO_CODING_PLAN)
+ *  - MINIMAX : MiniMax (API_KEY + MINIMAX_TOKEN_PLAN)
  */
 @Serializable
 enum class OpenAIBrand {
@@ -105,6 +109,9 @@ enum class OpenAIBrand {
 
     @SerialName("mimo")
     MIMO,
+
+    @SerialName("minimax")
+    MINIMAX,
 }
 
 fun OpenAIBrand.availableAuthModes(): List<OpenAIAuthMode> = when (this) {
@@ -113,6 +120,7 @@ fun OpenAIBrand.availableAuthModes(): List<OpenAIAuthMode> = when (this) {
     OpenAIBrand.ZHIPU -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.ZHIPU_CODING_PLAN)
     OpenAIBrand.KIMI -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.KIMI_CODING_PLAN)
     OpenAIBrand.MIMO -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.MIMO_CODING_PLAN)
+    OpenAIBrand.MINIMAX -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.MINIMAX_TOKEN_PLAN)
 }
 
 /**
@@ -126,6 +134,7 @@ fun OpenAIAuthMode.fixedBaseUrl(): String? = when (this) {
     OpenAIAuthMode.ZHIPU_CODING_PLAN -> "https://open.bigmodel.cn/api/coding/paas/v4"
     OpenAIAuthMode.KIMI_CODING_PLAN -> "https://api.kimi.com/coding/v1"
     OpenAIAuthMode.MIMO_CODING_PLAN -> "https://token-plan-cn.xiaomimimo.com/v1"
+    OpenAIAuthMode.MINIMAX_TOKEN_PLAN -> "https://api.minimaxi.com/v1"
 }
 
 @Serializable

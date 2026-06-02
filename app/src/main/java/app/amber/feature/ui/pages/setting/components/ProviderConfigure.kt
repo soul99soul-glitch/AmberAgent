@@ -487,24 +487,17 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                                 OpenAIAuthMode.ZHIPU_CODING_PLAN,
                                 OpenAIAuthMode.KIMI_CODING_PLAN,
                                 OpenAIAuthMode.MIMO_CODING_PLAN -> stringResource(R.string.setting_provider_page_openai_auth_coding_plan)
+                                OpenAIAuthMode.MINIMAX_TOKEN_PLAN -> "Token Plan"
                             }
                         )
                     },
                     selected = provider.authMode == authMode,
                     onClick = {
+                        if (provider.authMode == authMode) return@SegmentedButton
                         // For modes with a fixed base URL (Codex / Coding Plans), pin baseUrl
-                        // and let the runtime use that. API_KEY restores the brand's user-
-                        // editable default — but only when the *current* baseUrl is itself a
-                        // pinned one (i.e. the user is leaving a Codex/Coding-Plan mode). If
-                        // they had a custom baseUrl typed in for vanilla API_KEY use, we leave
-                        // it alone so we don't clobber their edit.
+                        // as the initial preset. Coding Plan keeps the field editable below;
+                        // API_KEY restores the brand's normal default when leaving a managed mode.
                         val pinned = authMode.fixedBaseUrl()
-                        val knownPinnedUrls = setOf(
-                            OpenAIAuthMode.CODEX_OAUTH.fixedBaseUrl(),
-                            OpenAIAuthMode.ZHIPU_CODING_PLAN.fixedBaseUrl(),
-                            OpenAIAuthMode.KIMI_CODING_PLAN.fixedBaseUrl(),
-                            OpenAIAuthMode.MIMO_CODING_PLAN.fixedBaseUrl(),
-                        )
                         val newProvider = when (authMode) {
                             OpenAIAuthMode.CODEX_OAUTH -> provider.copy(
                                 authMode = OpenAIAuthMode.CODEX_OAUTH,
@@ -514,13 +507,14 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                             )
                             OpenAIAuthMode.ZHIPU_CODING_PLAN,
                             OpenAIAuthMode.KIMI_CODING_PLAN,
-                            OpenAIAuthMode.MIMO_CODING_PLAN -> provider.copy(
+                            OpenAIAuthMode.MIMO_CODING_PLAN,
+                            OpenAIAuthMode.MINIMAX_TOKEN_PLAN -> provider.copy(
                                 authMode = authMode,
                                 baseUrl = pinned ?: provider.baseUrl,
                             )
                             OpenAIAuthMode.API_KEY -> {
-                                val leavingPinnedMode = provider.baseUrl in knownPinnedUrls
-                                val restoredBaseUrl = if (leavingPinnedMode) {
+                                val leavingManagedMode = provider.authMode != OpenAIAuthMode.API_KEY
+                                val restoredBaseUrl = if (leavingManagedMode) {
                                     (provider.resetBaseUrlToDefault() as ProviderSetting.OpenAI).baseUrl
                                 } else {
                                     provider.baseUrl
@@ -530,7 +524,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                                 // unset it, otherwise the Response API checkbox stays ticked
                                 // for non-OpenAI hosts where the protocol isn't supported and
                                 // chats fail with no obvious cause.
-                                val restoredUseResponseApi = if (leavingPinnedMode) {
+                                val restoredUseResponseApi = if (leavingManagedMode) {
                                     false
                                 } else {
                                     provider.useResponseApi
@@ -560,6 +554,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         OpenAIAuthMode.ZHIPU_CODING_PLAN,
         OpenAIAuthMode.KIMI_CODING_PLAN,
         OpenAIAuthMode.MIMO_CODING_PLAN,
+        OpenAIAuthMode.MINIMAX_TOKEN_PLAN,
     )
     if (provider.authMode == OpenAIAuthMode.API_KEY || isCodingPlan) {
         FlatTextField(
@@ -580,19 +575,17 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                 ?.let { "已配置 $it 个 key (空格/逗号/换行分隔)" },
         )
 
-        // baseUrl: editable for plain API_KEY, read-only when pinned by a Coding Plan mode.
-        // Without the read-only state the user could clobber the brand-specific URL and the
-        // request would silently 404 with no obvious cause.
+        // baseUrl: Coding Plan starts from a brand preset, but remains editable because these
+        // managed endpoints may move independently of the app release.
         FlatTextField(
             value = provider.baseUrl,
             onValueChange = {
-                if (!isCodingPlan) onEdit(provider.copy(baseUrl = it.trim()))
+                onEdit(provider.copy(baseUrl = it.trim()))
             },
             label = stringResource(id = R.string.setting_provider_page_api_base_url),
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isCodingPlan,
             mono = true,
-            isError = !isCodingPlan && provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl()
+            isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl()
         )
 
         // chatCompletionsPath / useResponseApi only relevant for vanilla API_KEY mode. Coding

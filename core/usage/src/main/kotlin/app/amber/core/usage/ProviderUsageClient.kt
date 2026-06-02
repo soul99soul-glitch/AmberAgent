@@ -50,7 +50,7 @@ class ProviderUsageClient(
             provider.brand == OpenAIBrand.MIMO || provider.looksLike("mimo", "xiaomi", model = model) ->
                 fetchMiMoUsage()
 
-            provider.looksLike("minimax", "minimaxi", model = model) ->
+            provider.brand == OpenAIBrand.MINIMAX || provider.looksLike("minimax", "minimaxi", model = model) ->
                 fetchMiniMaxUsage(provider)
 
             provider.balanceOption.enabled ->

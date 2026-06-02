@@ -362,6 +362,7 @@ private fun ProviderSetting.brandTagText(): String? {
     return when (brand) {
         OpenAIBrand.OPENAI -> "Codex OAuth"
         OpenAIBrand.ZHIPU, OpenAIBrand.KIMI, OpenAIBrand.MIMO -> "Coding Plan"
+        OpenAIBrand.MINIMAX -> "Token Plan"
         OpenAIBrand.GENERIC, OpenAIBrand.DEEPSEEK -> null
     }
 }

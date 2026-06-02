@@ -500,6 +500,11 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val MINIMAX_M3 = defineModel {
+        tokens("minimax", "m", "3")
+        toolReasoningAbility()
+    }
+
     private val XIAOMI_MIMO_V2 = defineModel {
         tokens("mimo", "v", "2")
         toolReasoningAbility()
@@ -667,6 +672,7 @@ object ModelRegistry {
         MINIMAX_M2,
         MINIMAX_M2_5,
         MINIMAX_M2_7,
+        MINIMAX_M3,
         XIAOMI_MIMO_V2,
         XIAOMI_MIMO_V2_PRO,
         XIAOMI_MIMO_V2_OMNI,

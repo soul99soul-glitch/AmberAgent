@@ -655,7 +655,8 @@ class OpenAIProvider(
             OpenAIAuthMode.API_KEY,
             OpenAIAuthMode.ZHIPU_CODING_PLAN,
             OpenAIAuthMode.KIMI_CODING_PLAN,
-            OpenAIAuthMode.MIMO_CODING_PLAN ->
+            OpenAIAuthMode.MIMO_CODING_PLAN,
+            OpenAIAuthMode.MINIMAX_TOKEN_PLAN ->
                 keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             OpenAIAuthMode.CODEX_OAUTH -> oauthClient
                 ?.getValidAccessToken(providerSetting.id, forceRefresh)
@@ -825,6 +826,7 @@ internal fun unsupportedAuthModeMessage(authMode: OpenAIAuthMode, capability: St
         OpenAIAuthMode.ZHIPU_CODING_PLAN,
         OpenAIAuthMode.KIMI_CODING_PLAN,
         OpenAIAuthMode.MIMO_CODING_PLAN -> "Coding Plan"
+        OpenAIAuthMode.MINIMAX_TOKEN_PLAN -> "Token Plan"
         // Unreachable: every caller of this helper guards on `authMode == API_KEY` first;
         // if we ever get here it's a bug, so emit a recognizable label rather than swallow it.
         OpenAIAuthMode.API_KEY -> "API Key"

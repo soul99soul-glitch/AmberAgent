@@ -89,6 +89,10 @@ class ModelRegistryTest {
             listOf(ModelAbility.TOOL, ModelAbility.REASONING),
             ModelRegistry.MODEL_ABILITIES.getData("minimax-m2.5")
         )
+        assertEquals(
+            listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+            ModelRegistry.MODEL_ABILITIES.getData("MiniMax-M3")
+        )
     }
 
     @Test

@@ -67,6 +67,22 @@ import kotlin.time.Clock
 
 private const val TAG = "ChatCompletionsAPI"
 
+internal fun normalizeOpenAIStreamDataLines(data: String): List<String> =
+    data.lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .map { it.withoutNestedSseDataPrefix() }
+        .filter { it.isNotBlank() && it != "[DONE]" }
+        .toList()
+
+private fun String.withoutNestedSseDataPrefix(): String {
+    var value = trimStart()
+    while (value.startsWith("data:")) {
+        value = value.removePrefix("data:").trimStart()
+    }
+    return value
+}
+
 class ChatCompletionsAPI(
     private val client: OkHttpClient,
     private val keyRoulette: KeyRoulette = KeyRoulette.default(),
@@ -166,16 +182,14 @@ class ChatCompletionsAPI(
                 type: String?,
                 data: String
             ) {
-                if (data == "[DONE]") {
+                val payloads = normalizeOpenAIStreamDataLines(data)
+                if (payloads.isEmpty() && data.contains("[DONE]")) {
                     println("[onEvent] (done) 结束流: $data")
                     close()
                     return
                 }
                 Log.d(TAG, "onEvent: $data")
-                data
-                    .trim()
-                    .split("\n")
-                    .filter { it.isNotBlank() }
+                payloads
                     .map { json.parseToJsonElement(it).jsonObject }
                     .forEach {
                         if (it["error"] != null) {
@@ -226,7 +240,9 @@ class ChatCompletionsAPI(
                 val bodyRaw = response?.body?.stringSafe()
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(bodyRaw)
+                        val bodyElement = Json.parseToJsonElement(
+                            normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
+                        )
                         println(bodyElement)
                         exception = bodyElement.parseErrorDetail()
                         Log.i(TAG, "onFailure: $exception")
