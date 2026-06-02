@@ -64,6 +64,8 @@ class SubAgentTools(
                 if (subAgentManager.runtimeMode() == SubAgentMode.SMART_DYNAMIC) {
                     appendLine("Smart dynamic mode is enabled. Ordinary built-in role ids are hidden and disabled. Design a temporary custom_subagent only when the task is complex, clearly bounded, and benefits from isolated work.")
                     appendLine("To delegate: call subagent_start(custom_subagent={description, system_prompt, optional name, tool_profile, optional tool_allowlist}, task={objective, output_format, tools_and_sources, boundaries, context}). If name is omitted or too generic, the app assigns a stable English display name for this run.")
+                    appendLine("Never write textual <tool_call>/<function>/<parameter> blocks in your reply; use native tool calls only.")
+                    appendLine("display_title is only the tool chip title; do not use it as the subagent name. Put a wanted role display name in custom_subagent.name.")
                     appendLine("custom_subagent.description must say when to invoke the temporary role, e.g. \"Use when ...\" or \"何时调用：...\".")
                     appendLine("custom_subagent.system_prompt must include explicit boundaries plus report/output instructions, e.g. \"Boundaries: ... Report output as ...\".")
                     appendLine("tool_profile options: ${toolProfileHelp()}. Default is read_only. tool_allowlist can only narrow that profile; it cannot add write, terminal, send, install, delete, or subagent_* tools.")
@@ -72,7 +74,8 @@ class SubAgentTools(
                     appendLine("You can delegate bounded subtasks to specialist subagents. Each subagent runs depth-1, with its own tool allowlist (and possibly its own model). Use them when a task is complex, clearly bounded, and benefits from isolation, a different model, or parallel viewpoints. Simple linear tasks must stay in the main agent.")
                     appendLine()
                     appendLine("To delegate: call subagent_start(subagent_id, task={objective, output_format, tools_and_sources, boundaries, context}). Run multiple in parallel by issuing back-to-back subagent_start calls before any subagent_wait. The user can watch the subagent's live Markdown panel; subagent_wait/read returns a compact structured result for you to synthesize.")
-                    appendLine("To dynamically create a temporary role: call subagent_start(custom_subagent={name, description, system_prompt, tool_profile}, task={...}) and omit subagent_id entirely. Do not use placeholder ids like \"custom\" or \"dynamic\". For pure creative/internal tasks, set tool_profile=\"none\".")
+                    appendLine("To dynamically create a temporary role: call subagent_start(custom_subagent={name, description, system_prompt, tool_profile}, task={...}) and omit subagent_id entirely. custom_subagent.name may be Chinese or English; if omitted, the app assigns a stable display name. Do not use placeholder ids like \"custom\" or \"dynamic\". For pure creative/internal tasks, set tool_profile=\"none\".")
+                    appendLine("display_title is only the tool chip title; do not use it as the subagent name. Put a wanted role display name in custom_subagent.name.")
                 }
                 appendLine()
                 builtIns.forEach { agent ->
@@ -126,9 +129,9 @@ class SubAgentTools(
                     put("subagent_id", stringProp("Roster subagent id. Omit this when using custom_subagent; do not pass placeholder ids like \"custom\" or \"dynamic\". In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. For OfficePro / terminal scenarios, call the underlying tools directly instead of dispatching a subagent."))
                     put("custom_subagent", buildJsonObject {
                         put("type", "object")
-                        put("description", "Narrow dynamic subagent definition. Required in smart dynamic mode. Smart mode may omit name; the app assigns an English display name if name is missing or too generic.")
+                        put("description", "Narrow dynamic subagent definition. name is optional; the app assigns a stable display name if name is missing or too generic.")
                         put("properties", buildJsonObject {
-                            put("name", stringProp("Optional display name. In smart dynamic mode, omit this unless a specific English name matters. Generic names are replaced."))
+                            put("name", stringProp("Optional subagent display name. May be Chinese or English. Do not use root display_title as the name. Generic names are replaced."))
                             put("description", stringProp("Required. Explain when to invoke this temporary role. Include a cue such as \"Use when ...\" or \"何时调用：...\"."))
                             put("system_prompt", stringProp("Required. At least 80 characters. Must include explicit boundaries plus report/output instructions, e.g. \"Boundaries: read only... Report output as findings...\"."))
                             put("tool_profile", stringProp("Optional. One of: ${toolProfileHelp()}. Default read_only."))
@@ -136,18 +139,6 @@ class SubAgentTools(
                                 put("type", "array")
                                 put("description", "Optional tool names. This can only narrow tool_profile; it cannot add write, terminal, send, install, delete, or subagent_* tools.")
                                 put("items", buildJsonObject { put("type", "string") })
-                            })
-                            put("max_turns", buildJsonObject {
-                                put("type", "integer")
-                                put("description", "Optional. Must not exceed current runtime limits.")
-                            })
-                            put("timeout_ms", buildJsonObject {
-                                put("type", "integer")
-                                put("description", "Optional. Must not exceed current runtime limits.")
-                            })
-                            put("output_budget_chars", buildJsonObject {
-                                put("type", "integer")
-                                put("description", "Optional. Must not exceed current runtime limits.")
                             })
                         })
                         put("required", buildJsonArray {
@@ -269,7 +260,7 @@ class SubAgentTools(
         if (subAgentManager.runtimeMode() == SubAgentMode.SMART_DYNAMIC) {
             "smart_dynamic: create temporary custom_subagent definitions; built-in ids are hidden/disabled; English name may be auto-assigned"
         } else {
-            "supported_with_validator: pass custom_subagent and omit subagent_id; narrow name, invocation description, boundary prompt, report format, tool profile/allowlist, and budget caps are required"
+            "supported_with_validator: pass custom_subagent and omit subagent_id; name is optional, while invocation description, boundary prompt, report format, and tool profile/allowlist are validated"
         }
 
     private fun toolProfileHelp(): String =

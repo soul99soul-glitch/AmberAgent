@@ -67,7 +67,7 @@ class ToolRegistry private constructor(
         entry.tool.copy(
             needsApproval = entry.metadata.needsApproval,
             allowsAutoApproval = entry.metadata.autoApprovable,
-            parameters = { entry.tool.parameters().withDisplayTitleHint() },
+            parameters = { entry.tool.parameters().withDisplayTitleHint(entry.tool.name) },
             execute = { input ->
                 entry.tool.execute(input).enforceOutputBudget(entry.metadata.outputBudgetChars)
             }
@@ -121,7 +121,9 @@ class ToolRegistry private constructor(
     )
 }
 
-private fun InputSchema?.withDisplayTitleHint(): InputSchema? = when (this) {
+private fun InputSchema?.withDisplayTitleHint(toolName: String): InputSchema? = when (this) {
+    is InputSchema.Obj if toolName == "subagent_start" -> this
+
     is InputSchema.Obj -> copy(
         properties = JsonObject(
             properties.toMutableMap().apply {

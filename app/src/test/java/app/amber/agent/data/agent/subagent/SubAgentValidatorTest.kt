@@ -98,6 +98,21 @@ class SubAgentValidatorTest {
     }
 
     @Test
+    fun rosterModeAssignsNameWhenDynamicNameMissing() {
+        val input = inputWithCustomSubagent(name = null)
+
+        val result = SubAgentValidator.resolveDefinition(
+            input,
+            setting,
+            setOf("file_read"),
+        )
+
+        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
+        assertTrue(result.definition.id.isNotBlank())
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
     fun smartModeReplacesGenericNameInsteadOfFailing() {
         val input = inputWithCustomSubagent(name = "General Helper")
 
@@ -123,6 +138,24 @@ class SubAgentValidatorTest {
 
         assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
         assertFalse(result.definition.name.contains("万能"))
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
+    fun smartModeKeepsSpecificChineseDisplayName() {
+        val input = inputWithCustomSubagent(
+            name = "情书子代理",
+            toolProfile = "none",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input,
+            setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            emptySet(),
+        )
+
+        assertEquals("情书子代理", result.definition.name)
+        assertTrue(result.definition.id.startsWith("dynamic-"))
         assertTrue(result.definition.dynamic)
     }
 
@@ -221,6 +254,24 @@ class SubAgentValidatorTest {
         )
 
         assertEquals("micro-poet", result.definition.id)
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
+    fun dynamicRoleAllowsScopedChineseTemporaryDescription() {
+        val input = inputWithCustomSubagent(
+            name = "Micro Fiction Writer",
+            description = "临时微小说家，写一个极短的科幻故事。",
+            toolProfile = "none",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            availableToolNames = emptySet(),
+        )
+
+        assertEquals("micro-fiction-writer", result.definition.id)
         assertTrue(result.definition.dynamic)
     }
 
@@ -353,15 +404,18 @@ class SubAgentValidatorTest {
     }
 
     @Test
-    fun dynamicRoleRejectsOverBudgetConfig() {
-        val input = inputWithCustomSubagent(maxTurns = 9)
+    fun dynamicRoleCapsBudgetHintsToRuntimeLimits() {
+        val input = inputWithCustomSubagent(
+            maxTurns = 9,
+            timeoutMs = 100L,
+            outputBudgetChars = 999_999,
+        )
 
-        val error = runCatching {
-            SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
-        }.exceptionOrNull()
+        val result = SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
 
-        assertTrue(error is IllegalArgumentException)
-        assertTrue(error!!.message!!.contains("max_turns"))
+        assertEquals(setting.maxTurns, result.definition.maxTurns)
+        assertEquals(1_000L, result.definition.timeoutMs)
+        assertEquals(setting.outputBudgetChars, result.definition.outputBudgetChars)
     }
 
     @Test
@@ -389,11 +443,12 @@ class SubAgentValidatorTest {
         timeoutMs: Long? = null,
         outputBudgetChars: Int? = null,
         subagentId: String? = null,
+        description: String = "Use when a narrow read-only code review is needed for a specific file or behavior.",
     ) = buildJsonObject {
         subagentId?.let { put("subagent_id", it) }
         put("custom_subagent", buildJsonObject {
             name?.let { put("name", it) }
-            put("description", "Use when a narrow read-only code review is needed for a specific file or behavior.")
+            put("description", description)
             put(
                 "system_prompt",
                 "You are a narrow reviewer. Boundaries: do not edit files, do not spawn agents, and do not use tools outside the allowlist. Report output as summary, findings, evidence, risks, and next steps."

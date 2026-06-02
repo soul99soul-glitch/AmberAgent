@@ -73,6 +73,23 @@ class ToolSearchTest {
     }
 
     @Test
+    fun subagentStartSchemaDoesNotExposeDisplayTitle() {
+        val registry = ToolRegistry.from(
+            listOf(
+                tool("subagent_start", "Start a subagent."),
+                tool("file_read", "Read workspace file."),
+            )
+        )
+
+        val schemas = registry.tools().associate { tool ->
+            tool.name to (tool.parameters() as InputSchema.Obj).properties
+        }
+
+        assertFalse(schemas["subagent_start"]!!.containsKey("display_title"))
+        assertTrue(schemas["file_read"]!!.containsKey("display_title"))
+    }
+
+    @Test
     fun searchResultPreservesPermissionMetadata() {
         val registry = ToolRegistry.from(
             listOf(

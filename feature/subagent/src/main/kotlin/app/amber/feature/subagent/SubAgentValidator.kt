@@ -98,8 +98,7 @@ object SubAgentValidator {
         val smartMode = setting.mode == SubAgentMode.SMART_DYNAMIC
 
         val requestedName = custom.stringOrBlank("name")
-        val requestedId = normalizeId(requestedName)
-        val rawName = if (smartMode && (requestedName.isBlank() || requestedId.isBlank() || isGenericName(requestedId))) {
+        val rawName = if (requestedName.isBlank() || (smartMode && isGenericName(requestedName))) {
             SmartSubAgentNames.pick(
                 seed = listOf(
                     input["task"]?.jsonObject?.stringOrBlank("objective").orEmpty(),
@@ -108,7 +107,6 @@ object SubAgentValidator {
                 ).joinToString("|")
             )
         } else {
-            require(requestedName.isNotBlank()) { "custom_subagent.name is required" }
             requestedName
         }
         val description = custom.string("description")
@@ -155,6 +153,9 @@ object SubAgentValidator {
             ReasoningLevel.entries.firstOrNull { it.name.equals(value, ignoreCase = true) || it.toString() == value }
                 ?: error("custom_subagent.reasoning_level must be one of ${ReasoningLevel.entries.joinToString { it.name.lowercase() }}; got: $value")
         }
+        val maxTurnsLimit = setting.maxTurns.coerceAtLeast(1)
+        val timeoutLimitMs = setting.timeoutMs.coerceAtLeast(1_000L)
+        val outputBudgetLimitChars = setting.outputBudgetChars.coerceAtLeast(1_000)
 
         val definition = SubAgentDefinition(
             id = id,
@@ -162,9 +163,11 @@ object SubAgentValidator {
             description = description,
             systemPrompt = systemPrompt,
             toolAllowlist = requestedTools,
-            maxTurns = custom["max_turns"]?.jsonPrimitive?.intOrNull ?: setting.maxTurns,
-            timeoutMs = custom["timeout_ms"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: setting.timeoutMs,
-            outputBudgetChars = custom["output_budget_chars"]?.jsonPrimitive?.intOrNull ?: setting.outputBudgetChars,
+            maxTurns = custom["max_turns"]?.jsonPrimitive?.intOrNull?.coerceIn(1, maxTurnsLimit) ?: maxTurnsLimit,
+            timeoutMs = custom["timeout_ms"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                ?.coerceIn(1_000L, timeoutLimitMs) ?: timeoutLimitMs,
+            outputBudgetChars = custom["output_budget_chars"]?.jsonPrimitive?.intOrNull
+                ?.coerceIn(1_000, outputBudgetLimitChars) ?: outputBudgetLimitChars,
             dynamic = true,
             modelId = parsedModelId,
             temperature = parsedTemperature,
@@ -193,7 +196,7 @@ object SubAgentValidator {
         require(!isGenericName(displayName)) {
             "Dynamic subagent name is too broad: $displayName"
         }
-        require(description.length >= 24 && description.hasInvocationCue()) {
+        require((description.length >= 24 && description.hasInvocationCue()) || description.isConciseTemporaryChineseRole()) {
             "custom_subagent.description must explain when this subagent should be invoked"
         }
         require(systemPrompt.length >= 80) { "custom_subagent.system_prompt is too short" }
@@ -291,6 +294,12 @@ object SubAgentValidator {
         val lower = lowercase()
         return listOf("when", "invoke", "use for", "用于", "适合", "何时", "调用").any { lower.contains(it) }
     }
+
+    private fun String.isConciseTemporaryChineseRole(): Boolean =
+        contains("临时") &&
+            count { it in '\u4e00'..'\u9fff' } >= 12 &&
+            listOf("写", "创作", "检查", "审阅", "总结", "分析", "整理", "翻译", "生成", "报道")
+                .any { contains(it) }
 
     private fun String.hasBoundaryCue(): Boolean {
         val lower = lowercase()
