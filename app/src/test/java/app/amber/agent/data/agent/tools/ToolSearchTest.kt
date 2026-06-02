@@ -230,6 +230,17 @@ class ToolSearchTest {
     }
 
     @Test
+    fun generateImageStaysResidentInLazyMode() {
+        val hiddenTools = (0 until 45).map { tool("hidden_tool_$it", "Hidden capability $it") }
+        val exposure = ToolExposureState.from(
+            hiddenTools + tool("generate_image", "Generate raster images.") + tool(TOOL_SEARCH_TOOL_NAME)
+        )
+
+        assertTrue(exposure.enabled)
+        assertTrue("generate_image" in exposure.toolsForStep().map { it.name })
+    }
+
+    @Test
     fun toolsListOutputDoesNotExposeHiddenTools() {
         val hiddenTools = (0 until 45).map { tool("hidden_tool_$it", "Hidden capability $it") }
         val exposure = ToolExposureState.from(

@@ -54,24 +54,31 @@ val SeedMiniMaxM3Model = Model(
     displayName = "MiniMax-M3",
 )
 
-// Stable UUIDs for the three visual-routing slash commands. Each command's
+// Stable UUIDs for the visual-routing slash commands. Each command's
 // content prefixes a route tag the GenerativeUiPlanner picks up at Layer 0,
 // forcing the corresponding render path regardless of the prompt's wording.
-//   /draw    → [ROUTE:image]   → generate_image tool
-//   /diagram → [ROUTE:diagram] → show-widget SVG
-//   /slide   → [ROUTE:slides]  → show-widget slides renderer
+//   /draw    -> [ROUTE:image]  -> generate_image tool
+//   /svg     -> [ROUTE:svg]    -> show-widget SVG
+//   /diagram -> [ROUTE:diagram]-> show-widget SVG
+//   /slide   -> [ROUTE:slides] -> show-widget slides renderer
 //
 // Trailing newline so the cursor lands on a fresh line after the tag, and
 // the user can type their prompt unprefixed.
 val SeedDrawQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e01")
 val SeedDiagramQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e02")
 val SeedSlideQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e03")
+val SeedSvgQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e04")
 
 val SeedRoutingQuickMessages: List<QuickMessage> = listOf(
     QuickMessage(
         id = SeedDrawQuickMessageId,
         title = "draw",
         content = "[ROUTE:image]\n",
+    ),
+    QuickMessage(
+        id = SeedSvgQuickMessageId,
+        title = "svg",
+        content = "[ROUTE:svg]\n",
     ),
     QuickMessage(
         id = SeedDiagramQuickMessageId,

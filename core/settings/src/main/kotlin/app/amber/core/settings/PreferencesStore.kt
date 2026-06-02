@@ -121,7 +121,7 @@ data class Settings(
     val imageModelsSeededVersion: Int = 0,
     /**
      * Same one-shot pattern, for the visual-routing slash commands
-     * (/draw / /diagram / /slide). Bumped once the three QuickMessages are
+     * (/draw / /svg / /diagram / /slide). Bumped as QuickMessages are
      * appended to settings.quickMessages and subscribed by every assistant.
      * Persisted as [PreferencesStore.SEEDED_ROUTING_QUICK_MESSAGES_V1].
      */

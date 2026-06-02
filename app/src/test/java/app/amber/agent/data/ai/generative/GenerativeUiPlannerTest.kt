@@ -60,6 +60,30 @@ class GenerativeUiPlannerTest {
     }
 
     @Test
+    fun slashRoutesSeparateDrawAndSvg() {
+        val setting = GenerativeUiSetting(enabled = true)
+        val drawMessages = listOf(userMessage("[ROUTE:image]\n画一只猫"))
+        val svgMessages = listOf(userMessage("[ROUTE:svg]\n画一只猫"))
+
+        val drawPrompt = GenerativeUiPlanner.buildPrompt(
+            setting = setting,
+            messages = drawMessages,
+            hasImageGenTool = true,
+        )
+        val svgPrompt = GenerativeUiPlanner.buildPrompt(
+            setting = setting,
+            messages = svgMessages,
+            hasImageGenTool = true,
+        )
+
+        assertTrue(drawPrompt.contains("Call the `generate_image` tool"))
+        assertFalse(GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(setting, drawMessages))
+        assertTrue(svgPrompt.contains("show-widget SVG"))
+        assertTrue(GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(setting, svgMessages))
+        assertFalse(GenerativeUiPlanner.stripVisualRouteTagsForDisplay("[ROUTE:svg]\n画一只猫").contains("[ROUTE:"))
+    }
+
+    @Test
     fun toolMediatedVisualRequestsWarnAgainstProgressWidgets() {
         val prompt = GenerativeUiPlanner.buildPrompt(
             setting = GenerativeUiSetting(enabled = true),

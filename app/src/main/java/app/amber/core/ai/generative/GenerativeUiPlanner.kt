@@ -82,7 +82,7 @@ object GenerativeUiPlanner {
                         appendLine("Use the requested tool/skill/subagent first. Do NOT create a widget for routing, progress, plan, or status summaries.")
                         appendLine("Only emit a show-widget after the real tool/skill/subagent result exists and the widget is the final requested artifact.")
                     } else {
-                        appendLine("The user asked for a structural diagram / chart / schematic. Emit a concise show-widget SVG block to answer.")
+                        appendLine("The user asked for an SVG/vector visual, structural diagram, chart, or schematic. Emit a concise show-widget SVG block to answer.")
                         appendLine("Start with one short sentence, then output the show-widget block immediately.")
                         appendLine("Prefer widget_code SVG for streaming; avoid renderer/spec unless the answer truly needs an interactive chart.")
                         appendLine("Keep the SVG inside its viewBox with 24px padding; do not draw outside the card.")
@@ -221,6 +221,7 @@ object GenerativeUiPlanner {
         // Layer 0: explicit slash-command route tags. Trumps everything.
         when {
             "[route:image]" in lower -> return VisualRoute.IMAGE_GEN
+            "[route:svg]" in lower -> return VisualRoute.DIAGRAM_WIDGET
             "[route:diagram]" in lower -> return VisualRoute.DIAGRAM_WIDGET
             "[route:slides]" in lower -> return VisualRoute.SLIDES
         }
@@ -271,7 +272,7 @@ object GenerativeUiPlanner {
     }
 
     /**
-     * Remove the `[ROUTE:image]` / `[ROUTE:diagram]` / `[ROUTE:slides]` tags
+     * Remove the `[ROUTE:image]` / `[ROUTE:svg]` / `[ROUTE:diagram]` / `[ROUTE:slides]` tags
      * (and any single trailing newline) from text before rendering it in the
      * UI. The Planner / classifyRoute still sees the raw text, but user
      * message bubbles shouldn't expose this routing metadata to the reader.
@@ -280,7 +281,7 @@ object GenerativeUiPlanner {
         ROUTE_TAG_REGEX.replace(text, "")
 
     private val ROUTE_TAG_REGEX = Regex(
-        """\[ROUTE:(?:image|diagram|slides)\]\n?""",
+        """\[ROUTE:(?:image|svg|diagram|slides)\]\n?""",
         RegexOption.IGNORE_CASE,
     )
 

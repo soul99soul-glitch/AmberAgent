@@ -15,6 +15,7 @@ import app.amber.core.settings.SeedGeminiImageModelId
 import app.amber.core.settings.SeedOpenAIImageModel
 import app.amber.core.settings.SeedOpenAIImageModelId
 import app.amber.core.settings.SeedRoutingQuickMessages
+import app.amber.core.settings.SeedSvgQuickMessageId
 import app.amber.core.settings.Settings
 import app.amber.core.model.QuickMessage
 import app.amber.core.settings.DEFAULT_PRESET_THEME_ID
@@ -228,7 +229,29 @@ class SettingsAggregatorHelpersTest {
                     seedIds.all { id -> id in assistant.quickMessageIds }
                 )
             }
-        assertEquals(1, out.routingQuickMessagesSeededVersion)
+        assertEquals(2, out.routingQuickMessagesSeededVersion)
+    }
+
+    @Test
+    fun `applyBackfillAndSeed — routing v1 only backfills svg quick-message`() {
+        val input = composeRawSettings(
+            ui = UIPrefsData(),
+            search = SearchPrefsData(),
+            agent = AgentPrefsData(),
+            provider = ProviderPrefsData(),
+            chat = ChatPrefsData(),
+            ext = ExtensionPrefsData(routingQuickMessagesSeededVersion = 1),
+            assistant = AssistantPrefsData(assistants = DEFAULT_ASSISTANTS),
+        )
+        val out = applyBackfillAndSeed(input)
+
+        assertEquals(listOf(SeedSvgQuickMessageId), out.quickMessages.map(QuickMessage::id))
+        out.assistants
+            .filter { it.id in DEFAULT_ASSISTANTS.map { d -> d.id } }
+            .forEach { assistant ->
+                assertTrue(SeedSvgQuickMessageId in assistant.quickMessageIds)
+            }
+        assertEquals(2, out.routingQuickMessagesSeededVersion)
     }
 
     @Test
@@ -391,7 +414,7 @@ class SettingsAggregatorHelpersTest {
         }
         // Seed flags flipped
         assertEquals(1, final.imageModelsSeededVersion)
-        assertEquals(1, final.routingQuickMessagesSeededVersion)
+        assertEquals(2, final.routingQuickMessagesSeededVersion)
         // TTS backfilled
         assertTrue(final.ttsProviders.any { it.id == DEFAULT_SYSTEM_TTS_ID })
         // Search enabled service derived from default search services

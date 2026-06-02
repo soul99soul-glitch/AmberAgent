@@ -27,6 +27,7 @@ import app.amber.core.settings.SeedGeminiImageModelId
 import app.amber.core.settings.SeedOpenAIImageModel
 import app.amber.core.settings.SeedOpenAIImageModelId
 import app.amber.core.settings.SeedRoutingQuickMessages
+import app.amber.core.settings.SeedSvgQuickMessageId
 import app.amber.core.settings.Settings
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.withAmberAgentAssistantBranding
@@ -342,8 +343,8 @@ internal fun composeRawSettings(
  * - Sync built-in provider metadata (description / shortDescription / brand)
  * - Seed gpt-image-2 / nano-banana-2 (gated by imageModelsSeededVersion < 1)
  * - Inject DEFAULT_ASSISTANTS that the user has not yet got
- * - Seed routing quick messages (/draw /diagram /slide) + subscribe default
- *   assistants to them (gated by routingQuickMessagesSeededVersion < 1)
+ * - Seed routing quick messages (/draw /svg /diagram /slide) + subscribe
+ *   default assistants to them (gated by routingQuickMessagesSeededVersion)
  * - Backfill DEFAULT_TTS_PROVIDERS + clamp selectedTTSProviderId
  * - Apply AmberAgent assistant branding
  * - Flip both seed version flags to 1 once seeding done
@@ -397,11 +398,14 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
         }
     }
 
-    val shouldSeedRoutingQuickMessages = it.routingQuickMessagesSeededVersion < 1
-    val routingSeedIds = SeedRoutingQuickMessages.map { qm -> qm.id }.toSet()
+    val routingQuickMessagesToSeed = SeedRoutingQuickMessages.filter { qm ->
+        it.routingQuickMessagesSeededVersion < if (qm.id == SeedSvgQuickMessageId) 2 else 1
+    }
+    val shouldSeedRoutingQuickMessages = routingQuickMessagesToSeed.isNotEmpty()
+    val routingSeedIds = routingQuickMessagesToSeed.map { qm -> qm.id }.toSet()
     val nextQuickMessages = if (shouldSeedRoutingQuickMessages) {
         val existingIds = it.quickMessages.map { qm -> qm.id }.toSet()
-        it.quickMessages + SeedRoutingQuickMessages.filter { qm -> qm.id !in existingIds }
+        it.quickMessages + routingQuickMessagesToSeed.filter { qm -> qm.id !in existingIds }
     } else it.quickMessages
     val assistants = if (shouldSeedRoutingQuickMessages) {
         assistantsRaw.map { assistant ->
@@ -432,7 +436,7 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
         },
         imageModelsSeededVersion = if (shouldSeedImageModels) 1 else it.imageModelsSeededVersion,
         routingQuickMessagesSeededVersion =
-            if (shouldSeedRoutingQuickMessages) 1 else it.routingQuickMessagesSeededVersion,
+            if (shouldSeedRoutingQuickMessages) 2 else it.routingQuickMessagesSeededVersion,
     )
 }
 

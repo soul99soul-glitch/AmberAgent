@@ -347,6 +347,7 @@ class ToolExposureState private constructor(
             "terminal_session_stop",
             "mcp_list",
             "mcp_call_tool",
+            "generate_image",
         )
 
         private val RESIDENT_CONTEXT_TOOLS = setOf(
