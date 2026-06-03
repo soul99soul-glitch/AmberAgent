@@ -6,5 +6,8 @@
       "Bash(uv run --directory locale-tui src/main.py:*)"
     ],
     "deny": []
-  }
+  },
+  "enabledMcpjsonServers": [
+    "aidesigner"
+  ]
 }

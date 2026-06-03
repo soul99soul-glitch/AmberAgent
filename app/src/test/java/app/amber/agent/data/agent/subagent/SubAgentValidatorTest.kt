@@ -222,39 +222,23 @@ class SubAgentValidatorTest {
     }
 
     @Test
-    fun customSubagentWinsOverPlaceholderSubagentId() {
-        val input = inputWithCustomSubagent(
-            name = "Micro Poet",
-            toolProfile = "none",
-            subagentId = "custom",
-        )
-
-        val result = SubAgentValidator.resolveDefinition(
-            input = input,
-            setting = setting,
-            availableToolNames = emptySet(),
-        )
-
-        assertEquals("micro-poet", result.definition.id)
-        assertTrue(result.definition.dynamic)
-    }
-
-    @Test
-    fun customSubagentWinsOverRosterSubagentIdWhenBothArePresent() {
+    fun customSubagentAndSubagentIdAreMutuallyExclusive() {
         val input = inputWithCustomSubagent(
             name = "Micro Poet",
             toolProfile = "none",
             subagentId = "fixer",
         )
 
-        val result = SubAgentValidator.resolveDefinition(
-            input = input,
-            setting = setting,
-            availableToolNames = emptySet(),
-        )
+        val error = runCatching {
+            SubAgentValidator.resolveDefinition(
+                input = input,
+                setting = setting,
+                availableToolNames = emptySet(),
+            )
+        }.exceptionOrNull()
 
-        assertEquals("micro-poet", result.definition.id)
-        assertTrue(result.definition.dynamic)
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("either subagent_id or custom_subagent"))
     }
 
     @Test

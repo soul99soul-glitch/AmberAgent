@@ -64,11 +64,16 @@ object SubAgentValidator {
         setting: SubAgentRuntimeSetting,
         availableToolNames: Set<String>,
     ): SubAgentValidationResult {
+        val requestedSubagentId = input["subagent_id"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        require(!(requestedSubagentId.isNotBlank() && input["custom_subagent"] is JsonObject)) {
+            "Pass either subagent_id or custom_subagent, not both."
+        }
+
         input["custom_subagent"]?.jsonObject?.let { custom ->
             return resolveDynamicDefinition(input, custom, setting, availableToolNames)
         }
 
-        input["subagent_id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { id ->
+        requestedSubagentId.takeIf { it.isNotBlank() }?.let { id ->
             // Match against built-ins, then user-saved custom definitions, applying user overrides for built-ins.
             // Use builtIn.id (canonical) for override lookup — `find()` allows name-fallback,
             // but overrides map is keyed by canonical id only.
