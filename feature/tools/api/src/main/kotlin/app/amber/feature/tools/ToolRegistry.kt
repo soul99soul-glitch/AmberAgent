@@ -472,6 +472,7 @@ private fun Tool.riskProfile(): RiskProfile = when {
     name in setOf("session_read", "session_expand") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
     name == "pdf_render_page" -> RiskProfile(ToolRisk.High, explicit = true)
     name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name == "subagent_start" -> RiskProfile(ToolRisk.Normal, explicit = true)
     name == "officepro_read_screen" ||
         name == "officepro_capture_context" ||
         name == "officepro_context_digest" ||

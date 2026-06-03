@@ -199,6 +199,39 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
+    fun subAgentStartUsesGlobalAutoApprovalInMainContext() {
+        val decision = resolver.resolve(
+            toolDef = readOnlyTool("subagent_start"),
+            tool = toolCall("subagent_start"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+        )
+
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("settings", decision.source)
+        val policy = decision.trace.policy!!
+        assertEquals("subagent", policy.category)
+        assertTrue(policy.mutates)
+        assertTrue(policy.needsApproval)
+        assertTrue(policy.autoApprovable)
+        assertEquals(ToolRisk.Normal, policy.risk)
+    }
+
+    @Test
+    fun subAgentCannotSilentlyStartNestedSubAgent() {
+        val decision = resolver.resolve(
+            toolDef = readOnlyTool("subagent_start"),
+            tool = toolCall("subagent_start"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+            invocationContext = ToolInvocationContext.SubAgent,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("subagent", decision.source)
+    }
+
+    @Test
     fun subAgentSensitiveToolStillAsksEvenWithHighRiskAutoApproval() {
         val decision = resolver.resolve(
             toolDef = approvalTool("screen_tap"),
