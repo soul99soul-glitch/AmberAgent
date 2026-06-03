@@ -93,6 +93,21 @@ fun DeepReadOutput.isComplete(): Boolean =
 fun DeepReadOutput.isVerifiedComplete(): Boolean =
     sectionsReady() && verificationState.status == DeepReadSectionStatus.READY
 
+fun DeepReadOutput.isDeliverableDraft(): Boolean =
+    sectionsReady()
+
+fun DeepReadOutput.sectionFailureMessage(): String? =
+    DeepReadGenerationStage.entries.firstNotNullOfOrNull { stage ->
+        sectionStates[stage]
+            ?.takeIf { it.status == DeepReadSectionStatus.FAILED }
+            ?.errorMessage
+    }
+
+fun DeepReadOutput.verificationWarningMessage(): String? =
+    verificationState
+        .takeIf { isDeliverableDraft() && it.status == DeepReadSectionStatus.FAILED }
+        ?.errorMessage
+
 fun DeepReadOutput.sectionsReady(): Boolean =
     DeepReadGenerationStage.entries.all { sectionStates[it]?.status == DeepReadSectionStatus.READY }
 

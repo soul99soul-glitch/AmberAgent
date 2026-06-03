@@ -91,6 +91,8 @@ import app.amber.feature.board.hotlist.deepread.isComplete
 import app.amber.feature.board.hotlist.deepread.statusOf
 import app.amber.feature.board.hotlist.deepread.errorOf
 import app.amber.feature.board.hotlist.deepread.hasAnyReadySection
+import app.amber.feature.board.hotlist.deepread.sectionFailureMessage
+import app.amber.feature.board.hotlist.deepread.verificationWarningMessage
 import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
@@ -229,16 +231,21 @@ fun DeepReadScreen(
     val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
         customTemplate == null
     val templateSelected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null
-    val firstFailureMessage = output?.firstFailureMessage()
+    val sectionFailureMessage = output?.sectionFailureMessage()
+    val verificationWarningMessage = output?.verificationWarningMessage()
     val firstFailedStage = output?.firstFailedStage()
-    val failureRetryLabel = if (firstFailedStage != null) "仅重试这一段" else "重试"
+    val failureRetryLabel = when {
+        firstFailedStage != null -> "仅重试这一段"
+        verificationWarningMessage != null -> "重新验真"
+        else -> "重试"
+    }
     fun retryFirstFailure() {
         firstFailedStage?.let(::runOne) ?: runAll(force = false)
     }
     fun retryInitialFailure() {
         firstFailedStage?.let(::runOne) ?: runAll(force = true)
     }
-    val initialDisplayError = (runError ?: firstFailureMessage)
+    val initialDisplayError = (runError ?: sectionFailureMessage)
         ?.takeIf { !generating && (output == null || !output.hasAnyReadySection()) }
 
     Box(Modifier.fillMaxSize().background(palette.background)) {
@@ -323,6 +330,21 @@ fun DeepReadScreen(
                             generationPhase = data.generationPhase,
                             modifier = noticeModifier,
                         )
+                        verificationWarningMessage != null && !complete -> DeepReadVerificationWarningNotice(
+                            onRetry = { runAll(force = false) },
+                            modifier = noticeModifier,
+                        )
+                        runError != null && !complete -> DeepReadPartialErrorNotice(
+                            error = runError.orEmpty(),
+                            onRetry = { runAll(force = true) },
+                            modifier = noticeModifier,
+                        )
+                        sectionFailureMessage != null && !complete -> DeepReadPartialErrorNotice(
+                            error = sectionFailureMessage,
+                            onRetry = ::retryFirstFailure,
+                            retryLabel = failureRetryLabel,
+                            modifier = noticeModifier,
+                        )
                         hasBasicDraft && !complete -> TemplateFallbackNotice(
                             message = "基础稿，可继续增强",
                             modifier = noticeModifier,
@@ -331,24 +353,13 @@ fun DeepReadScreen(
                             message = "内容已过 24 小时，可能需要重新生成",
                             modifier = noticeModifier,
                         )
-                        runError != null && !complete -> DeepReadPartialErrorNotice(
-                            error = runError.orEmpty(),
-                            onRetry = { runAll(force = true) },
-                            modifier = noticeModifier,
-                        )
-                        firstFailureMessage != null && !complete -> DeepReadPartialErrorNotice(
-                            error = firstFailureMessage,
-                            onRetry = ::retryFirstFailure,
-                            retryLabel = failureRetryLabel,
-                            modifier = noticeModifier,
-                        )
                     }
                 }
             }
 
             // Nothing usable yet — only initial fetch banner before first section persists.
             output == null || !output.hasAnyReadySection() -> {
-                val displayError = runError ?: firstFailureMessage?.takeIf { !generating }
+                val displayError = runError ?: sectionFailureMessage?.takeIf { !generating }
                 if (displayError != null) {
                     DeepReadError(
                         error = displayError,
@@ -426,6 +437,31 @@ fun DeepReadScreen(
                         .padding(horizontal = 18.dp, vertical = 10.dp)
 
                     when {
+                        generating -> RunningStageNotice(
+                            stages = data.sectionStates,
+                            verificationState = data.verificationState,
+                            generationPhase = data.generationPhase,
+                            modifier = noticeModifier,
+                        )
+                        verificationWarningMessage != null && !complete -> DeepReadVerificationWarningNotice(
+                            onRetry = { runAll(force = false) },
+                            modifier = noticeModifier,
+                        )
+                        runError != null && !complete -> DeepReadPartialErrorNotice(
+                            error = runError.orEmpty(),
+                            onRetry = { runAll(force = true) },
+                            modifier = noticeModifier,
+                        )
+                        sectionFailureMessage != null && !complete -> DeepReadPartialErrorNotice(
+                            error = sectionFailureMessage,
+                            onRetry = ::retryFirstFailure,
+                            retryLabel = failureRetryLabel,
+                            modifier = noticeModifier,
+                        )
+                        hasBasicDraft && !complete -> TemplateFallbackNotice(
+                            message = "基础稿，可继续增强",
+                            modifier = noticeModifier,
+                        )
                         selectedCustomMissing -> TemplateFallbackNotice(
                             message = "模板不可用，已回退默认排版",
                             modifier = noticeModifier,
@@ -434,29 +470,8 @@ fun DeepReadScreen(
                             message = "$invalidTemplateCount 个模板不可用，已回退默认排版",
                             modifier = noticeModifier,
                         )
-                        generating -> RunningStageNotice(
-                            stages = data.sectionStates,
-                            verificationState = data.verificationState,
-                            generationPhase = data.generationPhase,
-                            modifier = noticeModifier,
-                        )
-                        hasBasicDraft && !complete -> TemplateFallbackNotice(
-                            message = "基础稿，可继续增强",
-                            modifier = noticeModifier,
-                        )
                         historyExpired -> TemplateFallbackNotice(
                             message = "内容已过 24 小时，可能需要重新生成",
-                            modifier = noticeModifier,
-                        )
-                        runError != null && !complete -> DeepReadPartialErrorNotice(
-                            error = runError.orEmpty(),
-                            onRetry = { runAll(force = true) },
-                            modifier = noticeModifier,
-                        )
-                        firstFailureMessage != null && !complete -> DeepReadPartialErrorNotice(
-                            error = firstFailureMessage,
-                            onRetry = ::retryFirstFailure,
-                            retryLabel = failureRetryLabel,
                             modifier = noticeModifier,
                         )
                     }
@@ -488,15 +503,6 @@ private fun DeepReadOutput.asVisibleGeneratingOutput(generating: Boolean): DeepR
         sectionStates = states,
     )
 }
-
-private fun DeepReadOutput.firstFailureMessage(): String? =
-    verificationState
-        .takeIf { it.status == DeepReadSectionStatus.FAILED }
-        ?.errorMessage
-        ?: sectionStates
-            .values
-            .firstOrNull { it.status == DeepReadSectionStatus.FAILED }
-            ?.errorMessage
 
 private fun DeepReadOutput.firstFailedStage(): DeepReadGenerationStage? =
     DeepReadGenerationStage.entries.firstOrNull { stage ->
@@ -558,6 +564,40 @@ private fun RunningStageNotice(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+@Composable
+private fun DeepReadVerificationWarningNotice(
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.96f),
+        shadowElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "正文已生成，验真未完成，可阅读并重新验真",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Button(
+                onClick = onRetry,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Text("重新验真")
+            }
+        }
     }
 }
 

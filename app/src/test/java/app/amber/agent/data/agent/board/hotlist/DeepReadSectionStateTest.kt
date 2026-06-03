@@ -14,11 +14,15 @@ import app.amber.feature.board.hotlist.deepread.TimelineEvent
 import app.amber.feature.board.hotlist.deepread.displayHeroCaption
 import app.amber.feature.board.hotlist.deepread.displayHeroImageUrl
 import app.amber.feature.board.hotlist.deepread.isComplete
+import app.amber.feature.board.hotlist.deepread.isDeliverableDraft
+import app.amber.feature.board.hotlist.deepread.sectionFailureMessage
 import app.amber.feature.board.hotlist.deepread.statusOf
+import app.amber.feature.board.hotlist.deepread.verificationWarningMessage
 import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
 import app.amber.feature.board.hotlist.deepread.withSectionStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -69,6 +73,40 @@ class DeepReadSectionStateTest {
         }.copy(generationComplete = true)
 
         assertFalse(complete.isComplete())
+    }
+
+    @Test
+    fun deliverableDraftRequiresSectionsReadyButNotVerification() {
+        val failedVerification = DeepReadGenerationStage.entries.fold(DeepReadOutput()) { output, stage ->
+            output.withSectionStatus(stage, DeepReadSectionStatus.READY)
+        }.copy(
+            verificationState = DeepReadSectionState(
+                status = DeepReadSectionStatus.FAILED,
+                errorMessage = "最终验真未完成",
+            )
+        )
+
+        assertTrue(failedVerification.isDeliverableDraft())
+        assertFalse(failedVerification.isComplete())
+        assertEquals("最终验真未完成", failedVerification.verificationWarningMessage())
+        assertNull(failedVerification.sectionFailureMessage())
+    }
+
+    @Test
+    fun sectionFailureMessageStaysSeparateFromVerificationWarning() {
+        val sectionFailed = DeepReadOutput()
+            .withSectionStatus(DeepReadGenerationStage.OVERVIEW, DeepReadSectionStatus.READY)
+            .withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.FAILED, "时间线失败")
+            .copy(
+                verificationState = DeepReadSectionState(
+                    status = DeepReadSectionStatus.FAILED,
+                    errorMessage = "验真失败",
+                )
+            )
+
+        assertFalse(sectionFailed.isDeliverableDraft())
+        assertEquals("时间线失败", sectionFailed.sectionFailureMessage())
+        assertNull(sectionFailed.verificationWarningMessage())
     }
 
     @Test

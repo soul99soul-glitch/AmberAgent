@@ -29,6 +29,13 @@ private const val DIAGRAM_NODE_LABEL_MAX_CHARS = 34
 private const val DIAGRAM_NODE_NOTE_MAX_CHARS = 96
 private const val DIAGRAM_NODE_GROUP_MAX_CHARS = 40
 private const val DIAGRAM_EDGE_LABEL_MAX_CHARS = 42
+private const val OVERVIEW_SUMMARY_MIN_CHARS = 24
+
+private data class WriterFeedback(
+    val accepted: Map<String, Int> = emptyMap(),
+    val dropped: Map<String, Int> = emptyMap(),
+    val dropReasons: List<String> = emptyList(),
+)
 
 class DeepReadSectionWriterTools(
     private val repository: HotListRepository,
@@ -192,11 +199,12 @@ class DeepReadSectionWriterTools(
         allowsAutoApproval = true,
         execute = { input ->
             val obj = input.objectOrEmpty()
+            val summary = obj.string("summary")?.cleanText(OVERVIEW_SUMMARY_STORAGE_MAX_CHARS)
             val output = update { current ->
                 val references = obj.readingLinks("references")
                 val next = current.copy(
                     topicType = obj.string("topic_type")?.safeTake(32) ?: current.topicType,
-                    summary = obj.string("summary")?.cleanText(OVERVIEW_SUMMARY_STORAGE_MAX_CHARS) ?: current.summary,
+                    summary = summary ?: current.summary,
                     keyEntities = mergeStrings(current.keyEntities, obj.stringList("key_entities"), limit = 12),
                     references = mergeReadingLinks(current.references, references, limit = 12),
                 )
@@ -207,9 +215,32 @@ class DeepReadSectionWriterTools(
                     .withSectionQuality(DeepReadGenerationStage.OVERVIEW, DeepReadSectionQuality.STANDARD)
             }
             if (output.statusOf(DeepReadGenerationStage.OVERVIEW) == DeepReadSectionStatus.READY) {
-                ok("overview", output)
+                ok(
+                    section = "overview",
+                    output = output,
+                    feedback = WriterFeedback(
+                        accepted = mapOf(
+                            "summary_chars" to output.summary.trim().length,
+                            "key_entities" to output.keyEntities.size,
+                            "references" to output.references.size,
+                        )
+                    ),
+                )
             } else {
-                missing("overview", "summary")
+                val summaryChars = summary.orEmpty().trim().length
+                val required = if (summary.isNullOrBlank()) {
+                    "summary missing"
+                } else {
+                    "summary too short: $summaryChars/$OVERVIEW_SUMMARY_MIN_CHARS"
+                }
+                missing(
+                    section = "overview",
+                    required = required,
+                    feedback = WriterFeedback(
+                        dropped = mapOf("summary" to 1),
+                        dropReasons = listOf(required),
+                    ),
+                )
             }
         },
     )
@@ -229,11 +260,16 @@ class DeepReadSectionWriterTools(
         allowsAutoApproval = true,
         execute = { input ->
             val obj = input.objectOrEmpty()
+            val timeline = obj.timeline()
+            val corePoints = obj.corePoints()
+            val references = obj.readingLinks("references")
+            val rawTimelineCount = obj.objectList("timeline").size
+            val rawCorePointCount = obj.objectList("core_points").size
             val output = update { current ->
                 val next = current.copy(
-                    timeline = obj.timeline().takeIf { it.isNotEmpty() } ?: current.timeline,
-                    corePoints = obj.corePoints().takeIf { it.isNotEmpty() } ?: current.corePoints,
-                    references = mergeReadingLinks(current.references, obj.readingLinks("references"), limit = 12),
+                    timeline = timeline.takeIf { it.isNotEmpty() } ?: current.timeline,
+                    corePoints = corePoints.takeIf { it.isNotEmpty() } ?: current.corePoints,
+                    references = mergeReadingLinks(current.references, references, limit = 12),
                 )
                 if (!next.hasNarrativeContent()) return@update current
                 markRequiredWrite()
@@ -241,10 +277,25 @@ class DeepReadSectionWriterTools(
                     .withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.READY)
                     .withSectionQuality(DeepReadGenerationStage.NARRATIVE, DeepReadSectionQuality.STANDARD)
             }
+            val feedback = WriterFeedback(
+                accepted = mapOf(
+                    "timeline" to timeline.size,
+                    "core_points" to corePoints.size,
+                    "references" to references.size,
+                ),
+                dropped = mapOf(
+                    "timeline" to (rawTimelineCount - timeline.size).coerceAtLeast(0),
+                    "core_points" to (rawCorePointCount - corePoints.size).coerceAtLeast(0),
+                ).filterValues { it > 0 },
+                dropReasons = buildList {
+                    if (rawTimelineCount > timeline.size) add("timeline dropped: missing event or truncated limit=8")
+                    if (rawCorePointCount > corePoints.size) add("core_points dropped: missing point or truncated limit=8")
+                },
+            )
             if (output.statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.READY) {
-                ok("narrative", output)
+                ok("narrative", output, feedback)
             } else {
-                missing("narrative", "timeline or core_points")
+                missing("narrative", "timeline or core_points", feedback)
             }
         },
     )
@@ -380,7 +431,7 @@ class DeepReadSectionWriterTools(
 
     private fun diagramTool() = Tool(
         name = "deep_read_write_diagram",
-        description = "Internal Deep Read diagram writer. Submit only a compact structured diagram spec; raw SVG/HTML/JS/external resources are forbidden. Use 3-6 short nodes and keep flow/causal diagrams to the main chain.",
+        description = "Internal Deep Read diagram writer. Submit only a compact structured diagram spec; raw SVG/HTML/JS/external resources are forbidden. Use 3-6 short nodes; flow/causal diagrams may keep a few key cross-node relations but must avoid dense webs.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -398,12 +449,37 @@ class DeepReadSectionWriterTools(
         execute = { input ->
             val obj = input.objectOrEmpty()
             val diagram = obj.diagram()
+            val rawNodeCount = obj.objectList("nodes").size
+            val rawEdgeCount = obj.objectList("edges").size
             val output = update { current ->
                 if (diagram == null) return@update current
                 markVisibleWrite()
                 current.copy(diagram = diagram)
             }
-            if (diagram != null) ok("diagram", output) else missing("diagram", "type, title, nodes")
+            val feedback = WriterFeedback(
+                accepted = mapOf(
+                    "nodes" to diagram?.nodes.orEmpty().size,
+                    "edges" to diagram?.edges.orEmpty().size,
+                ),
+                dropped = mapOf(
+                    "nodes" to (rawNodeCount - diagram?.nodes.orEmpty().size).coerceAtLeast(0),
+                    "edges" to (rawEdgeCount - diagram?.edges.orEmpty().size).coerceAtLeast(0),
+                ).filterValues { it > 0 },
+                dropReasons = buildList {
+                    if (diagram == null) add(obj.diagramDropReason())
+                    if (rawNodeCount > diagram?.nodes.orEmpty().size) {
+                        add("nodes dropped: missing id/label, duplicate id, or truncated limit=$MAX_DIAGRAM_NODES")
+                    }
+                    if (rawEdgeCount > diagram?.edges.orEmpty().size) {
+                        add("edges dropped: unknown node, self edge, duplicate edge, or truncated limit")
+                    }
+                }.filter { it.isNotBlank() },
+            )
+            if (diagram != null) {
+                ok("diagram", output, feedback)
+            } else {
+                missing("diagram", obj.diagramDropReason(), feedback)
+            }
         },
     )
 
@@ -587,27 +663,55 @@ class DeepReadSectionWriterTools(
         next
     }
 
-    private fun ok(section: String, output: DeepReadOutput): List<UIMessagePart> =
+    private fun ok(
+        section: String,
+        output: DeepReadOutput,
+        feedback: WriterFeedback = WriterFeedback(),
+    ): List<UIMessagePart> =
         listOf(
             UIMessagePart.Text(
                 buildJsonObject {
                     put("status", "ok")
                     put("section", section)
                     put("generation_complete", output.isComplete())
+                    appendWriterFeedback(feedback)
                 }.toString()
             )
         )
 
-    private fun missing(section: String, required: String): List<UIMessagePart> =
+    private fun missing(
+        section: String,
+        required: String,
+        feedback: WriterFeedback = WriterFeedback(),
+    ): List<UIMessagePart> =
         listOf(
             UIMessagePart.Text(
                 buildJsonObject {
                     put("status", "missing_required_content")
                     put("section", section)
                     put("required", required)
+                    appendWriterFeedback(feedback)
                 }.toString()
             )
         )
+}
+
+private fun kotlinx.serialization.json.JsonObjectBuilder.appendWriterFeedback(feedback: WriterFeedback) {
+    if (feedback.accepted.isNotEmpty()) {
+        put("accepted", buildJsonObject {
+            feedback.accepted.forEach { (key, value) -> put(key, value) }
+        })
+    }
+    if (feedback.dropped.isNotEmpty()) {
+        put("dropped", buildJsonObject {
+            feedback.dropped.forEach { (key, value) -> put(key, value) }
+        })
+    }
+    if (feedback.dropReasons.isNotEmpty()) {
+        put("drop_reasons", buildJsonArray {
+            feedback.dropReasons.forEach { add(JsonPrimitive(it)) }
+        })
+    }
 }
 
 private fun stringProp(description: String) = buildJsonObject {
@@ -871,22 +975,36 @@ private fun JsonObject.diagram(): DeepReadDiagram? {
     )
 }
 
+private fun JsonObject.diagramDropReason(): String {
+    val type = string("type")?.lowercase()
+    if (type !in setOf("causal_chain", "process_flow", "stakeholder_map", "system_structure", "comparison_matrix")) {
+        return "invalid type"
+    }
+    if (string("title")?.cleanText(DIAGRAM_TITLE_MAX_CHARS).isNullOrBlank()) {
+        return "title missing"
+    }
+    val acceptedNodes = objectList("nodes").mapNotNull { obj ->
+        val id = obj.string("id")?.cleanText(32) ?: return@mapNotNull null
+        val label = obj.string("label")?.cleanText(DIAGRAM_NODE_LABEL_MAX_CHARS) ?: return@mapNotNull null
+        id to label
+    }.distinctBy { it.first }.take(MAX_DIAGRAM_NODES)
+    if (acceptedNodes.size < 2) return "nodes < 2"
+    return "type, title, nodes"
+}
+
 private fun List<DeepReadDiagramEdge>.normalizedDiagramEdges(
     type: String,
     nodeIds: List<String>,
 ): List<DeepReadDiagramEdge> {
-    val nodeIndex = nodeIds.withIndex().associate { it.value to it.index }
     val unique = distinctBy { "${it.from}->${it.to}" }
-    if (type == "process_flow" || type == "causal_chain") {
-        return unique
-            .filter { edge ->
-                val fromIndex = nodeIndex[edge.from] ?: return@filter false
-                val toIndex = nodeIndex[edge.to] ?: return@filter false
-                toIndex - fromIndex == 1
-            }
-            .take(MAX_LINEAR_DIAGRAM_EDGES)
+    val limit = if (type == "process_flow" || type == "causal_chain") {
+        MAX_LINEAR_DIAGRAM_EDGES
+    } else {
+        MAX_RELATION_DIAGRAM_EDGES
     }
-    return unique.take(MAX_RELATION_DIAGRAM_EDGES)
+    return unique
+        .filter { it.from in nodeIds && it.to in nodeIds && it.from != it.to }
+        .take(limit)
 }
 
 private fun JsonObject.verificationGate(
@@ -919,28 +1037,42 @@ private fun JsonObject.verificationGate(
             .mapNotNull { runCatching { it.jsonPrimitive.contentOrNull?.trim() }.getOrNull() }
             .filter { it.startsWith("http://") || it.startsWith("https://") }
         if (text.length < 8 || status !in setOf("verified", "uncertain", "refuted") || note.length < 4) {
+            val field = when {
+                text.length < 8 -> "claim"
+                status !in setOf("verified", "uncertain", "refuted") -> "status"
+                else -> "note"
+            }
             return VerificationGate(
                 false,
-                "checked_claims[$index] must include claim, status, and note",
+                "checked_claims[$index].$field missing or invalid",
             )
         } else if (evidenceUrls.isNotEmpty() && evidenceExcerpt.length < 8) {
-            return VerificationGate(false, "evidence-backed claims must include evidence_excerpt")
+            return VerificationGate(
+                false,
+                "checked_claims[$index].evidence_excerpt missing or too short for ${evidenceUrls.first().shortEvidenceUrl()}",
+            )
         } else {
             val unknownEvidence = evidenceUrls.firstOrNull { !isEvidenceUrlAllowed(it) }
             if (unknownEvidence != null) {
                 return VerificationGate(
                     false,
-                    "evidence_urls must come from pre-fetched or actually visited sources: $unknownEvidence",
+                    "checked_claims[$index].evidence_urls contains unvisited URL: ${unknownEvidence.shortEvidenceUrl()}",
                 )
             }
             if (evidenceUrls.isNotEmpty() && evidenceUrls.none { evidenceContains(it, evidenceExcerpt) }) {
-                return VerificationGate(false, "evidence_excerpt must appear in at least one evidence URL")
+                return VerificationGate(
+                    false,
+                    "checked_claims[$index].evidence_excerpt not found in evidence_urls; excerpt=${evidenceExcerpt.shortEvidenceExcerpt()}",
+                )
             }
             if (visibleExcerpt.length < 8) {
-                return VerificationGate(false, "checked_claims[$index] must include visible_excerpt from the draft")
+                return VerificationGate(false, "checked_claims[$index].visible_excerpt missing or too short")
             }
             if (!visibleText.containsLoose(visibleExcerpt)) {
-                return VerificationGate(false, "visible_excerpt must appear in the current draft")
+                return VerificationGate(
+                    false,
+                    "checked_claims[$index].visible_excerpt not found in current draft: ${visibleExcerpt.shortEvidenceExcerpt()}",
+                )
             }
             claims += VerifiedClaimGate(status = status, evidenceUrls = evidenceUrls)
         }
@@ -962,6 +1094,12 @@ private data class VerifiedClaimGate(
     val status: String,
     val evidenceUrls: List<String>,
 )
+
+private fun String.shortEvidenceUrl(): String =
+    safeTake(120)
+
+private fun String.shortEvidenceExcerpt(): String =
+    replace(Regex("\\s+"), " ").trim().safeTake(120)
 
 private fun DeepReadOutput.verificationVisibleText(): String = buildString {
     appendLine(summary)
@@ -1176,7 +1314,7 @@ private fun DeepReadImageCandidate.selectionReason(topicTitle: String): String =
     }
 
 private fun DeepReadOutput.hasOverviewContent(): Boolean =
-    summary.trim().length >= 40
+    summary.trim().length >= OVERVIEW_SUMMARY_MIN_CHARS
 
 private fun DeepReadOutput.hasNarrativeContent(): Boolean =
     timeline.orEmpty().any { it.event.trim().length >= 20 } ||

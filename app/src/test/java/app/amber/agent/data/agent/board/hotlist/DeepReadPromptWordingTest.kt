@@ -16,6 +16,7 @@ class DeepReadPromptWordingTest {
         val source = listOf(
             "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadAgentRunManager.kt",
             "feature/board/impl/src/main/kotlin/app/amber/feature/board/hotlist/deepread/DeepReadHiddenAssistantFactory.kt",
+            "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadSectionWriterTools.kt",
         ).joinToString("\n") { path -> Files.readString(repoFile(path)) }
 
         assertFalse(source.contains("底层链路可能约"))
@@ -23,6 +24,18 @@ class DeepReadPromptWordingTest {
         assertFalse(source.contains("PROVIDER_REQUEST_SOFT_TIMEOUT_MS"))
         assertTrue(source.contains("FIRST_WRITER_TARGET_WINDOW_MS"))
         assertTrue(source.contains("PLANNING_COLLECT_RUN_TIMEOUT_MS = 45_000L"))
+    }
+
+    @Test
+    fun diagramPromptAllowsSparseCrossNodeRelations() {
+        val source = listOf(
+            "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadAgentRunManager.kt",
+            "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadSectionWriterTools.kt",
+        ).joinToString("\n") { path -> Files.readString(repoFile(path)) }
+
+        assertTrue(source.contains("可保留少量关键跨节点关系"))
+        assertFalse(source.contains("只允许相邻边"))
+        assertFalse(source.contains("keep flow/causal diagrams to the main chain"))
     }
 
     @Test

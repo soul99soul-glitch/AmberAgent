@@ -10,6 +10,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.board.hotlist.deepread.CorePoint
 import app.amber.feature.board.hotlist.deepread.DeepReadImageCandidate
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
@@ -354,18 +355,24 @@ class DeepReadRepositoryTest {
         val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
         val tools = writer.tools().associateBy { it.name }
 
+        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
+        })
         tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
             put("overall", "passed")
             put("corrections_applied", false)
             put("checked_claims", buildJsonArray {
                 add(buildJsonObject {
                     put("claim", "一个有来源支撑的核心声明")
+                    put("visible_excerpt", "这是经过来源核查后的概览正文")
                     put("status", "verified")
                     put("note", "来源支撑")
+                    put("evidence_excerpt", "来源支撑并可交叉核查")
                     put("evidence_urls", buildJsonArray { add("https://example.com/a") })
                 })
                 add(buildJsonObject {
                     put("claim", "一个没有来源 URL 的核心声明")
+                    put("visible_excerpt", "为什么值得继续阅读")
                     put("status", "verified")
                     put("note", "没有证据 URL")
                     put("evidence_urls", buildJsonArray { })
@@ -375,6 +382,7 @@ class DeepReadRepositoryTest {
 
         assertEquals(0, writer.verificationCount)
         assertTrue(!writer.hasFreshVerification)
+        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("at least two evidence-backed claims"))
     }
 
     @Test
@@ -508,6 +516,8 @@ class DeepReadRepositoryTest {
 
         assertEquals(0, writer.verificationCount)
         assertTrue(!writer.hasFreshVerification)
+        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("checked_claims[1].evidence_urls"))
+        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("evil.example.com"))
     }
 
     @Test
@@ -550,6 +560,8 @@ class DeepReadRepositoryTest {
 
         assertEquals(0, writer.verificationCount)
         assertTrue(!writer.hasFreshVerification)
+        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("checked_claims[0].evidence_excerpt"))
+        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("来源正文里并不存在这段"))
     }
 
     @Test
@@ -647,6 +659,62 @@ class DeepReadRepositoryTest {
     }
 
     @Test
+    fun overviewToolAcceptsTwentyFourCharsAndReportsShortSummary() = runTest {
+        val shortRepo = HotListRepository(FakeHotListDao(), json)
+        val shortWriter = DeepReadSectionWriterTools(shortRepo, "topic-short", "话题")
+        val shortTools = shortWriter.tools().associateBy { it.name }
+
+        val shortResult = shortTools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "abcdefghijklmnopqrstuvw")
+        }).singleText()
+
+        assertTrue(shortResult.contains("\"status\":\"missing_required_content\""))
+        assertTrue(shortResult.contains("summary too short: 23/24"))
+        assertEquals(
+            DeepReadSectionStatus.PENDING,
+            shortRepo.getFreshDeepRead("topic-short", title = "话题")?.statusOf(DeepReadGenerationStage.OVERVIEW),
+        )
+
+        val readyRepo = HotListRepository(FakeHotListDao(), json)
+        val readyWriter = DeepReadSectionWriterTools(readyRepo, "topic-ready", "话题")
+        val readyTools = readyWriter.tools().associateBy { it.name }
+
+        val readyResult = readyTools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "abcdefghijklmnopqrstuvwx")
+        }).singleText()
+
+        assertTrue(readyResult.contains("\"status\":\"ok\""))
+        assertTrue(readyResult.contains("\"summary_chars\":24"))
+        assertEquals(
+            DeepReadSectionStatus.READY,
+            readyRepo.getFreshDeepRead("topic-ready", title = "话题")?.statusOf(DeepReadGenerationStage.OVERVIEW),
+        )
+    }
+
+    @Test
+    fun narrativeToolReportsAcceptedDroppedAndDropReasons() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val tools = writer.tools().associateBy { it.name }
+
+        val result = tools.getValue("deep_read_write_narrative").execute(buildJsonObject {
+            put("timeline", buildJsonArray {
+                add(buildJsonObject {
+                    put("date", "2026-05-21")
+                    put("event", "事件进入公开讨论阶段，多个来源给出了可交叉核查的时间线。")
+                })
+                add(buildJsonObject {
+                    put("date", "2026-05-22")
+                })
+            })
+        }).singleText()
+
+        assertTrue(result.contains("\"accepted\":{\"timeline\":1"))
+        assertTrue(result.contains("\"dropped\":{\"timeline\":1"))
+        assertTrue(result.contains("timeline dropped"))
+    }
+
+    @Test
     fun diagramToolDoesNotMarkGenerationComplete() = runTest {
         val repo = HotListRepository(FakeHotListDao(), json)
         val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
@@ -717,7 +785,7 @@ class DeepReadRepositoryTest {
         val diagram = repo.getFreshDeepRead("topic", title = "话题")?.diagram
         assertEquals(6, diagram?.nodes?.size)
         assertTrue(diagram?.nodes.orEmpty().all { it.label.length <= 34 && it.note.orEmpty().length <= 96 })
-        assertEquals(listOf("n1->n2", "n2->n3", "n3->n4", "n4->n5", "n5->n6"), diagram?.edges?.map { "${it.from}->${it.to}" })
+        assertEquals(listOf("n1->n5", "n1->n2", "n2->n3", "n3->n4", "n4->n5"), diagram?.edges?.map { "${it.from}->${it.to}" })
         assertTrue(diagram?.edges.orEmpty().all { it.label.orEmpty().length <= 42 })
     }
 
@@ -838,6 +906,9 @@ class DeepReadRepositoryTest {
             confidence = confidence,
             score = score,
         )
+
+    private fun List<UIMessagePart>.singleText(): String =
+        filterIsInstance<UIMessagePart.Text>().single().text
 }
 
 private class FakeHotListDao : HotListDAO {
