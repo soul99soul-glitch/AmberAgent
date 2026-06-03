@@ -29,6 +29,26 @@ class MiniAppOutputParserTest {
     }
 
     @Test
+    fun parsesMiniAppJsonSurroundedByAssistantText() {
+        val output = parser.parseOrNull(
+            """
+            我先把最终版本整理成 JSON：
+            {
+              "title": "冒险卡片",
+              "description": "真心话大冒险抽题",
+              "icon": "卡",
+              "category": "game",
+              "permissions": ["toast"],
+              "html": "<!DOCTYPE html><html><body><button onclick=\"Amber.toast('go')\">抽题</button></body></html>"
+            }
+            """.trimIndent()
+        )
+
+        assertEquals("冒险卡片", output?.title)
+        assertEquals(listOf("toast"), output?.permissions)
+    }
+
+    @Test
     fun acceptsV2Permissions() {
         val output = parser.parse(
             """
