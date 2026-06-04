@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.core.infra.AppScope
 import app.amber.feature.task.AgentTaskSnapshot
@@ -49,6 +50,7 @@ class SubAgentManager(
      * finishes so a freshly-opened sheet can display the final text; cleaned up via [LIVE_TEXT_CAP].
      */
     private val liveTextFlows = ConcurrentHashMap<String, MutableStateFlow<String>>()
+    private val livePartsFlows = ConcurrentHashMap<String, MutableStateFlow<List<UIMessagePart>>>()
 
     suspend fun start(
         parentConversationId: Uuid,
@@ -160,13 +162,22 @@ class SubAgentManager(
         // Live text flow for UI subscribers — created BEFORE the runner starts so a sheet opened
         // immediately after subagent_start sees the same flow that will be written to.
         val liveText = MutableStateFlow("")
+        val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
         liveTextFlows[runId] = liveText
+        livePartsFlows[runId] = liveParts
         capLiveTextFlows()
 
         runtimeRun.job = appScope.launch(Dispatchers.IO) {
             val result = try {
                 withTimeout(definition.timeoutMs) {
-                    runner.run(settings, effectiveDefinition, effectiveTask, scopedSubAgentTools(allowedTools), liveText)
+                    runner.run(
+                        settings,
+                        effectiveDefinition,
+                        effectiveTask,
+                        scopedSubAgentTools(allowedTools),
+                        liveText,
+                        liveParts,
+                    )
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 return@launch
@@ -240,6 +251,8 @@ class SubAgentManager(
      */
     fun liveTextFlow(runId: String): StateFlow<String>? = liveTextFlows[runId]?.asStateFlow()
 
+    fun livePartsFlow(runId: String): StateFlow<List<UIMessagePart>>? = livePartsFlows[runId]?.asStateFlow()
+
     /** Snapshot of a known run, or null if it was never started or was already evicted. */
     fun snapshot(runId: String): SubAgentRun? = runs[runId]?.snapshot
 
@@ -252,7 +265,7 @@ class SubAgentManager(
         settingsStore.settingsFlow.value.agentRuntime.subAgent.mode
 
     /**
-     * Keep [liveTextFlows] bounded. Iterate the flow keys (not [runs].values) so orphaned
+     * Keep live UI flows bounded. Iterate the flow keys (not [runs].values) so orphaned
      * entries — flows whose run snapshot was already evicted elsewhere — are also reclaimed.
      * Active runs (status.running) are skipped: the runner is still writing to them.
      *
@@ -261,18 +274,21 @@ class SubAgentManager(
      * eviction of a still-active run. Acceptable.
      */
     private fun capLiveTextFlows() {
-        if (liveTextFlows.size <= LIVE_TEXT_CAP) return
+        if (liveTextFlows.size <= LIVE_TEXT_CAP && livePartsFlows.size <= LIVE_TEXT_CAP) return
         // Build (runId, lastUpdate) for every live-text key and pick the oldest non-running ones.
-        val candidates = liveTextFlows.keys.mapNotNull { id ->
+        val candidates = (liveTextFlows.keys + livePartsFlows.keys).mapNotNull { id ->
             val snap = runs[id]?.snapshot
             when {
                 snap == null -> id to 0L  // orphan: definitely evictable, sort earliest
                 snap.status.running -> null  // active: keep
                 else -> id to snap.updatedAtMs
             }
-        }.sortedBy { it.second }
-        val toDrop = liveTextFlows.size - LIVE_TEXT_CAP
-        candidates.take(toDrop).forEach { (id, _) -> liveTextFlows.remove(id) }
+        }.distinctBy { it.first }.sortedBy { it.second }
+        val toDrop = maxOf(liveTextFlows.size, livePartsFlows.size) - LIVE_TEXT_CAP
+        candidates.take(toDrop).forEach { (id, _) ->
+            liveTextFlows.remove(id)
+            livePartsFlows.remove(id)
+        }
     }
 
     fun runtimeSummary(): JsonObject {

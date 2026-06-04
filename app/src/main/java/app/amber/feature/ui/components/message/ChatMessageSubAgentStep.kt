@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -235,7 +236,13 @@ private fun SubAgentRunSheet(
     // Live flow may be null when the manager has no record of this run (process restart, eviction).
     // In that case create an empty fallback flow so collectAsState works.
     val liveFlow = remember(step.runId) { manager.liveTextFlow(step.runId) ?: MutableStateFlow("") }
+    val livePartsFlow = remember(step.runId) {
+        manager.livePartsFlow(step.runId) ?: MutableStateFlow<List<UIMessagePart>>(emptyList())
+    }
     val liveText by liveFlow.collectAsState()
+    val liveParts by livePartsFlow.collectAsState()
+    val searchPresentation = rememberSearchPresentation(liveParts)
+    val searchSources = searchPresentation.sources.takeIf { it.isNotEmpty }
     val snapshotRun = manager.snapshot(step.runId)
     val snapshotText = snapshotRun?.displayText.orEmpty()
     var transcriptText by remember(step.runId) { mutableStateOf("") }
@@ -351,6 +358,11 @@ private fun SubAgentRunSheet(
 
             HorizontalDivider(color = workspace.hairline)
 
+            SearchImageGallery(
+                images = searchPresentation.images,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
             // Live / final text body — render as Markdown so headings, bold, lists, code,
             // hashtags-as-text etc. all show properly. Falls back to plain "waiting" text when
             // nothing has streamed in yet.
@@ -363,12 +375,17 @@ private fun SubAgentRunSheet(
                 )
             } else {
                 SelectionContainer {
-                    MarkdownBlock(
-                        content = displayText,
-                        modifier = Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
-                        streaming = isRunning,
-                    )
+                    CompositionLocalProvider(
+                        LocalSearchSources provides searchSources,
+                        LocalSearchImageUrls provides searchPresentation.imageUrls,
+                    ) {
+                        MarkdownBlock(
+                            content = displayText,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
+                            streaming = isRunning,
+                        )
+                    }
                 }
             }
         }

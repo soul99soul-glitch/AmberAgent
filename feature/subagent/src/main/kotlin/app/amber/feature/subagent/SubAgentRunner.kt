@@ -19,6 +19,8 @@ import app.amber.core.model.Assistant
 interface SubAgentRunner {
     /**
      * Run a subagent task. [liveText] receives the running assistant text as it streams in;
+     * [liveParts] receives the latest message parts so UI can derive render-time presentation
+     * from tool outputs without rewriting assistant text.
      * UI code can subscribe via [SubAgentManager.liveTextFlow] to render real-time output.
      * Pass a no-op flow if you don't need live updates.
      */
@@ -28,6 +30,7 @@ interface SubAgentRunner {
         task: SubAgentTaskSpec,
         tools: List<Tool>,
         liveText: MutableStateFlow<String>,
+        liveParts: MutableStateFlow<List<UIMessagePart>>,
     ): SubAgentResult
 }
 
@@ -40,6 +43,7 @@ class GenerationSubAgentRunner(
         task: SubAgentTaskSpec,
         tools: List<Tool>,
         liveText: MutableStateFlow<String>,
+        liveParts: MutableStateFlow<List<UIMessagePart>>,
     ): SubAgentResult {
         val isolatedSettings = settings.toIsolatedSubAgentSettings()
         // Per-role model: explicit override → fallback to current chat model.
@@ -72,6 +76,9 @@ class GenerationSubAgentRunner(
             ).collect { chunk ->
                 if (chunk is GenerationChunk.Messages) {
                     latest = chunk.messages
+                    latest.toLiveParts().also { parts ->
+                        if (parts != liveParts.value) liveParts.value = parts
+                    }
                     // Stream the assistant's accumulated content to subscribers (UI live view).
                     // Include reasoning so the user has something to watch during the (often long)
                     // thinking phase — UIMessage.toText() skips Reasoning parts entirely, which would
@@ -141,6 +148,9 @@ class GenerationSubAgentRunner(
                 ).collect { chunk ->
                     if (chunk is GenerationChunk.Messages) {
                         latest = chunk.messages
+                        latest.toLiveParts().also { parts ->
+                            if (parts != liveParts.value) liveParts.value = parts
+                        }
                     }
                 }
             } catch (error: CancellationException) {
@@ -156,6 +166,9 @@ class GenerationSubAgentRunner(
         // human-facing answer. A report-only retry is intentionally not allowed to replace the
         // user's visible transcript with internal reminder chatter.
         if (finalDisplayText.isNotBlank()) liveText.value = finalDisplayText
+        latest.toLiveParts().also { parts ->
+            if (parts != liveParts.value) liveParts.value = parts
+        }
         val result = reportCapture.resultOrFallback(finalDisplayText)
         val reportError = generationError ?: reportRetryError
         return if (!reportCapture.hasReport && reportError != null && finalDisplayText.isNotBlank()) {
@@ -198,6 +211,9 @@ class GenerationSubAgentRunner(
             .filter { it.isNotBlank() }
             .distinct()
             .joinToString("\n\n")
+
+    private fun List<UIMessage>.toLiveParts(): List<UIMessagePart> =
+        flatMap { it.parts }
 
     private fun Throwable.isRecoverableReportToolArgumentFailure(definition: SubAgentDefinition): Boolean {
         if (definition.toolAllowlist.isNotEmpty()) return false

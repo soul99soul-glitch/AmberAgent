@@ -1,9 +1,11 @@
 package app.amber.feature.subagent
 
+import app.amber.ai.core.MessageRole
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.Generator
 import app.amber.core.ai.transformers.InputMessageTransformer
@@ -35,6 +37,7 @@ class SubAgentRunnerTest {
             )
         )
         val liveText = MutableStateFlow("")
+        val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
 
         val result = runner.run(
             settings = settings(),
@@ -42,6 +45,7 @@ class SubAgentRunnerTest {
             task = task(),
             tools = emptyList(),
             liveText = liveText,
+            liveParts = liveParts,
         )
 
         assertEquals(SubAgentRunStatus.COMPLETED, result.status)
@@ -60,6 +64,7 @@ class SubAgentRunnerTest {
             task = task(),
             tools = emptyList(),
             liveText = MutableStateFlow(""),
+            liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList()),
         )
 
         assertEquals(SubAgentRunStatus.FAILED, result.status)
@@ -82,9 +87,59 @@ class SubAgentRunnerTest {
             task = task(),
             tools = emptyList(),
             liveText = MutableStateFlow(""),
+            liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList()),
         )
 
         assertEquals(SubAgentRunStatus.FAILED, result.status)
+    }
+
+    @Test
+    fun streamsSearchToolPartsForRenderTimePresentation() = runBlocking {
+        val searchTool = UIMessagePart.Tool(
+            toolCallId = "call-search",
+            toolName = "search_web",
+            input = """{"query":"Will Smith tour"}""",
+            output = listOf(
+                UIMessagePart.Text(
+                    """
+                    {
+                      "items": [
+                        {
+                          "title": "Will Smith tour news",
+                          "url": "https://example.com/will-smith-tour",
+                          "source": "Example",
+                          "images": ["https://img.example/will-smith.jpg"]
+                        }
+                      ],
+                      "total_images": 1
+                    }
+                    """.trimIndent()
+                )
+            ),
+        )
+        val runner = GenerationSubAgentRunner(
+            FakeGenerator(
+                assistantMessage = UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(searchTool, UIMessagePart.Text(visibleAnswer)),
+                )
+            )
+        )
+        val liveText = MutableStateFlow("")
+        val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
+
+        val result = runner.run(
+            settings = settings(),
+            definition = definition(toolAllowlist = emptySet()),
+            task = task(),
+            tools = emptyList(),
+            liveText = liveText,
+            liveParts = liveParts,
+        )
+
+        assertEquals(SubAgentRunStatus.COMPLETED, result.status)
+        assertEquals(visibleAnswer, liveText.value)
+        assertTrue(liveParts.value.any { it is UIMessagePart.Tool && it.toolName == "search_web" })
     }
 
     private fun settings(): Settings {
@@ -126,7 +181,8 @@ class SubAgentRunnerTest {
     )
 
     private inner class FakeGenerator(
-        private val error: Throwable,
+        private val error: Throwable? = null,
+        private val assistantMessage: UIMessage = UIMessage.assistant(visibleAnswer),
     ) : Generator {
         override fun generateText(
             settings: Settings,
@@ -146,8 +202,8 @@ class SubAgentRunnerTest {
             conversation: Conversation?,
             consumeSteerMessages: suspend () -> List<UIMessage>,
         ): Flow<GenerationChunk> = flow {
-            emit(GenerationChunk.Messages(messages + UIMessage.assistant(visibleAnswer)))
-            throw error
+            emit(GenerationChunk.Messages(messages + assistantMessage))
+            error?.let { throw it }
         }
     }
 }
