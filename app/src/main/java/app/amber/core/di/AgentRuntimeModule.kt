@@ -94,7 +94,11 @@ val agentRuntimeModule = module {
 
     single<app.amber.feature.chat.impl.ChatSessionResolver> { get<ChatSessionResolverImpl>() }
 
-    single { GenerationSubAgentRunner(get()) }
+    single {
+        GenerationSubAgentRunner(
+            generationHandler = get(),
+        )
+    }
     single<app.amber.feature.subagent.SubAgentRunner> { get<GenerationSubAgentRunner>() }
 
     single {

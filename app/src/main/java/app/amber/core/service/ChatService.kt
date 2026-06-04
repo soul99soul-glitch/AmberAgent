@@ -82,7 +82,6 @@ import app.amber.core.ai.transformers.PlaceholderTransformer
 import app.amber.core.ai.transformers.PromptInjectionTransformer
 import app.amber.core.ai.transformers.RegexOutputTransformer
 import app.amber.core.ai.transformers.TemplateTransformer
-import app.amber.core.ai.transformers.SearchImageInjectorTransformer
 import app.amber.core.ai.transformers.ThinkTagTransformer
 import app.amber.core.ai.transformers.TimeReminderTransformer
 import app.amber.feature.runtime.AgentLiveStatusNotifier
@@ -181,7 +180,6 @@ private val outputTransformers by lazy {
     listOf(
         ThinkTagTransformer,
         Base64ImageToLocalFileTransformer,
-        SearchImageInjectorTransformer,
         MiniAppOutputTransformer,
         RegexOutputTransformer,
     )

@@ -111,13 +111,12 @@ internal object SearchAggregator {
             val allImages = items.flatMap { it.images }.distinct().take(5)
             put("total_images", allImages.size)
             if (allImages.isNotEmpty()) {
-                put("image_instruction", "搜索结果包含 ${allImages.size} 张相关图片。" +
-                    "请在回复中使用这些图片：1) 在回复顶部用一行并排展示缩略图 " +
-                    "![img1](url1) ![img2](url2)；2) 在正文合适的位置插入图片 " +
-                    "![简短描述](url)，放在相关段落之后。最多使用 5 张图片。")
-                put("available_images", buildJsonArray {
-                    allImages.forEach { add(JsonPrimitive(it)) }
-                })
+                put(
+                    "image_instruction",
+                    "搜索结果包含 ${allImages.size} 张相关图片。图片由 AmberAgent 客户端单独处理；" +
+                        "请不要在回复正文中使用 ![](url) Markdown 图片语法，也不要输出任何图片渲染代码块。" +
+                        "只需要写好文字内容，并优先给用到的来源附上 [站点名](来源URL) 链接。",
+                )
             }
             put("sources", buildJsonArray {
                 calls.forEach { source ->

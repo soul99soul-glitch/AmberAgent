@@ -75,6 +75,8 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
+import app.amber.feature.ui.components.message.LocalSearchSources
+import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.table.DataTable
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -97,11 +99,12 @@ private val BLOCK_LATEX_REGEX = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MAT
 private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
 
 private fun preProcess(content: String): String {
+    val displayContent = stripSearchImageFencesForDisplay(content)
     val codeBlocks = mutableListOf<IntRange>()
-    CODE_BLOCK_REGEX.findAll(content).forEach { codeBlocks.add(it.range) }
+    CODE_BLOCK_REGEX.findAll(displayContent).forEach { codeBlocks.add(it.range) }
     fun isInCodeBlock(pos: Int) = codeBlocks.any { pos in it }
 
-    var result = INLINE_LATEX_REGEX.replace(content) { m ->
+    var result = INLINE_LATEX_REGEX.replace(displayContent) { m ->
         if (isInCodeBlock(m.range.first)) m.value else "$" + m.groupValues[1] + "$"
     }
     result = BLOCK_LATEX_REGEX.replace(result) { m ->
@@ -279,8 +282,8 @@ private fun HtmlBlockElement(
                         contentDescription = alt.takeIf { it.isNotEmpty() },
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .widthIn(min = 120.dp)
-                            .heightIn(min = 120.dp),
+                            .widthIn(min = 120.dp, max = 360.dp)
+                            .heightIn(min = 120.dp, max = 420.dp),
                     )
                 }
             }
@@ -370,6 +373,7 @@ private fun HtmlParagraphContent(
     val onClickUrl: (String) -> Unit = remember(context) {
         { url -> context.openUrl(url) }
     }
+    val searchSources = LocalSearchSources.current
 
     val (annotatedString, inlineContents) = remember(
         element.outerHtml(),
@@ -379,6 +383,7 @@ private fun HtmlParagraphContent(
         textStyle,
         onClickCitation,
         onClickUrl,
+        searchSources,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
@@ -392,6 +397,7 @@ private fun HtmlParagraphContent(
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
+                    searchSources = searchSources,
                 )
             }
         }
@@ -568,19 +574,6 @@ private fun HtmlCodeBlock(element: Element) {
         ?: "plaintext"
     val code = codeElement?.wholeText()?.trimEnd('\n') ?: element.wholeText().trimEnd('\n')
 
-    // `search-images` is a virtual code language — it doesn't represent source code,
-    // it's a marker that SearchImageInjectorTransformer wraps around image URL groups
-    // so the renderer can apply uniform sizing rules (multi-image = horizontal strip,
-    // single-image = full width with don't-upscale fallback). Anything else falls
-    // through to the syntax-highlighted code block.
-    if (language == "search-images") {
-        SearchImageBlock(
-            urls = code.split('\n'),
-            modifier = Modifier.padding(bottom = 4.dp),
-        )
-        return
-    }
-
     HighlightCodeBlock(
         code = code,
         language = language,
@@ -751,6 +744,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
     val onClickUrl: (String) -> Unit = remember(context) {
         { url -> context.openUrl(url) }
     }
+    val searchSources = LocalSearchSources.current
 
     val key = remember(nodes) { nodes.joinToString("") { if (it is Element) it.outerHtml() else it.toString() } }
     val (annotatedString, inlineContents) = remember(
@@ -761,6 +755,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
         textStyle,
         onClickCitation,
         onClickUrl,
+        searchSources,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
@@ -774,6 +769,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
+                    searchSources = searchSources,
                 )
             }
         }
@@ -811,8 +807,8 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                             contentDescription = alt.takeIf { it.isNotEmpty() },
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .widthIn(min = 120.dp)
-                                .heightIn(min = 120.dp),
+                                .widthIn(min = 120.dp, max = 360.dp)
+                                .heightIn(min = 120.dp, max = 420.dp),
                         )
                     }
                 }
@@ -835,6 +831,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                     val onClickUrl: (String) -> Unit = remember(context) {
                         { url -> context.openUrl(url) }
                     }
+                    val searchSources = LocalSearchSources.current
                     val (annotated, inlineContents) = remember(
                         node.outerHtml(),
                         enableLatexRendering,
@@ -843,6 +840,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                         textStyle,
                         onClickCitation,
                         onClickUrl,
+                        searchSources,
                     ) {
                         val contents = mutableMapOf<String, InlineTextContent>()
                         val text = buildAnnotatedString {
@@ -855,6 +853,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                                 enableLatexRendering = enableLatexRendering,
                                 onClickCitation = onClickCitation,
                                 onClickUrl = onClickUrl,
+                                searchSources = searchSources,
                             )
                         }
                         text to contents
@@ -877,6 +876,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
     onClickUrl: (String) -> Unit,
+    searchSources: SearchSourcesRegistry?,
 ) {
     when (node) {
         is TextNode -> append(node.text())
@@ -889,6 +889,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
             onClickUrl = onClickUrl,
+            searchSources = searchSources,
         )
     }
 }
@@ -902,6 +903,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
     onClickUrl: (String) -> Unit,
+    searchSources: SearchSourcesRegistry?,
 ) {
     val cssStyle = element.attr("style").takeIf { it.isNotBlank() }?.let {
         parseInlineSpanStyle(
@@ -921,6 +923,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
             onClickUrl = onClickUrl,
+            searchSources = searchSources,
         )
     }
 
@@ -959,46 +962,33 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
         "a" -> {
             val href = element.attr("href")
             val text = element.text()
+            val searchSource = searchSources?.lookup(href)
             when {
                 text.startsWith("citation,") -> {
                     // Citation link: [citation,domain](id)
                     val domain = text.substringAfter("citation,")
                     val id = href
                     if (id.length == 6) {
-                        inlineContents.putIfAbsent(
-                            "citation:$id",
-                            InlineTextContent(
-                                placeholder = Placeholder(
-                                    width = (domain.length * 7).sp,
-                                    height = 1.em,
-                                    placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
-                                ),
-                                children = {
-                                    Box(
-                                        modifier = Modifier
-                                            .clickable { onClickCitation(id.trim()) }
-                                            .fillMaxSize()
-                                            .clip(CircleShape)
-                                            .background(colorScheme.tertiaryContainer.copy(0.2f)),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            text = domain,
-                                            modifier = Modifier.wrapContentSize(),
-                                            style = TextStyle(
-                                                fontSize = 10.sp,
-                                                lineHeight = 10.sp,
-                                                fontFamily = JetbrainsMono,
-                                                color = colorScheme.onTertiaryContainer,
-                                                fontWeight = FontWeight.Thin,
-                                            ),
-                                        )
-                                    }
-                                },
-                            ),
+                        appendSearchSourcePill(
+                            key = "citation:$id",
+                            label = domain,
+                            inlineContents = inlineContents,
+                            colorScheme = colorScheme,
+                            onClick = { onClickCitation(id.trim()) },
                         )
-                        appendInlineContent("citation:$id")
+                    } else {
+                        append(domain)
                     }
+                }
+
+                searchSource != null -> {
+                    appendSearchSourcePill(
+                        key = "search-source:${searchSource.host}:$href",
+                        label = searchSource.name,
+                        inlineContents = inlineContents,
+                        colorScheme = colorScheme,
+                        onClick = { onClickUrl(href) },
+                    )
                 }
 
                 href.isNotEmpty() -> {

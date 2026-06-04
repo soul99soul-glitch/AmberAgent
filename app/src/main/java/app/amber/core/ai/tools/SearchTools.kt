@@ -54,21 +54,20 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                     - sources[].service, status, result_count, error
 
                     Citations:
-                    - After using results, add `[citation,domain](id)` after the sentence.
-                    - Multiple citations are allowed.
-                    - If no results are cited, omit citations.
+                    - Prefer natural Markdown source links, e.g. `[Reuters](https://www.reuters.com/...)`, after the sentence.
+                    - Multiple source links are allowed.
+                    - Legacy `[citation,domain](id)` citations are still accepted for compatibility.
+                    - If no results are cited, omit source links.
 
                     IMPORTANT — Images:
-                    When the search result JSON contains `available_images` and `image_instruction`, you MUST embed those images in your response using Markdown image syntax.
-                    Follow the `image_instruction` field exactly. The typical format is:
-                    1. A thumbnail row at the top: ![](url1) ![](url2) on one line
-                    2. Full images inline after relevant paragraphs: ![brief description](url)
-                    Do NOT ignore available images. Do NOT describe images in text instead of embedding them.
-                    Maximum 5 images. If no `available_images` field exists, skip images entirely.
+                    Do not embed images with Markdown image syntax like `![](url)`.
+                    Do not write internal image-rendering fences or code blocks.
+                    If items include images, AmberAgent handles the visual rendering separately.
+                    Your job is to write the answer text and attach source links for the sources you used.
 
                     Example:
-                    The capital of France is Paris. [citation,example.com](abc123)
-                    The population is about 2.1 million. [citation,example.com](abc123) [citation,example2.com](def456)
+                    The capital of France is Paris. [example.com](https://example.com/paris)
+                    The population is about 2.1 million. [example.com](https://example.com/paris) [example2.com](https://example2.com/france)
                     """.trimIndent(),
                 parameters = {
                     searchWebParameters()

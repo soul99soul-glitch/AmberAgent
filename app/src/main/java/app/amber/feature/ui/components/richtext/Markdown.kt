@@ -84,6 +84,8 @@ import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import app.amber.agent.BuildConfig
+import app.amber.feature.ui.components.message.LocalSearchSources
+import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.table.DataTable
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -139,6 +141,7 @@ private val TABLE_CELL_MARKDOWN_HINT_REGEX = Regex(
 
 // 预处理markdown内容
 private fun preProcess(content: String): String {
+    val displayContent = stripSearchImageFencesForDisplay(content)
     // TD.Rust.1b: native single-pass scan if available + flag on. Falls back
     // to the original Kotlin path on null return / not loaded / flag off.
     // The native flag is gated by NativePathPrefs.markdownHtml because
@@ -146,13 +149,13 @@ private fun preProcess(content: String): String {
     if (MarkdownNativeSwitch.isHtmlEnabled() &&
         MarkdownPreprocessNative.available
     ) {
-        val nativeResult = MarkdownPreprocessNative.preprocess(content)
+        val nativeResult = MarkdownPreprocessNative.preprocess(displayContent)
         if (nativeResult != null) return nativeResult
     }
 
     // 先找出所有代码块的位置
     val codeBlocks = mutableListOf<IntRange>()
-    CODE_BLOCK_REGEX.findAll(content).forEach { match ->
+    CODE_BLOCK_REGEX.findAll(displayContent).forEach { match ->
         codeBlocks.add(match.range)
     }
 
@@ -162,7 +165,7 @@ private fun preProcess(content: String): String {
     }
 
     // 替换行内公式 \( ... \) 到 $ ... $，但跳过代码块内的内容
-    var result = INLINE_LATEX_REGEX.replace(content) { matchResult ->
+    var result = INLINE_LATEX_REGEX.replace(displayContent) { matchResult ->
         if (isInCodeBlock(matchResult.range.first)) {
             matchResult.value // 保持原样
         } else {
@@ -1322,8 +1325,8 @@ private fun MarkdownNode(
                     contentDescription = altText,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .widthIn(min = 120.dp)
-                        .heightIn(min = 120.dp),
+                        .widthIn(min = 120.dp, max = 360.dp)
+                        .heightIn(min = 120.dp, max = 420.dp),
                 )
             }
         }
@@ -1407,21 +1410,6 @@ private fun MarkdownNode(
                 liveSuffixSourceOffset = liveSuffixSourceOffset,
             )
             val code = (rawCode + liveCodeSuffix).trimIndent()
-
-            // `search-images` is a virtual code language emitted by
-            // SearchImageInjectorTransformer — each line inside the fence is an image
-            // URL. SearchImageBlock applies uniform sizing rules (multi-image strip
-            // / single full-width / failed image collapses to zero height) so the
-            // entire visual stays consistent regardless of which search service
-            // produced the image. Other fence languages fall through to syntax
-            // highlighting unchanged.
-            if (language == "search-images") {
-                SearchImageBlock(
-                    urls = code.split('\n'),
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
-                return
-            }
 
             HighlightCodeBlock(
                 code = code,
@@ -1666,6 +1654,7 @@ private fun Paragraph(
     val onClickUrl: (String) -> Unit = remember(context) {
         { url -> context.openUrl(url) }
     }
+    val searchSources = LocalSearchSources.current
 
     // Streaming-aware text build, split into two layers so per-frame work
     // is bounded by the active reveal window instead of the whole paragraph:
@@ -1706,6 +1695,7 @@ private fun Paragraph(
             colorScheme,
             density,
             textStyle,
+            searchSources,
         ) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
@@ -1722,6 +1712,7 @@ private fun Paragraph(
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
                         sourceOffsetBase = sourceOffsetBase,
+                        searchSources = searchSources,
                     )
                 }
             }
@@ -1911,6 +1902,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
     onClickUrl: (String) -> Unit = {},
     baseColor: Color = Color.Unspecified,
     sourceOffsetBase: Int = 0,
+    searchSources: SearchSourcesRegistry? = null,
 ) {
     when {
         node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
@@ -1967,6 +1959,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
                         sourceOffsetBase = sourceOffsetBase,
+                        searchSources = searchSources,
                     )
                 }
             }
@@ -1987,6 +1980,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
                         sourceOffsetBase = sourceOffsetBase,
+                        searchSources = searchSources,
                     )
                 }
             }
@@ -2007,6 +2001,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
                         sourceOffsetBase = sourceOffsetBase,
+                        searchSources = searchSources,
                     )
                 }
             }
@@ -2017,43 +2012,30 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
             val linkText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content)
                 ?.trim { it == '[' || it == ']' } ?: linkDest
+            val searchSource = searchSources?.lookup(linkDest)
             if (linkText.startsWith("citation,")) {
                 // 如果是引用，则特殊处理
                 val domain = linkText.substringAfter("citation,")
                 val id = linkDest
                 if (id.length == 6) {
-                    inlineContents.putIfAbsent(
-                        "citation:$linkDest", InlineTextContent(
-                            placeholder = Placeholder(
-                                width = (domain.length * 7).sp,
-                                height = 1.em,
-                                placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
-                            ), children = {
-                                Box(
-                                    modifier = Modifier
-                                        .clickable {
-                                            onClickCitation(id.trim())
-                                        }
-                                        .fillMaxSize()
-                                        .clip(CircleShape)
-                                        .background(colorScheme.tertiaryContainer.copy(0.2f)),
-                                    contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = domain,
-                                        modifier = Modifier.wrapContentSize(),
-                                        style = TextStyle(
-                                            fontSize = 10.sp,
-                                            lineHeight = 10.sp,
-                                            fontFamily = JetbrainsMono,
-                                            color = colorScheme.onTertiaryContainer,
-                                            fontWeight = FontWeight.Thin
-                                        ),
-                                    )
-                                }
-                            })
+                    appendSearchSourcePill(
+                        key = "citation:$linkDest",
+                        label = domain,
+                        inlineContents = inlineContents,
+                        colorScheme = colorScheme,
+                        onClick = { onClickCitation(id.trim()) },
                     )
-                    appendInlineContent("citation:$linkDest")
+                } else {
+                    append(domain)
                 }
+            } else if (searchSource != null) {
+                appendSearchSourcePill(
+                    key = "search-source:${searchSource.host}:$linkDest",
+                    label = searchSource.name,
+                    inlineContents = inlineContents,
+                    colorScheme = colorScheme,
+                    onClick = { onClickUrl(linkDest) },
+                )
             } else {
                 withLink(openUrlLinkAnnotation(linkDest, onClickUrl)) {
                     withStyle(
@@ -2141,6 +2123,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     onClickUrl = onClickUrl,
                     baseColor = baseColor,
                     sourceOffsetBase = sourceOffsetBase,
+                    searchSources = searchSources,
                 )
             }
         }

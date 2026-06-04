@@ -16,6 +16,7 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,6 +93,8 @@ fun ChatMessage(
     val navController = LocalNavController.current
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
+    val searchPresentation = rememberSearchPresentation(message.parts)
+    val searchSources = searchPresentation.sources.takeIf { it.isNotEmpty }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -125,26 +128,34 @@ fun ChatMessage(
                 else -> Unit
             }
         }
-        ProvideTextStyle(textStyle) {
-            MessagePartsBlock(
-                assistant = assistant,
-                role = message.role,
-                parts = message.parts,
-                annotations = message.annotations,
-                loading = loading,
-                model = model,
-                onToolApproval = onToolApproval,
-                onToolAnswer = onToolAnswer,
-                onOpenWorkspaceFile = onOpenWorkspaceFile,
-                onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
-                onUserMessageLongClick = if (message.role == MessageRole.USER) {
-                    { showActionsSheet = true }
-                } else null,
-                onGenerativeWidgetAction = onGenerativeWidgetAction,
-                onMiniAppModify = onMiniAppModify,
-                onStreamingVisibleFrame = onStreamingVisibleFrame,
-                deferStreamingParse = deferStreamingParse,
-            )
+        CompositionLocalProvider(LocalSearchSources provides searchSources) {
+            if (message.role == MessageRole.ASSISTANT) {
+                SearchImageGallery(
+                    images = searchPresentation.images,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            ProvideTextStyle(textStyle) {
+                MessagePartsBlock(
+                    assistant = assistant,
+                    role = message.role,
+                    parts = message.parts,
+                    annotations = message.annotations,
+                    loading = loading,
+                    model = model,
+                    onToolApproval = onToolApproval,
+                    onToolAnswer = onToolAnswer,
+                    onOpenWorkspaceFile = onOpenWorkspaceFile,
+                    onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
+                    onUserMessageLongClick = if (message.role == MessageRole.USER) {
+                        { showActionsSheet = true }
+                    } else null,
+                    onGenerativeWidgetAction = onGenerativeWidgetAction,
+                    onMiniAppModify = onMiniAppModify,
+                    onStreamingVisibleFrame = onStreamingVisibleFrame,
+                    deferStreamingParse = deferStreamingParse,
+                )
+            }
         }
 
         if (message.role != MessageRole.USER) {

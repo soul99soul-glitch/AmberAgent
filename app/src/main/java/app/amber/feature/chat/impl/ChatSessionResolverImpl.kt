@@ -11,7 +11,6 @@ import app.amber.core.ai.transformers.OcrTransformer
 import app.amber.core.ai.transformers.PlaceholderTransformer
 import app.amber.core.ai.transformers.PromptInjectionTransformer
 import app.amber.core.ai.transformers.RegexOutputTransformer
-import app.amber.core.ai.transformers.SearchImageInjectorTransformer
 import app.amber.core.ai.transformers.TemplateTransformer
 import app.amber.core.ai.transformers.ThinkTagTransformer
 import app.amber.core.ai.transformers.TimeReminderTransformer
@@ -51,7 +50,6 @@ class ChatSessionResolverImpl(
         val outputTransformers = listOf(
             ThinkTagTransformer,
             Base64ImageToLocalFileTransformer,
-            SearchImageInjectorTransformer,
             MiniAppOutputTransformer,
             RegexOutputTransformer,
         )

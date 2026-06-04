@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -249,6 +250,8 @@ internal fun ChatMessageVirtualItemContent(
 ) {
     val message = node.currentMessage
     val textStyle = rememberChatMessageTextStyle()
+    val searchPresentation = rememberSearchPresentation(message.parts)
+    val searchSources = searchPresentation.sources.takeIf { it.isNotEmpty }
     when (item) {
         ChatMessageVirtualItem.Header -> {
             Column(
@@ -266,6 +269,10 @@ internal fun ChatMessageVirtualItemContent(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+                SearchImageGallery(
+                    images = searchPresentation.images,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 
@@ -320,44 +327,48 @@ internal fun ChatMessageVirtualItemContent(
         }
 
         is ChatMessageVirtualItem.Content -> {
-            ProvideTextStyle(textStyle) {
-                if (item.block.part is UIMessagePart.Text) {
-                    VirtualizedAssistantText(
-                        fullMessageParts = message.parts,
-                        part = item.block.part,
-                        assistant = assistant,
-                        markdownChild = null,
-                        showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
-                        onGenerativeWidgetAction = onGenerativeWidgetAction,
-                    )
-                } else {
-                    MessagePartsBlock(
-                        assistant = assistant,
-                        role = message.role,
-                        parts = listOf(item.block.part),
-                        annotations = emptyList(),
-                        loading = loading,
-                        model = model,
-                        onToolApproval = onToolApproval,
-                        onToolAnswer = onToolAnswer,
-                        onOpenWorkspaceFile = onOpenWorkspaceFile,
-                        onGenerativeWidgetAction = onGenerativeWidgetAction,
-                        onMiniAppModify = onMiniAppModify,
-                    )
+            CompositionLocalProvider(LocalSearchSources provides searchSources) {
+                ProvideTextStyle(textStyle) {
+                    if (item.block.part is UIMessagePart.Text) {
+                        VirtualizedAssistantText(
+                            fullMessageParts = message.parts,
+                            part = item.block.part,
+                            assistant = assistant,
+                            markdownChild = null,
+                            showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
+                            onGenerativeWidgetAction = onGenerativeWidgetAction,
+                        )
+                    } else {
+                        MessagePartsBlock(
+                            assistant = assistant,
+                            role = message.role,
+                            parts = listOf(item.block.part),
+                            annotations = emptyList(),
+                            loading = loading,
+                            model = model,
+                            onToolApproval = onToolApproval,
+                            onToolAnswer = onToolAnswer,
+                            onOpenWorkspaceFile = onOpenWorkspaceFile,
+                            onGenerativeWidgetAction = onGenerativeWidgetAction,
+                            onMiniAppModify = onMiniAppModify,
+                        )
+                    }
                 }
             }
         }
 
         is ChatMessageVirtualItem.MarkdownChild -> {
-            ProvideTextStyle(textStyle) {
-                VirtualizedAssistantText(
-                    fullMessageParts = message.parts,
-                    part = item.block.part as UIMessagePart.Text,
-                    assistant = assistant,
-                    markdownChild = item,
-                    showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
-                    onGenerativeWidgetAction = onGenerativeWidgetAction,
-                )
+            CompositionLocalProvider(LocalSearchSources provides searchSources) {
+                ProvideTextStyle(textStyle) {
+                    VirtualizedAssistantText(
+                        fullMessageParts = message.parts,
+                        part = item.block.part as UIMessagePart.Text,
+                        assistant = assistant,
+                        markdownChild = item,
+                        showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
+                        onGenerativeWidgetAction = onGenerativeWidgetAction,
+                    )
+                }
             }
         }
 
@@ -380,21 +391,23 @@ internal fun ChatMessageVirtualItemContent(
         }
 
         ChatMessageVirtualItem.Footer -> {
-            ChatMessageVirtualFooter(
-                node = node,
-                loading = loading,
-                model = model,
-                lastMessage = lastMessage,
-                onFork = onFork,
-                onRegenerate = onRegenerate,
-                onEdit = onEdit,
-                onShare = onShare,
-                onDelete = onDelete,
-                onUpdate = onUpdate,
-                isFavorite = isFavorite,
-                onToggleFavorite = onToggleFavorite,
-                textStyle = textStyle,
-            )
+            CompositionLocalProvider(LocalSearchSources provides searchSources) {
+                ChatMessageVirtualFooter(
+                    node = node,
+                    loading = loading,
+                    model = model,
+                    lastMessage = lastMessage,
+                    onFork = onFork,
+                    onRegenerate = onRegenerate,
+                    onEdit = onEdit,
+                    onShare = onShare,
+                    onDelete = onDelete,
+                    onUpdate = onUpdate,
+                    isFavorite = isFavorite,
+                    onToggleFavorite = onToggleFavorite,
+                    textStyle = textStyle,
+                )
+            }
         }
     }
 }

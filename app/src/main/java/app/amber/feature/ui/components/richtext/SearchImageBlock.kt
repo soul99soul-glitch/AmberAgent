@@ -38,10 +38,9 @@ import app.amber.feature.ui.components.ui.ImagePreviewDialog
 import app.amber.feature.ui.components.ui.LocalExportContext
 
 /**
- * Renders a `search-images` fenced code block (one entry per line) as a grouped
- * image layout. SearchImageInjectorTransformer emits these blocks after generation
- * finish so the rendering rule lives in one place instead of being scattered
- * across every markdown image we touch.
+ * Renders a grouped search image layout. The message renderer derives these
+ * entries from search tool output so image presentation stays outside assistant
+ * markdown text.
  *
  * Entry format per line: `<url>` or `<url>|<caption>` (caption optional).
  *
@@ -79,7 +78,12 @@ fun SearchImageBlock(
                 val caption = if (pipeIdx >= 0) {
                     raw.substring(pipeIdx + 1).trim().takeIf { it.isNotBlank() }
                 } else null
-                if (!url.startsWith("http")) null else SearchImageEntry(url, caption)
+                val normalizedUrl = when {
+                    url.startsWith("http://") || url.startsWith("https://") -> url
+                    url.startsWith("//") -> "https:$url"
+                    else -> null
+                }
+                normalizedUrl?.let { SearchImageEntry(it, caption) }
             }
             .toList()
     }
@@ -215,11 +219,6 @@ private fun ThumbnailImage(
     var showViewer by remember { mutableStateOf(false) }
 
     if (failed) {
-        // Collapse this cell. Other cells in the Row keep their weight=1f slot —
-        // the strip just gets visually narrower. Re-distributing the freed weight
-        // would shift all the surviving thumbnails on each load, which looks worse
-        // than a static gap.
-        Box(modifier = modifier.height(0.dp))
         return
     }
 

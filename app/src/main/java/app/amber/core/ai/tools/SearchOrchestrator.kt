@@ -137,24 +137,17 @@ internal object SearchOrchestrator {
                     imagesBudget = (imagesBudget - toEmit).coerceAtLeast(0)
                 }
             })
-            // SearchImageInjectorTransformer reads items[].images downstream and lays
-            // out the images itself in fenced `search-images` blocks. We tell the LLM
-            // explicitly NOT to embed images via `![](url)` Markdown — earlier we
-            // instructed the opposite ("please embed these images") and the model
-            // dutifully obeyed, producing a layer of raw `![]()` images that the
-            // standard markdown renderer can't normalise (inconsistent sizes, large
-            // grey placeholder rectangles on load failure). The transformer now owns
-            // image layout end-to-end; the LLM only writes prose + citations.
+            // The chat renderer derives image galleries from items[].images. Keep
+            // images out of assistant text so they are never re-parsed or fed back
+            // into the model as markdown/fence syntax.
             val allImages = merged.flatMap { it.images }.distinct().take(5)
             put("total_images", allImages.size)
             if (allImages.isNotEmpty()) {
                 put(
                     "image_instruction",
-                    "搜索结果包含 ${allImages.size} 张相关图片，AmberAgent 已经自动" +
-                        "把它们渲染在回复里。请**不要**在你的回复正文中再用 ![](url) " +
-                        "Markdown 语法插入这些图片；只需要写好文字内容并附上 " +
-                        "[citation,domain](id) 引用即可，AmberAgent 会按引用自动" +
-                        "把对应图片插到段落附近。",
+                    "搜索结果包含 ${allImages.size} 张相关图片。图片由 AmberAgent 客户端单独处理；" +
+                        "请不要在回复正文中使用 ![](url) Markdown 图片语法，也不要输出任何图片渲染代码块。" +
+                        "只需要写好文字内容，并优先给用到的来源附上 [站点名](来源URL) 链接。",
                 )
             }
             put("sources", sourceStatusJson(sourceResults = sourceResults, sources = sources, calls = calls))
@@ -488,8 +481,8 @@ internal object SearchOrchestrator {
                         publishedAt = item.publishedAt,
                         freshnessScore = freshnessScore,
                         // Carry per-item image URLs from the search service (Brave et al.)
-                        // through the merge layer so the downstream
-                        // SearchImageInjectorTransformer can match them to citations.
+                        // through the merge layer so the message renderer can derive
+                        // a stable image gallery from the tool output.
                         // Dedup at creation too (some services emit the same URL as
                         // thumbnail.src and thumbnail.original).
                         images = item.images.distinct().take(5),

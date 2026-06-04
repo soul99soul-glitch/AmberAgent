@@ -92,6 +92,7 @@ internal fun MessageAnnotations(
     loading: Boolean,
 ) {
     if (annotations.isEmpty()) return
+    if (LocalSearchSources.current?.isNotEmpty == true) return
 
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
     // 2026-05-14: dropped `animateContentSizeIf(loading)` here — see
