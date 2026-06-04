@@ -74,7 +74,6 @@ import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.board.hotlist.deepread.CorePoint
 import app.amber.feature.board.hotlist.deepread.DeepAnalysis
 import app.amber.feature.board.hotlist.deepread.DeepReadDiagram
-import app.amber.feature.board.hotlist.deepread.DeepReadAgentRunManager
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
@@ -125,7 +124,6 @@ fun DeepReadScreen(
         return
     }
 
-    val agent: DeepReadAgentRunManager = koinInject()
     val deepReadScheduler: DeepReadScheduler = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
     val hotListRepository: HotListRepository = koinInject()
@@ -173,7 +171,6 @@ fun DeepReadScreen(
     val historyExpired = cacheEntry?.expired == true
     val historyLoading = fromHistory && !cacheState.loaded
     var runError by remember(topicId) { mutableStateOf<String?>(null) }
-    var retryingStages by remember(topicId) { mutableStateOf<Set<DeepReadGenerationStage>>(emptySet()) }
     var initialForceConsumed by rememberSaveable(topicId, sourceUrl) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -183,7 +180,7 @@ fun DeepReadScreen(
     val backgroundRunning by deepReadScheduler
         .observeRunning(topicId)
         .collectAsStateWithLifecycle(initialValue = false)
-    val lifecycleRunning = backgroundRunning || retryingStages.isNotEmpty()
+    val lifecycleRunning = backgroundRunning
     val anySectionRunning = lifecycleRunning &&
         output?.sectionStates.orEmpty().values.any { it.status == DeepReadSectionStatus.RUNNING }
     val phaseRunning = lifecycleRunning && output?.generationPhase?.isActiveDeepReadPhase() == true
@@ -199,16 +196,9 @@ fun DeepReadScreen(
     }
 
     fun runOne(stage: DeepReadGenerationStage) {
-        if (stage in retryingStages) return
+        if (backgroundRunning) return
         runError = null
-        retryingStages = retryingStages + stage
-        scope.launch {
-            try {
-                agent.runSection(topicId = topicId, topicTitle = title, stage = stage, seedUrl = sourceUrl)
-            } finally {
-                retryingStages = retryingStages - stage
-            }
-        }
+        deepReadScheduler.runSection(topicId = topicId, title = title, sourceUrl = sourceUrl, stage = stage)
     }
 
     LaunchedEffect(topicId, confirmed, initialForceRegenerate, fromHistory) {

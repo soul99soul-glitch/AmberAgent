@@ -23,27 +23,24 @@ class DeepReadScheduler(
         force: Boolean,
     ) {
         if (topicId.isBlank() || title.isBlank()) return
-        val request = OneTimeWorkRequestBuilder<DeepReadWorker>()
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build(),
-            )
-            .setInputData(
-                workDataOf(
-                    DeepReadWorker.KEY_TOPIC_ID to topicId,
-                    DeepReadWorker.KEY_TITLE to title,
-                    DeepReadWorker.KEY_SOURCE_URL to sourceUrl.orEmpty(),
-                    DeepReadWorker.KEY_FORCE to force,
-                )
-            )
-            .addTag(TAG)
-            .addTag(workName(topicId))
-            .build()
         workManager.enqueueUniqueWork(
             workName(topicId),
             if (force) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
-            request,
+            request(topicId, title, sourceUrl, force, stage = null),
+        )
+    }
+
+    fun runSection(
+        topicId: String,
+        title: String,
+        sourceUrl: String?,
+        stage: DeepReadGenerationStage,
+    ) {
+        if (topicId.isBlank() || title.isBlank()) return
+        workManager.enqueueUniqueWork(
+            workName(topicId),
+            ExistingWorkPolicy.KEEP,
+            request(topicId, title, sourceUrl, force = false, stage = stage),
         )
     }
 
@@ -56,6 +53,31 @@ class DeepReadScheduler(
                         info.state == WorkInfo.State.BLOCKED
                 }
             }
+
+    private fun request(
+        topicId: String,
+        title: String,
+        sourceUrl: String?,
+        force: Boolean,
+        stage: DeepReadGenerationStage?,
+    ) = OneTimeWorkRequestBuilder<DeepReadWorker>()
+        .setConstraints(
+            Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build(),
+        )
+        .setInputData(
+            workDataOf(
+                DeepReadWorker.KEY_TOPIC_ID to topicId,
+                DeepReadWorker.KEY_TITLE to title,
+                DeepReadWorker.KEY_SOURCE_URL to sourceUrl.orEmpty(),
+                DeepReadWorker.KEY_FORCE to force,
+                DeepReadWorker.KEY_STAGE to stage?.name.orEmpty(),
+            )
+        )
+        .addTag(TAG)
+        .addTag(workName(topicId))
+        .build()
 
     companion object {
         const val TAG = "deep_read_generate"

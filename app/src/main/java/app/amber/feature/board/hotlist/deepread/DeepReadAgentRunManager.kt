@@ -90,6 +90,8 @@ class DeepReadAgentRunManager(
         topicTitle: String,
         force: Boolean = false,
         seedUrl: String? = null,
+        deferMissingStages: Boolean = true,
+        propagateFailuresWithPartial: Boolean = false,
     ): Result<DeepReadOutput> = topicMutex(topicId).withLock {
         if (force) hotListRepository.clearDeepRead(topicId)
 
@@ -99,9 +101,9 @@ class DeepReadAgentRunManager(
         }
 
         val missing = missingStages(cached ?: DeepReadOutput())
-        if (!force && cached?.hasAnyReadySection() == true && missing.isNotEmpty()) {
+        if (shouldDeferDeepReadMissingStages(force, cached, missing, deferMissingStages)) {
             scheduleBackgroundFill(topicId, topicTitle, missing, seedUrl)
-            return@withLock Result.success(cached)
+            return@withLock Result.success(cached ?: DeepReadOutput())
         }
         if (!force && cached != null && cached.sectionsReady()) {
             val completed = cached.copy(
@@ -117,7 +119,14 @@ class DeepReadAgentRunManager(
             else -> DeepReadGenerationStage.entries
         }
 
-        generateStages(topicId, topicTitle, stagesToGenerate, seedUrl, force)
+        generateStages(
+            topicId = topicId,
+            topicTitle = topicTitle,
+            stages = stagesToGenerate,
+            seedUrl = seedUrl,
+            force = force,
+            propagateFailuresWithPartial = propagateFailuresWithPartial,
+        )
     }
 
     suspend fun runSection(
@@ -125,8 +134,18 @@ class DeepReadAgentRunManager(
         topicTitle: String,
         stage: DeepReadGenerationStage,
         seedUrl: String? = null,
+        propagateFailuresWithPartial: Boolean = false,
     ): Result<DeepReadOutput> = topicMutex(topicId).withLock {
-        generateStages(topicId, topicTitle, listOf(stage), seedUrl)
+        markSectionRunning(topicId, topicTitle, seedUrl, stage)
+        generateStages(
+            topicId = topicId,
+            topicTitle = topicTitle,
+            stages = listOf(stage),
+            seedUrl = seedUrl,
+            markCollecting = false,
+            planningPhase = DeepReadGenerationPhase.WRITING,
+            propagateFailuresWithPartial = propagateFailuresWithPartial,
+        )
     }
 
     private fun scheduleBackgroundFill(
@@ -156,20 +175,39 @@ class DeepReadAgentRunManager(
         }
     }
 
+    private suspend fun markSectionRunning(
+        topicId: String,
+        topicTitle: String,
+        seedUrl: String?,
+        stage: DeepReadGenerationStage,
+    ) {
+        val current = fresh(topicId, topicTitle, seedUrl) ?: DeepReadOutput()
+        val next = current.withSectionRetryRunning(stage)
+        if (next == current) return
+        hotListRepository.saveDeepRead(
+            topicId = topicId,
+            title = topicTitle,
+            output = next,
+        )
+    }
+
     private suspend fun generateStages(
         topicId: String,
         topicTitle: String,
         stages: List<DeepReadGenerationStage>,
         seedUrl: String?,
         force: Boolean = false,
+        markCollecting: Boolean = true,
+        planningPhase: DeepReadGenerationPhase = DeepReadGenerationPhase.PLANNING,
+        propagateFailuresWithPartial: Boolean = false,
     ): Result<DeepReadOutput> {
         val context = createRunContext(
             topicId = topicId,
             topicTitle = topicTitle,
             seedUrl = seedUrl,
             force = force,
-            markCollecting = true,
-            planningPhase = DeepReadGenerationPhase.PLANNING,
+            markCollecting = markCollecting,
+            planningPhase = planningPhase,
         ).getOrElse { error ->
             if (error is CancellationException) throw error
             return Result.failure(error)
@@ -235,6 +273,10 @@ class DeepReadAgentRunManager(
                 // cancel) is not silently turned into a Result.failure here.
                 if (error is CancellationException) throw error
                 Log.e(TAG, "deep read hidden run failed", error)
+                if (propagateFailuresWithPartial) {
+                    context.writer.markPhase(DeepReadGenerationPhase.IDLE)
+                    return@fold Result.failure(error)
+                }
                 markMissingFailed(
                     writer = context.writer,
                     stages = stages,
@@ -1048,6 +1090,22 @@ private fun DeepReadGenerationStage.writerToolName(): String = when (this) {
     DeepReadGenerationStage.NARRATIVE -> "deep_read_write_narrative"
     DeepReadGenerationStage.ANALYSIS -> "deep_read_write_analysis"
     DeepReadGenerationStage.EXTENDED_READING -> "deep_read_write_extended_reading"
+}
+
+internal fun shouldDeferDeepReadMissingStages(
+    force: Boolean,
+    cached: DeepReadOutput?,
+    missing: List<DeepReadGenerationStage>,
+    deferMissingStages: Boolean,
+): Boolean =
+    deferMissingStages && !force && cached?.hasAnyReadySection() == true && missing.isNotEmpty()
+
+internal fun DeepReadOutput.withSectionRetryRunning(stage: DeepReadGenerationStage): DeepReadOutput {
+    if (statusOf(stage) == DeepReadSectionStatus.READY) return this
+    return copy(
+        generationPhase = DeepReadGenerationPhase.WRITING,
+        generationComplete = false,
+    ).withSectionStatus(stage, DeepReadSectionStatus.RUNNING)
 }
 
 private fun DeepReadGenerationStage.promptSourceLimit(): Int = when (this) {
