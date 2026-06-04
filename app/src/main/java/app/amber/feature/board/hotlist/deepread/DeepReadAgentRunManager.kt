@@ -58,8 +58,6 @@ class DeepReadAgentRunManager(
         val articlePlan: DeepReadArticlePlan,
         val playbookMarkdown: String,
         val writer: DeepReadSectionWriterTools,
-        val verificationTools: List<Tool>,
-        val verificationWriterToolNames: Set<String>,
     )
 
     suspend fun runPreview(
@@ -105,8 +103,13 @@ class DeepReadAgentRunManager(
             scheduleBackgroundFill(topicId, topicTitle, missing, seedUrl)
             return@withLock Result.success(cached)
         }
-        if (!force && cached != null && cached.sectionsReady() && !cached.isComplete()) {
-            return@withLock runVerificationOnly(topicId, topicTitle, seedUrl)
+        if (!force && cached != null && cached.sectionsReady()) {
+            val completed = cached.copy(
+                generationPhase = DeepReadGenerationPhase.COMPLETE,
+                generationComplete = true,
+            )
+            hotListRepository.saveDeepRead(topicId, topicTitle, completed)
+            return@withLock Result.success(completed)
         }
 
         val stagesToGenerate = when {
@@ -166,7 +169,6 @@ class DeepReadAgentRunManager(
             seedUrl = seedUrl,
             force = force,
             markCollecting = true,
-            seedOutputUrls = false,
             planningPhase = DeepReadGenerationPhase.PLANNING,
         ).getOrElse { error ->
             if (error is CancellationException) throw error
@@ -200,16 +202,12 @@ class DeepReadAgentRunManager(
                 runStageSupervisorLoop(context, DeepReadGenerationStage.EXTENDED_READING)
             }
 
-            // Verification + finish only when the full article is ready. A
-            // single-section retry may make its target READY while other
-            // sections are still missing; that must not stamp a global
-            // verification state for the whole draft.
             val allTargetedReady = stages.all {
                 context.writer.currentOutput().statusOf(it) == DeepReadSectionStatus.READY
             }
             val allSectionsReady = context.writer.currentOutput().sectionsReady()
             if (allTargetedReady && allSectionsReady) {
-                return@runCatching runCoverageAndVerificationTail(context)
+                return@runCatching finishIfPossible(context.writer)
             }
             if (allTargetedReady) {
                 context.writer.markPhase(DeepReadGenerationPhase.IDLE)
@@ -248,50 +246,12 @@ class DeepReadAgentRunManager(
         )
     }
 
-    private suspend fun runVerificationOnly(
-        topicId: String,
-        topicTitle: String,
-        seedUrl: String?,
-    ): Result<DeepReadOutput> {
-        val context = createRunContext(
-            topicId = topicId,
-            topicTitle = topicTitle,
-            seedUrl = seedUrl,
-            force = false,
-            markCollecting = false,
-            seedOutputUrls = true,
-            planningPhase = DeepReadGenerationPhase.VERIFYING,
-        ).getOrElse { error ->
-            if (error is CancellationException) throw error
-            return Result.failure(error)
-        }
-
-        return runCatching {
-            runCoverageAndVerificationTail(context)
-        }.fold(
-            onSuccess = { output ->
-                if (output.hasAnyReadySection() || output.isComplete()) Result.success(output) else Result.failure(
-                    IllegalStateException(firstFailure(output) ?: "深度阅读验真失败")
-                )
-            },
-            onFailure = { error ->
-                if (error is CancellationException) throw error
-                Log.e(TAG, "deep read verification-only run failed", error)
-                val output = context.writer.markVerificationFailed(
-                    error.message ?: error::class.simpleName.orEmpty(),
-                )
-                if (output.hasAnyReadySection()) Result.success(output) else Result.failure(error)
-            },
-        )
-    }
-
     private suspend fun createRunContext(
         topicId: String,
         topicTitle: String,
         seedUrl: String?,
         force: Boolean,
         markCollecting: Boolean,
-        seedOutputUrls: Boolean,
         planningPhase: DeepReadGenerationPhase,
     ): Result<DeepReadRunContext> {
         return try {
@@ -311,12 +271,6 @@ class DeepReadAgentRunManager(
                         generationComplete = false,
                     ),
                 )
-            }
-            val outputForSeed = if (seedOutputUrls) {
-                fresh(topicId, topicTitle, seedUrl)
-                    ?: return Result.failure(IllegalStateException("深度阅读缓存已不存在，无法重新验真"))
-            } else {
-                null
             }
             val prefetchedSources = sourcePrefetcher.collect(
                 topicId = topicId,
@@ -341,26 +295,14 @@ class DeepReadAgentRunManager(
             Log.i(TAG, "deep read prefetch ready: ${prefetchedSources.size} sources for topic=$topicId")
             val evidencePack = researchHarness.buildEvidencePack(topicTitle, prefetchedSources)
             val evidenceRegistry = DeepReadEvidenceRegistry()
-            seedEvidenceRegistry(evidenceRegistry, prefetchedSources, evidencePack, outputForSeed)
+            seedEvidenceRegistry(evidenceRegistry, prefetchedSources, evidencePack, output = null)
             val writer = DeepReadSectionWriterTools(
                 repository = hotListRepository,
                 topicId = topicId,
                 topicTitle = topicTitle,
                 imageCandidates = prefetchedSources.flatMap { it.imageCandidates },
-                isEvidenceUrlAllowed = evidenceRegistry::isAllowed,
-                evidenceContains = evidenceRegistry::containsEvidence,
                 allowTitleFallback = seedUrl.isNullOrBlank(),
             )
-            val verificationWriterTools = writer.tools()
-            val verificationTools = toolSetFactory.forDeepRead(
-                settings = settings,
-                writerTools = verificationWriterTools,
-                descriptionContext = DeepReadToolDescriptionContext(
-                    stageTimeoutSeconds = VERIFICATION_COLLECT_RUN_TIMEOUT_MS.toWholeSeconds(),
-                    verification = true,
-                ),
-            )
-                .map { it.withEvidenceRecording(evidenceRegistry) }
             val hiddenSettings = settings.toIsolatedSubAgentSettings()
             val assistant = DeepReadHiddenAssistantFactory.create(settings)
             val playbook = playbookRepository.read()
@@ -387,8 +329,6 @@ class DeepReadAgentRunManager(
                     articlePlan = articlePlan,
                     playbookMarkdown = playbook.markdown,
                     writer = writer,
-                    verificationTools = verificationTools,
-                    verificationWriterToolNames = verificationWriterTools.map { it.name }.toSet(),
                 )
             )
         } catch (cancel: CancellationException) {
@@ -444,7 +384,6 @@ class DeepReadAgentRunManager(
                 stageLabel = stage.label,
                 writerToolName = stage.writerToolName(),
                 stageTimeoutSeconds = stageTimeoutMs.toWholeSeconds(),
-                firstWriterTargetSeconds = firstWriterSoftDeadlineMs(stageTimeoutMs).toWholeSeconds(),
             ),
         )
             .map { it.withEvidenceRecording(context.evidenceRegistry) }
@@ -545,108 +484,6 @@ class DeepReadAgentRunManager(
         }
     }
 
-    private suspend fun runCoverageAndVerificationTail(
-        context: DeepReadRunContext,
-    ): DeepReadOutput {
-        val writer = context.writer
-        if (!writer.currentOutput().sectionsReady()) return writer.currentOutput()
-        if (!writer.hasFreshVerification) {
-            var coverageReport = researchHarness.verifyCoverage(
-                output = writer.currentOutput(),
-                plan = context.articlePlan,
-                pack = context.evidencePack,
-            )
-            var supplementPasses = 0
-            while (coverageReport.needsSupplement && supplementPasses < MAX_COVERAGE_SUPPLEMENT_PASSES) {
-                val targetStage = coverageReport.targetStage
-                    ?: return writer.markVerificationFailed(
-                        "本地覆盖检查未完成：${coverageReport.promptSummary()}"
-                    )
-                Log.i(
-                    TAG,
-                    "deep read local coverage needs supplement stage=${targetStage.name} " +
-                        "missing=${coverageReport.promptSummary()}",
-                )
-                writer.markPhase(DeepReadGenerationPhase.VERIFYING)
-                runStageSupervisorLoop(context, targetStage, coverageReport)
-                supplementPasses += 1
-                coverageReport = researchHarness.verifyCoverage(
-                    output = writer.currentOutput(),
-                    plan = context.articlePlan,
-                    pack = context.evidencePack,
-                )
-            }
-            if (coverageReport.needsSupplement) {
-                return writer.markVerificationFailed(
-                    "本地覆盖检查未完成：${coverageReport.promptSummary()}"
-                )
-            }
-            runVerificationSupervisorLoop(context)
-        }
-        if (!writer.hasFreshVerification) {
-            return writer.markVerificationFailed(writer.finalVerificationFailureMessage())
-        }
-        return finishIfPossible(writer)
-    }
-
-    private suspend fun runVerificationSupervisorLoop(context: DeepReadRunContext) {
-        val writer = context.writer
-        writer.markVerificationRunning()
-        var previousPassMissingToolCall = false
-        repeat(MAX_VERIFICATION_PASSES) { passIndex ->
-            val beforeAttempts = writer.verificationAttemptCount
-            runVerificationPass(
-                context = context,
-                pass = passIndex + 1,
-                previousFailure = writer.lastVerificationFailureReason,
-                previousPassMissingToolCall = previousPassMissingToolCall,
-            )
-            if (writer.hasFreshVerification) return
-            previousPassMissingToolCall = writer.verificationAttemptCount == beforeAttempts
-        }
-    }
-
-    private suspend fun runVerificationPass(
-        context: DeepReadRunContext,
-        pass: Int,
-        previousFailure: String?,
-        previousPassMissingToolCall: Boolean,
-    ) {
-        val current = context.writer.currentOutput()
-        val verifyMessages = listOf(
-            UIMessage.user(
-                buildVerificationReminder(
-                    topicTitle = context.topicTitle,
-                    currentOutput = current,
-                    evidencePack = context.evidencePack,
-                    evidenceRegistry = context.evidenceRegistry,
-                    pass = pass,
-                    previousFailure = previousFailure,
-                    previousPassMissingToolCall = previousPassMissingToolCall,
-                )
-            ),
-        )
-        try {
-            withTimeout(VERIFICATION_COLLECT_RUN_TIMEOUT_MS) {
-                collectRun(
-                    settings = context.hiddenSettings,
-                    model = context.model,
-                    messages = verifyMessages,
-                    assistant = context.assistant,
-                    tools = context.verificationTools,
-                    writerToolNames = context.verificationWriterToolNames,
-                    statusLabel = "深度阅读 验真",
-                )
-            }
-        } catch (timeout: TimeoutCancellationException) {
-            Log.w(TAG, "deep read verification timed out", timeout)
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (other: Throwable) {
-            Log.w(TAG, "deep read verification failed", other)
-        }
-    }
-
     private suspend fun collectRun(
         settings: Settings,
         model: Model,
@@ -700,25 +537,23 @@ class DeepReadAgentRunManager(
     ): DeepReadArticlePlan {
         val fallback = researchHarness.fallbackPlan(topicTitle, evidencePack)
         val messages = runCatching {
-            withTimeout(PLANNING_COLLECT_RUN_TIMEOUT_MS) {
-                collectRun(
-                    settings = settings,
-                    model = model,
-                    messages = listOf(
-                        UIMessage.user(
-                            researchHarness.buildPlanningPrompt(
-                                topicTitle = topicTitle,
-                                pack = evidencePack,
-                                playbookMarkdown = playbookMarkdown,
-                            )
+            collectRun(
+                settings = settings,
+                model = model,
+                messages = listOf(
+                    UIMessage.user(
+                        researchHarness.buildPlanningPrompt(
+                            topicTitle = topicTitle,
+                            pack = evidencePack,
+                            playbookMarkdown = playbookMarkdown,
                         )
-                    ),
-                    assistant = assistant.copy(streamOutput = false),
-                    tools = emptyList(),
-                    writerToolNames = emptySet(),
-                    statusLabel = "深度阅读 结构规划",
-                )
-            }
+                    )
+                ),
+                assistant = assistant.copy(streamOutput = false),
+                tools = emptyList(),
+                writerToolNames = emptySet(),
+                statusLabel = "深度阅读 结构规划",
+            )
         }.getOrElse { error ->
             if (error is CancellationException) throw error
             Log.w(TAG, "deep read planning fell back to local plan", error)
@@ -840,7 +675,7 @@ class DeepReadAgentRunManager(
         stages.forEach { stage -> appendLine("   - ${stage.writerToolName()}：${stage.label}") }
         appendLine("6. 本轮只暴露目标段 writer tool；如果你输出自由文本但没调工具，系统会尝试把自由文本转换成基础稿。")
         appendLine("7. 图片只能从 image_candidates 中选择；本轮如果没有视觉 writer，就在目标段 references/links 中保留可用来源。")
-        appendLine("8. 全部 writer 完成后，系统会先做本地 coverage check，再做验真。")
+        appendLine("8. 全部 writer 完成后，直接调用 deep_read_finish。")
         appendLine()
         appendLine("## 段落要求")
         if (DeepReadGenerationStage.OVERVIEW in stages) {
@@ -866,12 +701,11 @@ class DeepReadAgentRunManager(
         stageTimeoutMs: Long,
     ) {
         val stageSeconds = stageTimeoutMs.toWholeSeconds()
-        val firstWriteSeconds = firstWriterSoftDeadlineMs(stageTimeoutMs).toWholeSeconds()
         appendLine("## 时间预算（硬约束）")
-        appendLine("- 本段外层运行预算约 ${stageSeconds} 秒；首个 writer tool 目标约 ${firstWriteSeconds} 秒。")
-        appendLine("- 你必须把第一优先级放在 ${firstWriteSeconds} 秒内调用 ${stage.writerToolName()}；不要先输出长文、完整 JSON 或 Markdown 草稿。")
+        appendLine("- 本段运行预算约 ${stageSeconds} 秒。")
+        appendLine("- 你必须把第一优先级放在调用 ${stage.writerToolName()}；不要先输出长文、完整 JSON 或 Markdown 草稿。")
         appendLine("- 预抓证据包是主材料。除非关键事实缺失或互相矛盾，不要连续 search_web / scrape_web。")
-        appendLine("- 如果证据不够完整，先基于现有证据写保守版本；系统后续会做 coverage check 和验真，不要为了补全而耗尽时间。")
+        appendLine("- 如果证据不够完整，先基于现有证据写保守版本；不要为了补全而耗尽本段预算。")
         if (stage == DeepReadGenerationStage.EXTENDED_READING) {
             appendLine("- 扩展阅读不是长文写作：从本段证据包挑选 4-8 条真实来源链接，必要时带 image_assets，然后立即调用 writer tool。")
         }
@@ -971,61 +805,11 @@ class DeepReadAgentRunManager(
     }
 
     private fun buildWriterReminder(stages: List<DeepReadGenerationStage>, pass: Int): String = buildString {
-        val budgetMs = stages.map { collectRunTimeoutFor(it) }.maxOrNull() ?: FIRST_WRITER_TARGET_WINDOW_MS
-        val firstWriteSeconds = firstWriterSoftDeadlineMs(budgetMs).toWholeSeconds()
         appendLine("Supervisor reminder #${pass + 1}: 上一轮没有任何 deep_read_write_* 写入。")
-        appendLine("时间提醒：本轮首个 writer tool 目标约 ${firstWriteSeconds} 秒；现在请直接调用 writer tool。")
+        appendLine("时间提醒：现在请直接调用 writer tool。")
         appendLine("UI 不会消费你的自由文本。请立刻继续研究缺口，然后调用以下 writer tool 中至少一个：")
         stages.forEach { stage -> appendLine("- ${stage.writerToolName()} for ${stage.label}") }
         appendLine("如果来源不足，只把当前段落写为 FAILED 的决定留给系统；不要用自由文本交差。")
-    }
-
-    private fun buildVerificationReminder(
-        topicTitle: String,
-        currentOutput: DeepReadOutput,
-        evidencePack: DeepReadEvidencePack,
-        evidenceRegistry: DeepReadEvidenceRegistry,
-        pass: Int,
-        previousFailure: String?,
-        previousPassMissingToolCall: Boolean,
-    ): String = buildString {
-        appendLine("Final verification reminder #$pass:")
-        appendLine("话题「$topicTitle」的四个段落已经写入。请在最终 finish 前执行验真 skill。")
-        appendLine("时间预算：验真外层约 ${VERIFICATION_COLLECT_RUN_TIMEOUT_MS.toWholeSeconds()} 秒。优先抽 2-3 个核心声明，尽快调用 deep_read_verify_claims，再调用 deep_read_finish。")
-        if (previousPassMissingToolCall) {
-            appendLine("上一轮没有调用 deep_read_verify_claims；本轮不要输出自由文本，")
-            appendLine("必须调用 deep_read_verify_claims。")
-        }
-        previousFailure?.takeIf { it.isNotBlank() }?.let { reason ->
-            appendLine("上一轮 deep_read_verify_claims 被拒绝：$reason")
-            appendLine("请修正参数或必要时先改写被拒绝的段落，")
-            appendLine("然后重新调用 deep_read_verify_claims。")
-        }
-        appendLine()
-        appendEvidenceCards(
-            cards = evidencePack.cards.take(12),
-            title = "验真证据索引（本地 coverage matrix 摘录）",
-            excerptLimit = 520,
-        )
-        appendLine()
-        appendArticleContext(currentOutput)
-        appendLine()
-        appendLine("## 当前允许 evidence_urls")
-        evidenceRegistry.allowedUrls().take(40).forEach { url -> appendLine("- $url") }
-        appendLine()
-        appendLine("验真要求：")
-        appendLine("1. 基于上面的当前稿件全文，抽取影响最大的 3-5 个核心子声明。")
-        appendLine("2. 用已获得来源（含预抓 URL）核查这些声明；仅当声明在所有已抓来源中都找不到对应证据时，才再调 search_web / scrape_web 补充。")
-        appendLine("3. 如果发现不确定或被证伪的声明，先调用对应 deep_read_write_* 修正段落。")
-        appendLine("4. deep_read_verify_claims 至少提供 2 条带 evidence_urls 的核心声明。")
-        appendLine("   visible_excerpt 必须摘录当前稿件原文（只允许空白/换行差异）；")
-        appendLine("   evidence_excerpt 用对应来源正文/摘要里的原文或近似短句。")
-        appendLine("5. evidence_urls **只能来自**：(a) 上面「已预抓取来源」列表中的 URL，")
-        appendLine("   或 (b) 你在本轮 search_web/scrape_web 实际访问过且返回过 evidence_excerpt 的 URL。")
-        appendLine("   未带来源 URL 的声明不会计入验真门槛。")
-        appendLine("6. 然后调用 deep_read_verify_claims，最后调用 deep_read_finish。")
-        appendLine()
-        appendLine("仍然不要输出完整 JSON 或 Markdown 长文。")
     }
 
     private fun Tool.withEvidenceRecording(registry: DeepReadEvidenceRegistry): Tool {
@@ -1042,7 +826,7 @@ class DeepReadAgentRunManager(
 
     private fun StringBuilder.appendArticleContext(output: DeepReadOutput) {
         val current = output.withInferredSectionStates()
-        appendLine("## 当前稿件正文（补段和最终验真必须覆盖）")
+        appendLine("## 当前稿件正文（补段时必须覆盖）")
         appendLine(
             "section_states: " + DeepReadGenerationStage.entries.joinToString(", ") {
                 "${it.name.lowercase()}=${current.statusOf(it).name.lowercase()}"
@@ -1197,16 +981,10 @@ class DeepReadAgentRunManager(
         DeepReadGenerationStage.EXTENDED_READING -> 90_000L
     }
 
-    private fun firstWriterSoftDeadlineMs(stageTimeoutMs: Long): Long =
-        minOf(
-            FIRST_WRITER_TARGET_WINDOW_MS - WRITER_DEADLINE_MARGIN_MS,
-            stageTimeoutMs - STAGE_DEADLINE_MARGIN_MS,
-        ).coerceAtLeast(MIN_FIRST_WRITER_DEADLINE_MS)
-
     private fun Long.toWholeSeconds(): Long = (this / 1_000L).coerceAtLeast(1L)
 
     private fun timeoutFailureMessage(stage: DeepReadGenerationStage, timeoutMs: Long): String =
-        "${stage.label}超时未完成（本段预算约 ${timeoutMs.toWholeSeconds()} 秒，首个 writer tool 目标约 ${firstWriterSoftDeadlineMs(timeoutMs).toWholeSeconds()} 秒）。"
+        "${stage.label}超时未完成（本段预算约 ${timeoutMs.toWholeSeconds()} 秒）。"
 
     private fun stageFailureMessage(
         stage: DeepReadGenerationStage,
@@ -1246,18 +1024,6 @@ class DeepReadAgentRunManager(
         private const val PREVIEW_TOPIC_PREFIX = "template-demo-"
         private const val MAX_GENERATION_STEPS = 32
         private const val MAX_SUPERVISOR_PASSES = 2
-        private const val MAX_COVERAGE_SUPPLEMENT_PASSES = 2
-        private const val MAX_VERIFICATION_PASSES = 3
-
-        // Prompt-side target for getting the first writer tool call started.
-        // Real per-stage hard timeouts live in collectRunTimeoutFor(...);
-        // planning keeps its own PLANNING_COLLECT_RUN_TIMEOUT_MS below.
-        private const val FIRST_WRITER_TARGET_WINDOW_MS = 45_000L
-        private const val WRITER_DEADLINE_MARGIN_MS = 10_000L
-        private const val STAGE_DEADLINE_MARGIN_MS = 12_000L
-        private const val MIN_FIRST_WRITER_DEADLINE_MS = 20_000L
-        private const val PLANNING_COLLECT_RUN_TIMEOUT_MS = 45_000L
-        private const val VERIFICATION_COLLECT_RUN_TIMEOUT_MS = 60_000L
 
         // Prompt-side caps on how many pre-fetched sources we surface and how much
         // of each source body we inline. Anything beyond this stays in the
@@ -1303,13 +1069,3 @@ private fun List<UIMessage>.latestAssistantText(): String =
         .firstOrNull { it.role == app.amber.ai.core.MessageRole.ASSISTANT }
         ?.toText()
         .orEmpty()
-
-private fun DeepReadSectionWriterTools.finalVerificationFailureMessage(): String =
-    lastVerificationFailureReason
-        ?.takeIf { it.isNotBlank() }
-        ?.let { "最终验真未通过：$it" }
-        ?: if (verificationAttemptCount == 0) {
-            "最终验真未完成：Agent 没有调用 deep_read_verify_claims。"
-        } else {
-            "最终验真未完成：Agent 已尝试验真，但没有通过验真门槛。"
-        }

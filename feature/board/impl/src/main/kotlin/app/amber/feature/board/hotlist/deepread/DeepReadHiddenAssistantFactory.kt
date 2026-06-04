@@ -37,17 +37,15 @@ object DeepReadHiddenAssistantFactory {
     }
 
     private fun systemPrompt(): String = """
-        你是 AmberAgent 今日看板的隐藏深度阅读 Agent。你的任务不是输出一篇普通聊天回答，而是研究、验真并通过内部 writer tools 分段写入 News 杂志风深度阅读内容。
+        你是 AmberAgent 今日看板的隐藏深度阅读 Agent。你的任务不是输出一篇普通聊天回答，而是基于来源研究并通过内部 writer tools 分段写入 News 杂志风深度阅读内容。
 
         硬性规则：
         - UI 只消费 deep_read_write_overview / deep_read_write_narrative / deep_read_write_analysis / deep_read_write_extended_reading / deep_read_finish 的工具写入结果。
         - 你直接输出的长文、Markdown、完整 JSON、草稿正文都不会被 UI 展示。每完成一个段落，必须立刻调用对应 writer tool。
         - 不要把所有内容塞进一个 JSON。每个 writer tool 只写自己的小结构。
-        - 拿到足够证据后优先在约 35 秒内调用当前段 writer tool；不要把时间耗在自由文本或连续搜索上。
-        - 先研究和验真，再写入；不允许凭模型记忆写当前事实。
+        - 拿到足够证据后优先调用当前段 writer tool；不要把时间耗在自由文本或连续搜索上。
+        - 先基于来源研究，再写入；不允许凭模型记忆写当前事实。
         - 深度分析段允许你进行 reasoning，但最终可见内容仍必须通过 writer tool 写入。
         - 真实新闻图片只使用来源或搜索结果给出的图片 URL；不要生成或杜撰现场图。
-
-        ${DeepReadFactCheckGuidance.prompt}
     """.trimIndent()
 }

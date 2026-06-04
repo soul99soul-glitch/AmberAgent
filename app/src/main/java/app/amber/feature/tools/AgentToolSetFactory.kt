@@ -47,8 +47,6 @@ data class DeepReadToolDescriptionContext(
     val stageLabel: String? = null,
     val writerToolName: String? = null,
     val stageTimeoutSeconds: Long,
-    val firstWriterTargetSeconds: Long? = null,
-    val verification: Boolean = false,
 )
 
 internal fun Tool.withDeepReadDescriptionContext(context: DeepReadToolDescriptionContext?): Tool {
@@ -62,18 +60,7 @@ internal fun Tool.withDeepReadDescriptionContext(context: DeepReadToolDescriptio
 }
 
 private fun DeepReadToolDescriptionContext.searchGuidance(): String =
-    if (verification) {
-        "Deep Read timing: 验真预算约 $stageTimeoutSeconds 秒；仅当已得证据找不到核心声明时再调用本工具，随后尽快调用 deep_read_verify_claims 和 deep_read_finish。"
-    } else {
-        val writerName = writerToolName ?: "the current deep_read_write_* tool"
-        "Deep Read timing: 本段预算约 $stageTimeoutSeconds 秒，首个 writer tool 目标约 ${firstWriterTargetSeconds ?: stageTimeoutSeconds} 秒；只为关键事实缺口、矛盾证据或预抓正文不足调用本工具，拿到足够证据后优先调用 $writerName。"
-    }
+    "Deep Read timing: 本段预算约 $stageTimeoutSeconds 秒；只为关键事实缺口、矛盾证据或预抓正文不足调用本工具，拿到足够证据后优先调用 ${writerToolName ?: "the current deep_read_write_* tool"}。"
 
 private fun DeepReadToolDescriptionContext.writerGuidance(toolName: String): String =
-    if (verification) {
-        "Deep Read timing: 验真预算约 $stageTimeoutSeconds 秒；如需修正可调用 $toolName，但应优先核查 2-3 个核心声明后调用 deep_read_verify_claims 和 deep_read_finish。"
-    } else {
-        val writerName = writerToolName ?: toolName
-        val label = stageLabel?.let { "（$it）" }.orEmpty()
-        "Deep Read timing: 本段${label}预算约 $stageTimeoutSeconds 秒，首个 writer tool 目标约 ${firstWriterTargetSeconds ?: stageTimeoutSeconds} 秒；优先调用 $writerName，再只为关键事实缺口或矛盾证据补充 search_web/scrape_web。"
-    }
+    "Deep Read timing: 本段${stageLabel?.let { "（$it）" }.orEmpty()}预算约 $stageTimeoutSeconds 秒；优先调用 ${writerToolName ?: toolName}，再只为关键事实缺口或矛盾证据补充 search_web/scrape_web。"

@@ -41,7 +41,7 @@ class DeepReadSectionStateTest {
     }
 
     @Test
-    fun isCompleteRequiresAllSectionsReadyFinishFlagAndVerification() {
+    fun isCompleteRequiresAllSectionsReadyAndFinishFlag() {
         val partial = DeepReadOutput()
             .withSectionStatus(DeepReadGenerationStage.OVERVIEW, DeepReadSectionStatus.READY)
             .withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.READY)
@@ -54,25 +54,20 @@ class DeepReadSectionStateTest {
         assertFalse(readyButUnfinished.generationComplete)
 
         val complete = readyButUnfinished.copy(generationComplete = true)
-        assertFalse(complete.isComplete())
+        assertTrue(complete.isComplete())
+        assertTrue(complete.generationComplete)
 
-        val verifiedComplete = complete.copy(
-            verificationState = DeepReadSectionState(DeepReadSectionStatus.READY),
-        )
-        assertTrue(verifiedComplete.isComplete())
-        assertTrue(verifiedComplete.generationComplete)
-
-        val verifiedButUnfinished = verifiedComplete.copy(generationComplete = false)
-        assertFalse(verifiedButUnfinished.isComplete())
+        val unfinished = complete.copy(generationComplete = false)
+        assertFalse(unfinished.isComplete())
     }
 
     @Test
-    fun legacyCompleteCacheWithoutVerificationIsNotComplete() {
+    fun legacyCompleteCacheNoLongerRequiresVerification() {
         val complete = DeepReadGenerationStage.entries.fold(DeepReadOutput(generationComplete = true)) { output, stage ->
             output.withSectionStatus(stage, DeepReadSectionStatus.READY)
         }.copy(generationComplete = true)
 
-        assertFalse(complete.isComplete())
+        assertTrue(complete.isComplete())
     }
 
     @Test
@@ -88,7 +83,7 @@ class DeepReadSectionStateTest {
 
         assertTrue(failedVerification.isDeliverableDraft())
         assertFalse(failedVerification.isComplete())
-        assertEquals("最终验真未完成", failedVerification.verificationWarningMessage())
+        assertNull(failedVerification.verificationWarningMessage())
         assertNull(failedVerification.sectionFailureMessage())
     }
 
@@ -110,7 +105,7 @@ class DeepReadSectionStateTest {
     }
 
     @Test
-    fun withInferredSectionStatesRecoversSectionsButRequiresVerification() {
+    fun withInferredSectionStatesRecoversCompleteLegacyCache() {
         val legacy = DeepReadOutput(
             summary = "这是一段足够长的中文摘要，足以判断 overview 已经完成。",
             timeline = listOf(TimelineEvent("date", "event")),
@@ -125,8 +120,8 @@ class DeepReadSectionStateTest {
         DeepReadGenerationStage.entries.forEach { stage ->
             assertEquals(DeepReadSectionStatus.READY, inferred.statusOf(stage))
         }
-        assertFalse(inferred.isComplete())
-        assertFalse(inferred.generationComplete)
+        assertTrue(inferred.isComplete())
+        assertTrue(inferred.generationComplete)
     }
 
     @Test

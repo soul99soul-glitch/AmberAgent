@@ -18,7 +18,6 @@ import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.board.hotlist.HotListRepository
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
 
 private const val OVERVIEW_SUMMARY_STORAGE_MAX_CHARS = 1_200
 private const val MAX_DIAGRAM_NODES = 6
@@ -42,24 +41,13 @@ class DeepReadSectionWriterTools(
     private val topicId: String,
     private val topicTitle: String,
     private val imageCandidates: List<DeepReadImageCandidate> = emptyList(),
-    private val isEvidenceUrlAllowed: (String) -> Boolean = { true },
-    private val evidenceContains: (String, String) -> Boolean = { _, _ -> true },
     private val allowTitleFallback: Boolean = true,
 ) {
     private val _writeCount = AtomicInteger(0)
     private val _requiredWriteCount = AtomicInteger(0)
-    private val _verificationCount = AtomicInteger(0)
-    private val _verificationAttemptCount = AtomicInteger(0)
-    private val lastVerificationFailure = AtomicReference<String?>(null)
-    private val verifiedWriteCount = AtomicInteger(-1)
     private val writeMutex = Mutex()
     val writeCount: Int get() = _writeCount.get()
     val requiredWriteCount: Int get() = _requiredWriteCount.get()
-    val verificationCount: Int get() = _verificationCount.get()
-    val verificationAttemptCount: Int get() = _verificationAttemptCount.get()
-    val lastVerificationFailureReason: String? get() = lastVerificationFailure.get()
-    val hasFreshVerification: Boolean
-        get() = verificationCount > 0 && verifiedWriteCount.get() == writeCount
 
     fun tools(stages: Set<DeepReadGenerationStage>? = null): List<Tool> = buildList {
         if (stages == null || DeepReadGenerationStage.OVERVIEW in stages) add(overviewTool())
@@ -68,7 +56,6 @@ class DeepReadSectionWriterTools(
         if (stages == null || DeepReadGenerationStage.EXTENDED_READING in stages) add(extendedReadingTool())
         add(visualsTool())
         add(diagramTool())
-        add(verificationTool())
         add(finishTool())
     }
 
@@ -102,27 +89,6 @@ class DeepReadSectionWriterTools(
             } else {
                 current.withSectionStatus(stage, DeepReadSectionStatus.FAILED, message.safeTake(220))
             }
-        }
-
-    suspend fun markVerificationFailed(message: String): DeepReadOutput =
-        update { current ->
-            current.copy(
-                generationPhase = DeepReadGenerationPhase.IDLE,
-                verificationState = DeepReadSectionState(
-                    status = DeepReadSectionStatus.FAILED,
-                    errorMessage = message.safeTake(220),
-                ),
-                generationComplete = false,
-            )
-        }
-
-    suspend fun markVerificationRunning(): DeepReadOutput =
-        update { current ->
-            current.copy(
-                generationPhase = DeepReadGenerationPhase.VERIFYING,
-                verificationState = DeepReadSectionState(DeepReadSectionStatus.RUNNING),
-                generationComplete = false,
-            )
         }
 
     suspend fun writeFallbackSection(
@@ -184,7 +150,7 @@ class DeepReadSectionWriterTools(
 
     private fun overviewTool() = Tool(
         name = "deep_read_write_overview",
-        description = "Internal Deep Read writer. Write the verified overview section after using search_web/scrape_web. UI only renders content written through this tool.",
+        description = "Internal Deep Read writer. Write the source-backed overview section after using search_web/scrape_web. UI only renders content written through this tool.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -302,7 +268,7 @@ class DeepReadSectionWriterTools(
 
     private fun analysisTool() = Tool(
         name = "deep_read_write_analysis",
-        description = "Internal Deep Read writer. Write the deep analysis section after reasoning over verified sources.",
+        description = "Internal Deep Read writer. Write the deep analysis section after reasoning over source-backed evidence.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -483,61 +449,6 @@ class DeepReadSectionWriterTools(
         },
     )
 
-    private fun verificationTool() = Tool(
-        name = "deep_read_verify_claims",
-        description = "Internal Deep Read verifier. Call before deep_read_finish after checking the most important claims against search_web/scrape_web evidence.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    put("overall", stringProp("passed/has_uncertain/has_refuted."))
-                    put("corrections_applied", buildJsonObject { put("type", "boolean") })
-                    put("checked_claims", verifiedClaimsProp())
-                },
-                required = listOf("overall", "checked_claims"),
-            )
-        },
-        allowsAutoApproval = true,
-        execute = { input ->
-            _verificationAttemptCount.incrementAndGet()
-            val visibleText = currentOutput().verificationVisibleText()
-            val gate = input.objectOrEmpty().verificationGate(
-                visibleText = visibleText,
-                isEvidenceUrlAllowed = isEvidenceUrlAllowed,
-                evidenceContains = evidenceContains,
-            )
-            if (gate.accepted) {
-                _verificationCount.incrementAndGet()
-                verifiedWriteCount.set(writeCount)
-                lastVerificationFailure.set(null)
-                update { current ->
-                    current.copy(
-                        verificationState = DeepReadSectionState(DeepReadSectionStatus.READY),
-                        generationComplete = false,
-                    )
-                }
-                listOf(
-                    UIMessagePart.Text(
-                        buildJsonObject {
-                            put("status", "ok")
-                            put("section", "verification")
-                        }.toString()
-                    )
-                )
-            } else {
-                lastVerificationFailure.set(gate.reason)
-                listOf(
-                    UIMessagePart.Text(
-                        buildJsonObject {
-                            put("status", "verification_rejected")
-                            put("section", "verification")
-                            put("reason", gate.reason)
-                        }.toString()
-                    )
-                )
-            }
-        },
-    )
-
     private fun finishTool() = Tool(
         name = "deep_read_finish",
         description = "Internal Deep Read writer. Call after every section writer reports ready. Returns missing sections if any remain.",
@@ -546,26 +457,20 @@ class DeepReadSectionWriterTools(
         execute = {
             val output = update { current ->
                 current.copy(
-                    generationPhase = if (current.sectionsReady() && hasFreshVerification) {
+                    generationPhase = if (current.sectionsReady()) {
                         DeepReadGenerationPhase.COMPLETE
                     } else {
                         current.generationPhase
                     },
-                    generationComplete = current.sectionsReady() && hasFreshVerification,
-                    verificationState = if (hasFreshVerification) {
-                        DeepReadSectionState(DeepReadSectionStatus.READY)
-                    } else {
-                        current.verificationState
-                    },
+                    generationComplete = current.sectionsReady(),
                 )
             }
             val missing = DeepReadGenerationStage.entries.filter { output.statusOf(it) != DeepReadSectionStatus.READY }
             listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("status", if (missing.isEmpty() && hasFreshVerification) "complete" else "missing_sections")
+                        put("status", if (missing.isEmpty()) "complete" else "missing_sections")
                         put("missing", buildJsonArray { missing.forEach { add(JsonPrimitive(it.name.lowercase())) } })
-                        put("verification_ready", hasFreshVerification)
                     }.toString()
                 )
             )
@@ -829,29 +734,6 @@ private fun diagramEdgesProp() = buildJsonObject {
     })
 }
 
-private fun verifiedClaimsProp() = buildJsonObject {
-    put("type", "array")
-    put("items", buildJsonObject {
-        put("type", "object")
-        put("properties", buildJsonObject {
-            put("claim", stringProp("Core claim checked."))
-            put("visible_excerpt", stringProp("Exact visible excerpt from the current Deep Read draft that this claim verifies."))
-            put("status", stringProp("verified/uncertain/refuted."))
-            put("note", stringProp("Chinese verification note."))
-            put("evidence_excerpt", stringProp("Exact excerpt from one evidence URL that supports or refutes this claim."))
-            put("evidence_urls", buildJsonObject {
-                put("type", "array")
-                put("items", buildJsonObject { put("type", "string") })
-            })
-        })
-    })
-}
-
-private data class VerificationGate(
-    val accepted: Boolean,
-    val reason: String,
-)
-
 private fun JsonElement.objectOrEmpty(): JsonObject =
     runCatching { jsonObject }.getOrDefault(JsonObject(emptyMap()))
 
@@ -1006,146 +888,6 @@ private fun List<DeepReadDiagramEdge>.normalizedDiagramEdges(
         .filter { it.from in nodeIds && it.to in nodeIds && it.from != it.to }
         .take(limit)
 }
-
-private fun JsonObject.verificationGate(
-    visibleText: String,
-    isEvidenceUrlAllowed: (String) -> Boolean,
-    evidenceContains: (String, String) -> Boolean,
-): VerificationGate {
-    val overall = string("overall")?.lowercase()
-    if (overall !in setOf("passed", "has_uncertain", "has_refuted")) {
-        return VerificationGate(false, "overall must be passed, has_uncertain, or has_refuted")
-    }
-    if (overall == "has_refuted") {
-        return VerificationGate(false, "refuted claims must be corrected and re-verified before finish")
-    }
-
-    val claimElements = array("checked_claims")
-    if (claimElements.size < 2) {
-        return VerificationGate(false, "checked_claims must include at least two concrete checked claims")
-    }
-    val claims = mutableListOf<VerifiedClaimGate>()
-    claimElements.forEachIndexed { index, element ->
-        val claim = runCatching { element.jsonObject }.getOrNull()
-            ?: return VerificationGate(false, "checked_claims[$index] must be an object")
-        val text = claim.string("claim")?.cleanText(240).orEmpty()
-        val visibleExcerpt = claim.string("visible_excerpt")?.cleanText(420).orEmpty()
-        val status = claim.string("status")?.lowercase().orEmpty()
-        val note = claim.string("note")?.cleanText(240).orEmpty()
-        val evidenceExcerpt = claim.string("evidence_excerpt")?.cleanText(700).orEmpty()
-        val evidenceUrls = claim.array("evidence_urls")
-            .mapNotNull { runCatching { it.jsonPrimitive.contentOrNull?.trim() }.getOrNull() }
-            .filter { it.startsWith("http://") || it.startsWith("https://") }
-        if (text.length < 8 || status !in setOf("verified", "uncertain", "refuted") || note.length < 4) {
-            val field = when {
-                text.length < 8 -> "claim"
-                status !in setOf("verified", "uncertain", "refuted") -> "status"
-                else -> "note"
-            }
-            return VerificationGate(
-                false,
-                "checked_claims[$index].$field missing or invalid",
-            )
-        } else if (evidenceUrls.isNotEmpty() && evidenceExcerpt.length < 8) {
-            return VerificationGate(
-                false,
-                "checked_claims[$index].evidence_excerpt missing or too short for ${evidenceUrls.first().shortEvidenceUrl()}",
-            )
-        } else {
-            val unknownEvidence = evidenceUrls.firstOrNull { !isEvidenceUrlAllowed(it) }
-            if (unknownEvidence != null) {
-                return VerificationGate(
-                    false,
-                    "checked_claims[$index].evidence_urls contains unvisited URL: ${unknownEvidence.shortEvidenceUrl()}",
-                )
-            }
-            if (evidenceUrls.isNotEmpty() && evidenceUrls.none { evidenceContains(it, evidenceExcerpt) }) {
-                return VerificationGate(
-                    false,
-                    "checked_claims[$index].evidence_excerpt not found in evidence_urls; excerpt=${evidenceExcerpt.shortEvidenceExcerpt()}",
-                )
-            }
-            if (visibleExcerpt.length < 8) {
-                return VerificationGate(false, "checked_claims[$index].visible_excerpt missing or too short")
-            }
-            if (!visibleText.containsLoose(visibleExcerpt)) {
-                return VerificationGate(
-                    false,
-                    "checked_claims[$index].visible_excerpt not found in current draft: ${visibleExcerpt.shortEvidenceExcerpt()}",
-                )
-            }
-            claims += VerifiedClaimGate(status = status, evidenceUrls = evidenceUrls)
-        }
-    }
-    if (claims.any { it.status == "refuted" }) {
-        return VerificationGate(false, "refuted claims require correction and another verification pass")
-    }
-    if (claims.count { it.evidenceUrls.isNotEmpty() } < 2) {
-        return VerificationGate(false, "checked_claims must include at least two evidence-backed claims")
-    }
-    val hasUncertain = overall == "has_uncertain" || claims.any { it.status == "uncertain" }
-    if (hasUncertain && boolean("corrections_applied") != true) {
-        return VerificationGate(false, "uncertain claims must be caveated or removed before finish")
-    }
-    return VerificationGate(true, "accepted")
-}
-
-private data class VerifiedClaimGate(
-    val status: String,
-    val evidenceUrls: List<String>,
-)
-
-private fun String.shortEvidenceUrl(): String =
-    safeTake(120)
-
-private fun String.shortEvidenceExcerpt(): String =
-    replace(Regex("\\s+"), " ").trim().safeTake(120)
-
-private fun DeepReadOutput.verificationVisibleText(): String = buildString {
-    appendLine(summary)
-    appendLine(keyEntities.joinToString(" "))
-    timeline.orEmpty().forEach { event ->
-        appendLine(event.date)
-        appendLine(event.event)
-        appendLine(event.imageCaption.orEmpty())
-    }
-    corePoints.orEmpty().forEach { point ->
-        appendLine(point.point)
-        appendLine(point.supporting.orEmpty())
-        appendLine(point.imageCaption.orEmpty())
-    }
-    appendLine(analysis.coreDispute.orEmpty())
-    analysis.perspectives.forEach { perspective ->
-        appendLine(perspective.holder.orEmpty())
-        appendLine(perspective.viewpoint)
-    }
-    appendLine(analysis.implications.orEmpty())
-    analysis.quotes.forEach { quote ->
-        appendLine(quote.text)
-        appendLine(quote.attribution.orEmpty())
-    }
-    appendLine(heroCaption.orEmpty())
-    imageAssets.forEach { asset -> appendLine(asset.caption.orEmpty()) }
-    diagram?.let { diagram ->
-        appendLine(diagram.title)
-        appendLine(diagram.reason.orEmpty())
-        diagram.nodes.forEach { node ->
-            appendLine(node.label)
-            appendLine(node.note.orEmpty())
-            appendLine(node.group.orEmpty())
-        }
-        diagram.edges.forEach { edge -> appendLine(edge.label.orEmpty()) }
-        appendLine(diagram.caption.orEmpty())
-    }
-    extendedReading.forEach { link -> appendLine("${link.title} ${link.source.orEmpty()} ${link.url}") }
-    references.forEach { link -> appendLine("${link.title} ${link.source.orEmpty()} ${link.url}") }
-}
-
-private fun String.containsLoose(needle: String): Boolean =
-    normalizeForVerification().contains(needle.normalizeForVerification())
-
-private fun String.normalizeForVerification(): String =
-    replace(Regex("\\s+"), " ").trim()
 
 private fun String.cleanText(max: Int): String =
     replace(Regex("\\s+"), " ").trim().safeTake(max)

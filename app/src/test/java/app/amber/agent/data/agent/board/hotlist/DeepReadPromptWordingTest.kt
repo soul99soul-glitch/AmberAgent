@@ -12,7 +12,7 @@ import java.nio.file.Paths
 
 class DeepReadPromptWordingTest {
     @Test
-    fun promptDoesNotDescribeFirstWriterTargetAsProviderTimeout() {
+    fun promptDoesNotDescribeGlobalOrFirstWriterTimeouts() {
         val source = listOf(
             "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadAgentRunManager.kt",
             "feature/board/impl/src/main/kotlin/app/amber/feature/board/hotlist/deepread/DeepReadHiddenAssistantFactory.kt",
@@ -22,8 +22,10 @@ class DeepReadPromptWordingTest {
         assertFalse(source.contains("底层链路可能约"))
         assertFalse(source.contains("底层单次模型/工具链路"))
         assertFalse(source.contains("PROVIDER_REQUEST_SOFT_TIMEOUT_MS"))
-        assertTrue(source.contains("FIRST_WRITER_TARGET_WINDOW_MS"))
-        assertTrue(source.contains("PLANNING_COLLECT_RUN_TIMEOUT_MS = 45_000L"))
+        assertFalse(source.contains("FIRST_WRITER_TARGET_WINDOW_MS"))
+        assertFalse(source.contains("PLANNING_COLLECT_RUN_TIMEOUT_MS"))
+        assertFalse(source.contains("首个 writer tool 目标"))
+        assertFalse(source.contains("约 35 秒"))
     }
 
     @Test
@@ -44,7 +46,6 @@ class DeepReadPromptWordingTest {
             stageLabel = "深度分析",
             writerToolName = "deep_read_write_analysis",
             stageTimeoutSeconds = 150,
-            firstWriterTargetSeconds = 45,
         )
         val writer = testTool("deep_read_write_analysis")
             .withDeepReadDescriptionContext(context)
@@ -54,11 +55,12 @@ class DeepReadPromptWordingTest {
             .withDeepReadDescriptionContext(context)
 
         assertTrue(writer.description.contains("本段（深度分析）预算约 150 秒"))
-        assertTrue(writer.description.contains("首个 writer tool 目标约 45 秒"))
         assertTrue(writer.description.contains("优先调用 deep_read_write_analysis"))
         assertTrue(search.description.contains("本段预算约 150 秒"))
         assertTrue(search.description.contains("只为关键事实缺口"))
         assertTrue(scrape.description.contains("deep_read_write_analysis"))
+        assertFalse(writer.description.contains("首个 writer tool 目标"))
+        assertFalse(search.description.contains("首个 writer tool 目标"))
 
         val globalSearchTools = Files.readString(
             repoFile("app/src/main/java/app/amber/core/ai/tools/SearchTools.kt")
@@ -68,19 +70,18 @@ class DeepReadPromptWordingTest {
     }
 
     @Test
-    fun deepReadVerificationToolDescriptionsCarryVerificationBudget() {
+    fun deepReadToolDescriptionsDoNotMentionVerificationTool() {
         val context = DeepReadToolDescriptionContext(
             stageTimeoutSeconds = 60,
-            verification = true,
         )
         val search = testTool("search_web")
             .withDeepReadDescriptionContext(context)
         val writer = testTool("deep_read_write_overview")
             .withDeepReadDescriptionContext(context)
 
-        assertTrue(search.description.contains("验真预算约 60 秒"))
-        assertTrue(search.description.contains("deep_read_verify_claims"))
-        assertTrue(writer.description.contains("deep_read_finish"))
+        assertFalse(search.description.contains("验真"))
+        assertFalse(search.description.contains("deep_read_verify_claims"))
+        assertFalse(writer.description.contains("deep_read_verify_claims"))
     }
 
     private fun repoFile(path: String): Path {

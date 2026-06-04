@@ -87,14 +87,7 @@ class DeepReadWorker(
                     )
                 }
             },
-            verificationState = if (cached?.verificationState?.status == DeepReadSectionStatus.READY) {
-                cached.verificationState
-            } else {
-                DeepReadSectionState(
-                    status = DeepReadSectionStatus.FAILED,
-                    errorMessage = failureMessage,
-                )
-            },
+            verificationState = cached?.verificationState ?: DeepReadSectionState(),
         )
     }
 

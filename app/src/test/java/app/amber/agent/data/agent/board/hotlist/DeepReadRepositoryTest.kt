@@ -175,28 +175,6 @@ class DeepReadRepositoryTest {
                 })
             })
         })
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "passed")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "事件进入公开讨论阶段")
-                    put("visible_excerpt", "事件进入公开讨论阶段")
-                    put("status", "verified")
-                    put("note", "已有来源支撑")
-                    put("evidence_excerpt", "已有来源支撑并可交叉核查")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-                add(buildJsonObject {
-                    put("claim", "核心分歧已经在分析段落中降格表达")
-                    put("visible_excerpt", "核心分歧在于各方如何解释事件影响")
-                    put("status", "verified")
-                    put("note", "分析段落没有保留被证伪声明")
-                    put("evidence_excerpt", "分析段落没有保留被证伪声明")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-            })
-        })
         tools.getValue("deep_read_finish").execute(buildJsonObject { })
 
         val output = repo.getFreshDeepRead("topic", title = "话题")
@@ -205,7 +183,6 @@ class DeepReadRepositoryTest {
         assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.NARRATIVE))
         assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.ANALYSIS))
         assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.EXTENDED_READING))
-        assertEquals(DeepReadSectionStatus.READY, output?.verificationState?.status)
         assertTrue(output?.isComplete() == true)
         assertEquals("这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。", output?.summary)
         assertEquals("https://example.com/a", output?.extendedReading?.single()?.url)
@@ -219,7 +196,7 @@ class DeepReadRepositoryTest {
         val toolNames = writer.tools(stages = setOf(DeepReadGenerationStage.ANALYSIS)).map { it.name }.toSet()
 
         assertTrue("deep_read_write_analysis" in toolNames)
-        assertTrue("deep_read_verify_claims" in toolNames)
+        assertTrue("deep_read_verify_claims" !in toolNames)
         assertTrue("deep_read_finish" in toolNames)
         assertTrue("deep_read_write_overview" !in toolNames)
         assertTrue("deep_read_write_narrative" !in toolNames)
@@ -316,252 +293,6 @@ class DeepReadRepositoryTest {
         assertEquals(DeepReadSectionQuality.BASIC, output.sectionQualities[DeepReadGenerationStage.ANALYSIS])
         assertTrue(output.analysis.implications.orEmpty().contains("用户成本"))
         assertTrue(output.references.any { it.url == "https://example.com/supplement" })
-    }
-
-    @Test
-    fun sectionWriterRejectsWeakVerificationBeforeFinish() = runTest {
-        val repo = HotListRepository(FakeHotListDao(), json)
-        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
-        val tools = writer.tools().associateBy { it.name }
-
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "has_refuted")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "一个被证伪但没有修正的核心声明")
-                    put("status", "refuted")
-                    put("note", "来源不支持该声明")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/refute") })
-                })
-                add(buildJsonObject {
-                    put("claim", "另一个核心声明")
-                    put("status", "verified")
-                    put("note", "来源支撑")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/support") })
-                })
-            })
-        })
-
-        assertEquals(0, writer.verificationCount)
-        assertEquals(1, writer.verificationAttemptCount)
-        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("refuted"))
-        assertTrue(!writer.hasFreshVerification)
-    }
-
-    @Test
-    fun sectionWriterRequiresTwoEvidenceBackedVerificationClaims() = runTest {
-        val repo = HotListRepository(FakeHotListDao(), json)
-        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
-        val tools = writer.tools().associateBy { it.name }
-
-        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
-            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
-        })
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "passed")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "一个有来源支撑的核心声明")
-                    put("visible_excerpt", "这是经过来源核查后的概览正文")
-                    put("status", "verified")
-                    put("note", "来源支撑")
-                    put("evidence_excerpt", "来源支撑并可交叉核查")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-                add(buildJsonObject {
-                    put("claim", "一个没有来源 URL 的核心声明")
-                    put("visible_excerpt", "为什么值得继续阅读")
-                    put("status", "verified")
-                    put("note", "没有证据 URL")
-                    put("evidence_urls", buildJsonArray { })
-                })
-            })
-        })
-
-        assertEquals(0, writer.verificationCount)
-        assertTrue(!writer.hasFreshVerification)
-        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("at least two evidence-backed claims"))
-    }
-
-    @Test
-    fun sectionWriterRequiresVisibleExcerptInsteadOfClaimFallback() = runTest {
-        val repo = HotListRepository(FakeHotListDao(), json)
-        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
-        val tools = writer.tools().associateBy { it.name }
-
-        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
-            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
-        })
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "passed")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "这是经过来源核查后的概览正文")
-                    put("status", "verified")
-                    put("note", "来源支撑")
-                    put("evidence_excerpt", "来源支撑并可交叉核查")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-                add(buildJsonObject {
-                    put("claim", "为什么值得继续阅读")
-                    put("visible_excerpt", "为什么值得继续阅读")
-                    put("status", "verified")
-                    put("note", "来源支撑")
-                    put("evidence_excerpt", "来源支撑并可交叉核查")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-            })
-        })
-
-        assertEquals(0, writer.verificationCount)
-        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("visible_excerpt"))
-    }
-
-    @Test
-    fun finalVerificationFailureDoesNotClobberExtendedReadingSection() = runTest {
-        val repo = HotListRepository(FakeHotListDao(), json)
-        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
-        val tools = writer.tools().associateBy { it.name }
-
-        tools.getValue("deep_read_write_extended_reading").execute(buildJsonObject {
-            put("links", buildJsonArray {
-                add(buildJsonObject {
-                    put("title", "来源一")
-                    put("url", "https://example.com/a")
-                    put("source", "example.com")
-                })
-            })
-        })
-        writer.markVerificationFailed("最终验真未通过：证据摘录不匹配")
-
-        val output = repo.getFreshDeepRead("topic", title = "话题")
-        assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.EXTENDED_READING))
-        assertEquals(DeepReadSectionStatus.FAILED, output?.verificationState?.status)
-        assertTrue(output?.verificationState?.errorMessage.orEmpty().contains("证据摘录"))
-    }
-
-    @Test
-    fun sectionWriterRejectsMalformedClaimInsteadOfDroppingIt() = runTest {
-        val repo = HotListRepository(FakeHotListDao(), json)
-        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
-        val tools = writer.tools().associateBy { it.name }
-
-        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
-            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
-        })
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "passed")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "这个格式不完整的声明不能被静默丢弃")
-                    put("status", "verified")
-                })
-                repeat(2) { index ->
-                    add(buildJsonObject {
-                        put("claim", "一个有来源支撑的核心声明$index")
-                        put("visible_excerpt", "这是经过来源核查后的概览正文")
-                        put("status", "verified")
-                        put("note", "来源支撑")
-                        put("evidence_excerpt", "来源支撑并可交叉核查")
-                        put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                    })
-                }
-            })
-        })
-
-        assertEquals(0, writer.verificationCount)
-        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("checked_claims[0]"))
-    }
-
-    @Test
-    fun sectionWriterRejectsUnseenEvidenceUrls() = runTest {
-        val repo = HotListRepository(FakeHotListDao(), json)
-        val writer = DeepReadSectionWriterTools(
-            repository = repo,
-            topicId = "topic",
-            topicTitle = "话题",
-            isEvidenceUrlAllowed = { it == "https://example.com/allowed" },
-        )
-        val tools = writer.tools().associateBy { it.name }
-
-        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
-            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
-        })
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "passed")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "一个有来源支撑的核心声明")
-                    put("visible_excerpt", "这是经过来源核查后的概览正文")
-                    put("status", "verified")
-                    put("note", "来源支撑")
-                    put("evidence_excerpt", "来源支撑并可交叉核查")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/allowed") })
-                })
-                add(buildJsonObject {
-                    put("claim", "另一个核心声明也必须来自允许来源")
-                    put("visible_excerpt", "为什么值得继续阅读")
-                    put("status", "verified")
-                    put("note", "来源支撑")
-                    put("evidence_excerpt", "来源支撑并可交叉核查")
-                    put("evidence_urls", buildJsonArray { add("https://evil.example.com/made-up") })
-                })
-            })
-        })
-
-        assertEquals(0, writer.verificationCount)
-        assertTrue(!writer.hasFreshVerification)
-        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("checked_claims[1].evidence_urls"))
-        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("evil.example.com"))
-    }
-
-    @Test
-    fun sectionWriterRejectsUnsupportedEvidenceExcerpt() = runTest {
-        val repo = HotListRepository(FakeHotListDao(), json)
-        val writer = DeepReadSectionWriterTools(
-            repository = repo,
-            topicId = "topic",
-            topicTitle = "话题",
-            isEvidenceUrlAllowed = { it == "https://example.com/a" },
-            evidenceContains = { _, _ -> false },
-        )
-        val tools = writer.tools().associateBy { it.name }
-
-        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
-            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
-        })
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "passed")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "一个有来源支撑的核心声明")
-                    put("visible_excerpt", "这是经过来源核查后的概览正文")
-                    put("status", "verified")
-                    put("note", "来源支撑")
-                    put("evidence_excerpt", "来源正文里并不存在这段")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-                add(buildJsonObject {
-                    put("claim", "另一个核心声明也需要证据摘录")
-                    put("visible_excerpt", "为什么值得继续阅读")
-                    put("status", "verified")
-                    put("note", "来源支撑")
-                    put("evidence_excerpt", "另一段不存在的来源文字")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-            })
-        })
-
-        assertEquals(0, writer.verificationCount)
-        assertTrue(!writer.hasFreshVerification)
-        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("checked_claims[0].evidence_excerpt"))
-        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("来源正文里并不存在这段"))
     }
 
     @Test
@@ -790,7 +521,7 @@ class DeepReadRepositoryTest {
     }
 
     @Test
-    fun optionalVisualAndDiagramWritesRequireFreshVerificationBeforeFinish() = runTest {
+    fun optionalVisualAndDiagramWritesDoNotBlockFinish() = runTest {
         val repo = HotListRepository(FakeHotListDao(), json)
         val hero = "https://news.example.com/hero.jpg"
         val writer = DeepReadSectionWriterTools(
@@ -824,29 +555,6 @@ class DeepReadRepositoryTest {
                 })
             })
         })
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "passed")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "事件进入公开讨论阶段")
-                    put("visible_excerpt", "事件进入公开讨论阶段")
-                    put("status", "verified")
-                    put("note", "已有来源支撑")
-                    put("evidence_excerpt", "已有来源支撑并可交叉核查")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-                add(buildJsonObject {
-                    put("claim", "核心分歧已经在分析段落中降格表达")
-                    put("visible_excerpt", "核心分歧在于各方如何解释事件影响")
-                    put("status", "verified")
-                    put("note", "分析段落没有保留被证伪声明")
-                    put("evidence_excerpt", "分析段落没有保留被证伪声明")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-            })
-        })
-        assertTrue(writer.hasFreshVerification)
 
         tools.getValue("deep_read_write_visuals").execute(buildJsonObject {
             put("hero_image_url", hero)
@@ -867,32 +575,6 @@ class DeepReadRepositoryTest {
             })
         })
 
-        assertTrue(!writer.hasFreshVerification)
-        tools.getValue("deep_read_finish").execute(buildJsonObject { })
-        assertTrue(repo.getFreshDeepRead("topic", title = "话题")?.isComplete() != true)
-
-        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
-            put("overall", "passed")
-            put("corrections_applied", false)
-            put("checked_claims", buildJsonArray {
-                add(buildJsonObject {
-                    put("claim", "图解只表达已写入的流程关系")
-                    put("visible_excerpt", "核心分歧在于各方如何解释事件影响")
-                    put("status", "verified")
-                    put("note", "图解节点没有引入新事实")
-                    put("evidence_excerpt", "图解节点没有引入新事实")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-                add(buildJsonObject {
-                    put("claim", "头图来自候选池且没有使用任意外部 URL")
-                    put("visible_excerpt", "这是经过来源核查后的概览正文")
-                    put("status", "verified")
-                    put("note", "图片 URL 已由候选池复核")
-                    put("evidence_excerpt", "图片 URL 已由候选池复核")
-                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
-                })
-            })
-        })
         tools.getValue("deep_read_finish").execute(buildJsonObject { })
         assertTrue(repo.getFreshDeepRead("topic", title = "话题")?.isComplete() == true)
     }

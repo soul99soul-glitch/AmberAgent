@@ -15,7 +15,7 @@ fun createDeepReadOpenTool(eventBus: AppEventBus): Tool = Tool(
     description = """
         Open AmberAgent's full-screen Deep Read panel for a topic or URL.
         Use this when the user asks to 深度阅读, 深读, deep read, investigate a link/topic in magazine format, or wants a full-screen research reading view.
-        This tool only opens the Deep Read route; the panel then uses the standard hidden-agent Deep Read pipeline, search/scrape tools, segmented writes, verification, and 24h cache.
+        This tool only opens the Deep Read route; the panel then uses the standard hidden-agent Deep Read pipeline, search/scrape tools, segmented writes, and 24h cache.
         If the user provided a URL, pass it as source_url so Deep Read scrapes that source first, then cross-checks with search.
     """.trimIndent().replace("\n", " "),
     parameters = {

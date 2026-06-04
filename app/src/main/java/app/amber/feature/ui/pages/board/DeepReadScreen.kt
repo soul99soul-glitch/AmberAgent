@@ -92,7 +92,6 @@ import app.amber.feature.board.hotlist.deepread.statusOf
 import app.amber.feature.board.hotlist.deepread.errorOf
 import app.amber.feature.board.hotlist.deepread.hasAnyReadySection
 import app.amber.feature.board.hotlist.deepread.sectionFailureMessage
-import app.amber.feature.board.hotlist.deepread.verificationWarningMessage
 import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
@@ -187,10 +186,8 @@ fun DeepReadScreen(
     val lifecycleRunning = backgroundRunning || retryingStages.isNotEmpty()
     val anySectionRunning = lifecycleRunning &&
         output?.sectionStates.orEmpty().values.any { it.status == DeepReadSectionStatus.RUNNING }
-    val verificationRunning = lifecycleRunning &&
-        output?.verificationState?.status == DeepReadSectionStatus.RUNNING
     val phaseRunning = lifecycleRunning && output?.generationPhase?.isActiveDeepReadPhase() == true
-    val generating = lifecycleRunning || anySectionRunning || verificationRunning || phaseRunning
+    val generating = lifecycleRunning || anySectionRunning || phaseRunning
     val complete = output?.isComplete() == true
     val hasBasicDraft = output?.hasBasicDraft() == true
 
@@ -232,11 +229,9 @@ fun DeepReadScreen(
         customTemplate == null
     val templateSelected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null
     val sectionFailureMessage = output?.sectionFailureMessage()
-    val verificationWarningMessage = output?.verificationWarningMessage()
     val firstFailedStage = output?.firstFailedStage()
     val failureRetryLabel = when {
         firstFailedStage != null -> "仅重试这一段"
-        verificationWarningMessage != null -> "重新验真"
         else -> "重试"
     }
     fun retryFirstFailure() {
@@ -328,10 +323,6 @@ fun DeepReadScreen(
                             stages = data.sectionStates,
                             verificationState = data.verificationState,
                             generationPhase = data.generationPhase,
-                            modifier = noticeModifier,
-                        )
-                        verificationWarningMessage != null && !complete -> DeepReadVerificationWarningNotice(
-                            onRetry = { runAll(force = false) },
                             modifier = noticeModifier,
                         )
                         runError != null && !complete -> DeepReadPartialErrorNotice(
@@ -443,10 +434,6 @@ fun DeepReadScreen(
                             generationPhase = data.generationPhase,
                             modifier = noticeModifier,
                         )
-                        verificationWarningMessage != null && !complete -> DeepReadVerificationWarningNotice(
-                            onRetry = { runAll(force = false) },
-                            modifier = noticeModifier,
-                        )
                         runError != null && !complete -> DeepReadPartialErrorNotice(
                             error = runError.orEmpty(),
                             onRetry = { runAll(force = true) },
@@ -528,7 +515,7 @@ private fun RunningStageNotice(
     val phaseLabel = when (generationPhase) {
         DeepReadGenerationPhase.COLLECTING -> "资料收集"
         DeepReadGenerationPhase.PLANNING -> "结构规划"
-        DeepReadGenerationPhase.VERIFYING -> "补漏验真"
+        DeepReadGenerationPhase.VERIFYING -> "补漏"
         else -> null
     }
     if (verificationState.status == DeepReadSectionStatus.RUNNING || phaseLabel != null) {
@@ -539,7 +526,7 @@ private fun RunningStageNotice(
             shadowElevation = 4.dp,
         ) {
             Text(
-                "正在${phaseLabel ?: "补漏验真"}",
+                "正在${phaseLabel ?: "补漏"}",
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -564,40 +551,6 @@ private fun RunningStageNotice(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-    }
-}
-
-@Composable
-private fun DeepReadVerificationWarningNotice(
-    onRetry: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.96f),
-        shadowElevation = 4.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "正文已生成，验真未完成，可阅读并重新验真",
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Button(
-                onClick = onRetry,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-            ) {
-                Text("重新验真")
-            }
-        }
     }
 }
 
