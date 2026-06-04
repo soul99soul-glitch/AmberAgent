@@ -95,6 +95,7 @@ fun ChatMessage(
     val colorScheme = MaterialTheme.colorScheme
     val searchPresentation = rememberSearchPresentation(message.parts)
     val searchSources = searchPresentation.sources.takeIf { it.isNotEmpty }
+    val searchImageUrls = searchPresentation.imageUrls
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -128,7 +129,10 @@ fun ChatMessage(
                 else -> Unit
             }
         }
-        CompositionLocalProvider(LocalSearchSources provides searchSources) {
+        CompositionLocalProvider(
+            LocalSearchSources provides searchSources,
+            LocalSearchImageUrls provides searchImageUrls,
+        ) {
             if (message.role == MessageRole.ASSISTANT) {
                 SearchImageGallery(
                     images = searchPresentation.images,

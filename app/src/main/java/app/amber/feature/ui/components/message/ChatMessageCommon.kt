@@ -91,8 +91,12 @@ internal fun MessageAnnotations(
     annotations: List<UIMessageAnnotation>,
     loading: Boolean,
 ) {
-    if (annotations.isEmpty()) return
-    if (LocalSearchSources.current?.isNotEmpty == true) return
+    val visibleAnnotations = if (LocalSearchSources.current?.isNotEmpty == true) {
+        annotations.filterNot { it is UIMessageAnnotation.UrlCitation }
+    } else {
+        annotations
+    }
+    if (visibleAnnotations.isEmpty()) return
 
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
     // 2026-05-14: dropped `animateContentSizeIf(loading)` here — see
@@ -122,7 +126,7 @@ internal fun MessageAnnotations(
                         .padding(4.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    annotations.fastForEachIndexed { index, annotation ->
+                    visibleAnnotations.fastForEachIndexed { index, annotation ->
                         when (annotation) {
                             is UIMessageAnnotation.UrlCitation -> {
                                 Row(
@@ -149,7 +153,7 @@ internal fun MessageAnnotations(
                 expand = !expand
             }
         ) {
-            Text(stringResource(R.string.citations_count, annotations.size))
+            Text(stringResource(R.string.citations_count, visibleAnnotations.size))
         }
     }
 }

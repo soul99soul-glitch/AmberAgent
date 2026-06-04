@@ -39,17 +39,29 @@ internal class SearchSourcesRegistry(
     }
 }
 
+internal class SearchImageUrlRegistry(
+    private val urls: Set<String>,
+) {
+    fun contains(url: String): Boolean {
+        val normalized = normalizeSearchImageUrl(url) ?: return false
+        return normalized in urls
+    }
+}
+
 internal data class SearchPresentation(
     val images: List<SearchImageRef>,
     val sources: SearchSourcesRegistry,
+    val imageUrls: SearchImageUrlRegistry,
 )
 
 internal val EmptySearchPresentation = SearchPresentation(
     images = emptyList(),
     sources = SearchSourcesRegistry(emptyMap()),
+    imageUrls = SearchImageUrlRegistry(emptySet()),
 )
 
 internal val LocalSearchSources = compositionLocalOf<SearchSourcesRegistry?> { null }
+internal val LocalSearchImageUrls = compositionLocalOf<SearchImageUrlRegistry?> { null }
 
 internal fun List<UIMessagePart>.searchWebOutputsSignature(): String {
     return filterIsInstance<UIMessagePart.Tool>()
@@ -106,7 +118,7 @@ internal fun deriveSearchPresentation(parts: List<UIMessagePart>): SearchPresent
                 val images = item["images"] as? JsonArray ?: return@forEach
                 images.forEach { imageElement ->
                     if (imageRefs.size >= 5) return@forEach
-                    val imageUrl = imageElement.jsonPrimitive.content.takeIf(::isRenderableSearchImageUrl)
+                    val imageUrl = normalizeSearchImageUrl(imageElement.jsonPrimitive.content)
                         ?: return@forEach
                     if (seenImages.add(imageUrl)) {
                         imageRefs += SearchImageRef(
@@ -123,6 +135,7 @@ internal fun deriveSearchPresentation(parts: List<UIMessagePart>): SearchPresent
     return SearchPresentation(
         images = imageRefs,
         sources = SearchSourcesRegistry(sourceRefs),
+        imageUrls = SearchImageUrlRegistry(seenImages),
     )
 }
 
@@ -167,8 +180,13 @@ private fun JsonObject.stringValue(name: String): String? {
     return this[name]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
 }
 
-private fun isRenderableSearchImageUrl(url: String): Boolean {
-    return url.startsWith("http://") || url.startsWith("https://") || url.startsWith("//")
+internal fun normalizeSearchImageUrl(url: String): String? {
+    val clean = url.trim()
+    return when {
+        clean.startsWith("http://") || clean.startsWith("https://") -> clean
+        clean.startsWith("//") -> "https:$clean"
+        else -> null
+    }
 }
 
 private fun searchImageCaption(title: String, sourceName: String): String? {

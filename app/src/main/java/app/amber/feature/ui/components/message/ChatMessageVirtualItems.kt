@@ -252,6 +252,7 @@ internal fun ChatMessageVirtualItemContent(
     val textStyle = rememberChatMessageTextStyle()
     val searchPresentation = rememberSearchPresentation(message.parts)
     val searchSources = searchPresentation.sources.takeIf { it.isNotEmpty }
+    val searchImageUrls = searchPresentation.imageUrls
     when (item) {
         ChatMessageVirtualItem.Header -> {
             Column(
@@ -327,7 +328,10 @@ internal fun ChatMessageVirtualItemContent(
         }
 
         is ChatMessageVirtualItem.Content -> {
-            CompositionLocalProvider(LocalSearchSources provides searchSources) {
+            CompositionLocalProvider(
+                LocalSearchSources provides searchSources,
+                LocalSearchImageUrls provides searchImageUrls,
+            ) {
                 ProvideTextStyle(textStyle) {
                     if (item.block.part is UIMessagePart.Text) {
                         VirtualizedAssistantText(
@@ -358,7 +362,10 @@ internal fun ChatMessageVirtualItemContent(
         }
 
         is ChatMessageVirtualItem.MarkdownChild -> {
-            CompositionLocalProvider(LocalSearchSources provides searchSources) {
+            CompositionLocalProvider(
+                LocalSearchSources provides searchSources,
+                LocalSearchImageUrls provides searchImageUrls,
+            ) {
                 ProvideTextStyle(textStyle) {
                     VirtualizedAssistantText(
                         fullMessageParts = message.parts,
@@ -391,7 +398,10 @@ internal fun ChatMessageVirtualItemContent(
         }
 
         ChatMessageVirtualItem.Footer -> {
-            CompositionLocalProvider(LocalSearchSources provides searchSources) {
+            CompositionLocalProvider(
+                LocalSearchSources provides searchSources,
+                LocalSearchImageUrls provides searchImageUrls,
+            ) {
                 ChatMessageVirtualFooter(
                     node = node,
                     loading = loading,

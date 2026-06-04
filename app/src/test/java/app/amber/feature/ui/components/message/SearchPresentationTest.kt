@@ -48,6 +48,8 @@ class SearchPresentationTest {
 
         assertEquals(5, presentation.images.size)
         assertEquals("https://img.example/one.jpg", presentation.images[0].url)
+        assertEquals(true, presentation.imageUrls.contains("https://img.example/one.jpg"))
+        assertEquals(false, presentation.imageUrls.contains("https://img.example/not-in-search.jpg"))
         assertEquals("heightline", presentation.sources.lookup("https://www.heightline.com/other")?.name)
         assertEquals("新浪", presentation.sources.lookup("https://sina.com.cn/news")?.name)
         assertNotNull(presentation.sources.lookup("https://www.sina.com.cn/ent/music"))
@@ -68,6 +70,11 @@ class SearchPresentationTest {
         assertEquals("bbc.co.uk", normalizeSearchSourceHost("https://www.bbc.co.uk/news"))
         assertEquals("sina.com.cn", normalizeSearchSourceHost("//www.sina.com.cn/ent"))
         assertEquals("heightline.com", normalizeSearchSourceHost("heightline.com/story"))
+    }
+
+    @Test
+    fun normalizesProtocolRelativeImageUrls() {
+        assertEquals("https://cdn.example/image.jpg", normalizeSearchImageUrl("//cdn.example/image.jpg"))
     }
 
     private fun searchTool(output: String): UIMessagePart.Tool {

@@ -75,6 +75,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
+import app.amber.feature.ui.components.message.LocalSearchImageUrls
 import app.amber.feature.ui.components.message.LocalSearchSources
 import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.table.DataTable
@@ -275,6 +276,7 @@ private fun HtmlBlockElement(
         "img" -> {
             val src = element.attr("src")
             val alt = element.attr("alt")
+            if (LocalSearchImageUrls.current?.contains(src) == true) return
             if (src.isNotEmpty()) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     ZoomableAsyncImage(
@@ -801,6 +803,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                 tag == "img" -> {
                     val src = node.attr("src")
                     val alt = node.attr("alt")
+                    if (LocalSearchImageUrls.current?.contains(src) == true) return
                     if (src.isNotEmpty()) {
                         ZoomableAsyncImage(
                             model = src,

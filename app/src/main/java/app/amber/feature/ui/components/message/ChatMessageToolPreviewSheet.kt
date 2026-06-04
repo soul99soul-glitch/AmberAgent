@@ -151,38 +151,6 @@ private fun SearchWebPreview(
             }
         }
 
-        // Top-level image thumbnails (from available_images)
-        val topImages = content.jsonObject["available_images"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
-            ?.take(5)
-            .orEmpty()
-        if (topImages.isNotEmpty()) {
-            item {
-                Text(
-                    text = "相关图片 (${topImages.size})",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                )
-            }
-            item {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    topImages.forEach { imgUrl ->
-                        ZoomableAsyncImage(
-                            model = imgUrl,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .height(64.dp)
-                                .widthIn(max = 100.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                        )
-                    }
-                }
-            }
-        }
-
         if (items.isNotEmpty()) {
             items(items) { item ->
                 val url = item.getStringContent("url") ?: return@items

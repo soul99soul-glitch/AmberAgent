@@ -84,6 +84,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import app.amber.agent.BuildConfig
+import app.amber.feature.ui.components.message.LocalSearchImageUrls
 import app.amber.feature.ui.components.message.LocalSearchSources
 import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.table.DataTable
@@ -1316,6 +1317,7 @@ private fun MarkdownNode(
             val altText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content) ?: ""
             val imageUrl =
                 node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
+            if (LocalSearchImageUrls.current?.contains(imageUrl) == true) return
             Column(
                 modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally
             ) {

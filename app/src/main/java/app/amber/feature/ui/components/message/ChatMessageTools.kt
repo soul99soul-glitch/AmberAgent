@@ -890,29 +890,6 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 )
                             }
                         }
-                        // Show search result thumbnails inline on the collapsed card
-                        val searchImages = content?.jsonObject?.get("available_images")
-                            ?.jsonArray
-                            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
-                            ?.take(3)
-                            .orEmpty()
-                        if (searchImages.isNotEmpty()) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(top = 4.dp),
-                            ) {
-                                searchImages.forEach { imgUrl ->
-                                    ZoomableAsyncImage(
-                                        model = imgUrl,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .height(48.dp)
-                                            .widthIn(max = 72.dp)
-                                            .clip(RoundedCornerShape(6.dp)),
-                                    )
-                                }
-                            }
-                        }
                     }
                     if (tool.toolName == ToolNames.SCRAPE_WEB) {
                         val url = arguments.getStringContent("url") ?: ""
