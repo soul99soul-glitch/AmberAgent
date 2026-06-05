@@ -45,6 +45,7 @@ internal fun VirtualizedAssistantText(
     part: UIMessagePart.Text,
     assistant: Assistant?,
     markdownChild: ChatMessageVirtualItem.MarkdownChild?,
+    attachments: List<BlockAttachment> = emptyList(),
     showAssistantBubble: Boolean,
     onGenerativeWidgetAction: (String) -> Unit,
 ) {
@@ -53,11 +54,14 @@ internal fun VirtualizedAssistantText(
     MessageSelectionContainer {
         if (markdownChild != null) {
             val blockContent: @Composable () -> Unit = {
-                MarkdownTopLevelBlock(
-                    data = markdownChild.parseResult,
-                    blockIndex = markdownChild.blockIndex,
-                    onClickCitation = handleClickCitation,
-                )
+                Column {
+                    MarkdownTopLevelBlock(
+                        data = markdownChild.parseResult,
+                        blockIndex = markdownChild.blockIndex,
+                        onClickCitation = handleClickCitation,
+                    )
+                    BlockAttachments(attachments)
+                }
             }
             if (showAssistantBubble) {
                 AssistantBubbleSegment(
@@ -104,6 +108,18 @@ internal fun VirtualizedAssistantText(
                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun BlockAttachments(attachments: List<BlockAttachment>) {
+    attachments.forEach { attachment ->
+        when (attachment) {
+            is BlockAttachment.SearchImages -> SearchImageGallery(
+                images = attachment.images,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

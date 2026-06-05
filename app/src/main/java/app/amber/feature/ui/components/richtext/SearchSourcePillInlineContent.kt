@@ -18,6 +18,7 @@ import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -34,7 +35,7 @@ internal fun AnnotatedString.Builder.appendSearchSourcePill(
         key,
         InlineTextContent(
             placeholder = Placeholder(
-                width = (cleanLabel.length.coerceAtLeast(2) * 7).sp,
+                width = sourcePillWidth(cleanLabel).sp,
                 height = 1.em,
                 placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
             ),
@@ -50,6 +51,9 @@ internal fun AnnotatedString.Builder.appendSearchSourcePill(
                     Text(
                         text = cleanLabel,
                         modifier = Modifier.wrapContentSize(),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
                         style = TextStyle(
                             fontSize = 10.sp,
                             lineHeight = 10.sp,
@@ -64,3 +68,20 @@ internal fun AnnotatedString.Builder.appendSearchSourcePill(
     )
     appendInlineContent(key)
 }
+
+private fun sourcePillWidth(label: String): Float {
+    val units = label.sumOf { char ->
+        when {
+            char.isWideGlyph() -> 2.0
+            char.isUpperCase() -> 1.15
+            else -> 1.0
+        }
+    }.coerceAtLeast(2.0)
+    return (units * 7.2 + 8).toFloat()
+}
+
+private fun Char.isWideGlyph(): Boolean =
+    code in 0x2E80..0x9FFF ||
+        code in 0xAC00..0xD7AF ||
+        code in 0xF900..0xFAFF ||
+        code in 0xFF00..0xFFEF

@@ -58,9 +58,9 @@ import app.amber.feature.ui.components.ui.LocalExportContext
  *     strip can be scrolled, same affordance as the markdown table fallback.
  *     User swipes left to reveal more; right-edge thumbs slide in, left-edge
  *     thumbs slide out of view.
- *   * **Load failure** → cell collapses to height 0 instead of leaving a
- *     placeholder rectangle. Avoids the "wall of grey blocks" effect when half
- *     the search results 404 or hot-link-block their images.
+ *   * **Load failure** → keep the measured cell stable so a transient image
+ *     error does not permanently collapse a thumbnail during scroll/viewer
+ *     navigation.
  *   * **Tap** → opens [ImagePreviewDialog] zoomable viewer.
  */
 @Composable
@@ -133,7 +133,7 @@ fun SearchImageBlock(
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(gap),
             ) {
-                items(entries) { entry ->
+                items(entries, key = { it.url }) { entry ->
                     ThumbnailImage(
                         url = entry.url,
                         modifier = Modifier.width(cellWidth),
@@ -153,10 +153,7 @@ private fun SingleImage(
 ) {
     val context = LocalContext.current
     val export = LocalExportContext.current
-    var failed by remember(entry.url) { mutableStateOf(false) }
-    var showViewer by remember { mutableStateOf(false) }
-
-    if (failed) return // collapse to zero height — no placeholder rectangle
+    var showViewer by remember(entry.url) { mutableStateOf(false) }
 
     val request = remember(entry.url, export) {
         ImageRequest.Builder(context)
@@ -187,7 +184,6 @@ private fun SingleImage(
             // grows downward instead of stretching the photo.
             contentScale = ContentScale.Inside,
             alignment = Alignment.Center,
-            onError = { failed = true },
         )
         entry.caption?.let { caption ->
             Text(
@@ -215,12 +211,7 @@ private fun ThumbnailImage(
 ) {
     val context = LocalContext.current
     val export = LocalExportContext.current
-    var failed by remember(url) { mutableStateOf(false) }
-    var showViewer by remember { mutableStateOf(false) }
-
-    if (failed) {
-        return
-    }
+    var showViewer by remember(url) { mutableStateOf(false) }
 
     val request = remember(url, export) {
         ImageRequest.Builder(context)
@@ -251,7 +242,6 @@ private fun ThumbnailImage(
             .clip(RoundedCornerShape(8.dp))
             .clickable { showViewer = true },
         contentScale = ContentScale.Crop,
-        onError = { failed = true },
     )
     if (showViewer) {
         ImagePreviewDialog(images = listOf(url)) { showViewer = false }

@@ -73,4 +73,11 @@ object PerfFlags {
      * frame. Default keeps the legacy direct requestScroll path.
      */
     const val USE_UNIFIED_STREAMING_BOTTOM_FOLLOW = false
+
+    /**
+     * Search result images A/B — attach images referenced by answer citations
+     * or links to the matching virtualized markdown block. Unreferenced images
+     * remain in the header gallery.
+     */
+    const val SEARCH_INLINE_IMAGES = true
 }

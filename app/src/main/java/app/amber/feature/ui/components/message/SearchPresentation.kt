@@ -12,13 +12,22 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.intellij.markdown.IElementType
+import org.intellij.markdown.MarkdownElementTypes
+import org.intellij.markdown.ast.ASTNode
+import org.intellij.markdown.ast.getTextInNode
 import java.net.URI
 import java.util.Locale
+
+// Covers preprocessed link destinations that contain a rewritten bare URL fragment: `](url)`.
+private val RewrittenLinkDestinationRegex = Regex("""\]\((https?://[^)]+)\)""")
 
 internal data class SearchImageRef(
     val url: String,
     val caption: String? = null,
     val sourceId: String? = null,
+    /** Display/debug only; matching uses imagesByHost and does not read this field. */
+    val host: String? = null,
 )
 
 internal data class SourceRef(
@@ -52,6 +61,9 @@ internal data class SearchPresentation(
     val images: List<SearchImageRef>,
     val sources: SearchSourcesRegistry,
     val imageUrls: SearchImageUrlRegistry,
+    val imagesById: Map<String, List<SearchImageRef>> = emptyMap(),
+    val imagesByCanonicalUrl: Map<String, List<SearchImageRef>> = emptyMap(),
+    val imagesByHost: Map<String, List<SearchImageRef>> = emptyMap(),
 )
 
 internal val EmptySearchPresentation = SearchPresentation(
@@ -92,6 +104,9 @@ internal fun deriveSearchPresentation(parts: List<UIMessagePart>): SearchPresent
     val sourceRefs = linkedMapOf<String, SourceRef>()
     val imageRefs = mutableListOf<SearchImageRef>()
     val seenImages = linkedSetOf<String>()
+    val imagesById = linkedMapOf<String, MutableList<SearchImageRef>>()
+    val imagesByCanonicalUrl = linkedMapOf<String, MutableList<SearchImageRef>>()
+    val imagesByHost = linkedMapOf<String, MutableList<SearchImageRef>>()
 
     parts.filterIsInstance<UIMessagePart.Tool>()
         .filter { it.toolName == "search_web" && it.isExecuted }
@@ -106,6 +121,7 @@ internal fun deriveSearchPresentation(parts: List<UIMessagePart>): SearchPresent
                 val host = normalizeSearchSourceHost(url)
                     ?: normalizeSearchSourceHost(item.stringValue("domain").orEmpty())
                     ?: return@forEach
+                val canonicalUrl = canonicalizeSearchUrl(url)
                 val title = item.stringValue("title").orEmpty()
                 val source = SourceRef(
                     host = host,
@@ -125,7 +141,12 @@ internal fun deriveSearchPresentation(parts: List<UIMessagePart>): SearchPresent
                             url = imageUrl,
                             caption = searchImageCaption(title = title, sourceName = source.name),
                             sourceId = source.id,
-                        )
+                            host = host,
+                        ).also { image ->
+                            source.id?.let { id -> imagesById.addImage(id, image) }
+                            canonicalUrl?.let { canonical -> imagesByCanonicalUrl.addImage(canonical, image) }
+                            imagesByHost.addImage(host, image)
+                        }
                     }
                 }
             }
@@ -136,6 +157,9 @@ internal fun deriveSearchPresentation(parts: List<UIMessagePart>): SearchPresent
         images = imageRefs,
         sources = SearchSourcesRegistry(sourceRefs),
         imageUrls = SearchImageUrlRegistry(seenImages),
+        imagesById = imagesById.freezeImageIndex(),
+        imagesByCanonicalUrl = imagesByCanonicalUrl.freezeImageIndex(),
+        imagesByHost = imagesByHost.freezeImageIndex(),
     )
 }
 
@@ -187,6 +211,145 @@ internal fun normalizeSearchImageUrl(url: String): String? {
         clean.startsWith("//") -> "https:$clean"
         else -> null
     }
+}
+
+internal fun canonicalizeSearchUrl(url: String): String? {
+    val clean = url.trim()
+    if (clean.isBlank()) return null
+    val candidate = when {
+        clean.startsWith("//") -> "https:$clean"
+        clean.startsWith("http://") || clean.startsWith("https://") -> clean
+        else -> return null
+    }
+    val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
+    val host = uri.host
+        ?.lowercase(Locale.ROOT)
+        ?.removePrefix("www.")
+        ?: return null
+    val rawPath = uri.rawPath.orEmpty().trimEnd('/')
+    val path = rawPath.ifBlank { "/" }
+    val query = uri.rawQuery
+        ?.split('&')
+        ?.filterNot { it.substringBefore('=').lowercase(Locale.ROOT).startsWith("utm_") }
+        ?.joinToString("&")
+        .orEmpty()
+    return buildString {
+        append(host)
+        append(path)
+        if (query.isNotBlank()) {
+            append('?')
+            append(query)
+        }
+    }
+}
+
+internal sealed interface SearchBlockRef {
+    data class Citation(val id: String) : SearchBlockRef
+    data class Link(val url: String) : SearchBlockRef
+}
+
+internal fun extractSearchBlockReferences(blockNode: ASTNode, content: String): List<SearchBlockRef> {
+    val refs = mutableListOf<SearchBlockRef>()
+    blockNode.collectSearchBlockReferences(content, refs)
+    return refs
+}
+
+internal class SearchBlockImageAnchorResolver(
+    private val presentation: SearchPresentation,
+    private val perBlockCap: Int = 2,
+) {
+    private val used = linkedSetOf<String>()
+
+    fun resolveBlock(blockNode: ASTNode, content: String): List<SearchImageRef> {
+        val images = mutableListOf<SearchImageRef>()
+        extractSearchBlockReferences(blockNode, content).forEach { ref ->
+            if (images.size >= perBlockCap) return@forEach
+            val candidates = when (ref) {
+                is SearchBlockRef.Citation -> presentation.imagesById[ref.id].orEmpty()
+                is SearchBlockRef.Link -> {
+                    val byUrl = canonicalizeSearchUrl(ref.url)
+                        ?.let { presentation.imagesByCanonicalUrl[it] }
+                        .orEmpty()
+                    byUrl.ifEmpty {
+                        normalizeSearchSourceHost(ref.url)
+                            ?.let { presentation.imagesByHost[it] }
+                            .orEmpty()
+                    }
+                }
+            }
+            candidates.firstOrNull { it.url !in used }?.let { image ->
+                used += image.url
+                images += image
+            }
+        }
+        return images
+    }
+
+    fun orphans(): List<SearchImageRef> {
+        return presentation.images.filter { it.url !in used }
+    }
+}
+
+private fun ASTNode.collectSearchBlockReferences(content: String, refs: MutableList<SearchBlockRef>) {
+    when (type) {
+        MarkdownElementTypes.CODE_BLOCK,
+        MarkdownElementTypes.CODE_FENCE,
+        MarkdownElementTypes.CODE_SPAN,
+        MarkdownElementTypes.IMAGE -> return
+        MarkdownElementTypes.INLINE_LINK -> {
+            val linkText = findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)
+                ?.getTextInNode(content)
+                ?.toString()
+                ?.trim { it == '[' || it == ']' }
+                .orEmpty()
+            val linkDest = findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)
+                ?.getTextInNode(content)
+                ?.toString()
+                ?.cleanSearchLinkDestination()
+                .orEmpty()
+            if (linkDest.isNotBlank()) {
+                if (linkText.startsWith("citation,") && linkDest.length == 6) {
+                    refs += SearchBlockRef.Citation(linkDest)
+                } else {
+                    refs += SearchBlockRef.Link(linkDest)
+                }
+            }
+            return
+        }
+    }
+    children.forEach { child -> child.collectSearchBlockReferences(content, refs) }
+}
+
+private fun String.cleanSearchLinkDestination(): String {
+    val clean = trim().replace("&amp;", "&")
+    return RewrittenLinkDestinationRegex.find(clean)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?: clean
+}
+
+private fun ASTNode.findChildOfTypeRecursive(vararg types: IElementType): ASTNode? {
+    if (type in types) return this
+    children.forEach { child ->
+        val result = child.findChildOfTypeRecursive(*types)
+        if (result != null) return result
+    }
+    return null
+}
+
+private fun MutableMap<String, MutableList<SearchImageRef>>.addImage(
+    key: String,
+    image: SearchImageRef,
+) {
+    getOrPut(key) { mutableListOf() }.add(image)
+}
+
+private fun Map<String, List<SearchImageRef>>.distinctImageUrls(): Map<String, List<SearchImageRef>> {
+    return mapValues { (_, images) -> images.distinctBy { it.url } }
+}
+
+private fun Map<String, MutableList<SearchImageRef>>.freezeImageIndex(): Map<String, List<SearchImageRef>> {
+    return mapValues { (_, images) -> images.toList() }.distinctImageUrls()
 }
 
 private fun searchImageCaption(title: String, sourceName: String): String? {

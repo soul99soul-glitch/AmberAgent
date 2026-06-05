@@ -25,6 +25,7 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyUIMessage
+import app.amber.agent.PerfFlags
 import app.amber.agent.Screen
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
@@ -48,7 +49,9 @@ private val MarkdownTableLineRegex = Regex("""(?m)^\s*\|.+\|\s*$""")
 internal sealed interface ChatMessageVirtualItem {
     val keySuffix: String
 
-    data object Header : ChatMessageVirtualItem {
+    data class Header(
+        val galleryImages: List<SearchImageRef> = emptyList(),
+    ) : ChatMessageVirtualItem {
         override val keySuffix: String = "header"
     }
 
@@ -100,6 +103,7 @@ internal sealed interface ChatMessageVirtualItem {
         val content: String,
         val parseResult: MarkdownParseResult,
         val blockIndex: Int,
+        val attachments: List<BlockAttachment> = emptyList(),
     ) : ChatMessageVirtualItem {
         override val keySuffix: String =
             "content-${block.index}-markdown-$blockIndex-${parseResult.topLevelBlockKey(blockIndex)}"
@@ -108,6 +112,12 @@ internal sealed interface ChatMessageVirtualItem {
     data object Footer : ChatMessageVirtualItem {
         override val keySuffix: String = "footer"
     }
+}
+
+internal sealed interface BlockAttachment {
+    data class SearchImages(
+        val images: List<SearchImageRef>,
+    ) : BlockAttachment
 }
 
 internal fun MessageNode.chatMessageVirtualizationPrewarmTexts(
@@ -150,6 +160,12 @@ internal fun buildChatMessageVirtualItems(
 
     val groupedParts = message.parts.groupMessageParts()
     val shouldSplitComplexMessage = groupedParts.size > 2 || message.parts.size > 4
+    val searchPresentation = deriveSearchPresentation(message.parts)
+    val imageAnchorResolver = if (PerfFlags.SEARCH_INLINE_IMAGES && searchPresentation.images.isNotEmpty()) {
+        SearchBlockImageAnchorResolver(searchPresentation)
+    } else {
+        null
+    }
     var hasVirtualMarkdown = false
     val bodyItems = buildList {
         groupedParts.fastForEachIndexed { index, block ->
@@ -181,12 +197,21 @@ internal fun buildChatMessageVirtualItems(
                         ) {
                             hasVirtualMarkdown = true
                             repeat(parseResult.topLevelBlockCount()) { blockIndex ->
+                                val attachments = imageAnchorResolver
+                                    ?.resolveBlock(
+                                        blockNode = parseResult.astTree.children[blockIndex],
+                                        content = parseResult.preprocessed,
+                                    )
+                                    ?.takeIf { it.isNotEmpty() }
+                                    ?.let { listOf(BlockAttachment.SearchImages(it)) }
+                                    .orEmpty()
                                 add(
                                     ChatMessageVirtualItem.MarkdownChild(
                                         block = block,
                                         content = content,
                                         parseResult = parseResult,
                                         blockIndex = blockIndex,
+                                        attachments = attachments,
                                     )
                                 )
                             }
@@ -210,8 +235,9 @@ internal fun buildChatMessageVirtualItems(
     }
 
     if (!hasVirtualMarkdown && !shouldSplitComplexMessage) return null
+    val galleryImages = imageAnchorResolver?.orphans() ?: searchPresentation.images
     return buildList {
-        add(ChatMessageVirtualItem.Header)
+        add(ChatMessageVirtualItem.Header(galleryImages = galleryImages))
         addAll(bodyItems)
         add(ChatMessageVirtualItem.Footer)
     }
@@ -254,7 +280,7 @@ internal fun ChatMessageVirtualItemContent(
     val searchSources = searchPresentation.sources.takeIf { it.isNotEmpty }
     val searchImageUrls = searchPresentation.imageUrls
     when (item) {
-        ChatMessageVirtualItem.Header -> {
+        is ChatMessageVirtualItem.Header -> {
             Column(
                 modifier = modifier
                     .fillMaxWidth()
@@ -271,7 +297,7 @@ internal fun ChatMessageVirtualItemContent(
                     )
                 }
                 SearchImageGallery(
-                    images = searchPresentation.images,
+                    images = item.galleryImages,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -372,6 +398,7 @@ internal fun ChatMessageVirtualItemContent(
                         part = item.block.part as UIMessagePart.Text,
                         assistant = assistant,
                         markdownChild = item,
+                        attachments = item.attachments,
                         showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                     )

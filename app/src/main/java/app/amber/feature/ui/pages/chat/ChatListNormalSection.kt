@@ -986,7 +986,7 @@ internal fun ChatListNormal(
                             virtualItem.isAdjacentMarkdownChild(nextVirtualItem) -> 0.dp
                             else -> TimelineMessageInnerSpacing
                         }
-                        val virtualItemKey = if (virtualItem == ChatMessageVirtualItem.Header) {
+                        val virtualItemKey = if (virtualItem is ChatMessageVirtualItem.Header) {
                             node.id
                         } else {
                             "${node.id}:${virtualItem.keySuffix}"
