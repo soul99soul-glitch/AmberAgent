@@ -7,7 +7,10 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import kotlin.uuid.Uuid
 
 class ChatListSupportTest {
@@ -76,5 +79,133 @@ class ChatListSupportTest {
                 messageNodes = listOf(MessageNode.of(toolMessage)),
             ).latestRenderToken(),
         )
+    }
+
+    @Test
+    fun `generation end settle only runs on active generation falling edge`() {
+        assertTrue(
+            TimelineFollowEndSettlePolicy.effectPlan(
+                wasActiveGeneration = true,
+                activeGeneration = false,
+                autoScrollEnabled = true,
+            ).runEndSettleBeforeIdle
+        )
+        assertFalse(
+            TimelineFollowEndSettlePolicy.effectPlan(
+                wasActiveGeneration = false,
+                activeGeneration = false,
+                autoScrollEnabled = true,
+            ).runEndSettleBeforeIdle
+        )
+        assertFalse(
+            TimelineFollowEndSettlePolicy.effectPlan(
+                wasActiveGeneration = true,
+                activeGeneration = true,
+                autoScrollEnabled = true,
+            ).enterIdleAfterEndSettle
+        )
+    }
+
+    @Test
+    fun `generation end settle keeps idle after settle ordering`() {
+        val plan = TimelineFollowEndSettlePolicy.effectPlan(
+            wasActiveGeneration = true,
+            activeGeneration = false,
+            autoScrollEnabled = true,
+        )
+
+        assertTrue(plan.runEndSettleBeforeIdle)
+        assertTrue(plan.enterIdleAfterEndSettle)
+    }
+
+    @Test
+    fun `generation end settle gate respects follow mode finger and scroll state`() {
+        assertTrue(
+            TimelineFollowEndSettlePolicy.canSettleNow(
+                followMode = TimelineFollowMode.FollowingBottom,
+                userScrollInTimeline = false,
+                scrollInProgress = false,
+            )
+        )
+        assertFalse(
+            TimelineFollowEndSettlePolicy.canSettleNow(
+                followMode = TimelineFollowMode.PausedForUser,
+                userScrollInTimeline = false,
+                scrollInProgress = false,
+            )
+        )
+        assertFalse(
+            TimelineFollowEndSettlePolicy.canSettleNow(
+                followMode = TimelineFollowMode.FollowingBottom,
+                userScrollInTimeline = true,
+                scrollInProgress = false,
+            )
+        )
+        assertFalse(
+            TimelineFollowEndSettlePolicy.canSettleNow(
+                followMode = TimelineFollowMode.FollowingBottom,
+                userScrollInTimeline = false,
+                scrollInProgress = true,
+            )
+        )
+    }
+
+    @Test
+    fun `generation end settle can still attempt while scroll is settling`() {
+        assertTrue(
+            TimelineFollowEndSettlePolicy.canAttemptSettle(
+                followMode = TimelineFollowMode.FollowingBottom,
+                userScrollInTimeline = false,
+            )
+        )
+        assertFalse(
+            TimelineFollowEndSettlePolicy.canAttemptSettle(
+                followMode = TimelineFollowMode.PausedForUser,
+                userScrollInTimeline = false,
+            )
+        )
+        assertFalse(
+            TimelineFollowEndSettlePolicy.canAttemptSettle(
+                followMode = TimelineFollowMode.FollowingBottom,
+                userScrollInTimeline = true,
+            )
+        )
+    }
+
+    @Test
+    fun `generation end settle accepts bottom buffer but not missing anchor`() {
+        assertTrue(TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(distancePx = 0, bottomBufferPx = 24))
+        assertTrue(TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(distancePx = 24, bottomBufferPx = 24))
+        assertFalse(TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(distancePx = 25, bottomBufferPx = 24))
+        assertFalse(TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(distancePx = null, bottomBufferPx = 24))
+    }
+
+    @Test
+    fun `chat streaming follow path keeps stable pointer key and chunk emits only`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+
+        assertTrue(source.contains(".pointerInput(conversation.id)"))
+        assertFalse(source.contains(".pointerInput(activeGeneration, settings.displaySetting.enableAutoScroll, conversation.id)"))
+        assertTrue(source.contains("requestStreamingBottomFollow(\"chunk\")"))
+        assertFalse(source.contains("requestTimelineBottom(\"chunk\")"))
+        assertTrue(source.contains("streamingVisibleEvents.conflate()"))
+    }
+
+    @Test
+    fun `streaming bottom follow events use drop oldest buffer`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatStreamingFollowPolicy.kt").readText()
+
+        assertTrue(source.contains("extraBufferCapacity = 1"))
+        assertTrue(source.contains("onBufferOverflow = BufferOverflow.DROP_OLDEST"))
+        assertTrue(createStreamingBottomFollowEvents().tryEmit("chunk"))
+        assertTrue(createStreamingBottomFollowEvents().tryEmit("visible"))
+    }
+
+    private fun repoFile(pathInAppModule: String): File {
+        return listOf(
+            File(pathInAppModule),
+            File("app/$pathInAppModule"),
+        ).firstOrNull { it.isFile }
+            ?: error("Cannot locate $pathInAppModule")
     }
 }

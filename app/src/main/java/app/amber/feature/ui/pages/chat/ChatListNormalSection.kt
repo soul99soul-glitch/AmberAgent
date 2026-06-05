@@ -61,9 +61,7 @@ import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -151,6 +149,7 @@ internal fun ChatListNormal(
     val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
     val activeGeneration = loading || pendingUserMessages.isNotEmpty() || compactInTimelineActive
     val activeGenerationState by rememberUpdatedState(activeGeneration)
+    val enableAutoScrollState by rememberUpdatedState(settings.displaySetting.enableAutoScroll)
     val timelineLoadStateState by rememberUpdatedState(timelineLoadState)
     val loadOlderTimelineState by rememberUpdatedState(onLoadOlderTimeline)
     val ensureTimelineLoadedState by rememberUpdatedState(onEnsureTimelineLoaded)
@@ -160,6 +159,7 @@ internal fun ChatListNormal(
     var programmaticScrollToken by remember(conversation.id) { mutableIntStateOf(0) }
     var imeProgrammaticScrollToken by remember(conversation.id) { mutableStateOf<Int?>(null) }
     var userScrollInTimeline by remember(conversation.id) { mutableStateOf(false) }
+    var previousActiveGeneration by remember(conversation.id) { mutableStateOf(activeGeneration) }
     val density = LocalDensity.current
     val captureProgress = LocalScrollCaptureInProgress.current
     // 2026-05-16: 24dp ≈ 1 line of CJK at default size. 48dp (≈ 1.7 lines)
@@ -335,6 +335,81 @@ internal fun ChatListNormal(
         endProgrammaticScroll(token)
     }
 
+    suspend fun waitForGenerationEndSettleGate(): Boolean {
+        repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) {
+            if (
+                TimelineFollowEndSettlePolicy.canSettleNow(
+                    followMode = followMode,
+                    userScrollInTimeline = userScrollInTimeline,
+                    scrollInProgress = state.isScrollInProgress,
+                )
+            ) {
+                return true
+            }
+            if (
+                !TimelineFollowEndSettlePolicy.canAttemptSettle(
+                    followMode = followMode,
+                    userScrollInTimeline = userScrollInTimeline,
+                )
+            ) {
+                return false
+            }
+            withFrameNanos { }
+        }
+        return TimelineFollowEndSettlePolicy.canAttemptSettle(
+            followMode = followMode,
+            userScrollInTimeline = userScrollInTimeline,
+        )
+    }
+
+    suspend fun settleAfterGenerationEnd() {
+        if (!waitForGenerationEndSettleGate()) {
+            logScroll("generationEndSettle.skip", "gate=false")
+            return
+        }
+        repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) { frame ->
+            val distanceBefore = state.distanceToTimelineBottomPx()
+            if (
+                TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
+                    distancePx = distanceBefore,
+                    bottomBufferPx = bottomFollowBufferPx,
+                )
+            ) {
+                logScroll("generationEndSettle.done", "frame=$frame distancePx=$distanceBefore")
+                return
+            }
+            if (
+                !TimelineFollowEndSettlePolicy.canAttemptSettle(
+                    followMode = followMode,
+                    userScrollInTimeline = userScrollInTimeline,
+                )
+            ) {
+                logScroll("generationEndSettle.stop", "frame=$frame distancePx=$distanceBefore")
+                return
+            }
+            val reason = if (frame == 0) {
+                "generationEnded"
+            } else {
+                "generationEnded-settle-$frame"
+            }
+            scrollToTimelineBottom(reason, smoothLargeMove = false)
+            withFrameNanos { }
+            val distanceAfter = state.distanceToTimelineBottomPx()
+            logScroll(
+                "generationEndSettle.frame",
+                "frame=$frame before=$distanceBefore after=$distanceAfter",
+            )
+            if (
+                TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
+                    distancePx = distanceAfter,
+                    bottomBufferPx = bottomFollowBufferPx,
+                )
+            ) {
+                return
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
             if (settings.displaySetting.enableVolumeKeyScroll) {
@@ -493,25 +568,26 @@ internal fun ChatListNormal(
         activeGeneration,
         conversation.id,
     ) {
+        val effectPlan = TimelineFollowEndSettlePolicy.effectPlan(
+            wasActiveGeneration = previousActiveGeneration,
+            activeGeneration = activeGeneration,
+            autoScrollEnabled = settings.displaySetting.enableAutoScroll,
+        )
+        previousActiveGeneration = activeGeneration
         logScroll(
             "LE_init",
             "enableAutoScroll=${settings.displaySetting.enableAutoScroll} convId=${conversation.id}"
         )
-        if (!settings.displaySetting.enableAutoScroll) {
-            logScroll("LE_init.branch", "→ enterIdleFollowMode (autoScrollOff)")
-            enterIdleFollowMode()
-        } else if (!activeGeneration) {
-            if (
-                followMode == TimelineFollowMode.FollowingBottom &&
-                !userScrollInTimeline &&
-                !state.isScrollInProgress
-            ) {
-                withFrameNanos { }
-                scrollToTimelineBottom("generationEnded", smoothLargeMove = false)
-                withFrameNanos { }
-                scrollToTimelineBottom("generationEnded-settle", smoothLargeMove = false)
+        if (effectPlan.enterIdleAfterEndSettle) {
+            if (effectPlan.runEndSettleBeforeIdle) {
+                settleAfterGenerationEnd()
             }
-            logScroll("LE_init.branch", "→ enterIdleFollowMode (generationOff)")
+            val idleReason = if (settings.displaySetting.enableAutoScroll) {
+                "generationOff"
+            } else {
+                "autoScrollOff"
+            }
+            logScroll("LE_init.branch", "→ enterIdleFollowMode ($idleReason)")
             enterIdleFollowMode()
         } else if (
             followMode == TimelineFollowMode.Idle &&
@@ -712,14 +788,7 @@ internal fun ChatListNormal(
     // matching RikkaHub's simpler bottom-follow feel.
     val showPinnedAgentWorkingIndicator = false
     val streamingVisibleEvents = remember(conversation.id) {
-        if (PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW) {
-            MutableSharedFlow<String>(
-                extraBufferCapacity = 1,
-                onBufferOverflow = BufferOverflow.DROP_OLDEST,
-            )
-        } else {
-            MutableSharedFlow<String>(extraBufferCapacity = 1)
-        }
+        createStreamingBottomFollowEvents()
     }
     fun requestStreamingBottomFollow(reason: String) {
         streamingVisibleEvents.tryEmit(reason)
@@ -731,14 +800,7 @@ internal fun ChatListNormal(
     ) {
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(streamingVisibleEvents, conversation.id) {
-                val bottomFollowEvents = if (
-                    PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW ||
-                    PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL
-                ) {
-                    streamingVisibleEvents.conflate()
-                } else {
-                    streamingVisibleEvents
-                }
+                val bottomFollowEvents = streamingVisibleEvents.conflate()
                 bottomFollowEvents.collect { reason ->
                     val willFollow = activeGenerationState &&
                         followMode == TimelineFollowMode.FollowingBottom &&
@@ -774,17 +836,10 @@ internal fun ChatListNormal(
                 logScroll(
                     "LE_chunk",
                     "loading=$loading pendingUserMsgs=${pendingUserMessages.size} " +
-                        "tokenSuffix=${latestRenderToken.takeLast(40)} → ${if (willFollow) "SCROLL" else "SKIP"}"
+                        "tokenSuffix=${latestRenderToken.takeLast(40)} → ${if (willFollow) "EMIT" else "SKIP"}"
                 )
                 if (willFollow) {
-                    if (
-                        PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW ||
-                        PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL
-                    ) {
-                        requestStreamingBottomFollow("chunk")
-                    } else {
-                        requestTimelineBottom("chunk")
-                    }
+                    requestStreamingBottomFollow("chunk")
                 }
             }
         }
@@ -818,7 +873,7 @@ internal fun ChatListNormal(
                 .then(
                     if (useTimelineHaze) Modifier.hazeSource(state = hazeState) else Modifier
                 )
-                .pointerInput(activeGeneration, settings.displaySetting.enableAutoScroll, conversation.id) {
+                .pointerInput(conversation.id) {
                     awaitEachGesture {
                         // Use Initial pass so we can tag a real LazyColumn scroll
                         // as user-originated before the scroll progress effect runs.
@@ -830,7 +885,10 @@ internal fun ChatListNormal(
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                         userScrollInTimeline = true
                         try {
-                            logScroll("pointerDown", "enableAS=${settings.displaySetting.enableAutoScroll}")
+                            logScroll(
+                                "pointerDown",
+                                "enableAS=$enableAutoScrollState activeGen=$activeGenerationState",
+                            )
                             do {
                                 val event = awaitPointerEvent(pass = PointerEventPass.Initial)
                             } while (event.changes.any { it.pressed })
