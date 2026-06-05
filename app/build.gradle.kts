@@ -1,5 +1,7 @@
 import groovy.json.JsonSlurper
 import com.android.build.api.dsl.Packaging
+import com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension
+import org.gradle.api.plugins.ExtensionAware
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.File
@@ -28,6 +30,9 @@ fun String.asBuildConfigString(): String =
     replace("\\", "\\\\").replace("\"", "\\\"")
 
 val xiaomiXmsAppId = projectProperty("xiaomiXmsAppId", "XIAOMI_XMS_APP_ID")
+val uploadCrashlyticsMapping = projectProperty("uploadCrashlyticsMapping", "UPLOAD_CRASHLYTICS_MAPPING")
+    .ifBlank { "true" }
+    .toBooleanStrict()
 val baseApplicationId = "app.amber.agent"
 
 // Build types that share the Amber UI/runtime contract — must each call
@@ -184,6 +189,9 @@ android {
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "FIREBASE_LOCAL_FALLBACK_ALLOWED", "false")
             buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured(baseApplicationId, name).toString())
+            (this as ExtensionAware).extensions.configure<CrashlyticsExtension>("firebaseCrashlytics") {
+                mappingFileUploadEnabled = uploadCrashlyticsMapping
+            }
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
         }
         debug {
