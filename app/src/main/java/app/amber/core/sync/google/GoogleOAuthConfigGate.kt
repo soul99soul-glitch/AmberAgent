@@ -6,10 +6,23 @@ import app.amber.agent.BuildConfig
 class GoogleOAuthConfigGate(private val context: Context) {
     fun status(): GoogleOAuthConfigStatus {
         val webClientId = generatedWebClientId()
+        if (!BuildConfig.GOOGLE_OAUTH_CONFIGURED) {
+            val reason = buildString {
+                append("当前 APK 缺少 Google Drive OAuth client，无法授权：")
+                append(BuildConfig.APPLICATION_ID)
+                append("。请使用包含该包名和签名 SHA-1 的 app/google-services.json 重新构建。")
+            }
+            return GoogleOAuthConfigStatus(
+                available = false,
+                reason = reason,
+                credentialManagerAvailable = false,
+            )
+        }
         if (webClientId.isNullOrBlank()) {
             return GoogleOAuthConfigStatus(
                 available = true,
-                reason = "Drive 授权入口可用；本地缺少 default_web_client_id，若 Google 控制台未配置当前包名与签名，授权时会由 Google 返回错误：${BuildConfig.APPLICATION_ID}",
+                reason = "Drive 授权可用；缺少 default_web_client_id，" +
+                    "暂不启用 Credential Manager ID token 登录。",
                 credentialManagerAvailable = false,
             )
         }

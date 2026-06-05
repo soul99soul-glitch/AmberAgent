@@ -31,7 +31,7 @@ val baseApplicationId = "app.amber.agent"
 
 // Build types that share the Amber UI/runtime contract — must each call
 // `applyAmberUiBuildConfig(...)` in the `buildTypes {}` block below to set
-// optional applicationIdSuffix + VERSION/XMS/Firebase fallback BuildConfig fields consistently.
+// optional applicationIdSuffix + VERSION/XMS/Firebase/OAuth BuildConfig fields consistently.
 // See the afterEvaluate parity check at file end for why.
 val amberUiBuildTypes = setOf("notion")
 
@@ -58,6 +58,17 @@ fun googleServicesClient(packageName: String): Map<*, *>? = runCatching {
             androidClientInfo?.get("package_name") == packageName
         }
 }.getOrNull()
+
+fun googleOAuthConfigured(packageName: String): Boolean {
+    val client = googleServicesClient(packageName) ?: return false
+    val oauthClients = client["oauth_client"] as? List<*> ?: return false
+    return oauthClients
+        .mapNotNull { it as? Map<*, *> }
+        .any { oauthClient ->
+            oauthClient["client_type"]?.toString() == "1" &&
+                oauthClient["client_id"]?.toString().orEmpty().isNotBlank()
+        }
+}
 
 plugins {
     alias(libs.plugins.android.application)
@@ -130,7 +141,7 @@ android {
     }
 
     // Amber UI buildType helper. Build types using the custom Amber UI resource
-    // set call this so VERSION / XMS / Firebase fallback BuildConfig fields stay consistent.
+    // set call this so VERSION / XMS / Firebase fallback / OAuth BuildConfig fields stay consistent.
     // An empty packageSuffix intentionally keeps the canonical applicationId.
     val applyAmberUiBuildConfig: com.android.build.api.dsl.ApplicationBuildType.(String) -> Unit = { packageSuffix ->
         amberUiBuildConfigApplied.add(name)
@@ -140,6 +151,11 @@ android {
         buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
         buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
         buildConfigField("Boolean", "FIREBASE_LOCAL_FALLBACK_ALLOWED", "true")
+        buildConfigField(
+            "Boolean",
+            "GOOGLE_OAUTH_CONFIGURED",
+            googleOAuthConfigured("$baseApplicationId$packageSuffix").toString(),
+        )
         manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
     }
 
@@ -157,6 +173,7 @@ android {
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "FIREBASE_LOCAL_FALLBACK_ALLOWED", "false")
+            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured(baseApplicationId).toString())
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
         }
         debug {
@@ -166,6 +183,11 @@ android {
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "FIREBASE_LOCAL_FALLBACK_ALLOWED", "true")
+            buildConfigField(
+                "Boolean",
+                "GOOGLE_OAUTH_CONFIGURED",
+                googleOAuthConfigured("$baseApplicationId.debug").toString(),
+            )
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
         create("notion") {
@@ -185,6 +207,11 @@ android {
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "FIREBASE_LOCAL_FALLBACK_ALLOWED", "true")
+            buildConfigField(
+                "Boolean",
+                "GOOGLE_OAUTH_CONFIGURED",
+                googleOAuthConfigured("$baseApplicationId.debug").toString(),
+            )
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
     }
@@ -412,7 +439,7 @@ afterEvaluate {
 // Amber UI buildType parity check.
 //
 // Amber UI variants must each call `applyAmberUiBuildConfig(...)` so
-// VERSION/XMS/Firebase fallback BuildConfig fields stay consistent with the canonical app
+// VERSION/XMS/Firebase fallback/OAuth BuildConfig fields stay consistent with the canonical app
 // shape. This afterEvaluate compares the declared set in [amberUiBuildTypes]
 // against the helper call recorder [amberUiBuildConfigApplied]; any mismatch
 // fails configure time.

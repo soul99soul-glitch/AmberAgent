@@ -7,6 +7,7 @@ import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.ClearTokenRequest
 import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import com.google.android.gms.tasks.Task
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +34,11 @@ class GoogleDriveSyncRepository(
         val request = AuthorizationRequest.builder()
             .setRequestedScopes(listOf(Scope(DRIVE_APPDATA_SCOPE)))
             .build()
-        val result = authorizationClient.authorize(request).awaitTask()
+        val result = runCatching {
+            authorizationClient.authorize(request).awaitTask()
+        }.getOrElse { error ->
+            throw error.toDriveAuthorizationException()
+        }
         return result.toAuthorizationOutcome()
     }
 
@@ -177,6 +182,27 @@ class GoogleDriveSyncRepository(
             displayName = account?.displayName.orEmpty(),
             grantedScopes = grantedScopes.orEmpty(),
         )
+    }
+
+    private fun Throwable.toDriveAuthorizationException(): Throwable {
+        if (!isUnregisteredOAuthClientError()) return this
+        return IllegalStateException(
+            "当前 APK 的 Google Drive OAuth client 未注册或签名不匹配。" +
+                "请检查 Google API Console 中 ${context.packageName} 的 Android OAuth client 和 SHA-1。",
+            this,
+        )
+    }
+
+    private fun Throwable.isUnregisteredOAuthClientError(): Boolean {
+        val statusText = when (this) {
+            is ApiException -> listOfNotNull(
+                status.statusMessage,
+                status.toString(),
+                message,
+            ).joinToString(" ")
+            else -> message.orEmpty()
+        }
+        return statusText.contains("UNREGISTERED_ON_API_CONSOLE", ignoreCase = true)
     }
 
     private suspend fun <T> Task<T>.awaitTask(): T = suspendCancellableCoroutine { continuation ->
