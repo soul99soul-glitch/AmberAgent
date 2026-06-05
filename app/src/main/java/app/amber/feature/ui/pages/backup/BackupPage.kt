@@ -154,6 +154,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     // success and surfaces the hint. Avoids showing the hint after
     // unrelated upload/download operations also complete.
     var restoreInFlight by remember { mutableStateOf(false) }
+    var restoreObservedLoading by remember { mutableStateOf(false) }
     var showRestoreSuccessDialog by remember { mutableStateOf(false) }
     val googleAvailable = vm.googleConfigStatus.available
     val hasGoogleConnection = googleSession != null ||
@@ -194,21 +195,31 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     }
 
     // Surface a "建议重启" hint dialog after a successful restore. Watching
-    // operationState alone isn't enough — uploads/downloads also flip it to
-    // Success. The restoreInFlight flag scopes the effect to actual restore
-    // operations the user just kicked off.
+    // operationState alone isn't enough — uploads/downloads and backup previews
+    // also flip it to Success. Require this restore attempt to pass through
+    // Loading before treating Success as completion.
     LaunchedEffect(operationState, restoreInFlight) {
-        if (!restoreInFlight) return@LaunchedEffect
+        if (!restoreInFlight) {
+            restoreObservedLoading = false
+            return@LaunchedEffect
+        }
         when (operationState) {
+            is UiState.Loading -> {
+                restoreObservedLoading = true
+            }
             is UiState.Success -> {
-                restoreInFlight = false
-                showRestoreSuccessDialog = true
+                if (restoreObservedLoading) {
+                    restoreInFlight = false
+                    restoreObservedLoading = false
+                    showRestoreSuccessDialog = true
+                }
             }
             is UiState.Error -> {
                 // Failure already surfaces its own toast via googleMessage /
                 // localMessage; just clear the in-flight flag so subsequent
                 // success events don't accidentally fire the hint.
                 restoreInFlight = false
+                restoreObservedLoading = false
             }
             else -> Unit
         }
@@ -399,6 +410,8 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             preview = preview,
             restoreConversations = restoreConversations,
             restoreGenMedia = restoreGenMedia,
+            restoreActivity = backupActivity,
+            restoring = restoreInFlight,
             onRestoreConversationsChange = { restoreConversations = it },
             onRestoreGenMediaChange = { restoreGenMedia = it },
             onDismiss = {
@@ -411,6 +424,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             },
             onRestore = {
                 val localUri = pendingImportUri
+                restoreObservedLoading = false
                 restoreInFlight = true
                 // UI's "restoreX" maps inversely to engine's "preserveX".
                 val preserveConversations = !restoreConversations
@@ -570,16 +584,27 @@ private fun ImportPreviewDialog(
     preview: SyncPreview,
     restoreConversations: Boolean,
     restoreGenMedia: Boolean,
+    restoreActivity: BackupActivity?,
+    restoring: Boolean,
     onRestoreConversationsChange: (Boolean) -> Unit,
     onRestoreGenMediaChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onRestore: () -> Unit,
 ) {
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (!restoring) onDismiss()
+        },
         title = { Text("确认覆盖") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (restoring) {
+                    BackupStatusContent(
+                        syncSettings = SyncSettings(),
+                        activity = restoreActivity ?: BackupActivity(title = "正在恢复备份"),
+                    )
+                    HorizontalDivider()
+                }
                 Text("创建时间：${preview.createdAt}")
                 Text("版本：${preview.manifest.appVersionName} / ${preview.manifest.appVersionCode}")
                 HorizontalDivider()
@@ -592,23 +617,38 @@ private fun ImportPreviewDialog(
                     checked = restoreConversations,
                     title = "恢复对话",
                     description = "勾选后，备份里的对话历史会覆盖本机现有对话。不勾选则保留本机对话。",
+                    enabled = !restoring,
                     onCheckedChange = onRestoreConversationsChange,
                 )
                 IncludeToggleRow(
                     checked = restoreGenMedia,
                     title = "恢复生成的图片",
                     description = "勾选后，备份里的生成图（对话内联图 + 独立画廊）会覆盖本机。不勾选则保留本机的图。",
+                    enabled = !restoring,
                     onCheckedChange = onRestoreGenMediaChange,
                 )
             }
         },
         confirmButton = {
-            Button(onClick = onRestore) {
-                Text("覆盖")
+            Button(
+                onClick = onRestore,
+                enabled = !restoring,
+            ) {
+                if (restoring) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                }
+                Text(if (restoring) "恢复中" else "覆盖")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !restoring,
+            ) {
                 Text("取消")
             }
         }
@@ -620,6 +660,7 @@ private fun IncludeToggleRow(
     checked: Boolean,
     title: String,
     description: String,
+    enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
@@ -627,6 +668,7 @@ private fun IncludeToggleRow(
             .fillMaxWidth()
             .selectable(
                 selected = checked,
+                enabled = enabled,
                 role = androidx.compose.ui.semantics.Role.Checkbox,
                 onClick = { onCheckedChange(!checked) },
             ),
@@ -635,6 +677,7 @@ private fun IncludeToggleRow(
     ) {
         Checkbox(
             checked = checked,
+            enabled = enabled,
             onCheckedChange = null,  // handled by selectable() on the row
         )
         Column(modifier = Modifier.weight(1f)) {

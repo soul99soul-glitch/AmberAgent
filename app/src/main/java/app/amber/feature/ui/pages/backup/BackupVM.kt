@@ -384,8 +384,12 @@ class BackupVM(
         // archive was uploaded without one — either way, sub in the
         // documented fallback so the engine's non-blank require() holds.
         val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
+        operationState.value = UiState.Loading
+        backupActivity.value = BackupActivity(
+            title = "正在恢复云端备份",
+            detail = "覆盖本机数据",
+        )
         viewModelScope.launch {
-            operationState.value = UiState.Loading
             runCatching {
                 googleDriveSyncRepository.restore(
                     archiveFile = archiveFile,
@@ -417,8 +421,10 @@ class BackupVM(
                 }
                 pendingCloudRestoreRevision = ""
                 googleMessage.value = ""
+                backupActivity.value = null
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
+                backupActivity.value = null
                 operationState.value = UiState.Error(error)
                 googleMessage.value = "云端恢复失败：${error.message.orEmpty()}"
                 recordError(error)
@@ -488,8 +494,12 @@ class BackupVM(
         preserveGenMedia: Boolean = true,
     ) {
         val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
+        operationState.value = UiState.Loading
+        backupActivity.value = BackupActivity(
+            title = "正在恢复本地备份",
+            detail = "覆盖本机数据",
+        )
         viewModelScope.launch {
-            operationState.value = UiState.Loading
             runCatching {
                 localBackupRepository.restoreFromUri(
                     uri = uri,
@@ -515,8 +525,10 @@ class BackupVM(
                     )
                 }
                 localMessage.value = "已恢复本地备份，建议重启应用以确保所有数据生效。"
+                backupActivity.value = null
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
+                backupActivity.value = null
                 operationState.value = UiState.Error(error)
                 localMessage.value = "本地恢复失败：${error.message.orEmpty()}"
                 recordError(error)
