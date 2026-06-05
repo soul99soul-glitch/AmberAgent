@@ -119,7 +119,7 @@ import app.amber.core.utils.JsonInstant
         OpportunityEntity::class,
         ReferenceAnchorEntity::class,
     ],
-    version = 4
+    version = 5
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -389,6 +389,19 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `board_task` ADD COLUMN `artifact_json` TEXT")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `memoryentity` ADD COLUMN `supersedes_ids_json` " +
+                        "TEXT NOT NULL DEFAULT '[]'"
+                )
+                db.execSQL(
+                    "ALTER TABLE `memory_dream_plan` ADD COLUMN `supersede_count` " +
+                        "INTEGER NOT NULL DEFAULT 0"
+                )
             }
         }
     }

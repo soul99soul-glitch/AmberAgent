@@ -182,6 +182,92 @@ class MemoryRecallStoreTest {
     }
 
     @Test
+    fun conservativeTimeHintsDoNotDecayBareHistoricalChineseFacts() {
+        val now = day("2026-08-01")
+        val terms = MemoryRecallStore.tokenize("工作旅行")
+        val plannedTrip = MemoryRecallStore.score(
+            record = record(
+                id = 1,
+                content = "用户计划 2026年7月去新加坡旅行。",
+                scope = MemoryScope.LONG_TERM,
+                kind = MemoryKind.USER,
+            ),
+            terms = terms,
+            currentText = "工作旅行",
+            now = now,
+        )
+        val hired = MemoryRecallStore.score(
+            record = record(
+                id = 2,
+                content = "用户 2025年3月入职。",
+                scope = MemoryScope.LONG_TERM,
+                kind = MemoryKind.USER,
+            ),
+            terms = terms,
+            currentText = "工作旅行",
+            now = now,
+        )
+        val wentToBeijing = MemoryRecallStore.score(
+            record = record(
+                id = 3,
+                content = "用户 2025年3月去了北京。",
+                scope = MemoryScope.LONG_TERM,
+                kind = MemoryKind.USER,
+            ),
+            terms = terms,
+            currentText = "工作旅行",
+            now = now,
+        )
+
+        assertEquals(MemoryRecallFreshness.TIME_DECAYED, plannedTrip.freshness)
+        assertEquals(MemoryRecallFreshness.CURRENT, hired.freshness)
+        assertEquals(MemoryRecallFreshness.CURRENT, wentToBeijing.freshness)
+    }
+
+    @Test
+    fun englishFutureHintsUseWordBoundaries() {
+        val now = day("2026-08-01")
+        val terms = MemoryRecallStore.tokenize("schedule")
+        val realFutureHint = MemoryRecallStore.score(
+            record = record(
+                id = 1,
+                content = "User will travel in 2026-07.",
+                scope = MemoryScope.LONG_TERM,
+                kind = MemoryKind.USER,
+            ),
+            terms = terms,
+            currentText = "schedule",
+            now = now,
+        )
+        val willing = MemoryRecallStore.score(
+            record = record(
+                id = 2,
+                content = "User was willing to discuss 2026-07 history.",
+                scope = MemoryScope.LONG_TERM,
+                kind = MemoryKind.USER,
+            ),
+            terms = terms,
+            currentText = "schedule",
+            now = now,
+        )
+        val triple = MemoryRecallStore.score(
+            record = record(
+                id = 3,
+                content = "User likes triple-checking 2026-07 reports.",
+                scope = MemoryScope.LONG_TERM,
+                kind = MemoryKind.USER,
+            ),
+            terms = terms,
+            currentText = "schedule",
+            now = now,
+        )
+
+        assertEquals(MemoryRecallFreshness.TIME_DECAYED, realFutureHint.freshness)
+        assertEquals(MemoryRecallFreshness.CURRENT, willing.freshness)
+        assertEquals(MemoryRecallFreshness.CURRENT, triple.freshness)
+    }
+
+    @Test
     fun noteDoesNotBecomeAlwaysEligibleWithoutTerms() {
         val now = day("2026-08-01")
         val ranked = MemoryRecallStore.rankRecords(

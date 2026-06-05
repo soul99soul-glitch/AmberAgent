@@ -99,11 +99,12 @@ class SettingsAggregator(
             Log.w(TAG, "Cannot update dummy settings")
             return
         }
+        val settingsForWrite = settings.withMigratedMemoryDreamLegacy()
         // [M1.1.8a W1] Mirror the pre-M1.1.8e SettingsStore.update line 484 — push value into
         // flow eagerly so caller reading settingsFlow.value immediately after
         // update() sees the new value (matches existing god-class semantics
         // before the dataStore.edit reader cycle completes).
-        _settingsFlow.value = settings
+        _settingsFlow.value = settingsForWrite
         dataStore.edit { p ->
             p[PreferencesKeys.DYNAMIC_COLOR] = settings.dynamicColor
             p[PreferencesKeys.THEME_ID] = settings.themeId
@@ -163,7 +164,7 @@ class SettingsAggregator(
             p[PreferencesKeys.MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
             p[PreferencesKeys.LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
             p[PreferencesKeys.QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
-            p[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(settings.agentRuntime)
+            p[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(settingsForWrite.agentRuntime)
             p[PreferencesKeys.BACKUP_REMINDER_CONFIG] =
                 JsonInstant.encodeToString(settings.backupReminderConfig)
             p[PreferencesKeys.SYNC_SETTINGS] = JsonInstant.encodeToString(settings.syncSettings)
@@ -470,10 +471,11 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
  * - Dedup modeInjections / lorebooks / quickMessages (by id)
  */
 internal fun applyCrossDomainConsistency(settings: Settings): Settings {
-    val validMcpServerIds = settings.mcpServers.map { it.id }.toSet()
-    val validModeInjectionIds = settings.modeInjections.map { it.id }.toSet()
-    val validLorebookIds = settings.lorebooks.map { it.id }.toSet()
-    val validQuickMessageIds = settings.quickMessages.map { it.id }.toSet()
+    val migratedSettings = settings.withMigratedMemoryDreamLegacy()
+    val validMcpServerIds = migratedSettings.mcpServers.map { it.id }.toSet()
+    val validModeInjectionIds = migratedSettings.modeInjections.map { it.id }.toSet()
+    val validLorebookIds = migratedSettings.lorebooks.map { it.id }.toSet()
+    val validQuickMessageIds = migratedSettings.quickMessages.map { it.id }.toSet()
     // [M1.1.8a B1] Reader-path search cleanup. the pre-M1.1.8e SettingsStore reader applied
     // these inline in the raw decode (PreferencesStore.kt:197-204). The 7
     // domain Prefs in M1.1.1-7 deliberately skipped them (raw mirror only),
@@ -481,22 +483,22 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
     // a user who never wrote settings (fresh install / migration gap) would
     // see stale values on read. Apply here so aggregator.settingsFlow is
     // byte-equivalent to settingsStore.settingsFlow on every read path.
-    val cleanedSearchSelected = if (settings.searchServices.isEmpty()) {
+    val cleanedSearchSelected = if (migratedSettings.searchServices.isEmpty()) {
         0
     } else {
-        settings.searchServiceSelected.coerceIn(0, settings.searchServices.lastIndex)
+        migratedSettings.searchServiceSelected.coerceIn(0, migratedSettings.searchServices.lastIndex)
     }
-    val cleanedSearchEnabledIds = settings.searchEnabledServiceIds
-        .filter { id -> settings.searchServices.any { service -> service.id == id } }
+    val cleanedSearchEnabledIds = migratedSettings.searchEnabledServiceIds
+        .filter { id -> migratedSettings.searchServices.any { service -> service.id == id } }
         .ifEmpty {
-            settings.searchServices.getOrNull(cleanedSearchSelected)
+            migratedSettings.searchServices.getOrNull(cleanedSearchSelected)
                 ?.let { listOf(it.id) }
                 .orEmpty()
         }
-    return settings.copy(
+    return migratedSettings.copy(
         searchServiceSelected = cleanedSearchSelected,
         searchEnabledServiceIds = cleanedSearchEnabledIds,
-        providers = settings.providers.distinctBy { it.id }.map { provider ->
+        providers = migratedSettings.providers.distinctBy { it.id }.map { provider ->
             when (provider) {
                 is ProviderSetting.OpenAI -> provider.copy(
                     models = provider.models.distinctBy { model -> model.id }
@@ -511,7 +513,7 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
                 )
             }
         },
-        assistants = settings.assistants.distinctBy { it.id }.map { assistant ->
+        assistants = migratedSettings.assistants.distinctBy { it.id }.map { assistant ->
             assistant.copy(
                 mcpServers = assistant.mcpServers.filter { serverId ->
                     serverId in validMcpServerIds
@@ -527,12 +529,25 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
                 }.toSet()
             )
         },
-        ttsProviders = settings.ttsProviders.distinctBy { it.id },
-        favoriteModels = settings.favoriteModels.filter { uuid ->
-            settings.providers.flatMap { it.models }.any { m -> m.id == uuid }
+        ttsProviders = migratedSettings.ttsProviders.distinctBy { it.id },
+        favoriteModels = migratedSettings.favoriteModels.filter { uuid ->
+            migratedSettings.providers.flatMap { it.models }.any { m -> m.id == uuid }
         },
-        modeInjections = settings.modeInjections.distinctBy { it.id },
-        lorebooks = settings.lorebooks.distinctBy { it.id },
-        quickMessages = settings.quickMessages.distinctBy { it.id },
+        modeInjections = migratedSettings.modeInjections.distinctBy { it.id },
+        lorebooks = migratedSettings.lorebooks.distinctBy { it.id },
+        quickMessages = migratedSettings.quickMessages.distinctBy { it.id },
+    )
+}
+
+private fun Settings.withMigratedMemoryDreamLegacy(): Settings {
+    val worker = agentRuntime.memoryWorker
+    if (!worker.dreamEnabled) return this
+    return copy(
+        agentRuntime = agentRuntime.copy(
+            memoryWorker = worker.copy(
+                dreamModelEnabled = worker.dreamModelEnabled || worker.dreamEnabled,
+                dreamEnabled = false,
+            )
+        )
     )
 }

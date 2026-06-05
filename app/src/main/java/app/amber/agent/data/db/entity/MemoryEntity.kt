@@ -20,6 +20,8 @@ data class MemoryEntity(
     val sourceConversationId: String? = null,
     @ColumnInfo("source_message_ids_json")
     val sourceMessageIdsJson: String = "[]",
+    @ColumnInfo(name = "supersedes_ids_json", defaultValue = "'[]'")
+    val supersedesIdsJson: String = "[]",
     @ColumnInfo("expires_at")
     val expiresAt: Long? = null,
     @ColumnInfo("confidence")

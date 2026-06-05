@@ -10,6 +10,9 @@ import app.amber.core.memory.dream.MemoryDreamPlan
 import app.amber.core.memory.dream.MemoryDreamPlanSource
 import app.amber.core.memory.dream.MemoryDreamPlanStatus
 import app.amber.core.memory.dream.MemoryDreamPlanStore
+import app.amber.core.memory.dream.MemorySupersedeSuggestion
+import app.amber.core.memory.model.MemoryKind
+import app.amber.core.memory.model.MemoryScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -70,10 +73,27 @@ class MemoryDreamPlanStoreTest {
         assertEquals(MemoryDreamPlanStatus.APPLIED.wireName, dao.find(applied.id)?.status)
         assertEquals(800L, dao.find(applied.id)?.appliedAt)
         assertNull(store.getPendingPlan())
+
+        val supersede = store.savePending(
+            plan = MemoryDreamPlan(
+                supersedeSuggestions = listOf(
+                    MemorySupersedeSuggestion(
+                        oldMemoryIds = listOf(1),
+                        newContent = "用户现在偏好英文详细解释。",
+                        scope = MemoryScope.LONG_TERM,
+                        kind = MemoryKind.USER,
+                        confidence = 0.86f,
+                    )
+                )
+            ),
+            source = MemoryDreamPlanSource.AUTO,
+            now = 900L,
+        )
+        assertEquals(1, dao.find(supersede.id)?.supersedeCount)
     }
 }
 
-private class FakeMemoryDreamPlanDao : MemoryDreamPlanDAO {
+internal class FakeMemoryDreamPlanDao : MemoryDreamPlanDAO {
     private val plans = mutableListOf<MemoryDreamPlanEntity>()
     private val pendingFlow = MutableStateFlow<MemoryDreamPlanEntity?>(null)
 

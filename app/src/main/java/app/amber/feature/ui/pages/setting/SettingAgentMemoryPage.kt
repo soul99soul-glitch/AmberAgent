@@ -61,6 +61,7 @@ import app.amber.core.settings.Settings
 import app.amber.core.memory.dream.PersistedMemoryDreamPlan
 import app.amber.core.memory.model.MemoryCandidate
 import app.amber.core.memory.model.MemoryEvent
+import app.amber.core.memory.model.MemoryWorkerDreamGate
 import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.MemoryKind
@@ -153,7 +154,12 @@ fun SettingAgentMemoryPage(
                 navigationIcon = { BackButton() },
                 actions = {
                     if (subpage == MemorySettingsSubpage.Worker) {
-                        IconButton(onClick = { vm.triggerDreamNow() }) {
+                        val worker = settings.agentRuntime.memoryWorker
+                        val canRunDream = worker.enabled && MemoryWorkerDreamGate.isAnyDreamEnabled(worker)
+                        IconButton(
+                            enabled = canRunDream,
+                            onClick = { vm.triggerDreamNow() },
+                        ) {
                             Icon(
                                 imageVector = HugeIcons.Play,
                                 contentDescription = "立即运行一次 Daydream",
@@ -432,32 +438,78 @@ private fun MemoryWorkerSubpage(
     onApply: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val worker = settings.agentRuntime.memoryWorker
+    val canRunDream = worker.enabled && MemoryWorkerDreamGate.isAnyDreamEnabled(worker)
     CardGroup {
         item(
-            headlineContent = { Text("Daydream 自动整理") },
+            headlineContent = { Text("本地整理建议") },
             supportingContent = {
                 Text(
-                    "每 24 小时后台运行一次：合并、提升、归档短期/长期记忆；核心记忆不会自动修改。" +
-                        "自动运行需要联网、电量不低；可按设置要求设备空闲。手动运行仅要求联网。" +
-                        "开启后仍会自动应用整理结果。\n" +
+                    "每 24 小时后台生成待审核整理建议；应用前需要确认。核心记忆不会自动修改。" +
+                        "自动运行需要联网、电量不低；可按设置要求设备空闲。\n" +
                         "当前候选 $pendingCandidateCount 条，最近事件 $eventCount 条。"
                 )
             },
             trailingContent = {
                 Switch(
-                    checked = settings.agentRuntime.memoryWorker.dreamEnabled,
+                    checked = worker.dreamMaintenanceEnabled,
                     onCheckedChange = { enabled ->
-                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(dreamEnabled = enabled)) }
+                        onUpdate {
+                            it.copy(
+                                memoryWorker = it.memoryWorker.copy(
+                                    dreamMaintenanceEnabled = enabled,
+                                    dreamEnabled = false,
+                                )
+                            )
+                        }
                     },
                 )
             },
         )
-        // The following toggles were removed in favor of always-on defaults:
+        item(
+            headlineContent = { Text("LLM 整理建议") },
+            supportingContent = {
+                Text("开启后，Daydream 可以让模型提出冲突替换等高级建议；仍需人工确认后才会应用。")
+            },
+            trailingContent = {
+                Switch(
+                    checked = worker.dreamModelEnabled,
+                    onCheckedChange = { enabled ->
+                        onUpdate {
+                            it.copy(
+                                memoryWorker = it.memoryWorker.copy(
+                                    dreamModelEnabled = enabled,
+                                    dreamEnabled = false,
+                                )
+                            )
+                        }
+                    },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text("仅设备空闲时自动运行") },
+            supportingContent = { Text("关闭后，自动整理不再要求 Android device idle；仍需要联网和电量不低。") },
+            trailingContent = {
+                Switch(
+                    checked = worker.runOnlyOnIdle,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(runOnlyOnIdle = enabled)) }
+                    },
+                )
+            },
+        )
+        if (!canRunDream) {
+            item(
+                headlineContent = { Text("立即运行不可用") },
+                supportingContent = { Text("请先开启本地整理或 LLM 整理建议。") },
+            )
+        }
+        // The following toggles were removed in favor of defaults:
         //   - 记忆后台任务 (worker.enabled)            → field kept ON
         //   - 对话结束后提取 (worker.extractionEnabled) → field kept ON
         //   - 跟随压缩模型 (worker.followCompressModel)  → moved to model settings page
         //   - 只在充电时运行 (worker.runOnlyOnCharging)  → scheduler ignores; runs whenever
-        //   - 只在设备空闲时运行 (worker.runOnlyOnIdle)  → scheduler still respects this field.
         // Manual "立即运行一次" → moved to toolbar play icon.
     }
 
@@ -893,7 +945,7 @@ private fun MemoryCandidatesSection(
             }
         }
     }
-    candidates.take(5).forEach { candidate ->
+    candidates.forEach { candidate ->
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CustomColors.cardColorsOnSurfaceContainer,
@@ -903,7 +955,13 @@ private fun MemoryCandidatesSection(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "[${candidate.scope.wireName}/${candidate.kind.wireName}] confidence ${"%.2f".format(candidate.confidence)}",
+                    text = buildString {
+                        append("[${candidate.scope.wireName}/${candidate.kind.wireName}] ")
+                        append("confidence ${"%.2f".format(candidate.confidence)}")
+                        if (candidate.confidence >= LOW_CONFIDENCE_CANDIDATE_THRESHOLD) {
+                            append(" · 建议人工审核")
+                        }
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -959,7 +1017,7 @@ private fun DreamReviewSection(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("手动整理审核", style = MaterialTheme.typography.titleMediumEmphasized)
                     Text(
-                        "手动生成的 diff 仍需确认；后台 Daydream 会自动应用短期/长期整理。",
+                        "手动或后台生成的 diff 都需要确认；后台 Daydream 不会自动应用整理结果。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -972,7 +1030,8 @@ private fun DreamReviewSection(
             plan?.let { persisted ->
                 val current = persisted.plan
                 val summary = "合并 ${current.mergeSuggestions.size} 组 · 提升 ${current.promoteMemoryIds.size} 条 · " +
-                    "归档 ${current.archiveMemoryIds.size} 条 · 忽略候选 ${current.ignoreCandidateIds.size} 条"
+                    "归档 ${current.archiveMemoryIds.size} 条 · 替换 ${current.supersedeSuggestions.size} 条 · " +
+                    "忽略候选 ${current.ignoreCandidateIds.size} 条"
                 Text(summary, style = MaterialTheme.typography.bodyMedium)
                 Text(
                     text = "来源：${if (persisted.source.name == "AUTO") "自动 Daydream" else "手动生成"}",
@@ -984,6 +1043,21 @@ private fun DreamReviewSection(
                         text = "• $note",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                current.mergeSuggestions.take(5).forEach { suggestion ->
+                    Text(
+                        text = "合并 #${suggestion.targetMemoryId} <- ${suggestion.duplicateMemoryIds.joinToString(",")}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                current.supersedeSuggestions.take(5).forEach { suggestion ->
+                    Text(
+                        text = "替换 ${suggestion.oldMemoryIds.joinToString(",")} → ${suggestion.newContent}" +
+                            suggestion.reason.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             } ?: Text(

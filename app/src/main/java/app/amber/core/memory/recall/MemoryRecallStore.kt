@@ -7,10 +7,8 @@ import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.prompt.MemoryPromptBuilder
 import app.amber.core.memory.store.MemoryRepository
-import java.time.Instant
-import java.time.LocalDate
-import java.time.YearMonth
-import java.time.ZoneId
+import app.amber.core.memory.time.MemoryFreshness
+import app.amber.core.memory.time.MemoryTimeAnchorParser
 import kotlin.math.max
 
 class MemoryRecallStore(
@@ -134,7 +132,10 @@ class MemoryRecallStore(
             }
             val updateAgeDays = ((now - record.updatedAt).coerceAtLeast(0L) / 86_400_000.0)
             score += (10.0 / (1.0 + updateAgeDays)).coerceAtMost(10.0)
-            val freshness = classifyFreshness(record.content, now)
+            val freshness = when (MemoryTimeAnchorParser.classifyFreshness(record.content, now)) {
+                MemoryFreshness.CURRENT -> MemoryRecallFreshness.CURRENT
+                MemoryFreshness.TIME_DECAYED -> MemoryRecallFreshness.TIME_DECAYED
+            }
             if (freshness == MemoryRecallFreshness.TIME_DECAYED) {
                 score *= TIME_DECAY_MULTIPLIER
                 reasons += "time-decayed"
@@ -176,57 +177,6 @@ class MemoryRecallStore(
             }
         }
 
-        private fun classifyFreshness(content: String, now: Long): MemoryRecallFreshness {
-            val lower = content.lowercase()
-            if (!hasFutureIntent(lower) || hasHistoricalIntent(lower)) {
-                return MemoryRecallFreshness.CURRENT
-            }
-            val today = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
-            val currentMonth = YearMonth.from(today)
-            val hasExpiredAnchor = absoluteDateRegex.findAll(content).any { match ->
-                val year = match.groupValues[1].toIntOrNull() ?: return@any false
-                val month = match.groupValues[2].toIntOrNull() ?: return@any false
-                val day = match.groupValues.getOrNull(3)?.takeIf { it.isNotBlank() }?.toIntOrNull()
-                isExpiredAnchor(year, month, day, today, currentMonth)
-            } || chineseDateRegex.findAll(content).any { match ->
-                val year = match.groupValues[1].toIntOrNull() ?: return@any false
-                val month = match.groupValues[2].toIntOrNull() ?: return@any false
-                val day = match.groupValues.getOrNull(3)?.takeIf { it.isNotBlank() }?.toIntOrNull()
-                isExpiredAnchor(year, month, day, today, currentMonth)
-            }
-            return if (hasExpiredAnchor) MemoryRecallFreshness.TIME_DECAYED else MemoryRecallFreshness.CURRENT
-        }
-
-        private fun isExpiredAnchor(
-            year: Int,
-            month: Int,
-            day: Int?,
-            today: LocalDate,
-            currentMonth: YearMonth,
-        ): Boolean = runCatching {
-            if (day != null) {
-                LocalDate.of(year, month, day).isBefore(today)
-            } else {
-                YearMonth.of(year, month).isBefore(currentMonth)
-            }
-        }.getOrDefault(false)
-
-        private fun hasFutureIntent(lower: String): Boolean {
-            val hints = listOf(
-                "将", "计划", "要去", "准备", "行程", "旅行", "出差",
-                "will", "going to", "plan", "trip", "travel", "visit",
-            )
-            return hints.any { it in lower }
-        }
-
-        private fun hasHistoricalIntent(lower: String): Boolean {
-            val hints = listOf(
-                "去过", "已去", "已经去", "回来", "结束",
-                "visited", "went to", "traveled to", "have been", "has been",
-            )
-            return hints.any { it in lower }
-        }
-
         private fun Sequence<MemoryRecallSelection>.takeBudget(
             maxItems: Int,
             maxChars: Int,
@@ -243,8 +193,6 @@ class MemoryRecallStore(
             return selected
         }
 
-        private val absoluteDateRegex = Regex("""\b((?:19|20)\d{2})-(\d{1,2})(?:-(\d{1,2}))?\b""")
-        private val chineseDateRegex = Regex("""((?:19|20)\d{2})年(\d{1,2})月(?:(\d{1,2})日)?""")
     }
 }
 

@@ -122,7 +122,12 @@ val dataSourceModule = module {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "amber_agent")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+            )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     val dictDir = SimpleDictManager.extractDict(context)

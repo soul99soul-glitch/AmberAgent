@@ -33,6 +33,8 @@ object MemoryExtractionPrompt {
             - Extract only information likely useful in future conversations.
             - Do not store sensitive personal data unless the user explicitly asked to remember it.
             - Prefer short_term/project for active work and long_term for stable preferences.
+            - For temporary plans, trips, meetings, deadlines, or short-lived preferences, set expires_in_days.
+            - Keep expires_in_days null for stable user preferences, feedback, core facts, historical facts, and uncertain relative dates.
             - Do not invent facts.
             - At most 5 candidates.
             - Use these source_message_ids when relevant: ${sourceMessageIds.joinToString(", ")}.

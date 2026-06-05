@@ -29,7 +29,8 @@ data class PersistedMemoryDreamPlan(
 ) {
     val summary: String
         get() = "合并 ${plan.mergeSuggestions.size} · 提升 ${plan.promoteMemoryIds.size} · " +
-            "归档 ${plan.archiveMemoryIds.size} · 忽略候选 ${plan.ignoreCandidateIds.size}"
+            "归档 ${plan.archiveMemoryIds.size} · 替换 ${plan.supersedeSuggestions.size} · " +
+            "忽略候选 ${plan.ignoreCandidateIds.size}"
 }
 
 class MemoryDreamPlanStore(
@@ -59,6 +60,7 @@ class MemoryDreamPlanStore(
             mergeCount = plan.mergeSuggestions.size,
             promoteCount = plan.promoteMemoryIds.size,
             archiveCount = plan.archiveMemoryIds.size,
+            supersedeCount = plan.supersedeSuggestions.size,
             ignoreCandidateCount = plan.ignoreCandidateIds.size,
             createdAt = now,
             appliedAt = null,
@@ -81,6 +83,7 @@ class MemoryDreamPlanStore(
                 mergeCount = plan.mergeSuggestions.size,
                 promoteCount = plan.promoteMemoryIds.size,
                 archiveCount = plan.archiveMemoryIds.size,
+                supersedeCount = plan.supersedeSuggestions.size,
                 ignoreCandidateCount = plan.ignoreCandidateIds.size,
                 createdAt = now,
                 appliedAt = null,
@@ -103,6 +106,7 @@ class MemoryDreamPlanStore(
             mergeCount = plan.mergeSuggestions.size,
             promoteCount = plan.promoteMemoryIds.size,
             archiveCount = plan.archiveMemoryIds.size,
+            supersedeCount = plan.supersedeSuggestions.size,
             ignoreCandidateCount = plan.ignoreCandidateIds.size,
             createdAt = now,
             appliedAt = now,

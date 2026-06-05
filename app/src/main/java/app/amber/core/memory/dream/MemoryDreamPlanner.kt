@@ -2,6 +2,7 @@ package app.amber.core.memory.dream
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -16,6 +17,7 @@ import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.memory.model.MemoryCandidate
 import app.amber.core.memory.model.MemoryEventType
 import app.amber.core.memory.model.MemoryKind
+import app.amber.core.memory.model.MemoryWorkerDreamGate
 import kotlinx.serialization.Serializable
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
@@ -23,28 +25,47 @@ import app.amber.core.memory.prompt.MemoryDreamPrompt
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
 
+interface MemoryDreamPlanProvider {
+    suspend fun plan(): MemoryDreamPlan
+}
+
 class MemoryDreamPlanner(
     private val settingsStore: SettingsAggregator,
     private val providerManager: ProviderManager,
     private val json: Json,
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
-) {
-    suspend fun plan(): MemoryDreamPlan {
+) : MemoryDreamPlanProvider {
+    override suspend fun plan(): MemoryDreamPlan {
         val now = System.currentTimeMillis()
+        val settings = settingsStore.settingsFlow.value
         val records = memoryRepository.getAllRecords()
         val candidates = memoryRepository.getPendingCandidates()
-        val localPlan = planLocally(records, candidates, now)
+        val localPlan = if (MemoryWorkerDreamGate.isMaintenanceEnabled(settings.agentRuntime.memoryWorker)) {
+            planMaintenance(records, candidates, now)
+        } else {
+            MemoryDreamPlan()
+        }
         val modelPlan = runCatching {
-            planWithModel(settingsStore.settingsFlow.value, records, candidates)
+            planWithModel(settings, records, candidates)
         }.getOrNull()
 
-        val plan = localPlan.merge(modelPlan)
+        val plan = localPlan.mergeWith(modelPlan)
         eventLogger.log(
             type = MemoryEventType.DREAM_PLANNED,
             message = buildString {
                 append("merge=${plan.mergeSuggestions.size}, promote=${plan.promoteMemoryIds.size}, ")
-                append("archive=${plan.archiveMemoryIds.size}, ignore=${plan.ignoreCandidateIds.size}")
+                append("archive=${plan.archiveMemoryIds.size}, supersede=${plan.supersedeSuggestions.size}, ")
+                append("ignore=${plan.ignoreCandidateIds.size}")
+                append(", source=")
+                append(
+                    when {
+                        localPlan.hasChanges && modelPlan?.hasChanges == true -> "merged"
+                        modelPlan?.hasChanges == true -> "model"
+                        localPlan.hasChanges -> "maintenance"
+                        else -> "none"
+                    }
+                )
             },
         )
         return plan
@@ -56,7 +77,7 @@ class MemoryDreamPlanner(
         candidates: List<MemoryCandidate>,
     ): MemoryDreamPlan? {
         val worker = settings.agentRuntime.memoryWorker
-        if (!worker.enabled || !worker.dreamEnabled) return null
+        if (!worker.enabled || !MemoryWorkerDreamGate.isModelDreamEnabled(worker)) return null
         val model = resolveDaydreamModel(settings) ?: return null
         val provider = model.findProvider(settings.providers) ?: return null
         val response = providerManager.getProviderByType(provider).generateText(
@@ -75,7 +96,7 @@ class MemoryDreamPlanner(
             ),
         )
         val text = response.choices.firstOrNull()?.message?.toText().orEmpty()
-        return parseModelPlan(text, records, candidates)
+        return parseModelPlanJson(text, records, candidates, json)
     }
 
     private fun resolveDaydreamModel(settings: Settings) =
@@ -98,78 +119,14 @@ class MemoryDreamPlanner(
         } ?: settings.resolveTaskChatModel(settings.compressModelId)
             ?: settings.resolveTaskChatModel(settings.chatModelId)
 
-    private fun parseModelPlan(
-        raw: String,
-        records: List<MemoryRecord>,
-        candidates: List<MemoryCandidate>,
-    ): MemoryDreamPlan {
-        val memoryIds = records.map { it.id }.toSet()
-        val candidateIds = candidates.map { it.id }.toSet()
-        val cleaned = raw.trim()
-            .removePrefix("```json")
-            .removePrefix("```")
-            .removeSuffix("```")
-            .trim()
-            .let { text ->
-                val start = text.indexOf('{')
-                val end = text.lastIndexOf('}')
-                if (start >= 0 && end > start) text.substring(start, end + 1) else text
-            }
-        val root = json.parseToJsonElement(cleaned).jsonObject
-        val merges = root["merge"]?.jsonArray.orEmpty().mapNotNull { item ->
-            val obj = item.jsonObject
-            val target = obj["target_memory_id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                ?: return@mapNotNull null
-            if (target !in memoryIds) return@mapNotNull null
-            val duplicates = obj["duplicate_memory_ids"]?.jsonArray.orEmpty()
-                .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
-                .filter { it in memoryIds && it != target }
-                .distinct()
-            if (duplicates.isEmpty()) return@mapNotNull null
-            MemoryMergeSuggestion(
-                targetMemoryId = target,
-                duplicateMemoryIds = duplicates,
-                mergedContent = obj["merged_content"]?.jsonPrimitive?.contentOrNull,
-                reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-            )
-        }
-        return MemoryDreamPlan(
-            mergeSuggestions = merges,
-            promoteMemoryIds = root["promote"]?.jsonArray.orEmpty()
-                .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
-                .filter { it in memoryIds }
-                .distinct(),
-            archiveMemoryIds = root["archive"]?.jsonArray.orEmpty()
-                .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
-                .filter { it in memoryIds }
-                .distinct(),
-            ignoreCandidateIds = root["delete_suggestions"]?.jsonArray.orEmpty()
-                .mapNotNull { it.jsonPrimitive.contentOrNull }
-                .filter { it in candidateIds }
-                .distinct(),
-            notes = root["notes"]?.jsonArray.orEmpty()
-                .mapNotNull { it.jsonPrimitive.contentOrNull?.take(240) }
-                .take(6),
-        )
-    }
-
-    private fun MemoryDreamPlan.merge(other: MemoryDreamPlan?): MemoryDreamPlan {
-        if (other == null) return this
-        val localTargets = mergeSuggestions.map { it.targetMemoryId to it.duplicateMemoryIds.toSet() }.toSet()
-        val modelMerges = other.mergeSuggestions.filterNot { suggestion ->
-            (suggestion.targetMemoryId to suggestion.duplicateMemoryIds.toSet()) in localTargets
-        }
-        return copy(
-            mergeSuggestions = (mergeSuggestions + modelMerges).take(12),
-            promoteMemoryIds = (promoteMemoryIds + other.promoteMemoryIds).distinct().take(24),
-            archiveMemoryIds = (archiveMemoryIds + other.archiveMemoryIds).distinct().take(48),
-            ignoreCandidateIds = (ignoreCandidateIds + other.ignoreCandidateIds).distinct().take(48),
-            notes = (notes + other.notes).distinct().take(12),
-        )
-    }
-
     companion object {
         fun planLocally(
+            records: List<MemoryRecord>,
+            candidates: List<MemoryCandidate>,
+            now: Long = System.currentTimeMillis(),
+        ): MemoryDreamPlan = planMaintenance(records, candidates, now)
+
+        fun planMaintenance(
             records: List<MemoryRecord>,
             candidates: List<MemoryCandidate>,
             now: Long = System.currentTimeMillis(),
@@ -230,7 +187,101 @@ class MemoryDreamPlanner(
 
         private fun normalize(text: String): String =
             text.lowercase().filter { it.isLetterOrDigit() }.take(200)
+
+        internal fun parseModelPlanJson(
+            raw: String,
+            records: List<MemoryRecord>,
+            candidates: List<MemoryCandidate>,
+            json: Json = Json,
+        ): MemoryDreamPlan {
+            val memoryIds = records.map { it.id }.toSet()
+            val candidateIds = candidates.map { it.id }.toSet()
+            val cleaned = raw.trim()
+                .removePrefix("```json")
+                .removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+                .let { text ->
+                    val start = text.indexOf('{')
+                    val end = text.lastIndexOf('}')
+                    if (start >= 0 && end > start) text.substring(start, end + 1) else text
+                }
+            val root = json.parseToJsonElement(cleaned).jsonObject
+            val merges = root["merge"]?.jsonArray.orEmpty().mapNotNull { item ->
+                val obj = item.jsonObject
+                val target = obj["target_memory_id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?: return@mapNotNull null
+                if (target !in memoryIds) return@mapNotNull null
+                val duplicates = obj["duplicate_memory_ids"]?.jsonArray.orEmpty()
+                    .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
+                    .filter { it in memoryIds && it != target }
+                    .distinct()
+                if (duplicates.isEmpty()) return@mapNotNull null
+                MemoryMergeSuggestion(
+                    targetMemoryId = target,
+                    duplicateMemoryIds = duplicates,
+                    mergedContent = obj["merged_content"]?.jsonPrimitive?.contentOrNull,
+                    reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                )
+            }
+            val supersedes = root["supersede"]?.jsonArray.orEmpty().mapNotNull { item ->
+                val obj = item.jsonObject
+                val oldIds = obj["old_memory_ids"]?.jsonArray.orEmpty()
+                    .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
+                    .filter { it in memoryIds }
+                    .distinct()
+                if (oldIds.isEmpty()) return@mapNotNull null
+                val newContent = obj["new_content"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?.takeIf { it.length >= 8 }
+                    ?: return@mapNotNull null
+                MemorySupersedeSuggestion(
+                    oldMemoryIds = oldIds,
+                    newContent = newContent,
+                    scope = MemoryScope.fromWireName(obj["scope"]?.jsonPrimitive?.contentOrNull),
+                    kind = MemoryKind.fromWireName(obj["kind"]?.jsonPrimitive?.contentOrNull),
+                    confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0.7f,
+                    reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                )
+            }
+            return MemoryDreamPlan(
+                mergeSuggestions = merges,
+                promoteMemoryIds = root["promote"]?.jsonArray.orEmpty()
+                    .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
+                    .filter { it in memoryIds }
+                    .distinct(),
+                archiveMemoryIds = root["archive"]?.jsonArray.orEmpty()
+                    .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
+                    .filter { it in memoryIds }
+                    .distinct(),
+                ignoreCandidateIds = root["delete_suggestions"]?.jsonArray.orEmpty()
+                    .mapNotNull { it.jsonPrimitive.contentOrNull }
+                    .filter { it in candidateIds }
+                    .distinct(),
+                supersedeSuggestions = supersedes,
+                notes = root["notes"]?.jsonArray.orEmpty()
+                    .mapNotNull { it.jsonPrimitive.contentOrNull?.take(240) }
+                    .take(6),
+            )
+        }
     }
+}
+
+internal fun MemoryDreamPlan.mergeWith(other: MemoryDreamPlan?): MemoryDreamPlan {
+    if (other == null) return this
+    val localTargets = mergeSuggestions.map { it.targetMemoryId to it.duplicateMemoryIds.toSet() }.toSet()
+    val modelMerges = other.mergeSuggestions.filterNot { suggestion ->
+        (suggestion.targetMemoryId to suggestion.duplicateMemoryIds.toSet()) in localTargets
+    }
+    return copy(
+        mergeSuggestions = (mergeSuggestions + modelMerges).take(12),
+        promoteMemoryIds = (promoteMemoryIds + other.promoteMemoryIds).distinct().take(24),
+        archiveMemoryIds = (archiveMemoryIds + other.archiveMemoryIds).distinct().take(48),
+        ignoreCandidateIds = (ignoreCandidateIds + other.ignoreCandidateIds).distinct().take(48),
+        supersedeSuggestions = (supersedeSuggestions + other.supersedeSuggestions)
+            .distinctBy { it.oldMemoryIds.toSet() to it.newContent }
+            .take(12),
+        notes = (notes + other.notes).distinct().take(12),
+    )
 }
 
 @Serializable
@@ -239,13 +290,15 @@ data class MemoryDreamPlan(
     val promoteMemoryIds: List<Int> = emptyList(),
     val archiveMemoryIds: List<Int> = emptyList(),
     val ignoreCandidateIds: List<String> = emptyList(),
+    val supersedeSuggestions: List<MemorySupersedeSuggestion> = emptyList(),
     val notes: List<String> = emptyList(),
 ) {
     val hasChanges: Boolean
         get() = mergeSuggestions.isNotEmpty() ||
             promoteMemoryIds.isNotEmpty() ||
             archiveMemoryIds.isNotEmpty() ||
-            ignoreCandidateIds.isNotEmpty()
+            ignoreCandidateIds.isNotEmpty() ||
+            supersedeSuggestions.isNotEmpty()
 }
 
 @Serializable
@@ -253,5 +306,15 @@ data class MemoryMergeSuggestion(
     val targetMemoryId: Int,
     val duplicateMemoryIds: List<Int>,
     val mergedContent: String? = null,
+    val reason: String = "",
+)
+
+@Serializable
+data class MemorySupersedeSuggestion(
+    val oldMemoryIds: List<Int>,
+    val newContent: String,
+    val scope: MemoryScope,
+    val kind: MemoryKind,
+    val confidence: Float = 0.7f,
     val reason: String = "",
 )

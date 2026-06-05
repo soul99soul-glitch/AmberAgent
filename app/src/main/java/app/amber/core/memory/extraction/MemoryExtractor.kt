@@ -24,6 +24,7 @@ import app.amber.core.memory.prompt.MemoryExtractionPrompt
 import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
+import app.amber.core.memory.time.MemoryTimeAnchorParser
 import app.amber.core.model.Conversation
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -214,18 +215,20 @@ class MemoryExtractor(
             val expiresInDays = obj["expires_in_days"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
             val scopeValue = obj["scope"]?.jsonPrimitive?.contentOrNull
             val kindValue = obj["kind"]?.jsonPrimitive?.contentOrNull
+            val scope = MemoryScope.fromWireName(scopeValue)
+            val expiresAt = resolveCandidateExpiresAt(content, scope, expiresInDays)
             ParsedMemoryCandidate(
                 explicitScope = scopeValue.isValidMemoryScope(),
                 explicitKind = kindValue.isValidMemoryKind(),
                 candidate = MemoryCandidate(
                     content = content,
-                    scope = MemoryScope.fromWireName(scopeValue),
+                    scope = scope,
                     kind = MemoryKind.fromWireName(kindValue),
                     confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0.55f,
                     reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                     sourceConversationId = conversationId,
                     sourceMessageIds = sourceMessageIds,
-                    expiresAt = expiresInDays?.let { System.currentTimeMillis() + it * 86_400_000L },
+                    expiresAt = expiresAt,
                 ),
             )
         }
@@ -274,5 +277,15 @@ class MemoryExtractor(
                 candidate.confidence >= DURABLE_AUTO_WRITE_CONFIDENCE
             return shortTermProject || durableMemory
         }
+
+        internal fun resolveCandidateExpiresAt(
+            content: String,
+            scope: MemoryScope,
+            expiresInDays: Long?,
+            now: Long = System.currentTimeMillis(),
+        ): Long? =
+            expiresInDays?.let { now + it * 86_400_000L }
+                ?: scope.takeIf { it == MemoryScope.SHORT_TERM }
+                    ?.let { MemoryTimeAnchorParser.deriveExpiresAt(content, now) }
     }
 }

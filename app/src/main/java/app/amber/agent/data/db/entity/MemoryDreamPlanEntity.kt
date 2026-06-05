@@ -28,6 +28,8 @@ data class MemoryDreamPlanEntity(
     val promoteCount: Int,
     @ColumnInfo("archive_count")
     val archiveCount: Int,
+    @ColumnInfo(name = "supersede_count", defaultValue = "0")
+    val supersedeCount: Int = 0,
     @ColumnInfo("ignore_candidate_count")
     val ignoreCandidateCount: Int,
     @ColumnInfo("created_at")

@@ -7,6 +7,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import app.amber.core.memory.model.MemoryWorkerDreamGate
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import java.time.Duration
@@ -22,7 +23,7 @@ class MemoryDreamScheduler(
 
     suspend fun sync(settings: Settings = settingsStore.settingsFlow.value) {
         val worker = settings.agentRuntime.memoryWorker
-        if (!worker.enabled || !worker.dreamEnabled) {
+        if (!worker.enabled || !MemoryWorkerDreamGate.isAnyDreamEnabled(worker)) {
             workManager.cancelUniqueWork(WORK_NAME)
             return
         }
@@ -86,9 +87,8 @@ class MemoryDreamScheduler(
     /**
      * Run the Daydream worker once on demand. Skips charging / idle / battery-not-low
      * constraints so the user can manually trigger from settings; still requires network
-     * because the worker needs to call the LLM. The worker itself respects the dreamEnabled
-     * toggle and the per-day cap, so this is a real "run now" not "force-ignore-everything"
-     * — toggling Daydream off makes this a no-op.
+     * because model dream may need an LLM. The worker itself respects the maintenance/model
+     * toggles, so this is a real "run now" not "force-ignore-everything".
      */
     fun runOnce() {
         val constraints = Constraints.Builder()

@@ -106,6 +106,7 @@ open class MemoryRepository(
         assistantId: String = bucketForScope(scope),
         sourceConversationId: String? = null,
         sourceMessageIds: List<String> = emptyList(),
+        supersedesIds: List<Int> = emptyList(),
         expiresAt: Long? = null,
         confidence: Float = 1f,
         pinned: Boolean = false,
@@ -119,6 +120,7 @@ open class MemoryRepository(
                 kind = kind.wireName,
                 sourceConversationId = sourceConversationId,
                 sourceMessageIdsJson = JsonInstant.encodeToString(sourceMessageIds),
+                supersedesIdsJson = JsonInstant.encodeToString(supersedesIds.distinct()),
                 expiresAt = expiresAt,
                 confidence = confidence.coerceIn(0f, 1f),
                 pinned = pinned,
@@ -232,6 +234,7 @@ open class MemoryRepository(
         assistantId = assistantId,
         sourceConversationId = sourceConversationId,
         sourceMessageIds = decodeStringList(sourceMessageIdsJson),
+        supersedesIds = decodeIntList(supersedesIdsJson),
         expiresAt = expiresAt,
         confidence = confidence,
         pinned = pinned,
@@ -249,6 +252,7 @@ open class MemoryRepository(
         kind = kind.wireName,
         sourceConversationId = sourceConversationId,
         sourceMessageIdsJson = JsonInstant.encodeToString(sourceMessageIds),
+        supersedesIdsJson = JsonInstant.encodeToString(supersedesIds.distinct()),
         expiresAt = expiresAt,
         confidence = confidence.coerceIn(0f, 1f),
         pinned = pinned,
@@ -318,6 +322,9 @@ open class MemoryRepository(
 
     private fun decodeStringList(raw: String): List<String> =
         runCatching { JsonInstant.decodeFromString<List<String>>(raw) }.getOrDefault(emptyList())
+
+    private fun decodeIntList(raw: String): List<Int> =
+        runCatching { JsonInstant.decodeFromString<List<Int>>(raw) }.getOrDefault(emptyList())
 
     private fun scopeForBucket(assistantId: String): MemoryScope = when (assistantId) {
         GLOBAL_MEMORY_ID -> MemoryScope.CORE

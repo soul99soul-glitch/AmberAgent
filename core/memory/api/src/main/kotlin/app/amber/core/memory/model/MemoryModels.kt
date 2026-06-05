@@ -44,6 +44,9 @@ enum class MemoryEventType(val wireName: String) {
     @SerialName("candidate_accepted")
     CANDIDATE_ACCEPTED("candidate_accepted"),
 
+    @SerialName("candidate_ignored")
+    CANDIDATE_IGNORED("candidate_ignored"),
+
     @SerialName("memory_created")
     MEMORY_CREATED("memory_created"),
 
@@ -81,6 +84,7 @@ data class MemoryRecord(
     val assistantId: String,
     val sourceConversationId: String? = null,
     val sourceMessageIds: List<String> = emptyList(),
+    val supersedesIds: List<Int> = emptyList(),
     val expiresAt: Long? = null,
     val confidence: Float = 1f,
     val pinned: Boolean = false,
@@ -137,6 +141,10 @@ data class MemoryWorkerSetting(
     val daydreamFollowCompressModel: Boolean = true,
     val daydreamReasoningLevel: ReasoningLevel = ReasoningLevel.HIGH,
     val extractionEnabled: Boolean = true,
+    val dreamMaintenanceEnabled: Boolean = true,
+    val dreamModelEnabled: Boolean = false,
+    // Legacy alias from the old Daydream switch. Settings decode migrates this
+    // into dreamModelEnabled and keeps this false on newly written settings.
     val dreamEnabled: Boolean = false,
     val runOnlyOnIdle: Boolean = true,
     val runOnlyOnCharging: Boolean = true,

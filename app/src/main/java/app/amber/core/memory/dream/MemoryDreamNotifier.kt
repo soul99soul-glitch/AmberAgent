@@ -13,17 +13,24 @@ import app.amber.agent.MEMORY_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
 import app.amber.agent.RouteActivity
 
+interface MemoryDreamReviewNotifier {
+    fun notifyRunning()
+    fun notifyPendingReview(plan: MemoryDreamPlan)
+    fun notifyFailed(message: String)
+    fun cancel()
+}
+
 class MemoryDreamNotifier(
     private val context: Context,
-) {
+) : MemoryDreamReviewNotifier {
     private val notificationManager = NotificationManagerCompat.from(context)
 
-    fun notifyRunning() {
+    override fun notifyRunning() {
         notify(
             NotificationCompat.Builder(context, MEMORY_NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
-                .setContentTitle("AmberAgent 正在做梦")
-                .setContentText("正在自动整理短期和长期记忆")
+                .setContentTitle("AmberAgent 正在生成整理建议")
+                .setContentText("正在检查短期和长期记忆")
                 .setContentIntent(buildLaunchPendingIntent())
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -33,11 +40,11 @@ class MemoryDreamNotifier(
         )
     }
 
-    fun notifyApplied(plan: MemoryDreamPlan) {
+    override fun notifyPendingReview(plan: MemoryDreamPlan) {
         notify(
             NotificationCompat.Builder(context, MEMORY_NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
-                .setContentTitle("做梦完成：已整理记忆")
+                .setContentTitle("已生成记忆整理建议")
                 .setContentText(plan.summaryText())
                 .setStyle(NotificationCompat.BigTextStyle().bigText(plan.summaryText()))
                 .setContentIntent(buildLaunchPendingIntent())
@@ -49,7 +56,7 @@ class MemoryDreamNotifier(
         )
     }
 
-    fun notifyFailed(message: String) {
+    override fun notifyFailed(message: String) {
         notify(
             NotificationCompat.Builder(context, MEMORY_NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
@@ -65,7 +72,7 @@ class MemoryDreamNotifier(
         )
     }
 
-    fun cancel() {
+    override fun cancel() {
         notificationManager.cancel(NOTIFICATION_ID)
     }
 
@@ -100,4 +107,4 @@ class MemoryDreamNotifier(
 
 private fun MemoryDreamPlan.summaryText(): String =
     "合并 ${mergeSuggestions.size} · 提升 ${promoteMemoryIds.size} · " +
-        "归档 ${archiveMemoryIds.size} · 忽略候选 ${ignoreCandidateIds.size}"
+        "归档 ${archiveMemoryIds.size} · 替换 ${supersedeSuggestions.size} · 忽略候选 ${ignoreCandidateIds.size}"

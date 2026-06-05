@@ -21,6 +21,8 @@ import app.amber.core.memory.dream.MemoryDreamScheduler
 import app.amber.core.memory.dream.PersistedMemoryDreamPlan
 import app.amber.core.memory.export.MemoryImportExportManager
 import app.amber.core.memory.model.MemoryCandidateStatus
+import app.amber.core.memory.model.MemoryEvent
+import app.amber.core.memory.model.MemoryEventType
 import app.amber.core.model.AssistantMemory
 import app.amber.core.repository.MemoryRepository
 import java.io.File
@@ -115,6 +117,15 @@ class SettingAgentMemoryVM(
             candidates.forEach { candidate ->
                 memoryRepository.updateCandidate(candidate.copy(status = MemoryCandidateStatus.IGNORED))
             }
+            if (candidates.isNotEmpty()) {
+                memoryRepository.addEvent(
+                    MemoryEvent(
+                        type = MemoryEventType.CANDIDATE_IGNORED,
+                        message = "Batch ignored ${candidates.size} pending candidates with confidence < " +
+                            LOW_CONFIDENCE_CANDIDATE_THRESHOLD,
+                    )
+                )
+            }
             _operationMessage.value = if (candidates.isEmpty()) {
                 "没有低置信候选需要忽略"
             } else {
@@ -136,14 +147,19 @@ class SettingAgentMemoryVM(
             runCatching {
                 withContext(Dispatchers.IO) {
                     val plan = memoryDreamPlanner.plan()
+                    val replacedPending = plan.hasChanges && memoryDreamPlanStore.getPendingPlan() != null
                     if (plan.hasChanges) {
                         memoryDreamPlanStore.savePending(plan, MemoryDreamPlanSource.MANUAL)
                     }
-                    plan
+                    plan to replacedPending
                 }
-            }.onSuccess { plan ->
+            }.onSuccess { (plan, replacedPending) ->
                 _operationMessage.value = if (plan.hasChanges) {
-                    "已生成 Dream 整理建议"
+                    if (replacedPending) {
+                        "已生成 Dream 整理建议，上一份待审核建议已作废"
+                    } else {
+                        "已生成 Dream 整理建议"
+                    }
                 } else {
                     "没有发现需要整理的记忆"
                 }

@@ -23,6 +23,7 @@ class MemoryFrontmatterCodecTest {
             archived = true,
             sourceConversationId = "conversation-1",
             sourceMessageIds = listOf("message-1", "message-2"),
+            supersedesIds = listOf(7, 8),
             createdAt = 1_700_000_000_000,
             updatedAt = 1_700_000_100_000,
         )
@@ -36,6 +37,7 @@ class MemoryFrontmatterCodecTest {
         assertEquals(record.confidence, decoded.confidence)
         assertEquals(record.sourceConversationId, decoded.sourceConversationId)
         assertEquals(record.sourceMessageIds, decoded.sourceMessageIds)
+        assertEquals(record.supersedesIds, decoded.supersedesIds)
         assertTrue(decoded.pinned)
         assertTrue(decoded.archived)
     }

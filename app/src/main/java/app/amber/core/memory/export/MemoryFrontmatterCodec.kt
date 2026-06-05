@@ -20,6 +20,7 @@ class MemoryFrontmatterCodec {
         record.expiresAt?.let { appendLine("expires_at: ${quote(formatTime(it))}") }
         record.sourceConversationId?.let { appendLine("source_conversation_id: ${quote(it)}") }
         appendLine("source_message_ids: [${record.sourceMessageIds.joinToString(", ") { quote(it) }}]")
+        appendLine("supersedes_ids: [${record.supersedesIds.joinToString(", ")}]")
         appendLine("pinned: ${record.pinned}")
         appendLine("archived: ${record.archived}")
         appendLine("---")
@@ -47,6 +48,7 @@ class MemoryFrontmatterCodec {
             assistantId = bucketForScope(scope),
             sourceConversationId = frontmatter["source_conversation_id"],
             sourceMessageIds = parseInlineList(frontmatter["source_message_ids"].orEmpty()),
+            supersedesIds = parseIntList(frontmatter["supersedes_ids"].orEmpty()),
             confidence = frontmatter["confidence"]?.toFloatOrNull() ?: 1f,
             pinned = frontmatter["pinned"] == "true",
             archived = frontmatter["archived"] == "true",
@@ -67,5 +69,10 @@ class MemoryFrontmatterCodec {
     private fun parseInlineList(value: String): List<String> =
         Regex("\"((?:\\\\.|[^\"])*)\"").findAll(value)
             .map { match -> match.groupValues[1].replace("\\\"", "\"").replace("\\\\", "\\") }
+            .toList()
+
+    private fun parseIntList(value: String): List<Int> =
+        Regex("""-?\d+""").findAll(value)
+            .mapNotNull { match -> match.value.toIntOrNull() }
             .toList()
 }
