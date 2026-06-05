@@ -40,10 +40,11 @@ class MemoryDreamScheduler(
      * already passed today).
      */
     fun scheduleNextNightRun() {
+        val worker = settingsStore.settingsFlow.value.agentRuntime.memoryWorker
         val constraintsBuilder = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (worker.runOnlyOnIdle && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             // User explicitly asked: "when the device is sitting around". Idle is the cleanest
             // proxy — Android only flags it when screen is off + non-interactive for a while.
             constraintsBuilder.setRequiresDeviceIdle(true)

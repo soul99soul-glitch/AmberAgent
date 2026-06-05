@@ -61,7 +61,10 @@ import app.amber.core.settings.Settings
 import app.amber.core.memory.dream.PersistedMemoryDreamPlan
 import app.amber.core.memory.model.MemoryCandidate
 import app.amber.core.memory.model.MemoryEvent
+import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.model.AssistantMemory
+import app.amber.core.model.MemoryKind
+import app.amber.core.model.MemoryScope
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.RikkaConfirmDialog
@@ -222,6 +225,7 @@ fun SettingAgentMemoryPage(
                     running = memoryTaskRunning,
                     onAcceptCandidate = vm::acceptCandidate,
                     onIgnoreCandidate = vm::ignoreCandidate,
+                    onIgnoreLowConfidenceCandidates = vm::ignoreLowConfidenceCandidates,
                     onExport = {
                         val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
                         vm.exportMemories(baseDir)
@@ -434,7 +438,8 @@ private fun MemoryWorkerSubpage(
             supportingContent = {
                 Text(
                     "每 24 小时后台运行一次：合并、提升、归档短期/长期记忆；核心记忆不会自动修改。" +
-                        "需要联网，电量不低；不再受充电/空闲限制。\n" +
+                        "自动运行需要联网、电量不低；可按设置要求设备空闲。手动运行仅要求联网。" +
+                        "开启后仍会自动应用整理结果。\n" +
                         "当前候选 $pendingCandidateCount 条，最近事件 $eventCount 条。"
                 )
             },
@@ -452,7 +457,7 @@ private fun MemoryWorkerSubpage(
         //   - 对话结束后提取 (worker.extractionEnabled) → field kept ON
         //   - 跟随压缩模型 (worker.followCompressModel)  → moved to model settings page
         //   - 只在充电时运行 (worker.runOnlyOnCharging)  → scheduler ignores; runs whenever
-        //   - 只在设备空闲时运行 (worker.runOnlyOnIdle)  → scheduler ignores; runs whenever
+        //   - 只在设备空闲时运行 (worker.runOnlyOnIdle)  → scheduler still respects this field.
         // Manual "立即运行一次" → moved to toolbar play icon.
     }
 
@@ -517,6 +522,7 @@ private fun MemoryLibrarySubpage(
     running: Boolean,
     onAcceptCandidate: (String) -> Unit,
     onIgnoreCandidate: (String) -> Unit,
+    onIgnoreLowConfidenceCandidates: () -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     onAddMemory: () -> Unit,
@@ -526,12 +532,29 @@ private fun MemoryLibrarySubpage(
 ) {
     var showPortabilityDialog by remember { mutableStateOf(false) }
     var showEventsDialog by remember { mutableStateOf(false) }
+    var showCandidates by remember { mutableStateOf(false) }
 
-    MemoryCandidatesSection(
-        candidates = pendingCandidates,
-        onAccept = onAcceptCandidate,
-        onIgnore = onIgnoreCandidate,
+    MemorySummarySection(
+        coreMemories = memories,
+        longTermMemories = longTermMemories,
+        shortTermMemories = shortTermMemories,
+        onEditMemory = onEditMemory,
     )
+
+    MemoryCandidateInboxEntry(
+        candidateCount = pendingCandidates.size,
+        lowConfidenceCount = pendingCandidates.count { it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD },
+        expanded = showCandidates,
+        onToggle = { showCandidates = !showCandidates },
+    )
+    if (showCandidates) {
+        MemoryCandidatesSection(
+            candidates = pendingCandidates,
+            onAccept = onAcceptCandidate,
+            onIgnore = onIgnoreCandidate,
+            onIgnoreLowConfidence = onIgnoreLowConfidenceCandidates,
+        )
+    }
 
     MemoryRecordsSection(
         title = "核心记忆",
@@ -716,10 +739,133 @@ private fun AgentSoulCard(
 }
 
 @Composable
+private fun MemorySummarySection(
+    coreMemories: List<AssistantMemory>,
+    longTermMemories: List<AssistantMemory>,
+    shortTermMemories: List<AssistantMemory>,
+    onEditMemory: (AssistantMemory) -> Unit,
+) {
+    val stableMemories = (coreMemories + longTermMemories)
+        .filter { memory ->
+            !memory.archived &&
+                !memory.isSummarySensitive() &&
+                (
+                    memory.scope == MemoryScope.CORE ||
+                        memory.kind == MemoryKind.USER ||
+                        memory.kind == MemoryKind.FEEDBACK ||
+                        memory.kind == MemoryKind.ROUTINE ||
+                        memory.pinned
+                    )
+        }
+        .distinctBy { it.id }
+    val longTermProjects = longTermMemories
+        .filter { memory ->
+                !memory.archived &&
+                !memory.isSummarySensitive() &&
+                memory.kind in setOf(
+                    MemoryKind.PROJECT,
+                    MemoryKind.REFERENCE,
+                )
+        }
+    val currentProjects = shortTermMemories
+        .filter { memory ->
+            !memory.archived &&
+                !memory.isSummarySensitive() &&
+                memory.kind == MemoryKind.PROJECT
+        }
+
+    Text(
+        text = "Amber 对你的了解",
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(horizontal = 8.dp),
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val hasContent = stableMemories.isNotEmpty() ||
+                longTermProjects.isNotEmpty() ||
+                currentProjects.isNotEmpty()
+            if (!hasContent) {
+                Text(
+                    text = "暂无可汇总的正式记忆。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                MemorySummaryGroup("稳定偏好", stableMemories, onEditMemory)
+                MemorySummaryGroup("长期项目", longTermProjects, onEditMemory)
+                MemorySummaryGroup("当前短期事项", currentProjects, onEditMemory)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemorySummaryGroup(
+    title: String,
+    memories: List<AssistantMemory>,
+    onEditMemory: (AssistantMemory) -> Unit,
+) {
+    if (memories.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        memories.take(6).fastForEach { memory ->
+            Text(
+                text = "#${memory.id} [${memory.scope.wireName}/${memory.kind.wireName}] ${memory.content}",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onEditMemory(memory) },
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MemoryCandidateInboxEntry(
+    candidateCount: Int,
+    lowConfidenceCount: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    CardGroup {
+        item(
+            onClick = onToggle,
+            headlineContent = { Text("候选记忆审核") },
+            supportingContent = {
+                Text(
+                    if (candidateCount == 0) {
+                        "暂无待审核候选。"
+                    } else {
+                        "待审核 $candidateCount 条 · 低置信 $lowConfidenceCount 条 · ${if (expanded) "点击收起" else "点击展开"}"
+                    }
+                )
+            },
+        )
+    }
+}
+
+private fun AssistantMemory.isSummarySensitive(): Boolean {
+    return isSensitiveMemoryContent(content)
+}
+
+@Composable
 private fun MemoryCandidatesSection(
     candidates: List<MemoryCandidate>,
     onAccept: (String) -> Unit,
     onIgnore: (String) -> Unit,
+    onIgnoreLowConfidence: () -> Unit,
 ) {
     Text(
         text = "候选记忆审核",
@@ -733,6 +879,19 @@ private fun MemoryCandidatesSection(
             modifier = Modifier.padding(horizontal = 8.dp),
         )
         return
+    }
+    val lowConfidenceCount = candidates.count { it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD }
+    if (lowConfidenceCount > 0) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(onClick = onIgnoreLowConfidence) {
+                Text("忽略低置信候选（$lowConfidenceCount）")
+            }
+        }
     }
     candidates.take(5).forEach { candidate ->
         Card(

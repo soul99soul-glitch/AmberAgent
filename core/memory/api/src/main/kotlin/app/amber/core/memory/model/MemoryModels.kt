@@ -47,6 +47,9 @@ enum class MemoryEventType(val wireName: String) {
     @SerialName("memory_created")
     MEMORY_CREATED("memory_created"),
 
+    @SerialName("durable_memory_created")
+    DURABLE_MEMORY_CREATED("durable_memory_created"),
+
     @SerialName("memory_updated")
     MEMORY_UPDATED("memory_updated"),
 

@@ -21,6 +21,7 @@ import app.amber.core.memory.model.MemoryEventType
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.prompt.MemoryExtractionPrompt
+import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
 import app.amber.core.model.Conversation
@@ -119,17 +120,22 @@ class MemoryExtractor(
                 params = TextGenerationParams(model = model),
             )
             val text = response.choices.firstOrNull()?.message?.toText().orEmpty()
-            val candidates = parseCandidates(
+            val parsedCandidates = parseCandidates(
                 raw = text,
                 conversationId = conversationId,
                 sourceMessageIds = sourceIds,
             )
+            val parseMetaById = parsedCandidates.associateBy { it.candidate.id }
+            val candidates = parsedCandidates.map { it.candidate }
             val filtered = candidateFilter.filter(candidates, memoryRepository.getAllActiveRecords())
             memoryRepository.addCandidates(filtered.rejected)
             filtered.accepted.forEach { candidate ->
-                val autoWrite = candidate.scope == MemoryScope.SHORT_TERM &&
-                    candidate.kind == MemoryKind.PROJECT &&
-                    candidate.confidence >= 0.72f
+                val meta = parseMetaById[candidate.id]
+                val autoWrite = shouldAutoWriteCandidate(
+                    candidate = candidate,
+                    explicitScope = meta?.explicitScope == true,
+                    explicitKind = meta?.explicitKind == true,
+                )
                 if (autoWrite) {
                     val memory = memoryRepository.addMemory(
                         scope = candidate.scope,
@@ -141,11 +147,15 @@ class MemoryExtractor(
                         confidence = candidate.confidence,
                     )
                     eventLogger.log(
-                        type = MemoryEventType.MEMORY_CREATED,
+                        type = if (candidate.isDurableAutoWrite()) {
+                            MemoryEventType.DURABLE_MEMORY_CREATED
+                        } else {
+                            MemoryEventType.MEMORY_CREATED
+                        },
                         conversationId = conversationId,
                         memoryId = memory.id,
                         modelId = model.id.toString(),
-                        message = "Auto-created short-term project memory.",
+                        message = candidate.autoWriteEventMessage(),
                     )
                 } else {
                     memoryRepository.addCandidate(candidate)
@@ -185,7 +195,7 @@ class MemoryExtractor(
         raw: String,
         conversationId: String,
         sourceMessageIds: List<String>,
-    ): List<MemoryCandidate> {
+    ): List<ParsedMemoryCandidate> {
         val cleaned = raw.trim()
             .removePrefix("```json")
             .removePrefix("```")
@@ -202,16 +212,67 @@ class MemoryExtractor(
             val content = obj["content"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             if (content.isBlank()) return@mapNotNull null
             val expiresInDays = obj["expires_in_days"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-            MemoryCandidate(
-                content = content,
-                scope = MemoryScope.fromWireName(obj["scope"]?.jsonPrimitive?.contentOrNull),
-                kind = MemoryKind.fromWireName(obj["kind"]?.jsonPrimitive?.contentOrNull),
-                confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0.55f,
-                reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                sourceConversationId = conversationId,
-                sourceMessageIds = sourceMessageIds,
-                expiresAt = expiresInDays?.let { System.currentTimeMillis() + it * 86_400_000L },
+            val scopeValue = obj["scope"]?.jsonPrimitive?.contentOrNull
+            val kindValue = obj["kind"]?.jsonPrimitive?.contentOrNull
+            ParsedMemoryCandidate(
+                explicitScope = scopeValue.isValidMemoryScope(),
+                explicitKind = kindValue.isValidMemoryKind(),
+                candidate = MemoryCandidate(
+                    content = content,
+                    scope = MemoryScope.fromWireName(scopeValue),
+                    kind = MemoryKind.fromWireName(kindValue),
+                    confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0.55f,
+                    reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    sourceConversationId = conversationId,
+                    sourceMessageIds = sourceMessageIds,
+                    expiresAt = expiresInDays?.let { System.currentTimeMillis() + it * 86_400_000L },
+                ),
             )
+        }
+    }
+
+    private fun String?.isValidMemoryScope(): Boolean =
+        MemoryScope.entries.any { it.wireName == this }
+
+    private fun String?.isValidMemoryKind(): Boolean =
+        MemoryKind.entries.any { it.wireName == this }
+
+    private fun MemoryCandidate.isDurableAutoWrite(): Boolean =
+        scope == MemoryScope.LONG_TERM &&
+            kind in setOf(MemoryKind.USER, MemoryKind.FEEDBACK) &&
+            confidence >= DURABLE_AUTO_WRITE_CONFIDENCE
+
+    private fun MemoryCandidate.autoWriteEventMessage(): String =
+        when {
+            isDurableAutoWrite() && kind == MemoryKind.USER -> "Auto-created durable user memory."
+            isDurableAutoWrite() && kind == MemoryKind.FEEDBACK -> "Auto-created durable feedback memory."
+            else -> "Auto-created short-term project memory."
+        }
+
+    private data class ParsedMemoryCandidate(
+        val candidate: MemoryCandidate,
+        val explicitScope: Boolean,
+        val explicitKind: Boolean,
+    )
+
+    companion object {
+        internal const val SHORT_TERM_PROJECT_AUTO_WRITE_CONFIDENCE = 0.72f
+        internal const val DURABLE_AUTO_WRITE_CONFIDENCE = 0.85f
+
+        internal fun shouldAutoWriteCandidate(
+            candidate: MemoryCandidate,
+            explicitScope: Boolean,
+            explicitKind: Boolean,
+        ): Boolean {
+            if (candidate.sensitive || isSensitiveMemoryContent(candidate.content)) return false
+            if (!explicitScope || !explicitKind) return false
+            val shortTermProject = candidate.scope == MemoryScope.SHORT_TERM &&
+                candidate.kind == MemoryKind.PROJECT &&
+                candidate.confidence >= SHORT_TERM_PROJECT_AUTO_WRITE_CONFIDENCE
+            val durableMemory = candidate.scope == MemoryScope.LONG_TERM &&
+                candidate.kind in setOf(MemoryKind.USER, MemoryKind.FEEDBACK) &&
+                candidate.confidence >= DURABLE_AUTO_WRITE_CONFIDENCE
+            return shortTermProject || durableMemory
         }
     }
 }

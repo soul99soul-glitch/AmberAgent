@@ -3,7 +3,11 @@ package app.amber.core.memory.prompt
 import app.amber.core.memory.model.MemoryRecord
 
 object MemoryPromptBuilder {
-    fun buildMemoryContext(records: List<MemoryRecord>, debug: Boolean = false): String {
+    fun buildMemoryContext(
+        records: List<MemoryRecord>,
+        debug: Boolean = false,
+        debugDetails: Map<Int, String> = emptyMap(),
+    ): String {
         if (records.isEmpty()) return ""
         return buildString {
             appendLine("<memory_context>")
@@ -22,6 +26,10 @@ object MemoryPromptBuilder {
                     append(record.id)
                     append(", confidence=")
                     append("%.2f".format(record.confidence))
+                    debugDetails[record.id]?.let { details ->
+                        append(", ")
+                        append(details)
+                    }
                     append(")")
                 }
                 if (index != records.lastIndex) appendLine()

@@ -25,6 +25,8 @@ import app.amber.core.model.AssistantMemory
 import app.amber.core.repository.MemoryRepository
 import java.io.File
 
+internal const val LOW_CONFIDENCE_CANDIDATE_THRESHOLD = 0.60f
+
 class SettingAgentMemoryVM(
     private val settingsStore: SettingsAggregator,
     private val memoryRepository: MemoryRepository,
@@ -100,6 +102,24 @@ class SettingAgentMemoryVM(
         viewModelScope.launch {
             val candidate = memoryRepository.getAllCandidates().firstOrNull { it.id == id } ?: return@launch
             memoryRepository.updateCandidate(candidate.copy(status = MemoryCandidateStatus.IGNORED))
+        }
+    }
+
+    fun ignoreLowConfidenceCandidates() {
+        viewModelScope.launch {
+            val candidates = memoryRepository.getAllCandidates()
+                .filter { candidate ->
+                    candidate.status == MemoryCandidateStatus.PENDING &&
+                        candidate.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD
+                }
+            candidates.forEach { candidate ->
+                memoryRepository.updateCandidate(candidate.copy(status = MemoryCandidateStatus.IGNORED))
+            }
+            _operationMessage.value = if (candidates.isEmpty()) {
+                "没有低置信候选需要忽略"
+            } else {
+                "已忽略 ${candidates.size} 条低置信候选"
+            }
         }
     }
 

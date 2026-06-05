@@ -4,6 +4,7 @@ import app.amber.core.memory.model.MemoryCandidate
 import app.amber.core.memory.model.MemoryCandidateStatus
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
+import app.amber.core.memory.safety.isSensitiveMemoryContent
 
 class MemoryCandidateFilter {
     fun filter(candidates: List<MemoryCandidate>, existing: List<MemoryRecord>): FilterResult {
@@ -13,7 +14,7 @@ class MemoryCandidateFilter {
 
         candidates.forEach { candidate ->
             val normalized = normalize(candidate.content)
-            val sensitive = candidate.sensitive || containsSensitiveHint(candidate.content)
+            val sensitive = candidate.sensitive || isSensitiveMemoryContent(candidate.content)
             val tooWeak = candidate.content.trim().length < 12 || candidate.confidence < 0.45f
             val duplicate = normalized in existingNormalized || accepted.any { normalize(it.content) == normalized }
             if (sensitive || tooWeak || duplicate) {
@@ -40,14 +41,6 @@ class MemoryCandidateFilter {
     private fun normalize(text: String): String =
         text.lowercase().filter { it.isLetterOrDigit() }.take(200)
 
-    private fun containsSensitiveHint(text: String): Boolean {
-        val lower = text.lowercase()
-        val sensitiveTerms = listOf(
-            "身份证", "护照", "银行卡", "密码", "宗教", "政治观点",
-            "criminal", "password", "passport", "credit card", "religion", "sexual",
-        )
-        return sensitiveTerms.any { it in lower }
-    }
 }
 
 data class FilterResult(
