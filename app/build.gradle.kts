@@ -2,6 +2,7 @@ import groovy.json.JsonSlurper
 import com.android.build.api.dsl.Packaging
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.io.File
 import java.io.FileInputStream
 import java.math.BigInteger
 import java.net.URI
@@ -45,8 +46,17 @@ val googleServicesPackageByVariant = linkedMapOf(
     "baseline" to "$baseApplicationId.debug",
 )
 
-fun googleServicesClient(packageName: String): Map<*, *>? = runCatching {
-    val configFile = file("google-services.json")
+fun googleServicesFiles(variant: String): List<File> = listOf(
+    file("src/$variant/google-services.json"),
+    file("google-services.json"),
+)
+
+fun googleServicesClient(packageName: String, variant: String): Map<*, *>? =
+    googleServicesFiles(variant).firstNotNullOfOrNull { configFile ->
+        googleServicesClientFrom(configFile, packageName)
+    }
+
+fun googleServicesClientFrom(configFile: File, packageName: String): Map<*, *>? = runCatching {
     if (!configFile.exists()) return@runCatching null
     val root = JsonSlurper().parse(configFile) as? Map<*, *> ?: return@runCatching null
     val clients = root["client"] as? List<*> ?: return@runCatching null
@@ -59,8 +69,8 @@ fun googleServicesClient(packageName: String): Map<*, *>? = runCatching {
         }
 }.getOrNull()
 
-fun googleOAuthConfigured(packageName: String): Boolean {
-    val client = googleServicesClient(packageName) ?: return false
+fun googleOAuthConfigured(packageName: String, variant: String): Boolean {
+    val client = googleServicesClient(packageName, variant) ?: return false
     val oauthClients = client["oauth_client"] as? List<*> ?: return false
     return oauthClients
         .mapNotNull { it as? Map<*, *> }
@@ -154,7 +164,7 @@ android {
         buildConfigField(
             "Boolean",
             "GOOGLE_OAUTH_CONFIGURED",
-            googleOAuthConfigured("$baseApplicationId$packageSuffix").toString(),
+            googleOAuthConfigured("$baseApplicationId$packageSuffix", name).toString(),
         )
         manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
     }
@@ -173,7 +183,7 @@ android {
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "FIREBASE_LOCAL_FALLBACK_ALLOWED", "false")
-            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured(baseApplicationId).toString())
+            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured(baseApplicationId, name).toString())
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
         }
         debug {
@@ -186,7 +196,7 @@ android {
             buildConfigField(
                 "Boolean",
                 "GOOGLE_OAUTH_CONFIGURED",
-                googleOAuthConfigured("$baseApplicationId.debug").toString(),
+                googleOAuthConfigured("$baseApplicationId.debug", name).toString(),
             )
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
@@ -210,7 +220,7 @@ android {
             buildConfigField(
                 "Boolean",
                 "GOOGLE_OAUTH_CONFIGURED",
-                googleOAuthConfigured("$baseApplicationId.debug").toString(),
+                googleOAuthConfigured("$baseApplicationId.debug", name).toString(),
             )
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
@@ -280,15 +290,16 @@ googleServicesPackageByVariant.forEach { (variant, packageName) ->
         .configureEach {
             if (variant == "release") {
                 doFirst("require release google-services client") {
-                    if (googleServicesClient(packageName) == null) {
+                    if (googleServicesClient(packageName, variant) == null) {
                         throw GradleException(
-                            "Release builds require app/google-services.json to contain a Firebase client for $packageName."
+                            "Release builds require app/src/$variant/google-services.json or app/google-services.json " +
+                                "to contain a Firebase client for $packageName."
                         )
                     }
                 }
             } else {
                 onlyIf("google-services.json contains a Firebase client for $packageName") {
-                    googleServicesClient(packageName) != null
+                    googleServicesClient(packageName, variant) != null
                 }
             }
         }

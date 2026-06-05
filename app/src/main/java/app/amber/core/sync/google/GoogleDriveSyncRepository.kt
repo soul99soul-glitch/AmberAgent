@@ -46,7 +46,12 @@ class GoogleDriveSyncRepository(
 
     fun completeAuthorization(intent: Intent?): GoogleDriveAuthSession {
         requireNotNull(intent) { "Google 授权结果为空" }
-        return authorizationClient.getAuthorizationResultFromIntent(intent).toSession()
+        val result = runCatching {
+            authorizationClient.getAuthorizationResultFromIntent(intent)
+        }.getOrElse { error ->
+            throw error.toDriveAuthorizationException()
+        }
+        return result.toSession()
     }
 
     suspend fun findLatest(session: GoogleDriveAuthSession): GoogleDriveFile? = withContext(Dispatchers.IO) {
