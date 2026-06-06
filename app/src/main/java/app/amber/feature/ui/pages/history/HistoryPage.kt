@@ -54,6 +54,8 @@ import app.amber.agent.Screen
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
 import app.amber.core.utils.toLocalDateTime
@@ -262,7 +264,12 @@ private fun ConversationItem(
                 }
             },
             supportingContent = {
-                Text(conversation.createAt.toLocalDateTime())
+                // Graphite §3: timestamp is a machine-fact → MONO (meta), muted ink.
+                Text(
+                    text = conversation.createAt.toLocalDateTime(),
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.ink3,
+                )
             },
             trailingContent = {
                 IconButton(

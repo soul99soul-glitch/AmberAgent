@@ -49,6 +49,8 @@ import app.amber.agent.data.db.fts.MessageSearchResult
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
 import app.amber.core.utils.toLocalDateTime
@@ -266,10 +268,11 @@ private fun SearchResultItem(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+            // Graphite §3: timestamp is a machine-fact → MONO (meta), muted ink.
             Text(
                 text = formattedTime,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = LocalAmberType.current.meta,
+                color = LocalAmberTokens.current.ink3,
             )
         }
     }

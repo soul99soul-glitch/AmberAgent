@@ -76,6 +76,8 @@ import app.amber.feature.ui.hooks.useEditState
 import app.amber.feature.ui.modifier.onClick
 import app.amber.feature.ui.pages.assistant.detail.AssistantImporter
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -406,7 +408,9 @@ private fun AssistantItem(
         onClick = onEdit,
         colors = CardDefaults.cardColors(
             containerColor = CustomColors.listItemColors.containerColor
-        )
+        ),
+        // Graphite: flat surface, no drop shadow.
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier
@@ -461,10 +465,11 @@ private fun AssistantItem(
                             }
                         }
                         if (assistant.tags.size > 2) {
+                            // Graphite §3: overflow count is a machine-fact → MONO (meta), muted ink.
                             Text(
                                 text = "+${assistant.tags.size - 2}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                style = LocalAmberType.current.meta,
+                                color = LocalAmberTokens.current.ink3
                             )
                         }
                     }

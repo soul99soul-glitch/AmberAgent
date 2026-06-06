@@ -49,7 +49,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.theme.AmberMono
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import java.time.DayOfWeek
@@ -221,14 +223,24 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>) {
                         contentAlignment = Alignment.BottomStart,
                     ) {
                         if (labelDate != null) {
+                            // Graphite §3: the year axis label is a number (machine-fact) → MONO;
+                            // month abbreviations are human-readable text → stay sans.
+                            val isYearLabel = labelDate.monthValue == 1
                             Text(
-                                text = if (labelDate.monthValue == 1) {
+                                text = if (isYearLabel) {
                                     labelDate.year.toString()
                                 } else {
                                     labelDate.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
                                 },
                                 modifier = Modifier.wrapContentWidth(unbounded = true),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = if (isYearLabel) {
+                                    MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = AmberMono,
+                                        fontFeatureSettings = "tnum, zero",
+                                    )
+                                } else {
+                                    MaterialTheme.typography.labelSmall
+                                },
                                 fontSize = MaterialTheme.typography.labelSmall.fontSize * 0.75,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 softWrap = false,
@@ -411,13 +423,19 @@ private fun StatCard(
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp),
             )
+            // Graphite §3: the stat number is a machine-fact → MONO with tabular + slashed-zero.
+            // Keep headline size/weight so the visual hierarchy is unchanged; only the font swaps.
             Text(
                 text = value,
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontFamily = AmberMono,
+                    fontFeatureSettings = "tnum, zero",
+                ),
             )
+            // Human label stays sans.
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodySmall,
+                style = LocalAmberType.current.secondary,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
