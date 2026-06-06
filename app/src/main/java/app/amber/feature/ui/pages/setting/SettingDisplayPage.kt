@@ -65,7 +65,6 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberSharedPreferenceBoolean
 import app.amber.feature.ui.hooks.rememberSharedPreferenceString
-import app.amber.feature.ui.pages.chat.ChatThemeChoice
 import app.amber.feature.ui.components.ui.IntLabel
 import app.amber.feature.ui.components.ui.NotionSlider
 import app.amber.feature.ui.components.ui.PercentLabel
@@ -121,73 +120,6 @@ private fun <T> WorkspaceSegmentedChoice(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChatThemeChoiceCard(
-    choice: ChatThemeChoice,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val theme = choice.instance
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .width(128.dp)
-            .height(86.dp),
-        shape = RoundedCornerShape(18.dp),
-        color = theme.bg,
-        contentColor = theme.ink,
-        border = BorderStroke(
-            width = if (selected) 2.dp else 1.dp,
-            color = if (selected) theme.accent else theme.hair,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(theme.accent),
-                )
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(theme.userBubble)
-                        .border(1.dp, theme.hair, androidx.compose.foundation.shape.CircleShape),
-                )
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(theme.modelLogoBg)
-                        .border(1.dp, theme.hair, androidx.compose.foundation.shape.CircleShape),
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = choice.displayName,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = theme.ink,
-                    maxLines = 1,
-                )
-                Text(
-                    text = if (theme.isDark) "深色" else "浅色",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = theme.inkSoft,
-                    maxLines = 1,
-                )
             }
         }
     }
