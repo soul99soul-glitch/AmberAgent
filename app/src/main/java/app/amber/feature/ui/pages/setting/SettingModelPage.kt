@@ -91,6 +91,7 @@ import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -1024,6 +1025,8 @@ private fun ModelGroupSessionDefaultsSheet(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp),
+                            // Graphite §3: the context-message count is a machine-fact → MONO.
+                            textStyle = LocalAmberType.current.meta,
                             label = {
                                 Text(stringResource(R.string.assistant_page_context_message_size))
                             },
