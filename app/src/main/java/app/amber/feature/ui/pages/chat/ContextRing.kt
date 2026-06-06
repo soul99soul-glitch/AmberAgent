@@ -53,6 +53,17 @@ import kotlin.math.sin
 private const val CONTEXT_USAGE_POPUP_EXIT_MS = 140
 
 /**
+ * Number of filled bars (0..5) in the Graphite context meter for [used]/[total] tokens.
+ * Pure + testable (see ContextMeterTest). Rounds to nearest fifth; 0 when empty or total<=0.
+ */
+fun contextMeterFilledBars(used: Int, total: Int): Int {
+    if (total <= 0) return 0
+    val v = (used.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+    if (v <= 0.001f) return 0
+    return ((v * 5f) + 0.5f).toInt().coerceIn(0, 5)
+}
+
+/**
  * 22dp Context Ring —— 顶栏右侧轻量进度环 + 点开 usage panel popup。
  *
  * 设计来源 convo-agent.jsx HeaderContextRing + ContextUsagePanel：
@@ -112,7 +123,7 @@ fun ContextRing(
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            val filledCount = if (empty) 0 else ((v * 5f) + 0.5f).toInt().coerceIn(0, 5)
+            val filledCount = contextMeterFilledBars(used, total)
             val barHeights = listOf(6.dp, 8.dp, 10.dp, 12.dp, 14.dp)
             repeat(5) { i ->
                 Box(
