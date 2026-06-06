@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import app.amber.feature.ui.theme.AmberBase
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.AmberAccents
 import app.amber.feature.ui.theme.buildAmberTokens
 import app.amber.feature.ui.theme.defaultAmberTextStyles
 
@@ -97,19 +98,19 @@ private fun PrimitivesShowcase() {
 @Preview(name = "Light · terracotta", widthDp = 360)
 @Composable
 private fun PreviewLightTerracotta() =
-    AmberPreviewScaffold(AmberBase.LIGHT, Color(0xFFB8623A)) { PrimitivesShowcase() }
+    AmberPreviewScaffold(AmberBase.LIGHT, AmberAccents[0].hex) { PrimitivesShowcase() }
 
 @Preview(name = "Dark · blue", widthDp = 360)
 @Composable
 private fun PreviewDarkBlue() =
-    AmberPreviewScaffold(AmberBase.DARK, Color(0xFF4F86D6)) { PrimitivesShowcase() }
+    AmberPreviewScaffold(AmberBase.DARK, AmberAccents[2].hex) { PrimitivesShowcase() }
 
 @Preview(name = "Sage · sage-green", widthDp = 360)
 @Composable
 private fun PreviewSageGreen() =
-    AmberPreviewScaffold(AmberBase.SAGE, Color(0xFF5E9C6E)) { PrimitivesShowcase() }
+    AmberPreviewScaffold(AmberBase.SAGE, AmberAccents[1].hex) { PrimitivesShowcase() }
 
 @Preview(name = "Sage-dark · rose", widthDp = 360)
 @Composable
 private fun PreviewSageDarkRose() =
-    AmberPreviewScaffold(AmberBase.SAGE_DARK, Color(0xFFC2607A)) { PrimitivesShowcase() }
+    AmberPreviewScaffold(AmberBase.SAGE_DARK, AmberAccents[4].hex) { PrimitivesShowcase() }
