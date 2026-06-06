@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import app.amber.feature.ui.theme.LocalAmberType
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -124,7 +125,7 @@ private fun DeepReadHistoryRow(
             )
             Text(
                 text = formatHistoryTime(item.updatedAt),
-                style = MaterialTheme.typography.labelSmall,
+                style = LocalAmberType.current.meta,
                 color = colors.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
