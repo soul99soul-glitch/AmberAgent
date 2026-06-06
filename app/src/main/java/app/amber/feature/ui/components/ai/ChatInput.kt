@@ -24,6 +24,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.absoluteOffset
@@ -137,6 +139,7 @@ import app.amber.feature.ui.components.ui.permission.PermissionManager
 import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.core.utils.ChatSendTransitionTracker
@@ -772,18 +775,62 @@ fun ChatInput(
                     if (loading && state.isEmpty()) {
                         KeepScreenOn()
                     }
-                    app.amber.feature.ui.pages.chat.SendOrb(
-                        isEmpty = state.isEmpty(),
-                        loading = loading,
-                        onClick = {
-                            dismissExpand()
-                            sendMessage()
-                        },
-                        onLongClick = {
-                            dismissExpand()
-                            sendMessageWithoutAnswer()
-                        },
+                    // Graphite §6.2 composer: a FLAT circular send button (no halo/glow/shadow).
+                    // Fills with accent when there is a draft (!isEmpty); neutral surface2 when
+                    // empty. Stop-state (loading & empty) keeps the cancel affordance like before.
+                    // pressable only exposes onClick, but send needs both onClick (send) and
+                    // onLongClick (send-without-answer) — so we drive press feedback (scale .975,
+                    // design §5) from a shared MutableInteractionSource that also feeds
+                    // combinedClickable, rather than stacking pressable + combinedClickable.
+                    val tokens = LocalAmberTokens.current
+                    val sendEmpty = state.isEmpty()
+                    val sendEnabled = loading || !sendEmpty
+                    val sendStopState = loading && sendEmpty
+                    val sendFill by animateColorAsState(
+                        targetValue = if (sendEmpty && !loading) tokens.surface2 else tokens.accent,
+                        label = "sendButtonFill",
                     )
+                    val sendIconTint by animateColorAsState(
+                        targetValue = if (sendEmpty && !loading) tokens.ink2 else tokens.accentInk,
+                        label = "sendButtonIconTint",
+                    )
+                    val sendInteraction = remember { MutableInteractionSource() }
+                    val sendPressed by sendInteraction.collectIsPressedAsState()
+                    val sendScale by animateFloatAsState(
+                        targetValue = if (sendPressed) 0.975f else 1f,
+                        label = "sendButtonPress",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = sendScale
+                                scaleY = sendScale
+                            }
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(sendFill)
+                            .combinedClickable(
+                                interactionSource = sendInteraction,
+                                indication = null,
+                                enabled = sendEnabled,
+                                onClick = {
+                                    dismissExpand()
+                                    sendMessage()
+                                },
+                                onLongClick = {
+                                    dismissExpand()
+                                    sendMessageWithoutAnswer()
+                                },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (sendStopState) HugeIcons.Cancel01 else HugeIcons.ArrowUp02,
+                            contentDescription = if (sendStopState) "stop" else "send",
+                            tint = sendIconTint,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
             }
 

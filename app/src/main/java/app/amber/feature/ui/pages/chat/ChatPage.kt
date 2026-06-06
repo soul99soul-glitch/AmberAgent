@@ -119,6 +119,10 @@ import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ai.ChatInput
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
+import app.amber.feature.ui.components.ds.BlinkingCursor
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -918,15 +922,42 @@ private fun ChatPageContent(
                     val nick = setting.displaySetting.userNickname.trim()
                     val heroText = if (nick.isNotEmpty()) "Hi $nick，\n今天想聊点什么？" else "今天想聊点什么？"
                     val chatTheme = LocalChatTheme.current
-                    Text(
-                        text = heroText,
-                        color = chatTheme.ink.copy(alpha = if (loadingJob != null) 0.45f else 1f),
-                        fontSize = chatTheme.heroSize.sp,
-                        fontWeight = FontWeight(chatTheme.heroWeight),
-                        letterSpacing = chatTheme.heroLetter.sp,
-                        lineHeight = (chatTheme.heroSize * 1.4f).sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
+                    val amberTokens = LocalAmberTokens.current
+                    val amberType = LocalAmberType.current
+                    val heroDim = if (loadingJob != null) 0.45f else 1f
+                    // Graphite §6.2 Wordmark + §1: terminal wordmark replaces any gem/orb/halo
+                    // hero mark — `amber` in MONO 700 (ink) + an accent block BlinkingCursor,
+                    // then the existing restrained greeting beneath it.
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                text = "amber",
+                                style = amberType.meta.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 24.sp,
+                                    letterSpacing = (-0.5).sp,
+                                ),
+                                color = amberTokens.ink.copy(alpha = heroDim),
+                            )
+                            BlinkingCursor(
+                                modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
+                                width = 9.dp,
+                                height = 20.dp,
+                            )
+                        }
+                        Text(
+                            text = heroText,
+                            color = chatTheme.ink.copy(alpha = heroDim),
+                            fontSize = chatTheme.heroSize.sp,
+                            fontWeight = FontWeight(chatTheme.heroWeight),
+                            letterSpacing = chatTheme.heroLetter.sp,
+                            lineHeight = (chatTheme.heroSize * 1.4f).sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
                     if (loadingJob != null) {
                         // 上叠 spinner 给 "loading && empty" 中间态一个反馈
                         androidx.compose.material3.CircularProgressIndicator(
@@ -1430,6 +1461,9 @@ private fun TopBar(
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars),
     ) {
+        // Graphite §6.2 two-line ChatHeader: title block over the mono model-id trigger,
+        // closed by a bottom hairline (line token).
+        Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1462,16 +1496,34 @@ private fun TopBar(
                         }
                     }
                 }
-                ModelSelector(
-                    modelId = settings.getCurrentAssistant().chatModelId ?: settings.chatModelId,
-                    providers = settings.providers,
-                    type = ModelType.CHAT,
-                    minimalText = true,
+                // Graphite §6.2 ChatHeader title block: line 1 = bold session title (sans),
+                // line 2 = the model-id row that triggers the model menu (ModelSelector owns
+                // the picker + its onClick/popup — preserved as-is).
+                Column(
                     modifier = Modifier.weight(1f, fill = false),
-                    currentAssistant = settings.getCurrentAssistant(),
-                    onUpdateAssistant = onUpdateAssistant,
-                    onSelect = onUpdateChatModel,
-                )
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    val amberTokens = LocalAmberTokens.current
+                    val amberType = LocalAmberType.current
+                    val sessionTitle = conversation.title.ifBlank { "新会话" }
+                    Text(
+                        text = sessionTitle,
+                        style = amberType.sessionTitle,
+                        color = amberTokens.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 12.dp),
+                    )
+                    ModelSelector(
+                        modelId = settings.getCurrentAssistant().chatModelId ?: settings.chatModelId,
+                        providers = settings.providers,
+                        type = ModelType.CHAT,
+                        minimalText = true,
+                        currentAssistant = settings.getCurrentAssistant(),
+                        onUpdateAssistant = onUpdateAssistant,
+                        onSelect = onUpdateChatModel,
+                    )
+                }
             }
 
             Row(
@@ -1548,6 +1600,8 @@ private fun TopBar(
                     )
                 }
             }
+        }
+        Hairline()
         }
     }
 }
