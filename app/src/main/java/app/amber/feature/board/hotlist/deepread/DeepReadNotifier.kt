@@ -17,17 +17,42 @@ class DeepReadNotifier(
         topicId: String,
         title: String,
         sourceUrl: String?,
+        progress: DeepReadProgressSnapshot = null.deepReadProgressSnapshot(running = true),
     ): Notification =
         NotificationCompat.Builder(context, DEEP_READ_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.amberagent_live_status_icon)
-            .setContentTitle("深度阅读正在生成")
-            .setContentText(title.take(120))
+            .setContentTitle("深度阅读正在生成 · ${progress.percent}%")
+            .setContentText("${progress.label} · ${title.take(96)}")
             .setContentIntent(buildOpenPendingIntent(topicId, title, sourceUrl, fromHistory = false))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setProgress(100, progress.percent.coerceIn(0, 100), false)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+
+    fun notifyRunningProgress(
+        topicId: String,
+        title: String,
+        sourceUrl: String?,
+        progress: DeepReadProgressSnapshot,
+    ) {
+        context.sendNotification(
+            channelId = DEEP_READ_NOTIFICATION_CHANNEL_ID,
+            notificationId = notificationId(topicId),
+        ) {
+            this.title = "深度阅读正在生成 · ${progress.percent}%"
+            content = "${progress.label} · ${title.take(96)}"
+            smallIcon = R.drawable.amberagent_live_status_icon
+            ongoing = true
+            onlyAlertOnce = true
+            progressMax = 100
+            this.progress = progress.percent
+            category = NotificationCompat.CATEGORY_PROGRESS
+            priority = NotificationCompat.PRIORITY_LOW
+            contentIntent = buildOpenPendingIntent(topicId, title, sourceUrl, fromHistory = false)
+        }
+    }
 
     fun notifyCompleted(
         topicId: String,

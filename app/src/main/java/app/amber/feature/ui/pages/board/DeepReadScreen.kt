@@ -84,6 +84,7 @@ import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
 import app.amber.feature.board.hotlist.deepread.Perspective
 import app.amber.feature.board.hotlist.deepread.ReadingLink
 import app.amber.feature.board.hotlist.deepread.TimelineEvent
+import app.amber.feature.board.hotlist.deepread.deepReadProgressSnapshot
 import app.amber.feature.board.hotlist.deepread.displayHeroCaption
 import app.amber.feature.board.hotlist.deepread.displayHeroImageUrl
 import app.amber.feature.board.hotlist.deepread.isComplete
@@ -310,9 +311,7 @@ fun DeepReadScreen(
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                     when {
                         generating -> RunningStageNotice(
-                            stages = data.sectionStates,
-                            verificationState = data.verificationState,
-                            generationPhase = data.generationPhase,
+                            progress = data.deepReadProgressSnapshot(running = true),
                             modifier = noticeModifier,
                         )
                         runError != null && !complete -> DeepReadPartialErrorNotice(
@@ -364,9 +363,7 @@ fun DeepReadScreen(
                             onRetrySection = ::runOne,
                         )
                         RunningStageNotice(
-                            stages = data.sectionStates,
-                            verificationState = data.verificationState,
-                            generationPhase = data.generationPhase,
+                            progress = data.deepReadProgressSnapshot(running = true),
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .statusBarsPadding()
@@ -419,9 +416,7 @@ fun DeepReadScreen(
 
                     when {
                         generating -> RunningStageNotice(
-                            stages = data.sectionStates,
-                            verificationState = data.verificationState,
-                            generationPhase = data.generationPhase,
+                            progress = data.deepReadProgressSnapshot(running = true),
                             modifier = noticeModifier,
                         )
                         runError != null && !complete -> DeepReadPartialErrorNotice(
@@ -497,38 +492,9 @@ private fun DeepReadGenerationPhase.isActiveDeepReadPhase(): Boolean =
 
 @Composable
 private fun RunningStageNotice(
-    stages: Map<DeepReadGenerationStage, app.amber.feature.board.hotlist.deepread.DeepReadSectionState>,
-    verificationState: app.amber.feature.board.hotlist.deepread.DeepReadSectionState,
-    generationPhase: DeepReadGenerationPhase,
+    progress: app.amber.feature.board.hotlist.deepread.DeepReadProgressSnapshot,
     modifier: Modifier = Modifier,
 ) {
-    val phaseLabel = when (generationPhase) {
-        DeepReadGenerationPhase.COLLECTING -> "资料收集"
-        DeepReadGenerationPhase.PLANNING -> "结构规划"
-        DeepReadGenerationPhase.VERIFYING -> "补漏"
-        else -> null
-    }
-    if (verificationState.status == DeepReadSectionStatus.RUNNING || phaseLabel != null) {
-        Surface(
-            modifier = modifier,
-            shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-            shadowElevation = 4.dp,
-        ) {
-            Text(
-                "正在${phaseLabel ?: "补漏"}",
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-        return
-    }
-    val activeStage = DeepReadGenerationStage.entries.firstOrNull { stage ->
-        stages[stage]?.status == DeepReadSectionStatus.RUNNING
-    } ?: DeepReadGenerationStage.entries.firstOrNull { stage ->
-        stages[stage]?.status != DeepReadSectionStatus.READY
-    } ?: return
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(50),
@@ -536,7 +502,7 @@ private fun RunningStageNotice(
         shadowElevation = 4.dp,
     ) {
         Text(
-            "分段写作：${activeStage.label}",
+            "${progress.label} ${progress.percent}%",
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
@@ -1856,12 +1822,10 @@ private fun DeepReadLoading(
 ) {
     val stages = remember { DeepReadGenerationStage.entries }
     val states = output?.sectionStates.orEmpty()
-    val readyCount = stages.count { states[it]?.status == DeepReadSectionStatus.READY }
+    val progress = output.deepReadProgressSnapshot(running = true)
     val activeStage = stages.firstOrNull { states[it]?.status == DeepReadSectionStatus.RUNNING }
         ?: stages.firstOrNull { (states[it]?.status ?: DeepReadSectionStatus.PENDING) != DeepReadSectionStatus.READY }
         ?: stages.first()
-    val activeIndex = stages.indexOf(activeStage).coerceAtLeast(0)
-    val progress = ((readyCount + 0.4f) / stages.size).coerceIn(0.12f, 0.92f)
     Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier.padding(horizontal = 38.dp),
@@ -1926,7 +1890,7 @@ private fun DeepReadLoading(
                 }
             }
             LinearProgressIndicator(
-                progress = { progress },
+                progress = { progress.fraction },
                 modifier = Modifier.fillMaxWidth().height(2.dp),
                 color = palette.accent,
                 trackColor = palette.line,

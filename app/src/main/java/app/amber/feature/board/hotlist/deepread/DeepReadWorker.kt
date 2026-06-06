@@ -8,6 +8,11 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import app.amber.feature.board.hotlist.HotListRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.io.IOException
@@ -26,6 +31,7 @@ class DeepReadWorker(
         val route = deepReadWorkerRoute(inputData.getString(KEY_STAGE))
         if (route is DeepReadWorkerRoute.Invalid) return Result.failure()
         val notifier = get<DeepReadNotifier>()
+        val repository = get<HotListRepository>()
 
         try {
             setForeground(createForegroundInfo(notifier, topicId, title, sourceUrl))
@@ -34,7 +40,6 @@ class DeepReadWorker(
         } catch (error: Throwable) {
             if (canRetryDeepReadWorker(runAttemptCount)) return Result.retry()
             val reason = error.message ?: error::class.java.simpleName
-            val repository = get<HotListRepository>()
             val cached = repository.materializeFreshDeepRead(topicId, title)?.withInferredSectionStates()
             repository.saveDeepRead(
                 topicId = topicId,
@@ -52,6 +57,25 @@ class DeepReadWorker(
             return Result.failure()
         }
 
+        return coroutineScope {
+            val progressJob = launchProgressNotifications(repository, notifier, topicId, title, sourceUrl)
+            try {
+                runGeneration(route, topicId, title, sourceUrl, force, repository, notifier)
+            } finally {
+                progressJob.cancelAndJoin()
+            }
+        }
+    }
+
+    private suspend fun runGeneration(
+        route: DeepReadWorkerRoute,
+        topicId: String,
+        title: String,
+        sourceUrl: String?,
+        force: Boolean,
+        repository: HotListRepository,
+        notifier: DeepReadNotifier,
+    ): Result {
         return try {
             val manager = get<DeepReadAgentRunManager>()
             val output = when (route) {
@@ -87,7 +111,6 @@ class DeepReadWorker(
             throw cancel
         } catch (error: Throwable) {
             val reason = error.message ?: error::class.java.simpleName
-            val repository = get<HotListRepository>()
             val cached = repository.materializeFreshDeepRead(topicId, title)?.withInferredSectionStates()
             if (shouldRetryDeepReadWorkerError(error, runAttemptCount)) {
                 repository.saveDeepRead(
@@ -114,6 +137,41 @@ class DeepReadWorker(
                 reason = reason,
             )
             Result.failure()
+        }
+    }
+
+    private fun CoroutineScope.launchProgressNotifications(
+        repository: HotListRepository,
+        notifier: DeepReadNotifier,
+        topicId: String,
+        title: String,
+        sourceUrl: String?,
+    ) = launch {
+        var lastProgress = null.deepReadProgressSnapshot(running = true)
+        try {
+            repository.observeDeepRead(topicId).collect { output ->
+                if (!output.shouldNotifyRunningDeepReadProgress()) return@collect
+                val progress = output.deepReadProgressSnapshot(running = true)
+                if (shouldNotifyDeepReadProgress(lastProgress, progress)) {
+                    lastProgress = progress
+                    try {
+                        notifier.notifyRunningProgress(
+                            topicId = topicId,
+                            title = title,
+                            sourceUrl = sourceUrl,
+                            progress = progress,
+                        )
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Throwable) {
+                        // Notification progress is best-effort; Room remains the source of truth.
+                    }
+                }
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Throwable) {
+            // Notification progress is best-effort; Room remains the source of truth.
         }
     }
 
