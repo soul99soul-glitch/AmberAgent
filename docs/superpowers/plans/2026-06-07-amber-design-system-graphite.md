@@ -798,4 +798,42 @@ Critical path: 0.1→0.2→0.3→0.4 (everything depends on tokens+type), then 0
 
 ---
 
-*End of plan. Execution begins at Phase 0, Task 0.1 once you give the go.*
+## Progress log — 2026-06-07 (autonomous /goal run)
+
+**Commits on `amberagent/ui-graphite-redesign` (base `8168ba67`):**
+1. docs: plan + design handoff reference
+2. feat: Graphite token + type foundation; flip app theme to AmberTokens
+3. feat: DS primitives + base/accent picker in settings
+4. feat: context meter ring→bars; remove bottom bloom + dead WhisperHalo
+5. feat: reskin chat message components (tool/think/ask/actions)
+6. feat: bubble + amber label + flat send + two-line header/empty wordmark; delete SendOrb
+7. feat: reskin model picker (mono trigger + accordion, accent-active)
+8. chore: delete dead AmberMark gem
+9. feat: mono/flat polish — history, search, stats, assistant
+10. feat: mono context-size input in SettingModelPage
+11. test: Graphite preview harness + DS primitives preview matrix
+12. test: extract contextMeterFilledBars + JVM unit test
+
+**Success-criteria status:**
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | `assembleDebug` passes | ✅ verified (exit 0) |
+| 2 | legacy themes + bloom/halo/orb removed; 4 bases + 5 accents switchable | ✅ (WhisperHalo/SendOrb/AmberMark deleted, bloom call removed; picker in settings) |
+| 3 | mono/sans split in chat/model/settings core | ✅ core screens |
+| 4 | Phase 1 + Phase 2 + Phase 3 every screen reskinned, zero regression | 🟡 Phase 1 ✅ (all 9), Phase 2 core ✅; ALL screens reskinned at color level via the AmberTokens→M3 mapping; per-screen mono-polish done on history/search/stats/assistant/settings-model; long tail (board, favorite, imggen, live, extensions, miniapp, webview, share, backup, log/debug/developer, remaining setting subpages, nav/table/workspace) inherits Graphite but has no individual mono pass yet |
+| 5 | targeted UI tests | 🟡 context-meter math unit test ✅ (runs+passes); composer +→capsule morph deferred (flat send shipped instead); model-menu instrumentation test not written (needs device) |
+| 6 | completeness critic: no bare hex / no residual decoration | 🟡 dead decoration deleted; reskinned components are token-based; full-codebase literal-hex purge of untouched files NOT done (large, pre-existing) |
+| 7 | core screens preview in 4 bases × accents | 🟡 reusable preview harness + DS primitives matrix shipped; per-screen preview matrices not all written |
+
+**Key TODOs (need user):**
+- **FONTS (D5):** Hanken Grotesk + Noto Sans SC subset binaries not bundled — `AmberSans` currently falls back to the platform sans (Roboto Latin + system Noto Sans CJK). Drop `hanken_grotesk_*.ttf` + `noto_sans_sc_*.otf` into `app/src/main/res/font/` and point `AmberSans`/CN family at them (see `AmberType.kt` TODO) for full fidelity. JetBrains Mono (the mono signature) is exact today.
+- **Visual review:** run the app in all 4 bases × light/dark × ≥2 accents and walk chat → model menu → settings → history. Compile-verified only; pixel fidelity needs human eyes.
+- Composer `+`→capsule morph (progressive enhancement) not implemented; flat accent send shipped.
+- Model-list provider chip scroll-to-selected math is approximate after the accordion merge (pre-existing approximation; no crash) — true up if it bothers in use.
+
+**Remaining work (next rounds):** per-screen mono polish on the long-tail screens; model-menu + composer instrumentation tests; broaden preview matrices; optional full literal-hex audit.
+
+---
+
+*Plan + progress current as of commit 12. Foundation, all signature components, core screens, and a buildable Graphite APK are in place.*
