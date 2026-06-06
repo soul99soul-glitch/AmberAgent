@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AmberAgent · 04 其他</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { font-family: "Noto Sans SC", -apple-system, system-ui, sans-serif; background: #f0eee9; }
+  *, *::before, *::after { box-sizing: border-box; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="themes.jsx"></script>
+<script type="text/babel" src="phone-screen.jsx"></script>
+<script type="text/babel" src="convo-user.jsx"></script>
+<script type="text/babel" src="convo-agent.jsx"></script>
+<script type="text/babel" src="convo-ask.jsx"></script>
+<script type="text/babel" src="convo-tool-result.jsx"></script>
+<script type="text/babel" src="model-picker.jsx"></script>
+<script type="text/babel" src="model-picker-v3.jsx"></script>
+<script type="text/babel" src="model-picker-v6.jsx"></script>
+<script type="text/babel" src="concept-floating.jsx"></script>
+<script type="text/babel" src="settings-screen.jsx"></script>
+<script type="text/babel" src="provider-screens.jsx"></script>
+<script type="text/babel" src="settings-shell.jsx"></script>
+<script type="text/babel" src="settings-experimental.jsx"></script>
+<script type="text/babel" src="settings-memory.jsx"></script>
+<script type="text/babel" src="settings-memory-v2.jsx"></script>
+<script type="text/babel" src="settings-runtime.jsx"></script>
+<script type="text/babel" src="settings-models.jsx"></script>
+<script type="text/babel" src="attachments-panel.jsx"></script>
+<script type="text/babel" src="settings-search.jsx"></script>
+<script type="text/babel" src="settings-search-v2.jsx"></script>
+<script type="text/babel" src="provider-screens-v2.jsx"></script>
+<script type="text/babel" src="settings-skills.jsx"></script>
+<script type="text/babel" src="convo-screen.jsx"></script>
+<script type="text/babel" src="convo-history.jsx"></script>
+<script type="text/babel" src="tablet-screen.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  const T = window.THEMES;
+  return (
+    <DesignCanvas>
+            <DCSection
+        id="providers"
+        title="Providers"
+        subtitle="提供商列表 / 配置 / 模型 / 可用模型 sheet。Whisper 主线 + 其它主题精选。"
+      >
+        <DCArtboard id="prov-list" label="提供商列表" width={380} height={832}>
+          <ProviderListScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="prov-config" label="提供商 · 配置" width={380} height={832}>
+          <ProviderConfigScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="prov-models" label="提供商 · 模型" width={380} height={832}>
+          <ProviderModelsScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="prov-available" label="可用模型 Sheet" width={380} height={832}>
+          <ProviderAvailableSheet t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="prov-list-night" label="提供商列表 · Midnight" width={380} height={832}>
+          <ProviderListScreen t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="prov-list-paper" label="提供商列表 · Paper" width={380} height={832}>
+          <ProviderListScreen t={T.PAPER} />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="providers-v2"
+        title="Providers · V2 重做"
+        subtitle="配置 / 模型 / 编辑模型弹层 —— 按真实字段重做，统一 V2 卡片语言。Whisper 主线 + Paper / Midnight。"
+      >
+        <DCArtboard id="prov2-config" label="配置 · Whisper" width={380} height={832}>
+          <ProviderConfigV2Screen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="prov2-models" label="模型 · Whisper" width={380} height={832}>
+          <ProviderModelsV2Screen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="prov2-edit" label="编辑模型 · Whisper" width={380} height={832}>
+          <EditModelSheet t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="prov2-config-paper" label="配置 · Paper" width={380} height={832}>
+          <ProviderConfigV2Screen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="prov2-models-paper" label="模型 · Paper" width={380} height={832}>
+          <ProviderModelsV2Screen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="prov2-edit-paper" label="编辑模型 · Paper" width={380} height={832}>
+          <EditModelSheet t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="prov2-config-night" label="配置 · Midnight" width={380} height={832}>
+          <ProviderConfigV2Screen t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="prov2-models-night" label="模型 · Midnight" width={380} height={832}>
+          <ProviderModelsV2Screen t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="prov2-edit-night" label="编辑模型 · Midnight" width={380} height={832}>
+          <EditModelSheet t={T.NIGHT} />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="history"
+        title="History · 四个主题"
+        subtitle="全屏对话列表。"
+      >
+        <DCArtboard id="hist-whisper" label="历史 · Whisper" width={380} height={832}>
+          <HistoryScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="hist-plain" label="历史 · Plain" width={380} height={832}>
+          <HistoryScreen t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="hist-paper" label="历史 · Paper" width={380} height={832}>
+          <HistoryScreen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="hist-night" label="历史 · Midnight" width={380} height={832}>
+          <HistoryScreen t={T.NIGHT} />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="tablet"
+        title="Tablet · 四个主题"
+        subtitle="平板布局：左侧 300px 侧边栏 + 右侧居中 760px 对话。"
+      >
+        <DCArtboard id="tab-whisper" label="平板 · Whisper" width={1180} height={820}>
+          <TabletScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="tab-plain" label="平板 · Plain" width={1180} height={820}>
+          <TabletScreen t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="tab-paper" label="平板 · Paper" width={1180} height={820}>
+          <TabletScreen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="tab-night" label="平板 · Midnight" width={1180} height={820}>
+          <TabletScreen t={T.NIGHT} />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

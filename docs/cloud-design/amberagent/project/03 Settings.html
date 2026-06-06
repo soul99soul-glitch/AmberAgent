@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AmberAgent · 03 设置</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { font-family: "Noto Sans SC", -apple-system, system-ui, sans-serif; background: #f0eee9; }
+  *, *::before, *::after { box-sizing: border-box; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="themes.jsx"></script>
+<script type="text/babel" src="phone-screen.jsx"></script>
+<script type="text/babel" src="convo-user.jsx"></script>
+<script type="text/babel" src="convo-agent.jsx"></script>
+<script type="text/babel" src="convo-ask.jsx"></script>
+<script type="text/babel" src="convo-tool-result.jsx"></script>
+<script type="text/babel" src="model-picker.jsx"></script>
+<script type="text/babel" src="model-picker-v3.jsx"></script>
+<script type="text/babel" src="model-picker-v6.jsx"></script>
+<script type="text/babel" src="concept-floating.jsx"></script>
+<script type="text/babel" src="settings-screen.jsx"></script>
+<script type="text/babel" src="provider-screens.jsx"></script>
+<script type="text/babel" src="settings-shell.jsx"></script>
+<script type="text/babel" src="settings-experimental.jsx"></script>
+<script type="text/babel" src="settings-memory.jsx"></script>
+<script type="text/babel" src="settings-memory-v2.jsx"></script>
+<script type="text/babel" src="settings-runtime.jsx"></script>
+<script type="text/babel" src="settings-models.jsx"></script>
+<script type="text/babel" src="attachments-panel.jsx"></script>
+<script type="text/babel" src="settings-search.jsx"></script>
+<script type="text/babel" src="settings-search-v2.jsx"></script>
+<script type="text/babel" src="settings-skills.jsx"></script>
+<script type="text/babel" src="convo-screen.jsx"></script>
+<script type="text/babel" src="convo-history.jsx"></script>
+<script type="text/babel" src="tablet-screen.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  const T = window.THEMES;
+  return (
+    <DesignCanvas>
+            <DCSection
+        id="settings"
+        title="Settings 主页"
+        subtitle="设置主页 · 四个主题。"
+      >
+        <DCArtboard id="set-whisper" label="设置 · Whisper" width={380} height={832}>
+          <SettingsScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="set-plain" label="设置 · Plain" width={380} height={832}>
+          <SettingsScreen t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="set-paper" label="设置 · Paper" width={380} height={832}>
+          <SettingsScreen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="set-night" label="设置 · Midnight" width={380} height={832}>
+          <SettingsScreen t={T.NIGHT} />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="settings-sub"
+        title="Settings · 子页面"
+        subtitle="实验性功能 / 核心记忆 / 运行环境 / 模型分配 / 搜索服务 / Skill 技能。均为 Whisper。"
+      >
+        <DCArtboard id="set-exp" label="实验性功能" width={380} height={832}>
+          <ExperimentalScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="set-mem" label="核心记忆" width={380} height={832}>
+          <CoreMemoryScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="set-mem-v2-whisper" label="核心记忆 V2 笔记本 · Whisper" width={380} height={832}>
+          <CoreMemoryV2Screen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="set-mem-v2-paper" label="核心记忆 V2 笔记本 · Paper" width={380} height={832}>
+          <CoreMemoryV2Screen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="set-mem-v2-sage" label="核心记忆 V2 笔记本 · Sage" width={380} height={832}>
+          <CoreMemoryV2Screen t={T.SAGE} />
+        </DCArtboard>
+        <DCArtboard id="set-rt" label="运行环境" width={380} height={832}>
+          <RuntimeEnvScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="set-ma" label="模型分配" width={380} height={832}>
+          <ModelAssignScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="set-ss" label="搜索服务" width={380} height={832}>
+          <SearchServicesScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="set-ss-v2-whisper" label="搜索服务 V2 · Whisper" width={380} height={832}>
+          <SearchServicesV2Screen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="set-ss-v2-sage" label="搜索服务 V2 · Sage" width={380} height={832}>
+          <SearchServicesV2Screen t={T.SAGE} />
+        </DCArtboard>
+        <DCArtboard id="set-ss-v2-paper" label="搜索服务 V2 · Paper" width={380} height={832}>
+          <SearchServicesV2Screen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="set-ss-v2-night" label="搜索服务 V2 · Midnight" width={380} height={832}>
+          <SearchServicesV2Screen t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="set-sk" label="Skill 技能" width={380} height={832}>
+          <SkillsScreen t={T.WHISPER} />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="settings-sub-themes"
+        title="Settings 子页面 · 主题对比"
+        subtitle="挑选最丰富的子页面（模型分配 / Skill 技能）做四主题对比。"
+      >
+        <DCArtboard id="ma-plain" label="模型分配 · Plain" width={380} height={832}>
+          <ModelAssignScreen t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="ma-paper" label="模型分配 · Paper" width={380} height={832}>
+          <ModelAssignScreen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="ma-night" label="模型分配 · Midnight" width={380} height={832}>
+          <ModelAssignScreen t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="sk-plain" label="Skill · Plain" width={380} height={832}>
+          <SkillsScreen t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="sk-paper" label="Skill · Paper" width={380} height={832}>
+          <SkillsScreen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="sk-night" label="Skill · Midnight" width={380} height={832}>
+          <SkillsScreen t={T.NIGHT} />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

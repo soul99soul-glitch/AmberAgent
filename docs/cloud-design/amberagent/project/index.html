@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AmberAgent · Design Canvas 索引</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; min-height: 100%; }
+  body {
+    font-family: "Noto Sans SC", -apple-system, system-ui, sans-serif;
+    background: #f0eee9;
+    color: #2b2722;
+    -webkit-font-smoothing: antialiased;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 88px 32px 64px; }
+
+  .eyebrow {
+    font-size: 12px; letter-spacing: 2.4px; text-transform: uppercase;
+    color: #a89f93; font-weight: 500; margin: 0 0 14px;
+  }
+  h1 { font-size: 34px; font-weight: 600; letter-spacing: 0.4px; margin: 0 0 12px; }
+  .lede { font-size: 15px; line-height: 1.6; color: #6f675c; margin: 0 0 8px; max-width: 600px; }
+  .note {
+    font-size: 12.5px; line-height: 1.6; color: #a89f93; margin: 0 0 48px; max-width: 600px;
+  }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+
+  .card {
+    display: block; text-decoration: none; color: inherit;
+    background: #fbfaf7; border: 1px solid #e4ded4; border-radius: 18px;
+    padding: 26px 26px 24px;
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px -12px rgba(60,50,38,0.22);
+    border-color: #d6cdbf;
+  }
+  .card .idx {
+    font-size: 12px; letter-spacing: 1.6px; color: #b9af9f; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .card h2 { font-size: 19px; font-weight: 600; letter-spacing: 0.3px; margin: 8px 0 8px; }
+  .card p { font-size: 13px; line-height: 1.55; color: #847b6e; margin: 0; }
+  .card .meta {
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid #efe9df;
+    font-size: 11.5px; color: #a89f93; letter-spacing: 0.3px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .card .arrow { color: #c9bfae; transition: transform .16s ease, color .16s ease; }
+  .card:hover .arrow { transform: translateX(3px); color: #8a8072; }
+
+  @media (max-width: 680px) {
+    .grid { grid-template-columns: 1fr; }
+    .wrap { padding: 56px 22px 48px; }
+    h1 { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="eyebrow">AmberAgent · Design Canvas</p>
+    <h1>设计画布索引</h1>
+    <p class="lede">原先的单一画布因 artboard 过多在 Chrome 下渲染吃力，已按主题拆成四个独立画布。每页各自平移 / 缩放，互不影响。</p>
+    <p class="note">所有页面共用同一套组件源文件，内容与原画布完全一致。</p>
+
+    <div class="grid">
+      <a class="card" href="01 Chat.html">
+        <span class="idx">01</span>
+        <h2>聊天</h2>
+        <p>空状态（16 主题）· 对话页 · 状态变体（思考 / 用量环 / 询问 / 工具预览）· 附件面板三方向。</p>
+        <div class="meta"><span>4 个分组 · ~40 屏</span><span class="arrow">→</span></div>
+      </a>
+
+      <a class="card" href="02 Model Picker.html">
+        <span class="idx">02</span>
+        <h2>模型选择</h2>
+        <p>模型选择器 · V3 重构 · V6 预览-确认方案 · Concept 悬浮控件实验。</p>
+        <div class="meta"><span>4 个分组 · ~22 屏</span><span class="arrow">→</span></div>
+      </a>
+
+      <a class="card" href="03 Settings.html">
+        <span class="idx">03</span>
+        <h2>设置</h2>
+        <p>设置主页 · 子页面（含搜索服务 V2、核心记忆 V2、模型分配等）· 子页面主题对比。</p>
+        <div class="meta"><span>3 个分组 · ~25 屏</span><span class="arrow">→</span></div>
+      </a>
+
+      <a class="card" href="04 More.html">
+        <span class="idx">04</span>
+        <h2>其他</h2>
+        <p>Providers 提供商流程 · History 历史列表 · Tablet 平板布局。</p>
+        <div class="meta"><span>3 个分组 · ~14 屏</span><span class="arrow">→</span></div>
+      </a>
+    </div>
+
+    <div class="grid" style="margin-top:18px;">
+      <a class="card" href="Amber Redesign.html" style="grid-column:1 / -1; border-color:#d8c4b4; background:linear-gradient(180deg,#fbfaf7,#f8f1ea);">
+        <span class="idx" style="color:#b8623a;">RD · TERMINAL × MODERN</span>
+        <h2>Amber Redesign</h2>
+        <p>借 OpenCode Mobile 的「终端 × 现代」暖中性石墨语言重做 Amber：陶土色强调、Hanken + JetBrains Mono、等宽元数据。主页 / 对话 / 模型选择 / 设置全套，含浅深两种模式。打开 Tweaks 可把底色与强调色分开混搭。</p>
+        <div class="meta"><span>5 个分组 · 17 屏 · 底色 × 强调色可混搭</span><span class="arrow">→</span></div>
+      </a>
+    </div>
+  </div>
+</body>
+</html>
