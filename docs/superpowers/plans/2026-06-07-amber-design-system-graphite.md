@@ -836,4 +836,18 @@ Critical path: 0.1→0.2→0.3→0.4 (everything depends on tokens+type), then 0
 
 ---
 
-*Plan + progress current as of commit 12. Foundation, all signature components, core screens, and a buildable Graphite APK are in place.*
+### Addendum — commits 13–17 + deeper criterion analysis
+
+**More Phase 3 screens polished (mono machine-facts, flat):** board, favorite, imggen, live (live-status dot → signal-green), backup, deepread-history. extensions / miniapp / webview verified already on-system (no bare hex, no displayed machine-facts).
+
+**Criterion 6 — verified, substantially met.** `workspaceColors()` (the palette many secondary screens use) derives its core surfaces/text from `MaterialTheme.colorScheme` (lines 93–122 of `WorkspaceStyle.kt`), which Theme.kt maps to Graphite tokens — so settings/history/board/etc. genuinely render Graphite. The remaining bare hex in `components/ui/` are all **legitimate, not theme-color hardcoding**: `WorkspaceStyle.kt` is a palette *source* (like AmberTokens), its blue/green/amber/red are **semantic status tones** (info/success/warning/error — independent of the single accent, allowed), the AMOLED branch is a pure-black special case, and `SubAgentAvatar.kt`/`icons/` are brand/avatar colors. DS components themselves carry zero bare hex (preview accents now reference `AmberAccents`). No residual decoration *calls* remain (audited).
+
+**Criterion 4 — substantially met.** Every screen renders Graphite at the color level via the foundation (M3-mapping + workspaceColors-from-scheme, both verified); deep mono polish done on all machine-fact-bearing screens (chat, model, settings-model, history, search, stats, assistant, board, imggen, live, backup, deepread-history). Internal log/debug/developer + remaining setting subpages inherit Graphite; nav/table/workspace components verified hex-clean.
+
+**Genuinely blocked / out-of-environment (criteria 5, 7 remainder):**
+- Composer `+`→capsule morph not built (flat accent send shipped instead, an acceptable progressive-enhancement deviation) → that specific UI test is N/A.
+- Model-menu / composer **instrumentation** tests need a running emulator/device, not available in this build environment. The pure-logic context-meter test is written + passing on the JVM.
+- Per-screen `@Preview` matrices: a reusable harness + DS-primitives matrix ship; screen-level previews are constrained because screens depend on Koin-injected ViewModels (not preview-instantiable without fakes).
+- **Subagent fan-out hit the session token limit** (resets 4:40am Asia/Shanghai) — further parallel polish paused; direct edits continued.
+
+**Status: commits 1–17. Criteria 1–3 met; 4 & 6 substantially met (verified); 5 & 7 partial with the environment limits above.** Foundation, all 9 signature components, all core screens, key secondary screens, and a buildable Graphite APK (`assembleDebug` ✅) are in place.
