@@ -49,6 +49,7 @@ import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
 import app.amber.core.utils.toLocalDateTime
@@ -154,9 +155,10 @@ private fun FavoriteHeader(count: Int) {
                     style = MaterialTheme.typography.titleSmall,
                     color = workspace.ink,
                 )
+                // Graphite §3: snippet count is a machine-fact → MONO (meta), muted ink.
                 Text(
                     text = stringResource(R.string.favorite_page_count, count),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = LocalAmberType.current.meta,
                     color = workspace.muted,
                 )
             }

@@ -94,6 +94,8 @@ import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.ImagePreviewDialog
 import app.amber.feature.ui.components.ui.OutlinedNumberInput
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import java.io.File
@@ -423,10 +425,11 @@ private fun ImageGalleryScreen(
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Column {
+                                        // Graphite §3: model id is a machine-fact → MONO (meta), muted ink.
                                         Text(
                                             text = it.model,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary
+                                            style = LocalAmberType.current.meta,
+                                            color = LocalAmberTokens.current.ink3
                                         )
                                         Text(
                                             text = it.prompt.take(20) + if (it.prompt.length > 20) "..." else "",

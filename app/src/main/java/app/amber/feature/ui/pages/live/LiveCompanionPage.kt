@@ -76,6 +76,7 @@ import app.amber.feature.live.LiveModeCard
 import app.amber.feature.live.LiveModeUiState
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import java.util.Locale
@@ -308,7 +309,7 @@ private fun LivePulse(active: Boolean, analyzing: Boolean, hasError: Boolean) {
     val color = when {
         hasError -> MaterialTheme.colorScheme.error
         analyzing -> MaterialTheme.colorScheme.tertiary
-        active -> MaterialTheme.colorScheme.primary
+        active -> LocalAmberTokens.current.signal // live = signal-green liveness, not accent
         else -> MaterialTheme.colorScheme.outline
     }
     Box(

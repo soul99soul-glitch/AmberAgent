@@ -95,6 +95,7 @@ import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import org.koin.compose.koinInject
 import java.time.Instant
@@ -304,7 +305,7 @@ fun TodayBoardPage() {
                         maxLines = 12,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text("置信度 ${(opportunity.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+                    Text("置信度 ${(opportunity.confidence * 100).toInt()}%", style = LocalAmberType.current.meta)
                 }
             },
             confirmButton = {
@@ -370,7 +371,7 @@ private fun HotListActionSheet(
             if (topic.sources.isNotEmpty()) {
                 Text(
                     topic.sources.joinToString(" · ") { "${it.providerName} #${it.rank}" },
-                    style = MaterialTheme.typography.labelSmall,
+                    style = LocalAmberType.current.meta,
                     color = workspaceColors().muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -536,7 +537,7 @@ private fun HotTopicRow(topic: HotTopic, onClick: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                 Text(
                     "#${topic.bestRank}",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    style = LocalAmberType.current.meta.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -587,12 +588,12 @@ private fun ProviderSection(provider: HotListProviderSnapshot, onItemClick: (Hot
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
-                            Text("${item.rank}.", style = MaterialTheme.typography.bodyMedium, color = workspaceColors().muted)
+                            Text("${item.rank}.", style = LocalAmberType.current.meta, color = workspaceColors().muted)
                             Column(Modifier.weight(1f)) {
                                 Text(item.presentationTitle, style = MaterialTheme.typography.bodyMedium)
                                 val heat = item.heat
                                 if (!heat.isNullOrBlank()) {
-                                    Text(heat, style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
+                                    Text(heat, style = LocalAmberType.current.meta, color = workspaceColors().muted)
                                 }
                             }
                         }
@@ -865,7 +866,7 @@ private fun OpportunityRow(
                     )
                     Text(
                         "${sourceLabel(opportunity.sourceType)} · ${(opportunity.confidence * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = LocalAmberType.current.meta,
                         color = workspaceColors().muted,
                     )
                     if (opportunity.summary.isNotBlank()) {
@@ -924,7 +925,7 @@ private fun TaskRow(
                     )
                     Text(
                         "${sourceLabel(task.sourceType)} · ${timeAgo(task.updatedAt)}",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = LocalAmberType.current.meta,
                         color = workspaceColors().muted,
                     )
                     if (task.summary.isNotBlank()) {
@@ -1073,7 +1074,7 @@ private fun TodoRow(item: BoardItemEntity, onComplete: () -> Unit, onChat: () ->
                 )
                 Text(
                     "${sourceLabel(item.sourceType)} · ${timeAgo(item.signalTime)}",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = LocalAmberType.current.meta,
                     color = workspaceColors().muted,
                 )
                 if (item.reason.isNotBlank()) {
@@ -1090,7 +1091,7 @@ private fun SectionTitle(title: String, subtitle: String? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
         if (!subtitle.isNullOrBlank()) {
-            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
+            Text(subtitle, style = LocalAmberType.current.meta, color = workspaceColors().muted)
         }
     }
 }

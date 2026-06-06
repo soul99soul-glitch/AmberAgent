@@ -60,6 +60,8 @@ import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.UiState
 import org.koin.androidx.compose.koinViewModel
 
@@ -99,7 +101,12 @@ private fun BackupStatusContent(
     activity: BackupActivity?,
 ) {
     if (activity == null) {
-        Text(formatBackupStatus(syncSettings))
+        // Graphite §3: backup status is timestamp + version + device — machine facts → MONO (meta), muted ink.
+        Text(
+            formatBackupStatus(syncSettings),
+            style = LocalAmberType.current.meta,
+            color = LocalAmberTokens.current.ink3,
+        )
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -320,7 +327,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     strokeWidth = 2.dp,
                                 )
                             } else {
-                                Text("${(progress * 100).toInt()}%")
+                                // Graphite §3: progress percent is a machine-fact number → MONO (meta).
+                                Text(
+                                    "${(progress * 100).toInt()}%",
+                                    style = LocalAmberType.current.meta,
+                                    color = LocalAmberTokens.current.ink2,
+                                )
                             }
                         }
                     },
@@ -515,11 +527,17 @@ private fun CloudSnapshotPickerDialog(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(formatCloudSnapshotTitle(snapshot))
+                            // Graphite §3: snapshot title (timestamp · version) and detail
+                            // (device · size · archive format) are machine facts → MONO (meta).
+                            Text(
+                                formatCloudSnapshotTitle(snapshot),
+                                style = LocalAmberType.current.meta,
+                                color = LocalAmberTokens.current.ink,
+                            )
                             Text(
                                 formatCloudSnapshotDetail(snapshot, unsupported),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = LocalAmberType.current.meta,
+                                color = LocalAmberTokens.current.ink3,
                             )
                         }
                         Text(
