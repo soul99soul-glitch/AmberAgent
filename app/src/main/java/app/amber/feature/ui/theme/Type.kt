@@ -37,3 +37,20 @@ val NotoSerifSC = FontFamily(
         weight = FontWeight.Normal,
     )
 )
+
+@OptIn(ExperimentalTextApi::class)
+private fun jbMono(weight: FontWeight) = Font(
+    resId = R.font.jetbrains_mono,
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight)),
+)
+
+/**
+ * Multi-weight JetBrains Mono family — the design-system "machine fact" font (model ids,
+ * ctx, price, timings, `//` section labels, version strings, the `amber` wordmark, tool names).
+ */
+val JetBrainsMonoFamily = FontFamily(
+    jbMono(FontWeight.Normal),
+    jbMono(FontWeight.Medium),
+    jbMono(FontWeight.SemiBold),
+    jbMono(FontWeight.Bold),
+)

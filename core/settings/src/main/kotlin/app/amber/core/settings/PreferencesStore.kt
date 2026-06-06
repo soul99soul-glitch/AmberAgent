@@ -343,6 +343,10 @@ data class DisplaySetting(
     val volumeKeyScrollRatio: Float = 1.0f,
     // V3：用户在设置里手选的聊天主题 key。浅色/深色模式各自只应用匹配模式的主题。
     val chatThemeChoice: String = "WHISPER",
+    // Graphite redesign: base family (WARM | SAGE); light/dark resolved by system mode.
+    val amberBaseFamily: String = "WARM",
+    // Graphite redesign: accent color (independent of base), one of the curated 5. Hex string.
+    val accentColor: String = "#B8623A",
 )
 
 @Serializable

@@ -26,6 +26,7 @@ import kotlinx.serialization.Serializable
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberColorMode
 import app.amber.feature.ui.hooks.rememberUserSettingsState
+import app.amber.feature.ui.pages.chat.toChatTheme
 
 private val ExtendLightColors = lightExtendColors()
 private val ExtendDarkColors = darkExtendColors()
@@ -184,9 +185,19 @@ fun AmberAgentTheme(
     }
 
     val settings by rememberUserSettingsState()
-    val chatTheme = app.amber.feature.ui.pages.chat.ChatThemeChoice
-        .resolve(settings.displaySetting.chatThemeChoice, darkTheme)
-        .instance
+
+    // Graphite redesign (D2/D3): base family × system dark-mode → one of 4 bases; the accent is
+    // an independent user setting. Legacy chatThemeChoice is no longer consulted. chatTheme is
+    // derived from the new tokens via the compat adapter so existing LocalChatTheme consumers work.
+    val amberBase = when {
+        settings.displaySetting.amberBaseFamily == "SAGE" && darkTheme -> AmberBase.SAGE_DARK
+        settings.displaySetting.amberBaseFamily == "SAGE" -> AmberBase.SAGE
+        darkTheme -> AmberBase.DARK
+        else -> AmberBase.LIGHT
+    }
+    val amberAccent = parseAccent(settings.displaySetting.accentColor)
+    val amberTokens = remember(amberBase, amberAccent) { buildAmberTokens(amberBase, amberAccent) }
+    val chatTheme = remember(amberTokens) { amberTokens.toChatTheme() }
 
     val themedColorScheme = remember(colorSchemeConverted, chatTheme, amoledDarkMode, darkTheme) {
         run {
@@ -242,6 +253,8 @@ fun AmberAgentTheme(
         LocalAmoledDarkMode provides (darkTheme && amoledDarkMode),
         LocalExtendColors provides extendColors,
         LocalOverscrollFactory provides null,
+        LocalAmberTokens provides amberTokens,
+        LocalAmberType provides defaultAmberTextStyles(),
         app.amber.feature.ui.pages.chat.LocalChatTheme provides chatTheme,
         // Bug fix: M3 LocalContentColor 默认 Color.Black. 没有 Surface 显式 provide 时
         // (如 ChatPage 直接放 MarkdownBlock 的无 bubble 渲染路径), 深色模式下文字仍渲染成黑色.
@@ -261,3 +274,10 @@ val MaterialTheme.extendColors
     @Composable
     @ReadOnlyComposable
     get() = LocalExtendColors.current
+
+/** Parse a stored accent hex (e.g. "#B8623A") into a Compose Color; falls back to terracotta. */
+private fun parseAccent(hex: String): Color = try {
+    Color(android.graphics.Color.parseColor(if (hex.startsWith("#")) hex else "#$hex"))
+} catch (e: IllegalArgumentException) {
+    Color(0xFFB8623A)
+}

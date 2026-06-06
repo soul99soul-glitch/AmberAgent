@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.chat
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import app.amber.feature.ui.theme.AmberTokens
 
 /**
  * V3 设计稿主题 token —— themes.jsx 完整搬运 + 适应 Compose 类型。
@@ -692,3 +693,71 @@ enum class ChatThemeChoice(val instance: ChatTheme, val displayName: String) {
 
 /** 全局 CompositionLocal —— UI 消费侧读 [LocalChatTheme.current]. */
 val LocalChatTheme = staticCompositionLocalOf { WhisperTheme }
+
+/**
+ * Graphite compatibility adapter (D1) —— build a legacy [ChatTheme] from the new [AmberTokens]
+ * so existing `LocalChatTheme.current.xxx` reads keep working during migration. Decoration
+ * fields (bloom / halo / send-halo) are flattened to transparent: the "Terminal × Modern"
+ * design forbids them (anti-goals §1). These flattened fields are removed once their consumers
+ * (SendOrb / WhisperHalo / Background) are deleted in Phase 1.3.
+ */
+fun AmberTokens.toChatTheme(): ChatTheme = ChatTheme(
+    name = "Graphite",
+    bg = bg,
+    paper = surface,
+    ink = ink,
+    inkSoft = ink2,
+    inkFaint = ink3,
+    hair = line,
+    surface = surface,
+    surfaceEdge = line,
+    accent = accent,
+    accentDeep = accent,
+    accentSoft = accent.copy(alpha = 0.14f),
+    accentTint = accent.copy(alpha = 0.22f),
+    sendBg = accent,
+    sendArrow = accentInk,
+    sendHalo = Color.Transparent,
+    bloomCore = Color.Transparent,
+    bloomSecondary = Color.Transparent,
+    bloomHighlight = Color.Transparent,
+    bloomMaxAlpha = 0f,
+    showBloomInConvo = false,
+    userBubble = userBg,
+    userBubbleEdge = line,
+    modelStatusDot = signal,
+    modelLogoBg = surface2,
+    toolPillBg = codeBg,
+    toolPillEdge = line,
+    toolLabelInk = accent,
+    toolIconInk = accent,
+    toolDoneBg = accent,
+    toolDoneBadgeInk = accentInk,
+    thinkRule = line2,
+    thinkHeaderInk = accent,
+    thinkBodyInk = ink3,
+    sheetBackdrop = if (isDark) Color(0x99000000) else Color(0x52000000),
+    dragHandle = line2,
+    searchBarBg = surface2,
+    composerShadow = Color.Transparent,
+    outlineStrong = line2,
+    outlineSoft = line,
+    containerLowest = bg,
+    containerLow = surface,
+    containerMid = surface2,
+    containerHigh = surface2,
+    containerHighest = raised,
+    onAccent = accentInk,
+    isDark = isDark,
+    topHaloCore = Color.Transparent,
+    topHaloAlpha = 0f,
+    bloomHeightFrac = 0f,
+    contextEmpty = line2,
+    contextLow = accent,
+    contextMid = accent,
+    contextHigh = accent,
+    contextTrack = line,
+    popoverBg = surface,
+    widgetCanvas = surface2,
+    widgetCanvasBorder = line,
+)
