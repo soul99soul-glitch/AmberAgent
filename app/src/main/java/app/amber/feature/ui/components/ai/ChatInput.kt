@@ -155,6 +155,19 @@ enum class ExpandState {
     Collapsed, Files,
 }
 
+/**
+ * Pure toggle logic for the composer attach control (`+`→`×`/capsule): tapping a target toggles
+ * it open, tapping the open one collapses it. Extracted for JVM testing (see ComposerLogicTest).
+ */
+fun nextExpandState(current: ExpandState, target: ExpandState): ExpandState =
+    if (current == target) ExpandState.Collapsed else target
+
+/**
+ * The send button is active (fills accent / enabled) when there is draft text, and stays enabled
+ * while streaming so it can show "stop". Pure + testable (see ComposerLogicTest) — the "draft 亮起".
+ */
+fun composerSendEnabled(isEmpty: Boolean, loading: Boolean): Boolean = loading || !isEmpty
+
 @Composable
 fun ChatInput(
     state: ChatInputState,
@@ -301,7 +314,7 @@ fun ChatInput(
     }
 
     fun expandToggle(type: ExpandState) {
-        if (expand == type) {
+        if (nextExpandState(expand, type) == ExpandState.Collapsed) {
             dismissExpand()
         } else {
             expand = type
@@ -784,7 +797,7 @@ fun ChatInput(
                     // combinedClickable, rather than stacking pressable + combinedClickable.
                     val tokens = LocalAmberTokens.current
                     val sendEmpty = state.isEmpty()
-                    val sendEnabled = loading || !sendEmpty
+                    val sendEnabled = composerSendEnabled(sendEmpty, loading)
                     val sendStopState = loading && sendEmpty
                     val sendFill by animateColorAsState(
                         targetValue = if (sendEmpty && !loading) tokens.surface2 else tokens.accent,
