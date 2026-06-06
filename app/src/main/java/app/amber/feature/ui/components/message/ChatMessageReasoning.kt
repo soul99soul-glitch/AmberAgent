@@ -19,7 +19,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,6 +56,7 @@ import app.amber.core.model.AssistantAffectScope
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.ChainOfThoughtScope
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.core.utils.extractThinkingTitle
@@ -229,7 +229,9 @@ private fun ReasoningContent(
                         assistant = assistant,
                         scope = AssistantAffectScope.ASSISTANT,
                     ),
-                    style = MaterialTheme.typography.bodySmall.copy(
+                    // Graphite §6.2: thoughts are human prose → SANS (.secondary), ink3/thinkBodyInk
+                    // behind the 2dp thinkRule left rule (drawn above).
+                    style = LocalAmberType.current.secondary.copy(
                         color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.thinkBodyInk,
                         fontSize = 13.5.sp,
                         lineHeight = 23.sp,
@@ -296,13 +298,13 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 }
                 // V3 设计稿: "思考了 5.4 秒 · auto" 一体显示，不分 extra
                 val combinedText = if (budgetLabel != null) "$baseText · $budgetLabel" else baseText
+                // Graphite §6.2 ThinkingStrip: MONO header (.meta) — machine timing/mode line.
                 Text(
                     text = combinedText,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        // V3 设计稿: 头部 13sp + 字距 0.2
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal,
-                        letterSpacing = 0.2.sp,
+                    style = LocalAmberType.current.meta.copy(
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.sp,
                     ),
                     color = chatThemeForReasoning.thinkHeaderInk,  // 鲜亮 accent，不再 0.72 alpha
                     modifier = Modifier.shimmer(isLoading = reasoningLoading),
@@ -317,10 +319,11 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 null
             }
             if (durationLabel != null) {
+                // Graphite §6.2: MONO duration, fainter than the header (the `Ns` machine fact).
                 Text(
                     text = durationLabel,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 10.sp,
+                    style = LocalAmberType.current.meta.copy(
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.Normal,
                     ),
                     color = chatThemeForReasoning.thinkHeaderInk.copy(alpha = 0.56f),
@@ -396,8 +399,9 @@ private fun ReasoningTitle(title: String) {
     ) {
         Text(
             text = it,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 12.sp,
+            // Graphite §6.2: MONO header line for the streaming thinking title.
+            style = LocalAmberType.current.meta.copy(
+                fontSize = 12.5.sp,
                 fontWeight = FontWeight.Normal,
             ),
             // V3 主题感知 (Paper 砖红 / Plain 黑 / Midnight 靛蓝)
