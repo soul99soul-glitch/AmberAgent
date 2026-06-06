@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -239,13 +241,9 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         color = workspace.faint,
                         modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
                     )
-                    val darkMode = LocalDarkMode.current
-                    val themeOptions = remember(darkMode) {
-                        ChatThemeChoice.choicesFor(darkMode)
-                    }
-                    val currentTheme = remember(displaySetting.chatThemeChoice, darkMode) {
-                        ChatThemeChoice.resolve(displaySetting.chatThemeChoice, darkMode)
-                    }
+                    // Graphite (D2/D3): base family (Warm/Sage) + independent accent. Light/dark
+                    // follows the global color mode; the 9 legacy themes are replaced.
+                    val baseFamily = displaySetting.amberBaseFamily
                     ListItem(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -257,39 +255,64 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     bottomEnd = 2.dp
                                 )
                             ),
-                        headlineContent = { Text("聊天主题") },
+                        headlineContent = { Text("色系") },
                         supportingContent = {
                             Column(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    if (darkMode) {
-                                        "深色主题; 横向滑动查看更多"
-                                    } else {
-                                        "浅色主题; 横向滑动查看更多"
-                                    }
-                                )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(90.dp)
-                                        .horizontalScroll(rememberScrollState())
-                                        .padding(vertical = 2.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    themeOptions.forEach { choice ->
-                                        ChatThemeChoiceCard(
-                                            choice = choice,
-                                            selected = choice == currentTheme,
-                                            onClick = {
-                                                updateDisplaySetting(
-                                                    displaySetting.copy(chatThemeChoice = choice.name)
-                                                )
-                                            },
+                                Text("Graphite 暖石墨基色；明暗跟随全局模式")
+                                WorkspaceSegmentedChoice(
+                                    options = listOf("WARM", "SAGE"),
+                                    selected = baseFamily,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onSelected = { fam ->
+                                        updateDisplaySetting(displaySetting.copy(amberBaseFamily = fam))
+                                    },
+                                    label = { fam ->
+                                        Text(
+                                            text = if (fam == "SAGE") "鼠尾草 Sage" else "暖 Warm",
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth(),
                                         )
-                                    }
+                                    },
+                                )
+                            }
+                        },
+                        colors = CustomColors.listItemColors,
+                    )
+                    ListItem(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(2.dp)),
+                        headlineContent = { Text("强调色") },
+                        supportingContent = {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                app.amber.feature.ui.theme.AmberAccents.forEach { acc ->
+                                    val hex = "#%06X".format(acc.hex.toArgb() and 0xFFFFFF)
+                                    val selected =
+                                        displaySetting.accentColor.equals(hex, ignoreCase = true)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(acc.hex)
+                                            .border(
+                                                width = if (selected) 2.dp else 1.dp,
+                                                color = if (selected) workspace.ink else workspace.hairline,
+                                                shape = androidx.compose.foundation.shape.CircleShape,
+                                            )
+                                            .clickable {
+                                                updateDisplaySetting(displaySetting.copy(accentColor = hex))
+                                            },
+                                    )
                                 }
                             }
                         },
