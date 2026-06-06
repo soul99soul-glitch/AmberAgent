@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
+import app.amber.feature.ui.theme.LocalAmberType
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
@@ -99,46 +101,34 @@ fun ContextRing(
 
     Box(
         modifier = modifier
-            .size(36.dp)
-            // V3: ripple 改圆形, 跟 ring 视觉一致 (默认矩形 ripple 在圆 ring 周围看着错位)
-            .clip(androidx.compose.foundation.shape.CircleShape)
-            .clickable { expanded = !expanded },
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { expanded = !expanded }
+            .padding(horizontal = 6.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(modifier = Modifier.size(ringSize)) {
-            val s = this.size.width
-            val strokePx = strokeDp.toPx()
-            val r = (s - strokePx) / 2f - 1f
-            val cx = s / 2f
-            val cy = s / 2f
-            drawCircle(
-                color = if (empty) color else trackColor,
-                radius = r,
-                center = Offset(cx, cy),
-                style = Stroke(width = strokePx),
-            )
-            if (!empty) {
-                val sweep = 360f * v
-                drawArc(
-                    color = color,
-                    startAngle = -90f,
-                    sweepAngle = sweep,
-                    useCenter = false,
-                    topLeft = Offset(cx - r, cy - r),
-                    size = Size(r * 2, r * 2),
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
+        // Context meter — 5 mono bars + % (design §6.2; no donut). Accent-filled proportionally;
+        // bar color follows the usage threshold token (accent under Graphite).
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            val filledCount = if (empty) 0 else ((v * 5f) + 0.5f).toInt().coerceIn(0, 5)
+            val barHeights = listOf(6.dp, 8.dp, 10.dp, 12.dp, 14.dp)
+            repeat(5) { i ->
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .height(barHeights[i])
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(if (i < filledCount) color else trackColor)
                 )
-                if (v < 0.999f) {
-                    val headAngle = (v * 2f - 0.5f) * PI.toFloat()
-                    val headX = cx + r * cos(headAngle)
-                    val headY = cy + r * sin(headAngle)
-                    drawCircle(
-                        color = color,
-                        radius = strokePx / 2f + 0.4f,
-                        center = Offset(headX, headY),
-                    )
-                }
             }
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = "${(v * 100f).toInt()}%",
+                style = LocalAmberType.current.meta,
+                color = theme.inkSoft,
+            )
         }
 
         if (popupMounted) {

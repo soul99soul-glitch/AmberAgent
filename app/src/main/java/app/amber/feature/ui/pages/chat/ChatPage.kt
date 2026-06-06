@@ -578,9 +578,9 @@ private fun ChatPageContent(
             animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
             label = "bloomFade",
         )
-        if (setting.getCurrentAssistant().background == null && bloomIntensity > 0.001f) {
-            WhisperBottomBloom(intensity = bloomIntensity)
-        }
+        // Graphite (D4): bottom ambient bloom removed — flat & hairline, no glow (anti-goals §1).
+        // `bloomTarget` / `bloomIntensity` above are now inert; cleaned up with the bloom machinery
+        // when the chat background is fully de-decorated.
         Scaffold(
             topBar = {
                 TopBar(
