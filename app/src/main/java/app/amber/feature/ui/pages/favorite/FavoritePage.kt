@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -152,7 +151,7 @@ private fun FavoriteHeader(count: Int) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = stringResource(R.string.favorite_page_title),
-                    style = MaterialTheme.typography.titleSmall,
+                    style = LocalAmberType.current.sessionTitle,
                     color = workspace.ink,
                 )
                 // Graphite §3: snippet count is a machine-fact → MONO (meta), muted ink.
@@ -185,12 +184,12 @@ private fun FavoriteEmptyState() {
             )
             Text(
                 text = stringResource(R.string.favorite_page_no_favorites),
-                style = MaterialTheme.typography.titleSmall,
+                style = LocalAmberType.current.sessionTitle,
                 color = workspace.ink,
             )
             Text(
                 text = stringResource(R.string.favorite_page_empty_hint),
-                style = MaterialTheme.typography.bodySmall,
+                style = LocalAmberType.current.secondary,
                 color = workspace.muted,
             )
         }
@@ -282,14 +281,14 @@ private fun FavoriteCard(
                     text = item.conversationTitle.ifBlank { stringResource(R.string.favorite_page_untitled_conversation) },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = LocalAmberType.current.sessionTitle,
                     color = workspace.ink,
                 )
                 Text(
                     text = item.preview,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = LocalAmberType.current.secondary,
                     color = workspace.muted,
                 )
                 WorkspaceStatusPill(
