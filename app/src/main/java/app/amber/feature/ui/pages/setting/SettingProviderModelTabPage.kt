@@ -2,12 +2,16 @@ package app.amber.feature.ui.pages.setting
 
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Package01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.CheckmarkCircle01
+import me.rerere.hugeicons.stroke.Search01
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,9 +26,12 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -56,13 +63,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastFilter
 import kotlinx.coroutines.launch
+import app.amber.ai.provider.Modality
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderManager
 import app.amber.ai.provider.ProviderSetting
@@ -75,7 +88,19 @@ import app.amber.feature.ui.components.ai.ModelTypeTag
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.hooks.useEditState
+import app.amber.feature.ui.pages.setting.components.ProviderCapFlags
+import app.amber.feature.ui.pages.setting.components.ProviderCard
+import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
+import app.amber.feature.ui.pages.setting.components.ProviderHairline
+import app.amber.feature.ui.pages.setting.components.ProviderIconButton
+import app.amber.feature.ui.pages.setting.components.ProviderMonogram
+import app.amber.feature.ui.pages.setting.components.ProviderSearchField
+import app.amber.feature.ui.pages.setting.components.ProviderSectionLabel
+import app.amber.feature.ui.pages.setting.components.toContextLabel
+import app.amber.feature.ui.pages.setting.components.toProviderMonogram
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.compose.koinInject
@@ -129,44 +154,59 @@ private fun ModelList(
     }
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
+    val modelItemOffset = 1
     val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        onUpdateProvider(providerSetting.moveMove(from.index, to.index))
+        val fromModelIndex = from.index - modelItemOffset
+        val toModelIndex = to.index - modelItemOffset
+        if (fromModelIndex in providerSetting.models.indices && toModelIndex in providerSetting.models.indices) {
+            onUpdateProvider(providerSetting.moveMove(fromModelIndex, toModelIndex))
+        }
     }
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(t.bg)
+    ) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
-                .floatingToolbarVerticalNestedScroll(
-                    expanded = expanded,
-                    onExpand = { expanded = true },
-                    onCollapse = { expanded = false },
-                ),
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 128.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp) + PaddingValues(bottom = 112.dp),
+            horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState
         ) {
+            item("enabled_models_label") {
+                ProviderSectionLabel("已启用模型", count = providerSetting.models.size)
+            }
             // 模型列表
             if (providerSetting.models.isEmpty()) {
                 item {
-                    Column(
+                    ProviderCard(
                         modifier = Modifier
-                            .fillParentMaxHeight(0.8f)
-                            .fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                            .fillMaxWidth()
+                            .height(180.dp),
                     ) {
-                        Text(
-                            text = stringResource(R.string.setting_provider_page_no_models),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = stringResource(R.string.setting_provider_page_add_models_hint),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.setting_provider_page_no_models),
+                                style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = t.ink2,
+                            )
+                            Text(
+                                text = stringResource(R.string.setting_provider_page_add_models_hint),
+                                style = type.secondary,
+                                color = t.ink3,
+                            )
+                        }
                     }
                 }
             } else {
@@ -200,11 +240,10 @@ private fun ModelList(
                 }
             }
         }
-        HorizontalFloatingToolbar(
-            expanded = expanded,
+        ProviderCard(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset),
+                .padding(horizontal = 18.dp, vertical = 14.dp),
         ) {
             AddModelButton(
                 models = modelList,
@@ -275,9 +314,14 @@ private fun AddModelButton(
 ) {
     val dialogState = useEditState<Model> { onAddModel(it) }
     val scope = rememberCoroutineScope()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     Row(
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ModelPicker(
@@ -328,32 +372,19 @@ private fun AddModelButton(
                         }
                     )
                 )
-            }
+            },
+            modifier = Modifier.weight(1f),
         )
 
-        Button(
+        ProviderCommandButton(
+            text = stringResource(R.string.setting_provider_page_add_new_model),
+            imageVector = HugeIcons.Add01,
+            accent = true,
             onClick = {
                 dialogState.open(Model())
-            }
-        ) {
-            Row(
-                modifier = Modifier,
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    HugeIcons.Add01,
-                    contentDescription = stringResource(R.string.setting_provider_page_add_model)
-                )
-                AnimatedVisibility(expanded) {
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text(
-                        stringResource(R.string.setting_provider_page_add_new_model),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
-            }
-        }
+            },
+            modifier = Modifier.weight(1.25f),
+        )
     }
 
     if (dialogState.isEditing) {
@@ -365,30 +396,23 @@ private fun AddModelButton(
                 },
                 sheetState = sheetState,
                 sheetGesturesEnabled = false,
+                containerColor = t.bg,
                 dragHandle = {
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                sheetState.hide()
-                                dialogState.dismiss()
-                            }
-                        }
-                    ) {
-                        Icon(HugeIcons.ArrowDown01, null)
-                    }
+                    ProviderSheetGrabber()
                 }
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .fillMaxHeight(0.95f)
-                        .padding(16.dp),
+                        .fillMaxHeight(0.92f)
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
                         text = stringResource(R.string.setting_provider_page_add_model),
-                        style = MaterialTheme.typography.titleLarge
+                        style = type.body.copy(fontWeight = FontWeight.Bold),
+                        color = t.ink,
                     )
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -408,22 +432,21 @@ private fun AddModelButton(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     ) {
-                        TextButton(
+                        ProviderCommandButton(
+                            text = stringResource(R.string.cancel),
                             onClick = {
                                 dialogState.dismiss()
                             },
-                        ) {
-                            Text(stringResource(R.string.cancel))
-                        }
-                        TextButton(
+                        )
+                        ProviderCommandButton(
+                            text = stringResource(R.string.setting_provider_page_add),
+                            accent = true,
                             onClick = {
                                 if (modelState.modelId.isNotBlank() && modelState.displayName.isNotBlank()) {
                                     dialogState.confirm()
                                 }
                             },
-                        ) {
-                            Text(stringResource(R.string.setting_provider_page_add))
-                        }
+                        )
                     }
                 }
             }
@@ -438,13 +461,27 @@ private fun ModelPicker(
     onModelSelected: (Model) -> Unit,
     onModelDeselected: (Model) -> Unit,
     onAllModelSelected: (List<Model>) -> Unit,
-    onAllModelDeselected: (List<Model>) -> Unit
+    onAllModelDeselected: (List<Model>) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var showModal by remember { mutableStateOf(false) }
     if (showModal) {
+        val t = LocalAmberTokens.current
+        val type = LocalAmberType.current
         ModalBottomSheet(
             onDismissRequest = { showModal = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = t.bg,
+            dragHandle = {
+                Box(
+                    Modifier
+                        .padding(top = 10.dp, bottom = 4.dp)
+                        .width(42.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(t.line2)
+                )
+            },
         ) {
             var filterText by remember { mutableStateOf("") }
             val filterKeywords = filterText.split(" ").filter { it.isNotBlank() }
@@ -461,29 +498,40 @@ private fun ModelPicker(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.9f)
-                    .padding(8.dp)
+                    .fillMaxHeight(0.92f)
+                    .padding(horizontal = 18.dp)
+                    .padding(bottom = 12.dp)
                     .imePadding(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // 标题栏和添加所有按钮
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .padding(top = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = stringResource(R.string.setting_provider_page_avaliable_models),
-                        style = MaterialTheme.typography.titleMedium
-                    )
-
                     val unselectedCount = filteredModels.count { model ->
                         selectedModels.none { it.modelId == model.modelId }
                     }
-
-                    TextButton(
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = stringResource(R.string.setting_provider_page_avaliable_models),
+                            style = type.body.copy(fontWeight = FontWeight.Bold),
+                            color = t.ink,
+                        )
+                        Text(
+                            text = "${filteredModels.size} 可用 · ${selectedModels.size} 已启用",
+                            style = type.meta.copy(fontSize = 11.sp),
+                            color = t.ink3,
+                        )
+                    }
+                    ProviderCommandButton(
+                        text = if (unselectedCount > 0) {
+                            stringResource(R.string.setting_provider_page_select_all, unselectedCount)
+                        } else {
+                            stringResource(R.string.setting_provider_page_deselect_models)
+                        },
                         onClick = {
                             if (unselectedCount > 0) {
                                 onAllModelSelected(filteredModels)
@@ -491,14 +539,7 @@ private fun ModelPicker(
                                 onAllModelDeselected(filteredModels)
                             }
                         },
-                    ) {
-                        Text(
-                            if (unselectedCount > 0) stringResource(
-                                R.string.setting_provider_page_select_all,
-                                unselectedCount
-                            ) else stringResource(R.string.setting_provider_page_deselect_models)
-                        )
-                    }
+                    )
                 }
 
                 LazyColumn(
@@ -509,105 +550,80 @@ private fun ModelPicker(
                     contentPadding = PaddingValues(8.dp),
                 ) {
                     items(filteredModels) {
-                        Card {
+                        val selected = selectedModels.any { model -> model.modelId == it.modelId }
+                        ProviderCard {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(
-                                    8.dp
-                                ),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(8.dp),
+                                    .pressable(onClick = {
+                                        if (selected) {
+                                            onModelDeselected(selectedModels.firstOrNull { model -> model.modelId == it.modelId } ?: it)
+                                        } else {
+                                            onModelSelected(it)
+                                        }
+                                    })
+                                    .padding(11.dp),
                             ) {
-                                AutoAIIcon(
-                                    it.modelId,
-                                    Modifier.size(32.dp)
+                                ProviderMonogram(
+                                    text = it.modelId.toProviderMonogram(),
+                                    size = 34.dp,
                                 )
                                 Column(
-                                    verticalArrangement = Arrangement.spacedBy(
-                                        4.dp
-                                    ),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    Text(
-                                        // Graphite §3: a model id is a machine-fact → MONO.
-                                        text = it.modelId,
-                                        style = LocalAmberType.current.meta,
-                                    )
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        val modelMeta = remember(it) {
-                                            it.copy(
-                                                inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(it.modelId),
-                                                outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(it.modelId),
-                                                abilities = ModelRegistry.MODEL_ABILITIES.getData(it.modelId),
-                                                contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it.modelId),
-                                            )
-                                        }
-                                        ModelModalityTag(
-                                            model = modelMeta,
-                                        )
-                                        ModelAbilityTag(
-                                            model = modelMeta,
+                                    val modelMeta = remember(it) {
+                                        it.copy(
+                                            inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(it.modelId),
+                                            outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(it.modelId),
+                                            abilities = ModelRegistry.MODEL_ABILITIES.getData(it.modelId),
+                                            contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it.modelId),
                                         )
                                     }
+                                    Text(
+                                        text = it.modelId,
+                                        style = type.meta.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                                        color = t.ink,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    ProviderCapFlags(modelMeta.capFlags())
                                 }
-                                IconButton(
+                                ProviderIconButton(
+                                    imageVector = if (selected) HugeIcons.CheckmarkCircle01 else HugeIcons.Add01,
+                                    contentDescription = null,
+                                    tint = if (selected) t.accent else t.ink3,
                                     onClick = {
-                                        if (selectedModels.any { model -> model.modelId == it.modelId }) {
-                                            // 从selectedModels中计算出要删除的model，因为删除需要id匹配，而不是ModelId
+                                        if (selected) {
                                             onModelDeselected(selectedModels.firstOrNull { model -> model.modelId == it.modelId }
                                                 ?: it)
                                         } else {
                                             onModelSelected(it)
                                         }
                                     }
-                                ) {
-                                    if (selectedModels.any { model -> model.modelId == it.modelId }) {
-                                        Icon(HugeIcons.Cancel01, null)
-                                    } else {
-                                        Icon(HugeIcons.Add01, null)
-                                    }
-                                }
+                                )
                             }
                         }
                     }
                 }
-                OutlinedTextField(
+                ProviderSearchField(
                     value = filterText,
-                    onValueChange = {
-                        filterText = it
-                    },
-                    label = { Text(stringResource(R.string.setting_provider_page_filter_placeholder)) },
+                    onValueChange = { filterText = it },
+                    placeholder = stringResource(R.string.setting_provider_page_filter_example),
+                    imageVector = HugeIcons.Search01,
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = {
-                        Text(stringResource(R.string.setting_provider_page_filter_example))
-                    },
                 )
             }
         }
     }
-    BadgedBox(
-        badge = {
-            if (models.isNotEmpty()) {
-                Badge {
-                    // Graphite §3: available-model count is a machine-fact → MONO.
-                    Text(models.size.toString(), style = LocalAmberType.current.meta)
-                }
-            }
-        }
-    ) {
-        IconButton(
-            onClick = {
-                showModal = true
-            }
-        ) {
-            Icon(HugeIcons.Package01, null)
-        }
-    }
+    ProviderCommandButton(
+        text = "可用 ${models.size}",
+        imageVector = HugeIcons.Package01,
+        onClick = { showModal = true },
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -623,6 +639,8 @@ private fun ModelCard(
     }
     val swipeToDismissBoxState = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
+    val sheetTokens = LocalAmberTokens.current
+    val sheetType = LocalAmberType.current
 
     if (dialogState.isEditing) {
         dialogState.currentState?.let { editingModel ->
@@ -633,13 +651,16 @@ private fun ModelCard(
                 },
                 sheetState = sheetState,
                 sheetGesturesEnabled = false,
-                dragHandle = null,
+                containerColor = sheetTokens.bg,
+                dragHandle = {
+                    ProviderSheetGrabber()
+                },
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .fillMaxHeight(0.95f)
-                        .padding(16.dp),
+                        .fillMaxHeight(0.92f)
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -659,7 +680,8 @@ private fun ModelCard(
                         }
                         Text(
                             text = stringResource(R.string.setting_provider_page_edit_model),
-                            style = MaterialTheme.typography.titleLarge,
+                            style = sheetType.body.copy(fontWeight = FontWeight.Bold),
+                            color = sheetTokens.ink,
                             modifier = Modifier.align(Alignment.Center),
                         )
                     }
@@ -681,22 +703,21 @@ private fun ModelCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     ) {
-                        TextButton(
+                        ProviderCommandButton(
+                            text = stringResource(R.string.cancel),
                             onClick = {
                                 dialogState.dismiss()
                             },
-                        ) {
-                            Text(stringResource(R.string.cancel))
-                        }
-                        TextButton(
+                        )
+                        ProviderCommandButton(
+                            text = stringResource(R.string.confirm),
+                            accent = true,
                             onClick = {
                                 if (editingModel.displayName.isNotBlank()) {
                                     dialogState.confirm()
                                 }
                             },
-                        ) {
-                            Text(stringResource(R.string.confirm))
-                        }
+                        )
                     }
                 }
             }
@@ -706,6 +727,7 @@ private fun ModelCard(
     SwipeToDismissBox(
         state = swipeToDismissBoxState,
         backgroundContent = {
+            val t = LocalAmberTokens.current
             Row(
                 modifier = Modifier
                     .fillMaxSize()
@@ -720,7 +742,7 @@ private fun ModelCard(
                         }
                     }
                 ) {
-                    Icon(HugeIcons.Cancel01, null)
+                    Icon(HugeIcons.Cancel01, null, tint = t.ink3)
                 }
                 FilledIconButton(
                     onClick = {
@@ -741,60 +763,109 @@ private fun ModelCard(
         gesturesEnabled = true,
         modifier = modifier
     ) {
-        OutlinedCard {
+        val t = LocalAmberTokens.current
+        val type = LocalAmberType.current
+        val contextLabel = model.contextWindowTokens.toContextLabel()
+        val openEditor = { dialogState.open(model.copy()) }
+        ProviderCard {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    .pressable(onClick = openEditor)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = MaterialTheme.shapes.small,
-                ) {
-                    AutoAIIcon(
-                        name = model.modelId,
-                        modifier = Modifier.size(36.dp),
-                    )
-                }
+                ProviderMonogram(
+                    text = model.modelId.toProviderMonogram(),
+                    size = 36.dp,
+                )
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Text(
-                        text = model.displayName,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 2,
+                        text = model.modelId,
+                        style = type.meta.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                        color = t.ink,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        if (model.providerOverwrite != null) {
-                            Tag(type = TagType.INFO) {
-                                Text(
-                                    model.providerOverwrite?.javaClass?.simpleName ?: model.providerOverwrite?.name
-                                    ?: "ProviderOverwrite"
-                                )
-                            }
+                        ProviderCapFlags(
+                            flags = model.capFlags(),
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (contextLabel.isNotBlank()) {
+                            Text(
+                                text = contextLabel,
+                                style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                color = t.ink3,
+                                maxLines = 1,
+                            )
                         }
-                        ModelTypeTag(model = model)
-                        ModelModalityTag(model = model)
-                        ModelAbilityTag(model = model)
                     }
                 }
 
-                // Edit button
-                IconButton(
-                    onClick = {
-                        dialogState.open(model.copy())
-                    }
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(t.surface2)
+                        .border(1.dp, t.line, RoundedCornerShape(9.dp))
+                        .pressable(onClick = openEditor),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(HugeIcons.Edit01, "Edit", modifier = Modifier.size(20.dp))
+                    Icon(
+                        imageVector = HugeIcons.ArrowRight01,
+                        contentDescription = stringResource(R.string.setting_provider_page_edit_model),
+                        tint = t.ink3,
+                        modifier = Modifier.size(16.dp),
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ProviderSheetGrabber() {
+    val t = LocalAmberTokens.current
+    Box(
+        Modifier
+            .padding(top = 10.dp, bottom = 4.dp)
+            .width(42.dp)
+            .height(4.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(t.line2)
+    )
+}
+
+private fun Model.capFlags(): List<String> {
+    val flags = buildList {
+        add(
+            when (type) {
+                ModelType.CHAT -> "chat"
+                ModelType.IMAGE -> "image"
+                ModelType.EMBEDDING -> "embed"
+            }
+        )
+        if (inputModalities.contains(Modality.TEXT) && outputModalities.contains(Modality.TEXT)) {
+            add("t2t")
+        }
+        if (abilities.contains(ModelAbility.TOOL)) {
+            add("tools")
+        }
+        if (inputModalities.contains(Modality.IMAGE) || outputModalities.contains(Modality.IMAGE)) {
+            add("vision")
+        }
+        if (abilities.contains(ModelAbility.REASONING)) {
+            add("think")
+        }
+    }
+    return flags.distinct().take(5)
 }

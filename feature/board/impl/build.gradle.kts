@@ -34,4 +34,6 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
     api(libs.kotlinx.serialization.json)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.jetbrains.markdown)
+    implementation(libs.jsoup)
 }

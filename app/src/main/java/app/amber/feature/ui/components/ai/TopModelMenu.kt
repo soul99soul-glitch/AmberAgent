@@ -34,8 +34,10 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.amber.agent.R
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
@@ -121,19 +123,35 @@ fun TopModelMenu(
                     .verticalScroll(rememberScrollState())
                     .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
             ) {
-                providers.forEach { provider ->
-                    ProviderGroup(
-                        provider = provider,
-                        modelType = modelType,
-                        open = openIds.contains(provider.id),
-                        active = provider.id == currentProviderId,
-                        selectedModelId = currentModelId,
-                        onToggle = {
-                            openIds = if (openIds.contains(provider.id)) openIds - provider.id
-                            else openIds + provider.id
-                        },
-                        onSelect = onSelect,
+                if (providers.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.model_list_no_providers),
+                        style = LocalAmberType.current.meta.copy(
+                            fontSize = 12.5.sp,
+                            lineHeight = 17.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.sp,
+                        ),
+                        color = LocalAmberTokens.current.ink3,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 18.dp),
                     )
+                } else {
+                    providers.forEach { provider ->
+                        ProviderGroup(
+                            provider = provider,
+                            modelType = modelType,
+                            open = openIds.contains(provider.id),
+                            active = provider.id == currentProviderId,
+                            selectedModelId = currentModelId,
+                            onToggle = {
+                                openIds = if (openIds.contains(provider.id)) openIds - provider.id
+                                else openIds + provider.id
+                            },
+                            onSelect = onSelect,
+                        )
+                    }
                 }
             }
         }

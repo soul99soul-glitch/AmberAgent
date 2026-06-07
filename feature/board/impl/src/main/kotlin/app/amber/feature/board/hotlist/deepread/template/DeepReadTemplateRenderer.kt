@@ -14,8 +14,61 @@ import app.amber.feature.board.hotlist.deepread.displayHeroImageUrl
 import app.amber.feature.board.hotlist.deepread.errorOf
 import app.amber.feature.board.hotlist.deepread.statusOf
 import app.amber.feature.board.hotlist.deepread.verifiedImageUrls
+import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import org.intellij.markdown.html.HtmlGenerator
+import org.intellij.markdown.parser.MarkdownParser
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import org.jsoup.safety.Safelist
 
 object DeepReadTemplateRenderer {
+    private val markdownFlavour by lazy {
+        GFMFlavourDescriptor(makeHttpsAutoLinks = true, useSafeLinks = true)
+    }
+    private val markdownParser by lazy { MarkdownParser(markdownFlavour) }
+    private val markdownSafelist by lazy {
+        Safelist.none()
+            .addTags(
+                "p",
+                "br",
+                "strong",
+                "b",
+                "em",
+                "i",
+                "del",
+                "s",
+                "blockquote",
+                "ul",
+                "ol",
+                "li",
+                "code",
+                "pre",
+                "a",
+                "h2",
+                "h3",
+                "h4",
+                "hr",
+                "table",
+                "thead",
+                "tbody",
+                "tr",
+                "th",
+                "td",
+            )
+            .addAttributes("a", "href", "title")
+            .addProtocols("a", "href", "http", "https")
+    }
+    private val markdownOutputSettings by lazy {
+        Document.OutputSettings().prettyPrint(false)
+    }
+    private val singleParagraphRegex = Regex(
+        pattern = """^<p>(.*)</p>$""",
+        options = setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+
+    fun renderSafeMarkdownHtml(markdown: String): String =
+        markdown.markdownBlockHtml()
+
     fun sampleOutput(): DeepReadOutput = DeepReadOutput(
         topicType = "event",
         generationComplete = true,
@@ -160,7 +213,7 @@ object DeepReadTemplateRenderer {
         }
         val summaryText = summary.trim()
         if (summaryText.isNotEmpty()) {
-            return "<p class=\"summary\">${summaryText.escapeHtml()}</p>"
+            return "<div class=\"summary markdown-body\">${summaryText.markdownBlockHtml()}</div>"
         }
         return sectionStateHtml(
             stage = DeepReadGenerationStage.OVERVIEW,
@@ -215,9 +268,9 @@ object DeepReadTemplateRenderer {
             buildString {
                 append("<div class=\"timeline-item\"><div class=\"timeline-marker\"></div><div class=\"timeline-body\"><p class=\"timeline-date\">")
                 append(event.date.escapeHtml())
-                append("</p><p>")
-                append(event.event.escapeHtml())
-                append("</p>")
+                append("</p><div class=\"timeline-copy markdown-body\">")
+                append(event.event.markdownBlockHtml())
+                append("</div>")
                 event.imageUrl?.takeIf { it in safeImages }?.let { url ->
                     append("<figure><img src=\"")
                     append(url.escapeHtml())
@@ -250,10 +303,14 @@ object DeepReadTemplateRenderer {
         return points.joinToString("\n") { point ->
             buildString {
                 append("<div class=\"core-point\"><h2>")
-                append(point.point.escapeHtml())
-                append("</h2><p>")
-                append(point.supporting.orEmpty().escapeHtml())
-                append("</p>")
+                append(point.point.markdownInlineHtml())
+                append("</h2>")
+                val supporting = point.supporting.orEmpty().markdownBlockHtml()
+                if (supporting.isNotBlank()) {
+                    append("<div class=\"core-support markdown-body\">")
+                    append(supporting)
+                    append("</div>")
+                }
                 point.imageUrl?.takeIf { it in safeImages }?.let { url ->
                     append("<figure><img src=\"")
                     append(url.escapeHtml())
@@ -290,7 +347,7 @@ object DeepReadTemplateRenderer {
         return """
             <section class="diagram-block">
               <p class="section">$typeLabel</p>
-              <h2>${title.escapeHtml()}</h2>
+              <h2>${title.markdownInlineHtml()}</h2>
               <div class="diagram-frame">
                 $body
                 ${renderDiagramRelations(visibleEdges, nodeLabels)}
@@ -307,8 +364,8 @@ object DeepReadTemplateRenderer {
               <span class="diagram-step-index">${"%02d".format(index + 1)}</span>
               <div>
                 ${node.group?.takeIf { it.isNotBlank() }?.let { "<small class=\"diagram-group\">${it.escapeHtml()}</small>" }.orEmpty()}
-                <h3>${node.label.escapeHtml()}</h3>
-                ${node.note?.takeIf { it.isNotBlank() }?.let { "<p>${it.escapeHtml()}</p>" }.orEmpty()}
+                <h3>${node.label.markdownInlineHtml()}</h3>
+                ${node.note?.takeIf { it.isNotBlank() }?.let { "<div class=\"diagram-note markdown-body\">${it.markdownBlockHtml()}</div>" }.orEmpty()}
               </div>
             </li>
             """.trimIndent()
@@ -319,8 +376,8 @@ object DeepReadTemplateRenderer {
             """
             <div class="diagram-card">
               ${node.group?.takeIf { it.isNotBlank() }?.let { "<small class=\"diagram-group\">${it.escapeHtml()}</small>" }.orEmpty()}
-              <h3>${node.label.escapeHtml()}</h3>
-              ${node.note?.takeIf { it.isNotBlank() }?.let { "<p>${it.escapeHtml()}</p>" }.orEmpty()}
+              <h3>${node.label.markdownInlineHtml()}</h3>
+              ${node.note?.takeIf { it.isNotBlank() }?.let { "<div class=\"diagram-note markdown-body\">${it.markdownBlockHtml()}</div>" }.orEmpty()}
             </div>
             """.trimIndent()
         }.joinToString(prefix = "<div class=\"diagram-grid\">", postfix = "</div>", separator = "\n")
@@ -363,21 +420,21 @@ object DeepReadTemplateRenderer {
             return@buildString
         }
         analysis.coreDispute?.takeIf { it.isNotBlank() }?.let {
-            append("<blockquote>")
-            append(it.escapeHtml())
+            append("<blockquote class=\"markdown-body\">")
+            append(it.markdownBlockHtml())
             append("</blockquote>")
         }
         analysis.perspectives.take(6).forEach { perspective ->
             append("<div class=\"perspective\"><p class=\"holder\">")
             append(perspective.holder.orEmpty().escapeHtml())
-            append("</p><p>")
-            append(perspective.viewpoint.escapeHtml())
-            append("</p></div>")
+            append("</p><div class=\"markdown-body\">")
+            append(perspective.viewpoint.markdownBlockHtml())
+            append("</div></div>")
         }
         analysis.implications?.takeIf { it.isNotBlank() }?.let {
-            append("<p>")
-            append(it.escapeHtml())
-            append("</p>")
+            append("<div class=\"markdown-body\">")
+            append(it.markdownBlockHtml())
+            append("</div>")
         }
     }
 
@@ -434,6 +491,19 @@ object DeepReadTemplateRenderer {
             .replace(">", "&gt;")
             .replace("\"", "&quot;")
             .replace("'", "&#39;")
+
+    private fun String.markdownBlockHtml(): String {
+        val source = trim()
+        if (source.isBlank()) return ""
+        val tree = markdownParser.buildMarkdownTreeFromString(source)
+        val html = HtmlGenerator(source, tree, markdownFlavour).generateHtml()
+        return Jsoup.clean(html, "", markdownSafelist, markdownOutputSettings)
+    }
+
+    private fun String.markdownInlineHtml(): String {
+        val html = markdownBlockHtml().trim()
+        return singleParagraphRegex.matchEntire(html)?.groupValues?.get(1) ?: html
+    }
 
     private fun String.withRuntimeCss(css: String, trailingCss: String = ""): String {
         val hasCss = css.trim() in this
@@ -545,6 +615,28 @@ object DeepReadTemplateRenderer {
         .diagram-relations li{font-family:var(--deep-read-sans);font-size:11px;line-height:1.55;color:#6b7280;margin:4px 0;}
         .diagram-relations b{font-weight:500;color:#ef4444;margin:0 5px;}
         .diagram-caption{font-family:var(--deep-read-sans);font-size:11px;line-height:1.5;color:#6b7280;margin:10px 0 0;}
+        .markdown-body>:first-child{margin-top:0;}
+        .markdown-body>:last-child{margin-bottom:0;}
+        .markdown-body strong,.markdown-body b{font-weight:650;color:inherit;}
+        .markdown-body em,.markdown-body i{font-style:italic;}
+        .markdown-body s,.markdown-body del{text-decoration:line-through;}
+        .markdown-body h2,.markdown-body h3,.markdown-body h4{font-weight:500;line-height:1.35;margin:14px 0 7px;}
+        .markdown-body h2{font-size:18px;}
+        .markdown-body h3{font-size:16px;}
+        .markdown-body h4{font-size:15px;}
+        .markdown-body ul,.markdown-body ol{font-size:15px;line-height:1.68;margin:0 0 13px 1.25em;padding:0;}
+        .markdown-body li{margin:0 0 6px;padding-left:2px;}
+        .markdown-body li>p{margin:0 0 6px;}
+        .markdown-body code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;background:rgba(107,114,128,.12);padding:0 .22em;border-radius:4px;}
+        .markdown-body pre{overflow:auto;background:#f0f0ec;padding:10px 12px;border-radius:10px;margin:0 0 13px;}
+        .markdown-body pre code{background:transparent;padding:0;border-radius:0;}
+        .markdown-body a{color:#991b1b;text-decoration:none;border-bottom:1px solid currentColor;}
+        .markdown-body table{width:100%;border-collapse:collapse;font-family:var(--deep-read-sans);font-size:12px;line-height:1.5;margin:0 0 13px;}
+        .markdown-body th,.markdown-body td{border-top:1px solid #ddd;padding:7px 6px;text-align:left;vertical-align:top;}
+        .markdown-body blockquote{margin:0 0 13px;padding-left:10px;border-left:2px solid #ef4444;font-size:15px;line-height:1.68;}
+        blockquote.markdown-body p{font-size:18px;line-height:1.48;}
+        .timeline-copy,.core-support{min-width:0;}
+        .diagram-note.markdown-body p{font-family:var(--deep-read-sans);font-size:12px;line-height:1.58;color:#6b7280;margin:0;}
     """
 
     private fun templateRuntimeCss(darkTheme: Boolean): String =
@@ -571,6 +663,11 @@ object DeepReadTemplateRenderer {
         .section-state.failed{background:#281515;color:#f2b8b5;}
         .state-dot{background:#62574c;}
         .skeleton-line{background:#322b24;}
+        .markdown-body code{background:rgba(168,157,144,.16);}
+        .markdown-body pre{background:#181410;}
+        .markdown-body a{color:#d18752;}
+        .markdown-body th,.markdown-body td{border-top-color:#3a332b;}
+        .markdown-body blockquote{border-left-color:#d18752;}
     """
 
     private const val EMPTY_IMAGE_FALLBACK_CSS = """

@@ -32,7 +32,7 @@ baseline/amber-main-2026-05-29
 The first baseline acceptance pass should run:
 
 ```bash
-./gradlew assembleNotion test
+./gradlew assembleGraphite test
 ```
 
 If this passes, the baseline tag marks the first post-rebrand mainline checkpoint.

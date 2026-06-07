@@ -185,7 +185,7 @@ function AgentActions() {
 
 /* ------------------------------------------------------------- header ----- */
 // Two-line title block à la OpenCode: bold session title + mono model id.
-// The model row is the menu trigger (chevron). 
+// The model row is the menu trigger (chevron).
 function ChatHeader({ title = "新会话", model = "claude-sonnet-4-5", back, withMeter = true, onModelTap, menuOpen, onLeft, onEdit }) {
   return (
     <div className="hair" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10,

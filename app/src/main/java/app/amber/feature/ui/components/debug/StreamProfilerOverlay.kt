@@ -28,7 +28,7 @@ import app.amber.feature.ui.components.richtext.LocalCharRevealController
 // -guide §14 calls for: a quick at-a-glance signal of whether the
 // reveal pipeline is keeping up. NOT meant for end users — gated on
 // BuildConfig.DEBUG so it disappears in release variants and the
-// notion buildType has DEBUG=true so the developer sees it.
+// Graphite buildType has DEBUG=true so the developer sees it.
 //
 // Currently shows:
 //   - FPS  (independent EWMA from withFrameNanos, not the reveal

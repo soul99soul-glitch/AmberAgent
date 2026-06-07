@@ -102,7 +102,7 @@ private fun AmberAgentIcon(
         color = color,
     ) {
         Image(
-            painter = painterResource(R.drawable.notion_agent_mark),
+            painter = painterResource(R.drawable.graphite_agent_mark),
             contentDescription = name,
             modifier = Modifier.padding(4.dp),
         )

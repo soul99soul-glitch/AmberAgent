@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -118,5 +119,23 @@ class ModelMenuInteractionTest {
         compose.onNodeWithText("xhigh").assertIsDisplayed()
         // gpt set has no "auto" segment
         compose.onNodeWithText("auto").assertDoesNotExist()
+    }
+
+    @Test
+    fun topModelMenu_openWithoutProvidersShowsEmptyState() {
+        compose.setContent {
+            TopModelMenu(
+                open = true,
+                providers = emptyList(),
+                modelType = ModelType.CHAT,
+                currentProviderId = null,
+                currentModelId = null,
+                onSelect = {},
+                onClose = {},
+            )
+        }
+
+        compose.onNodeWithText("No available AI providers, please add in settings")
+            .assertIsDisplayed()
     }
 }

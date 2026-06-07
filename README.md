@@ -53,10 +53,10 @@ personal research app and codebase, not a polished end-user distribution.
 Use Android Studio or Gradle from the repository root:
 
 ```bash
-./gradlew :app:assembleNotion
+./gradlew :app:assembleGraphite
 ```
 
-`Notion` is a historical build-type name in this repository; the current AmberAgent package target is `app.amber.agent`.
+`Graphite` is the canonical AmberAgent build type and targets the `app.amber.agent` package.
 For local development, some cloud-backed features require private configuration files that are intentionally not
 committed, such as `app/google-services.json`. The app can be built for local development without shipping those
 private credentials, but Firebase/Google-related features may be limited unless the file contains clients for the

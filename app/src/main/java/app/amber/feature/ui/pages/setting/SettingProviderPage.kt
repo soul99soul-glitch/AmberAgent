@@ -4,64 +4,55 @@ import android.net.Uri
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Search01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.ChartBarLine
+import me.rerere.hugeicons.stroke.Share01
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import me.rerere.hugeicons.stroke.ArrowRight01
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
@@ -70,45 +61,57 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.AutoAIIcon
-import app.amber.feature.ui.components.ui.WorkspaceSearchField
-import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.decodeProviderSetting
-import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.hooks.useEditState
-import app.amber.feature.ui.pages.setting.components.ProviderConfigure
+import app.amber.feature.ui.pages.setting.components.ProviderCard
+import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
+import app.amber.feature.ui.pages.setting.components.ProviderHairline
+import app.amber.feature.ui.pages.setting.components.ProviderIconButton
+import app.amber.feature.ui.pages.setting.components.ProviderLiveDot
+import app.amber.feature.ui.pages.setting.components.ProviderMonogram
+import app.amber.feature.ui.pages.setting.components.ProviderSearchField
+import app.amber.feature.ui.pages.setting.components.ProviderSectionLabel
 import app.amber.feature.ui.pages.setting.components.ProviderTemplatePickerSheet
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.pages.setting.components.providerAuthLabel
+import app.amber.feature.ui.pages.setting.components.providerSlugLabel
+import app.amber.feature.ui.pages.setting.components.toProviderMonogram
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.ImageUtils
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
-import androidx.compose.foundation.lazy.items as lazyItems
 
 @Composable
 fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var searchQuery by remember { mutableStateOf("") }
     var pendingDeleteProvider by remember { mutableStateOf<ProviderSetting?>(null) }
     val lazyListState = rememberLazyListState()
     val filteredProviders = remember(settings.providers, searchQuery) {
+        val query = searchQuery.trim()
         if (searchQuery.isBlank()) {
             settings.providers
         } else {
             settings.providers.filter { provider ->
-                provider.name.contains(searchQuery, ignoreCase = true)
+                provider.name.contains(query, ignoreCase = true) ||
+                    provider.providerSlugLabel().contains(query, ignoreCase = true)
             }
         }
     }
+    val onlineProviders = remember(filteredProviders) { filteredProviders.filter { it.enabled } }
+    val disabledProviders = remember(filteredProviders) { filteredProviders.filterNot { it.enabled } }
+    val totalModelCount = remember(settings.providers) { settings.providers.sumOf { it.models.size } }
+    val onlineCount = remember(settings.providers) { settings.providers.count { it.enabled } }
+    val t = LocalAmberTokens.current
 
     Scaffold(
         topBar = {
-            WorkspaceTopBar(
-                title = stringResource(R.string.setting_provider_page_title),
-                navigationIcon = { BackButton() },
+            ProviderRegistryTopBar(
+                title = "提供商",
+                onBack = { navController.popBackStack() },
                 actions = {
                     ImportProviderButton {
                         vm.updateSettings(
@@ -129,24 +132,30 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         )
                     }
                 },
-                scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        containerColor = t.bg,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            WorkspaceSearchField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
+            ProviderAggregateStrip(
+                providerCount = settings.providers.size,
+                modelCount = totalModelCount,
+                onlineCount = onlineCount,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                placeholder = stringResource(R.string.setting_provider_page_search_providers),
+                    .padding(horizontal = 18.dp)
+                    .padding(top = 10.dp, bottom = 2.dp),
+            )
+            ProviderSearchField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = "搜索提供商 / slug",
+                imageVector = HugeIcons.Search01,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
             )
 
             LazyColumn(
@@ -154,54 +163,165 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                     .fillMaxWidth()
                     .weight(1f)
                     .imePadding(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(1.dp),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 2.dp),
                 state = lazyListState,
             ) {
-                // Notion grouped-row pattern: every item shares one outer
-                // rounded hairline, internal 1dp gaps act as dividers.
-                val total = filteredProviders.size
-                lazyItems(filteredProviders, key = { it.id }) { provider ->
-                    val index = filteredProviders.indexOfFirst { it.id == provider.id }
-                    ProviderItem(
-                        modifier = Modifier.fillMaxWidth(),
-                        provider = provider,
-                        isFirst = index == 0,
-                        isLast = index == total - 1,
-                        onEdit = {
-                            navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
-                        },
-                        onDelete = {
-                            pendingDeleteProvider = provider
-                        },
-                    )
+                if (onlineProviders.isNotEmpty()) {
+                    item("online_label") {
+                        ProviderSectionLabel("在线", count = onlineProviders.size)
+                    }
+                    item("online_group") {
+                        ProviderCard(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                            onlineProviders.forEachIndexed { index, provider ->
+                                if (index > 0) ProviderHairline(Modifier.padding(horizontal = 14.dp))
+                                ProviderItem(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    provider = provider,
+                                    onEdit = {
+                                        navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                                    },
+                                    onDelete = {
+                                        pendingDeleteProvider = provider
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (disabledProviders.isNotEmpty()) {
+                    item("disabled_label") {
+                        ProviderSectionLabel("未启用", count = disabledProviders.size)
+                    }
+                    item("disabled_group") {
+                        ProviderCard(Modifier.fillMaxWidth().padding(bottom = 18.dp)) {
+                            disabledProviders.forEachIndexed { index, provider ->
+                                if (index > 0) ProviderHairline(Modifier.padding(horizontal = 14.dp))
+                                ProviderItem(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    provider = provider,
+                                    onEdit = {
+                                        navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                                    },
+                                    onDelete = {
+                                        pendingDeleteProvider = provider
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
     pendingDeleteProvider?.let { provider ->
-        AlertDialog(
-            onDismissRequest = { pendingDeleteProvider = null },
-            title = { Text(stringResource(R.string.confirm_delete)) },
-            text = { Text(stringResource(R.string.setting_provider_page_delete_dialog_text)) },
-            dismissButton = {
-                TextButton(onClick = { pendingDeleteProvider = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingDeleteProvider = null
-                        vm.updateSettings(settings.copy(providers = settings.providers - provider))
-                    },
-                ) {
-                    Text(stringResource(R.string.delete))
-                }
+        ProviderConfirmDialog(
+            title = stringResource(R.string.confirm_delete),
+            message = stringResource(R.string.setting_provider_page_delete_dialog_text),
+            confirmText = stringResource(R.string.delete),
+            onDismiss = { pendingDeleteProvider = null },
+            onConfirm = {
+                pendingDeleteProvider = null
+                vm.updateSettings(settings.copy(providers = settings.providers - provider))
             },
         )
     }
+}
+
+@Composable
+private fun ProviderRegistryTopBar(
+    title: String,
+    onBack: () -> Unit,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(t.bg)
+            .windowInsetsPadding(WindowInsets.statusBars),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .padding(start = 6.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BackButton()
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                style = type.screenTitle,
+                color = t.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                content = actions,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProviderAggregateStrip(
+    providerCount: Int,
+    modelCount: Int,
+    onlineCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = modifier.padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = HugeIcons.ChartBarLine,
+            contentDescription = null,
+            tint = t.accent,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(9.dp))
+        ProviderStat(providerCount, "提供商")
+        ProviderStatSep()
+        ProviderStat(modelCount, "模型")
+        ProviderStatSep()
+        ProviderStat(onlineCount, "在线", accent = true)
+    }
+}
+
+@Composable
+private fun ProviderStat(value: Int, label: String, accent: Boolean = false) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            value.toString(),
+            style = type.meta.copy(fontWeight = FontWeight.Bold),
+            color = if (accent) t.accent else t.ink,
+        )
+        Text(
+            " $label",
+            style = type.secondary.copy(fontSize = 11.5.sp),
+            color = t.ink3,
+        )
+    }
+}
+
+@Composable
+private fun ProviderStatSep() {
+    val t = LocalAmberTokens.current
+    Box(
+        Modifier
+            .padding(horizontal = 13.dp)
+            .size(width = 1.dp, height = 11.dp)
+            .background(t.line2)
+    )
 }
 
 @Composable
@@ -224,113 +344,28 @@ private fun ImportProviderButton(
         }
     }
 
-    IconButton(
-        onClick = {
-            showImportDialog = true
-        }
-    ) {
-        Icon(HugeIcons.FileImport, null)
-    }
+    ProviderIconButton(
+        imageVector = HugeIcons.Share01,
+        contentDescription = null,
+        rotate180 = true,
+        onClick = { showImportDialog = true },
+    )
 
     if (showImportDialog) {
-        AlertDialog(
-            onDismissRequest = { showImportDialog = false },
-            title = {
-                Text(
-                    text = stringResource(R.string.setting_provider_page_import_dialog_title),
-                    style = MaterialTheme.typography.headlineSmall
+        ProviderImportDialog(
+            onDismiss = { showImportDialog = false },
+            onScanQr = {
+                showImportDialog = false
+                scanQrCodeLauncher.launch(null)
+            },
+            onPickImage = {
+                showImportDialog = false
+                pickImageLauncher.launch(
+                    androidx.activity.result.PickVisualMediaRequest(
+                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                    )
                 )
             },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_provider_page_import_dialog_message),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // 主要操作：扫描二维码
-                        Button(
-                            onClick = {
-                                showImportDialog = false
-                                scanQrCodeLauncher.launch(null)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            shape = MaterialTheme.shapes.large
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Camera01,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = stringResource(R.string.setting_provider_page_scan_qr_code),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        }
-
-                        // 次要操作：从相册选择
-                        OutlinedButton(
-                            onClick = {
-                                showImportDialog = false
-                                pickImageLauncher.launch(
-                                    androidx.activity.result.PickVisualMediaRequest(
-                                        ActivityResultContracts.PickVisualMedia.ImageOnly
-                                    )
-                                )
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            shape = MaterialTheme.shapes.large
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Image02,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = stringResource(R.string.setting_provider_page_select_from_gallery),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(
-                    onClick = { showImportDialog = false },
-                    shape = MaterialTheme.shapes.large
-                ) {
-                    Text(
-                        text = stringResource(R.string.cancel),
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
-            }
         )
     }
 }
@@ -412,36 +447,199 @@ private fun handleImageQRCode(
 
 
 @Composable
+private fun ProviderConfirmDialog(
+    title: String,
+    message: String,
+    confirmText: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Dialog(onDismissRequest = onDismiss) {
+        ProviderCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = type.body.copy(fontWeight = FontWeight.Bold),
+                    color = t.ink,
+                )
+                Text(
+                    text = message,
+                    style = type.secondary,
+                    color = t.ink3,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    ProviderCommandButton(
+                        text = stringResource(R.string.cancel),
+                        onClick = onDismiss,
+                    )
+                    ProviderCommandButton(
+                        text = confirmText,
+                        onClick = onConfirm,
+                        accent = true,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderImportDialog(
+    onDismiss: () -> Unit,
+    onScanQr: () -> Unit,
+    onPickImage: () -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Dialog(onDismissRequest = onDismiss) {
+        ProviderCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_provider_page_import_dialog_title),
+                    style = type.body.copy(fontWeight = FontWeight.Bold),
+                    color = t.ink,
+                )
+                Text(
+                    text = stringResource(R.string.setting_provider_page_import_dialog_message),
+                    style = type.secondary,
+                    color = t.ink3,
+                )
+                ProviderCommandButton(
+                    text = stringResource(R.string.setting_provider_page_scan_qr_code),
+                    imageVector = HugeIcons.Camera01,
+                    onClick = onScanQr,
+                    accent = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ProviderCommandButton(
+                    text = stringResource(R.string.setting_provider_page_select_from_gallery),
+                    imageVector = HugeIcons.Image02,
+                    onClick = onPickImage,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ProviderCommandButton(
+                    text = stringResource(R.string.cancel),
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderEditorSheet(
+    title: String,
+    initialProvider: ProviderSetting,
+    confirmText: String,
+    autoStartOAuth: Boolean,
+    onAutoStartConsumed: () -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: (ProviderSetting) -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var draftProvider by remember(initialProvider.id) { mutableStateOf(initialProvider) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = t.bg,
+        dragHandle = { ProviderSheetGrabber() },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .padding(horizontal = 18.dp),
+        ) {
+            Text(
+                text = title,
+                style = type.screenTitle.copy(fontSize = 22.sp),
+                color = t.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            ProviderConsole(
+                provider = draftProvider,
+                onEdit = { draftProvider = it },
+                onCommit = { draftProvider = it },
+                autoStartOAuth = autoStartOAuth,
+                onAutoStartConsumed = onAutoStartConsumed,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(vertical = 12.dp),
+            ) { currentProvider ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ProviderCommandButton(
+                        text = stringResource(R.string.cancel),
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ProviderCommandButton(
+                        text = confirmText,
+                        onClick = { onConfirm(currentProvider) },
+                        accent = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderSheetGrabber() {
+    val t = LocalAmberTokens.current
+    Box(
+        Modifier
+            .padding(top = 10.dp, bottom = 4.dp)
+            .width(42.dp)
+            .height(4.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(t.line2)
+    )
+}
+
+@Composable
 private fun AddButton(
     existingProviderIds: Set<Uuid>,
     onAdd: (ProviderSetting) -> Unit,
 ) {
-    // Two-step add flow:
-    //  1. Tap "+"  → open ProviderTemplatePickerSheet (bundled brands + custom types)
-    //  2. Pick row → close sheet, open the existing edit dialog pre-filled with that initial
-    //     ProviderSetting, then user reviews / fills in API key / hits "Add".
-    //
-    // The previous implementation immediately opened a blank `ProviderSetting.OpenAI()`
-    // editor with a hidden "Codex OAuth" shortcut tucked into the dismiss row. That made
-    // the brand-tagged providers (DeepSeek / Kimi / 智谱 / MiMo) impossible to add back
-    // once the user had deleted them, because nothing in the editor lets the user choose a
-    // brand directly. The picker sheet is now the single discovery point for both.
     var showPicker by remember { mutableStateOf(false) }
-    // Picker's OAuth quick-start rows ask the editor to auto-trigger the OAuth handler
-    // the moment it composes, so the user doesn't have to switch tabs / pick auth mode
-    // again after already telling the picker "I want OAuth". Reset on each dismiss/
-    // confirm so a subsequent non-OAuth template doesn't inherit a stale `true`.
     var autoStartOAuth by remember { mutableStateOf(false) }
-    val dialogState = useEditState<ProviderSetting> {
-        onAdd(it)
-        autoStartOAuth = false
-    }
+    var editingProvider by remember { mutableStateOf<ProviderSetting?>(null) }
 
-    IconButton(
-        onClick = { showPicker = true }
-    ) {
-        Icon(HugeIcons.Add01, "Add")
-    }
+    ProviderIconButton(
+        imageVector = HugeIcons.Add01,
+        contentDescription = "Add",
+        iconSize = 22.dp,
+        onClick = { showPicker = true },
+    )
 
     if (showPicker) {
         ProviderTemplatePickerSheet(
@@ -450,49 +648,26 @@ private fun AddButton(
             onPick = { initial, requestAutoStart ->
                 showPicker = false
                 autoStartOAuth = requestAutoStart
-                dialogState.open(initial)
+                editingProvider = initial
             },
         )
     }
 
-    if (dialogState.isEditing) {
-        AlertDialog(
-            onDismissRequest = {
+    editingProvider?.let { initial ->
+        ProviderEditorSheet(
+            title = stringResource(R.string.setting_provider_page_add_provider),
+            initialProvider = initial,
+            confirmText = stringResource(R.string.setting_provider_page_add),
+            autoStartOAuth = autoStartOAuth,
+            onAutoStartConsumed = { autoStartOAuth = false },
+            onDismiss = {
                 autoStartOAuth = false
-                dialogState.dismiss()
+                editingProvider = null
             },
-            title = {
-                Text(stringResource(R.string.setting_provider_page_add_provider))
-            },
-            text = {
-                dialogState.currentState?.let {
-                    ProviderConfigure(
-                        provider = it,
-                        autoStartOAuth = autoStartOAuth,
-                        onAutoStartConsumed = { autoStartOAuth = false },
-                    ) { newState ->
-                        dialogState.currentState = newState
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        dialogState.confirm()
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_provider_page_add))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        autoStartOAuth = false
-                        dialogState.dismiss()
-                    }
-                ) {
-                    Text(stringResource(R.string.cancel))
-                }
+            onConfirm = {
+                onAdd(it)
+                autoStartOAuth = false
+                editingProvider = null
             },
         )
     }
@@ -501,118 +676,83 @@ private fun AddButton(
 @Composable
 private fun ProviderItem(
     provider: ProviderSetting,
-    isFirst: Boolean,
-    isLast: Boolean,
     modifier: Modifier = Modifier,
     onEdit: () -> Unit,
     onDelete: () -> Unit,  // 保留参数兼容，但行内已不再显示删除按钮，删除移到 detail 页
 ) {
-    val workspace = workspaceColors()
-    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    // V3: 整行 background 用主题色区分启用/禁用。深色主题里 accent 叠太多会吞掉副标题，
-    // 所以深色只保留很轻的 tint；状态主要靠文字和 logo spot 表达。
-    val enabledRowTint = if (chatTheme.isDark) 0.08f else 0.18f
-    val rowBg = if (provider.enabled) {
-        chatTheme.accent.copy(alpha = enabledRowTint).compositeOver(chatTheme.surface)
-    } else {
-        chatTheme.surface
-    }
-    val secondaryTextColor = when {
-        provider.enabled && chatTheme.isDark -> chatTheme.inkSoft
-        provider.enabled -> chatTheme.inkFaint
-        else -> chatTheme.inkFaint
-    }
-    val providerIconBackground = if (provider.enabled) chatTheme.modelLogoBg else Color.Transparent
-    androidx.compose.material3.Surface(
-        onClick = onEdit,
-        modifier = modifier,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(
-            topStart = if (isFirst) 18.dp else 0.dp,
-            topEnd = if (isFirst) 18.dp else 0.dp,
-            bottomStart = if (isLast) 18.dp else 0.dp,
-            bottomEnd = if (isLast) 18.dp else 0.dp,
-        ),
-        color = rowBg,
-        contentColor = chatTheme.ink,
-        border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair),
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .pressable(onClick = onEdit)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.spacedBy(13.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box {
+        ProviderMonogram(
+            text = provider.name.toProviderMonogram(),
+            enabled = provider.enabled,
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                // V3: logo 用 40dp 圆形 (CircleShape) bg, 比之前 36dp 圆角矩形更扩.
-                // enabled = modelLogoBg spot (比 row bg 更轻), disabled = transparent.
-                // AutoAIIcon 28dp 占比 ~70% 不显得拥挤.
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(providerIconBackground),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AutoAIIcon(
-                        name = provider.name,
-                        // color=Transparent 让 AIIcon 内置 Surface 圆形 bg 隐形, 避免跟外层 40dp
-                        // CircleShape 形成"双重圆环" (内层 24dp 圆 + 外层 40dp 圆).
-                        color = androidx.compose.ui.graphics.Color.Transparent,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .then(
-                                if (!provider.enabled) Modifier.alpha(0.45f) else Modifier
-                            ),
-                    )
-                }
-                // name + 模型计数
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = provider.name,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (provider.enabled) chatTheme.ink else chatTheme.inkFaint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = stringResource(
-                            R.string.setting_provider_page_model_count,
-                            provider.models.size,
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = secondaryTextColor,
-                    )
-                }
-                // 仅 disabled 显示灰胶囊（"已禁用"），enabled 状态不显示
-                if (!provider.enabled) {
-                    app.amber.feature.ui.components.ui.WorkspaceStatusPill(
-                        text = stringResource(R.string.setting_provider_page_disabled),
-                        tone = app.amber.feature.ui.components.ui.WorkspaceTone.Neutral,
-                    )
-                }
-                // chevron-right (进入 detail)
-                Icon(
-                    imageVector = HugeIcons.ArrowRight01,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = secondaryTextColor.copy(alpha = if (provider.enabled) 0.72f else 1f),
+                Text(
+                    text = provider.name,
+                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (provider.enabled) t.ink else t.ink3,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                if (provider.enabled) {
+                    ProviderLiveDot()
+                }
             }
-            // V3 hairline divider — 仅非 last 行显示，模拟"单卡 + hairline 分隔"
-            if (!isLast) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 14.dp)
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(chatTheme.hair),
-                )
-            }
+            Text(
+                text = provider.providerSlugLabel(),
+                style = type.meta.copy(fontSize = 11.sp),
+                color = t.ink4,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ProviderAuthBadge(provider.providerAuthLabel())
+            Text(
+                text = "${provider.models.size} 模型",
+                style = type.meta.copy(fontSize = 11.5.sp),
+                color = if (provider.models.isNotEmpty()) t.ink2 else t.ink4,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProviderAuthBadge(text: String) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Box(
+        modifier = Modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(5.dp))
+            .background(t.surface2)
+            .border(1.dp, t.line, androidx.compose.foundation.shape.RoundedCornerShape(5.dp))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = type.meta.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
+            color = if (text == "—") t.ink4 else t.ink3,
+            maxLines = 1,
+        )
     }
 }

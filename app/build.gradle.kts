@@ -34,20 +34,21 @@ val uploadCrashlyticsMapping = projectProperty("uploadCrashlyticsMapping", "UPLO
     .ifBlank { "true" }
     .toBooleanStrict()
 val baseApplicationId = "app.amber.agent"
+val graphiteDebugApplicationIdSuffix = ".graphite"
 
 // Build types that share the Amber UI/runtime contract — must each call
 // `applyAmberUiBuildConfig(...)` in the `buildTypes {}` block below to set
 // optional applicationIdSuffix + VERSION/XMS/Firebase/OAuth BuildConfig fields consistently.
 // See the afterEvaluate parity check at file end for why.
-val amberUiBuildTypes = setOf("notion")
+val amberUiBuildTypes = setOf("graphite")
 
 // Populated by `applyAmberUiBuildConfig(...)` invocations; compared against
 // `amberUiBuildTypes` after configuration.
 val amberUiBuildConfigApplied = mutableSetOf<String>()
 val googleServicesPackageByVariant = linkedMapOf(
     "release" to baseApplicationId,
-    "debug" to "$baseApplicationId.debug",
-    "notion" to baseApplicationId,
+    "debug" to "$baseApplicationId$graphiteDebugApplicationIdSuffix",
+    "graphite" to baseApplicationId,
     "baseline" to "$baseApplicationId.debug",
 )
 
@@ -197,7 +198,7 @@ android {
         debug {
             // Graphite redesign build — distinct applicationId so it installs ALONGSIDE the
             // existing `app.amber.agent` (main) without overwriting it.
-            applicationIdSuffix = ".graphite"
+            applicationIdSuffix = graphiteDebugApplicationIdSuffix
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
@@ -206,11 +207,11 @@ android {
             buildConfigField(
                 "Boolean",
                 "GOOGLE_OAUTH_CONFIGURED",
-                googleOAuthConfigured("$baseApplicationId.debug", name).toString(),
+                googleOAuthConfigured("$baseApplicationId$graphiteDebugApplicationIdSuffix", name).toString(),
             )
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
-        create("notion") {
+        create("graphite") {
             initWith(getByName("debug"))
             matchingFallbacks.add("debug")
             applyAmberUiBuildConfig("")
@@ -404,7 +405,7 @@ val forbiddenRustSharedLibraries = listOf(
     "tokenizer",
 )
 
-val rustNativeCheckedBuildTypes = setOf("release", "notion", "baseline")
+val rustNativeCheckedBuildTypes = setOf("release", "graphite", "baseline")
 
 afterEvaluate {
     rustNativeCheckedBuildTypes.forEach { buildTypeName ->

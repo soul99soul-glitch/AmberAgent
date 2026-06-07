@@ -4,10 +4,10 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Delete01
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,23 +18,14 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import app.amber.feature.ui.components.ui.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,12 +35,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import app.amber.ai.provider.BuiltInTools
+import app.amber.ai.provider.CustomBody
+import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.Modality
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
@@ -57,11 +53,27 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.registry.ModelRegistry
 import app.amber.agent.R
-import app.amber.feature.ui.components.ui.AutoAIIcon
-import app.amber.feature.ui.pages.assistant.detail.CustomBodies
-import app.amber.feature.ui.pages.assistant.detail.CustomHeaders
-import app.amber.feature.ui.pages.setting.components.ProviderConfigure
+import app.amber.feature.ui.pages.setting.components.ProviderCard
+import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
+import app.amber.feature.ui.pages.setting.components.ProviderMonogram
+import app.amber.feature.ui.pages.setting.components.ProviderPillSeg
+import app.amber.feature.ui.pages.setting.components.ProviderSegOption
+import app.amber.feature.ui.pages.setting.components.ProviderSmallIconButton
+import app.amber.feature.ui.pages.setting.components.ProviderTextField
+import app.amber.feature.ui.pages.setting.components.ProviderToggle
+import app.amber.feature.ui.pages.setting.components.toProviderMonogram
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.uuid.Uuid
+
+private val providerModelJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+    prettyPrint = true
+}
 
 private fun parseContextWindowInput(input: String): Int? {
     val compact = input.trim()
@@ -121,38 +133,20 @@ internal fun ModelSettingsForm(
     }
 
     Column {
-        SecondaryTabRow(
-            selectedTabIndex = pagerState.currentPage,
-            containerColor = Color.Transparent,
-        ) {
-            Tab(
-                selected = pagerState.currentPage == 0,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(0)
-                    }
-                },
-                text = { Text(stringResource(R.string.setting_provider_page_basic_settings)) }
-            )
-            Tab(
-                selected = pagerState.currentPage == 1,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(1)
-                    }
-                },
-                text = { Text(stringResource(R.string.setting_provider_page_advanced_settings)) }
-            )
-            Tab(
-                selected = pagerState.currentPage == 2,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(2)
-                    }
-                },
-                text = { Text(stringResource(R.string.setting_page_built_in_tools)) }
-            )
-        }
+        ProviderPillSeg(
+            options = listOf(
+                ProviderSegOption(0, stringResource(R.string.setting_provider_page_basic_settings)),
+                ProviderSegOption(1, stringResource(R.string.setting_provider_page_advanced_settings)),
+                ProviderSegOption(2, stringResource(R.string.setting_page_built_in_tools)),
+            ),
+            selected = pagerState.currentPage,
+            onSelected = { page ->
+                scope.launch {
+                    pagerState.animateScrollToPage(page)
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         HorizontalPager(
             state = pagerState,
@@ -251,7 +245,7 @@ internal fun ModelSettingsForm(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
-                            .padding(16.dp),
+                            .padding(top = 16.dp, bottom = 80.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         ProviderOverrideSettings(
@@ -262,14 +256,14 @@ internal fun ModelSettingsForm(
                             parentProvider = parentProvider
                         )
 
-                        CustomHeaders(
+                        ModelCustomHeaders(
                             headers = model.customHeaders,
                             onUpdate = { headers ->
                                 onModelChange(model.copy(customHeaders = headers))
                             }
                         )
 
-                        CustomBodies(
+                        ModelCustomBodies(
                             customBodies = model.customBodies,
                             onUpdate = { bodies ->
                                 onModelChange(model.copy(customBodies = bodies))
@@ -289,6 +283,219 @@ internal fun ModelSettingsForm(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ModelAdvancedSectionLabel(
+    text: String,
+    count: Int,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text("//", style = type.eyebrow, color = t.accent)
+        Text(
+            text = text.uppercase(),
+            style = type.eyebrow,
+            color = t.ink3,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text("· $count", style = type.meta.copy(fontSize = 11.sp), color = t.ink4)
+    }
+}
+
+@Composable
+private fun ModelCustomHeaders(
+    headers: List<CustomHeader>,
+    onUpdate: (List<CustomHeader>) -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ModelAdvancedSectionLabel(
+            text = stringResource(R.string.assistant_page_custom_headers),
+            count = headers.size,
+        )
+
+        headers.forEachIndexed { index, header ->
+            var headerName by remember(header.name) { mutableStateOf(header.name) }
+            var headerValue by remember(header.value) { mutableStateOf(header.value) }
+
+            ProviderCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "HEADER ${index + 1}",
+                            style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                            color = t.ink3,
+                        )
+                        ProviderSmallIconButton(
+                            imageVector = HugeIcons.Delete01,
+                            contentDescription = stringResource(R.string.assistant_page_delete_header),
+                            onClick = {
+                                val updatedHeaders = headers.toMutableList()
+                                updatedHeaders.removeAt(index)
+                                onUpdate(updatedHeaders)
+                            },
+                        )
+                    }
+                    ProviderTextField(
+                        value = headerName,
+                        onValueChange = {
+                            headerName = it
+                            val updatedHeaders = headers.toMutableList()
+                            updatedHeaders[index] = updatedHeaders[index].copy(name = it.trim())
+                            onUpdate(updatedHeaders)
+                        },
+                        placeholder = stringResource(R.string.assistant_page_header_name),
+                        mono = true,
+                    )
+                    ProviderTextField(
+                        value = headerValue,
+                        onValueChange = {
+                            headerValue = it
+                            val updatedHeaders = headers.toMutableList()
+                            updatedHeaders[index] = updatedHeaders[index].copy(value = it.trim())
+                            onUpdate(updatedHeaders)
+                        },
+                        placeholder = stringResource(R.string.assistant_page_header_value),
+                        mono = true,
+                    )
+                }
+            }
+        }
+
+        ProviderCommandButton(
+            text = stringResource(R.string.assistant_page_add_header),
+            imageVector = HugeIcons.Add01,
+            onClick = {
+                val updatedHeaders = headers.toMutableList()
+                updatedHeaders.add(CustomHeader("", ""))
+                onUpdate(updatedHeaders)
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun ModelCustomBodies(
+    customBodies: List<CustomBody>,
+    onUpdate: (List<CustomBody>) -> Unit,
+) {
+    val context = LocalContext.current
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ModelAdvancedSectionLabel(
+            text = stringResource(R.string.assistant_page_custom_bodies),
+            count = customBodies.size,
+        )
+
+        customBodies.forEachIndexed { index, body ->
+            var bodyKey by remember(body.key) { mutableStateOf(body.key) }
+            var bodyValueString by remember(body.value) {
+                mutableStateOf(providerModelJson.encodeToString(JsonElement.serializer(), body.value))
+            }
+            var jsonParseError by remember { mutableStateOf<String?>(null) }
+
+            ProviderCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "BODY ${index + 1}",
+                            style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                            color = t.ink3,
+                        )
+                        ProviderSmallIconButton(
+                            imageVector = HugeIcons.Delete01,
+                            contentDescription = stringResource(R.string.assistant_page_delete_body),
+                            onClick = {
+                                val updatedBodies = customBodies.toMutableList()
+                                updatedBodies.removeAt(index)
+                                onUpdate(updatedBodies)
+                            },
+                        )
+                    }
+                    ProviderTextField(
+                        value = bodyKey,
+                        onValueChange = {
+                            bodyKey = it
+                            val updatedBodies = customBodies.toMutableList()
+                            updatedBodies[index] = updatedBodies[index].copy(key = it.trim())
+                            onUpdate(updatedBodies)
+                        },
+                        placeholder = stringResource(R.string.assistant_page_body_key),
+                        mono = true,
+                    )
+                    ProviderTextField(
+                        value = bodyValueString,
+                        onValueChange = { newString ->
+                            bodyValueString = newString
+                            try {
+                                val newJsonValue = providerModelJson.parseToJsonElement(newString)
+                                val updatedBodies = customBodies.toMutableList()
+                                updatedBodies[index] = updatedBodies[index].copy(value = newJsonValue)
+                                onUpdate(updatedBodies)
+                                jsonParseError = null
+                            } catch (e: Exception) {
+                                jsonParseError = context.getString(
+                                    R.string.assistant_page_invalid_json,
+                                    e.message?.take(100) ?: ""
+                                )
+                            }
+                        },
+                        placeholder = stringResource(R.string.assistant_page_body_value),
+                        mono = true,
+                        singleLine = false,
+                        minHeight = 98.dp,
+                    )
+                    if (jsonParseError != null) {
+                        Text(
+                            text = jsonParseError!!,
+                            style = type.meta.copy(fontSize = 11.sp),
+                            color = t.accent,
+                        )
+                    }
+                }
+            }
+        }
+
+        ProviderCommandButton(
+            text = stringResource(R.string.assistant_page_add_body),
+            imageVector = HugeIcons.Add01,
+            onClick = {
+                val updatedBodies = customBodies.toMutableList()
+                updatedBodies.add(CustomBody("", JsonPrimitive("")))
+                onUpdate(updatedBodies)
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -443,6 +650,8 @@ private fun BuiltInToolsSettings(
     tools: Set<BuiltInTools>,
     onUpdateTools: (Set<BuiltInTools>) -> Unit
 ) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -478,13 +687,11 @@ private fun BuiltInToolsSettings(
 
         availableTools.forEach { (tool, info) ->
             val (title, description) = info
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            ProviderCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(13.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -494,15 +701,20 @@ private fun BuiltInToolsSettings(
                     ) {
                         Text(
                             text = title,
-                            style = MaterialTheme.typography.titleSmall
+                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                            color = t.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = type.secondary.copy(fontSize = 12.sp),
+                            color = t.ink3,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Switch(
+                    ProviderToggle(
                         checked = tool in tools,
                         onCheckedChange = { checked ->
                             if (checked) {
@@ -526,136 +738,140 @@ private fun ProviderOverrideSettings(
 ) {
     var showProviderConfig by remember { mutableStateOf(false) }
     var editingProvider by remember { mutableStateOf<ProviderSetting?>(null) }
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             text = stringResource(R.string.setting_provider_page_provider_override),
-            style = MaterialTheme.typography.titleSmall
+            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+            color = t.ink,
         )
 
         Text(
             text = stringResource(R.string.setting_provider_page_provider_override_desc),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = type.secondary,
+            color = t.ink3,
         )
 
         if (providerOverride != null) {
-            OutlinedCard(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
+            ProviderCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    ProviderMonogram(
+                        text = providerOverride.name.toProviderMonogram(),
+                        size = 34.dp,
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
-                        AutoAIIcon(
-                            providerOverride.name,
-                            modifier = Modifier.size(24.dp)
+                        Text(
+                            text = providerOverride.name,
+                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                            color = t.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = "${providerOverride.name} (Override)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f)
+                            text = "override",
+                            style = type.meta.copy(fontSize = 11.sp),
+                            color = t.ink4,
                         )
-                        IconButton(
-                            onClick = {
-                                editingProvider = providerOverride
-                                showProviderConfig = true
-                            }
-                        ) {
-                            Icon(HugeIcons.Edit01, contentDescription = "Edit override", modifier = Modifier.size(20.dp))
-                        }
-                        IconButton(
-                            onClick = {
-                                onUpdateProviderOverride(null)
-                            }
-                        ) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "Remove override", modifier = Modifier.size(20.dp))
-                        }
                     }
+                    ProviderSmallIconButton(
+                        imageVector = HugeIcons.Edit01,
+                        contentDescription = "Edit override",
+                        onClick = {
+                            editingProvider = providerOverride
+                            showProviderConfig = true
+                        },
+                    )
+                    ProviderSmallIconButton(
+                        imageVector = HugeIcons.Cancel01,
+                        contentDescription = "Remove override",
+                        onClick = { onUpdateProviderOverride(null) },
+                    )
                 }
             }
         } else {
-            Button(
+            ProviderCommandButton(
+                text = stringResource(R.string.setting_provider_page_add_provider_override),
+                imageVector = HugeIcons.Add01,
                 onClick = {
                     editingProvider = parentProvider?.copyProvider(
                         id = Uuid.random(),
                         builtIn = false,
-                        models = emptyList(), // 这里必须设置为空，不然会导致循环依赖JSON
+                        models = emptyList(),
                         description = {},
                     )
                     showProviderConfig = true
                 },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(HugeIcons.Add01, contentDescription = null)
-                Spacer(modifier = Modifier.size(8.dp))
-                Text(stringResource(R.string.setting_provider_page_add_provider_override))
-            }
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
-        // Provider configuration modal
         if (showProviderConfig && editingProvider != null) {
             ModalBottomSheet(
                 onDismissRequest = {
                     showProviderConfig = false
                     editingProvider = null
                 },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = t.bg,
             ) {
                 var internalProvider by remember(editingProvider) { mutableStateOf(editingProvider!!) }
 
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .fillMaxHeight(0.9f)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .fillMaxHeight(0.92f)
+                        .padding(horizontal = 18.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.setting_provider_page_configure_provider_override),
-                        style = MaterialTheme.typography.titleLarge,
+                        style = type.screenTitle.copy(fontSize = 22.sp),
+                        color = t.ink,
                     )
 
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        ProviderConfigure(
-                            provider = internalProvider,
-                            onEdit = { internalProvider = it }
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    ) {
-                        TextButton(
-                            onClick = {
-                                showProviderConfig = false
-                                editingProvider = null
-                            },
+                    ProviderConsole(
+                        provider = internalProvider,
+                        onEdit = { internalProvider = it },
+                        onCommit = { internalProvider = it },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
+                    ) { currentProvider ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Text(stringResource(R.string.cancel))
-                        }
-                        TextButton(
-                            onClick = {
-                                onUpdateProviderOverride(internalProvider)
-                                showProviderConfig = false
-                                editingProvider = null
-                            },
-                        ) {
-                            Text(stringResource(R.string.setting_provider_page_save))
+                            ProviderCommandButton(
+                                text = stringResource(R.string.cancel),
+                                onClick = {
+                                    showProviderConfig = false
+                                    editingProvider = null
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                            ProviderCommandButton(
+                                text = stringResource(R.string.setting_provider_page_save),
+                                onClick = {
+                                    onUpdateProviderOverride(currentProvider)
+                                    showProviderConfig = false
+                                    editingProvider = null
+                                },
+                                accent = true,
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     }
                 }

@@ -6,7 +6,9 @@ import app.amber.feature.board.hotlist.deepread.DeepReadDiagramEdge
 import app.amber.feature.board.hotlist.deepread.DeepReadDiagramNode
 import app.amber.feature.board.hotlist.deepread.DeepReadImageAsset
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
+import app.amber.feature.board.hotlist.deepread.CorePoint
 import app.amber.feature.board.hotlist.deepread.IMAGE_CONFIDENCE_HERO
+import app.amber.feature.board.hotlist.deepread.Perspective
 import app.amber.feature.board.hotlist.deepread.ReadingLink
 import app.amber.feature.board.hotlist.deepread.TimelineEvent
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
@@ -158,6 +160,67 @@ class DeepReadTemplateValidatorTest {
         assertFalse(rendered.html.contains("invented.example.com"))
         assertTrue(rendered.html.contains(verified))
         assertEquals(setOf("https://example.com/a"), rendered.allowedLinkUrls)
+    }
+
+    @Test
+    fun rendererConvertsMarkdownFormattingInArticleBody() {
+        val output = DeepReadOutput(
+            summary = "这是 **摘要重点**，并带有 `inline-code`。",
+            timeline = listOf(
+                TimelineEvent(
+                    date = "今天",
+                    event = "**第一层**：平台治理出现变化。\n\n- 创作者\n- 分发平台",
+                ),
+            ),
+            corePoints = listOf(
+                CorePoint(
+                    point = "**核心判断**",
+                    supporting = "支持 **证据** 会在正文里加粗，而不是露出星号。",
+                ),
+            ),
+            analysis = DeepAnalysis(
+                coreDispute = "**核心分歧**：这是治理问题还是内容问题。",
+                perspectives = listOf(Perspective("平台认为 **质量信号** 更重要。", "平台方")),
+                implications = "最终影响 **会外溢** 到创作者生态。",
+            ),
+            extendedReading = listOf(ReadingLink("来源", "https://example.com/a", "example")),
+        )
+
+        val rendered = DeepReadTemplateRenderer.renderEditorialSlant(
+            title = "中文深读",
+            output = output,
+        )
+
+        assertFalse(rendered.html.contains("**摘要重点**"))
+        assertFalse(rendered.html.contains("**第一层**"))
+        assertTrue(rendered.html.contains("<strong>摘要重点</strong>"))
+        assertTrue(rendered.html.contains("<strong>第一层</strong>"))
+        assertTrue(rendered.html.contains("<code>inline-code</code>"))
+        assertTrue(rendered.html.contains("<ul>"))
+
+        val customTemplate = """
+            <!doctype html><html><body>
+            <h1>{{title}}</h1><p>{{summary}}</p>
+            <section>{{narrative_html}}</section>
+            <section>{{analysis_html}}</section>
+            <nav>{{extended_reading_html}}</nav>
+            </body></html>
+        """.trimIndent()
+        val custom = DeepReadTemplateRenderer.renderCustom(
+            title = "中文深读",
+            output = output.copy(summary = "中文摘要"),
+            templateHtml = customTemplate,
+        )
+
+        assertFalse(custom.html.contains("**核心分歧**"))
+        assertTrue(custom.html.contains("<strong>核心分歧</strong>"))
+
+        val safeHtml = DeepReadTemplateRenderer.renderSafeMarkdownHtml(
+            "正文 **加粗**。\n\n![不应展示](https://tracker.example.com/a.png)\n\n<script>alert(1)</script>",
+        )
+        assertTrue(safeHtml.contains("<strong>加粗</strong>"))
+        assertFalse(safeHtml.contains("<img"))
+        assertFalse(safeHtml.contains("<script"))
     }
 
     @Test

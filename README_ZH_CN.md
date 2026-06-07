@@ -44,10 +44,10 @@ AmberAgent 仍然是一个快速变化的实验性代码库。它既有从 Rikka
 使用 Android Studio，或在仓库根目录执行：
 
 ```bash
-./gradlew :app:assembleNotion
+./gradlew :app:assembleGraphite
 ```
 
-`Notion` 是仓库里保留下来的历史 build type 名称；当前 AmberAgent 的目标包名是 `app.amber.agent`。
+`Graphite` 是当前 AmberAgent 的标准 build type，目标包名是 `app.amber.agent`。
 部分云端能力需要本地私有配置文件，例如 `app/google-services.json`。这些文件不会提交到仓库。缺少这些私有凭据时，应用仍可用于本地开发构建，
 但 Firebase / Google 相关能力可能受限，取决于配置文件是否包含当前构建包名对应的 client。
 

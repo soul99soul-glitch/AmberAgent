@@ -3,7 +3,7 @@ set -euo pipefail
 
 ADB="${ADB:-/Users/arquiel/Library/Android/sdk/platform-tools/adb}"
 SERIAL="${SERIAL:-c9a8a837}"
-PACKAGE="${PACKAGE:-app.amber.agent.notion}"
+PACKAGE="${PACKAGE:-app.amber.agent}"
 REPEATS="${REPEATS:-3}"
 SWIPES_PER_RUN="${SWIPES_PER_RUN:-12}"
 SWIPE_MS="${SWIPE_MS:-90}"

@@ -98,6 +98,7 @@ import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateReposit
 import app.amber.feature.board.hotlist.deepread.verifiedImageUrls
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.font.SlidesFontRepository
+import app.amber.feature.ui.components.richtext.MarkdownNew
 import app.amber.feature.ui.theme.LocalDarkMode
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
@@ -873,6 +874,22 @@ private fun DeepReadScaledText(
     )
 }
 
+@Composable
+private fun DeepReadMarkdownText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    val safeHtml = remember(text) {
+        DeepReadTemplateRenderer.renderSafeMarkdownHtml(text)
+    }
+    MarkdownNew(
+        content = safeHtml,
+        modifier = modifier.fillMaxWidth(),
+        style = style,
+    )
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MagazineHeroFrame(
@@ -1354,8 +1371,8 @@ private fun HeroTextBlock(
                 color = palette.ink,
             ).withReadingFont(fontFamily),
         )
-        Text(
-            output.summary,
+        DeepReadMarkdownText(
+            text = output.summary,
             style = MaterialTheme.typography.bodyLarge.copy(
                 lineHeight = 31.sp,
                 color = palette.ink,
@@ -1425,8 +1442,8 @@ private fun deepReadSourceLabel(output: DeepReadOutput): String =
 private fun EditorialSection(title: String, body: String, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionKicker(title, palette)
-        Text(
-            body,
+        DeepReadMarkdownText(
+            text = body,
             style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
                 .withReadingFont(fontFamily),
         )
@@ -1447,8 +1464,8 @@ private fun TimelineSection(
                 TimelineMarker(highlight = event.isHighlight, palette = palette)
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(event.date, style = MaterialTheme.typography.labelMedium, color = palette.muted)
-                    Text(
-                        event.event,
+                    DeepReadMarkdownText(
+                        text = event.event,
                         style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp, color = palette.ink)
                             .withReadingFont(fontFamily),
                     )
@@ -1509,18 +1526,17 @@ private fun CorePointsSection(
                     color = palette.accent,
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        point.point,
+                    DeepReadMarkdownText(
+                        text = point.point,
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light, color = palette.ink)
                             .withReadingFont(fontFamily),
                     )
                     val pointSupporting = point.supporting
                     if (!pointSupporting.isNullOrBlank()) {
-                        Text(
-                            pointSupporting,
-                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp)
+                        DeepReadMarkdownText(
+                            text = pointSupporting,
+                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp, color = palette.muted)
                                 .withReadingFont(fontFamily),
-                            color = palette.muted,
                         )
                     }
                     point.imageUrl?.takeIf { it in verifiedImageUrls }?.let { image ->
@@ -1588,11 +1604,10 @@ private fun DiagramSection(
                             )
                         }
                         node.note?.takeIf { it.isNotBlank() }?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
+                            DeepReadMarkdownText(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp, color = palette.muted)
                                     .withReadingFont(fontFamily),
-                                color = palette.muted,
                             )
                         }
                     }
@@ -1681,8 +1696,8 @@ private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fo
         SectionKicker("深度分析", palette)
         val analysisCoreDispute = analysis.coreDispute
         if (!analysisCoreDispute.isNullOrBlank()) {
-            Text(
-                analysisCoreDispute,
+            DeepReadMarkdownText(
+                text = analysisCoreDispute,
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink)
                     .withReadingFont(fontFamily),
             )
@@ -1697,8 +1712,8 @@ private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fo
         }
         val analysisImplications = analysis.implications
         if (!analysisImplications.isNullOrBlank()) {
-            Text(
-                analysisImplications,
+            DeepReadMarkdownText(
+                text = analysisImplications,
                 style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
                     .withReadingFont(fontFamily),
             )
@@ -1710,8 +1725,8 @@ private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fo
 private fun PerspectiveRow(perspective: Perspective, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(perspective.holder ?: "观点", style = MaterialTheme.typography.labelMedium, color = palette.accent)
-        Text(
-            perspective.viewpoint,
+        DeepReadMarkdownText(
+            text = perspective.viewpoint,
             style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
                 .withReadingFont(fontFamily),
         )

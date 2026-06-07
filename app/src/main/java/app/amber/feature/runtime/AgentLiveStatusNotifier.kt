@@ -87,7 +87,7 @@ class AgentLiveStatusNotifier(
             content = xiaomiSuperIsland.content
             subText = status.subText
             smallIcon = R.drawable.amberagent_live_status_icon
-            largeIcon = R.drawable.amberagent_launcher_foreground
+            largeIcon = R.mipmap.ic_launcher
             color = xiaomiSuperIsland.accentColor.toNotificationColor()
             priority = NotificationCompat.PRIORITY_DEFAULT
             silent = true
@@ -174,7 +174,7 @@ class AgentLiveStatusNotifier(
             content = visual.content
             subText = context.getString(R.string.app_name)
             smallIcon = R.drawable.amberagent_live_status_icon
-            largeIcon = R.drawable.amberagent_launcher_foreground
+            largeIcon = R.mipmap.ic_launcher
             color = visual.accentColor.toNotificationColor()
             priority = if (isInProgress) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_DEFAULT
             silent = isInProgress

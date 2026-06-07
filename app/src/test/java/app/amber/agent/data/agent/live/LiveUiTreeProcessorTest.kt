@@ -129,7 +129,7 @@ class LiveUiTreeProcessorTest {
             nodeCount = 60,
         )
         val divider = valid.copy(splitDivider = true)
-        val ownApp = valid.copy(packageName = "app.amber.agent.notion", ownApp = true)
+        val ownApp = valid.copy(packageName = "app.amber.agent", ownApp = true)
         val system = valid.copy(packageName = "com.android.systemui", systemLike = true)
         val blank = valid.copy(visibleTextLength = 0, visibleTextCount = 0)
         val tiny = valid.copy(area = 4_000)
