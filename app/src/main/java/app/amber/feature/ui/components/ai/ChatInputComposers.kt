@@ -431,7 +431,8 @@ internal fun TextInputRow(
                     isFocused = it.isFocused
                 },
             contentPadding = if (minimalChrome) {
-                PaddingValues(horizontal = 0.dp, vertical = 12.dp)
+                // 单行高度压到 ≤46dp，让外层 pill 的 heightIn(min=46) 钳到 46dp，与两侧圆按钮齐平
+                PaddingValues(horizontal = 0.dp, vertical = 9.dp)
             } else {
                 TextFieldDefaults.contentPaddingWithoutLabel()
             },

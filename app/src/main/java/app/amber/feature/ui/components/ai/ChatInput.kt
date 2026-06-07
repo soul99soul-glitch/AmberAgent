@@ -66,9 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -553,22 +551,11 @@ fun ChatInput(
     }
 
     val tokens = LocalAmberTokens.current
-    // Graphite §7.4 "immersive bottom": the composer sits on a full-bleed tray =
-    // `surface` fill that continues to the screen edges (and under the nav inset),
-    // carrying a single 1dp top hairline (`line`). Flat — no shadow on the tray.
+    // Graphite §7.4 "immersive bottom": the composer sits on a full-bleed tray = `surface`
+    // fill that continues to the screen edges (and under the nav inset). Flat — no shadow,
+    // and no top divider: the surface/bg color difference alone separates it from content.
     Surface(
         color = tokens.surface,
-        // Top hairline drawn *after* the surface fill (drawWithContent) so it sits on top of
-        // the `surface` color rather than being painted over by it.
-        modifier = Modifier.drawWithContent {
-            drawContent()
-            drawLine(
-                color = tokens.line,
-                start = Offset(0f, 0f),
-                end = Offset(size.width, 0f),
-                strokeWidth = 1.dp.toPx(),
-            )
-        },
     ) {
         Column(
             modifier = modifier
@@ -639,7 +626,8 @@ fun ChatInput(
                         Icon(
                             imageVector = HugeIcons.Add01,
                             contentDescription = stringResource(R.string.more_options),
-                            tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink2,
+                            // 与发送按钮图标同色（浅灰 ink3），不再用更深的 ink2
+                            tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink3,
                             modifier = Modifier
                                 .size(24.dp)
                                 .graphicsLayer {
