@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,10 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -63,6 +61,8 @@ import app.amber.core.settings.DEFAULT_ASSISTANTS_IDS
 import app.amber.core.settings.Settings
 import app.amber.core.model.Assistant
 import app.amber.core.repository.MemoryRepository
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.Tag
@@ -403,18 +403,15 @@ private fun AssistantItem(
     onEdit: () -> Unit,
     onShowActions: () -> Unit,
 ) {
-    Card(
+    // Graphite §6.2: list row → AmberCard (surface + hairline, flat). Click moves to the inner
+    // Row since AmberCard has no onClick; the outer drag-handle modifier is preserved as-is.
+    AmberCard(
         modifier = modifier.fillMaxWidth(),
-        onClick = onEdit,
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        ),
-        // Graphite: flat surface, no drop shadow.
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable(onClick = onEdit)
                 .padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -434,7 +431,7 @@ private fun AssistantItem(
 
                 Text(
                     text = assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) },
-                    style = MaterialTheme.typography.titleMedium,
+                    style = LocalAmberType.current.sessionTitle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -444,8 +441,12 @@ private fun AssistantItem(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (assistant.enableMemory) {
+                        // Graphite §3: memory count is a machine-fact → MONO (meta).
                         Tag(type = TagType.SUCCESS) {
-                            Text(stringResource(R.string.assistant_page_memory_count, memoryCount))
+                            Text(
+                                text = stringResource(R.string.assistant_page_memory_count, memoryCount),
+                                style = LocalAmberType.current.meta,
+                            )
                         }
                     }
 
@@ -460,7 +461,7 @@ private fun AssistantItem(
                                 Text(
                                     text = tag.name,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = LocalAmberType.current.tinyTag,
                                 )
                             }
                         }
@@ -521,11 +522,11 @@ private fun AssistantActionSheet(
                 )
                 Text(
                     text = assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) },
-                    style = MaterialTheme.typography.titleMedium
+                    style = LocalAmberType.current.sessionTitle
                 )
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Hairline(modifier = Modifier.padding(vertical = 8.dp))
 
             // 克隆选项
             ListItem(
