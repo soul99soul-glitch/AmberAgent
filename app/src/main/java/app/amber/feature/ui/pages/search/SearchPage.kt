@@ -258,15 +258,17 @@ private fun SearchResultItem(
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            // Graphite §3: conversation title is human prose → SANS (sessionTitle), full ink.
             Text(
                 text = result.title.ifBlank { untitled },
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = LocalAmberType.current.sessionTitle,
+                color = LocalAmberTokens.current.ink,
             )
+            // Graphite §3: snippet/preview → SANS secondary, secondary ink.
             Text(
                 text = snippetText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink2,
             )
             // Graphite §3: timestamp is a machine-fact → MONO (meta), muted ink.
             Text(
