@@ -53,6 +53,7 @@ import app.amber.agent.LaunchStartMode
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
 import app.amber.agent.migrateLaunchStartMode
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.CardGroup
@@ -289,7 +290,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
-                    title = { Text(stringResource(R.string.setting_page_general_settings)) },
+                    title = { SectionLabel(stringResource(R.string.setting_page_general_settings)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_launch_start_mode_title)) },
@@ -343,7 +344,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     CardGroup(
                         modifier = Modifier.padding(horizontal = 8.dp),
-                        title = { Text(stringResource(R.string.setting_page_message_display_settings)) },
+                        title = { SectionLabel(stringResource(R.string.setting_page_message_display_settings)) },
                     ) {
                         // V3: 聊天主题切换器已移到顶部 (替代旧 "Notion style" 项), 这里去除重复
                         item(
@@ -510,7 +511,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_code_display_settings)) },
+                    title = { SectionLabel(stringResource(R.string.setting_page_code_display_settings)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_wrap_title)) },
@@ -557,7 +558,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     CardGroup(
                         modifier = Modifier.padding(horizontal = 8.dp),
-                        title = { Text(stringResource(R.string.setting_page_interaction_notification_settings)) },
+                        title = { SectionLabel(stringResource(R.string.setting_page_interaction_notification_settings)) },
                     ) {
                         item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_title)) },
@@ -712,7 +713,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_tts_settings)) },
+                    title = { SectionLabel(stringResource(R.string.setting_page_tts_settings)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_tts_only_read_quoted_title)) },

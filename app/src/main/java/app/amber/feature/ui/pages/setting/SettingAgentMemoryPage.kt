@@ -66,6 +66,7 @@ import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.MemoryKind
 import app.amber.core.model.MemoryScope
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.RikkaConfirmDialog
@@ -1134,7 +1135,7 @@ private fun MemoryMaintenanceSection(
     onOpenPortability: () -> Unit,
     onOpenEvents: () -> Unit,
 ) {
-    CardGroup(title = { Text("维护工具") }) {
+    CardGroup(title = { SectionLabel("维护工具") }) {
         item(
             onClick = onOpenPortability,
             headlineContent = { Text("导入导出") },

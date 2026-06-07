@@ -83,6 +83,7 @@ import app.amber.core.settings.findModelById
 import app.amber.core.settings.resolveTaskChatModel
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.ai.provider.hasUsableAuth
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceDivider
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
@@ -121,7 +122,7 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
         ) {
             item("chat") {
                 ModelSection(
-                    title = { Text(stringResource(R.string.setting_model_page_chat_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_model_page_chat_section)) },
                 ) {
                     DefaultChatModelSetting(
                         settings = settings,
@@ -132,7 +133,7 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
             item("assistantTasks") {
                 ModelSection(
-                    title = { Text(stringResource(R.string.setting_model_page_auxiliary_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_model_page_auxiliary_section)) },
                 ) {
                     DefaultTitleModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
@@ -152,7 +153,7 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
             item("advanced") {
                 ModelSection(
-                    title = { Text(stringResource(R.string.setting_model_page_advanced_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_model_page_advanced_section)) },
                 ) {
                     GroupDefaultsEntry(
                         onClick = { showGroupDefaults = true },
