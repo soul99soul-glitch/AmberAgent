@@ -42,7 +42,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
@@ -66,6 +65,7 @@ import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.MemoryKind
 import app.amber.core.model.MemoryScope
+import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
@@ -76,7 +76,8 @@ import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.hooks.EditStateContent
 import app.amber.feature.ui.hooks.useEditState
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.androidx.compose.koinViewModel
 import java.io.File
 
@@ -536,8 +537,8 @@ private fun MemoryCompactionSubpage(
                     Text(stringResource(R.string.setting_agent_memory_context_compaction_desc))
                     Text(
                         text = stringResource(R.string.setting_agent_memory_context_compaction_defaults),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = LocalAmberType.current.secondary,
+                        color = workspaceColors().muted,
                     )
                 }
             },
@@ -716,12 +717,13 @@ private fun AgentSoulCard(
         ) {
             Text(
                 text = stringResource(R.string.setting_agent_memory_soul_title),
-                style = MaterialTheme.typography.titleMediumEmphasized,
+                style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                color = workspaceColors().ink,
             )
             Text(
                 text = stringResource(R.string.setting_agent_memory_soul_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = LocalAmberType.current.secondary,
+                color = workspaceColors().muted,
             )
             Text(
                 text = previewText,
@@ -730,27 +732,23 @@ private fun AgentSoulCard(
                     .clip(RoundedCornerShape(16.dp))
                     .border(
                         width = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant,
+                        color = workspaceColors().hairline,
                         shape = RoundedCornerShape(16.dp),
                     )
                     .padding(14.dp),
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
-                // V3 settings-memory.jsx: agents.md preview 用 monospace
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    fontSize = 12.5.sp,
-                    lineHeight = 18.sp,
-                ),
+                // Graphite §3: agents.md preview is machine-fact text → MONO token.
+                style = LocalAmberType.current.meta,
                 color = if (value.isBlank()) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
+                    workspaceColors().muted
                 } else {
-                    MaterialTheme.colorScheme.onSurface
+                    workspaceColors().ink
                 },
             )
             Text(
                 text = stringResource(R.string.setting_agent_memory_soul_edit_hint),
-                style = MaterialTheme.typography.labelMedium,
+                style = LocalAmberType.current.secondary,
                 color = MaterialTheme.colorScheme.primary,
             )
         }
@@ -827,14 +825,12 @@ private fun MemorySummarySection(
                 memory.kind == MemoryKind.PROJECT
         }
 
-    Text(
+    SectionLabel(
         text = "Amber 对你的了解",
-        style = MaterialTheme.typography.titleMedium,
         modifier = Modifier.padding(horizontal = 8.dp),
     )
-    Card(
+    AmberCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -846,8 +842,8 @@ private fun MemorySummarySection(
             if (!hasContent) {
                 Text(
                     text = "暂无可汇总的正式记忆。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = LocalAmberType.current.secondary,
+                    color = workspaceColors().muted,
                 )
             } else {
                 MemorySummaryGroup("稳定偏好", stableMemories, onEditMemory)
@@ -868,8 +864,8 @@ private fun MemorySummaryGroup(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
+            style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
+            color = LocalAmberTokens.current.accent,
         )
         memories.take(6).fastForEach { memory ->
             Text(
@@ -877,7 +873,7 @@ private fun MemorySummaryGroup(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onEditMemory(memory) },
-                style = MaterialTheme.typography.bodySmall,
+                style = LocalAmberType.current.secondary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -920,15 +916,15 @@ private fun MemoryCandidatesSection(
     onIgnore: (String) -> Unit,
     onIgnoreLowConfidence: () -> Unit,
 ) {
-    Text(
+    SectionLabel(
         text = "候选记忆审核",
-        style = MaterialTheme.typography.titleMedium,
         modifier = Modifier.padding(horizontal = 8.dp),
     )
     if (candidates.isEmpty()) {
         Text(
             text = "暂无待审核候选。",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = LocalAmberType.current.secondary,
+            color = workspaceColors().muted,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
         return
@@ -947,9 +943,8 @@ private fun MemoryCandidatesSection(
         }
     }
     candidates.forEach { candidate ->
-        Card(
+        AmberCard(
             modifier = Modifier.fillMaxWidth(),
-            colors = CustomColors.cardColorsOnSurfaceContainer,
         ) {
             Column(
                 modifier = Modifier.padding(16.dp),
@@ -963,20 +958,21 @@ private fun MemoryCandidatesSection(
                             append(" · 建议人工审核")
                         }
                     },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    // Graphite §3: scope/kind tags + confidence value are machine-facts → MONO.
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.accent,
                 )
                 Text(
                     text = candidate.content,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = LocalAmberType.current.body,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (candidate.reason.isNotBlank()) {
                     Text(
                         text = candidate.reason,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = LocalAmberType.current.secondary,
+                        color = workspaceColors().muted,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1002,9 +998,8 @@ private fun DreamReviewSection(
     onApply: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    Card(
+    AmberCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1016,11 +1011,15 @@ private fun DreamReviewSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("手动整理审核", style = MaterialTheme.typography.titleMediumEmphasized)
+                    Text(
+                        "手动整理审核",
+                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = workspaceColors().ink,
+                    )
                     Text(
                         "手动或后台生成的 diff 都需要确认；后台 Daydream 不会自动应用整理结果。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = LocalAmberType.current.secondary,
+                        color = workspaceColors().muted,
                     )
                 }
                 if (running) {
@@ -1033,38 +1032,45 @@ private fun DreamReviewSection(
                 val summary = "合并 ${current.mergeSuggestions.size} 组 · 提升 ${current.promoteMemoryIds.size} 条 · " +
                     "归档 ${current.archiveMemoryIds.size} 条 · 替换 ${current.supersedeSuggestions.size} 条 · " +
                     "忽略候选 ${current.ignoreCandidateIds.size} 条"
-                Text(summary, style = MaterialTheme.typography.bodyMedium)
+                // Graphite §3: dream-plan summary is a count-dense machine-fact → MONO.
+                Text(
+                    summary,
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().ink,
+                )
                 Text(
                     text = "来源：${if (persisted.source.name == "AUTO") "自动 Daydream" else "手动生成"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = LocalAmberType.current.secondary,
+                    color = workspaceColors().muted,
                 )
                 current.notes.take(4).forEach { note ->
                     Text(
                         text = "• $note",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = LocalAmberType.current.secondary,
+                        color = workspaceColors().muted,
                     )
                 }
                 current.mergeSuggestions.take(5).forEach { suggestion ->
+                    // Graphite §3: merge suggestion = #id references → MONO.
                     Text(
                         text = "合并 #${suggestion.targetMemoryId} <- ${suggestion.duplicateMemoryIds.joinToString(",")}",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = LocalAmberType.current.meta,
+                        color = workspaceColors().ink,
                     )
                 }
                 current.supersedeSuggestions.take(5).forEach { suggestion ->
                     Text(
                         text = "替换 ${suggestion.oldMemoryIds.joinToString(",")} → ${suggestion.newContent}" +
                             suggestion.reason.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = LocalAmberType.current.secondary,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             } ?: Text(
                 text = "还没有手动整理建议。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = LocalAmberType.current.secondary,
+                color = workspaceColors().muted,
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1102,16 +1108,16 @@ private fun MemoryEventsSection(
     showTitle: Boolean,
 ) {
     if (showTitle) {
-        Text(
+        SectionLabel(
             text = "记忆事件日志",
-            style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
     if (events.isEmpty()) {
         Text(
             text = "暂无记忆事件。",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = LocalAmberType.current.secondary,
+            color = workspaceColors().muted,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
         return
@@ -1122,7 +1128,14 @@ private fun MemoryEventsSection(
                 headlineContent = { Text(event.type.wireName) },
                 supportingContent = {
                     val message = event.message.ifBlank { "memory=${event.memoryId ?: "-"} candidate=${event.candidateId ?: "-"}" }
-                    Text(message, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    // Graphite §3: fallback shows raw memory/candidate ids → MONO.
+                    val isIdFallback = event.message.isBlank()
+                    Text(
+                        message,
+                        style = if (isIdFallback) LocalAmberType.current.meta else LocalAmberType.current.secondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
             )
         }
@@ -1194,9 +1207,8 @@ private fun MemoryRecordsSection(
             .fillMaxWidth()
             .padding(horizontal = 8.dp),
     ) {
-        Text(
+        SectionLabel(
             text = title,
-            style = MaterialTheme.typography.titleMedium,
             modifier = Modifier
                 .padding(bottom = 8.dp)
                 .align(Alignment.CenterStart),
@@ -1213,16 +1225,15 @@ private fun MemoryRecordsSection(
                         .size(24.dp)
                         .border(
                             width = 1.dp,
-                            color = MaterialTheme.colorScheme.outline,
+                            color = workspaceColors().hairline,
                             shape = CircleShape,
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = "?",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = LocalAmberType.current.tinyTag,
+                        color = workspaceColors().muted,
                     )
                 }
             }
@@ -1239,7 +1250,8 @@ private fun MemoryRecordsSection(
     if (memories.isEmpty()) {
         Text(
             text = emptyText,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = LocalAmberType.current.secondary,
+            color = workspaceColors().muted,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
@@ -1262,9 +1274,8 @@ private fun MemoryItem(
     onEditMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit,
 ) {
-    Card(
+    AmberCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Row(
             modifier = Modifier
@@ -1278,14 +1289,16 @@ private fun MemoryItem(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
+                    // Graphite §3: memory entry id is a machine-fact → MONO.
                     text = "#${memory.id}",
-                    style = MaterialTheme.typography.titleMediumEmphasized,
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.ink,
                 )
                 Text(
                     text = memory.content,
                     maxLines = 5,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = LocalAmberType.current.body,
                 )
             }
             IconButton(onClick = { onEditMemory(memory) }) {
