@@ -195,7 +195,9 @@ android {
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
         }
         debug {
-            applicationIdSuffix = ".debug"
+            // Graphite redesign build — distinct applicationId so it installs ALONGSIDE the
+            // existing `app.amber.agent` (main) without overwriting it.
+            applicationIdSuffix = ".graphite"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
@@ -249,6 +251,8 @@ android {
         // tests. Returning defaults (no-op for void methods) keeps the
         // bridge's lazy-load path testable without Robolectric.
         unitTests.isReturnDefaultValues = true
+        // Robolectric Compose UI tests need real resources on the JVM classpath.
+        unitTests.isIncludeAndroidResources = true
     }
     sourceSets {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")
@@ -740,6 +744,10 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.koin.test)
     testImplementation(libs.koin.test.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.ui.test.junit4)
+    testImplementation(libs.androidx.ui.test.manifest)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -3,7 +3,8 @@
   android:height="108dp"
   android:viewportWidth="108"
   android:viewportHeight="108">
+  <!-- Graphite redesign: warm-graphite dark fill (Terminal × Modern) -->
   <path
-    android:fillColor="#FFFFFF"
+    android:fillColor="#1C1B17"
     android:pathData="M0,0 H108 V108 H0 Z" />
 </vector>
