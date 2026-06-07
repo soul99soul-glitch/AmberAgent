@@ -8,6 +8,7 @@ import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,12 +24,14 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -411,6 +414,14 @@ internal fun TextInputRow(
                 }
             }
         }
+        // In the graphite composer (minimalChrome) the field lives inside a 26dp `surface-2`
+        // pill that already supplies the visual chrome + horizontal inset, so we drop M3's
+        // 48dp interactive floor and trim the content padding to keep the single-line pill
+        // height aligned with the flanking 46dp [+] / send circles.
+        CompositionLocalProvider(
+            LocalMinimumInteractiveComponentSize provides
+                if (minimalChrome) 0.dp else LocalMinimumInteractiveComponentSize.current
+        ) {
         TextField(
             state = state.textContent,
             modifier = Modifier
@@ -419,6 +430,11 @@ internal fun TextInputRow(
                 .onFocusChanged {
                     isFocused = it.isFocused
                 },
+            contentPadding = if (minimalChrome) {
+                PaddingValues(horizontal = 0.dp, vertical = 12.dp)
+            } else {
+                TextFieldDefaults.contentPaddingWithoutLabel()
+            },
             shape = if (minimalChrome) RoundedCornerShape(0.dp) else RoundedCornerShape(8.dp),
             placeholder = {
                 if (!hidePlaceholder) {
@@ -472,6 +488,7 @@ internal fun TextInputRow(
                 }
             },
         )
+        }
         if (isFullScreen) {
             FullScreenEditor(state = state) {
                 isFullScreen = false
