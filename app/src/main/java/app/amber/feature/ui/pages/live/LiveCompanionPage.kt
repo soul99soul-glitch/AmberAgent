@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
@@ -56,10 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -74,9 +71,13 @@ import me.rerere.hugeicons.stroke.VolumeHigh
 import app.amber.agent.Screen
 import app.amber.feature.live.LiveModeCard
 import app.amber.feature.live.LiveModeUiState
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.LiveDot
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import java.util.Locale
@@ -102,13 +103,12 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                     Column {
                         Text(
                             text = "AI 伴随",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            style = LocalAmberType.current.sessionTitle,
                         )
                         Text(
                             text = state.compactStatusLabel(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = LocalAmberType.current.meta,
+                            color = LocalAmberTokens.current.ink3,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -160,14 +160,7 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.surface,
-                            MaterialTheme.colorScheme.surfaceContainerLow,
-                        )
-                    )
-                )
+                .background(LocalAmberTokens.current.bg)
         ) {
             Column(
                 modifier = Modifier
@@ -239,11 +232,7 @@ private fun LiveStatusPanel(
     onStart: () -> Unit,
     onPause: () -> Unit,
 ) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
-    ) {
+    AmberCard {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -259,8 +248,8 @@ private fun LiveStatusPanel(
                 ) {
                     Text(
                         text = state.prominentStatusLabel(),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        style = LocalAmberType.current.sessionTitle,
+                        color = LocalAmberTokens.current.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -270,8 +259,8 @@ private fun LiveStatusPanel(
                 }
                 Text(
                     text = state.statusDetail(autoRefresh),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.ink3,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -281,7 +270,7 @@ private fun LiveStatusPanel(
                 ) {
                     Text(
                         text = if (autoRefresh) "自动分析：开" else "自动分析：关",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = LocalAmberType.current.secondary,
                     )
                 }
             }
@@ -306,25 +295,15 @@ private fun LiveStatusPanel(
 
 @Composable
 private fun LivePulse(active: Boolean, analyzing: Boolean, hasError: Boolean) {
-    val color = when {
-        hasError -> MaterialTheme.colorScheme.error
-        analyzing -> MaterialTheme.colorScheme.tertiary
-        active -> LocalAmberTokens.current.signal // live = signal-green liveness, not accent
-        else -> MaterialTheme.colorScheme.outline
-    }
+    // Graphite: the live/connected indicator is the one place signal-green is used.
+    // Pulsing signal-green dot when truly live (active, no error); grey idle otherwise.
+    // Error / analyzing states are conveyed by the status text + spinner, not the dot.
+    val live = active && !hasError
     Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(color.copy(alpha = 0.14f)),
+        modifier = Modifier.size(40.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = HugeIcons.Sparkles,
-            contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(22.dp),
-        )
+        LiveDot(idle = !live, dotSize = 9.dp)
     }
 }
 
@@ -357,8 +336,7 @@ private fun ActionProgressCard(state: LiveModeUiState) {
                         state.paused -> "${action}已暂停"
                         else -> "已收到：$action"
                     },
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
+                    style = LocalAmberType.current.sessionTitle,
                 )
                 Text(
                     text = when {
@@ -367,7 +345,7 @@ private fun ActionProgressCard(state: LiveModeUiState) {
                         state.paused -> "点击继续后再读取屏幕并生成结果。"
                         else -> "等待屏幕稳定后开始，结果会显示在下面的“${action.resultTitle()}”里。"
                     },
-                    style = MaterialTheme.typography.bodySmall,
+                    style = LocalAmberType.current.secondary,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
                 )
             }
@@ -384,27 +362,21 @@ private fun LiveCard(
     enabled: Boolean,
     onInstruction: (String) -> Unit,
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp),
-    ) {
+    AmberCard {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Text(
                 text = if (stale) "上一张结果" else actionLabel.resultTitle(),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
+                style = LocalAmberType.current.sessionTitle,
+                color = LocalAmberTokens.current.ink,
             )
             if (stale && pendingAction.isNotBlank()) {
                 Text(
                     text = "新的“$pendingAction”还在处理，下面先保留上一张卡片。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = LocalAmberType.current.secondary,
+                    color = LocalAmberTokens.current.ink3,
                 )
             }
             when (actionLabel) {
@@ -506,25 +478,25 @@ private fun LiveSection(
     prominent: Boolean = false,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-        )
+        SectionLabel(title)
         if (!content.isNullOrBlank()) {
             Text(
                 text = content,
-                style = if (prominent) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
-                fontWeight = if (prominent) FontWeight.SemiBold else FontWeight.Normal,
+                style = if (prominent) {
+                    LocalAmberType.current.sessionTitle
+                } else {
+                    LocalAmberType.current.body
+                },
+                color = LocalAmberTokens.current.ink,
             )
         }
         items.take(4).forEach { item ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("·", color = MaterialTheme.colorScheme.primary)
+                Text("·", color = LocalAmberTokens.current.accent, style = LocalAmberType.current.body)
                 Text(
                     text = item,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = LocalAmberType.current.body,
+                    color = LocalAmberTokens.current.ink,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -532,8 +504,8 @@ private fun LiveSection(
         if (content.isNullOrBlank() && items.isEmpty() && !emptyText.isNullOrBlank()) {
             Text(
                 text = emptyText,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink3,
             )
         }
     }
@@ -544,21 +516,15 @@ private fun WaitingCard(
     state: LiveModeUiState,
     onStart: () -> Unit,
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp),
-    ) {
+    AmberCard {
         Column(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
                 text = if (state.active) "等待第一张伴随卡片" else "伴随尚未开启",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
+                style = LocalAmberType.current.sessionTitle,
+                color = LocalAmberTokens.current.ink,
             )
             Text(
                 text = when {
@@ -566,8 +532,8 @@ private fun WaitingCard(
                     state.currentAppLabel.isNotBlank() -> "已读取：${state.currentAppLabel}${state.currentTitle.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()}"
                     else -> state.statusText
                 },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = LocalAmberType.current.body,
+                color = LocalAmberTokens.current.ink2,
             )
             if (!state.active) {
                 Button(
@@ -601,8 +567,8 @@ private fun GuidanceCard(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = LocalAmberType.current.sessionTitle, color = LocalAmberTokens.current.ink)
+            Text(body, style = LocalAmberType.current.body, color = LocalAmberTokens.current.ink2)
             FilledTonalButton(onClick = onAction) {
                 Text(action)
             }
@@ -623,17 +589,16 @@ private fun ErrorNote(title: String, error: String, retrying: Boolean) {
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = LocalAmberType.current.sessionTitle,
             )
             Text(
                 text = error,
-                style = MaterialTheme.typography.bodySmall,
+                style = LocalAmberType.current.secondary,
             )
             if (retrying) {
                 Text(
                     text = "这不是 UI 树读取频率导致的错误，而是模型服务暂时不可用。",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = LocalAmberType.current.secondary,
                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.78f),
                 )
             }
@@ -874,8 +839,7 @@ private fun HoldToSpeakButton(
             Spacer(modifier = Modifier.size(8.dp))
             Text(
                 text = if (listening) "松开结束" else "按住说话",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
+                style = LocalAmberType.current.sessionTitle,
             )
         }
     }
