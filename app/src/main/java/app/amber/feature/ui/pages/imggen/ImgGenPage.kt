@@ -38,7 +38,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
@@ -72,7 +71,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -89,10 +87,13 @@ import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.ai.ModelSelector
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.ImagePreviewDialog
 import app.amber.feature.ui.components.ui.OutlinedNumberInput
+import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -376,13 +377,13 @@ private fun ImageGalleryScreen(
                         imageVector = HugeIcons.Image03,
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = workspaceColors().muted
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = stringResource(R.string.imggen_page_no_generated_images),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = LocalAmberType.current.body,
+                        color = workspaceColors().muted,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -404,7 +405,7 @@ private fun ImageGalleryScreen(
                     image?.let {
                         var showPreview by remember { mutableStateOf(false) }
 
-                        Card(
+                        AmberCard(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column {
@@ -433,8 +434,8 @@ private fun ImageGalleryScreen(
                                         )
                                         Text(
                                             text = it.prompt.take(20) + if (it.prompt.length > 20) "..." else "",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = LocalAmberType.current.secondary,
+                                            color = workspaceColors().muted,
                                             maxLines = 2
                                         )
                                     }
@@ -538,11 +539,7 @@ private fun SettingsBottomSheet(
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = stringResource(R.string.imggen_page_settings_title),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            SectionLabel(stringResource(R.string.imggen_page_settings_title))
 
             FormItem(
                 label = { Text(stringResource(R.string.imggen_page_model_selection)) },
