@@ -121,7 +121,7 @@ fun TopModelMenu(
                     }
                     .heightIn(max = 560.dp)
                     .verticalScroll(rememberScrollState())
-                    .padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 12.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
             ) {
                 providers.forEach { provider ->
                     ProviderGroup(
@@ -168,15 +168,16 @@ private fun ProviderGroup(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onToggle)
-                .padding(horizontal = 2.dp, vertical = 7.dp),
+                .padding(vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = provider.name,
+                // 选中态只用 accent 颜色表达，不加粗（统一 Medium 字重）
                 style = type.meta.copy(
                     fontSize = 12.5.sp,
                     lineHeight = 15.sp,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                    fontWeight = FontWeight.Medium,
                     letterSpacing = 0.sp,
                 ),
                 color = if (active) chatTheme.accent else tokens.ink2,
