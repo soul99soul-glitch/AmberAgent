@@ -16,12 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import app.amber.feature.ui.components.ui.Switch
 import androidx.compose.material3.Text
@@ -45,12 +42,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantMemory
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.RikkaConfirmDialog
 import app.amber.feature.ui.hooks.EditStateContent
 import app.amber.feature.ui.hooks.useEditState
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -252,9 +252,8 @@ private fun AssistantMemoryContent(
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp)
         ) {
-            Text(
+            SectionLabel(
                 text = stringResource(R.string.assistant_page_manage_memory_title),
-                style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier
                     .padding(bottom = 8.dp)
                     .align(Alignment.CenterStart)
@@ -314,9 +313,9 @@ private fun MemoryItem(
     onEditMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit
 ) {
-    Card(
+    val type = LocalAmberType.current
+    AmberCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer
     ) {
         Row(
             modifier = Modifier
@@ -331,14 +330,14 @@ private fun MemoryItem(
             ) {
                 Text(
                     text = "#${memory.id}",
-                    style = MaterialTheme.typography.titleMediumEmphasized,
+                    style = type.meta,
                 )
                 Text(
                     text = memory.content,
 
                     maxLines = 5,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = type.body,
                 )
             }
             IconButton(
