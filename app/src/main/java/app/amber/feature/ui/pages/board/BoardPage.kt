@@ -27,7 +27,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -87,6 +86,8 @@ import app.amber.core.utils.JsonInstant
 import app.amber.agent.data.db.entity.DailyReviewEntity
 import app.amber.agent.data.db.entity.OpportunityEntity
 import app.amber.agent.data.db.entity.OpportunityType
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
@@ -176,7 +177,7 @@ fun TodayBoardPage() {
     ) { innerPadding ->
         if (!boardEnabled) {
             Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                Text("今日看板未启用\n请在设置中开启", style = MaterialTheme.typography.bodyLarge)
+                Text("今日看板未启用\n请在设置中开启", style = LocalAmberType.current.body)
             }
             return@Scaffold
         }
@@ -194,7 +195,7 @@ fun TodayBoardPage() {
                         text = {
                             Text(
                                 label,
-                                style = MaterialTheme.typography.labelMedium.copy(
+                                style = LocalAmberType.current.body.copy(
                                     fontWeight = if (pagerState.currentPage == index) FontWeight.SemiBold else FontWeight.Normal,
                                 ),
                             )
@@ -262,8 +263,8 @@ fun TodayBoardPage() {
     pendingDeepRead?.let { request ->
         AlertDialog(
             onDismissRequest = { pendingDeepRead = null },
-            title = { Text("深度阅读会消耗更多 tokens") },
-            text = { Text("每次生成约消耗 3 万 tokens。后续同一话题 24 小时内会优先使用缓存。") },
+            title = { Text("深度阅读会消耗更多 tokens", style = LocalAmberType.current.sessionTitle) },
+            text = { Text("每次生成约消耗 3 万 tokens。后续同一话题 24 小时内会优先使用缓存。", style = LocalAmberType.current.body) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -292,15 +293,15 @@ fun TodayBoardPage() {
     selectedOpportunity?.let { opportunity ->
         AlertDialog(
             onDismissRequest = { selectedOpportunity = null },
-            title = { Text(opportunity.title) },
+            title = { Text(opportunity.title, style = LocalAmberType.current.sessionTitle) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(opportunity.summary, style = MaterialTheme.typography.bodyMedium)
-                    HorizontalDivider()
-                    Text("依据", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                    Text(opportunity.summary, style = LocalAmberType.current.body)
+                    Hairline()
+                    Text("依据", style = LocalAmberType.current.sessionTitle)
                     Text(
                         opportunity.evidenceJson,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = LocalAmberType.current.secondary,
                         color = workspaceColors().muted,
                         maxLines = 12,
                         overflow = TextOverflow.Ellipsis,
@@ -364,7 +365,7 @@ private fun HotListActionSheet(
         ) {
             Text(
                 topic.title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                style = LocalAmberType.current.sessionTitle,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -378,7 +379,7 @@ private fun HotListActionSheet(
                 )
             }
             Spacer(Modifier.height(10.dp))
-            HorizontalDivider(color = workspaceColors().hairline)
+            Hairline()
             TopicActionRow(
                 label = "深度阅读",
                 icon = HugeIcons.Notebook01,
@@ -428,7 +429,7 @@ private fun TopicActionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = color)
-        Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
+        Text(label, style = LocalAmberType.current.body, color = color)
     }
 }
 
@@ -541,7 +542,7 @@ private fun HotTopicRow(topic: HotTopic, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(topic.title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+                    Text(topic.title, style = LocalAmberType.current.sessionTitle)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         topic.sources.take(4).forEach { source ->
                             WorkspaceStatusPill(
@@ -575,7 +576,7 @@ private fun ProviderSection(provider: HotListProviderSnapshot, onItemClick: (Hot
                     Text(
                         provider.error ?: "暂无数据",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = LocalAmberType.current.secondary,
                         color = workspaceColors().muted,
                     )
                 } else {
@@ -590,7 +591,7 @@ private fun ProviderSection(provider: HotListProviderSnapshot, onItemClick: (Hot
                         ) {
                             Text("${item.rank}.", style = LocalAmberType.current.meta, color = workspaceColors().muted)
                             Column(Modifier.weight(1f)) {
-                                Text(item.presentationTitle, style = MaterialTheme.typography.bodyMedium)
+                                Text(item.presentationTitle, style = LocalAmberType.current.body)
                                 val heat = item.heat
                                 if (!heat.isNullOrBlank()) {
                                     Text(heat, style = LocalAmberType.current.meta, color = workspaceColors().muted)
@@ -861,7 +862,7 @@ private fun OpportunityRow(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         opportunity.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        style = LocalAmberType.current.sessionTitle,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
@@ -870,7 +871,7 @@ private fun OpportunityRow(
                         color = workspaceColors().muted,
                     )
                     if (opportunity.summary.isNotBlank()) {
-                        Text(opportunity.summary, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                        Text(opportunity.summary, style = LocalAmberType.current.secondary, color = workspaceColors().muted)
                     }
                 }
             }
@@ -920,7 +921,7 @@ private fun TaskRow(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         task.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        style = LocalAmberType.current.sessionTitle,
                         color = if (terminal) workspaceColors().muted else MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
@@ -929,7 +930,7 @@ private fun TaskRow(
                         color = workspaceColors().muted,
                     )
                     if (task.summary.isNotBlank()) {
-                        Text(task.summary, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                        Text(task.summary, style = LocalAmberType.current.secondary, color = workspaceColors().muted)
                     }
                 }
             }
@@ -1003,7 +1004,7 @@ private fun TaskArtifactBlock(artifact: BoardTaskArtifact) {
             if (artifact.title.isNotBlank()) {
                 Text(
                     artifact.title,
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    style = LocalAmberType.current.sessionTitle,
                 )
             }
             artifact.sections.forEach { section ->
@@ -1011,27 +1012,27 @@ private fun TaskArtifactBlock(artifact: BoardTaskArtifact) {
                     if (section.heading.isNotBlank()) {
                         Text(
                             section.heading,
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                            style = LocalAmberType.current.body.copy(fontWeight = FontWeight.Medium),
                         )
                     }
                     section.oldValue?.takeIf { it.isNotBlank() }?.let {
-                        Text("原值：$it", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                        Text("原值：$it", style = LocalAmberType.current.secondary, color = workspaceColors().muted)
                     }
                     section.newValue?.takeIf { it.isNotBlank() }?.let {
-                        Text("新值：$it", style = MaterialTheme.typography.bodySmall)
+                        Text("新值：$it", style = LocalAmberType.current.secondary)
                     }
                     section.suggestedRewrite?.takeIf { it.isNotBlank() }?.let {
-                        Text("建议改写：$it", style = MaterialTheme.typography.bodySmall)
+                        Text("建议改写：$it", style = LocalAmberType.current.secondary)
                     }
                     if (section.body.isNotBlank()) {
-                        Text(section.body, style = MaterialTheme.typography.bodySmall)
+                        Text(section.body, style = LocalAmberType.current.secondary)
                     }
                     val sources = (section.sources + listOfNotNull(section.upstreamSource?.takeIf { it.isNotBlank() }))
                         .filter { it.isNotBlank() }
                     if (sources.isNotEmpty()) {
                         Text(
                             "来源：${sources.joinToString("、")}",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = LocalAmberType.current.secondary,
                             color = workspaceColors().muted,
                         )
                     }
@@ -1066,8 +1067,7 @@ private fun TodoRow(item: BoardItemEntity, onComplete: () -> Unit, onChat: () ->
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     item.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = FontWeight.Medium,
+                    style = LocalAmberType.current.sessionTitle.copy(
                         fontStyle = if (completed) FontStyle.Italic else FontStyle.Normal,
                     ),
                     color = if (completed) workspaceColors().muted else MaterialTheme.colorScheme.onSurface,
@@ -1078,7 +1078,7 @@ private fun TodoRow(item: BoardItemEntity, onComplete: () -> Unit, onChat: () ->
                     color = workspaceColors().muted,
                 )
                 if (item.reason.isNotBlank()) {
-                    Text(item.reason, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                    Text(item.reason, style = LocalAmberType.current.secondary, color = workspaceColors().muted)
                 }
             }
             WorkspaceTextButton(text = "聊一下", onClick = onChat, tone = WorkspaceTone.Neutral)
@@ -1089,7 +1089,7 @@ private fun TodoRow(item: BoardItemEntity, onComplete: () -> Unit, onChat: () ->
 @Composable
 private fun SectionTitle(title: String, subtitle: String? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+        SectionLabel(title)
         if (!subtitle.isNullOrBlank()) {
             Text(subtitle, style = LocalAmberType.current.meta, color = workspaceColors().muted)
         }
@@ -1123,7 +1123,7 @@ private fun EmptyLine(text: String) {
         color = workspaceColors().paper,
         border = workspaceBorder(),
     ) {
-        Text(text, modifier = Modifier.padding(16.dp), color = workspaceColors().muted)
+        Text(text, modifier = Modifier.padding(16.dp), style = LocalAmberType.current.secondary, color = workspaceColors().muted)
     }
 }
 
@@ -1137,8 +1137,8 @@ private fun ReviewEmptyState() {
                 modifier = Modifier.size(34.dp),
                 tint = MaterialTheme.colorScheme.secondary,
             )
-            Text("今日复盘尚未生成", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
-            Text("将在午间和晚间自动补全", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+            Text("今日复盘尚未生成", style = LocalAmberType.current.sessionTitle)
+            Text("将在午间和晚间自动补全", style = LocalAmberType.current.secondary, color = workspaceColors().muted)
         }
     }
 }
