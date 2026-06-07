@@ -2,6 +2,12 @@ package app.amber.feature.ui.pages.board
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -52,12 +59,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -90,12 +106,13 @@ import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
-import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ds.LiveDot
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import org.koin.compose.koinInject
@@ -160,7 +177,7 @@ fun TodayBoardPage() {
         topBar = {
             TopAppBar(
                 title = {
-                    Text("今日看板")
+                    Text("今日看板", fontWeight = FontWeight.Bold)
                 },
                 navigationIcon = { BackButton() },
                 actions = {
@@ -482,13 +499,12 @@ private fun HotListTab(
             HotListSkeleton()
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
             ) {
                 item {
-                    SectionTitle(
-                        title = "🔥 综合热点",
-                        subtitle = dashboard.lastUpdatedAt.takeIf { it > 0L }?.let { "${timeAgo(it)}更新" },
+                    RubricHead(
+                        label = "综合热点",
+                        status = dashboard.lastUpdatedAt.takeIf { it > 0L }?.let { "${timeAgo(it)}更新" },
                     )
                 }
                 if (dashboard.topics.isEmpty()) {
@@ -502,106 +518,269 @@ private fun HotListTab(
                         )
                     }
                 }
-                items(dashboard.topics.take(HOT_LIST_TOPIC_DISPLAY_LIMIT), key = { it.id }) { topic ->
-                    HotTopicRow(topic = topic, onClick = { onTopicClick(topic) })
-                }
-                dashboard.providers.forEach { provider ->
-                    item(provider.providerId) {
-                        ProviderSection(
-                            provider = provider,
-                            onItemClick = { item -> onProviderItemClick(provider, item) },
+                val topics = dashboard.topics.take(HOT_LIST_TOPIC_DISPLAY_LIMIT)
+                itemsIndexed(topics, key = { _, it -> it.id }) { index, topic ->
+                    if (index == 0) {
+                        LeadStory(
+                            rank = topic.bestRank,
+                            title = topic.title,
+                            dek = null,
+                            meta = topicMeta(topic),
+                            onClick = { onTopicClick(topic) },
+                        )
+                    } else {
+                        IndexRow(
+                            rank = topic.bestRank,
+                            title = topic.title,
+                            meta = topicMeta(topic),
+                            onClick = { onTopicClick(topic) },
+                            last = index == topics.lastIndex,
                         )
                     }
                 }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun HotTopicRow(topic: HotTopic, onClick: () -> Unit) {
-    val ws = workspaceColors()
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = ws.paper,
-        border = workspaceBorder(),
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                Text(
-                    "#${topic.bestRank}",
-                    style = LocalAmberType.current.meta.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(topic.title, style = LocalAmberType.current.sessionTitle)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        topic.sources.take(4).forEach { source ->
-                            WorkspaceStatusPill(
-                                text = "${source.providerName} #${source.rank}",
-                                tone = WorkspaceTone.Neutral,
-                            )
-                        }
+                dashboard.providers.forEach { provider ->
+                    item("${provider.providerId}-head") {
+                        RubricHead(
+                            label = provider.providerName,
+                            status = provider.error?.let { "⚠ 上次更新 ${timeAgo(provider.fetchedAt)}" }
+                                ?: provider.fetchedAt.takeIf { it > 0L }?.let { timeAgo(it) },
+                        )
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProviderSection(provider: HotListProviderSnapshot, onItemClick: (HotListItem) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionTitle(
-            title = provider.providerName,
-            subtitle = provider.error?.let { "⚠ 上次更新: ${timeAgo(provider.fetchedAt)}" }
-                ?: provider.fetchedAt.takeIf { it > 0L }?.let { timeAgo(it) },
-        )
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
-            color = workspaceColors().paper,
-            border = workspaceBorder(),
-        ) {
-            Column(Modifier.padding(vertical = 6.dp)) {
-                if (provider.items.isEmpty()) {
-                    Text(
-                        provider.error ?: "暂无数据",
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        style = LocalAmberType.current.secondary,
-                        color = workspaceColors().muted,
-                    )
-                } else {
-                    provider.items.take(12).forEach { item ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { onItemClick(item) }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            Text("${item.rank}.", style = LocalAmberType.current.meta, color = workspaceColors().muted)
-                            Column(Modifier.weight(1f)) {
-                                Text(item.presentationTitle, style = LocalAmberType.current.body)
-                                val heat = item.heat
-                                if (!heat.isNullOrBlank()) {
-                                    Text(heat, style = LocalAmberType.current.meta, color = workspaceColors().muted)
-                                }
+                    val providerItems = provider.items.take(12)
+                    if (providerItems.isEmpty()) {
+                        item("${provider.providerId}-empty") {
+                            EmptyLine(provider.error ?: "暂无数据")
+                        }
+                    } else {
+                        itemsIndexed(
+                            providerItems,
+                            key = { i, _ -> "${provider.providerId}-$i" },
+                        ) { index, item ->
+                            if (index == 0) {
+                                LeadStory(
+                                    rank = item.rank,
+                                    title = item.presentationTitle,
+                                    dek = null,
+                                    meta = MetaData(source = provider.providerName, detail = item.heat),
+                                    onClick = { onProviderItemClick(provider, item) },
+                                )
+                            } else {
+                                IndexRow(
+                                    rank = item.rank,
+                                    title = item.presentationTitle,
+                                    meta = MetaData(source = provider.providerName, detail = item.heat),
+                                    onClick = { onProviderItemClick(provider, item) },
+                                    last = index == providerItems.lastIndex,
+                                )
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flat "newspaper index" rows — ported from redesign/aa-board.jsx.
+// Machine facts (rank / source / time) use the mono `meta` style; human titles use
+// the sans `sessionTitle` family. Single `accent` for lead rank; `signal` green only
+// for live/done. Flat + 1dp `line` hairline; no cards, no elevation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** mono「source · detail」line — source in ink-3, separator+detail in ink-4. */
+private data class MetaData(val source: String?, val detail: String?)
+
+/** Bottom 1dp hairline (tokens.line) drawn at the row's lower edge. */
+private fun Modifier.bottomHairline(color: Color, show: Boolean = true): Modifier =
+    if (!show) this else drawBehind {
+        val y = size.height - 0.5.dp.toPx()
+        drawLine(color, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+    }
+
+/** Zero-pad a rank to two digits, mirroring the JSX "01"/"02" formatting. */
+private fun rank2(rank: Int): String =
+    if (rank in 0..99) rank.toString().padStart(2, '0') else rank.toString()
+
+/** Derive the topic meta line from its sources, keeping the same info the old pills showed. */
+private fun topicMeta(topic: HotTopic): MetaData {
+    val labels = topic.sources.take(4).map { "${it.providerName} #${it.rank}" }
+    return MetaData(
+        source = labels.firstOrNull(),
+        detail = labels.drop(1).joinToString(" · ").takeIf { it.isNotBlank() },
+    )
+}
+
+@Composable
+private fun Meta(meta: MetaData, topPadding: Dp) {
+    val t = LocalAmberTokens.current
+    val source = meta.source
+    val detail = meta.detail
+    if (source.isNullOrBlank() && detail.isNullOrBlank()) return
+    val mono = LocalAmberType.current.meta.copy(fontSize = 11.sp)
+    Text(
+        text = buildAnnotatedString {
+            if (!source.isNullOrBlank()) {
+                withStyle(SpanStyle(color = t.ink3)) { append(source) }
+            }
+            if (!detail.isNullOrBlank()) {
+                withStyle(SpanStyle(color = t.ink4)) {
+                    append(if (source.isNullOrBlank()) detail else " · $detail")
+                }
+            }
+        },
+        style = mono,
+        modifier = Modifier.padding(top = topPadding),
+    )
+}
+
+/** mono rubric label「// 综合热点」+ right-side live dot + status. */
+@Composable
+private fun RubricHead(label: String, status: String?) {
+    val t = LocalAmberTokens.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 22.dp, bottom = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = buildAnnotatedString {
+                withStyle(SpanStyle(color = t.accent)) { append("//") }
+                withStyle(SpanStyle(color = t.ink2)) { append(" $label") }
+            },
+            style = LocalAmberType.current.meta.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
+        )
+        if (!status.isNullOrBlank()) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                LiveDot(dotSize = 6.dp)
+                Text(status, style = LocalAmberType.current.meta.copy(fontSize = 11.sp), color = t.ink3)
+            }
+        }
+    }
+}
+
+/** Hero row: big accent mono rank + 19.5sp title + optional dek + mono meta. */
+@Composable
+private fun LeadStory(rank: Int, title: String, dek: String?, meta: MetaData, onClick: () -> Unit) {
+    val t = LocalAmberTokens.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .bottomHairline(t.line)
+            .padding(top = 10.dp, bottom = 15.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            rank2(rank),
+            style = LocalAmberType.current.meta.copy(
+                fontSize = 29.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 29.sp,
+            ),
+            color = t.accent,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = LocalAmberType.current.sessionTitle.copy(
+                    fontSize = 19.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 26.sp,
+                ),
+                color = t.ink,
+            )
+            if (!dek.isNullOrBlank()) {
+                Text(
+                    dek,
+                    style = LocalAmberType.current.body.copy(fontSize = 14.sp, lineHeight = 21.sp),
+                    color = t.ink3,
+                    modifier = Modifier.padding(top = 7.dp),
+                )
+            }
+            Meta(meta, topPadding = 9.dp)
+        }
+    }
+}
+
+/** Index row: small grey mono rank + 16sp 2-line title + mono meta. */
+@Composable
+private fun IndexRow(rank: Int, title: String, meta: MetaData, onClick: () -> Unit, last: Boolean) {
+    val t = LocalAmberTokens.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .bottomHairline(t.line, show = !last)
+            .padding(vertical = 13.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            rank2(rank),
+            style = LocalAmberType.current.meta.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+            color = t.ink4,
+            modifier = Modifier.width(20.dp).padding(top = 1.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = LocalAmberType.current.sessionTitle.copy(
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    lineHeight = 22.sp,
+                ),
+                color = t.ink,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Meta(meta, topPadding = 6.dp)
+        }
+    }
+}
+
+/**
+ * Task status dot: run/in-progress = breathing accent; done = static signal green;
+ * pending/other = grey idle. Reuses [LiveDot] for the signal/idle variants; the accent
+ * breathing dot is drawn locally since LiveDot hardcodes the signal color.
+ */
+@Composable
+private fun StatusDot(state: String) {
+    val t = LocalAmberTokens.current
+    when (state) {
+        BoardTaskState.IN_PROGRESS, BoardTaskState.WAITING_USER -> AccentLiveDot(t.accent)
+        BoardTaskState.DONE -> Box(Modifier.size(7.dp).clip(CircleShape).background(t.signal))
+        else -> LiveDot(idle = true, dotSize = 7.dp)
+    }
+}
+
+/** Breathing dot in an arbitrary [color] (accent for running tasks). */
+@Composable
+private fun AccentLiveDot(color: Color, dotSize: Dp = 7.dp) {
+    val tr = rememberInfiniteTransition(label = "accentDot")
+    val p by tr.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
+        label = "p",
+    )
+    Box(Modifier.size(dotSize * 2.2f), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .size(dotSize)
+                .graphicsLayer {
+                    val s = 1f + p * 1.1f
+                    scaleX = s
+                    scaleY = s
+                    alpha = 0.35f * (1f - p)
+                }
+                .background(color, CircleShape),
+        )
+        Box(Modifier.size(dotSize).background(color, CircleShape))
     }
 }
 
@@ -715,121 +894,52 @@ private fun TaskFlowTab(
         state = pullState,
         modifier = Modifier.fillMaxSize(),
     ) {
+        // One merged "智能体任务" list: running first, then waiting on user, then a
+        // capped tail of finished/ignored/blocked records. Opportunities and the daily
+        // review sit below as flat sub-blocks.
+        val mergedTasks = inProgress + waiting + terminal.take(8)
         LazyColumn(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            opportunitySection(
-                title = "建议准备 / 可能事项",
-                opportunities = opportunities,
-                emptyText = "没有新的主动机会。",
-                onDispatch = onDispatchOpportunity,
-                onShowEvidence = onShowOpportunityEvidence,
-                onDismiss = onDismissOpportunity,
-                onMuteType = onMuteOpportunityType,
-            )
-            taskSection(
-                title = "正在进行",
-                tasks = inProgress,
-                emptyText = "没有正在推进的任务。",
-                onDispatch = onDispatch,
-                onDone = onDone,
-                onIgnore = onIgnore,
-                onCancel = onCancel,
-                onSnooze = onSnooze,
-                onOpenSession = onOpenSession,
-            )
-            taskSection(
-                title = "等我确认",
-                tasks = waiting,
-                emptyText = "没有等待确认的任务。",
-                onDispatch = onDispatch,
-                onDone = onDone,
-                onIgnore = onIgnore,
-                onCancel = onCancel,
-                onSnooze = onSnooze,
-                onOpenSession = onOpenSession,
-            )
-            taskSection(
-                title = "已完成/受阻",
-                tasks = terminal.take(8),
-                emptyText = "暂无完成、忽略或受阻记录。",
-                onDispatch = onDispatch,
-                onDone = onDone,
-                onIgnore = onIgnore,
-                onCancel = onCancel,
-                onSnooze = onSnooze,
-                onOpenSession = onOpenSession,
-            )
-            item { SectionTitle("今日复盘", review?.let { reviewPhaseLabel(it) }) }
+            item { RubricHead("智能体任务", "实时") }
+            if (mergedTasks.isEmpty()) {
+                item { EmptyLine("暂无智能体任务。") }
+            } else {
+                items(mergedTasks, key = { it.id }) { task ->
+                    TaskRow(
+                        task = task,
+                        onDispatch = { onDispatch(task) },
+                        onDone = { onDone(task.id) },
+                        onIgnore = { onIgnore(task.id) },
+                        onCancel = { onCancel(task.id) },
+                        onSnooze = { onSnooze(task.id) },
+                        onOpenSession = { onOpenSession(task) },
+                    )
+                }
+            }
+            item { RubricHead("机会建议", null) }
+            if (opportunities.isEmpty()) {
+                item { EmptyLine("没有新的主动机会。") }
+            } else {
+                items(opportunities, key = { "opp_${it.id}" }) { opportunity ->
+                    OpportunityRow(
+                        opportunity = opportunity,
+                        onDispatch = { onDispatchOpportunity(opportunity) },
+                        onShowEvidence = { onShowOpportunityEvidence(opportunity) },
+                        onDismiss = { onDismissOpportunity(opportunity) },
+                        onMuteType = { onMuteOpportunityType(opportunity) },
+                    )
+                }
+            }
+            item { RubricHead("今日复盘", review?.let { reviewPhaseLabel(it) }) }
             item {
                 if (review == null) {
                     ReviewEmptyState()
                 } else {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = workspaceColors().paper,
-                        border = workspaceBorder(),
-                    ) {
-                        MarkdownBlock(content = review.content, modifier = Modifier.padding(16.dp))
-                    }
+                    MarkdownBlock(content = review.content, modifier = Modifier.padding(vertical = 8.dp))
                 }
             }
-        }
-    }
-}
-
-private fun LazyListScope.taskSection(
-    title: String,
-    tasks: List<BoardTaskEntity>,
-    emptyText: String,
-    onDispatch: (BoardTaskEntity) -> Unit,
-    onDone: (String) -> Unit,
-    onIgnore: (String) -> Unit,
-    onCancel: (String) -> Unit,
-    onSnooze: (String) -> Unit,
-    onOpenSession: (BoardTaskEntity) -> Unit,
-) {
-    item { SectionTitle(title, if (tasks.isEmpty()) "暂无" else "${tasks.size} 条") }
-    if (tasks.isEmpty()) {
-        item { EmptyLine(emptyText) }
-    } else {
-        items(tasks, key = { it.id }) { task ->
-            TaskRow(
-                task = task,
-                onDispatch = { onDispatch(task) },
-                onDone = { onDone(task.id) },
-                onIgnore = { onIgnore(task.id) },
-                onCancel = { onCancel(task.id) },
-                onSnooze = { onSnooze(task.id) },
-                onOpenSession = { onOpenSession(task) },
-            )
-        }
-    }
-}
-
-private fun LazyListScope.opportunitySection(
-    title: String,
-    opportunities: List<OpportunityEntity>,
-    emptyText: String,
-    onDispatch: (OpportunityEntity) -> Unit,
-    onShowEvidence: (OpportunityEntity) -> Unit,
-    onDismiss: (OpportunityEntity) -> Unit,
-    onMuteType: (OpportunityEntity) -> Unit,
-) {
-    item { SectionTitle(title, if (opportunities.isEmpty()) "暂无" else "${opportunities.size} 条") }
-    if (opportunities.isEmpty()) {
-        item { EmptyLine(emptyText) }
-    } else {
-        items(opportunities, key = { it.id }) { opportunity ->
-            OpportunityRow(
-                opportunity = opportunity,
-                onDispatch = { onDispatch(opportunity) },
-                onShowEvidence = { onShowEvidence(opportunity) },
-                onDismiss = { onDismiss(opportunity) },
-                onMuteType = { onMuteType(opportunity) },
-            )
         }
     }
 }
@@ -843,47 +953,39 @@ private fun OpportunityRow(
     onDismiss: () -> Unit,
     onMuteType: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = workspaceColors().paper,
-        border = workspaceBorder(),
+    val t = LocalAmberTokens.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .bottomHairline(t.line)
+            .padding(vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                WorkspaceStatusPill(
-                    text = opportunity.typeLabel(),
-                    tone = WorkspaceTone.Neutral,
-                )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        opportunity.title,
-                        style = LocalAmberType.current.sessionTitle,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        "${sourceLabel(opportunity.sourceType)} · ${(opportunity.confidence * 100).toInt()}%",
-                        style = LocalAmberType.current.meta,
-                        color = workspaceColors().muted,
-                    )
-                    if (opportunity.summary.isNotBlank()) {
-                        Text(opportunity.summary, style = LocalAmberType.current.secondary, color = workspaceColors().muted)
-                    }
-                }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                WorkspaceTextButton(text = "派发", onClick = onDispatch, tone = WorkspaceTone.Success)
-                WorkspaceTextButton(text = "查看依据", onClick = onShowEvidence, tone = WorkspaceTone.Neutral)
-                WorkspaceTextButton(text = "忽略", onClick = onDismiss, tone = WorkspaceTone.Neutral)
-                WorkspaceTextButton(text = "不再提醒这类", onClick = onMuteType, tone = WorkspaceTone.Neutral)
-            }
+        Text(
+            opportunity.title,
+            style = LocalAmberType.current.sessionTitle.copy(
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 22.sp,
+            ),
+            color = t.ink,
+        )
+        Text(
+            "${opportunity.typeLabel()} · ${sourceLabel(opportunity.sourceType)} · ${(opportunity.confidence * 100).toInt()}%",
+            style = LocalAmberType.current.meta.copy(fontSize = 11.5.sp),
+            color = t.ink3,
+        )
+        if (opportunity.summary.isNotBlank()) {
+            Text(opportunity.summary, style = LocalAmberType.current.secondary, color = t.ink3)
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            WorkspaceTextButton(text = "派发", onClick = onDispatch, tone = WorkspaceTone.Success)
+            WorkspaceTextButton(text = "查看依据", onClick = onShowEvidence, tone = WorkspaceTone.Neutral)
+            WorkspaceTextButton(text = "忽略", onClick = onDismiss, tone = WorkspaceTone.Neutral)
+            WorkspaceTextButton(text = "不再提醒这类", onClick = onMuteType, tone = WorkspaceTone.Neutral)
         }
     }
 }
@@ -899,52 +1001,62 @@ private fun TaskRow(
     onSnooze: () -> Unit,
     onOpenSession: () -> Unit,
 ) {
+    val t = LocalAmberTokens.current
     val terminal = task.state == BoardTaskState.DONE || task.state == BoardTaskState.DISMISSED
     val dispatchable = task.state == BoardTaskState.DISMISSED ||
         task.state == BoardTaskState.BLOCKED
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = workspaceColors().paper,
-        border = workspaceBorder(),
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .bottomHairline(t.line)
+            .padding(vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                WorkspaceStatusPill(
-                    text = task.stateLabel(),
-                    tone = if (task.state == BoardTaskState.BLOCKED) WorkspaceTone.Danger else WorkspaceTone.Neutral,
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenSession),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(Modifier.padding(top = 5.dp)) { StatusDot(task.state) }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(
+                    task.title,
+                    style = LocalAmberType.current.sessionTitle.copy(
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 22.sp,
+                    ),
+                    color = if (terminal) t.ink3 else t.ink,
                 )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        task.title,
-                        style = LocalAmberType.current.sessionTitle,
-                        color = if (terminal) workspaceColors().muted else MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        "${sourceLabel(task.sourceType)} · ${timeAgo(task.updatedAt)}",
-                        style = LocalAmberType.current.meta,
-                        color = workspaceColors().muted,
-                    )
-                    if (task.summary.isNotBlank()) {
-                        Text(task.summary, style = LocalAmberType.current.secondary, color = workspaceColors().muted)
-                    }
+                Text(
+                    "${task.stateLabel()} · ${sourceLabel(task.sourceType)} · ${timeAgo(task.updatedAt)}",
+                    style = LocalAmberType.current.meta.copy(fontSize = 11.5.sp),
+                    color = t.ink3,
+                )
+                if (task.summary.isNotBlank()) {
+                    Text(task.summary, style = LocalAmberType.current.secondary, color = t.ink3)
                 }
             }
-            // Surface the finished structured material so the user has something concrete to
-            // confirm. Only shown once a round has settled (waiting_user / done); while running
-            // the artifact slot is cleared by the repository, so this stays null.
-            if (task.state == BoardTaskState.WAITING_USER || task.state == BoardTaskState.DONE) {
-                rememberBoardTaskArtifact(task.artifactJson)?.let { TaskArtifactBlock(it) }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                when (task.state) {
+            Icon(
+                HugeIcons.ArrowRight01,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp).padding(top = 2.dp),
+                tint = t.ink4,
+            )
+        }
+        // Surface the finished structured material so the user has something concrete to
+        // confirm. Only shown once a round has settled (waiting_user / done); while running
+        // the artifact slot is cleared by the repository, so this stays null.
+        if (task.state == BoardTaskState.WAITING_USER || task.state == BoardTaskState.DONE) {
+            rememberBoardTaskArtifact(task.artifactJson)?.let { TaskArtifactBlock(it) }
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            when (task.state) {
                     BoardTaskState.IN_PROGRESS -> {
                         WorkspaceTextButton(text = "查看进展", onClick = onOpenSession, tone = WorkspaceTone.Success)
                         WorkspaceTextButton(text = "完成", onClick = onDone, tone = WorkspaceTone.Success)
@@ -979,7 +1091,6 @@ private fun TaskRow(
                         WorkspaceTextButton(text = "查看详情", onClick = onOpenSession, tone = WorkspaceTone.Neutral)
                     }
                 }
-            }
         }
     }
 }
@@ -1117,14 +1228,12 @@ private fun HotListSkeleton() {
 
 @Composable
 private fun EmptyLine(text: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = workspaceColors().paper,
-        border = workspaceBorder(),
-    ) {
-        Text(text, modifier = Modifier.padding(16.dp), style = LocalAmberType.current.secondary, color = workspaceColors().muted)
-    }
+    Text(
+        text,
+        Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 14.dp),
+        style = LocalAmberType.current.secondary,
+        color = LocalAmberTokens.current.ink3,
+    )
 }
 
 @Composable

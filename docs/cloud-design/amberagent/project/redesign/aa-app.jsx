@@ -437,6 +437,7 @@ function App() {
   let screen;
   switch (cur.name) {
     case "home": screen = <HomeScreenApp model={model} onModel={setModel} onStart={startChat} onSessions={() => nav.push("sessions")} nav={nav} />; break;
+    case "board": screen = <BoardScreen onBack={() => nav.back()} onHistory={() => nav.push("sessions")} onSettings={() => nav.push("settings")} />; break;
     case "chat": screen = <ChatScreenApp model={model} onModel={setModel} session={cur.params} onBack={() => nav.back()} onNew={() => nav.reset("home")} />; break;
     case "sessions": screen = <SessionsView sessions={sessions} onBack={() => nav.back()} onOpen={openSession} onNew={() => nav.reset("home")} onSettings={() => nav.push("settings")} />; break;
     case "settings": screen = <SettingsScreenApp t={t} setTweak={setTweak} nav={nav} onBack={() => nav.back()} model={model} />; break;
