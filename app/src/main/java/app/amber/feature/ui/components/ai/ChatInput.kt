@@ -680,36 +680,6 @@ fun ChatInput(
                             onUpdateAssistant = onUpdateAssistant,
                         )
                     }
-
-                    // Slash affordance — folded into the pill's trailing area as a small, faint
-                    // `ink-4` glyph (design has no standalone "/" button; typing "/" still opens
-                    // the panel). Tap toggles the panel without polluting user-typed text.
-                    Box(
-                        modifier = Modifier
-                            .padding(bottom = 9.dp)
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .clickable {
-                                val cur = state.textContent.text.toString()
-                                when {
-                                    cur.isEmpty() -> state.setMessageText("/")
-                                    cur == "/" -> state.setMessageText("")  // 仅 toggle 关闭
-                                    cur.startsWith("/") -> {
-                                        // 已 "/" 开头 + 有查询字符 → 收起 panel, 保留用户输入 (去 "/")
-                                        state.setMessageText(cur.removePrefix("/"))
-                                    }
-                                    // 用户已输普通文本 → no-op (避免污染)
-                                }
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        androidx.compose.material3.Text(
-                            text = "/",
-                            fontSize = 15.sp,
-                            color = tokens.ink4,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
-                    }
                 }
 
                 if (loading && state.isEmpty()) {
