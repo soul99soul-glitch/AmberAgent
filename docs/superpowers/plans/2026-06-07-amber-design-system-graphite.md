@@ -640,27 +640,29 @@ val LocalAmberType = staticCompositionLocalOf { defaultAmberTextStyles() }
 
 Priority: P0 = design-covered core; P1 = high-traffic; P2 = secondary; P3 = internal/debug.
 
+Status legend: `[x]` reskinned + **visually verified on device**; `[~]` reskinned (foundation colors + mono polish) but not yet per-screen visually verified; `[ ]` not started.
+
 | Screen (`pages/`) | Priority | Reference | Phase | Status |
 |---|---|---|---|---|
-| chat (conversation) | P0 | 01 Chat / Refined | 2.2 | [ ] |
-| chat (home/empty) | P0 | Redesign home | 2.1 | [ ] |
-| model picker | P0 | 02 Model Picker | 2.3 | [ ] |
-| setting (home) | P0 | 03 Settings | 2.4 | [ ] |
-| setting (memory) | P0 | Redesign set-memory | 2.4 | [ ] |
-| setting (models) | P0 | Redesign set-models | 2.4 | [ ] |
-| setting (providers/skills/search/runtime/experimental/privacy) | P1 | aa-settings/aa-pages | 3 | [ ] |
-| history | P1 | aa-pages Sessions | 3 | [ ] |
-| assistant | P1 | aa-settings | 3 | [ ] |
-| search | P1 | — | 3 | [ ] |
-| board | P2 | — | 3 | [ ] |
-| favorite | P2 | — | 3 | [ ] |
-| stats | P2 | — | 3 | [ ] |
-| imggen | P2 | — | 3 | [ ] |
-| live | P2 | — | 3 | [ ] |
-| extensions / miniapp / webview / share | P2 | — | 3 | [ ] |
-| backup | P2 | — | 3 | [ ] |
-| log / debug / developer | P3 | — | 3 | [ ] |
-| nav drawer / table / workspace (components) | P1 | aa-pages | 3 | [ ] |
+| chat (home/empty) | P0 | Redesign home | 2.1 | [x] verified — amber wordmark+cursor, Hanken greeting, mono model-id, 3-surface composer |
+| chat (conversation) | P0 | 01 Chat / Refined | 2.2 | [~] components reskinned (tool/think/ask/bubble); needs a live convo to verify |
+| model picker | P0 | 02 Model Picker | 2.3 | [x] verified — accent-active selected row, mono name…ctx, provider accordion (sheet container kept) |
+| setting (home) | P0 | 03 Settings | 2.4 | [~] foundation + base/accent picker; not yet visually verified |
+| setting (memory) | P0 | Redesign set-memory | 2.4 | [~] foundation; not yet visually verified |
+| setting (models) | P0 | Redesign set-models | 2.4 | [~] mono model-id polish; not yet visually verified |
+| setting (providers/skills/search/runtime/experimental/privacy) | P1 | aa-settings/aa-pages | 3 | [~] foundation (providers/model pages verified on-system) |
+| history | P1 | aa-pages Sessions | 3 | [~] mono timestamps |
+| assistant | P1 | aa-settings | 3 | [~] mono + flat card |
+| search | P1 | — | 3 | [~] mono timestamps |
+| board | P2 | — | 3 | [~] mono machine-facts |
+| favorite | P2 | — | 3 | [~] mono count |
+| stats | P2 | — | 3 | [~] mono numbers (tabular) |
+| imggen | P2 | — | 3 | [~] mono model-id |
+| live | P2 | — | 3 | [~] signal-green live dot |
+| extensions / miniapp / webview / share | P2 | — | 3 | [~] foundation (extensions/miniapp/webview on-system) |
+| backup | P2 | — | 3 | [~] mono timestamps/sizes |
+| log / debug / developer | P3 | — | 3 | [~] already mono (log/debug); foundation |
+| nav drawer / table / workspace (components) | P1 | aa-pages | 3 | [~] hex-clean (foundation) |
 
 ---
 
