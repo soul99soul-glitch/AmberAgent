@@ -422,11 +422,13 @@ internal fun AgentToolCallCapsule(
                     }
 
                     val displayText = if (subtitle.isNullOrBlank()) title else "$title $subtitle"
+                    val amberType = app.amber.feature.ui.theme.LocalAmberType.current
                     Text(
                         text = displayText,
-                        fontSize = 11.5.sp,
+                        // §6.2 ToolCall row: tool name + args are machine-facts → mono (.meta),
+                        // colored with accent (toolLabelInk).
+                        style = amberType.meta,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                        letterSpacing = 0.2.sp,
                         color = theme.toolLabelInk,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -481,19 +483,22 @@ private fun V3ToolStatusBadge(
     modifier: Modifier = Modifier,
 ) {
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    // §6.2: a completed tool call uses signal-green (liveness/"just-finished"),
+    // independent of the accent-derived toolDoneBg.
+    val signal = app.amber.feature.ui.theme.LocalAmberTokens.current.signal
     val statusIconInk = if (theme.isDark) theme.bg else Color.White
     val (bg, ink) = when (status) {
-        AgentToolStatus.SUCCEEDED -> theme.toolDoneBg to theme.toolDoneBadgeInk
+        AgentToolStatus.SUCCEEDED -> signal to theme.toolDoneBadgeInk
         AgentToolStatus.RUNNING -> Color.Transparent to theme.toolDoneBg
         AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid to statusIconInk
         AgentToolStatus.FAILED -> theme.contextHigh to statusIconInk
         AgentToolStatus.CANCELLED -> Color.Transparent to theme.inkSoft
     }
     if (status == AgentToolStatus.RUNNING) {
-        RunningToolSpinner(
-            color = ink,
-            modifier = modifier.requiredSize(16.dp),
-        )
+        // §6.2 ToolCall row: running → signal-green breathing live dot.
+        Box(modifier.requiredSize(16.dp), contentAlignment = Alignment.Center) {
+            app.amber.feature.ui.components.ds.LiveDot()
+        }
         return
     }
     Surface(

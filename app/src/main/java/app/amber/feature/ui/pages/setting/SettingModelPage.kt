@@ -83,6 +83,7 @@ import app.amber.core.settings.findModelById
 import app.amber.core.settings.resolveTaskChatModel
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.ai.provider.hasUsableAuth
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceDivider
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
@@ -91,6 +92,7 @@ import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -120,7 +122,7 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
         ) {
             item("chat") {
                 ModelSection(
-                    title = { Text(stringResource(R.string.setting_model_page_chat_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_model_page_chat_section)) },
                 ) {
                     DefaultChatModelSetting(
                         settings = settings,
@@ -131,7 +133,7 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
             item("assistantTasks") {
                 ModelSection(
-                    title = { Text(stringResource(R.string.setting_model_page_auxiliary_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_model_page_auxiliary_section)) },
                 ) {
                     DefaultTitleModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
@@ -151,7 +153,7 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
             item("advanced") {
                 ModelSection(
-                    title = { Text(stringResource(R.string.setting_model_page_advanced_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_model_page_advanced_section)) },
                 ) {
                     GroupDefaultsEntry(
                         onClick = { showGroupDefaults = true },
@@ -1024,6 +1026,8 @@ private fun ModelGroupSessionDefaultsSheet(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp),
+                            // Graphite §3: the context-message count is a machine-fact → MONO.
+                            textStyle = LocalAmberType.current.meta,
                             label = {
                                 Text(stringResource(R.string.assistant_page_context_message_size))
                             },

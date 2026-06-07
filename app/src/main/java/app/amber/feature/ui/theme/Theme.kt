@@ -26,6 +26,7 @@ import kotlinx.serialization.Serializable
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberColorMode
 import app.amber.feature.ui.hooks.rememberUserSettingsState
+import app.amber.feature.ui.pages.chat.toChatTheme
 
 private val ExtendLightColors = lightExtendColors()
 private val ExtendDarkColors = darkExtendColors()
@@ -43,21 +44,21 @@ private val NotionShapes = Shapes(
     extraLarge = RoundedCornerShape(10.dp),
 )
 private val NotionTypography = Typography.copy(
-    displayLarge = Typography.displayLarge.copy(fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold),
-    displayMedium = Typography.displayMedium.copy(fontSize = 27.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold),
-    displaySmall = Typography.displaySmall.copy(fontSize = 24.sp, lineHeight = 31.sp, fontWeight = FontWeight.SemiBold),
-    headlineLarge = Typography.headlineLarge.copy(fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
-    headlineMedium = Typography.headlineMedium.copy(fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold),
-    headlineSmall = Typography.headlineSmall.copy(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-    titleLarge = Typography.titleLarge.copy(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-    titleMedium = Typography.titleMedium.copy(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
-    titleSmall = Typography.titleSmall.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
-    bodyLarge = Typography.bodyLarge.copy(fontSize = 14.sp, lineHeight = 21.sp),
-    bodyMedium = Typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 20.sp),
-    bodySmall = Typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 18.sp),
-    labelLarge = Typography.labelLarge.copy(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
-    labelMedium = Typography.labelMedium.copy(fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
-    labelSmall = Typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
+    displayLarge = Typography.displayLarge.copy(fontFamily = HankenGrotesk, fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold),
+    displayMedium = Typography.displayMedium.copy(fontFamily = HankenGrotesk, fontSize = 27.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold),
+    displaySmall = Typography.displaySmall.copy(fontFamily = HankenGrotesk, fontSize = 24.sp, lineHeight = 31.sp, fontWeight = FontWeight.SemiBold),
+    headlineLarge = Typography.headlineLarge.copy(fontFamily = HankenGrotesk, fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
+    headlineMedium = Typography.headlineMedium.copy(fontFamily = HankenGrotesk, fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold),
+    headlineSmall = Typography.headlineSmall.copy(fontFamily = HankenGrotesk, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = Typography.titleLarge.copy(fontFamily = HankenGrotesk, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
+    titleMedium = Typography.titleMedium.copy(fontFamily = HankenGrotesk, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
+    titleSmall = Typography.titleSmall.copy(fontFamily = HankenGrotesk, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = Typography.bodyLarge.copy(fontFamily = HankenGrotesk, fontSize = 14.sp, lineHeight = 21.sp),
+    bodyMedium = Typography.bodyMedium.copy(fontFamily = HankenGrotesk, fontSize = 13.sp, lineHeight = 20.sp),
+    bodySmall = Typography.bodySmall.copy(fontFamily = HankenGrotesk, fontSize = 12.sp, lineHeight = 18.sp),
+    labelLarge = Typography.labelLarge.copy(fontFamily = HankenGrotesk, fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
+    labelMedium = Typography.labelMedium.copy(fontFamily = HankenGrotesk, fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
+    labelSmall = Typography.labelSmall.copy(fontFamily = HankenGrotesk, fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
 )
 
 private val NotionLightScheme = lightColorScheme(
@@ -184,9 +185,19 @@ fun AmberAgentTheme(
     }
 
     val settings by rememberUserSettingsState()
-    val chatTheme = app.amber.feature.ui.pages.chat.ChatThemeChoice
-        .resolve(settings.displaySetting.chatThemeChoice, darkTheme)
-        .instance
+
+    // Graphite redesign (D2/D3): base family × system dark-mode → one of 4 bases; the accent is
+    // an independent user setting. Legacy chatThemeChoice is no longer consulted. chatTheme is
+    // derived from the new tokens via the compat adapter so existing LocalChatTheme consumers work.
+    val amberBase = when {
+        settings.displaySetting.amberBaseFamily == "SAGE" && darkTheme -> AmberBase.SAGE_DARK
+        settings.displaySetting.amberBaseFamily == "SAGE" -> AmberBase.SAGE
+        darkTheme -> AmberBase.DARK
+        else -> AmberBase.LIGHT
+    }
+    val amberAccent = parseAccent(settings.displaySetting.accentColor)
+    val amberTokens = remember(amberBase, amberAccent) { buildAmberTokens(amberBase, amberAccent) }
+    val chatTheme = remember(amberTokens) { amberTokens.toChatTheme() }
 
     val themedColorScheme = remember(colorSchemeConverted, chatTheme, amoledDarkMode, darkTheme) {
         run {
@@ -242,6 +253,8 @@ fun AmberAgentTheme(
         LocalAmoledDarkMode provides (darkTheme && amoledDarkMode),
         LocalExtendColors provides extendColors,
         LocalOverscrollFactory provides null,
+        LocalAmberTokens provides amberTokens,
+        LocalAmberType provides defaultAmberTextStyles(),
         app.amber.feature.ui.pages.chat.LocalChatTheme provides chatTheme,
         // Bug fix: M3 LocalContentColor 默认 Color.Black. 没有 Surface 显式 provide 时
         // (如 ChatPage 直接放 MarkdownBlock 的无 bubble 渲染路径), 深色模式下文字仍渲染成黑色.
@@ -261,3 +274,10 @@ val MaterialTheme.extendColors
     @Composable
     @ReadOnlyComposable
     get() = LocalExtendColors.current
+
+/** Parse a stored accent hex (e.g. "#B8623A") into a Compose Color; falls back to terracotta. */
+private fun parseAccent(hex: String): Color = try {
+    Color(android.graphics.Color.parseColor(if (hex.startsWith("#")) hex else "#$hex"))
+} catch (e: IllegalArgumentException) {
+    Color(0xFFB8623A)
+}

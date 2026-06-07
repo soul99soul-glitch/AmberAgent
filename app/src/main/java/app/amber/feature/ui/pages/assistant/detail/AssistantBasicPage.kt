@@ -10,11 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -40,6 +36,8 @@ import app.amber.core.settings.defaultReasoningLevelForModel
 import app.amber.core.settings.findModelById
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ai.ReasoningButton
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.Select
@@ -49,6 +47,7 @@ import app.amber.feature.ui.components.ui.TagsInput
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.hooks.heroAnimation
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.toFixed
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -146,9 +145,7 @@ internal fun AssistantBasicContent(
             )
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
-        ) {
+        AmberCard {
             FormItem(
                 label = {
                     Text(stringResource(R.string.assistant_page_name))
@@ -169,7 +166,7 @@ internal fun AssistantBasicContent(
                 )
             }
 
-            HorizontalDivider()
+            Hairline()
 
             FormItem(
                 label = {
@@ -186,7 +183,7 @@ internal fun AssistantBasicContent(
                 )
             }
 
-            HorizontalDivider()
+            Hairline()
 
             FormItem(
                 modifier = Modifier.padding(8.dp),
@@ -211,9 +208,7 @@ internal fun AssistantBasicContent(
             )
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
-        ) {
+        AmberCard {
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -244,7 +239,7 @@ internal fun AssistantBasicContent(
                     )
                 }
             )
-            HorizontalDivider()
+            Hairline()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -264,7 +259,7 @@ internal fun AssistantBasicContent(
                     )
                 }
             )
-            HorizontalDivider()
+            Hairline()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -294,7 +289,7 @@ internal fun AssistantBasicContent(
                     )
                 }
             )
-            HorizontalDivider()
+            Hairline()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -345,7 +340,8 @@ internal fun AssistantBasicContent(
                             type = TagType.INFO
                         ) {
                             Text(
-                                text = "$currentTemperature"
+                                text = "$currentTemperature",
+                                style = LocalAmberType.current.meta,
                             )
                         }
 
@@ -366,7 +362,7 @@ internal fun AssistantBasicContent(
                     }
                 }
             }
-            HorizontalDivider()
+            Hairline()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -411,12 +407,11 @@ internal fun AssistantBasicContent(
                             R.string.assistant_page_top_p_value,
                             topP.toString()
                         ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
+                        style = LocalAmberType.current.meta,
                     )
                 }
             }
-            HorizontalDivider()
+            Hairline()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -447,11 +442,10 @@ internal fun AssistantBasicContent(
                         R.string.assistant_page_context_message_count,
                         assistant.contextMessageSize
                     ) else stringResource(R.string.assistant_page_context_message_unlimited),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
+                    style = LocalAmberType.current.meta,
                 )
             }
-            HorizontalDivider()
+            Hairline()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -473,7 +467,7 @@ internal fun AssistantBasicContent(
                     )
                 }
             )
-            HorizontalDivider()
+            Hairline()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -487,7 +481,7 @@ internal fun AssistantBasicContent(
                     }
                 )
             }
-            HorizontalDivider()
+            Hairline()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -527,9 +521,7 @@ internal fun AssistantBasicContent(
             }
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
-        ) {
+        AmberCard {
             BackgroundPicker(
                 modifier = Modifier.padding(8.dp),
                 background = assistant.background,
@@ -545,7 +537,7 @@ internal fun AssistantBasicContent(
 
             if (assistant.background != null) {
                 val backgroundOpacity = assistant.backgroundOpacity.coerceIn(0f, 1f)
-                HorizontalDivider()
+                Hairline()
                 FormItem(
                     modifier = Modifier.padding(8.dp),
                     label = {
@@ -573,8 +565,7 @@ internal fun AssistantBasicContent(
                             R.string.assistant_page_background_opacity_value,
                             (backgroundOpacity * 100).roundToInt()
                         ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
+                        style = LocalAmberType.current.meta,
                     )
                 }
             }

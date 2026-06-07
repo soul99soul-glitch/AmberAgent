@@ -18,3 +18,9 @@ local.properties
 *.perfetto-trace
 core/**/build/
 feature/**/build/
+
+# Design handoff reference (large binaries; keep the .md/.css/.jsx specs tracked)
+/amberagent-handoff.zip
+docs/cloud-design/**/uploads/
+docs/cloud-design/**/screenshots/
+docs/cloud-design/**/.thumbnail

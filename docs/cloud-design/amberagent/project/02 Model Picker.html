@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AmberAgent · 02 模型选择</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { font-family: "Noto Sans SC", -apple-system, system-ui, sans-serif; background: #f0eee9; }
+  *, *::before, *::after { box-sizing: border-box; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="themes.jsx"></script>
+<script type="text/babel" src="phone-screen.jsx"></script>
+<script type="text/babel" src="convo-user.jsx"></script>
+<script type="text/babel" src="convo-agent.jsx"></script>
+<script type="text/babel" src="convo-ask.jsx"></script>
+<script type="text/babel" src="convo-tool-result.jsx"></script>
+<script type="text/babel" src="model-picker.jsx"></script>
+<script type="text/babel" src="model-picker-v3.jsx"></script>
+<script type="text/babel" src="model-picker-v6.jsx"></script>
+<script type="text/babel" src="concept-floating.jsx"></script>
+<script type="text/babel" src="settings-screen.jsx"></script>
+<script type="text/babel" src="provider-screens.jsx"></script>
+<script type="text/babel" src="settings-shell.jsx"></script>
+<script type="text/babel" src="settings-experimental.jsx"></script>
+<script type="text/babel" src="settings-memory.jsx"></script>
+<script type="text/babel" src="settings-memory-v2.jsx"></script>
+<script type="text/babel" src="settings-runtime.jsx"></script>
+<script type="text/babel" src="settings-models.jsx"></script>
+<script type="text/babel" src="attachments-panel.jsx"></script>
+<script type="text/babel" src="settings-search.jsx"></script>
+<script type="text/babel" src="settings-search-v2.jsx"></script>
+<script type="text/babel" src="settings-skills.jsx"></script>
+<script type="text/babel" src="convo-screen.jsx"></script>
+<script type="text/babel" src="convo-history.jsx"></script>
+<script type="text/babel" src="tablet-screen.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  const T = window.THEMES;
+  return (
+    <DesignCanvas>
+            <DCSection
+        id="model-picker"
+        title="模型选择"
+        subtitle="不同 Provider 的思考程度分级（off/on/max / low-xhigh / adaptive 等）+ 四个主题。"
+      >
+        <DCArtboard id="mp-deepseek" label="DeepSeek (off/on/max)" width={380} height={832}>
+          <ModelPicker t={T.WHISPER} activeModelId="deepseek-v4-pro" />
+        </DCArtboard>
+        <DCArtboard id="mp-gpt" label="GPT (low-xhigh)" width={380} height={832}>
+          <ModelPicker t={T.WHISPER} activeModelId="gpt-5" />
+        </DCArtboard>
+        <DCArtboard id="mp-claude" label="Claude (含 adaptive)" width={380} height={832}>
+          <ModelPicker t={T.WHISPER} activeModelId="claude-opus-4.7" />
+        </DCArtboard>
+        <DCArtboard id="mp-claude-auto" label="Claude (adaptive on)" width={380} height={832}>
+          <ModelPicker t={T.WHISPER} activeModelId="claude-opus-4.7" adaptiveOn />
+        </DCArtboard>
+        <DCArtboard id="mp-plain" label="Plain" width={380} height={832}>
+          <ModelPicker t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="mp-paper" label="Paper" width={380} height={832}>
+          <ModelPicker t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="mp-night" label="Midnight" width={380} height={832}>
+          <ModelPicker t={T.NIGHT} />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="model-picker-v3"
+        title="模型选择 · V3 重构"
+        subtitle="顶部 Hero 卡（含完整 effort 横排）+ 下方平等列表。彻底分开当前使用与备选模型，effort 不再挤进每行。"
+      >
+        <DCArtboard id="mp3-whisper" label="V3 · Whisper" width={380} height={832}>
+          <ModelPickerV3 t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="mp3-paper" label="V3 · Paper" width={380} height={832}>
+          <ModelPickerV3 t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="mp3-night" label="V3 · Midnight" width={380} height={832}>
+          <ModelPickerV3 t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="mp3-plain" label="V3 · Plain" width={380} height={832}>
+          <ModelPickerV3 t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="mp3-claude" label="V3 · Claude (5 levels)" width={380} height={832}>
+          <ModelPickerV3 t={T.WHISPER} activeModelId="claude-opus-4.7" />
+        </DCArtboard>
+        <DCArtboard id="mp3-gpt" label="V3 · GPT (4 levels)" width={380} height={832}>
+          <ModelPickerV3 t={T.WHISPER} activeModelId="gpt-5" />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="model-picker-v6"
+        title="模型选择 · 预览-确认（方案 A）"
+        subtitle="单层面板内同时完成换模型 + 调思考程度。点行 = 预览展开 effort；点 effort 段或底部应用按钮 = 确认。"
+      >
+        <DCArtboard id="mp6-rest" label="初始 · 当前模型展开" width={380} height={832}>
+          <ModelPickerV6 t={T.WHISPER}
+            committedModelId="deepseek-v4-pro"
+            committedLevel="on" />
+        </DCArtboard>
+        <DCArtboard id="mp6-preview" label="预览中 · 点了 GPT 但未确认" width={380} height={832}>
+          <ModelPickerV6 t={T.WHISPER}
+            committedModelId="deepseek-v4-pro"
+            committedLevel="on"
+            previewedModelId="gpt-5"
+            previewedLevel="high" />
+        </DCArtboard>
+        <DCArtboard id="mp6-confirmed" label="确认后 · 切换到 GPT@high" width={380} height={832}>
+          <ModelPickerV6 t={T.WHISPER}
+            committedModelId="gpt-5"
+            committedLevel="high" />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="concept"
+        title="Concept · 悬浮控件"
+        subtitle="实验稿：模型 / Effort / Context 抽成下方悬浮胶囊。"
+      >
+        <DCArtboard id="cf-whisper" label="悬浮控件 · Whisper" width={380} height={832}>
+          <ConceptFloating t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="cf-night" label="悬浮控件 · Midnight" width={380} height={832}>
+          <ConceptFloating t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="cf-context" label="Context 面板" width={380} height={832}>
+          <ConceptFloating t={T.WHISPER} openPanel="context" />
+        </DCArtboard>
+        <DCArtboard id="cf-effort" label="思考程度面板" width={380} height={832}>
+          <ConceptFloating t={T.WHISPER} openPanel="effort" />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

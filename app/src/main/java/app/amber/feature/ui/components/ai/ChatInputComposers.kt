@@ -8,11 +8,13 @@ import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -23,12 +25,14 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -411,14 +415,33 @@ internal fun TextInputRow(
                 }
             }
         }
+        // In the graphite composer (minimalChrome) the field lives inside a 26dp `surface-2`
+        // pill that already supplies the visual chrome + horizontal inset, so we drop M3's
+        // 48dp interactive floor and trim the content padding to keep the single-line pill
+        // height aligned with the flanking 46dp [+] / send circles.
+        CompositionLocalProvider(
+            LocalMinimumInteractiveComponentSize provides
+                if (minimalChrome) 0.dp else LocalMinimumInteractiveComponentSize.current
+        ) {
         TextField(
             state = state.textContent,
             modifier = Modifier
                 .fillMaxWidth()
+                // Graphite 修：Material3 TextField 内部写死 MinHeight=56dp（无视 contentPadding /
+                // LocalMinimumInteractiveComponentSize）。这里只需传入一个「非零」minHeight 即可绕过
+                // 那道 56dp 地板——真实高度由内容决定（单行≈42dp，对称 padding 使文字在其内居中），
+                // 再由外层 pill 的 heightIn(min=46)+CenterVertically 把它在 46dp 内整体居中、与 [+]/send 齐平。
+                .then(if (minimalChrome) Modifier.heightIn(min = 1.dp) else Modifier)
                 .contentReceiver(receiveContentListener)
                 .onFocusChanged {
                     isFocused = it.isFocused
                 },
+            contentPadding = if (minimalChrome) {
+                // 单行高度压到 ≤46dp，让外层 pill 的 heightIn(min=46) 钳到 46dp，与两侧圆按钮齐平
+                PaddingValues(horizontal = 0.dp, vertical = 9.dp)
+            } else {
+                TextFieldDefaults.contentPaddingWithoutLabel()
+            },
             shape = if (minimalChrome) RoundedCornerShape(0.dp) else RoundedCornerShape(8.dp),
             placeholder = {
                 if (!hidePlaceholder) {
@@ -472,6 +495,7 @@ internal fun TextInputRow(
                 }
             },
         )
+        }
         if (isFullScreen) {
             FullScreenEditor(state = state) {
                 isFullScreen = false

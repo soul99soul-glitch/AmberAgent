@@ -23,10 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -58,7 +55,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,6 +72,9 @@ import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.AssistantRegex
 import app.amber.core.model.Conversation
 import app.amber.core.model.toMessageNode
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.message.ChatMessage
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.FormItem
@@ -83,7 +82,7 @@ import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TextArea
 import app.amber.feature.ui.theme.CustomColors
-import app.amber.feature.ui.theme.JetbrainsMono
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.UiState
 import app.amber.core.utils.insertAtCursor
 import app.amber.core.utils.onError
@@ -147,9 +146,7 @@ private fun AssistantPromptContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
-        ) {
+        AmberCard {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -190,7 +187,10 @@ private fun AssistantPromptContent(
                                 }
                             ) {
                                 info.displayName()
-                                Text(": {{$k}}")
+                                Text(
+                                    text = ": {{$k}}",
+                                    style = LocalAmberType.current.meta,
+                                )
                             }
                         }
                     }
@@ -198,9 +198,7 @@ private fun AssistantPromptContent(
             }
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
-        ) {
+        AmberCard {
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -219,11 +217,7 @@ private fun AssistantPromptContent(
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 5,
                         maxLines = 15,
-                        textStyle = LocalTextStyle.current.copy(
-                            fontSize = 12.sp,
-                            fontFamily = JetbrainsMono,
-                            lineHeight = 16.sp
-                        )
+                        textStyle = LocalTextStyle.current.merge(LocalAmberType.current.meta)
                     )
                 },
                 description = {
@@ -257,6 +251,7 @@ private fun AssistantPromptContent(
                     })
                 }
             )
+            Hairline()
             Column(
                 modifier = Modifier
                     .padding(8.dp)
@@ -265,10 +260,7 @@ private fun AssistantPromptContent(
                     .padding(8.dp)
                     .fillMaxWidth()
             ) {
-                Text(
-                    text = stringResource(R.string.assistant_page_template_preview),
-                    style = MaterialTheme.typography.titleSmall
-                )
+                SectionLabel(stringResource(R.string.assistant_page_template_preview))
                 val rawMessages = listOf(
                     UIMessage.user("你好啊"),
                     UIMessage.assistant("你好，有什么我可以帮你的吗？"),
@@ -316,9 +308,7 @@ private fun AssistantPromptContent(
             }
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
-        ) {
+        AmberCard {
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -418,9 +408,7 @@ private fun AssistantPromptContent(
             }
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
-        ) {
+        AmberCard {
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -471,7 +459,7 @@ private fun AssistantRegexCard(
     var expanded by remember {
         mutableStateOf(false)
     }
-    ElevatedCard(
+    AmberCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(

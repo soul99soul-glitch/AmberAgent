@@ -44,7 +44,6 @@ import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Upload02
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.Alignment
 import app.amber.core.sync.core.CURRENT_ARCHIVE_VERSION
 import app.amber.core.sync.core.SYNC_ARCHIVE_MIME
@@ -56,10 +55,14 @@ import app.amber.core.sync.local.LocalBackupRepository
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.UiState
 import org.koin.androidx.compose.koinViewModel
 
@@ -99,16 +102,21 @@ private fun BackupStatusContent(
     activity: BackupActivity?,
 ) {
     if (activity == null) {
-        Text(formatBackupStatus(syncSettings))
+        // Graphite §3: backup status is timestamp + version + device — machine facts → MONO (meta), muted ink.
+        Text(
+            formatBackupStatus(syncSettings),
+            style = LocalAmberType.current.meta,
+            color = LocalAmberTokens.current.ink3,
+        )
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(activity.title)
+        Text(activity.title, style = LocalAmberType.current.body)
         if (activity.detail.isNotBlank()) {
             Text(
                 activity.detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink3,
             )
         }
         val progress = activity.progress
@@ -262,7 +270,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            CardGroup(title = { Text("Google Drive") }) {
+            CardGroup(title = { SectionLabel("Google Drive") }) {
                 item(
                     onClick = if (googleAvailable) {
                         { vm.connectGoogle() }
@@ -318,7 +326,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     strokeWidth = 2.dp,
                                 )
                             } else {
-                                Text("${(progress * 100).toInt()}%")
+                                // Graphite §3: progress percent is a machine-fact number → MONO (meta).
+                                Text(
+                                    "${(progress * 100).toInt()}%",
+                                    style = LocalAmberType.current.meta,
+                                    color = LocalAmberTokens.current.ink2,
+                                )
                             }
                         }
                     },
@@ -363,7 +376,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 )
             }
 
-            CardGroup(title = { Text("本地备份") }) {
+            CardGroup(title = { SectionLabel("本地备份") }) {
                 item(
                     onClick = {
                         createDocumentLauncher.launch(LocalBackupRepository.suggestedFileName())
@@ -462,10 +475,27 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             title = { Text("云端快照冲突") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Google Drive 已有一个不同 revision 的同步快照。")
-                    Text("云端修改时间：${conflict.remoteFile.modifiedTime ?: "未知"}")
-                    Text("本机记录 revision：${conflict.localRevision.ifBlank { "无" }}")
-                    Text("为避免静默丢数据，请确认是否用本机快照覆盖云端。")
+                    Text(
+                        "Google Drive 已有一个不同 revision 的同步快照。",
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink3,
+                    )
+                    // Graphite §3: remote modified time + local revision are machine facts → MONO (meta).
+                    Text(
+                        "云端修改时间：${conflict.remoteFile.modifiedTime ?: "未知"}",
+                        style = LocalAmberType.current.meta,
+                        color = LocalAmberTokens.current.ink,
+                    )
+                    Text(
+                        "本机记录 revision：${conflict.localRevision.ifBlank { "无" }}",
+                        style = LocalAmberType.current.meta,
+                        color = LocalAmberTokens.current.ink,
+                    )
+                    Text(
+                        "为避免静默丢数据，请确认是否用本机快照覆盖云端。",
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink3,
+                    )
                 }
             },
             confirmButton = {
@@ -507,11 +537,17 @@ private fun CloudSnapshotPickerDialog(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(formatCloudSnapshotTitle(snapshot))
+                            // Graphite §3: snapshot title (timestamp · version) and detail
+                            // (device · size · archive format) are machine facts → MONO (meta).
+                            Text(
+                                formatCloudSnapshotTitle(snapshot),
+                                style = LocalAmberType.current.meta,
+                                color = LocalAmberTokens.current.ink,
+                            )
                             Text(
                                 formatCloudSnapshotDetail(snapshot, unsupported),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = LocalAmberType.current.meta,
+                                color = LocalAmberTokens.current.ink3,
                             )
                         }
                         Text(
@@ -524,7 +560,7 @@ private fun CloudSnapshotPickerDialog(
                         )
                     }
                     if (index != snapshots.lastIndex) {
-                        HorizontalDivider()
+                        Hairline()
                     }
                 }
             }
@@ -595,15 +631,24 @@ private fun ImportPreviewDialog(
                         syncSettings = SyncSettings(),
                         activity = restoreActivity ?: BackupActivity(title = "正在恢复备份"),
                     )
-                    HorizontalDivider()
+                    Hairline()
                 }
-                Text("创建时间：${preview.createdAt}")
-                Text("版本：${preview.manifest.appVersionName} / ${preview.manifest.appVersionCode}")
-                HorizontalDivider()
+                // Graphite §3: backup createdAt + version strings are machine facts → MONO (meta).
+                Text(
+                    "创建时间：${preview.createdAt}",
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.ink,
+                )
+                Text(
+                    "版本：${preview.manifest.appVersionName} / ${preview.manifest.appVersionCode}",
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.ink,
+                )
+                Hairline()
                 Text(
                     "覆盖会替换 Provider 配置、助手、记忆、文件等本机数据。下面两项默认不恢复——勾选才会把备份里的对应内容也覆盖到本机。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = LocalAmberType.current.secondary,
+                    color = LocalAmberTokens.current.ink3,
                 )
                 IncludeToggleRow(
                     checked = restoreConversations,
@@ -673,11 +718,11 @@ private fun IncludeToggleRow(
             onCheckedChange = null,  // handled by selectable() on the row
         )
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(title, style = LocalAmberType.current.body)
             Text(
                 description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink3,
             )
         }
     }

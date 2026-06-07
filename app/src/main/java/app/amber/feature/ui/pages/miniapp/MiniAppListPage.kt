@@ -31,8 +31,10 @@ import app.amber.agent.Screen
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.miniapp.components.MiniAppGridCard
+import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,7 +53,7 @@ fun MiniAppListPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("小应用") },
+                title = { Text("小应用", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.MiniAppSettings) }) {
@@ -68,7 +70,11 @@ fun MiniAppListPage(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text("还没有保存的小应用")
+                Text(
+                    text = "还没有保存的小应用",
+                    style = LocalAmberType.current.secondary,
+                    color = workspaceColors().muted,
+                )
             }
         } else {
             LazyVerticalGrid(

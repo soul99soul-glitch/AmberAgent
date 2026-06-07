@@ -61,7 +61,6 @@ import me.rerere.hugeicons.stroke.WebDesign01
 import app.amber.agent.R
 import app.amber.core.model.MessageNode
 import app.amber.feature.ui.components.ui.RikkaConfirmDialog
-import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalTTSState
@@ -183,19 +182,36 @@ private fun MessageActionIconButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    // Borderless variant — message-row actions sit under every bubble, so the
-    // outlined paper-and-hairline look was reading as "hardware control panel"
-    // clutter. Tap feedback is still provided by Surface's ripple, just without
-    // the resting-state outline.
-    WorkspaceIconButton(
+    // Borderless, faint variant — message-row actions sit under every assistant turn.
+    // Graphite design §6.2/§7: the action row whispers (faint ink), flat & hairline,
+    // no glow. Tint = LocalChatTheme.inkFaint (the same faint token the assistant
+    // header date uses) instead of full-strength ink. Tap feedback is the Surface
+    // ripple; no resting-state outline. Structure (size/transparent/ripple) is kept
+    // identical to the previous WorkspaceIconButton so layout is unchanged.
+    val tint = app.amber.feature.ui.pages.chat.LocalChatTheme.current.inkFaint
+        .copy(alpha = if (enabled) 1f else 0.36f)
+    Surface(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.size(34.dp),
-        icon = imageVector,
-        contentDescription = contentDescription,
-        showBorder = false,
-        containerColor = Color.Transparent,
-    )
+        shape = RoundedCornerShape(6.dp),
+        color = Color.Transparent,
+        contentColor = tint,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        androidx.compose.foundation.layout.Box(
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = contentDescription,
+                // Match the prior WorkspaceIconButton default glyph size (15dp) so only
+                // the tint changes, not the icon's footprint.
+                modifier = Modifier.size(15.dp),
+            )
+        }
+    }
 }
 
 @Composable

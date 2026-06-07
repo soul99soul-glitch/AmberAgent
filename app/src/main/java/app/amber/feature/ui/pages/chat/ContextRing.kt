@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
+import app.amber.feature.ui.theme.LocalAmberType
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
@@ -49,6 +51,17 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 private const val CONTEXT_USAGE_POPUP_EXIT_MS = 140
+
+/**
+ * Number of filled bars (0..5) in the Graphite context meter for [used]/[total] tokens.
+ * Pure + testable (see ContextMeterTest). Rounds to nearest fifth; 0 when empty or total<=0.
+ */
+fun contextMeterFilledBars(used: Int, total: Int): Int {
+    if (total <= 0) return 0
+    val v = (used.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+    if (v <= 0.001f) return 0
+    return ((v * 5f) + 0.5f).toInt().coerceIn(0, 5)
+}
 
 /**
  * 22dp Context Ring —— 顶栏右侧轻量进度环 + 点开 usage panel popup。
@@ -99,46 +112,36 @@ fun ContextRing(
 
     Box(
         modifier = modifier
-            .size(36.dp)
-            // V3: ripple 改圆形, 跟 ring 视觉一致 (默认矩形 ripple 在圆 ring 周围看着错位)
-            .clip(androidx.compose.foundation.shape.CircleShape)
-            .clickable { expanded = !expanded },
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { expanded = !expanded }
+            .padding(horizontal = 6.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(modifier = Modifier.size(ringSize)) {
-            val s = this.size.width
-            val strokePx = strokeDp.toPx()
-            val r = (s - strokePx) / 2f - 1f
-            val cx = s / 2f
-            val cy = s / 2f
-            drawCircle(
-                color = if (empty) color else trackColor,
-                radius = r,
-                center = Offset(cx, cy),
-                style = Stroke(width = strokePx),
-            )
-            if (!empty) {
-                val sweep = 360f * v
-                drawArc(
-                    color = color,
-                    startAngle = -90f,
-                    sweepAngle = sweep,
-                    useCenter = false,
-                    topLeft = Offset(cx - r, cy - r),
-                    size = Size(r * 2, r * 2),
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
+        // Context meter — 5 mono bars + % (design §6.2; no donut). Accent-filled proportionally;
+        // bar color follows the usage threshold token (accent under Graphite).
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            val filledCount = contextMeterFilledBars(used, total)
+            // 等高格子（统一取原第 2 格的 8dp），不再一格比一格高
+            repeat(5) { i ->
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(if (i < filledCount) color else trackColor)
                 )
-                if (v < 0.999f) {
-                    val headAngle = (v * 2f - 0.5f) * PI.toFloat()
-                    val headX = cx + r * cos(headAngle)
-                    val headY = cy + r * sin(headAngle)
-                    drawCircle(
-                        color = color,
-                        radius = strokePx / 2f + 0.4f,
-                        center = Offset(headX, headY),
-                    )
-                }
             }
+            // 图示↔文字间距 5→3，更紧凑
+            Spacer(Modifier.width(3.dp))
+            Text(
+                text = "${(v * 100f).toInt()}%",
+                // 百分比字号 12→10
+                style = LocalAmberType.current.meta.copy(fontSize = 10.sp, lineHeight = 12.sp),
+                color = theme.inkSoft,
+            )
         }
 
         if (popupMounted) {

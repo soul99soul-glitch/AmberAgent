@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -107,7 +108,10 @@ import app.amber.feature.ui.components.ui.TagType
 import app.amber.feature.ui.components.ui.icons.HeartIcon
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.extendColors
+import app.amber.core.utils.formatNumber
 import app.amber.core.utils.toDp
 import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
@@ -147,8 +151,9 @@ fun ModelSelector(
 
     if (!onlyIcon) {
         if (minimalText) {
-            // V3: 去掉 "⌄" chevron 字符 (用户反馈不需要), 同时把 ripple 改成胶囊形
-            // (.clip(CircleShape) before .clickable 让 ripple 跟随胶囊裁剪而非矩形)
+            // Graphite §6.2 model-menu trigger: MONO model-id (LocalAmberType.meta) + small
+            // dropdown chevron icon. Capsule ripple (.clip(CircleShape) before .clickable).
+            val tokens = LocalAmberTokens.current
             Row(
                 modifier = modifier
                     .clip(androidx.compose.foundation.shape.CircleShape)
@@ -158,17 +163,22 @@ fun ModelSelector(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = model?.displayName
+                    text = model?.modelId
                         ?: emptyLabel
                         ?: stringResource(R.string.model_list_select_model),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 15.sp,
+                    style = LocalAmberType.current.meta.copy(
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.2.sp,
                     ),
-                    color = workspaceColors().ink,
+                    color = tokens.ink,
+                )
+                Icon(
+                    imageVector = HugeIcons.ArrowDown01,
+                    contentDescription = null,
+                    tint = tokens.ink3,
+                    modifier = Modifier.size(14.dp),
                 )
             }
         } else if (inline) {
@@ -649,27 +659,26 @@ private fun ColumnScope.ModelList(
             }
         }
 
-        // V3 重构 v2: 不分家 — active 和同 provider 其他 model 都在一张 group card 内
-        // 只有 active 行用 accentSoft 高亮 + 段控内嵌；非 active 行 surface 普通样式
+        // Graphite §6.2 "Top model menu": provider groups as an accordion. The header row
+        // toggles expand/collapse (+/−); the ACTIVE provider name (the one holding the current
+        // model) and the SELECTED model are accent-colored, everything else neutral ink. Rows
+        // read "name … ctx" in mono, no check/badge. Kept inside one LazyColumn group item per
+        // provider (so the chip-rail / scroll-position math is unchanged); collapsing only
+        // hides rows inside that item, not whole items.
         providers.fastForEach { providerSetting ->
             val groupModels = searchFilteredModelsByProvider[providerSetting.id].orEmpty()
             if (groupModels.isEmpty()) return@fastForEach
 
-            // provider 名 accent label —— 与卡片左边线对齐 (4dp 偏移让视觉略缩进)
-            item(key = "header:${providerSetting.id}") {
-                Text(
-                    text = providerSetting.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 0.3.sp,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp, top = 8.dp),
-                )
-            }
+            val providerActive = groupModels.fastAny { it.id == currentModel }
 
-            // 单张 group 卡 + 内部 hairline 分隔; active 行 accentSoft 高亮 + 段控
-            // 不加 horizontal padding，让宽度跟 LazyColumn content padding 走，与 收藏 卡对齐
             item(key = "group:${providerSetting.id}") {
                 val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+                val tokens = LocalAmberTokens.current
+                // Default-expand a provider while searching, or the one holding the active
+                // model; collapsed otherwise. Re-keyed by search term so a query opens matches.
+                var expanded by remember(providerSetting.id, searchKeywords) {
+                    mutableStateOf(searchKeywords.isNotBlank() || providerActive)
+                }
                 Card(
                     modifier = Modifier.animateItem(),
                     colors = CardDefaults.cardColors(
@@ -680,46 +689,66 @@ private fun ColumnScope.ModelList(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
                 ) {
                     Column {
-                        groupModels.forEachIndexed { idx, model ->
-                            val isActive = model.id == currentModel
-                            val hasReasoning = model.abilities.contains(app.amber.ai.provider.ModelAbility.REASONING)
-                            if (idx > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(start = 14.dp)
-                                        .fillMaxWidth()
-                                        .height(1.dp)
-                                        .background(chatTheme.hair),
-                                )
-                            }
-                            val favorite = settings.value.favoriteModels.contains(model.id)
-                            Column(
-                                modifier = if (isActive) Modifier.background(chatTheme.accentSoft) else Modifier,
-                            ) {
-                                ModelItemRow(
-                                    model = model,
-                                    providerSetting = providerSetting,
-                                    isActive = isActive,
-                                    onSelect = onSelect,
-                                    onDismiss = onDismiss,
-                                    tail = {
-                                        FavoriteToggleIcon(
-                                            favorite = favorite,
-                                            isActive = isActive,
-                                            onToggle = {
-                                                coroutineScope.launch {
-                                                    settingsStore.update { s ->
-                                                        if (favorite) s.copy(favoriteModels = s.favoriteModels.filter { it != model.id })
-                                                        else s.copy(favoriteModels = s.favoriteModels + model.id)
+                        // Accordion header: mono provider name (accent when active) + +/− glyph.
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expanded = !expanded }
+                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = providerSetting.name,
+                                style = LocalAmberType.current.meta.copy(
+                                    fontSize = 14.sp,
+                                    fontWeight = if (providerActive) FontWeight.SemiBold else FontWeight.Medium,
+                                ),
+                                color = if (providerActive) chatTheme.accent else tokens.ink2,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Icon(
+                                imageVector = if (expanded) HugeIcons.ArrowDown01 else HugeIcons.ArrowRight01,
+                                contentDescription = null,
+                                tint = tokens.ink4,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        androidx.compose.animation.AnimatedVisibility(visible = expanded) {
+                            Column {
+                                groupModels.fastForEach { model ->
+                                    val isActive = model.id == currentModel
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(start = 14.dp)
+                                            .fillMaxWidth()
+                                            .height(1.dp)
+                                            .background(chatTheme.hair),
+                                    )
+                                    val favorite = settings.value.favoriteModels.contains(model.id)
+                                    ModelItemRow(
+                                        model = model,
+                                        providerSetting = providerSetting,
+                                        isActive = isActive,
+                                        onSelect = onSelect,
+                                        onDismiss = onDismiss,
+                                        tail = {
+                                            FavoriteToggleIcon(
+                                                favorite = favorite,
+                                                isActive = isActive,
+                                                onToggle = {
+                                                    coroutineScope.launch {
+                                                        settingsStore.update { s ->
+                                                            if (favorite) s.copy(favoriteModels = s.favoriteModels.filter { it != model.id })
+                                                            else s.copy(favoriteModels = s.favoriteModels + model.id)
+                                                        }
                                                     }
-                                                }
-                                            },
-                                        )
-                                    },
-                                )
-                                // V3: thinking-level segment 已搬到 SlashCommandPanel footer,
-                                // 这里不再渲染. 保留 currentAssistant / onUpdateAssistant 入参以兼容
-                                // 旧 callsite (避免 ripple).
+                                                },
+                                            )
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -859,27 +888,31 @@ private fun ModelItem(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                AutoAIIcon(
-                    name = model.modelId,
-                    modifier = Modifier.size(28.dp),
-                )
-                // V3: model 名 12.5sp + 删 V3CapabilityIcons (能力图标对用户意义不大)
+                val tokens = LocalAmberTokens.current
+                // Graphite §6.2 row: mono "name … ctx", accent only when selected, no badge.
                 Text(
                     text = model.displayName,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.2.sp,
-                        lineHeight = 15.sp,
+                    style = LocalAmberType.current.meta.copy(
+                        fontSize = 14.sp,
+                        fontWeight = if (select) FontWeight.SemiBold else FontWeight.Normal,
                     ),
-                    color = if (select) chatTheme.accent else chatTheme.ink,
+                    color = if (select) chatTheme.accent else tokens.ink3,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f, fill = false),
                 )
+                Spacer(modifier = Modifier.weight(1f))
+                model.contextWindowTokens?.let { ctx ->
+                    Text(
+                        text = ctx.formatNumber(),
+                        style = LocalAmberType.current.meta.copy(fontSize = 11.5.sp),
+                        color = tokens.ink4,
+                        maxLines = 1,
+                    )
+                }
                 tail()
             }
             // ── 第二行：thinking-level segment（仅 active + REASONING 时显示）
@@ -1159,9 +1192,11 @@ private fun ModelItemRow(
     val navController = LocalNavController.current
     val interactionSource = remember { MutableInteractionSource() }
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    val tokens = LocalAmberTokens.current
+    // Graphite §6.2 row: mono "name … ctx", accent only when selected, no logo/check/badge.
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
@@ -1176,26 +1211,28 @@ private fun ModelItemRow(
                 interactionSource = interactionSource,
                 indication = LocalIndication.current,
             )
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(start = 28.dp, end = 6.dp, top = 9.dp, bottom = 9.dp),
     ) {
-        AutoAIIcon(
-            name = model.modelId,
-            modifier = Modifier.size(28.dp),
-        )
-        // V3: model 名 12.5sp + 删 V3CapabilityIcons (能力图标对用户意义不大)
         Text(
             text = model.displayName,
-            style = MaterialTheme.typography.titleSmall.copy(
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.2.sp,
-                lineHeight = 15.sp,
+            style = LocalAmberType.current.meta.copy(
+                fontSize = 14.sp,
+                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
             ),
-            color = if (isActive) chatTheme.accent else chatTheme.ink,
+            color = if (isActive) chatTheme.accent else tokens.ink3,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f, fill = false),
         )
+        Spacer(modifier = Modifier.weight(1f))
+        model.contextWindowTokens?.let { ctx ->
+            Text(
+                text = ctx.formatNumber(),
+                style = LocalAmberType.current.meta.copy(fontSize = 11.5.sp),
+                color = tokens.ink4,
+                maxLines = 1,
+            )
+        }
         tail()
     }
 }

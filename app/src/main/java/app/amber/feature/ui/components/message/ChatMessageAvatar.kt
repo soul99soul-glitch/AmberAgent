@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.sp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,6 +27,7 @@ import app.amber.core.model.Avatar
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.context.LocalSettings
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.formatNumber
 import app.amber.core.utils.toLocalString
 
@@ -140,16 +140,16 @@ fun ChatMessageAssistantAvatar(
                 ) {
                     if(settings.displaySetting.showModelName) {
                         Text(
-                            // V3: 固定显示 "Amber" 而非具体模型名 —— 用户对话的对象是 Amber Agent
-                            // 整体, 不是底下哪个 model. 想看具体 model 可以从 TopBar 切换器看.
-                            text = "Amber",
-                            // V3 convo-agent.jsx:11 → 17sp/W500 (比 15sp 更醒目，是消息组的标识)
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontSize = 17.sp,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                                letterSpacing = 0.2.sp,
+                            // Graphite §6.2 "Assistant turn": the brand label is the mono
+                            // `amber` wordmark in accent (mono = machine-fact, the mono/sans
+                            // split is the signature). Still the Agent group identity, not the
+                            // underlying model id — switch concrete model from the TopBar.
+                            text = "amber",
+                            // .meta = JetBrains Mono machine-fact style; wordmark is 700 + accent.
+                            style = LocalAmberType.current.meta.copy(
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                             ),
-                            color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.ink,
+                            color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent,
                             maxLines = 1,
                         )
                         if (settings.displaySetting.showDateBelowName) {

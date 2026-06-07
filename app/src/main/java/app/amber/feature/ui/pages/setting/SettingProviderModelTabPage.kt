@@ -76,6 +76,7 @@ import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
 import app.amber.feature.ui.hooks.useEditState
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
@@ -529,8 +530,9 @@ private fun ModelPicker(
                                     modifier = Modifier.weight(1f),
                                 ) {
                                     Text(
+                                        // Graphite §3: a model id is a machine-fact → MONO.
                                         text = it.modelId,
-                                        style = MaterialTheme.typography.titleSmall,
+                                        style = LocalAmberType.current.meta,
                                     )
 
                                     Row(
@@ -592,7 +594,8 @@ private fun ModelPicker(
         badge = {
             if (models.isNotEmpty()) {
                 Badge {
-                    Text(models.size.toString())
+                    // Graphite §3: available-model count is a machine-fact → MONO.
+                    Text(models.size.toString(), style = LocalAmberType.current.meta)
                 }
             }
         }

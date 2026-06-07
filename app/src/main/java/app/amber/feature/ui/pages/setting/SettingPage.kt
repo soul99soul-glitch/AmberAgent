@@ -58,6 +58,7 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.isNotConfigured
 import app.amber.core.files.FilesManager
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.Select
@@ -70,6 +71,7 @@ import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.hooks.rememberColorMode
 import app.amber.feature.ui.theme.ColorMode
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -129,9 +131,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     ColorMode.LIGHT -> stringResource(R.string.setting_page_color_mode_light)
                     ColorMode.DARK -> stringResource(R.string.setting_page_color_mode_dark)
                 }
+                SectionLabel(
+                    text = stringResource(R.string.setting_page_general_settings),
+                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
+                )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
-                    title = { Text(stringResource(R.string.setting_page_general_settings)) },
                     colors = settingListColors,
                 ) {
                     item(
@@ -171,9 +176,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("agentRuntimeSettings") {
+                SectionLabel(
+                    text = stringResource(R.string.setting_page_agent_runtime),
+                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
+                )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
-                    title = { Text(stringResource(R.string.setting_page_agent_runtime)) },
                     colors = settingListColors,
                 ) {
                     item(
@@ -216,9 +224,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("modelServices") {
+                SectionLabel(
+                    text = stringResource(R.string.setting_page_model_and_services),
+                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
+                )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
-                    title = { Text(stringResource(R.string.setting_page_model_and_services)) },
                     colors = settingListColors,
                 ) {
                     item(
@@ -252,9 +263,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 val storageState by produceState(-1 to 0L) {
                     value = filesManager.countChatFiles()
                 }
+                SectionLabel(
+                    text = stringResource(R.string.setting_page_data_settings),
+                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
+                )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
-                    title = { Text(stringResource(R.string.setting_page_data_settings)) },
                     colors = settingListColors,
                 ) {
                     item(
@@ -270,12 +284,14 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                             if (storageState.first == -1) {
                                 Text(stringResource(R.string.calculating))
                             } else {
+                                // Machine-fact (file count + size) → mono (design §3).
                                 Text(
                                     stringResource(
                                         R.string.setting_page_chat_storage_desc,
                                         storageState.first,
                                         storageState.second / 1024 / 1024.0
-                                    )
+                                    ),
+                                    style = LocalAmberType.current.meta,
                                 )
                             }
                         },

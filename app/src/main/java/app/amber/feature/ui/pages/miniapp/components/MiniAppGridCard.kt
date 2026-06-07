@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +32,10 @@ import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Pin
 import me.rerere.hugeicons.stroke.PinOff
 import app.amber.agent.data.db.entity.MiniAppEntity
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -48,16 +50,17 @@ fun MiniAppGridCard(
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
-    Surface(
+    AmberCard(
         modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { menuExpanded = true },
             ),
-        shape = MaterialTheme.shapes.small,
-        tonalElevation = 1.dp,
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -67,10 +70,11 @@ fun MiniAppGridCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(app.iconEmoji ?: "▣", style = MaterialTheme.typography.titleMedium)
+                Text(app.iconEmoji ?: "▣", style = type.sessionTitle)
                 Text(
                     text = app.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = type.sessionTitle,
+                    color = workspace.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -80,7 +84,7 @@ fun MiniAppGridCard(
                         imageVector = HugeIcons.Pin,
                         contentDescription = "已置顶",
                         modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = tokens.accent,
                     )
                 }
             }
@@ -90,8 +94,8 @@ fun MiniAppGridCard(
             ) {
                 Text(
                     text = app.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = type.secondary,
+                    color = workspace.muted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -106,7 +110,7 @@ fun MiniAppGridCard(
                         imageVector = HugeIcons.MoreVertical,
                         contentDescription = "更多操作",
                         modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = workspace.muted,
                     )
                 }
                 DropdownMenu(

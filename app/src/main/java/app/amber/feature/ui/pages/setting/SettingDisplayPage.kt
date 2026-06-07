@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -51,6 +53,7 @@ import app.amber.agent.LaunchStartMode
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
 import app.amber.agent.migrateLaunchStartMode
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.CardGroup
@@ -63,7 +66,6 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberSharedPreferenceBoolean
 import app.amber.feature.ui.hooks.rememberSharedPreferenceString
-import app.amber.feature.ui.pages.chat.ChatThemeChoice
 import app.amber.feature.ui.components.ui.IntLabel
 import app.amber.feature.ui.components.ui.NotionSlider
 import app.amber.feature.ui.components.ui.PercentLabel
@@ -125,73 +127,6 @@ private fun <T> WorkspaceSegmentedChoice(
 }
 
 @Composable
-private fun ChatThemeChoiceCard(
-    choice: ChatThemeChoice,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val theme = choice.instance
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .width(128.dp)
-            .height(86.dp),
-        shape = RoundedCornerShape(18.dp),
-        color = theme.bg,
-        contentColor = theme.ink,
-        border = BorderStroke(
-            width = if (selected) 2.dp else 1.dp,
-            color = if (selected) theme.accent else theme.hair,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(theme.accent),
-                )
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(theme.userBubble)
-                        .border(1.dp, theme.hair, androidx.compose.foundation.shape.CircleShape),
-                )
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(theme.modelLogoBg)
-                        .border(1.dp, theme.hair, androidx.compose.foundation.shape.CircleShape),
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = choice.displayName,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = theme.ink,
-                    maxLines = 1,
-                )
-                Text(
-                    text = if (theme.isDark) "深色" else "浅色",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = theme.inkSoft,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
@@ -239,13 +174,9 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         color = workspace.faint,
                         modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
                     )
-                    val darkMode = LocalDarkMode.current
-                    val themeOptions = remember(darkMode) {
-                        ChatThemeChoice.choicesFor(darkMode)
-                    }
-                    val currentTheme = remember(displaySetting.chatThemeChoice, darkMode) {
-                        ChatThemeChoice.resolve(displaySetting.chatThemeChoice, darkMode)
-                    }
+                    // Graphite (D2/D3): base family (Warm/Sage) + independent accent. Light/dark
+                    // follows the global color mode; the 9 legacy themes are replaced.
+                    val baseFamily = displaySetting.amberBaseFamily
                     ListItem(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -257,39 +188,64 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     bottomEnd = 2.dp
                                 )
                             ),
-                        headlineContent = { Text("聊天主题") },
+                        headlineContent = { Text("色系") },
                         supportingContent = {
                             Column(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    if (darkMode) {
-                                        "深色主题; 横向滑动查看更多"
-                                    } else {
-                                        "浅色主题; 横向滑动查看更多"
-                                    }
-                                )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(90.dp)
-                                        .horizontalScroll(rememberScrollState())
-                                        .padding(vertical = 2.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    themeOptions.forEach { choice ->
-                                        ChatThemeChoiceCard(
-                                            choice = choice,
-                                            selected = choice == currentTheme,
-                                            onClick = {
-                                                updateDisplaySetting(
-                                                    displaySetting.copy(chatThemeChoice = choice.name)
-                                                )
-                                            },
+                                Text("Graphite 暖石墨基色；明暗跟随全局模式")
+                                WorkspaceSegmentedChoice(
+                                    options = listOf("WARM", "SAGE"),
+                                    selected = baseFamily,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onSelected = { fam ->
+                                        updateDisplaySetting(displaySetting.copy(amberBaseFamily = fam))
+                                    },
+                                    label = { fam ->
+                                        Text(
+                                            text = if (fam == "SAGE") "鼠尾草 Sage" else "暖 Warm",
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth(),
                                         )
-                                    }
+                                    },
+                                )
+                            }
+                        },
+                        colors = CustomColors.listItemColors,
+                    )
+                    ListItem(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(2.dp)),
+                        headlineContent = { Text("强调色") },
+                        supportingContent = {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                app.amber.feature.ui.theme.AmberAccents.forEach { acc ->
+                                    val hex = "#%06X".format(acc.hex.toArgb() and 0xFFFFFF)
+                                    val selected =
+                                        displaySetting.accentColor.equals(hex, ignoreCase = true)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(acc.hex)
+                                            .border(
+                                                width = if (selected) 2.dp else 1.dp,
+                                                color = if (selected) workspace.ink else workspace.hairline,
+                                                shape = androidx.compose.foundation.shape.CircleShape,
+                                            )
+                                            .clickable {
+                                                updateDisplaySetting(displaySetting.copy(accentColor = hex))
+                                            },
+                                    )
                                 }
                             }
                         },
@@ -334,7 +290,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
-                    title = { Text(stringResource(R.string.setting_page_general_settings)) },
+                    title = { SectionLabel(stringResource(R.string.setting_page_general_settings)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_launch_start_mode_title)) },
@@ -388,7 +344,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     CardGroup(
                         modifier = Modifier.padding(horizontal = 8.dp),
-                        title = { Text(stringResource(R.string.setting_page_message_display_settings)) },
+                        title = { SectionLabel(stringResource(R.string.setting_page_message_display_settings)) },
                     ) {
                         // V3: 聊天主题切换器已移到顶部 (替代旧 "Notion style" 项), 这里去除重复
                         item(
@@ -555,7 +511,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_code_display_settings)) },
+                    title = { SectionLabel(stringResource(R.string.setting_page_code_display_settings)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_wrap_title)) },
@@ -602,7 +558,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     CardGroup(
                         modifier = Modifier.padding(horizontal = 8.dp),
-                        title = { Text(stringResource(R.string.setting_page_interaction_notification_settings)) },
+                        title = { SectionLabel(stringResource(R.string.setting_page_interaction_notification_settings)) },
                     ) {
                         item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_title)) },
@@ -757,7 +713,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_tts_settings)) },
+                    title = { SectionLabel(stringResource(R.string.setting_page_tts_settings)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_tts_only_read_quoted_title)) },

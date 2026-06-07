@@ -58,8 +58,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -91,10 +93,10 @@ import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyInputMessage
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
-import me.rerere.hugeicons.stroke.MessageAdd01
 import app.amber.agent.R
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.runtime.SandboxActivityUiState
@@ -119,6 +121,11 @@ import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ai.ChatInput
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
+import app.amber.feature.ui.components.ai.TopModelMenu
+import app.amber.feature.ui.components.ds.BlinkingCursor
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -544,6 +551,8 @@ private fun ChatPageContent(
     // 强行变白，导致用户切到 Paper 看到的还是白底。
     val chatThemeForBg = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     val chatThemeBg = chatThemeForBg.bg
+    // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
+    var modelMenuOpen by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize().background(chatThemeBg)) {
         AssistantBackground(setting = setting)
         // V3 Whisper：空白态满强度 bloom；进入对话按设计稿"蓝光晕去掉 → 干净浅灰白"。
@@ -578,9 +587,9 @@ private fun ChatPageContent(
             animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
             label = "bloomFade",
         )
-        if (setting.getCurrentAssistant().background == null && bloomIntensity > 0.001f) {
-            WhisperBottomBloom(intensity = bloomIntensity)
-        }
+        // Graphite (D4): bottom ambient bloom removed — flat & hairline, no glow (anti-goals §1).
+        // `bloomTarget` / `bloomIntensity` above are now inert; cleaned up with the bloom machinery
+        // when the chat background is fully de-decorated.
         Scaffold(
             topBar = {
                 TopBar(
@@ -612,6 +621,8 @@ private fun ChatPageContent(
                     onUpdateTitle = {
                         vm.updateTitle(it)
                     },
+                    modelMenuOpen = modelMenuOpen,
+                    onToggleModelMenu = { modelMenuOpen = !modelMenuOpen },
                 )
             },
             bottomBar = {
@@ -918,15 +929,42 @@ private fun ChatPageContent(
                     val nick = setting.displaySetting.userNickname.trim()
                     val heroText = if (nick.isNotEmpty()) "Hi $nick，\n今天想聊点什么？" else "今天想聊点什么？"
                     val chatTheme = LocalChatTheme.current
-                    Text(
-                        text = heroText,
-                        color = chatTheme.ink.copy(alpha = if (loadingJob != null) 0.45f else 1f),
-                        fontSize = chatTheme.heroSize.sp,
-                        fontWeight = FontWeight(chatTheme.heroWeight),
-                        letterSpacing = chatTheme.heroLetter.sp,
-                        lineHeight = (chatTheme.heroSize * 1.4f).sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
+                    val amberTokens = LocalAmberTokens.current
+                    val amberType = LocalAmberType.current
+                    val heroDim = if (loadingJob != null) 0.45f else 1f
+                    // Graphite §6.2 Wordmark + §1: terminal wordmark replaces any gem/orb/halo
+                    // hero mark — `amber` in MONO 700 (ink) + an accent block BlinkingCursor,
+                    // then the existing restrained greeting beneath it.
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                text = "amber",
+                                style = amberType.meta.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 24.sp,
+                                    letterSpacing = (-0.5).sp,
+                                ),
+                                color = amberTokens.ink.copy(alpha = heroDim),
+                            )
+                            BlinkingCursor(
+                                modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
+                                width = 9.dp,
+                                height = 20.dp,
+                            )
+                        }
+                        Text(
+                            text = heroText,
+                            color = chatTheme.ink.copy(alpha = heroDim),
+                            fontSize = chatTheme.heroSize.sp,
+                            fontWeight = FontWeight(chatTheme.heroWeight),
+                            letterSpacing = chatTheme.heroLetter.sp,
+                            lineHeight = (chatTheme.heroSize * 1.4f).sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
                     if (loadingJob != null) {
                         // 上叠 spinner 给 "loading && empty" 中间态一个反馈
                         androidx.compose.material3.CircularProgressIndicator(
@@ -940,6 +978,29 @@ private fun ChatPageContent(
                 }
             }
             }  // end if (!initialized) else branch (ChatList + hero)
+
+            // Graphite TopModelMenu —— 从 header 正下方 (innerPadding.top) 卷帘展开、覆盖内容区
+            // 的服务商/模型手风琴下拉（替代旧 ModalBottomSheet）。
+            val chatModelIdForMenu = setting.getCurrentAssistant().chatModelId ?: setting.chatModelId
+            val chatProvidersForMenu = setting.providers.filter { p ->
+                p.enabled && p.models.any { it.type == ModelType.CHAT }
+            }
+            val currentProviderIdForMenu = chatProvidersForMenu.firstOrNull { p ->
+                p.models.any { it.id == chatModelIdForMenu }
+            }?.id
+            TopModelMenu(
+                open = modelMenuOpen,
+                providers = chatProvidersForMenu,
+                modelType = ModelType.CHAT,
+                currentProviderId = currentProviderIdForMenu,
+                currentModelId = chatModelIdForMenu,
+                onSelect = { model ->
+                    vm.setChatModel(assistant = setting.getCurrentAssistant(), model = model)
+                    modelMenuOpen = false
+                },
+                onClose = { modelMenuOpen = false },
+                modifier = Modifier.padding(top = innerPadding.calculateTopPadding()),
+            )
             }  // end outer Box (fillMaxSize)
         }
 
@@ -1419,6 +1480,8 @@ private fun TopBar(
     onUpdateChatModel: (Model) -> Unit,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateTitle: (String) -> Unit,
+    modelMenuOpen: Boolean,
+    onToggleModelMenu: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     // V3 phone-screen.jsx header 没有 surface —— 直接坐在 bloom 之上
@@ -1430,10 +1493,13 @@ private fun TopBar(
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars),
     ) {
+        // Graphite §6.2 two-line ChatHeader: title block over the mono model-id trigger,
+        // closed by a bottom hairline (line token).
+        Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(56.dp)
                 .padding(start = 20.dp, end = 20.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -1462,16 +1528,67 @@ private fun TopBar(
                         }
                     }
                 }
-                ModelSelector(
-                    modelId = settings.getCurrentAssistant().chatModelId ?: settings.chatModelId,
-                    providers = settings.providers,
-                    type = ModelType.CHAT,
-                    minimalText = true,
+                // Graphite §6.2 ChatHeader title block: line 1 = bold session title (sans),
+                // line 2 = the model-id row that triggers the model menu (ModelSelector owns
+                // the picker + its onClick/popup — preserved as-is).
+                Column(
                     modifier = Modifier.weight(1f, fill = false),
-                    currentAssistant = settings.getCurrentAssistant(),
-                    onUpdateAssistant = onUpdateAssistant,
-                    onSelect = onUpdateChatModel,
-                )
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    val amberTokens = LocalAmberTokens.current
+                    val amberType = LocalAmberType.current
+                    val sessionTitle = conversation.title.ifBlank { "新会话" }
+                    Text(
+                        text = sessionTitle,
+                        style = amberType.sessionTitle,
+                        color = amberTokens.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        // 左内距 12→4，与下方 model 左对齐、整组向左靠
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                    // Graphite §6.2 ChatHeader model-id trigger: mono model-id + a chevron that
+                    // rotates 180° while the TopModelMenu dropdown is open. Tapping toggles it
+                    // (the dropdown itself is rendered in the content area, anchored under header).
+                    val chevronRotation by animateFloatAsState(
+                        targetValue = if (modelMenuOpen) 180f else 0f,
+                        animationSpec = tween(durationMillis = 280),
+                        label = "modelMenuChevron",
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .clickable { onToggleModelMenu() }
+                            // 上下内距 3 收紧标题↔model；左内距 12→4，整组向左靠
+                            .padding(start = 4.dp, top = 3.dp, end = 12.dp, bottom = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = currentChatModel?.modelId
+                                ?: stringResource(R.string.model_list_select_model),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // 字号收到 10.5：进一步弱化 model、强化标题层级
+                            style = amberType.meta.copy(
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Medium,
+                            ),
+                            // ink3↔ink2 中点：ink3 偏淡、ink2 偏深，取中间的暖中灰
+                            color = lerp(amberTokens.ink3, amberTokens.ink2, 0.5f),
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Icon(
+                            imageVector = HugeIcons.ArrowDown01,
+                            contentDescription = null,
+                            tint = amberTokens.ink3,
+                            // 箭头 14→13，陪着字号一起缩
+                            modifier = Modifier
+                                .size(13.dp)
+                                .rotate(chevronRotation),
+                        )
+                    }
+                }
             }
 
             Row(
@@ -1540,14 +1657,12 @@ private fun TopBar(
                         .clickable { onNewChat() },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = HugeIcons.MessageAdd01,
-                        contentDescription = "New Message",
-                        tint = LocalChatTheme.current.ink,
-                        modifier = Modifier.size(26.dp),
-                    )
+                    // 极简 + 标记，与左侧抽象汉堡同一套 1.6dp 细线语言
+                    AmberHeaderPlus()
                 }
             }
+        }
+        Hairline()
         }
     }
 }
@@ -1562,6 +1677,30 @@ private fun AmberHeaderLine(width: androidx.compose.ui.unit.Dp) {
             .height(1.6.dp)
             .background(LocalChatTheme.current.ink, RoundedCornerShape(1.dp))
     )
+}
+
+/**
+ * “新会话”极简标记：用与 [AmberHeaderLine] 完全相同的 1.6dp 圆角 ink 细条，交叉成一个 +。
+ * 左侧汉堡是「三条横线」、右侧是「两条交叉线」，同一套抽象细线语言 —— 取代之前具象的
+ * HugeIcons 描线图标（用户反馈两者"不像一个界面里的元素"）。
+ */
+@Composable
+private fun AmberHeaderPlus(arm: androidx.compose.ui.unit.Dp = 18.dp) {
+    val ink = LocalChatTheme.current.ink
+    Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .width(arm)
+                .height(1.6.dp)
+                .background(ink, RoundedCornerShape(1.dp))
+        )
+        Box(
+            modifier = Modifier
+                .width(1.6.dp)
+                .height(arm)
+                .background(ink, RoundedCornerShape(1.dp))
+        )
+    }
 }
 
 // V3 Whisper 空白态本应为纯净留白 + 底部光晕；之前的 EmptyChatHero（宝石 + 问候）

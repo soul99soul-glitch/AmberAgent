@@ -21,7 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -53,7 +53,12 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.workspaceBorder
+import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
 import app.amber.core.utils.toLocalDateTime
@@ -67,8 +72,10 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     var showDeleteAllDialog by remember { mutableStateOf(false) }
 
     val conversations = vm.conversations.collectAsLazyPagingItems()
+    val workspace = workspaceColors()
 
     Scaffold(
+        containerColor = workspace.canvas,
         topBar = {
             TopAppBar(
                 title = {
@@ -77,6 +84,7 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                 navigationIcon = {
                     BackButton()
                 },
+                colors = CustomColors.topBarColors,
                 actions = {
                     IconButton(
                         onClick = {
@@ -194,6 +202,7 @@ private fun SwipeableConversationItem(
         }
     }
 
+    val workspace = workspaceColors()
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
@@ -201,8 +210,8 @@ private fun SwipeableConversationItem(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        MaterialTheme.colorScheme.errorContainer,
-                        RoundedCornerShape(25)
+                        workspace.redContainer,
+                        RoundedCornerShape(8.dp)
                     )
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd
@@ -210,7 +219,7 @@ private fun SwipeableConversationItem(
                 Icon(
                     imageVector = HugeIcons.Delete01,
                     contentDescription = stringResource(R.string.history_page_delete),
-                    tint = MaterialTheme.colorScheme.onErrorContainer
+                    tint = workspace.red
                 )
             }
         },
@@ -232,13 +241,17 @@ private fun ConversationItem(
     onTogglePin: () -> Unit = {},
     onClick: () -> Unit = {},
 ) {
+    val workspace = workspaceColors()
+    val accent = LocalAmberTokens.current.accent
     Surface(
         onClick = onClick,
-        tonalElevation = 2.dp,
-        shape = RoundedCornerShape(25),
+        color = workspace.paper,
+        border = workspaceBorder(),
+        shape = RoundedCornerShape(8.dp),
         modifier = modifier
     ) {
         ListItem(
+            colors = ListItemDefaults.colors(containerColor = workspace.paper),
             headlineContent = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -248,21 +261,28 @@ private fun ConversationItem(
                         Icon(
                             imageVector = HugeIcons.Pin,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = accent,
                             modifier = Modifier.size(16.dp),
                         )
                     }
+                    // Graphite §3: session title is human prose → SANS (sessionTitle), full ink.
                     Text(
                         text = conversation.title.ifBlank { stringResource(R.string.history_page_new_conversation) }
                             .trim(),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = LocalAmberType.current.sessionTitle,
+                        color = workspace.ink,
                     )
                 }
             },
             supportingContent = {
-                Text(conversation.createAt.toLocalDateTime())
+                // Graphite §3: timestamp is a machine-fact → MONO (meta), muted ink.
+                Text(
+                    text = conversation.createAt.toLocalDateTime(),
+                    style = LocalAmberType.current.meta,
+                    color = workspace.muted,
+                )
             },
             trailingContent = {
                 IconButton(
@@ -272,7 +292,8 @@ private fun ConversationItem(
                         if (conversation.isPinned) HugeIcons.PinOff else HugeIcons.Pin,
                         contentDescription = if (conversation.isPinned) stringResource(R.string.history_page_unpin) else stringResource(
                             R.string.history_page_pin
-                        )
+                        ),
+                        tint = if (conversation.isPinned) accent else workspace.muted,
                     )
                 }
             }

@@ -16,9 +16,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -37,7 +37,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -48,6 +47,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Refresh01
@@ -114,22 +115,24 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
             if (loading) {
                 DotLoading(size = 10.dp)
             } else {
+                // §6.2 AskUser card: accent "?" indicator, flat & hairline (no glow).
                 Icon(
                     imageVector = HugeIcons.BubbleChatQuestion,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = LocalAmberTokens.current.accent,
                 )
             }
         },
         label = {
+            // §6.2 heading "询问 N 个问题" — human text → sans, accent-colored, weight 600.
             Text(
                 text = if (questions.size <= 1) firstQuestion else stringResource(
                     R.string.chat_message_tool_ask_questions,
                     questions.size
                 ),
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.primary,
+                style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                color = LocalAmberTokens.current.accent,
                 modifier = Modifier.shimmer(isLoading = loading),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -142,16 +145,18 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
             ) {
                 questions.forEachIndexed { index, q ->
                     if (index > 0) {
+                        // §4 hairline divider between question blocks.
                         HorizontalDivider(
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
-                            thickness = 0.5.dp,
+                            color = LocalAmberTokens.current.line,
+                            thickness = 1.dp,
                         )
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Question text is human-readable → sans body, ink.
                         Text(
                             text = q.question,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.onSurface,
+                            style = LocalAmberType.current.body,
+                            color = LocalAmberTokens.current.ink,
                         )
 
                         if (isPending && onToolAnswer != null) {
@@ -209,27 +214,29 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                                             }
                                         }
                                     }
+                                    // §6.1 .field: surface fill + hairline; focus lifts border to accent.
+                                    val fieldTokens = LocalAmberTokens.current
                                     OutlinedTextField(
                                         value = answers[q.id] ?: "",
                                         onValueChange = { answers[q.id] = it },
                                         modifier = Modifier.fillMaxWidth(),
-                                        textStyle = MaterialTheme.typography.bodyMedium,
+                                        textStyle = LocalAmberType.current.body,
                                         placeholder = {
                                             Text(
                                                 text = "在此输入回答…",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                                style = LocalAmberType.current.body,
+                                                color = fieldTokens.ink4,
                                             )
                                         },
                                         singleLine = false,
                                         minLines = 2,
                                         maxLines = 6,
-                                        shape = RoundedCornerShape(12.dp),
+                                        shape = RoundedCornerShape(14.dp),
                                         colors = OutlinedTextFieldDefaults.colors(
-                                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                                            unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
-                                            focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                            unfocusedBorderColor = fieldTokens.line,
+                                            focusedBorderColor = fieldTokens.accent,
+                                            unfocusedContainerColor = fieldTokens.surface,
+                                            focusedContainerColor = fieldTokens.raised,
                                         ),
                                     )
                                 }
@@ -244,14 +251,13 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                                     ?: answeredState.answer
                                 else -> answeredState.answer
                             }
+                            // Answered state: flat surface-2 inset + hairline (§4, §7).
+                            val answeredTokens = LocalAmberTokens.current
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                                border = BorderStroke(
-                                    0.5.dp,
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                ),
+                                color = answeredTokens.surface2,
+                                border = BorderStroke(1.dp, answeredTokens.line),
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
@@ -259,20 +265,23 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                        shape = RoundedCornerShape(5.dp),
+                                        // Faint accent inset derived from the accent token (§7.2).
+                                        color = answeredTokens.accent.copy(alpha = 0.12f),
                                     ) {
+                                        // "A" is a fixed marker glyph → mono (machine-fact), accent.
                                         Text(
                                             text = "A",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.primary,
+                                            style = LocalAmberType.current.eyebrow,
+                                            color = answeredTokens.accent,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                         )
                                     }
+                                    // Answer is human text → sans body, ink.
                                     Text(
                                         text = answerText,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
+                                        style = LocalAmberType.current.body,
+                                        color = answeredTokens.ink,
                                         modifier = Modifier.weight(1f),
                                     )
                                 }
@@ -282,6 +291,7 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                 }
 
                 if (isPending && onToolAnswer != null) {
+                    val actionTokens = LocalAmberTokens.current
                     val anyAnswered = answers.values.any { it.isNotBlank() } ||
                         multiAnswers.values.any { it.isNotEmpty() }
                     Row(
@@ -290,9 +300,10 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (anyAnswered) {
+                            // Secondary "清空" affordance: faint ink, flat.
                             Row(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(999.dp))
                                     .clickable {
                                         answers.clear()
                                         multiAnswers.clear()
@@ -305,12 +316,12 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                                     imageVector = HugeIcons.Refresh01,
                                     contentDescription = null,
                                     modifier = Modifier.size(12.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                    tint = actionTokens.ink3,
                                 )
                                 Text(
                                     text = "清空",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    style = LocalAmberType.current.secondary,
+                                    color = actionTokens.ink3,
                                 )
                             }
                             Spacer(modifier = Modifier.width(8.dp))
@@ -340,7 +351,12 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                                     else -> !answers[q.id].isNullOrBlank()
                                 }
                             },
-                            shape = RoundedCornerShape(20.dp),
+                            // Primary action → §6.1 .btn-accent: accent fill + accent-ink, pill.
+                            shape = RoundedCornerShape(999.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = actionTokens.accent,
+                                contentColor = actionTokens.accentInk,
+                            ),
                             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
                         ) {
                             Icon(
@@ -350,7 +366,7 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                             )
                             Text(
                                 text = stringResource(R.string.chat_message_tool_submit),
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
                                 modifier = Modifier.padding(start = 6.dp),
                             )
                         }
@@ -367,23 +383,17 @@ private fun AskOptionChip(
     label: String,
     onClick: () -> Unit,
 ) {
-    // V3 claude design spec: 999 圆角胶囊 / 白底 + 6% 墨灰边 + 极淡 1px 2px 接触阴影
-    // 13.5sp ink + 字距 0.2 + padding 8/14
-    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    val shape = androidx.compose.foundation.shape.CircleShape
+    // §6.2 AskUser pill: surface-2 fill + 1dp hairline + fully-round; selected = accent.
+    // Flat & hairline first (§7): no shadow. Option label is human text → sans.
+    val tokens = LocalAmberTokens.current
     Surface(
         onClick = onClick,
-        shape = shape,
-        color = if (selected) chatTheme.accent else chatTheme.surface,
-        contentColor = if (selected) chatTheme.onAccent else chatTheme.ink,
-        border = if (selected) {
-            null
-        } else {
-            BorderStroke(width = 1.dp, color = chatTheme.surfaceEdge)
-        },
+        shape = RoundedCornerShape(999.dp),
+        color = if (selected) tokens.accent else tokens.surface2,
+        contentColor = if (selected) tokens.accentInk else tokens.ink2,
+        border = if (selected) null else BorderStroke(width = 1.dp, color = tokens.line),
         tonalElevation = 0.dp,
-        // V3: 选中态去掉强阴影，未选中保留极淡 1dp 接触阴影
-        shadowElevation = if (selected) 0.dp else 1.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -399,11 +409,7 @@ private fun AskOptionChip(
             }
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    // V3 spec: 13.5sp + 字距 0.2 + 行高 1.3
-                    fontSize = 13.5.sp,
-                    letterSpacing = 0.2.sp,
-                    lineHeight = 17.5.sp,
+                style = LocalAmberType.current.secondary.copy(
                     fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                 ),
             )

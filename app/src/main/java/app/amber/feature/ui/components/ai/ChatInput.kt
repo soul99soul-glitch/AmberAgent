@@ -9,8 +9,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.expandHorizontally
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,11 +20,13 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -42,7 +42,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -68,8 +67,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -89,8 +86,6 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -137,6 +132,7 @@ import app.amber.feature.ui.components.ui.permission.PermissionManager
 import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.core.utils.ChatSendTransitionTracker
@@ -151,6 +147,19 @@ private const val PostSendKeyboardHideDelayMillis = 96L
 enum class ExpandState {
     Collapsed, Files,
 }
+
+/**
+ * Pure toggle logic for the composer attach control (`+`→`×`/capsule): tapping a target toggles
+ * it open, tapping the open one collapses it. Extracted for JVM testing (see ComposerLogicTest).
+ */
+fun nextExpandState(current: ExpandState, target: ExpandState): ExpandState =
+    if (current == target) ExpandState.Collapsed else target
+
+/**
+ * The send button is active (fills accent / enabled) when there is draft text, and stays enabled
+ * while streaming so it can show "stop". Pure + testable (see ComposerLogicTest) — the "draft 亮起".
+ */
+fun composerSendEnabled(isEmpty: Boolean, loading: Boolean): Boolean = loading || !isEmpty
 
 @Composable
 fun ChatInput(
@@ -186,12 +195,6 @@ fun ChatInput(
     val assistant = settings.getCurrentAssistant()
     val coroutineScope = rememberCoroutineScope()
     val workspace = workspaceColors()
-    val hazeTintColor = workspace.paper
-    // SendOrb 自身 76dp, 顶着 Row 实际高度 = max(60, 76) = 76dp.
-    // corner 38dp = 76/2 = 单行/空状态时完美半圆胶囊.
-    // 多行扩高 N>76dp 时, 38dp < N/2, 两端不再完美半圆 (长方圆角). 这正是用户要的.
-    val composerShape = RoundedCornerShape(38.dp)
-    val useComposerBlur = false
     val suggestionFillPulse = remember(conversation.id) { Animatable(0f) }
 
     LaunchedEffect(conversation.id, suggestionFillPulseKey) {
@@ -298,7 +301,7 @@ fun ChatInput(
     }
 
     fun expandToggle(type: ExpandState) {
-        if (expand == type) {
+        if (nextExpandState(expand, type) == ExpandState.Collapsed) {
             dismissExpand()
         } else {
             expand = type
@@ -547,19 +550,22 @@ fun ChatInput(
         )
     }
 
+    val tokens = LocalAmberTokens.current
+    // Graphite §7.4 "immersive bottom": the composer sits on a full-bleed tray = `surface`
+    // fill that continues to the screen edges (and under the nav inset). Flat — no shadow,
+    // and no top divider: the surface/bg color difference alone separates it from content.
     Surface(
-        color = Color.Transparent,
+        color = tokens.surface,
     ) {
         Column(
             modifier = modifier
                 .imePadding()
                 .navigationBarsPadding()
-                // 6dp breathing room below the gesture/nav inset — keeps the
-                // 22dp rounded corners clear of devices with aggressive screen
-                // rounding so the card never looks "bitten" at the bottom.
+                // breathing room below the gesture/nav inset
                 .padding(bottom = 6.dp)
                 // 调整: composer 左右 8→12dp 离屏幕边线稍远一些 (不再"贴边")
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 12.dp)
+                .padding(top = 10.dp),
             // spacedBy 控制 SandboxPeekBar 与 composer pill 之间的间距。
             // 设计稿是预览卡紧贴输入框，2dp 足够留一条 hair 缝
             verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -576,130 +582,67 @@ fun ChatInput(
             }
 
             val pulseFraction = suggestionFillPulse.value
-            // V3 review P3 #8: suggestion pulse 用 chatTheme.accent (跟 4 主题色协调)
-            val chatThemeForPulse = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-            val composerBorderColor = lerp(
-                start = workspace.hairline,
-                stop = chatThemeForPulse.accent.copy(alpha = 0.42f),
+            val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+            // Graphite §6.2 / §7.4 composer: three separate `surface-2` surfaces on the tray,
+            // separated by gaps — circular [+] · pill input · circular send. Flat & hairline
+            // only (no shadow / glow on any of them). The suggestion-fill pulse now tints the
+            // input pill's hairline border (resting = `line`).
+            val attachmentsExpanded = expand == ExpandState.Files
+            val hideComposerPlaceholder = attachmentsExpanded || keepPlaceholderHiddenDuringAttachmentExit
+            val addRotation by animateFloatAsState(
+                targetValue = if (attachmentsExpanded) 45f else 0f,
+                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                label = "composerAttachmentToggleRotation",
+            )
+            val pillBorder = lerp(
+                start = tokens.line,
+                stop = chatTheme.accent.copy(alpha = 0.42f),
                 fraction = pulseFraction,
             )
-            val composerContainerColor = if (useComposerBlur) {
-                Color.Transparent
-            } else {
-                lerp(
-                    start = hazeTintColor,
-                    stop = chatThemeForPulse.accentSoft,
-                    fraction = pulseFraction * 0.22f,
-                )
-            }
-
-            // V3 composer pill 阴影策略：
-            //   浅色主题 (Whisper/Plain/Paper)：Material shadow 12dp + chatTheme.composerShadow
-            //     的墨灰/暖棕投影，在浅底上"浮"出 pill 感
-            //   深色主题 (Midnight)：Material shadow ambient/spot 改 Color.Black 强制黑投影，
-            //     避免 default 白色 shadow 在 Midnight #0B0E14 上变成"白晕". border 调成顶轻底重
-            //     (5% 白 → 16% 白) 模拟 pill "落"在背景上 (下沉感) 而非顶部 rim light.
-            val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-            val composerFill = chatTheme.surface
-            val composerBorder: androidx.compose.ui.graphics.Brush = if (chatTheme.isDark) {
-                androidx.compose.ui.graphics.Brush.verticalGradient(
-                    listOf(
-                        Color(0x0DE8EAEF),  // 顶 ~5% 白 (细)
-                        Color(0x29E8EAEF),  // 底 ~16% 白 (粗) - 落地感
-                    )
-                )
-            } else {
-                androidx.compose.ui.graphics.SolidColor(chatTheme.surfaceEdge)
-            }
-            Surface(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // Bug fix: 之前 fixed height(68.dp) 把 TextField maxHeightInLines=5 给框死了,
-                    // 用户输入多行时被遮挡. 改 heightIn(min=60dp) 让 composer 跟随 TextField 高度扩展.
-                    // 60dp 比之前 68dp 略矮一些, 单行胶囊看着不那么"高大".
-                    .heightIn(min = 60.dp)
-                    .shadow(
-                        elevation = 12.dp,
-                        shape = composerShape,
-                        clip = false,
-                        // 深色模式下 ambient/spot 必须强制 Color.Black, 否则 default 白色 shadow
-                        // 在 Midnight 上扩散成"白晕"看着像反向高光. 浅色用 chatTheme.composerShadow
-                        // (墨灰/暖棕) 保持原效果.
-                        ambientColor = if (chatTheme.isDark) Color.Black else chatTheme.composerShadow,
-                        spotColor = if (chatTheme.isDark) Color.Black else chatTheme.composerShadow,
-                    )
-                    .clip(composerShape)
-                    .then(
-                        if (useComposerBlur) Modifier.hazeEffect(
-                            state = hazeState,
-                            style = HazeMaterials.ultraThin(containerColor = hazeTintColor)
-                        )
-                        else Modifier
-                    ),
-                shape = composerShape,
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-                border = BorderStroke(1.dp, composerBorder),
-                color = if (useComposerBlur) Color.Transparent else composerFill,
+                    .heightIn(min = 48.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
+                // ── attach chip — `surface-2` circle that morphs into the [× · image · file]
+                //    capsule (animated width via animateContentSize; + rotates to ×).
                 Row(
                     modifier = Modifier
-                        // Bug fix: fillMaxSize() 在 Surface heightIn(min=68dp) 无 max 约束时会
-                        // 反过来撑爆 Surface 到屏幕最大. 改 fillMaxWidth() 高度跟随子内容.
-                        .fillMaxWidth()
-                        // Bug fix: 用户反复反馈光标位置仍偏右. 继续压缩:
-                        //   Row start 12 → 8dp / Row spacedBy 4 → 0dp / TextField offset(-8dp)
-                        //   抵消 M3 TextField 内部 fixed 16dp content padding.
-                        // (TextField 用 absoluteOffset 视觉左移, 不影响布局尺寸, 不会跟旁边元素重叠.)
-                        .padding(start = 8.dp, end = 10.dp),
+                        .height(46.dp)
+                        .clip(CircleShape)
+                        .background(tokens.surface2)
+                        .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
-                    val attachmentsExpanded = expand == ExpandState.Files
-                    val hideComposerPlaceholder = attachmentsExpanded || keepPlaceholderHiddenDuringAttachmentExit
-                    val addRotation by animateFloatAsState(
-                        targetValue = if (attachmentsExpanded) 45f else 0f,
-                        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                        label = "composerAttachmentToggleRotation",
-                    )
-
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
                             .clickable { expandToggle(ExpandState.Files) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.Add01,
-                                contentDescription = stringResource(R.string.more_options),
-                                tint = if (attachmentsExpanded) chatTheme.accent else chatTheme.ink,
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .graphicsLayer {
-                                        rotationZ = addRotation
-                                    },
-                            )
-                        }
+                        Icon(
+                            imageVector = HugeIcons.Add01,
+                            contentDescription = stringResource(R.string.more_options),
+                            // 与发送按钮图标同色（浅灰 ink3），不再用更深的 ink2
+                            tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink3,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer {
+                                    rotationZ = addRotation
+                                },
+                        )
                     }
 
                     AnimatedVisibility(
                         visible = attachmentsExpanded,
-                        enter = expandHorizontally(
-                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                            expandFrom = Alignment.Start,
-                        ) + fadeIn(animationSpec = tween(160)) + scaleIn(
+                        enter = fadeIn(animationSpec = tween(160)) + scaleIn(
                             initialScale = 0.92f,
                             animationSpec = tween(220, easing = FastOutSlowInEasing),
                         ),
-                        exit = shrinkHorizontally(
-                            animationSpec = tween(180, easing = FastOutSlowInEasing),
-                            shrinkTowards = Alignment.Start,
-                        ) + fadeOut(animationSpec = tween(120)) + scaleOut(
+                        exit = fadeOut(animationSpec = tween(120)) + scaleOut(
                             targetScale = 0.94f,
                             animationSpec = tween(160, easing = FastOutSlowInEasing),
                         ),
@@ -708,81 +651,99 @@ fun ChatInput(
                             onTakePic = onLaunchCamera,
                             onPickImage = { imagePickerLauncher.launch("image/*") },
                             onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
-                            modifier = Modifier.padding(start = 2.dp, end = 4.dp),
+                            modifier = Modifier.padding(end = 4.dp),
                         )
                     }
+                }
 
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(20.dp)
-                            .background(chatTheme.hair),
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .absoluteOffset(x = (-8).dp),
-                    ) {
+                // ── center input pill — `surface-2`, 26dp radius, 1dp hairline, flat.
+                val pillShape = RoundedCornerShape(26.dp)
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 46.dp)
+                        .clip(pillShape)
+                        .background(tokens.surface2)
+                        .border(BorderStroke(1.dp, pillBorder), pillShape)
+                        // 26dp 大圆角下，文字左内距给足 18dp 才不贴边；右侧留 16dp 对称
+                        .padding(start = 18.dp, end = 16.dp),
+                    // 文字在药丸内垂直居中（TextField 取自然高度，多出的空隙上下均分）
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
                         TextInputRow(
                             state = state,
                             onSendMessage = { sendMessage() },
                             onUsageClick = { showUsageSheet = true },
                             onCompactContext = onCompactContext,
-                            // 用 absoluteOffset 把 TextField 整体视觉左移 8dp, 抵消 M3 TextField
-                            // 不可直接修改的 16dp leading content padding. 不影响 layout 尺寸,
-                            // 故不会跟 / 按钮 / send orb 重叠.
                             modifier = Modifier.fillMaxWidth(),
                             minimalChrome = true,
                             hidePlaceholder = hideComposerPlaceholder,
                             onUpdateAssistant = onUpdateAssistant,
                         )
                     }
+                }
 
-                    // V3: 用 Text("/") 字符替代 Canvas line, 跟 SlashCommandLeadingMark
-                    // (TextField leadingIcon 内的 "/" 字符) 用同一字体, 两个斜杠角度一致.
-                    // toggle 语义: 仅在文本为空 / 已 "/" 开头 (即 panel 已显示) 时 toggle.
-                    // 用户已输普通文本时点击 = no-op, 避免吞掉/污染用户内容 (review P2 #1 修复).
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .clickable {
-                                val cur = state.textContent.text.toString()
-                                when {
-                                    cur.isEmpty() -> state.setMessageText("/")
-                                    cur == "/" -> state.setMessageText("")  // 仅 toggle 关闭
-                                    cur.startsWith("/") -> {
-                                        // 已 "/" 开头 + 有查询字符 → 收起 panel, 保留用户输入 (去 "/")
-                                        state.setMessageText(cur.removePrefix("/"))
-                                    }
-                                    // 用户已输普通文本 → no-op (避免污染)
-                                }
+                if (loading && state.isEmpty()) {
+                    KeepScreenOn()
+                }
+                // Graphite §6.2 composer: a FLAT circular send button (no halo/glow/shadow).
+                // Fills with accent when there is a draft (!isEmpty); neutral surface2 when
+                // empty. Stop-state (loading & empty) keeps the cancel affordance like before.
+                // pressable only exposes onClick, but send needs both onClick (send) and
+                // onLongClick (send-without-answer) — so we drive press feedback (scale .975,
+                // design §5) from a shared MutableInteractionSource that also feeds
+                // combinedClickable, rather than stacking pressable + combinedClickable.
+                val sendEmpty = state.isEmpty()
+                val sendEnabled = composerSendEnabled(sendEmpty, loading)
+                val sendStopState = loading && sendEmpty
+                val sendFill by animateColorAsState(
+                    targetValue = if (sendEmpty && !loading) tokens.surface2 else tokens.accent,
+                    label = "sendButtonFill",
+                )
+                val sendIconTint by animateColorAsState(
+                    // 发送/停止图标落在 accent 实心圆上时一律用浅色。accentInk 在 sage-green 这类
+                    // "浅 accent" 上被 accentInkFor 定成近黑 → 箭头/停止 X 变黑（用户反馈）。发送键
+                    // 作为主操作按钮惯例是浅色字形，故固定白色（与其余 4 个 accent 的 accentInk=白
+                    // 一致）；空态仍用中性 ink3。
+                    targetValue = if (sendEmpty && !loading) tokens.ink3 else Color.White,
+                    label = "sendButtonIconTint",
+                )
+                val sendInteraction = remember { MutableInteractionSource() }
+                val sendPressed by sendInteraction.collectIsPressedAsState()
+                val sendScale by animateFloatAsState(
+                    targetValue = if (sendPressed) 0.975f else 1f,
+                    label = "sendButtonPress",
+                )
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = sendScale
+                            scaleY = sendScale
+                        }
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(sendFill)
+                        .combinedClickable(
+                            interactionSource = sendInteraction,
+                            indication = null,
+                            enabled = sendEnabled,
+                            onClick = {
+                                dismissExpand()
+                                sendMessage()
                             },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        androidx.compose.material3.Text(
-                            text = "/",
-                            fontSize = 22.sp,
-                            color = workspace.muted,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
-                    }
-
-                    if (loading && state.isEmpty()) {
-                        KeepScreenOn()
-                    }
-                    app.amber.feature.ui.pages.chat.SendOrb(
-                        isEmpty = state.isEmpty(),
-                        loading = loading,
-                        onClick = {
-                            dismissExpand()
-                            sendMessage()
-                        },
-                        onLongClick = {
-                            dismissExpand()
-                            sendMessageWithoutAnswer()
-                        },
+                            onLongClick = {
+                                dismissExpand()
+                                sendMessageWithoutAnswer()
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (sendStopState) HugeIcons.Cancel01 else HugeIcons.ArrowUp02,
+                        contentDescription = if (sendStopState) "stop" else "send",
+                        tint = sendIconTint,
+                        modifier = Modifier.size(22.dp),
                     )
                 }
             }

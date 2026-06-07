@@ -6,9 +6,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
@@ -215,24 +218,40 @@ internal fun MessagePartsBlock(
                     is UIMessagePart.Text -> {
                         MessageSelectionContainer {
                                 if (role == MessageRole.USER) {
-                                    // V3 Whisper user bubble: full capsule, neutral gray #F2F4F7,
-                                    // subtle rgba(15,20,25,0.06) 1px edge, no left stripe.
-                                    // chat1.md L549 final: borderRadius 999 + padding 10/18.
-                                    // V3: 长按弹 menu sheet（复制/重试/编辑/分享/...). 短按维持 edit 兼容旧行为.
+                                    // Graphite user bubble: userBubble fill + userBubbleEdge
+                                    // hairline, asymmetric corners (see shape below), no left
+                                    // stripe. 长按弹 menu sheet（复制/重试/编辑/分享/...); 短按维持
+                                    // edit 兼容旧行为.
                                     // DisableSelection 屏蔽 Android 系统的 text selection toolbar
                                     // (复制/全选/朗读/搜索) ——避免跟我们的 menu sheet 两个面板同时出现.
                                     androidx.compose.foundation.text.selection.DisableSelection {
-                                    // V3 修: CircleShape (radius = height/2) 多行时 radius 跟随高度暴涨,
-                                    // 让整个 bubble 变成大圆球 (user 报"修改小程序"长消息变球). 改用
-                                    // RoundedCornerShape 固定 19dp ≈ single-line 高度/2, 单行视觉仍是
-                                    // capsule, 多行只是高度增加 (圆角形状不变).
-                                    val userBubbleShape = androidx.compose.foundation.shape.RoundedCornerShape(19.dp)
+                                    // Graphite §6.2 "User bubble": userBg fill, userInk text,
+                                    // asymmetric radius 16/16/5/16 (topStart/topEnd/bottomEnd/
+                                    // bottomStart), right-aligned, max-width ~82% of available.
+                                    // The bottomEnd 5dp notch points the bubble back at the
+                                    // sender (right side); other corners stay 16dp.
+                                    val userBubbleShape = androidx.compose.foundation.shape.RoundedCornerShape(
+                                        topStart = 16.dp,
+                                        topEnd = 16.dp,
+                                        bottomEnd = 5.dp,
+                                        bottomStart = 16.dp,
+                                    )
+                                    // §6.2 max-width = 82% of available width. BoxWithConstraints
+                                    // is the in-repo idiom for a fraction-of-parent cap (see
+                                    // GeneratedImageCarousel / GenerativeWidgetCard); it only adds
+                                    // a measuring frame — the Surface + every branch below is
+                                    // untouched. contentAlignment=TopEnd 把 wrap 到内容宽度的气泡靠右放
+                                    // ——光靠 Surface 上的 wrapContentWidth(End) 不够：它只收窄不定位，
+                                    // box 默认 TopStart 会把气泡按到左边，表现为"左对齐"。
+                                    BoxWithConstraints(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.TopEnd,
+                                    ) {
+                                    val userBubbleMaxWidth = maxWidth * 0.82f
                                     Surface(
                                         modifier = Modifier
-                                            // V3 convo-user.jsx:paddingLeft:60 —— 长消息保留 60dp
-                                            // 最小左留白避免铺满至左边线，保持右对齐 editorial 感
-                                            .padding(start = 60.dp)
-                                            .widthIn(max = 560.dp)
+                                            .wrapContentWidth(Alignment.End)
+                                            .widthIn(max = userBubbleMaxWidth)
                                             .clip(userBubbleShape)
                                             .combinedClickable(
                                                 onClick = { onUserMessageClick?.invoke() },
@@ -240,7 +259,8 @@ internal fun MessagePartsBlock(
                                             ),
                                         shape = userBubbleShape,
                                         color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.userBubble,
-                                        contentColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.ink,
+                                        // 深底用户气泡 → 浅色文字 userBubbleInk（之前误用 ink 造成黑底黑字）
+                                        contentColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.userBubbleInk,
                                         tonalElevation = 0.dp,
                                         shadowElevation = 0.dp,
                                         border = BorderStroke(
@@ -265,6 +285,7 @@ internal fun MessagePartsBlock(
                                             )
                                         }
                                     }
+                                    } // end BoxWithConstraints
                                     } // end DisableSelection
                                 } else {
                                     // True only when this Text block is the very last block

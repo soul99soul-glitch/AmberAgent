@@ -37,3 +37,53 @@ val NotoSerifSC = FontFamily(
         weight = FontWeight.Normal,
     )
 )
+
+@OptIn(ExperimentalTextApi::class)
+private fun jbMono(weight: FontWeight) = Font(
+    resId = R.font.jetbrains_mono,
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight)),
+)
+
+/**
+ * Multi-weight JetBrains Mono family — the design-system "machine fact" font (model ids,
+ * ctx, price, timings, `//` section labels, version strings, the `amber` wordmark, tool names).
+ */
+val JetBrainsMonoFamily = FontFamily(
+    jbMono(FontWeight.Normal),
+    jbMono(FontWeight.Medium),
+    jbMono(FontWeight.SemiBold),
+    jbMono(FontWeight.Bold),
+)
+
+// `weight = weight` is REQUIRED: it declares the font's match weight to Compose's font matcher.
+// Without it the param defaults to FontWeight.Normal, so all 4 weights look identical (400) to
+// the matcher — it then can't pair Hanken+Noto per weight and bold falls back to the system CJK.
+@OptIn(ExperimentalTextApi::class)
+private fun hanken(weight: FontWeight) = Font(
+    resId = R.font.hanken_grotesk,
+    weight = weight,
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight)),
+)
+
+// Bundled CJK sans: Noto Sans SC, GB2312 subset (~6.7k 常用汉字), variable `wght` 100–900,
+// ≈3.6MB. Supplies the hanzi that the Latin-only Hanken lacks, AT EACH WEIGHT — so bold
+// Chinese titles render真·bold instead of falling back to the system CJK font at normal weight.
+@OptIn(ExperimentalTextApi::class)
+private fun notoSans(weight: FontWeight) = Font(
+    resId = R.font.noto_sans_sc,
+    weight = weight,
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight)),
+)
+
+/**
+ * Multi-weight Amber sans family — Hanken Grotesk (Latin UI) + bundled Noto Sans SC (hanzi),
+ * paired at every weight. Latin resolves to Hanken; hanzi to Noto Sans SC at the SAME weight,
+ * so `FontWeight.Bold` yields真·加粗中文标题. Rare hanzi outside the GB2312 subset still fall
+ * back to the system CJK font (normal weight).
+ */
+val HankenGrotesk = FontFamily(
+    hanken(FontWeight.Normal), notoSans(FontWeight.Normal),
+    hanken(FontWeight.Medium), notoSans(FontWeight.Medium),
+    hanken(FontWeight.SemiBold), notoSans(FontWeight.SemiBold),
+    hanken(FontWeight.Bold), notoSans(FontWeight.Bold),
+)
