@@ -124,14 +124,13 @@ fun TopModelMenu(
                     .verticalScroll(rememberScrollState())
                     .padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 12.dp),
             ) {
-                providers.forEachIndexed { index, provider ->
+                providers.forEach { provider ->
                     ProviderGroup(
                         provider = provider,
                         modelType = modelType,
                         open = openIds.contains(provider.id),
                         active = provider.id == currentProviderId,
                         selectedModelId = currentModelId,
-                        last = index == providers.lastIndex,
                         onToggle = {
                             openIds = if (openIds.contains(provider.id)) openIds - provider.id
                             else openIds + provider.id
@@ -151,7 +150,6 @@ private fun ProviderGroup(
     open: Boolean,
     active: Boolean,
     selectedModelId: Uuid?,
-    last: Boolean,
     onToggle: () -> Unit,
     onSelect: (Model) -> Unit,
 ) {
@@ -163,33 +161,22 @@ private fun ProviderGroup(
     }
     if (models.isEmpty()) return
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .drawBehind {
-                if (!last) {
-                    val y = size.height - 1.dp.toPx()
-                    drawRect(
-                        color = chatTheme.hair,
-                        topLeft = androidx.compose.ui.geometry.Offset(0f, y),
-                        size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx()),
-                    )
-                }
-            },
-    ) {
+    // 无任何行间分割线（按用户反馈：每行无 divider，参照魔魂扣安卓版）。
+    Column(modifier = Modifier.fillMaxWidth()) {
         // 服务商行：整行可点切换该组展开。左 mono 名（active→accent/600，否则 ink-2/500），
         // 右 mono "−"(展开)/"+"(收起)。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onToggle)
-                .padding(horizontal = 2.dp, vertical = 13.dp),
+                .padding(horizontal = 2.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = provider.name,
                 style = type.meta.copy(
-                    fontSize = 14.5.sp,
+                    fontSize = 12.5.sp,
+                    lineHeight = 15.sp,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
                     letterSpacing = 0.sp,
                 ),
@@ -200,7 +187,7 @@ private fun ProviderGroup(
             )
             Text(
                 text = if (open) "−" else "+",
-                style = type.meta.copy(fontSize = 19.sp, fontWeight = FontWeight.Normal, lineHeight = 19.sp),
+                style = type.meta.copy(fontSize = 16.sp, fontWeight = FontWeight.Normal, lineHeight = 16.sp),
                 color = tokens.ink4,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.width(16.dp),
@@ -240,14 +227,15 @@ private fun ModelLine(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(top = 9.dp, bottom = 9.dp, end = 4.dp),
+            .padding(top = 6.dp, bottom = 6.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
             text = model.displayName,
             style = type.meta.copy(
-                fontSize = 14.5.sp,
+                fontSize = 12.5.sp,
+                lineHeight = 15.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 letterSpacing = 0.sp,
             ),
@@ -260,7 +248,7 @@ private fun ModelLine(
         model.contextWindowTokens?.let { ctx ->
             Text(
                 text = ctx.formatNumber(),
-                style = type.meta.copy(fontSize = 11.5.sp),
+                style = type.meta.copy(fontSize = 11.sp),
                 color = tokens.ink4,
                 maxLines = 1,
             )
