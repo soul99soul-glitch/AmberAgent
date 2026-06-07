@@ -64,6 +64,7 @@ class BackupVM(
     private var pendingCloudRestoreFile: File? = null
     private var pendingCloudRestoreRevision: String = ""
     private var pendingCloudUploadRequest: SyncExportRequest? = null
+    private var pendingLocalRestoreUri: Uri? = null
     private var googleAuthorizationInFlight = false
 
     init {
@@ -440,6 +441,11 @@ class BackupVM(
         val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
         viewModelScope.launch {
             operationState.value = UiState.Loading
+            localMessage.value = ""
+            backupActivity.value = BackupActivity(
+                title = "正在导出本地备份",
+                detail = "正在生成加密备份文件",
+            )
             runCatching {
                 localBackupRepository.exportToUri(
                     uri = uri,
@@ -460,8 +466,10 @@ class BackupVM(
                     )
                 }
                 localMessage.value = "已导出本地备份。"
+                backupActivity.value = null
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
+                backupActivity.value = null
                 operationState.value = UiState.Error(error)
                 localMessage.value = "本地导出失败：${error.message.orEmpty()}"
                 recordError(error)
@@ -470,20 +478,51 @@ class BackupVM(
     }
 
     fun inspectImport(uri: Uri) {
+        pendingLocalRestoreUri = uri
         viewModelScope.launch {
             operationState.value = UiState.Loading
+            backupActivity.value = BackupActivity(
+                title = "正在读取本地备份",
+                detail = "正在解析备份文件",
+            )
             runCatching {
                 localBackupRepository.inspectUri(uri)
             }.onSuccess { preview ->
+                backupActivity.value = null
                 pendingImportPreview.value = preview
                 localMessage.value = "已读取本地备份，确认后可恢复。"
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
+                pendingLocalRestoreUri = null
+                backupActivity.value = null
                 operationState.value = UiState.Error(error)
                 localMessage.value = "本地导入失败：${error.message.orEmpty()}"
                 recordError(error)
             }
         }
+    }
+
+    fun restorePendingLocal(
+        passphrase: String,
+        scope: RestoreScope = RestoreScope.EVERYTHING,
+        preserveConversations: Boolean = true,
+        preserveGenMedia: Boolean = true,
+    ) {
+        val uri = pendingLocalRestoreUri
+        if (uri == null) {
+            val error = IllegalStateException("没有待恢复的本地备份")
+            backupActivity.value = null
+            operationState.value = UiState.Error(error)
+            localMessage.value = error.message.orEmpty()
+            return
+        }
+        restoreLocal(
+            uri = uri,
+            passphrase = passphrase,
+            scope = scope,
+            preserveConversations = preserveConversations,
+            preserveGenMedia = preserveGenMedia,
+        )
     }
 
     fun restoreLocal(
@@ -513,6 +552,7 @@ class BackupVM(
             }.onSuccess { preview ->
                 val manifest = preview.manifest
                 pendingImportPreview.value = null
+                pendingLocalRestoreUri = null
                 settingsStore.update { current ->
                     current.copy(
                         syncSettings = current.syncSettings.copy(
@@ -546,6 +586,7 @@ class BackupVM(
         pendingCloudRestoreFile = null
         pendingCloudRestore.value = false
         pendingCloudRestoreRevision = ""
+        pendingLocalRestoreUri = null
         cloudSnapshotPickerVisible.value = false
     }
 

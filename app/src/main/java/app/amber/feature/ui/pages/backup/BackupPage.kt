@@ -140,7 +140,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     val cloudSnapshotPickerVisible by vm.cloudSnapshotPickerVisible.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var pendingGoogleAction by remember { mutableStateOf<GoogleSyncAction?>(null) }
-    var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
     // Restore scope is always EVERYTHING; within it the user opts in to
     // including chat history / generated images. Default OFF for both — the
     // safe path is "leave local chat & gallery alone". User framed it as:
@@ -240,7 +239,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
-            pendingImportUri = uri
             vm.inspectImport(uri)
         }
     }
@@ -383,7 +381,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 item(
                     onClick = {
                         vm.clearPendingImport()
-                        pendingImportUri = null
                         openDocumentLauncher.launch(arrayOf(SYNC_ARCHIVE_MIME, "application/zip", "*/*"))
                     },
                     leadingContent = { Icon(HugeIcons.FileImport, contentDescription = null) },
@@ -416,14 +413,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             onRestoreGenMediaChange = { restoreGenMedia = it },
             onDismiss = {
                 vm.clearPendingImport()
-                pendingImportUri = null
                 // Reset toggles to safe defaults (don't override local data)
                 // for the next restore.
                 restoreConversations = false
                 restoreGenMedia = false
             },
             onRestore = {
-                val localUri = pendingImportUri
                 restoreObservedLoading = false
                 restoreInFlight = true
                 // UI's "restoreX" maps inversely to engine's "preserveX".
@@ -435,15 +430,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                         preserveConversations = preserveConversations,
                         preserveGenMedia = preserveGenMedia,
                     )
-                } else if (localUri != null) {
-                    vm.restoreLocal(
-                        uri = localUri,
+                } else {
+                    vm.restorePendingLocal(
                         passphrase = "",
                         preserveConversations = preserveConversations,
                         preserveGenMedia = preserveGenMedia,
                     )
-                } else {
-                    restoreInFlight = false
                 }
             },
         )

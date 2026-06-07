@@ -21,7 +21,7 @@ class LocalBackupRepository(
     suspend fun exportToUri(uri: Uri, request: SyncExportRequest): SyncPreview = withContext(Dispatchers.IO) {
         val archiveFile = syncArchiveManager.createArchiveFile(request)
         try {
-            context.contentResolver.openOutputStream(uri)?.use { output ->
+            context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
                 archiveFile.inputStream().buffered().use { input -> input.copyTo(output) }
             } ?: error("无法打开导出文件")
             syncArchiveManager.inspectArchive(archiveFile, suggestedFileName())
