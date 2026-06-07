@@ -648,11 +648,12 @@ Status legend: `[x]` reskinned + **visually verified on device**; `[~]` reskinne
 | chat (conversation) | P0 | 01 Chat / Refined | 2.2 | [~] components reskinned (tool/think/ask/bubble); needs a live convo to verify |
 | model picker | P0 | 02 Model Picker | 2.3 | [x] verified — accent-active selected row, mono name…ctx, provider accordion (sheet container kept) |
 | setting (home) | P0 | 03 Settings | 2.4 | [x] verified — // mono section eyebrows, grouped cards, accent color-mode dropdown, Hanken Latin in descriptions |
-| setting (memory) | P0 | Redesign set-memory | 2.4 | [~] foundation; not yet visually verified |
-| setting (models) | P0 | Redesign set-models | 2.4 | [~] mono model-id polish; not yet visually verified |
+| setting (display) | P0 | Redesign set-display | 2.4 | [x] **verified on device** — base-family segmented (暖 Warm / 鼠尾草 Sage) + 5-accent swatch picker; **live accent switch verified** (terracotta↔blue propagates app-wide to // eyebrows + pills); // eyebrows on sub-groups (1c4d3a38) |
+| setting (memory) | P0 | Redesign set-memory | 2.4 | [~] // section eyebrow (1c4d3a38); foundation; not yet visually verified |
+| setting (models) | P0 | Redesign set-models | 2.4 | [~] // section eyebrows + mono model-id (1c4d3a38); not yet visually verified |
 | setting (providers/skills/search/runtime/experimental/privacy) | P1 | aa-settings/aa-pages | 3 | [~] foundation (providers/model pages verified on-system) |
-| history | P1 | aa-pages Sessions | 3 | [~] mono timestamps |
-| assistant | P1 | aa-settings | 3 | [~] mono + flat card |
+| history | P1 | aa-pages Sessions | 3 | [~] reskinned: sans `sessionTitle` + mono timestamps + flat token rows + accent pin state (39a02f6a); needs convos to verify |
+| assistant | P1 | aa-settings | 3 | [~] basic/edit page reskinned: mono temp/topP/ctx/opacity + AmberCard + Hairline (bf931ccd); 7 sub-pages deferred |
 | search | P1 | — | 3 | [~] mono timestamps |
 | board | P2 | — | 3 | [~] mono machine-facts |
 | favorite | P2 | — | 3 | [~] mono count |
