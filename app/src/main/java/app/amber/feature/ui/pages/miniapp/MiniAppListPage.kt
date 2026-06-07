@@ -53,7 +53,7 @@ fun MiniAppListPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("小应用") },
+                title = { Text("小应用", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.MiniAppSettings) }) {
