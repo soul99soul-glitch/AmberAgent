@@ -29,7 +29,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
@@ -48,6 +47,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.theme.AmberMono
 import app.amber.feature.ui.theme.CustomColors
@@ -112,15 +113,14 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
 
 @Composable
 private fun HeatmapCard(conversationsPerDay: Map<LocalDate, Int>, modifier: Modifier = Modifier) {
-    Card(
+    AmberCard(
         modifier = modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(stringResource(R.string.stats_page_heatmap_title), style = MaterialTheme.typography.titleMedium)
+            SectionLabel(stringResource(R.string.stats_page_heatmap_title))
 
             ChatHeatmap(conversationsPerDay = conversationsPerDay)
 
@@ -412,7 +412,7 @@ private fun StatCard(
     label: String,
     value: String,
 ) {
-    Card(modifier = modifier, colors = CustomColors.cardColorsOnSurfaceContainer) {
+    AmberCard(modifier = modifier) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
