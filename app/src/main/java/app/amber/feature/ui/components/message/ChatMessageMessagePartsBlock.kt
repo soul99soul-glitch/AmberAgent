@@ -240,10 +240,12 @@ internal fun MessagePartsBlock(
                                     // is the in-repo idiom for a fraction-of-parent cap (see
                                     // GeneratedImageCarousel / GenerativeWidgetCard); it only adds
                                     // a measuring frame — the Surface + every branch below is
-                                    // untouched. wrapContentWidth(End) right-aligns the hugged
-                                    // bubble (replaces the old start=60dp right-bias hack).
+                                    // untouched. contentAlignment=TopEnd 把 wrap 到内容宽度的气泡靠右放
+                                    // ——光靠 Surface 上的 wrapContentWidth(End) 不够：它只收窄不定位，
+                                    // box 默认 TopStart 会把气泡按到左边，表现为"左对齐"。
                                     BoxWithConstraints(
                                         modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.TopEnd,
                                     ) {
                                     val userBubbleMaxWidth = maxWidth * 0.82f
                                     Surface(
@@ -257,7 +259,8 @@ internal fun MessagePartsBlock(
                                             ),
                                         shape = userBubbleShape,
                                         color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.userBubble,
-                                        contentColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.ink,
+                                        // 深底用户气泡 → 浅色文字 userBubbleInk（之前误用 ink 造成黑底黑字）
+                                        contentColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.userBubbleInk,
                                         tonalElevation = 0.dp,
                                         shadowElevation = 0.dp,
                                         border = BorderStroke(

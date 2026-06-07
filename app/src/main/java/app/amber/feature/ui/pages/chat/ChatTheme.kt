@@ -47,6 +47,8 @@ data class ChatTheme(
     // user bubble
     val userBubble: Color,
     val userBubbleEdge: Color,
+    // 用户气泡内的文字色（深底→浅字）。之前缺这一项，contentColor 退回到 ink(深) → 黑底黑字。
+    val userBubbleInk: Color = Color(0xFFF6F4EE),
     // agent header status dot
     val modelStatusDot: Color,
     // provider/model logo circular background
@@ -147,6 +149,7 @@ fun AmberTokens.toChatTheme(): ChatTheme = ChatTheme(
     showBloomInConvo = false,
     userBubble = userBg,
     userBubbleEdge = line,
+    userBubbleInk = userInk,
     modelStatusDot = signal,
     modelLogoBg = surface2,
     toolPillBg = codeBg,
