@@ -647,7 +647,7 @@ Status legend: `[x]` reskinned + **visually verified on device**; `[~]` reskinne
 | chat (home/empty) | P0 | Redesign home | 2.1 | [x] verified — amber wordmark+cursor, Hanken greeting, mono model-id, 3-surface composer |
 | chat (conversation) | P0 | 01 Chat / Refined | 2.2 | [~] components reskinned (tool/think/ask/bubble); needs a live convo to verify |
 | model picker | P0 | 02 Model Picker | 2.3 | [x] verified — accent-active selected row, mono name…ctx, provider accordion (sheet container kept) |
-| setting (home) | P0 | 03 Settings | 2.4 | [~] foundation + base/accent picker; not yet visually verified |
+| setting (home) | P0 | 03 Settings | 2.4 | [x] verified — // mono section eyebrows, grouped cards, accent color-mode dropdown, Hanken Latin in descriptions |
 | setting (memory) | P0 | Redesign set-memory | 2.4 | [~] foundation; not yet visually verified |
 | setting (models) | P0 | Redesign set-models | 2.4 | [~] mono model-id polish; not yet visually verified |
 | setting (providers/skills/search/runtime/experimental/privacy) | P1 | aa-settings/aa-pages | 3 | [~] foundation (providers/model pages verified on-system) |
