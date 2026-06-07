@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,7 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -108,10 +106,10 @@ fun TopModelMenu(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .shadow(elevation = 16.dp, shape = RoundedCornerShape(bottomStart = 4.dp, bottomEnd = 4.dp), clip = false)
-                    .background(chatTheme.surface)
+                    // 面板背景比顶栏 bg 更灰 (surface2)，去掉阴影，仅靠底部 hairline 收边（参照 OpenCode）
+                    .background(LocalAmberTokens.current.surface2)
                     .drawBehind {
-                        // 底部 1px line-2
+                        // 底部 1px 收边线（取代阴影）
                         val y = size.height - 1.dp.toPx()
                         drawRect(
                             color = chatTheme.hair,
