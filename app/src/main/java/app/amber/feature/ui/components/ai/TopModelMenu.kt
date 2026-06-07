@@ -233,10 +233,11 @@ private fun ModelLine(
     ) {
         Text(
             text = model.displayName,
+            // 选中态只用 accent 颜色表达，不加粗（统一 Normal 字重）
             style = type.meta.copy(
                 fontSize = 12.5.sp,
                 lineHeight = 15.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = FontWeight.Normal,
                 letterSpacing = 0.sp,
             ),
             color = if (selected) chatTheme.accent else tokens.ink3,
