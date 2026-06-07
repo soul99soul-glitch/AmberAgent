@@ -17,13 +17,14 @@ import androidx.compose.ui.unit.sp
  * Apply via [LocalAmberType] styles at call sites; never mono-set human prose, never sans-set
  * machine facts (design §3).
  *
- * TODO(fonts/D5): bundle Hanken Grotesk (Latin UI) + Noto Sans SC subset (CN) and point
- * [AmberSans] at them. Until the binaries are added, [AmberSans] falls back to the platform
- * sans — on Android that is Roboto for Latin + system Noto Sans CJK for hanzi (≈ Noto Sans SC),
- * so Chinese already renders on-brand. The mono signature is exact today via bundled JetBrains
- * Mono.
+ * [AmberSans] is Hanken Grotesk (bundled variable font, Latin UI). Hanken carries no hanzi, so
+ * Chinese glyphs fall back to Android's system Noto Sans CJK (≈ Noto Sans SC) — on-brand today.
+ * The mono signature is exact via bundled JetBrains Mono.
+ *
+ * TODO(fonts/D5): bundle a Noto Sans SC subset for pixel-exact CN rendering (future nicety; the
+ * system CJK fallback is already close).
  */
-val AmberSans: FontFamily = FontFamily.Default
+val AmberSans: FontFamily = HankenGrotesk
 val AmberMono: FontFamily = JetBrainsMonoFamily
 
 @Immutable

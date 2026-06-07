@@ -54,3 +54,21 @@ val JetBrainsMonoFamily = FontFamily(
     jbMono(FontWeight.SemiBold),
     jbMono(FontWeight.Bold),
 )
+
+@OptIn(ExperimentalTextApi::class)
+private fun hanken(weight: FontWeight) = Font(
+    resId = R.font.hanken_grotesk,
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight)),
+)
+
+/**
+ * Multi-weight Hanken Grotesk family — the design-system Latin UI font (titles, body,
+ * descriptions, labels). Single variable font with a `wght` axis; Chinese glyphs fall back to
+ * the system CJK font (≈ Noto Sans SC) since Hanken carries no hanzi.
+ */
+val HankenGrotesk = FontFamily(
+    hanken(FontWeight.Normal),
+    hanken(FontWeight.Medium),
+    hanken(FontWeight.SemiBold),
+    hanken(FontWeight.Bold),
+)
