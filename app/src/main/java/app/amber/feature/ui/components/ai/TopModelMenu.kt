@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -242,9 +241,9 @@ private fun ModelLine(
             color = if (selected) chatTheme.accent else tokens.ink3,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
+            // 模型名吃满弹性空间 → ctx 始终顶到最右、跨行对齐（修复 ctx 漂移）
+            modifier = Modifier.weight(1f),
         )
-        Spacer(modifier = Modifier.weight(1f))
         model.contextWindowTokens?.let { ctx ->
             Text(
                 text = ctx.formatNumber(),
