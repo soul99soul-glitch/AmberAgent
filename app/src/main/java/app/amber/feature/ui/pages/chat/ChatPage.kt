@@ -61,6 +61,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -96,7 +97,6 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
-import me.rerere.hugeicons.stroke.MessageAdd01
 import app.amber.agent.R
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.runtime.SandboxActivityUiState
@@ -1499,7 +1499,7 @@ private fun TopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(56.dp)
                 .padding(start = 20.dp, end = 20.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -1544,7 +1544,8 @@ private fun TopBar(
                         color = amberTokens.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 12.dp),
+                        // 左内距 12→4，与下方 model 左对齐、整组向左靠
+                        modifier = Modifier.padding(start = 4.dp),
                     )
                     // Graphite §6.2 ChatHeader model-id trigger: mono model-id + a chevron that
                     // rotates 180° while the TopModelMenu dropdown is open. Tapping toggles it
@@ -1558,7 +1559,8 @@ private fun TopBar(
                         modifier = Modifier
                             .clip(androidx.compose.foundation.shape.CircleShape)
                             .clickable { onToggleModelMenu() }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            // 上下内距 3 收紧标题↔model；左内距 12→4，整组向左靠
+                            .padding(start = 4.dp, top = 3.dp, end = 12.dp, bottom = 3.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -1567,19 +1569,22 @@ private fun TopBar(
                                 ?: stringResource(R.string.model_list_select_model),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            // 字号收到 10.5：进一步弱化 model、强化标题层级
                             style = amberType.meta.copy(
-                                fontSize = 14.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Medium,
                             ),
-                            color = amberTokens.ink,
+                            // ink3↔ink2 中点：ink3 偏淡、ink2 偏深，取中间的暖中灰
+                            color = lerp(amberTokens.ink3, amberTokens.ink2, 0.5f),
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         Icon(
                             imageVector = HugeIcons.ArrowDown01,
                             contentDescription = null,
                             tint = amberTokens.ink3,
+                            // 箭头 14→13，陪着字号一起缩
                             modifier = Modifier
-                                .size(14.dp)
+                                .size(13.dp)
                                 .rotate(chevronRotation),
                         )
                     }
@@ -1652,12 +1657,8 @@ private fun TopBar(
                         .clickable { onNewChat() },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = HugeIcons.MessageAdd01,
-                        contentDescription = "New Message",
-                        tint = LocalChatTheme.current.ink,
-                        modifier = Modifier.size(26.dp),
-                    )
+                    // 极简 + 标记，与左侧抽象汉堡同一套 1.6dp 细线语言
+                    AmberHeaderPlus()
                 }
             }
         }
@@ -1676,6 +1677,30 @@ private fun AmberHeaderLine(width: androidx.compose.ui.unit.Dp) {
             .height(1.6.dp)
             .background(LocalChatTheme.current.ink, RoundedCornerShape(1.dp))
     )
+}
+
+/**
+ * “新会话”极简标记：用与 [AmberHeaderLine] 完全相同的 1.6dp 圆角 ink 细条，交叉成一个 +。
+ * 左侧汉堡是「三条横线」、右侧是「两条交叉线」，同一套抽象细线语言 —— 取代之前具象的
+ * HugeIcons 描线图标（用户反馈两者"不像一个界面里的元素"）。
+ */
+@Composable
+private fun AmberHeaderPlus(arm: androidx.compose.ui.unit.Dp = 18.dp) {
+    val ink = LocalChatTheme.current.ink
+    Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .width(arm)
+                .height(1.6.dp)
+                .background(ink, RoundedCornerShape(1.dp))
+        )
+        Box(
+            modifier = Modifier
+                .width(1.6.dp)
+                .height(arm)
+                .background(ink, RoundedCornerShape(1.dp))
+        )
+    }
 }
 
 // V3 Whisper 空白态本应为纯净留白 + 底部光晕；之前的 EmptyChatHero（宝石 + 问候）

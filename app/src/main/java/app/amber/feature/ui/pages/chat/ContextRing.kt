@@ -120,24 +120,26 @@ fun ContextRing(
         // Context meter — 5 mono bars + % (design §6.2; no donut). Accent-filled proportionally;
         // bar color follows the usage threshold token (accent under Graphite).
         Row(
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             val filledCount = contextMeterFilledBars(used, total)
-            val barHeights = listOf(6.dp, 8.dp, 10.dp, 12.dp, 14.dp)
+            // 等高格子（统一取原第 2 格的 8dp），不再一格比一格高
             repeat(5) { i ->
                 Box(
                     Modifier
                         .width(3.dp)
-                        .height(barHeights[i])
+                        .height(8.dp)
                         .clip(RoundedCornerShape(1.dp))
                         .background(if (i < filledCount) color else trackColor)
                 )
             }
-            Spacer(Modifier.width(5.dp))
+            // 图示↔文字间距 5→3，更紧凑
+            Spacer(Modifier.width(3.dp))
             Text(
                 text = "${(v * 100f).toInt()}%",
-                style = LocalAmberType.current.meta,
+                // 百分比字号 12→10
+                style = LocalAmberType.current.meta.copy(fontSize = 10.sp, lineHeight = 12.sp),
                 color = theme.inkSoft,
             )
         }

@@ -665,8 +665,10 @@ fun ChatInput(
                         .clip(pillShape)
                         .background(tokens.surface2)
                         .border(BorderStroke(1.dp, pillBorder), pillShape)
-                        .padding(start = 4.dp, end = 6.dp),
-                    verticalAlignment = Alignment.Bottom,
+                        // 26dp 大圆角下，文字左内距给足 18dp 才不贴边；右侧留 16dp 对称
+                        .padding(start = 18.dp, end = 16.dp),
+                    // 文字在药丸内垂直居中（TextField 取自然高度，多出的空隙上下均分）
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(modifier = Modifier.weight(1f)) {
                         TextInputRow(
@@ -700,7 +702,11 @@ fun ChatInput(
                     label = "sendButtonFill",
                 )
                 val sendIconTint by animateColorAsState(
-                    targetValue = if (sendEmpty && !loading) tokens.ink3 else tokens.accentInk,
+                    // 发送/停止图标落在 accent 实心圆上时一律用浅色。accentInk 在 sage-green 这类
+                    // "浅 accent" 上被 accentInkFor 定成近黑 → 箭头/停止 X 变黑（用户反馈）。发送键
+                    // 作为主操作按钮惯例是浅色字形，故固定白色（与其余 4 个 accent 的 accentInk=白
+                    // 一致）；空态仍用中性 ink3。
+                    targetValue = if (sendEmpty && !loading) tokens.ink3 else Color.White,
                     label = "sendButtonIconTint",
                 )
                 val sendInteraction = remember { MutableInteractionSource() }

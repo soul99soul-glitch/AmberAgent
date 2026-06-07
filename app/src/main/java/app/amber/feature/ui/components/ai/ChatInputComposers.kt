@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -426,6 +427,11 @@ internal fun TextInputRow(
             state = state.textContent,
             modifier = Modifier
                 .fillMaxWidth()
+                // Graphite 修：Material3 TextField 内部写死 MinHeight=56dp（无视 contentPadding /
+                // LocalMinimumInteractiveComponentSize）。这里只需传入一个「非零」minHeight 即可绕过
+                // 那道 56dp 地板——真实高度由内容决定（单行≈42dp，对称 padding 使文字在其内居中），
+                // 再由外层 pill 的 heightIn(min=46)+CenterVertically 把它在 46dp 内整体居中、与 [+]/send 齐平。
+                .then(if (minimalChrome) Modifier.heightIn(min = 1.dp) else Modifier)
                 .contentReceiver(receiveContentListener)
                 .onFocusChanged {
                     isFocused = it.isFocused
