@@ -58,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -91,6 +92,7 @@ import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyInputMessage
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
@@ -119,6 +121,7 @@ import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ai.ChatInput
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
+import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.components.ds.BlinkingCursor
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -548,6 +551,8 @@ private fun ChatPageContent(
     // 强行变白，导致用户切到 Paper 看到的还是白底。
     val chatThemeForBg = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     val chatThemeBg = chatThemeForBg.bg
+    // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
+    var modelMenuOpen by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize().background(chatThemeBg)) {
         AssistantBackground(setting = setting)
         // V3 Whisper：空白态满强度 bloom；进入对话按设计稿"蓝光晕去掉 → 干净浅灰白"。
@@ -616,6 +621,8 @@ private fun ChatPageContent(
                     onUpdateTitle = {
                         vm.updateTitle(it)
                     },
+                    modelMenuOpen = modelMenuOpen,
+                    onToggleModelMenu = { modelMenuOpen = !modelMenuOpen },
                 )
             },
             bottomBar = {
@@ -971,6 +978,29 @@ private fun ChatPageContent(
                 }
             }
             }  // end if (!initialized) else branch (ChatList + hero)
+
+            // Graphite TopModelMenu —— 从 header 正下方 (innerPadding.top) 卷帘展开、覆盖内容区
+            // 的服务商/模型手风琴下拉（替代旧 ModalBottomSheet）。
+            val chatModelIdForMenu = setting.getCurrentAssistant().chatModelId ?: setting.chatModelId
+            val chatProvidersForMenu = setting.providers.filter { p ->
+                p.enabled && p.models.any { it.type == ModelType.CHAT }
+            }
+            val currentProviderIdForMenu = chatProvidersForMenu.firstOrNull { p ->
+                p.models.any { it.id == chatModelIdForMenu }
+            }?.id
+            TopModelMenu(
+                open = modelMenuOpen,
+                providers = chatProvidersForMenu,
+                modelType = ModelType.CHAT,
+                currentProviderId = currentProviderIdForMenu,
+                currentModelId = chatModelIdForMenu,
+                onSelect = { model ->
+                    vm.setChatModel(assistant = setting.getCurrentAssistant(), model = model)
+                    modelMenuOpen = false
+                },
+                onClose = { modelMenuOpen = false },
+                modifier = Modifier.padding(top = innerPadding.calculateTopPadding()),
+            )
             }  // end outer Box (fillMaxSize)
         }
 
@@ -1450,6 +1480,8 @@ private fun TopBar(
     onUpdateChatModel: (Model) -> Unit,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateTitle: (String) -> Unit,
+    modelMenuOpen: Boolean,
+    onToggleModelMenu: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     // V3 phone-screen.jsx header 没有 surface —— 直接坐在 bloom 之上
@@ -1514,15 +1546,43 @@ private fun TopBar(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 12.dp),
                     )
-                    ModelSelector(
-                        modelId = settings.getCurrentAssistant().chatModelId ?: settings.chatModelId,
-                        providers = settings.providers,
-                        type = ModelType.CHAT,
-                        minimalText = true,
-                        currentAssistant = settings.getCurrentAssistant(),
-                        onUpdateAssistant = onUpdateAssistant,
-                        onSelect = onUpdateChatModel,
+                    // Graphite §6.2 ChatHeader model-id trigger: mono model-id + a chevron that
+                    // rotates 180° while the TopModelMenu dropdown is open. Tapping toggles it
+                    // (the dropdown itself is rendered in the content area, anchored under header).
+                    val chevronRotation by animateFloatAsState(
+                        targetValue = if (modelMenuOpen) 180f else 0f,
+                        animationSpec = tween(durationMillis = 280),
+                        label = "modelMenuChevron",
                     )
+                    Row(
+                        modifier = Modifier
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .clickable { onToggleModelMenu() }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = currentChatModel?.modelId
+                                ?: stringResource(R.string.model_list_select_model),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = amberType.meta.copy(
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                            ),
+                            color = amberTokens.ink,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Icon(
+                            imageVector = HugeIcons.ArrowDown01,
+                            contentDescription = null,
+                            tint = amberTokens.ink3,
+                            modifier = Modifier
+                                .size(14.dp)
+                                .rotate(chevronRotation),
+                        )
+                    }
                 }
             }
 
