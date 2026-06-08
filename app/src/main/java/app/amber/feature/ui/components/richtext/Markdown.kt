@@ -379,7 +379,7 @@ private const val MARKDOWN_PARSE_HIT_LOG_MIN_CHARS = 600
 private const val MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L
 
 /**
- * Batch reveal fade window (STREAMING_BATCH_REVEAL). Kept strictly below
+ * Batch reveal fade window. Kept strictly below
  * [MARKDOWN_STREAMING_PARSE_THROTTLE_MS] so each batch's suffix reaches
  * alpha≈1 before the next parse tick absorbs it into the settled text —
  * otherwise the absorbed chars would pop from <1 to 1.
