@@ -879,7 +879,12 @@ fun MarkdownBlock(
     var (data, setData) = remember {
         mutableStateOf(
             if (streaming) {
-                streamingParseCache.parse(renderContent, revealStableEnd = 0)
+                val initialRevealStableEnd: Int? = if (app.amber.agent.PerfFlags.STREAMING_BATCH_REVEAL) {
+                    null
+                } else {
+                    0
+                }
+                streamingParseCache.parse(renderContent, revealStableEnd = initialRevealStableEnd)
             } else {
                 streamingParseCache.reset()
                 MarkdownParseCache.getOrParse(renderContent)
@@ -1672,21 +1677,15 @@ private fun Paragraph(
     }
     val searchSources = LocalSearchSources.current
 
-    // Streaming-aware text build, split into two layers so per-frame work
-    // is bounded by the active reveal window instead of the whole paragraph:
-    //   - staticAnnotated: built once per (content, theme, AST) tuple. Marks
-    //     fade-eligible leaves with REVEAL_LEAF_TAG annotations carrying the
-    //     leaf's source startOffset.
-    //   - annotatedString:  if the controller has active reveal entries,
-    //     layer per-codepoint alpha on top of staticAnnotated via
-    //     applyRevealOverlay; otherwise pass staticAnnotated through.
-    // Previously a single remember(...) keyed on revealClock rebuilt the
-    // whole AST every frame at 60 Hz — that contended with LazyColumn
-    // scroll measure/layout under concurrent tool calls.
+    // Streaming-aware text build. Legacy reveal marks leaf ranges for
+    // per-codepoint alpha; batch reveal leaves static text unannotated and
+    // fades only the live suffix range.
     val revealController = LocalCharRevealController.current
     val baseColor = LocalContentColor.current
     val revealClock = revealController?.nowNanos ?: 0L
     val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
+    val useBatchReveal = app.amber.agent.PerfFlags.STREAMING_BATCH_REVEAL
+    val leafRevealBaseColor = if (useBatchReveal) Color.Unspecified else baseColor
 
     FlowRow(
         modifier = modifier
@@ -1705,7 +1704,7 @@ private fun Paragraph(
             content,
             enableLatexRendering,
             onClickUrl,
-            baseColor,
+            leafRevealBaseColor,
             node,
             trim,
             colorScheme,
@@ -1726,14 +1725,14 @@ private fun Paragraph(
                         trim = trim,
                         enableLatexRendering = enableLatexRendering,
                         onClickUrl = onClickUrl,
-                        baseColor = baseColor,
+                        baseColor = leafRevealBaseColor,
                         sourceOffsetBase = sourceOffsetBase,
                         searchSources = searchSources,
                     )
                 }
             }
         }
-        val annotatedString = if (app.amber.agent.PerfFlags.STREAMING_BATCH_REVEAL) {
+        val annotatedString = if (useBatchReveal) {
             // Batch reveal (L4 decoupled): only the unparsed live suffix
             // fades, as one alpha unit. No per-leaf REVEAL_LEAF_TAG, no
             // source-offset mapping. The settled prefix stays opaque; it
