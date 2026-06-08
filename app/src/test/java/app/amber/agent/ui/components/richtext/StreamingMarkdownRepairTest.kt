@@ -1,6 +1,7 @@
 package app.amber.feature.ui.components.richtext
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StreamingMarkdownRepairTest {
@@ -163,5 +164,16 @@ class StreamingMarkdownRepairTest {
         )
 
         assertEquals("\nval y = 2", suffix)
+    }
+
+    @Test
+    fun `parse stabilizes completed top-level blocks structurally`() {
+        // multi-block: leading blocks finalize, the last stays active
+        val multi = StreamingMarkdownParseCache().parse("alpha\n\nbravo\n\ncharlie")
+        assertTrue(multi.stableTopLevelBlocks.isNotEmpty())
+
+        // single still-growing block: nothing finalized yet
+        val single = StreamingMarkdownParseCache().parse("alpha")
+        assertTrue(single.stableTopLevelBlocks.isEmpty())
     }
 }
