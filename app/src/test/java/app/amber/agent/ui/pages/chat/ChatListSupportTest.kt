@@ -183,12 +183,25 @@ class ChatListSupportTest {
     @Test
     fun `chat streaming follow path keeps stable pointer key and chunk emits only`() {
         val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+        val perfFlags = repoFile("src/main/java/app/amber/agent/PerfFlags.kt").readText()
 
+        assertTrue(perfFlags.contains("Default uses the measured path"))
+        assertTrue(perfFlags.contains("const val USE_UNIFIED_STREAMING_BOTTOM_FOLLOW = true"))
         assertTrue(source.contains(".pointerInput(conversation.id)"))
         assertFalse(source.contains(".pointerInput(activeGeneration, settings.displaySetting.enableAutoScroll, conversation.id)"))
         assertTrue(source.contains("requestStreamingBottomFollow(\"chunk\")"))
         assertFalse(source.contains("requestTimelineBottom(\"chunk\")"))
         assertTrue(source.contains("streamingVisibleEvents.conflate()"))
+        assertTrue(source.contains("scrollToTimelineBottom(\"stream-\$reason\", smoothLargeMove = false)"))
+    }
+
+    @Test
+    fun `scroll to timeline bottom keeps collector alive after user scroll interruption`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+
+        assertTrue(source.contains("catch (exception: CancellationException)"))
+        assertTrue(source.contains("currentCoroutineContext().ensureActive()"))
+        assertTrue(source.contains("\"scrollToTimelineBottom.interrupted\""))
     }
 
     @Test

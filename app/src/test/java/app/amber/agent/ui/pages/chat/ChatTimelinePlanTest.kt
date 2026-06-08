@@ -134,6 +134,83 @@ class ChatTimelinePlanTest {
         assertEquals(0, cache.hits)
     }
 
+    @Test
+    fun suppressLastAssistantVirtualizationKeepsLongTailAsSingleMessage() {
+        val conversation = conversationOf(
+            message(longMarkdown("tail"), MessageRole.ASSISTANT),
+        )
+        val cache = ChatVirtualItemCache()
+        val plan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = false,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = idlePostSendState(),
+            suppressLastAssistantVirtualization = true,
+            virtualItemCache = cache,
+        )
+
+        assertTrue(plan.entries.first() is ChatTimelineEntry.Message)
+        assertTrue(plan.entries.none { it is ChatTimelineEntry.VirtualMessage })
+        assertEquals(0, cache.misses)
+    }
+
+    @Test
+    fun disablingSuppressLastAssistantVirtualizationRestoresLongTailVirtualMessages() {
+        val conversation = conversationOf(
+            message(longMarkdown("tail"), MessageRole.ASSISTANT),
+        )
+        val cache = ChatVirtualItemCache()
+        val plan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = false,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = idlePostSendState(),
+            suppressLastAssistantVirtualization = false,
+            virtualItemCache = cache,
+        )
+
+        assertTrue(plan.entries.any { it is ChatTimelineEntry.VirtualMessage })
+        assertEquals(1, cache.misses)
+    }
+
+    @Test
+    fun suppressLastAssistantVirtualizationBypassesCacheForComplexAssistantTail() {
+        val conversation = conversationOf(
+            message(
+                parts = listOf(
+                    UIMessagePart.Text("one"),
+                    UIMessagePart.Text("two"),
+                    UIMessagePart.Text("three"),
+                    UIMessagePart.Text("four"),
+                    UIMessagePart.Text("five"),
+                ),
+                role = MessageRole.ASSISTANT,
+            ),
+        )
+        val cache = ChatVirtualItemCache()
+        val plan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = false,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = idlePostSendState(),
+            suppressLastAssistantVirtualization = true,
+            virtualItemCache = cache,
+        )
+
+        assertTrue(plan.entries.first() is ChatTimelineEntry.Message)
+        assertTrue(plan.entries.none { it is ChatTimelineEntry.VirtualMessage })
+        assertEquals(0, cache.misses)
+    }
+
     private fun conversationOf(vararg messages: UIMessage) = Conversation(
         id = Uuid.random(),
         assistantId = Uuid.random(),
@@ -143,6 +220,19 @@ class ChatTimelinePlanTest {
     private fun message(text: String, role: MessageRole) = UIMessage(
         role = role,
         parts = listOf(UIMessagePart.Text(text)),
+    )
+
+    private fun message(parts: List<UIMessagePart>, role: MessageRole) = UIMessage(
+        role = role,
+        parts = parts,
+    )
+
+    private fun idlePostSendState() = PostSendTimelineState(
+        sentUserMessageId = null,
+        sentUserMessageIndex = null,
+        assistantMessageIndex = null,
+        hiddenAssistantMessageIndex = null,
+        waitingForAssistantContent = false,
     )
 
     private fun longMarkdown(label: String): String = buildString {

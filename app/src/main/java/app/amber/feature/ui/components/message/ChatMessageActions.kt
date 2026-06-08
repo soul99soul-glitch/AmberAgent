@@ -72,6 +72,7 @@ import app.amber.core.utils.toLocalString
 fun ColumnScope.ChatMessageActionButtons(
     message: UIMessage,
     node: MessageNode,
+    enabled: Boolean = true,
     onUpdate: (MessageNode) -> Unit,
     onRegenerate: () -> Unit,
     onOpenActionSheet: () -> Unit,
@@ -106,12 +107,14 @@ fun ColumnScope.ChatMessageActionButtons(
         MessageActionIconButton(
             imageVector = HugeIcons.Copy01,
             contentDescription = stringResource(R.string.copy),
+            enabled = enabled,
             onClick = { context.copyMessageToClipboard(message) },
         )
 
         MessageActionIconButton(
             imageVector = HugeIcons.Refresh03,
             contentDescription = stringResource(R.string.regenerate),
+            enabled = enabled,
             onClick = {
                 if (message.role == MessageRole.USER) {
                     showRegenerateConfirm = true
@@ -129,7 +132,7 @@ fun ColumnScope.ChatMessageActionButtons(
             MessageActionIconButton(
                 imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
                 contentDescription = stringResource(R.string.tts),
-                enabled = isAvailable,
+                enabled = enabled && isAvailable,
                 onClick = {
                     if (!isSpeaking) {
                         val text = message.toText()
@@ -149,6 +152,7 @@ fun ColumnScope.ChatMessageActionButtons(
         MessageActionIconButton(
             imageVector = HugeIcons.MoreVertical,
             contentDescription = stringResource(R.string.more_options),
+            enabled = enabled,
             onClick = {
                 onOpenActionSheet()
             },
@@ -156,6 +160,7 @@ fun ColumnScope.ChatMessageActionButtons(
 
         ChatMessageBranchSelector(
             node = node,
+            enabled = enabled,
             onUpdate = onUpdate,
         )
     }

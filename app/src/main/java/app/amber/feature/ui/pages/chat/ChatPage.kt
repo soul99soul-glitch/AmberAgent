@@ -290,6 +290,22 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
     val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
     val activeGeneration = loadingJob != null || pendingUserMessages.isNotEmpty() || compactInTimelineActive
+    val latestMessage = conversation.messageNodes.lastOrNull()?.currentMessage
+    var streamedAssistantMessageIdToKeepUnvirtualized by remember(conversation.id) {
+        mutableStateOf<Uuid?>(null)
+    }
+    // Keep the just-streamed assistant in the single-message path while it remains
+    // the timeline tail. Releasing on finish would re-split long replies 1 -> N
+    // exactly when the action row appears; the tradeoff is that an idle long tail
+    // stays unvirtualized until the user sends another message or switches chats.
+    LaunchedEffect(conversation.id, loadingJob, latestMessage?.id, latestMessage?.role) {
+        if (loadingJob != null && latestMessage?.role == MessageRole.ASSISTANT) {
+            streamedAssistantMessageIdToKeepUnvirtualized = latestMessage.id
+        }
+    }
+    val suppressLastAssistantVirtualization =
+        latestMessage?.role == MessageRole.ASSISTANT &&
+            latestMessage.id == streamedAssistantMessageIdToKeepUnvirtualized
     val chatTimelinePlan = rememberChatTimelinePlan(
         conversation = conversation,
         assistant = chatAssistant,
@@ -298,6 +314,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         activeGeneration = activeGeneration,
         hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
         pendingMessageCount = pendingUserMessages.size,
+        suppressLastAssistantVirtualization = suppressLastAssistantVirtualization,
     )
     val initialChatListIndex = remember(conversation.id, nodeId, conversation.messageNodes, chatTimelinePlan) {
         if (nodeId != null) {

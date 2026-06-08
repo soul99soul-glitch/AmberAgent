@@ -4,11 +4,11 @@ package app.amber.agent
  * Compile-time feature flags for performance-layer optimizations that
  * still need on-device verification.
  *
- * **All flags default to false** so the legacy code path is preserved
- * for every user. Enable a flag by flipping the constant to `true` and
- * rebuilding, then exercise the new path on a real device. If a
- * regression surfaces, flip back OR `git revert <commit>` the specific
- * commit listed in the flag's docstring.
+ * Most flags default to false so the legacy code path is preserved for
+ * every user unless the flag's own docstring says otherwise. Enable a flag
+ * by flipping the constant to `true` and rebuilding, then exercise the new
+ * path on a real device. If a regression surfaces, flip back OR
+ * `git revert <commit>` the specific commit listed in the flag's docstring.
  *
  * Why compile-time `object` instead of DataStore preferences:
  *  - Zero runtime DI / Koin wiring
@@ -70,9 +70,10 @@ object PerfFlags {
     /**
      * Streaming bottom-follow A/B — route chunk and visible-frame follow
      * requests through one conflated stream, then snap/settle at most once per
-     * frame. Default keeps the legacy direct requestScroll path.
+     * frame. Default uses the measured path; flip false to compare the legacy
+     * direct requestScroll path.
      */
-    const val USE_UNIFIED_STREAMING_BOTTOM_FOLLOW = false
+    const val USE_UNIFIED_STREAMING_BOTTOM_FOLLOW = true
 
     /**
      * Search result images A/B — attach images referenced by answer citations

@@ -153,6 +153,7 @@ internal fun rememberChatTimelinePlan(
     activeGeneration: Boolean,
     hasHistoryLoadingItem: Boolean,
     pendingMessageCount: Int,
+    suppressLastAssistantVirtualization: Boolean,
 ): ChatTimelinePlan {
     val virtualItemCache = remember(conversation.id) { ChatVirtualItemCache() }
     val postSendState = remember(conversation.id, conversation.messageNodes, activeGeneration) {
@@ -167,6 +168,7 @@ internal fun rememberChatTimelinePlan(
         hasHistoryLoadingItem,
         pendingMessageCount,
         postSendState,
+        suppressLastAssistantVirtualization,
         virtualItemCache,
     ) {
         measureChatTimelinePlan(
@@ -181,6 +183,7 @@ internal fun rememberChatTimelinePlan(
                 hasHistoryLoadingItem = hasHistoryLoadingItem,
                 pendingMessageCount = pendingMessageCount,
                 postSendState = postSendState,
+                suppressLastAssistantVirtualization = suppressLastAssistantVirtualization,
                 virtualItemCache = virtualItemCache,
             )
         }
@@ -252,6 +255,7 @@ internal data class ChatTimelinePlan(
     private val firstLazyIndexByMessageIndex: Map<Int, Int>,
     val postSendState: PostSendTimelineState,
     val timelineLoading: Boolean,
+    val suppressLastAssistantVirtualization: Boolean,
 ) {
     val lastIndex: Int get() = entries.lastIndex
 
@@ -438,6 +442,7 @@ internal fun buildChatTimelinePlan(
     hasHistoryLoadingItem: Boolean,
     pendingMessageCount: Int,
     postSendState: PostSendTimelineState,
+    suppressLastAssistantVirtualization: Boolean = false,
     virtualItemCache: ChatVirtualItemCache,
 ): ChatTimelinePlan {
     val entries = buildList {
@@ -449,13 +454,20 @@ internal fun buildChatTimelinePlan(
             }
             val isLastMessage = index == conversation.messageNodes.lastIndex
             val isLoadingMessage = timelineLoading && isLastMessage
-            val virtualItems = virtualItemCache.getOrBuild(
-                node = node,
-                assistant = assistant,
-                showAssistantBubble = showAssistantBubble,
-                loading = isLoadingMessage,
-                lastMessage = isLastMessage,
-            )
+            val shouldSuppressVirtualization = suppressLastAssistantVirtualization &&
+                isLastMessage &&
+                node.currentMessage.role == MessageRole.ASSISTANT
+            val virtualItems = if (shouldSuppressVirtualization) {
+                null
+            } else {
+                virtualItemCache.getOrBuild(
+                    node = node,
+                    assistant = assistant,
+                    showAssistantBubble = showAssistantBubble,
+                    loading = isLoadingMessage,
+                    lastMessage = isLastMessage,
+                )
+            }
             if (virtualItems == null) {
                 add(ChatTimelineEntry.Message(index, node))
             } else {
@@ -495,6 +507,7 @@ internal fun buildChatTimelinePlan(
         firstLazyIndexByMessageIndex = firstLazyIndexByMessageIndex,
         postSendState = postSendState,
         timelineLoading = timelineLoading,
+        suppressLastAssistantVirtualization = suppressLastAssistantVirtualization,
     )
 }
 

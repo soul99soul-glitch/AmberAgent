@@ -383,6 +383,12 @@ private const val MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L
 // See applyRevealOverlay below. internal so the parity test can pin it.
 internal const val REVEAL_LEAF_TAG = "amber_agent.reveal.leaf"
 
+private data class MarkdownParseRequest(
+    val content: String,
+    val throttleStreamingParse: Boolean,
+    val deferStreamingParse: Boolean,
+)
+
 private data class MarkdownParseCacheKey(
     val content: String,
     val contentHash: Int,
@@ -863,12 +869,13 @@ fun MarkdownBlock(
     val displayDrainingAfterStream = !streaming &&
         renderContent != content &&
         content.startsWith(renderContent)
+    val throttleStreamingParse = streaming || displayDrainingAfterStream
     val streamingParseCache = remember {
         StreamingMarkdownParseCache()
     }
     var (data, setData) = remember {
         mutableStateOf(
-            if (streaming) {
+            if (throttleStreamingParse) {
                 streamingParseCache.parse(renderContent, revealStableEnd = 0)
             } else {
                 streamingParseCache.reset()
@@ -887,10 +894,12 @@ fun MarkdownBlock(
     // (renderContent vs raw content); the AST re-parse is the expensive
     // step we're cutting.
     val updatedContent by rememberUpdatedState(renderContent)
-    val updatedStreaming by rememberUpdatedState(streaming)
+    val updatedThrottleStreamingParse by rememberUpdatedState(throttleStreamingParse)
     val updatedDeferStreamingParse by rememberUpdatedState(deferStreamingParse)
+    val renderStreamingTail = throttleStreamingParse ||
+        (!streaming && data.syntheticSuffixStart != Int.MAX_VALUE)
     val revealController = rememberCharRevealController(
-        streaming = streaming || displayDrainingAfterStream,
+        streaming = renderStreamingTail,
         content = renderContent,
         immediateMode = app.amber.agent.PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL,
     )
@@ -902,58 +911,63 @@ fun MarkdownBlock(
         activeBaseOffset = data.activeBaseOffset,
         parsedPreprocessed = data.preprocessed,
         syntheticSuffixStart = data.syntheticSuffixStart,
-        streaming = streaming,
+        streaming = renderStreamingTail,
     )
-    LaunchedEffect(Unit) {
-        var lastParsedContent = renderContent
-        var lastParsedStreaming = streaming
-        var lastDeferred = deferStreamingParse
+    LaunchedEffect(throttleStreamingParse) {
+        var lastParsedContent: String? = null
+        var lastParsedThrottleStreamingParse: Boolean? = null
+        var lastDeferred: Boolean? = null
         @OptIn(FlowPreview::class)
         snapshotFlow {
-            Triple(updatedContent, updatedStreaming, updatedDeferStreamingParse)
+            MarkdownParseRequest(
+                content = updatedContent,
+                throttleStreamingParse = updatedThrottleStreamingParse,
+                deferStreamingParse = updatedDeferStreamingParse,
+            )
         }
             .distinctUntilChanged()
             .let { upstream ->
-                // Sample only when streaming. When the chat-turn is settled,
-                // the user expects an immediate re-parse (e.g. they edited
-                // an old message), so don't throttle.
-                if (streaming) {
+                // Sample only while streaming or while the display buffer is
+                // draining after stream end. Once settled, parse immediately.
+                if (throttleStreamingParse) {
                     upstream.sample(MARKDOWN_STREAMING_PARSE_THROTTLE_MS)
                 } else {
                     upstream
                 }
             }
-            .collectLatest { (latestContent, latestStreaming, latestDeferStreamingParse) ->
+            .collectLatest { request ->
                 if (
-                    latestContent == lastParsedContent &&
-                    latestStreaming == lastParsedStreaming &&
-                    latestDeferStreamingParse == lastDeferred
+                    request.content == lastParsedContent &&
+                    request.throttleStreamingParse == lastParsedThrottleStreamingParse &&
+                    request.deferStreamingParse == lastDeferred
                 ) {
                     return@collectLatest
                 }
-                if (latestStreaming && latestDeferStreamingParse) {
-                    lastDeferred = latestDeferStreamingParse
+                if (request.throttleStreamingParse && request.deferStreamingParse) {
+                    lastParsedContent = request.content
+                    lastParsedThrottleStreamingParse = request.throttleStreamingParse
+                    lastDeferred = request.deferStreamingParse
                     StreamingRenderProbe.record {
-                        "parse_deferred len=${latestContent.length}"
+                        "parse_deferred len=${request.content.length}"
                     }
                     return@collectLatest
                 }
                 try {
                     val revealStableEnd = updatedRevealStableEnd
                     val parsed = withContext(Dispatchers.Default) {
-                        if (latestStreaming) {
+                        if (request.throttleStreamingParse) {
                             streamingParseCache.parse(
-                                content = latestContent,
+                                content = request.content,
                                 revealStableEnd = revealStableEnd,
                             )
                         } else {
                             streamingParseCache.reset()
-                            MarkdownParseCache.getOrParse(latestContent)
+                            MarkdownParseCache.getOrParse(request.content)
                         }
                     }
-                    lastParsedContent = latestContent
-                    lastParsedStreaming = latestStreaming
-                    lastDeferred = latestDeferStreamingParse
+                    lastParsedContent = request.content
+                    lastParsedThrottleStreamingParse = request.throttleStreamingParse
+                    lastDeferred = request.deferStreamingParse
                     setData(parsed)
                 } catch (exception: CancellationException) {
                     throw exception

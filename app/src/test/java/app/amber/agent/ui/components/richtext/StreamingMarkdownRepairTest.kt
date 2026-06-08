@@ -1,7 +1,10 @@
 package app.amber.feature.ui.components.richtext
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class StreamingMarkdownRepairTest {
     @Test
@@ -163,5 +166,40 @@ class StreamingMarkdownRepairTest {
         )
 
         assertEquals("\nval y = 2", suffix)
+    }
+
+    @Test
+    fun `markdown parse throttle signal includes display drain`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt").readText()
+
+        assertTrue(source.contains("val throttleStreamingParse = streaming || displayDrainingAfterStream"))
+        assertTrue(source.contains("val updatedThrottleStreamingParse by rememberUpdatedState(throttleStreamingParse)"))
+        assertTrue(source.contains("LaunchedEffect(throttleStreamingParse)"))
+        assertTrue(source.contains("MarkdownParseRequest("))
+        assertTrue(source.contains("throttleStreamingParse = updatedThrottleStreamingParse"))
+        assertTrue(source.contains("if (throttleStreamingParse) {\n                    upstream.sample"))
+        assertTrue(source.contains("if (request.throttleStreamingParse) {\n                            streamingParseCache.parse"))
+        assertTrue(source.contains("val renderStreamingTail = throttleStreamingParse ||"))
+        assertTrue(source.contains("!streaming && data.syntheticSuffixStart != Int.MAX_VALUE"))
+        assertTrue(source.contains("streaming = renderStreamingTail,\n        content = renderContent"))
+        assertTrue(source.contains("syntheticSuffixStart = data.syntheticSuffixStart,\n        streaming = renderStreamingTail"))
+        assertFalse(source.contains("Triple(updatedContent, updatedStreaming, updatedDeferStreamingParse)"))
+        assertFalse(source.contains("if (latestStreaming)"))
+    }
+
+    @Test
+    fun `markdown streaming does not add plain tail block marker heuristic`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt").readText()
+
+        assertFalse(source.contains("PlainTail"))
+        assertFalse(source.contains("LiveSuffixPlacement"))
+    }
+
+    private fun repoFile(pathInAppModule: String): File {
+        return listOf(
+            File(pathInAppModule),
+            File("app/$pathInAppModule"),
+        ).firstOrNull { it.isFile }
+            ?: error("Cannot locate $pathInAppModule")
     }
 }

@@ -1,11 +1,6 @@
 package app.amber.feature.ui.components.message
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,7 +26,6 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import app.amber.ai.ui.isEmptyUIMessage
 import app.amber.agent.Screen
 import app.amber.core.model.Assistant
 import app.amber.core.model.MessageNode
@@ -84,6 +78,7 @@ fun ChatMessage(
     onMiniAppModify: (String) -> Boolean = { false },
     onStreamingVisibleFrame: (() -> Unit)? = null,
     deferStreamingParse: Boolean = false,
+    actionRowHeightCache: ActionRowHeightCache? = null,
 ) {
     val message = node.messages[node.selectIndex]
     val settings = LocalSettings.current.displaySetting
@@ -162,32 +157,18 @@ fun ChatMessage(
             }
         }
 
-        if (message.role != MessageRole.USER) {
-            val showActions = if (lastMessage) {
-                !loading
-            } else {
-                message.parts.isEmptyUIMessage().not()
-            }
-            AnimatedVisibility(
-                visible = showActions,
-                enter = slideInVertically { it / 2 } + fadeIn(),
-                exit = slideOutVertically { it / 2 } + fadeOut()
-            ) {
-                Column(
-                    modifier = Modifier.animateContentSizeIf(loading && lastMessage)
-                ) {
-                    ChatMessageActionButtons(
-                        message = message,
-                        onRegenerate = onRegenerate,
-                        node = node,
-                        onUpdate = onUpdate,
-                        onOpenActionSheet = {
-                            showActionsSheet = true
-                        },
-                    )
-                }
-            }
-        }
+        AssistantActionRowSlot(
+            message = message,
+            node = node,
+            loading = loading,
+            lastMessage = lastMessage,
+            actionRowHeightCache = actionRowHeightCache,
+            onRegenerate = onRegenerate,
+            onUpdate = onUpdate,
+            onOpenActionSheet = {
+                showActionsSheet = true
+            },
+        )
     }
     if (showActionsSheet) {
         ChatMessageActionsSheet(

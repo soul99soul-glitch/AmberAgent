@@ -215,8 +215,13 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
 
     fun flushText() {
         pendingText?.let { textPart ->
-            val mergedText = pendingTextBuilder?.toString() ?: textPart.text
-            result.add(MessagePartBlock.ContentBlock(textPart.copy(text = mergedText), pendingTextIndex))
+            val builder = pendingTextBuilder
+            val part = if (builder == null) {
+                textPart
+            } else {
+                textPart.copy(text = builder.toString())
+            }
+            result.add(MessagePartBlock.ContentBlock(part, pendingTextIndex))
         }
         pendingText = null
         pendingTextBuilder = null
@@ -242,10 +247,12 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
                 val previous = pendingText
                 pendingText = if (previous == null) {
                     pendingTextIndex = index
-                    pendingTextBuilder = StringBuilder(part.text)
                     part
                 } else {
-                    pendingTextBuilder?.append(part.text)
+                    val builder = pendingTextBuilder ?: StringBuilder(previous.text).also {
+                        pendingTextBuilder = it
+                    }
+                    builder.append(part.text)
                     previous.copy(
                         metadata = part.metadata ?: previous.metadata,
                     )

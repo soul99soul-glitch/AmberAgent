@@ -27,6 +27,7 @@ import app.amber.core.model.MessageNode
 fun ChatMessageBranchSelector(
     node: MessageNode,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onUpdate: (MessageNode) -> Unit,
 ) {
     Row(
@@ -42,6 +43,7 @@ fun ChatMessageBranchSelector(
                     .clip(CircleShape)
                     .alpha(if (node.selectIndex == 0) 0.5f else 1f)
                     .clickable(
+                        enabled = enabled && node.selectIndex > 0,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {
@@ -70,6 +72,7 @@ fun ChatMessageBranchSelector(
                     .clip(CircleShape)
                     .alpha(if (node.selectIndex == node.messages.lastIndex) 0.5f else 1f)
                     .clickable(
+                        enabled = enabled && node.selectIndex < node.messages.lastIndex,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {

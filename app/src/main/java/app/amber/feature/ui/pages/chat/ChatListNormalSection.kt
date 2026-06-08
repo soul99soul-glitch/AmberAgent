@@ -60,8 +60,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -91,6 +94,7 @@ import app.amber.core.model.MessageNode
 import app.amber.core.service.ChatError
 import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.service.PendingUserMessage
+import app.amber.feature.ui.components.message.ActionRowHeightCache
 import app.amber.feature.ui.components.message.ChatMessage
 import app.amber.feature.ui.components.message.ChatMessageVirtualItem
 import app.amber.feature.ui.components.message.ChatMessageVirtualItemContent
@@ -174,6 +178,7 @@ internal fun ChatListNormal(
     val sendTransitionSlidePx = with(density) { SendTransitionSlideDistance.roundToPx() }
     val activity = LocalContext.current as? app.amber.agent.RouteActivity
     val workspace = workspaceColors()
+    val actionRowHeightCache = remember(conversation.id) { ActionRowHeightCache() }
     val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
         conversation.actionSuggestionTexts()
     }
@@ -320,6 +325,12 @@ internal fun ChatListNormal(
                     else -> break
                 }
             }
+        } catch (exception: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            logScroll(
+                "scrollToTimelineBottom.interrupted",
+                "reason=$reason token=$token message=${exception.message.orEmpty()}",
+            )
         } finally {
             logScroll("scrollToTimelineBottom.exit", "reason=$reason token=$token")
             endProgrammaticScroll(token)
@@ -1021,6 +1032,7 @@ internal fun ChatListNormal(
                                         },
                                         deferStreamingParse = isLoadingMessage && deferStreamingMarkdownParse,
                                         lastMessage = isLastMessage,
+                                        actionRowHeightCache = actionRowHeightCache,
                                     )
                                 }
                             }
@@ -1132,6 +1144,7 @@ internal fun ChatListNormal(
                                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                                         onMiniAppModify = onMiniAppModify,
                                         lastMessage = isLastMessage,
+                                        actionRowHeightCache = actionRowHeightCache,
                                     )
                                 }
                             }
