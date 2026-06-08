@@ -1,6 +1,7 @@
 package app.amber.feature.ui.components.richtext
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StreamingMarkdownRepairTest {
@@ -163,5 +164,20 @@ class StreamingMarkdownRepairTest {
         )
 
         assertEquals("\nval y = 2", suffix)
+    }
+
+    @Test
+    fun `null revealStableEnd decouples block stabilization from reveal progress`() {
+        val content = "alpha\n\nbravo\n\ncharlie"
+        // reveal at offset 0 -> nothing has been revealed -> nothing stabilizes
+        val gated = StreamingMarkdownParseCache().parse(content, revealStableEnd = 0)
+        // null and MAX_VALUE both mean "do not gate stabilization on reveal"
+        val ungatedNull = StreamingMarkdownParseCache().parse(content, revealStableEnd = null)
+        val ungatedMax = StreamingMarkdownParseCache().parse(content, revealStableEnd = Int.MAX_VALUE)
+
+        // null behaves identically to "fully revealed" (no gating)
+        assertEquals(ungatedMax.stableTopLevelBlocks.size, ungatedNull.stableTopLevelBlocks.size)
+        // and strictly more blocks stabilize than when reveal hasn't advanced
+        assertTrue(ungatedNull.stableTopLevelBlocks.size > gated.stableTopLevelBlocks.size)
     }
 }

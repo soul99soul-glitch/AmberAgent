@@ -33,6 +33,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -376,6 +378,14 @@ private const val MARKDOWN_PARSE_HIT_LOG_MIN_CHARS = 600
  */
 private const val MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L
 
+/**
+ * Batch reveal fade window (STREAMING_BATCH_REVEAL). Kept strictly below
+ * [MARKDOWN_STREAMING_PARSE_THROTTLE_MS] so each batch's suffix reaches
+ * alpha≈1 before the next parse tick absorbs it into the settled text —
+ * otherwise the absorbed chars would pop from <1 to 1.
+ */
+private const val STREAMING_BATCH_FADE_MS = 180
+
 // Tag used to mark leaf-text ranges in the static AnnotatedString that
 // are eligible for per-frame reveal alpha. The annotation's value carries
 // the leaf's absolute startOffset in the source content string so the
@@ -672,7 +682,7 @@ private fun parseMarkdownUncached(content: String): MarkdownParseResult {
     return parsePreprocessedMarkdownUncached(preProcess(content))
 }
 
-private class StreamingMarkdownParseCache {
+internal class StreamingMarkdownParseCache {
     private val lock = Any()
     private var stableRawPrefix = ""
     private var stableBlocks = emptyList<MarkdownTopLevelBlockSnapshot>()
@@ -939,7 +949,11 @@ fun MarkdownBlock(
                     return@collectLatest
                 }
                 try {
-                    val revealStableEnd = updatedRevealStableEnd
+                    val revealStableEnd = if (app.amber.agent.PerfFlags.STREAMING_BATCH_REVEAL) {
+                        null
+                    } else {
+                        updatedRevealStableEnd
+                    }
                     val parsed = withContext(Dispatchers.Default) {
                         if (latestStreaming) {
                             streamingParseCache.parse(
@@ -1719,59 +1733,97 @@ private fun Paragraph(
                 }
             }
         }
-        val displayAnnotated = remember(
-            staticAnnotated,
-            liveSuffix,
-            liveSuffixSourceOffset,
-            baseColor,
-        ) {
-            if (liveSuffix.isEmpty()) {
-                staticAnnotated
-            } else {
-                buildAnnotatedString {
-                    append(staticAnnotated)
-                    val displaySuffix = liveSuffix.replace(BREAK_LINE_REGEX, "\n")
-                    if (baseColor == Color.Unspecified) {
-                        append(displaySuffix)
-                    } else {
-                        pushStringAnnotation(REVEAL_LEAF_TAG, liveSuffixSourceOffset.toString())
-                        append(displaySuffix)
-                        pop()
+        val annotatedString = if (app.amber.agent.PerfFlags.STREAMING_BATCH_REVEAL) {
+            // Batch reveal (L4 decoupled): only the unparsed live suffix
+            // fades, as one alpha unit. No per-leaf REVEAL_LEAF_TAG, no
+            // source-offset mapping. The settled prefix stays opaque; it
+            // already faded earlier while it was itself the live suffix.
+            val combined = remember(staticAnnotated, liveSuffix, baseColor) {
+                if (liveSuffix.isEmpty()) {
+                    staticAnnotated
+                } else {
+                    buildAnnotatedString {
+                        append(staticAnnotated)
+                        append(liveSuffix.replace(BREAK_LINE_REGEX, "\n"))
                     }
                 }
             }
-        }
-
-        // Cache the REVEAL_LEAF_TAG range list once per static AnnotatedString.
-        // getStringAnnotations(tag, ...) walks every annotation in the doc to
-        // tag-filter, including any UrlAnnotation / InlineContent annotations
-        // pushed by INLINE_LINK / INLINE_MATH. For a paragraph with dozens of
-        // citations + formulas that's O(N) per frame — exactly the kind of
-        // per-frame regression this refactor exists to prevent.
-        val revealRanges = remember(displayAnnotated) {
-            displayAnnotated.getStringAnnotations(REVEAL_LEAF_TAG, 0, displayAnnotated.length)
-        }
-
-        // revealClock = controller?.nowNanos ?: 0L already covers the
-        // null↔non-null transition (the clock jumps between 0 and a real
-        // nanoTime when the controller is installed/removed), so the
-        // controller reference itself isn't a needed key — keeping it
-        // would just add identity churn during the brief streaming-end
-        // window without functional benefit.
-        val annotatedString = remember(
-            displayAnnotated,
-            revealRanges,
-            revealClock,
-            baseColor,
-        ) {
-            if (
-                revealController != null &&
-                revealController.hasActiveReveals() &&
-                revealRanges.isNotEmpty()
-            ) {
-                applyRevealOverlay(displayAnnotated, revealRanges, revealController, baseColor)
+            // revealController != null marks the active streaming block; only
+            // then is there a suffix to fade. liveSuffixSourceOffset changes
+            // once per parse tick, so it is the batch key — a fresh Animatable
+            // per batch fades the newly-arrived text from 0→1.
+            val streamingTail = revealController != null && liveSuffix.isNotEmpty()
+            val suffixAlpha = if (streamingTail) {
+                val anim = remember(liveSuffixSourceOffset) { Animatable(0f) }
+                LaunchedEffect(liveSuffixSourceOffset) {
+                    anim.animateTo(1f, animationSpec = tween(STREAMING_BATCH_FADE_MS))
+                }
+                anim.value
             } else {
-                displayAnnotated
+                1f
+            }
+            remember(combined, staticAnnotated.length, suffixAlpha, baseColor) {
+                applyBatchRevealSuffix(
+                    combined = combined,
+                    staticLength = staticAnnotated.length,
+                    suffixAlpha = suffixAlpha,
+                    baseColor = baseColor,
+                )
+            }
+        } else {
+            val displayAnnotated = remember(
+                staticAnnotated,
+                liveSuffix,
+                liveSuffixSourceOffset,
+                baseColor,
+            ) {
+                if (liveSuffix.isEmpty()) {
+                    staticAnnotated
+                } else {
+                    buildAnnotatedString {
+                        append(staticAnnotated)
+                        val displaySuffix = liveSuffix.replace(BREAK_LINE_REGEX, "\n")
+                        if (baseColor == Color.Unspecified) {
+                            append(displaySuffix)
+                        } else {
+                            pushStringAnnotation(REVEAL_LEAF_TAG, liveSuffixSourceOffset.toString())
+                            append(displaySuffix)
+                            pop()
+                        }
+                    }
+                }
+            }
+            // Cache the REVEAL_LEAF_TAG range list once per static AnnotatedString.
+            // getStringAnnotations(tag, ...) walks every annotation in the doc to
+            // tag-filter, including any UrlAnnotation / InlineContent annotations
+            // pushed by INLINE_LINK / INLINE_MATH. For a paragraph with dozens of
+            // citations + formulas that's O(N) per frame — exactly the kind of
+            // per-frame regression this refactor exists to prevent.
+            val revealRanges = remember(displayAnnotated) {
+                displayAnnotated.getStringAnnotations(REVEAL_LEAF_TAG, 0, displayAnnotated.length)
+            }
+
+            // revealClock = controller?.nowNanos ?: 0L already covers the
+            // null↔non-null transition (the clock jumps between 0 and a real
+            // nanoTime when the controller is installed/removed), so the
+            // controller reference itself isn't a needed key — keeping it
+            // would just add identity churn during the brief streaming-end
+            // window without functional benefit.
+            remember(
+                displayAnnotated,
+                revealRanges,
+                revealClock,
+                baseColor,
+            ) {
+                if (
+                    revealController != null &&
+                    revealController.hasActiveReveals() &&
+                    revealRanges.isNotEmpty()
+                ) {
+                    applyRevealOverlay(displayAnnotated, revealRanges, revealController, baseColor)
+                } else {
+                    displayAnnotated
+                }
             }
         }
 
@@ -2193,6 +2245,35 @@ private fun fadingSpanStyle(baseColor: Color, alpha: Float): SpanStyle = SpanSty
     color = baseColor.copy(alpha = alpha),
     baselineShift = BaselineShift(-(1f - alpha) * 0.14f),
 )
+
+/**
+ * Per-arrival-batch reveal: the batch counterpart to [applyRevealOverlay].
+ * Instead of mapping per-codepoint alpha back to source offsets, it fades
+ * exactly one contiguous range — the live suffix appended after the
+ * statically-parsed text — as a single alpha unit. [staticLength] is the
+ * boundary between settled text (always opaque) and the fading suffix.
+ *
+ * Returns [combined] unchanged when there's nothing to fade (no usable
+ * baseColor, suffix already fully revealed, or the boundary is out of range).
+ */
+internal fun applyBatchRevealSuffix(
+    combined: AnnotatedString,
+    staticLength: Int,
+    suffixAlpha: Float,
+    baseColor: Color,
+): AnnotatedString {
+    if (baseColor == Color.Unspecified) return combined
+    if (suffixAlpha >= 1f) return combined
+    if (staticLength < 0 || staticLength >= combined.length) return combined
+    return buildAnnotatedString {
+        append(combined)
+        addStyle(
+            style = SpanStyle(color = baseColor.copy(alpha = suffixAlpha.coerceIn(0f, 1f))),
+            start = staticLength,
+            end = combined.length,
+        )
+    }
+}
 
 internal fun applyRevealOverlay(
     static: AnnotatedString,
