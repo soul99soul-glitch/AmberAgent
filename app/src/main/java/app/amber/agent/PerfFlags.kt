@@ -80,4 +80,17 @@ object PerfFlags {
      * remain in the header gallery.
      */
     const val SEARCH_INLINE_IMAGES = true
+
+    /**
+     * Streaming reveal decouple — replace the per-codepoint CharReveal
+     * overlay (which maps static AnnotatedString offsets back to source
+     * offsets via REVEAL_LEAF_TAG, and gates block stabilization on reveal
+     * progress via revealStableEnd) with a per-arrival-batch fade: only the
+     * unparsed live suffix fades, as one alpha unit, and top-level blocks
+     * stabilize on structure alone. Removes the L3<->L4 coupling. Default
+     * keeps the legacy per-codepoint path until on-device verification.
+     *
+     * Revert if enabled and broken: `git revert <commit-streaming-batch-reveal>`.
+     */
+    const val STREAMING_BATCH_REVEAL = false
 }
