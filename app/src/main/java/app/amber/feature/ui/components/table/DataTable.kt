@@ -48,6 +48,8 @@ fun DataTable(
     columnMinWidths: List<Dp> = emptyList(),
     columnMaxWidths: List<Dp> = emptyList(),
     cellAlignment: Alignment = Alignment.CenterStart,
+    headerCellModifier: @Composable (column: Int) -> Modifier = { Modifier },
+    bodyCellModifier: @Composable (row: Int, column: Int) -> Modifier = { _, _ -> Modifier },
 ) {
     val hScroll = rememberScrollState()
     val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
@@ -76,6 +78,7 @@ fun DataTable(
             fun subcomposeHeaderContent(c: Int): Placeable {
                 val measurables = subcompose("h1_$c") {
                     CellContentBox(
+                        modifier = headerCellModifier(c),
                         padding = cellPadding,
                         alignment = cellAlignment,
                     ) {
@@ -95,6 +98,7 @@ fun DataTable(
             fun subcomposeBodyContent(r: Int, c: Int): Placeable {
                 val measurables = subcompose("b1_${r}_$c") {
                     CellContentBox(
+                        modifier = bodyCellModifier(r, c),
                         padding = cellPadding,
                         alignment = cellAlignment,
                     ) {
@@ -175,12 +179,13 @@ fun DataTable(
 
 @Composable
 private fun CellContentBox(
+    modifier: Modifier = Modifier,
     padding: Dp,
     alignment: Alignment,
     content: @Composable () -> Unit,
 ) {
     Box(
-        modifier = Modifier.padding(padding),
+        modifier = modifier.padding(padding),
         contentAlignment = alignment,
     ) {
         content()

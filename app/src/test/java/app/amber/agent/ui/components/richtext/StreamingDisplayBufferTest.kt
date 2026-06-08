@@ -42,11 +42,11 @@ class StreamingDisplayBufferTest {
     }
 
     @Test
-    fun streaming_target_speed_reaches_fast_model_range_before_completion() {
+    fun streaming_target_speed_stretches_mid_sized_backlog() {
         val speed = streamingDisplayTargetSpeed(backlog = 240, streaming = true)
         assertTrue(
-            "A 240-char backlog should drain during streaming instead of waiting for final flush.",
-            speed >= 800f,
+            "A 240-char backlog should keep moving without dumping a whole burst.",
+            speed in 240f..360f,
         )
     }
 
@@ -65,7 +65,7 @@ class StreamingDisplayBufferTest {
     @Test
     fun streaming_backlog_has_hard_lag_bound() {
         val maxBacklog = streamingDisplayMaxBacklogChars()
-        val targetLength = 2_000
+        val targetLength = 3_000
         val visibleLength = 1_000
         val catchUpEnd = streamingDisplayBacklogCatchUpEnd(
             visibleLength = visibleLength,
@@ -85,7 +85,7 @@ class StreamingDisplayBufferTest {
     @Test
     fun streaming_backlog_cap_is_inactive_inside_lag_bound() {
         val maxBacklog = streamingDisplayMaxBacklogChars()
-        val targetLength = 1_000
+        val targetLength = 2_000
         val visibleLength = targetLength - maxBacklog + 12
 
         assertTrue(targetLength - visibleLength < maxBacklog)
@@ -105,9 +105,9 @@ class StreamingDisplayBufferTest {
         // speed cap is lower, the drain can never hold the lag and the hard
         // backlog catch-up (snap) fires on every fast model instead of acting as
         // a rare backstop — the cause of the "20-char wave" stutter.
-        // TARGET_DRAIN_SECONDS is 0.28f.
+        // TARGET_DRAIN_SECONDS is 0.90f.
         val maxBacklog = streamingDisplayMaxBacklogChars()
-        val speedNeededToHoldLag = maxBacklog / 0.28f
+        val speedNeededToHoldLag = maxBacklog / 0.90f
         assertTrue(
             "Speed cap throttles the deadline-drain below the lag bound; raise " +
                 "STREAM_DISPLAY_MAX_CHARS_PER_SEC to >= MAX_BACKLOG_CHARS / TARGET_DRAIN_SECONDS.",

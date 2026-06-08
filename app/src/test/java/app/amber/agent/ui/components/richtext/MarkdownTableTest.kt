@@ -46,6 +46,58 @@ class MarkdownTableTest {
         )
     }
 
+    @Test
+    fun `streaming table data includes live suffix row`() {
+        val content = """
+            | ID | Name |
+            | --- | --- |
+            | 1 | Amber |
+        """.trimIndent()
+        val table = findTable(
+            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
+        ) ?: error("table missing")
+
+        val tableData = extractStreamingMarkdownTableData(
+            node = table,
+            content = content,
+            sourceOffsetBase = 0,
+            liveSuffix = "\n| 2 | Graphite |",
+            liveSuffixSourceOffset = table.endOffset,
+        )
+
+        assertNotNull(tableData)
+        assertEquals(
+            listOf(
+                listOf("1", "Amber"),
+                listOf("2", "Graphite"),
+            ),
+            tableData?.rows,
+        )
+    }
+
+    @Test
+    fun `streaming table data ignores suffix that does not start at table end`() {
+        val content = """
+            | ID | Name |
+            | --- | --- |
+            | 1 | Amber |
+        """.trimIndent()
+        val table = findTable(
+            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
+        ) ?: error("table missing")
+
+        val tableData = extractStreamingMarkdownTableData(
+            node = table,
+            content = content,
+            sourceOffsetBase = 0,
+            liveSuffix = "\n| 2 | Graphite |",
+            liveSuffixSourceOffset = table.endOffset + 1,
+        )
+
+        assertNotNull(tableData)
+        assertEquals(listOf(listOf("1", "Amber")), tableData?.rows)
+    }
+
     private fun findTable(node: ASTNode): ASTNode? {
         if (node.type == GFMElementTypes.TABLE) return node
         return node.children.firstNotNullOfOrNull(::findTable)

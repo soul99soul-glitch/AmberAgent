@@ -105,9 +105,9 @@ private const val REVEAL_TAIL_WINDOW_NANOS = 350_000_000L
 private const val REVEAL_TAIL_MAX_ENTRIES = 150
 private const val REVEAL_TAIL_MAX_CHARS = 400
 
-private const val STREAM_DISPLAY_BASE_CHARS_PER_SEC = 54f
+private const val STREAM_DISPLAY_BASE_CHARS_PER_SEC = 72f
 // MUST be >= STREAM_DISPLAY_MAX_BACKLOG_CHARS / STREAM_DISPLAY_TARGET_DRAIN_SECONDS
-// (420 / 0.28 = 1500). Below that, the deadline-drain can never reach the speed
+// (1200 / 0.90 = 1333). Below that, the deadline-drain can never reach the speed
 // needed to hold lag at the backlog cap, so the hard catch-up (snap) fires on
 // every fast model instead of acting as a rare backstop — that premature snap is
 // the "20-char wave" stutter. Do NOT chase faster models by bumping this; raise
@@ -115,19 +115,19 @@ private const val STREAM_DISPLAY_BASE_CHARS_PER_SEC = 54f
 // (StreamingDisplayBufferTest pins this relationship.)
 private const val STREAM_DISPLAY_MAX_CHARS_PER_SEC = 1_500f
 private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_SEC = 2_400f
-private const val STREAM_DISPLAY_SPEED_ALPHA = 0.12f
-private const val STREAM_DISPLAY_TARGET_DRAIN_SECONDS = 0.28f
-private const val STREAM_DISPLAY_FINAL_TARGET_DRAIN_SECONDS = 0.10f
+private const val STREAM_DISPLAY_SPEED_ALPHA = 0.08f
+private const val STREAM_DISPLAY_TARGET_DRAIN_SECONDS = 0.90f
+private const val STREAM_DISPLAY_FINAL_TARGET_DRAIN_SECONDS = 0.18f
 // Fixed speed caps are a soft comfort target, not a correctness guarantee.
 // When a model bursts faster than the display buffer can comfortably reveal,
 // keep lag bounded so completion never has a whole answer left to dump.
-private const val STREAM_DISPLAY_MAX_BACKLOG_CHARS = 420
+private const val STREAM_DISPLAY_MAX_BACKLOG_CHARS = 1_200
 // The display buffer runs from Compose's frame clock, so one loop iteration is
 // already bounded by the device vsync. Keep a small guard for very high refresh
 // panels, but do not cap 120Hz devices at the old 16ms / ~60Hz cadence.
 private const val STREAM_DISPLAY_MIN_EMIT_INTERVAL_NANOS = 8_000_000L
-private const val STREAM_DISPLAY_MAX_CHARS_PER_EMIT = 18
-private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT = 32
+private const val STREAM_DISPLAY_MAX_CHARS_PER_EMIT = 8
+private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT = 20
 private const val HARD_DEGRADE_REVEAL_DURATION_NANOS = 72_000_000L
 
 /**
@@ -801,8 +801,8 @@ fun rememberStreamingDisplayText(
                 maxCharsPerSecond = maxCharsPerSecond,
             )
             speed += (targetSpeed - speed) * STREAM_DISPLAY_SPEED_ALPHA
-            budget += speed * deltaSeconds
             val maxCharsPerEmit = streamingDisplayMaxCharsPerEmit(updatedStreaming)
+            budget = (budget + speed * deltaSeconds).coerceAtMost(maxCharsPerEmit.toFloat())
             val releaseCount = budget.toInt().coerceAtMost(maxCharsPerEmit)
             if (releaseCount <= 0) continue
             if (

@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,6 +51,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -108,6 +110,7 @@ import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitc
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownPreprocessNative
 import app.amber.agent.ui.components.richtext.nativebridge.PackedAstReader
 import java.util.LinkedHashMap
+import java.util.LinkedHashSet
 import kotlin.random.Random
 
 /**
@@ -117,6 +120,7 @@ import kotlin.random.Random
 internal val LocalMarkdownFillWidth = compositionLocalOf { true }
 private val LocalMarkdownSourceOffsetBase = compositionLocalOf { 0 }
 private val LocalMarkdownSyntheticSuffixStart = compositionLocalOf { Int.MAX_VALUE }
+private val LocalStreamingMarkdownMotionScope = compositionLocalOf<StreamingMarkdownMotionScope?> { null }
 
 private fun Modifier.fillWidthIf(fill: Boolean): Modifier = if (fill) fillMaxWidth() else this
 
@@ -284,6 +288,51 @@ internal data class StreamingLiveSuffix(
     val sourceOffset: Int,
 )
 
+internal data class StreamingMarkdownMotionKey(
+    val type: String,
+    val absoluteStartOffset: Int,
+)
+
+internal class StreamingMarkdownMotionScope {
+    private val animatedKeys = LinkedHashSet<StreamingMarkdownMotionKey>()
+
+    fun claim(key: StreamingMarkdownMotionKey): Boolean {
+        return animatedKeys.add(key)
+    }
+
+    fun hasSeen(key: StreamingMarkdownMotionKey): Boolean {
+        return key in animatedKeys
+    }
+
+    fun clear() {
+        animatedKeys.clear()
+    }
+}
+
+internal fun streamingMarkdownMotionKey(
+    type: IElementType,
+    sourceOffsetBase: Int,
+    nodeStartOffset: Int,
+): StreamingMarkdownMotionKey {
+    return StreamingMarkdownMotionKey(
+        type = type.toString(),
+        absoluteStartOffset = sourceOffsetBase + nodeStartOffset,
+    )
+}
+
+internal fun streamingTableCellMotionKey(
+    tableKey: StreamingMarkdownMotionKey,
+    rowIndex: Int,
+    columnIndex: Int,
+    header: Boolean,
+): StreamingMarkdownMotionKey {
+    val section = if (header) "header" else "row"
+    return StreamingMarkdownMotionKey(
+        type = "${tableKey.type}:$section:$rowIndex:$columnIndex",
+        absoluteStartOffset = tableKey.absoluteStartOffset,
+    )
+}
+
 private val FENCE_LINE_REGEX = Regex("""(?m)^[ \t]*```""")
 private val TRAILING_FENCE_TERMINATOR_REGEX = Regex("""[ \t]*```[ \t]*""")
 private val EMPTY_STREAMING_LIVE_SUFFIX = StreamingLiveSuffix("", 0)
@@ -362,6 +411,50 @@ internal fun streamingLiveSuffixFor(
     )
 }
 
+internal fun streamingLiveSuffixForLastRenderableChild(
+    children: List<ASTNode>,
+    child: ASTNode,
+    liveSuffix: String,
+    liveSuffixSourceOffset: Int,
+): StreamingLiveSuffix {
+    if (liveSuffix.isEmpty()) return EMPTY_STREAMING_LIVE_SUFFIX
+    val target = children.asReversed().firstOrNull { it.isStreamingSuffixRenderableTarget() }
+        ?: return EMPTY_STREAMING_LIVE_SUFFIX
+    return if (child === target) {
+        StreamingLiveSuffix(liveSuffix, liveSuffixSourceOffset)
+    } else {
+        EMPTY_STREAMING_LIVE_SUFFIX
+    }
+}
+
+private fun ASTNode.isStreamingSuffixRenderableTarget(): Boolean {
+    return when (type) {
+        MarkdownElementTypes.PARAGRAPH,
+        MarkdownElementTypes.UNORDERED_LIST,
+        MarkdownElementTypes.ORDERED_LIST,
+        MarkdownElementTypes.LIST_ITEM,
+        MarkdownElementTypes.BLOCK_QUOTE,
+        MarkdownElementTypes.ATX_1,
+        MarkdownElementTypes.ATX_2,
+        MarkdownElementTypes.ATX_3,
+        MarkdownElementTypes.ATX_4,
+        MarkdownElementTypes.ATX_5,
+        MarkdownElementTypes.ATX_6,
+        MarkdownElementTypes.IMAGE,
+        MarkdownElementTypes.CODE_FENCE,
+        MarkdownElementTypes.CODE_BLOCK,
+        MarkdownElementTypes.HTML_BLOCK,
+        MarkdownTokenTypes.ATX_CONTENT,
+        MarkdownTokenTypes.TEXT,
+        MarkdownTokenTypes.HORIZONTAL_RULE,
+        GFMElementTypes.TABLE,
+        GFMElementTypes.BLOCK_MATH,
+        GFMTokenTypes.CHECK_BOX -> true
+
+        else -> children.any { it.isStreamingSuffixRenderableTarget() }
+    }
+}
+
 private const val MARKDOWN_PARSE_CACHE_VERSION = 1
 private const val MARKDOWN_PARSE_CACHE_MAX_ENTRIES = 128
 private const val MARKDOWN_PARSE_CACHE_MAX_CHARS = 1_200_000
@@ -379,12 +472,25 @@ private const val MARKDOWN_PARSE_HIT_LOG_MIN_CHARS = 600
 private const val MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L
 
 /**
- * Batch reveal fade window. Kept strictly below
- * [MARKDOWN_STREAMING_PARSE_THROTTLE_MS] so each batch's suffix reaches
- * alpha≈1 before the next parse tick absorbs it into the settled text —
- * otherwise the absorbed chars would pop from <1 to 1.
+ * Codex-style batch reveal window. The live suffix starts faint but readable,
+ * reaches near-opaque by the 200ms parse tick, then finishes softly. This keeps
+ * the alpha motion visible without letting parse absorption pop the tail.
  */
-private const val STREAMING_BATCH_FADE_MS = 180
+private const val STREAMING_BATCH_FADE_MS = 220
+private const val STREAMING_BATCH_CHAR_STAGGER_MS = 12
+private const val STREAMING_BATCH_STAGGER_MAX_CODEPOINTS = 96
+private const val STREAMING_BATCH_MAX_STAGGER_FRACTION = 0.42f
+private const val STREAMING_BATCH_REVEAL_START_ALPHA = 0.24f
+private const val STREAMING_BATCH_REVEAL_LIFT_EM = 0.10f
+private const val STREAMING_BLOCK_REVEAL_MS = 170
+private const val STREAMING_BLOCK_REVEAL_START_ALPHA = 0.86f
+private const val STREAMING_BLOCK_REVEAL_OFFSET_DP = 3
+private const val STREAMING_TABLE_CELL_REVEAL_MS = 150
+private const val STREAMING_TABLE_CELL_REVEAL_START_ALPHA = 0.72f
+private const val STREAMING_TABLE_CELL_REVEAL_MAX_CELLS = 48
+private const val STREAMING_LIST_ITEM_REVEAL_MS = 130
+private const val STREAMING_LIST_ITEM_STAGGER_LIMIT = 8
+private const val STREAMING_LIST_ITEM_STAGGER_MS = 8
 
 private data class MarkdownParseCacheKey(
     val content: String,
@@ -885,6 +991,28 @@ fun MarkdownBlock(
         content = renderContent,
         immediateMode = app.amber.agent.PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL,
     )
+    val streamingMotionActive = streaming || displayDrainingAfterStream
+    val streamingMotionScope = remember {
+        StreamingMarkdownMotionScope()
+    }
+    val lastMotionContent = remember {
+        mutableStateOf(renderContent)
+    }
+    LaunchedEffect(streamingMotionActive, renderContent) {
+        if (!streamingMotionActive) {
+            streamingMotionScope.clear()
+            lastMotionContent.value = renderContent
+            return@LaunchedEffect
+        }
+        val previousContent = lastMotionContent.value
+        if (
+            renderContent.length < previousContent.length ||
+            !renderContent.startsWith(previousContent)
+        ) {
+            streamingMotionScope.clear()
+        }
+        lastMotionContent.value = renderContent
+    }
     val streamingLiveSuffix = streamingLiveSuffixFor(
         renderContent = renderContent,
         activeBaseOffset = data.activeBaseOffset,
@@ -972,6 +1100,7 @@ fun MarkdownBlock(
                             key(block.key) {
                                 CompositionLocalProvider(
                                     LocalCharRevealController provides null,
+                                    LocalStreamingMarkdownMotionScope provides null,
                                 ) {
                                     val blockModifier = if (block.preserveParagraphBottomPadding) {
                                         nodeModifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
@@ -1001,6 +1130,11 @@ fun MarkdownBlock(
                                     LocalCharRevealController provides revealController,
                                     LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
                                     LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
+                                    LocalStreamingMarkdownMotionScope provides if (index == activeLastIndex) {
+                                        streamingMotionScope
+                                    } else {
+                                        null
+                                    },
                                 ) {
                                     MarkdownNode(
                                         node = activeChild,
@@ -1030,6 +1164,11 @@ fun MarkdownBlock(
                                 LocalCharRevealController provides childRevealController,
                                 LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
                                 LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
+                                LocalStreamingMarkdownMotionScope provides if (childRevealController != null) {
+                                    streamingMotionScope
+                                } else {
+                                    null
+                                },
                             ) {
                                 MarkdownNode(
                                     node = child,
@@ -1094,6 +1233,82 @@ object HeaderStyle {
 }
 
 @Composable
+private fun StreamingBlockReveal(
+    node: ASTNode,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    delayMillis: Int = 0,
+    durationMillis: Int = STREAMING_BLOCK_REVEAL_MS,
+    startAlpha: Float = STREAMING_BLOCK_REVEAL_START_ALPHA,
+    offsetYDp: Int = STREAMING_BLOCK_REVEAL_OFFSET_DP,
+    content: @Composable (Modifier) -> Unit,
+) {
+    val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
+    val key = remember(node.type, sourceOffsetBase, node.startOffset) {
+        streamingMarkdownMotionKey(
+            type = node.type,
+            sourceOffsetBase = sourceOffsetBase,
+            nodeStartOffset = node.startOffset,
+        )
+    }
+    content(
+        modifier.then(
+            streamingRevealModifier(
+                key = key,
+                enabled = enabled,
+                delayMillis = delayMillis,
+                durationMillis = durationMillis,
+                startAlpha = startAlpha,
+                offsetYDp = offsetYDp,
+            )
+        )
+    )
+}
+
+@Composable
+private fun streamingRevealModifier(
+    key: StreamingMarkdownMotionKey,
+    enabled: Boolean = true,
+    delayMillis: Int = 0,
+    durationMillis: Int = STREAMING_BLOCK_REVEAL_MS,
+    startAlpha: Float = STREAMING_BLOCK_REVEAL_START_ALPHA,
+    offsetYDp: Int = STREAMING_BLOCK_REVEAL_OFFSET_DP,
+): Modifier {
+    val scope = LocalStreamingMarkdownMotionScope.current
+    val revealActive = enabled && LocalCharRevealController.current != null
+    val shouldAnimate = remember(key) {
+        mutableStateOf(false)
+    }
+    LaunchedEffect(scope, revealActive, key) {
+        val motionScope = scope
+        shouldAnimate.value = if (revealActive && motionScope != null) {
+            motionScope.claim(key)
+        } else {
+            false
+        }
+    }
+    if (!shouldAnimate.value) return Modifier
+
+    val anim = remember(key) { Animatable(0f) }
+    LaunchedEffect(key) {
+        anim.animateTo(
+            1f,
+            animationSpec = tween(
+                durationMillis = durationMillis,
+                delayMillis = delayMillis,
+                easing = LinearEasing,
+            ),
+        )
+    }
+    val offsetPx = with(LocalDensity.current) { offsetYDp.dp.toPx() }
+    return Modifier.graphicsLayer {
+        val eased = codexStreamingAlphaProgress(anim.value)
+        alpha = startAlpha + (1f - startAlpha) * eased
+        translationY = offsetPx * (1f - eased)
+    }
+}
+
+@Composable
 private fun MarkdownNode(
     node: ASTNode,
     content: String,
@@ -1107,8 +1322,19 @@ private fun MarkdownNode(
         // 文件根节点
         MarkdownElementTypes.MARKDOWN_FILE -> {
             node.children.fastForEach { child ->
+                val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                    children = node.children,
+                    child = child,
+                    liveSuffix = liveSuffix,
+                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                )
                 MarkdownNode(
-                    node = child, content = content, modifier = modifier, onClickCitation = onClickCitation
+                    node = child,
+                    content = content,
+                    modifier = modifier,
+                    onClickCitation = onClickCitation,
+                    liveSuffix = childLiveSuffix.text,
+                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                 )
             }
         }
@@ -1146,19 +1372,29 @@ private fun MarkdownNode(
                 else -> 8.dp
             }
             ProvideTextStyle(value = style) {
-                FlowRow(
-                    modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    node.children.fastForEach { node ->
-                        if (node.type == MarkdownTokenTypes.ATX_CONTENT) {
-                            Paragraph(
-                                node = node,
-                                content = content,
-                                onClickCitation = onClickCitation,
-                                modifier = modifier.padding(vertical = headingPadding),
-                                trim = true,
-                            )
+                StreamingBlockReveal(node = node, modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current)) { revealModifier ->
+                    FlowRow(
+                        modifier = revealModifier,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        node.children.fastForEach { child ->
+                            if (child.type == MarkdownTokenTypes.ATX_CONTENT) {
+                                val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                                    children = node.children,
+                                    child = child,
+                                    liveSuffix = liveSuffix,
+                                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                                )
+                                Paragraph(
+                                    node = child,
+                                    content = content,
+                                    onClickCitation = onClickCitation,
+                                    modifier = Modifier.padding(vertical = headingPadding),
+                                    trim = true,
+                                    liveSuffix = childLiveSuffix.text,
+                                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
+                                )
+                            }
                         }
                     }
                 }
@@ -1172,7 +1408,9 @@ private fun MarkdownNode(
                 content = content,
                 modifier = modifier.padding(vertical = 4.dp),
                 onClickCitation = onClickCitation,
-                level = listLevel
+                level = listLevel,
+                liveSuffix = liveSuffix,
+                liveSuffixSourceOffset = liveSuffixSourceOffset,
             )
         }
 
@@ -1182,7 +1420,9 @@ private fun MarkdownNode(
                 content = content,
                 modifier = modifier.padding(vertical = 4.dp),
                 onClickCitation = onClickCitation,
-                level = listLevel
+                level = listLevel,
+                liveSuffix = liveSuffix,
+                liveSuffixSourceOffset = liveSuffixSourceOffset,
             )
         }
 
@@ -1219,21 +1459,34 @@ private fun MarkdownNode(
                 // 同时降低 bgColor alpha (0.2 → 0.12), 在深色下也清爽.
                 val borderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                 val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)
-                Column(
-                    modifier = Modifier
-                        .drawBehind {
-                            drawRect(
-                                color = bgColor, size = size
+                StreamingBlockReveal(node = node, modifier = modifier) { revealModifier ->
+                    Column(
+                        modifier = revealModifier
+                            .drawBehind {
+                                drawRect(
+                                    color = bgColor, size = size
+                                )
+                                drawRect(
+                                    color = borderColor, size = Size(10f, size.height)
+                                )
+                            }
+                            .padding(8.dp)
+                    ) {
+                        node.children.fastForEach { child ->
+                            val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                                children = node.children,
+                                child = child,
+                                liveSuffix = liveSuffix,
+                                liveSuffixSourceOffset = liveSuffixSourceOffset,
                             )
-                            drawRect(
-                                color = borderColor, size = Size(10f, size.height)
+                            MarkdownNode(
+                                node = child,
+                                content = content,
+                                onClickCitation = onClickCitation,
+                                liveSuffix = childLiveSuffix.text,
+                                liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                             )
                         }
-                        .padding(8.dp)) {
-                    node.children.fastForEach { child ->
-                        MarkdownNode(
-                            node = child, content = content, onClickCitation = onClickCitation
-                        )
                     }
                 }
             }
@@ -1260,8 +1513,19 @@ private fun MarkdownNode(
         MarkdownElementTypes.EMPH -> {
             ProvideTextStyle(TextStyle(fontStyle = FontStyle.Italic)) {
                 node.children.fastForEach { child ->
+                    val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                        children = node.children,
+                        child = child,
+                        liveSuffix = liveSuffix,
+                        liveSuffixSourceOffset = liveSuffixSourceOffset,
+                    )
                     MarkdownNode(
-                        node = child, content = content, modifier = modifier, onClickCitation = onClickCitation
+                        node = child,
+                        content = content,
+                        modifier = modifier,
+                        onClickCitation = onClickCitation,
+                        liveSuffix = childLiveSuffix.text,
+                        liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                     )
                 }
             }
@@ -1270,8 +1534,19 @@ private fun MarkdownNode(
         MarkdownElementTypes.STRONG -> {
             ProvideTextStyle(TextStyle(fontWeight = FontWeight.SemiBold)) {
                 node.children.fastForEach { child ->
+                    val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                        children = node.children,
+                        child = child,
+                        liveSuffix = liveSuffix,
+                        liveSuffixSourceOffset = liveSuffixSourceOffset,
+                    )
                     MarkdownNode(
-                        node = child, content = content, modifier = modifier, onClickCitation = onClickCitation
+                        node = child,
+                        content = content,
+                        modifier = modifier,
+                        onClickCitation = onClickCitation,
+                        liveSuffix = childLiveSuffix.text,
+                        liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                     )
                 }
             }
@@ -1285,15 +1560,23 @@ private fun MarkdownNode(
         }
 
         GFMElementTypes.TABLE -> {
-            TableNode(node = node, content = content, modifier = modifier)
+            TableNode(
+                node = node,
+                content = content,
+                modifier = modifier,
+                liveSuffix = liveSuffix,
+                liveSuffixSourceOffset = liveSuffixSourceOffset,
+            )
         }
 
         MarkdownTokenTypes.HORIZONTAL_RULE -> {
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 16.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                thickness = 0.5.dp
-            )
+            StreamingBlockReveal(node = node) { revealModifier ->
+                HorizontalDivider(
+                    modifier = revealModifier.padding(vertical = 16.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                    thickness = 0.5.dp
+                )
+            }
         }
 
         // 图片
@@ -1302,18 +1585,20 @@ private fun MarkdownNode(
             val imageUrl =
                 node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
             if (LocalSearchImageUrls.current?.contains(imageUrl) == true) return
-            Column(
-                modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // 这里可以使用Coil等图片加载库加载图片
-                ZoomableAsyncImage(
-                    model = imageUrl,
-                    contentDescription = altText,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .widthIn(min = 120.dp, max = 360.dp)
-                        .heightIn(min = 120.dp, max = 420.dp),
-                )
+            StreamingBlockReveal(node = node, modifier = modifier) { revealModifier ->
+                Column(
+                    modifier = revealModifier, horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // 这里可以使用Coil等图片加载库加载图片
+                    ZoomableAsyncImage(
+                        model = imageUrl,
+                        contentDescription = altText,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .widthIn(min = 120.dp, max = 360.dp)
+                            .heightIn(min = 120.dp, max = 420.dp),
+                    )
+                }
             }
         }
 
@@ -1336,20 +1621,19 @@ private fun MarkdownNode(
         GFMElementTypes.BLOCK_MATH -> {
             val formula = node.getTextInNode(content)
             val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
-            if (enableLatexRendering) {
-                MathBlock(
-                    formula, modifier = modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                )
-            } else {
-                Text(
-                    text = formula,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                )
+            StreamingBlockReveal(node = node, modifier = modifier.fillMaxWidth().padding(vertical = 8.dp)) { revealModifier ->
+                if (enableLatexRendering) {
+                    MathBlock(
+                        formula,
+                        modifier = revealModifier
+                    )
+                } else {
+                    Text(
+                        text = formula,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = revealModifier
+                    )
+                }
             }
         }
 
@@ -1362,10 +1646,12 @@ private fun MarkdownNode(
 
         MarkdownElementTypes.CODE_BLOCK -> {
             val code = node.getTextInNode(content)
-            Text(
-                text = code,
-                modifier = modifier,
-            )
+            StreamingBlockReveal(node = node, modifier = modifier) { revealModifier ->
+                Text(
+                    text = code,
+                    modifier = revealModifier,
+                )
+            }
         }
 
         // 代码块
@@ -1397,14 +1683,14 @@ private fun MarkdownNode(
             )
             val code = (rawCode + liveCodeSuffix).trimIndent()
 
-            HighlightCodeBlock(
-                code = code,
-                language = language,
-                modifier = Modifier
-                    .padding(bottom = 4.dp)
-                    .fillMaxWidth(),
-                completeCodeBlock = hasEnd
-            )
+            StreamingBlockReveal(node = node, modifier = Modifier.padding(bottom = 4.dp).fillMaxWidth()) { revealModifier ->
+                HighlightCodeBlock(
+                    code = code,
+                    language = language,
+                    modifier = revealModifier,
+                    completeCodeBlock = hasEnd
+                )
+            }
         }
 
         MarkdownTokenTypes.TEXT -> {
@@ -1417,17 +1703,30 @@ private fun MarkdownNode(
 
         MarkdownElementTypes.HTML_BLOCK -> {
             val text = node.getTextInNode(content)
-            SimpleHtmlBlock(
-                html = text, modifier = modifier
-            )
+            StreamingBlockReveal(node = node, modifier = modifier) { revealModifier ->
+                SimpleHtmlBlock(
+                    html = text, modifier = revealModifier
+                )
+            }
         }
 
         // 其他类型的节点，递归处理子节点
         else -> {
             // 递归处理其他节点的子节点
             node.children.fastForEach { child ->
+                val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                    children = node.children,
+                    child = child,
+                    liveSuffix = liveSuffix,
+                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                )
                 MarkdownNode(
-                    node = child, content = content, modifier = modifier, onClickCitation = onClickCitation
+                    node = child,
+                    content = content,
+                    modifier = modifier,
+                    onClickCitation = onClickCitation,
+                    liveSuffix = childLiveSuffix.text,
+                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                 )
             }
         }
@@ -1466,7 +1765,9 @@ private fun UnorderedListNode(
     content: String,
     modifier: Modifier = Modifier,
     onClickCitation: (String) -> Unit = {},
-    level: Int = 0
+    level: Int = 0,
+    liveSuffix: String = "",
+    liveSuffixSourceOffset: Int = 0,
 ) {
     val bulletStyle = when (level % 3) {
         0 -> "• "
@@ -1479,15 +1780,26 @@ private fun UnorderedListNode(
             .fillWidthIf(LocalMarkdownFillWidth.current)
             .padding(start = (level * 8).dp)
     ) {
+        var itemIndex = 0
         node.children.fastForEach { child ->
             if (child.type == MarkdownElementTypes.LIST_ITEM) {
+                val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                    children = node.children,
+                    child = child,
+                    liveSuffix = liveSuffix,
+                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                )
                 ListItemNode(
                     node = child,
                     content = content,
                     bulletText = bulletStyle,
                     onClickCitation = onClickCitation,
-                    level = level
+                    level = level,
+                    itemIndex = itemIndex,
+                    liveSuffix = childLiveSuffix.text,
+                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                 )
+                itemIndex++
             }
         }
     }
@@ -1499,7 +1811,9 @@ private fun OrderedListNode(
     content: String,
     modifier: Modifier = Modifier,
     onClickCitation: (String) -> Unit = {},
-    level: Int = 0
+    level: Int = 0,
+    liveSuffix: String = "",
+    liveSuffixSourceOffset: Int = 0,
 ) {
     Column(
         modifier = modifier
@@ -1511,12 +1825,21 @@ private fun OrderedListNode(
             if (child.type == MarkdownElementTypes.LIST_ITEM) {
                 val numberText =
                     child.findChildOfTypeRecursive(MarkdownTokenTypes.LIST_NUMBER)?.getTextInNode(content) ?: "$index. "
+                val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                    children = node.children,
+                    child = child,
+                    liveSuffix = liveSuffix,
+                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                )
                 ListItemNode(
                     node = child,
                     content = content,
                     bulletText = numberText,
                     onClickCitation = onClickCitation,
-                    level = level
+                    level = level,
+                    itemIndex = index - 1,
+                    liveSuffix = childLiveSuffix.text,
+                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                 )
                 index++
             }
@@ -1526,7 +1849,14 @@ private fun OrderedListNode(
 
 @Composable
 private fun ListItemNode(
-    node: ASTNode, content: String, bulletText: String, onClickCitation: (String) -> Unit = {}, level: Int
+    node: ASTNode,
+    content: String,
+    bulletText: String,
+    onClickCitation: (String) -> Unit = {},
+    level: Int,
+    itemIndex: Int,
+    liveSuffix: String = "",
+    liveSuffixSourceOffset: Int = 0,
 ) {
     Column(
         modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
@@ -1535,35 +1865,61 @@ private fun ListItemNode(
         val (directContent, nestedLists) = separateContentAndLists(node)
         // directContent 渲染处理
         if (directContent.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
-            ) {
-                Text(
-                    text = bulletText,
-                    modifier = Modifier.alignByBaseline(),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                FlowRow(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically,
+            StreamingBlockReveal(
+                node = node,
+                enabled = itemIndex < STREAMING_LIST_ITEM_STAGGER_LIMIT,
+                delayMillis = itemIndex * STREAMING_LIST_ITEM_STAGGER_MS,
+                durationMillis = STREAMING_LIST_ITEM_REVEAL_MS,
+            ) { revealModifier ->
+                Row(
+                    modifier = revealModifier.fillWidthIf(LocalMarkdownFillWidth.current)
                 ) {
-                    directContent.fastForEach { contentChild ->
-                        MarkdownNode(
-                            node = contentChild,
-                            content = content,
-                            modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
-                            onClickCitation = onClickCitation,
-                            listLevel = level,
-                        )
+                    Text(
+                        text = bulletText,
+                        modifier = Modifier.alignByBaseline(),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    FlowRow(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        directContent.fastForEach { contentChild ->
+                            val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                                children = node.children,
+                                child = contentChild,
+                                liveSuffix = liveSuffix,
+                                liveSuffixSourceOffset = liveSuffixSourceOffset,
+                            )
+                            MarkdownNode(
+                                node = contentChild,
+                                content = content,
+                                modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
+                                onClickCitation = onClickCitation,
+                                listLevel = level,
+                                liveSuffix = childLiveSuffix.text,
+                                liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
+                            )
+                        }
                     }
                 }
             }
         }
         // nestedLists 渲染处理
         nestedLists.fastForEach { nestedList ->
+            val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                children = node.children,
+                child = nestedList,
+                liveSuffix = liveSuffix,
+                liveSuffixSourceOffset = liveSuffixSourceOffset,
+            )
             MarkdownNode(
-                node = nestedList, content = content, onClickCitation = onClickCitation, listLevel = level + 1 // 增加层级
+                node = nestedList,
+                content = content,
+                onClickCitation = onClickCitation,
+                listLevel = level + 1, // 增加层级
+                liveSuffix = childLiveSuffix.text,
+                liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
             )
         }
     }
@@ -1609,8 +1965,18 @@ private fun Paragraph(
     if (hasImageOrBlockMath) {
         FlowRow(modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current)) {
             node.children.fastForEach { child ->
+                val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                    children = node.children,
+                    child = child,
+                    liveSuffix = liveSuffix,
+                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                )
                 MarkdownNode(
-                    node = child, content = content, onClickCitation = onClickCitation
+                    node = child,
+                    content = content,
+                    onClickCitation = onClickCitation,
+                    liveSuffix = childLiveSuffix.text,
+                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                 )
             }
         }
@@ -1693,9 +2059,9 @@ private fun Paragraph(
                 }
             }
         }
-        // Batch reveal (L4 decoupled): only the unparsed live suffix fades,
-        // as one alpha unit. The settled prefix stays opaque; it already
-        // faded earlier while it was itself the live suffix.
+        // Batch reveal (L4 decoupled): only the unparsed live suffix animates.
+        // The settled prefix stays opaque; it already revealed earlier while
+        // it was itself the live suffix.
         val combined = remember(staticAnnotated, liveSuffix, baseColor) {
             if (liveSuffix.isEmpty()) {
                 staticAnnotated
@@ -1709,12 +2075,18 @@ private fun Paragraph(
         // revealController != null marks the active streaming block; only then
         // is there a suffix to fade. liveSuffixSourceOffset changes once per
         // parse tick, so it is the batch key — a fresh Animatable per batch
-        // fades the newly-arrived text from 0→1.
+        // drives the newly-arrived text from 0→1.
         val streamingTail = revealController != null && liveSuffix.isNotEmpty()
         val suffixAlpha = if (streamingTail) {
             val anim = remember(liveSuffixSourceOffset) { Animatable(0f) }
             LaunchedEffect(liveSuffixSourceOffset) {
-                anim.animateTo(1f, animationSpec = tween(STREAMING_BATCH_FADE_MS))
+                anim.animateTo(
+                    1f,
+                    animationSpec = tween(
+                        durationMillis = STREAMING_BATCH_FADE_MS,
+                        easing = LinearEasing,
+                    ),
+                )
             }
             anim.value
         } else {
@@ -1724,7 +2096,7 @@ private fun Paragraph(
             applyBatchRevealSuffix(
                 combined = combined,
                 staticLength = staticAnnotated.length,
-                suffixAlpha = suffixAlpha,
+                suffixProgress = suffixAlpha,
                 baseColor = baseColor,
             )
         }
@@ -1743,12 +2115,44 @@ private fun Paragraph(
 }
 
 @Composable
-private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modifier) {
-    val tableData = remember(node, content) {
+private fun TableNode(
+    node: ASTNode,
+    content: String,
+    modifier: Modifier = Modifier,
+    liveSuffix: String = "",
+    liveSuffixSourceOffset: Int = 0,
+) {
+    val settledTableData = remember(node, content) {
         traceMarkdown("Amber Markdown table extract") {
             extractMarkdownTableData(node = node, content = content)
         }
     } ?: return
+    val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
+    val tableData = remember(node, content, sourceOffsetBase, liveSuffix, liveSuffixSourceOffset) {
+        traceMarkdown("Amber Markdown table streaming extract") {
+            extractStreamingMarkdownTableData(
+                node = node,
+                content = content,
+                sourceOffsetBase = sourceOffsetBase,
+                liveSuffix = liveSuffix,
+                liveSuffixSourceOffset = liveSuffixSourceOffset,
+            )
+        }
+    } ?: settledTableData
+    val tableMotionKey = remember(node.type, sourceOffsetBase, node.startOffset) {
+        streamingMarkdownMotionKey(
+            type = node.type,
+            sourceOffsetBase = sourceOffsetBase,
+            nodeStartOffset = node.startOffset,
+        )
+    }
+    val firstLiveRowIndex = if (liveSuffix.isNotEmpty()) {
+        settledTableData.rows.size
+    } else {
+        0
+    }
+    val tableCellRevealEnabled =
+        tableData.rows.size * tableData.columnCount <= STREAMING_TABLE_CELL_REVEAL_MAX_CELLS
 
     // 创建表头composable列表
     val headers = List(tableData.columnCount) { columnIndex ->
@@ -1767,15 +2171,35 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
     }
 
     TraceMarkdownComposable("Amber DataTable render") {
-        DataTable(
-            headers = headers,
-            rows = rowComposables,
+        StreamingBlockReveal(
+            node = node,
             modifier = modifier
                 .padding(vertical = 8.dp)
                 .amberTraceMeasure("Amber DataTable measure"),
-            columnMinWidths = List(tableData.columnCount) { 80.dp },
-            columnMaxWidths = List(tableData.columnCount) { 200.dp },
-        )
+        ) { revealModifier ->
+            DataTable(
+                headers = headers,
+                rows = rowComposables,
+                modifier = revealModifier,
+                columnMinWidths = List(tableData.columnCount) { 80.dp },
+                columnMaxWidths = List(tableData.columnCount) { 200.dp },
+                bodyCellModifier = { rowIndex, columnIndex ->
+                    streamingRevealModifier(
+                        key = streamingTableCellMotionKey(
+                            tableKey = tableMotionKey,
+                            rowIndex = rowIndex,
+                            columnIndex = columnIndex,
+                            header = false,
+                        ),
+                        enabled = tableCellRevealEnabled &&
+                            (liveSuffix.isEmpty() || rowIndex >= firstLiveRowIndex),
+                        durationMillis = STREAMING_TABLE_CELL_REVEAL_MS,
+                        startAlpha = STREAMING_TABLE_CELL_REVEAL_START_ALPHA,
+                        offsetYDp = 0,
+                    )
+                },
+            )
+        }
     }
 }
 
@@ -1799,6 +2223,29 @@ internal data class MarkdownTableData(
     val headers: List<String>,
     val rows: List<List<String>>,
 )
+
+internal fun extractStreamingMarkdownTableData(
+    node: ASTNode,
+    content: String,
+    sourceOffsetBase: Int,
+    liveSuffix: String,
+    liveSuffixSourceOffset: Int,
+): MarkdownTableData? {
+    val settledData = extractMarkdownTableData(node = node, content = content) ?: return null
+    if (liveSuffix.isEmpty()) return settledData
+
+    val absoluteTableEnd = sourceOffsetBase + node.endOffset
+    if (liveSuffixSourceOffset != absoluteTableEnd) return settledData
+
+    val tableText = node.getTextInNode(content) + liveSuffix
+    val streamingTable = parser
+        .buildMarkdownTreeFromString(tableText)
+        .children
+        .firstOrNull { it.type == GFMElementTypes.TABLE }
+        ?: return settledData
+
+    return extractMarkdownTableData(node = streamingTable, content = tableText) ?: settledData
+}
 
 internal fun extractMarkdownTableData(node: ASTNode, content: String): MarkdownTableData? {
     val headerNode = node.children.find { it.type == GFMElementTypes.HEADER }
@@ -2050,10 +2497,10 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
 
 /**
  * Per-arrival-batch streaming reveal layer.
- * Instead of mapping per-codepoint alpha back to source offsets, it fades
- * exactly one contiguous range — the live suffix appended after the
- * statically-parsed text — as a single alpha unit. [staticLength] is the
- * boundary between settled text (always opaque) and the fading suffix.
+ * Instead of mapping per-codepoint alpha back to source offsets, it styles
+ * only one contiguous range — the live suffix appended after the
+ * statically-parsed text. [staticLength] is the boundary between settled
+ * text (always opaque) and the revealing suffix.
  *
  * Returns [combined] unchanged when there's nothing to fade (no usable
  * baseColor, suffix already fully revealed, or the boundary is out of range).
@@ -2061,20 +2508,87 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
 internal fun applyBatchRevealSuffix(
     combined: AnnotatedString,
     staticLength: Int,
-    suffixAlpha: Float,
+    suffixProgress: Float,
     baseColor: Color,
 ): AnnotatedString {
     if (baseColor == Color.Unspecified) return combined
-    if (suffixAlpha >= 1f) return combined
+    if (suffixProgress >= 1f) return combined
     if (staticLength < 0 || staticLength >= combined.length) return combined
-    return buildAnnotatedString {
-        append(combined)
-        addStyle(
-            style = SpanStyle(color = baseColor.copy(alpha = suffixAlpha.coerceIn(0f, 1f))),
-            start = staticLength,
-            end = combined.length,
+    val progress = suffixProgress.coerceIn(0f, 1f)
+    val codePointCount = combined.text
+        .codePointCount(staticLength, combined.length)
+        .coerceAtLeast(1)
+    if (codePointCount > STREAMING_BATCH_STAGGER_MAX_CODEPOINTS) {
+        val eased = easeStreamingReveal(progress)
+        return buildAnnotatedString {
+            append(combined)
+            addStyle(
+                style = streamingRevealSpanStyle(
+                    baseColor = baseColor,
+                    localProgress = progress,
+                    eased = eased,
+                ),
+                start = staticLength,
+                end = combined.length,
+            )
+        }
+    }
+    val staggerFraction = if (codePointCount <= 1) {
+        0f
+    } else {
+        minOf(
+            STREAMING_BATCH_CHAR_STAGGER_MS.toFloat() / STREAMING_BATCH_FADE_MS,
+            STREAMING_BATCH_MAX_STAGGER_FRACTION / (codePointCount - 1),
         )
     }
+    return buildAnnotatedString {
+        append(combined)
+        var offset = staticLength
+        var index = 0
+        while (offset < combined.length) {
+            val codePoint = combined.text.codePointAt(offset)
+            val nextOffset = offset + Character.charCount(codePoint)
+            val delay = index * staggerFraction
+            val localProgress = ((progress - delay) / (1f - delay))
+                .coerceIn(0f, 1f)
+            val eased = easeStreamingReveal(localProgress)
+            addStyle(
+                style = streamingRevealSpanStyle(
+                    baseColor = baseColor,
+                    localProgress = localProgress,
+                    eased = eased,
+                ),
+                start = offset,
+                end = nextOffset,
+            )
+            offset = nextOffset
+            index++
+        }
+    }
+}
+
+private fun streamingRevealSpanStyle(
+    baseColor: Color,
+    localProgress: Float,
+    eased: Float,
+): SpanStyle {
+    val alphaProgress = codexStreamingAlphaProgress(localProgress)
+    val alpha = STREAMING_BATCH_REVEAL_START_ALPHA +
+        (1f - STREAMING_BATCH_REVEAL_START_ALPHA) * alphaProgress
+    return SpanStyle(
+        color = baseColor.copy(alpha = alpha),
+        baselineShift = BaselineShift(-STREAMING_BATCH_REVEAL_LIFT_EM * (1f - eased)),
+    )
+}
+
+private fun easeStreamingReveal(progress: Float): Float {
+    val inverse = 1f - progress.coerceIn(0f, 1f)
+    return 1f - inverse * inverse * inverse
+}
+
+private fun codexStreamingAlphaProgress(progress: Float): Float {
+    val p = progress.coerceIn(0f, 1f)
+    return p * p * (3f - 2f * p)
 }
 
 private fun openUrlLinkAnnotation(url: String, onClickUrl: (String) -> Unit): LinkAnnotation.Url {
