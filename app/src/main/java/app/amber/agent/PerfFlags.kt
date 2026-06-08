@@ -92,5 +92,5 @@ object PerfFlags {
      *
      * Revert if enabled and broken: `git revert <commit-streaming-batch-reveal>`.
      */
-    const val STREAMING_BATCH_REVEAL = false
+    const val STREAMING_BATCH_REVEAL = true
 }
