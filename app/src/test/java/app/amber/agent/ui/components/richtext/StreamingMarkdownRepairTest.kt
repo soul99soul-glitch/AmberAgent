@@ -167,17 +167,13 @@ class StreamingMarkdownRepairTest {
     }
 
     @Test
-    fun `null revealStableEnd decouples block stabilization from reveal progress`() {
-        val content = "alpha\n\nbravo\n\ncharlie"
-        // reveal at offset 0 -> nothing has been revealed -> nothing stabilizes
-        val gated = StreamingMarkdownParseCache().parse(content, revealStableEnd = 0)
-        // null and MAX_VALUE both mean "do not gate stabilization on reveal"
-        val ungatedNull = StreamingMarkdownParseCache().parse(content, revealStableEnd = null)
-        val ungatedMax = StreamingMarkdownParseCache().parse(content, revealStableEnd = Int.MAX_VALUE)
+    fun `parse stabilizes completed top-level blocks structurally`() {
+        // multi-block: leading blocks finalize, the last stays active
+        val multi = StreamingMarkdownParseCache().parse("alpha\n\nbravo\n\ncharlie")
+        assertTrue(multi.stableTopLevelBlocks.isNotEmpty())
 
-        // null behaves identically to "fully revealed" (no gating)
-        assertEquals(ungatedMax.stableTopLevelBlocks.size, ungatedNull.stableTopLevelBlocks.size)
-        // and strictly more blocks stabilize than when reveal hasn't advanced
-        assertTrue(ungatedNull.stableTopLevelBlocks.size > gated.stableTopLevelBlocks.size)
+        // single still-growing block: nothing finalized yet
+        val single = StreamingMarkdownParseCache().parse("alpha")
+        assertTrue(single.stableTopLevelBlocks.isEmpty())
     }
 }

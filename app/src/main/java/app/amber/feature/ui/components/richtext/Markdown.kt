@@ -701,7 +701,6 @@ internal class StreamingMarkdownParseCache {
 
     fun parse(
         content: String,
-        revealStableEnd: Int? = null,
     ): MarkdownParseResult = traceMarkdown("Amber Markdown parse streaming") {
         val baseline = synchronized(lock) {
             if (stableRawPrefix.isNotEmpty() && content.startsWith(stableRawPrefix)) {
@@ -735,21 +734,10 @@ internal class StreamingMarkdownParseCache {
             )
         }
 
-        val parserStableChildren = activeChildren.dropLast(1)
-        val revealLimitInActive = revealStableEnd
-            ?.minus(prefix.length)
-            ?.coerceAtLeast(0)
-            ?: Int.MAX_VALUE
-        val newlyStableChildren = parserStableChildren.takeWhile { child ->
-            child.endOffset <= revealLimitInActive
-        }
-        if (newlyStableChildren.isEmpty()) {
-            return@traceMarkdown parseRepairedTail(
-                tail = activePreprocessed,
-                activeBaseOffset = prefix.length,
-                blocks = blocks,
-            )
-        }
+        // Structural stabilization: every top-level block except the last
+        // (still-growing) one is finalized. No longer gated on reveal
+        // progress — the batch fade is a purely visual layer.
+        val newlyStableChildren = activeChildren.dropLast(1)
 
         val nextStableBlocks = blocks + newlyStableChildren.map { child ->
             val blockContent = activePreprocessed.substring(child.startOffset, child.endOffset)
@@ -872,12 +860,7 @@ fun MarkdownBlock(
     var (data, setData) = remember {
         mutableStateOf(
             if (streaming) {
-                val initialRevealStableEnd: Int? = if (app.amber.agent.PerfFlags.STREAMING_BATCH_REVEAL) {
-                    null
-                } else {
-                    0
-                }
-                streamingParseCache.parse(renderContent, revealStableEnd = initialRevealStableEnd)
+                streamingParseCache.parse(renderContent)
             } else {
                 streamingParseCache.reset()
                 MarkdownParseCache.getOrParse(renderContent)
@@ -901,9 +884,6 @@ fun MarkdownBlock(
         streaming = streaming || displayDrainingAfterStream,
         content = renderContent,
         immediateMode = app.amber.agent.PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL,
-    )
-    val updatedRevealStableEnd by rememberUpdatedState(
-        revealController?.stableOffsetExclusive()
     )
     val streamingLiveSuffix = streamingLiveSuffixFor(
         renderContent = renderContent,
@@ -947,17 +927,9 @@ fun MarkdownBlock(
                     return@collectLatest
                 }
                 try {
-                    val revealStableEnd = if (app.amber.agent.PerfFlags.STREAMING_BATCH_REVEAL) {
-                        null
-                    } else {
-                        updatedRevealStableEnd
-                    }
                     val parsed = withContext(Dispatchers.Default) {
                         if (latestStreaming) {
-                            streamingParseCache.parse(
-                                content = latestContent,
-                                revealStableEnd = revealStableEnd,
-                            )
+                            streamingParseCache.parse(content = latestContent)
                         } else {
                             streamingParseCache.reset()
                             MarkdownParseCache.getOrParse(latestContent)
