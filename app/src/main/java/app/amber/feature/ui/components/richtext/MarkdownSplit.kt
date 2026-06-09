@@ -1,30 +1,15 @@
 package app.amber.feature.ui.components.richtext
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.dp
+import androidx.compose.material3.LocalTextStyle
 
 /**
  * **T-C perf-layer scaffold** for `PerfFlags.USE_SPLIT_MARKDOWN`.
  *
- * The full Markdown renderer (2061 LOC) is documented as a multi-day
- * sprint in `docs/td-rust-1a-feasibility.md`. This scaffold provides
- * the dispatcher target so a future device-verified path can plug in
- * here without touching the entry-point signature.
- *
- * Region candidates (for the future sprint): block-level renderers
- * (paragraph / heading / list / blockquote / code-block / table) each
- * as a leaf Composable consuming only the ASTNode subtree it needs.
- *
- * Defaults: flag=false → legacy MarkdownBlock path. Scaffold below
- * is only reachable behind the explicit flag flip.
+ * Until block-level renderers land, delegate to the production [MarkdownBlock]
+ * so streaming tail markers, batch reveal, and parse throttle stay intact.
  */
 @Composable
 fun MarkdownBlockSplit(
@@ -37,21 +22,14 @@ fun MarkdownBlockSplit(
     onStreamingVisibleFrame: (() -> Unit)? = null,
     onClickCitation: (String) -> Unit = {},
 ) {
-    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                "T4 Markdown scaffold active (streaming=$streaming, chars=${content.length})",
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Text(
-                content,
-                style = style,
-            )
-            Text(
-                "TODO: split into block-renderer Composables per AST node type.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    MarkdownBlock(
+        content = content,
+        modifier = modifier,
+        style = style,
+        fillWidth = fillWidth,
+        streaming = streaming,
+        deferStreamingParse = deferStreamingParse,
+        onStreamingVisibleFrame = onStreamingVisibleFrame,
+        onClickCitation = onClickCitation,
+    )
 }

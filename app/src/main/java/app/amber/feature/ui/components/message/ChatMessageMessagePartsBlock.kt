@@ -50,7 +50,6 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
-import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
@@ -79,7 +78,6 @@ internal fun MessagePartsBlock(
     role: MessageRole,
     model: Model?,
     parts: List<UIMessagePart>,
-    annotations: List<UIMessageAnnotation>,
     loading: Boolean,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
@@ -534,6 +532,4 @@ internal fun MessagePartsBlock(
             }
         }
     }
-
-    MessageAnnotations(annotations = annotations, loading = loading)
 }

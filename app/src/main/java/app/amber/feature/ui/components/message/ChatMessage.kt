@@ -1,11 +1,6 @@
 package app.amber.feature.ui.components.message
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -144,7 +139,6 @@ fun ChatMessage(
                     assistant = assistant,
                     role = message.role,
                     parts = message.parts,
-                    annotations = message.annotations,
                     loading = loading,
                     model = model,
                     onToolApproval = onToolApproval,
@@ -162,32 +156,25 @@ fun ChatMessage(
             }
         }
 
-        if (message.role != MessageRole.USER) {
-            val showActions = if (lastMessage) {
-                !loading
-            } else {
-                message.parts.isEmptyUIMessage().not()
-            }
-            AnimatedVisibility(
-                visible = showActions,
-                enter = slideInVertically { it / 2 } + fadeIn(),
-                exit = slideOutVertically { it / 2 } + fadeOut()
-            ) {
-                Column(
-                    modifier = Modifier.animateContentSizeIf(loading && lastMessage)
-                ) {
-                    ChatMessageActionButtons(
-                        message = message,
-                        onRegenerate = onRegenerate,
-                        node = node,
-                        onUpdate = onUpdate,
-                        onOpenActionSheet = {
-                            showActionsSheet = true
-                        },
-                    )
-                }
-            }
-        }
+        val actionFooterMode = resolveActionFooterMode(
+            role = message.role,
+            lastMessage = lastMessage,
+            loading = loading,
+            hasContent = message.parts.isEmptyUIMessage().not(),
+        )
+        ChatMessageMessageFooter(
+            annotations = message.annotations,
+            loading = loading,
+            textStyle = textStyle,
+            actionFooterMode = actionFooterMode,
+            message = message,
+            node = node,
+            onRegenerate = onRegenerate,
+            onUpdate = onUpdate,
+            onOpenActionSheet = {
+                showActionsSheet = true
+            },
+        )
     }
     if (showActionsSheet) {
         ChatMessageActionsSheet(

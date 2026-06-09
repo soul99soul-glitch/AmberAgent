@@ -75,6 +75,8 @@ fun ColumnScope.ChatMessageActionButtons(
     onUpdate: (MessageNode) -> Unit,
     onRegenerate: () -> Unit,
     onOpenActionSheet: () -> Unit,
+    interactionEnabled: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     var isPendingDelete by remember { mutableStateOf(false) }
@@ -100,18 +102,21 @@ fun ColumnScope.ChatMessageActionButtons(
     }
 
     FlowRow(
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         MessageActionIconButton(
             imageVector = HugeIcons.Copy01,
             contentDescription = stringResource(R.string.copy),
+            enabled = interactionEnabled,
             onClick = { context.copyMessageToClipboard(message) },
         )
 
         MessageActionIconButton(
             imageVector = HugeIcons.Refresh03,
             contentDescription = stringResource(R.string.regenerate),
+            enabled = interactionEnabled,
             onClick = {
                 if (message.role == MessageRole.USER) {
                     showRegenerateConfirm = true
@@ -129,7 +134,7 @@ fun ColumnScope.ChatMessageActionButtons(
             MessageActionIconButton(
                 imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
                 contentDescription = stringResource(R.string.tts),
-                enabled = isAvailable,
+                enabled = interactionEnabled && isAvailable,
                 onClick = {
                     if (!isSpeaking) {
                         val text = message.toText()
@@ -149,6 +154,7 @@ fun ColumnScope.ChatMessageActionButtons(
         MessageActionIconButton(
             imageVector = HugeIcons.MoreVertical,
             contentDescription = stringResource(R.string.more_options),
+            enabled = interactionEnabled,
             onClick = {
                 onOpenActionSheet()
             },
@@ -157,6 +163,7 @@ fun ColumnScope.ChatMessageActionButtons(
         ChatMessageBranchSelector(
             node = node,
             onUpdate = onUpdate,
+            interactionEnabled = interactionEnabled,
         )
     }
 

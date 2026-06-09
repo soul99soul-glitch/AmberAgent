@@ -28,6 +28,7 @@ fun ChatMessageBranchSelector(
     node: MessageNode,
     modifier: Modifier = Modifier,
     onUpdate: (MessageNode) -> Unit,
+    interactionEnabled: Boolean = true,
 ) {
     Row(
         modifier = modifier,
@@ -42,6 +43,7 @@ fun ChatMessageBranchSelector(
                     .clip(CircleShape)
                     .alpha(if (node.selectIndex == 0) 0.5f else 1f)
                     .clickable(
+                        enabled = interactionEnabled,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {
@@ -70,6 +72,7 @@ fun ChatMessageBranchSelector(
                     .clip(CircleShape)
                     .alpha(if (node.selectIndex == node.messages.lastIndex) 0.5f else 1f)
                     .clickable(
+                        enabled = interactionEnabled,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {

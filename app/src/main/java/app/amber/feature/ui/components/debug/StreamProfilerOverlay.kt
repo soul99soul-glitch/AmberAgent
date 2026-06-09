@@ -20,27 +20,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.amber.agent.BuildConfig
-import app.amber.feature.ui.components.richtext.LocalCharRevealController
+import app.amber.feature.ui.components.richtext.LocalStreamingTailActive
+import app.amber.feature.ui.components.richtext.StreamingRenderProbe
 
-// Phase B / B4 — dev-only profiler overlay.
-//
-// Surfaces the streaming-render metrics that smooth-streaming-rendering
-// -guide §14 calls for: a quick at-a-glance signal of whether the
-// reveal pipeline is keeping up. NOT meant for end users — gated on
-// BuildConfig.DEBUG so it disappears in release variants and the
-// Graphite buildType has DEBUG=true so the developer sees it.
-//
-// Currently shows:
-//   - FPS  (independent EWMA from withFrameNanos, not the reveal
-//     controller's — so we still get a number when no reveal is
-//     active)
-//   - reveal queue depth (per CharRevealController.queueDepth)
-//   - reveal degraded? (currentFps below the controller's degrade
-//     threshold)
-//
-// Future additions on the same surface (B4 follow-up if needed):
-//   - amberTraceMeasure rolling commit cost
-//   - chunk inter-arrival ms
+// Dev-only profiler overlay for the batch-reveal streaming pipeline.
+// Gated on BuildConfig.DEBUG — not shown in release variants.
 
 @Composable
 fun StreamProfilerOverlay(modifier: Modifier = Modifier) {
@@ -55,7 +39,6 @@ fun StreamProfilerOverlay(modifier: Modifier = Modifier) {
                 if (prevFrameNanos > 0L) {
                     val delta = now - prevFrameNanos
                     if (delta in 1_000_000L..200_000_000L) {
-                        // EWMA alpha = 1/8, ~125ms half-life
                         avgFrameDeltaNanos = (avgFrameDeltaNanos * 7 + delta) / 8
                     }
                 }
@@ -64,14 +47,17 @@ fun StreamProfilerOverlay(modifier: Modifier = Modifier) {
         }
     }
 
-    val fps = if (avgFrameDeltaNanos > 0L)
+    val fps = if (avgFrameDeltaNanos > 0L) {
         1_000_000_000f / avgFrameDeltaNanos.toFloat()
-    else 60f
+    } else {
+        60f
+    }
 
-    val controller = LocalCharRevealController.current
-    val queueDepth = controller?.queueDepth() ?: 0
-    val controllerFps = controller?.currentFps
-    val isReveal = controller != null
+    val tailActive = LocalStreamingTailActive.current != null
+    val motionClaims = StreamingRenderProbe.motionClaimCount
+    val displayBacklog = StreamingRenderProbe.displayBacklog
+    val liveSuffixLen = StreamingRenderProbe.liveSuffixLength
+    val parseTicks = StreamingRenderProbe.parseTickCount
 
     Box(
         modifier = modifier
@@ -88,24 +74,21 @@ fun StreamProfilerOverlay(modifier: Modifier = Modifier) {
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
             )
-            if (isReveal) {
+            if (tailActive) {
                 Text(
-                    text = "rev q=$queueDepth",
-                    color = if (queueDepth > 80) Color(0xFFFF6E6E)
-                    else if (queueDepth > 30) Color(0xFFFFC66D)
+                    text = "tail suffix=$liveSuffixLen buf=$displayBacklog",
+                    color = if (displayBacklog > 600) Color(0xFFFF6E6E)
+                    else if (displayBacklog > 200) Color(0xFFFFC66D)
                     else Color.White.copy(alpha = 0.85f),
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                 )
-                if (controllerFps != null) {
-                    Text(
-                        text = "rev fps ${controllerFps.toInt()}",
-                        color = if (controllerFps < 45f) Color(0xFFFF6E6E)
-                        else Color.White.copy(alpha = 0.6f),
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
+                Text(
+                    text = "motion=$motionClaims parse=$parseTicks",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
             }
         }
     }

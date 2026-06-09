@@ -42,6 +42,33 @@ internal object StreamingRenderProbe {
         events.toList()
     }
 
+    /** Debug overlay: display-buffer lag (target − visible chars). */
+    @Volatile
+    var displayBacklog: Int = 0
+        internal set
+
+    /** Debug overlay: AST re-parse ticks during streaming. */
+    @Volatile
+    var parseTickCount: Int = 0
+        internal set
+
+    /** Debug overlay: unparsed live suffix length on the active block. */
+    @Volatile
+    var liveSuffixLength: Int = 0
+        internal set
+
+    /** Debug overlay: block/table motion keys claimed on the active tail. */
+    @Volatile
+    var motionClaimCount: Int = 0
+        internal set
+
+    /** Clears per-session overlay counters when streaming fully settles. */
+    fun resetStreamingDiagnostics() {
+        displayBacklog = 0
+        liveSuffixLength = 0
+        parseTickCount = 0
+    }
+
     fun push(event: String) {
         synchronized(lock) {
             while (events.size >= StreamingRenderProbeCapacity) {

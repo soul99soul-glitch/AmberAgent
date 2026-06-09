@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +84,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
@@ -297,15 +300,22 @@ internal class StreamingMarkdownMotionScope {
     private val animatedKeys = LinkedHashSet<StreamingMarkdownMotionKey>()
 
     fun claim(key: StreamingMarkdownMotionKey): Boolean {
-        return animatedKeys.add(key)
+        val added = animatedKeys.add(key)
+        if (added) {
+            StreamingRenderProbe.motionClaimCount = animatedKeys.size
+        }
+        return added
     }
 
     fun hasSeen(key: StreamingMarkdownMotionKey): Boolean {
         return key in animatedKeys
     }
 
+    fun claimCount(): Int = animatedKeys.size
+
     fun clear() {
         animatedKeys.clear()
+        StreamingRenderProbe.motionClaimCount = 0
     }
 }
 
@@ -409,6 +419,38 @@ internal fun streamingLiveSuffixFor(
         text = renderContent.substring(activeBaseOffset + parsedSourceEnd),
         sourceOffset = activeBaseOffset + parsedSourceEnd,
     )
+}
+
+internal enum class LiveSuffixPlacement {
+    /** Append to the active paragraph and batch-fade with the AST tail. */
+    Inline,
+
+    /** Show as plain text below the settled block; avoids block-boundary reflow. */
+    Plain,
+}
+
+private val LIVE_SUFFIX_BLOCK_HEADING_REGEX = Regex("""^#{1,6}\s""")
+private val LIVE_SUFFIX_BLOCK_LIST_REGEX = Regex("""^[-*+]\s""")
+private val LIVE_SUFFIX_BLOCK_ORDERED_LIST_REGEX = Regex("""^\d+\.\s""")
+private val LIVE_SUFFIX_BLOCK_QUOTE_REGEX = Regex("""^>\s?""")
+
+internal fun liveSuffixPlacementFor(suffix: String): LiveSuffixPlacement {
+    if (suffix.isEmpty()) return LiveSuffixPlacement.Inline
+    if (suffix.startsWith("\n\n") || suffix.startsWith("\r\n\r\n")) {
+        return LiveSuffixPlacement.Plain
+    }
+    val trimmedStart = suffix.trimStart()
+    if (trimmedStart.isEmpty()) return LiveSuffixPlacement.Inline
+    return when {
+        LIVE_SUFFIX_BLOCK_HEADING_REGEX.containsMatchIn(trimmedStart) -> LiveSuffixPlacement.Plain
+        LIVE_SUFFIX_BLOCK_LIST_REGEX.containsMatchIn(trimmedStart) -> LiveSuffixPlacement.Plain
+        LIVE_SUFFIX_BLOCK_ORDERED_LIST_REGEX.containsMatchIn(trimmedStart) -> LiveSuffixPlacement.Plain
+        trimmedStart.startsWith("|") -> LiveSuffixPlacement.Plain
+        trimmedStart.startsWith("```") -> LiveSuffixPlacement.Plain
+        LIVE_SUFFIX_BLOCK_QUOTE_REGEX.containsMatchIn(trimmedStart) -> LiveSuffixPlacement.Plain
+        trimmedStart.matches(Regex("""^(-{3,}|\*{3,}|_{3,})\s*$""")) -> LiveSuffixPlacement.Plain
+        else -> LiveSuffixPlacement.Inline
+    }
 }
 
 internal fun streamingLiveSuffixForLastRenderableChild(
@@ -929,8 +971,8 @@ fun MarkdownBlock(
     fillWidth: Boolean = true,
     /**
      * Streaming still uses the incremental/background parse cache. When true,
-     * only the trailing active block gets a [CharRevealController] so newly
-     * arrived text can fade in while finalized blocks stay on the fast path.
+     * only the trailing active block gets a [StreamingTailActive] marker so
+     * newly arrived text can fade in while finalized blocks stay on the fast path.
      */
     streaming: Boolean = false,
     deferStreamingParse: Boolean = false,
@@ -985,11 +1027,10 @@ fun MarkdownBlock(
     // step we're cutting.
     val updatedContent by rememberUpdatedState(renderContent)
     val updatedStreaming by rememberUpdatedState(streaming)
+    val updatedDraining by rememberUpdatedState(displayDrainingAfterStream)
     val updatedDeferStreamingParse by rememberUpdatedState(deferStreamingParse)
-    val revealController = rememberCharRevealController(
+    val streamingTailActive = streamingTailActiveWhen(
         streaming = streaming || displayDrainingAfterStream,
-        content = renderContent,
-        immediateMode = app.amber.agent.PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL,
     )
     val streamingMotionActive = streaming || displayDrainingAfterStream
     val streamingMotionScope = remember {
@@ -1020,34 +1061,41 @@ fun MarkdownBlock(
         syntheticSuffixStart = data.syntheticSuffixStart,
         streaming = streaming,
     )
+    SideEffect {
+        StreamingRenderProbe.liveSuffixLength = streamingLiveSuffix.text.length
+        if (!streaming && !displayDrainingAfterStream) {
+            StreamingRenderProbe.resetStreamingDiagnostics()
+        }
+    }
     LaunchedEffect(Unit) {
         var lastParsedContent = renderContent
         var lastParsedStreaming = streaming
         var lastDeferred = deferStreamingParse
         @OptIn(FlowPreview::class)
         snapshotFlow {
-            Triple(updatedContent, updatedStreaming, updatedDeferStreamingParse)
+            Triple(
+                updatedContent,
+                updatedStreaming || updatedDraining,
+                updatedDeferStreamingParse,
+            )
         }
             .distinctUntilChanged()
-            .let { upstream ->
-                // Sample only when streaming. When the chat-turn is settled,
-                // the user expects an immediate re-parse (e.g. they edited
-                // an old message), so don't throttle.
-                if (streaming) {
-                    upstream.sample(MARKDOWN_STREAMING_PARSE_THROTTLE_MS)
+            .flatMapLatest { triple ->
+                if (triple.second) {
+                    flowOf(triple).sample(MARKDOWN_STREAMING_PARSE_THROTTLE_MS)
                 } else {
-                    upstream
+                    flowOf(triple)
                 }
             }
-            .collectLatest { (latestContent, latestStreaming, latestDeferStreamingParse) ->
+            .collectLatest { (latestContent, parseAsStreaming, latestDeferStreamingParse) ->
                 if (
                     latestContent == lastParsedContent &&
-                    latestStreaming == lastParsedStreaming &&
+                    parseAsStreaming == lastParsedStreaming &&
                     latestDeferStreamingParse == lastDeferred
                 ) {
                     return@collectLatest
                 }
-                if (latestStreaming && latestDeferStreamingParse) {
+                if (parseAsStreaming && latestDeferStreamingParse) {
                     lastDeferred = latestDeferStreamingParse
                     StreamingRenderProbe.record {
                         "parse_deferred len=${latestContent.length}"
@@ -1056,7 +1104,7 @@ fun MarkdownBlock(
                 }
                 try {
                     val parsed = withContext(Dispatchers.Default) {
-                        if (latestStreaming) {
+                        if (parseAsStreaming) {
                             streamingParseCache.parse(content = latestContent)
                         } else {
                             streamingParseCache.reset()
@@ -1064,9 +1112,12 @@ fun MarkdownBlock(
                         }
                     }
                     lastParsedContent = latestContent
-                    lastParsedStreaming = latestStreaming
+                    lastParsedStreaming = parseAsStreaming
                     lastDeferred = latestDeferStreamingParse
                     setData(parsed)
+                    if (parseAsStreaming) {
+                        StreamingRenderProbe.parseTickCount++
+                    }
                 } catch (exception: CancellationException) {
                     throw exception
                 } catch (exception: Exception) {
@@ -1099,7 +1150,7 @@ fun MarkdownBlock(
                         data.stableTopLevelBlocks.fastForEach { block ->
                             key(block.key) {
                                 CompositionLocalProvider(
-                                    LocalCharRevealController provides null,
+                                    LocalStreamingTailActive provides null,
                                     LocalStreamingMarkdownMotionScope provides null,
                                 ) {
                                     val blockModifier = if (block.preserveParagraphBottomPadding) {
@@ -1127,7 +1178,7 @@ fun MarkdownBlock(
                                     EMPTY_STREAMING_LIVE_SUFFIX
                                 }
                                 CompositionLocalProvider(
-                                    LocalCharRevealController provides revealController,
+                                    LocalStreamingTailActive provides streamingTailActive,
                                     LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
                                     LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
                                     LocalStreamingMarkdownMotionScope provides if (index == activeLastIndex) {
@@ -1150,8 +1201,8 @@ fun MarkdownBlock(
                     } else {
                         val activeLastIndex = children.lastIndex
                         children.fastForEachIndexed { index, child ->
-                            val childRevealController = if (index == children.lastIndex) {
-                                revealController
+                            val childStreamingTailActive = if (index == children.lastIndex) {
+                                streamingTailActive
                             } else {
                                 null
                             }
@@ -1161,10 +1212,10 @@ fun MarkdownBlock(
                                 EMPTY_STREAMING_LIVE_SUFFIX
                             }
                             CompositionLocalProvider(
-                                LocalCharRevealController provides childRevealController,
+                                LocalStreamingTailActive provides childStreamingTailActive,
                                 LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
                                 LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
-                                LocalStreamingMarkdownMotionScope provides if (childRevealController != null) {
+                                LocalStreamingMarkdownMotionScope provides if (childStreamingTailActive != null) {
                                     streamingMotionScope
                                 } else {
                                     null
@@ -1275,7 +1326,7 @@ private fun streamingRevealModifier(
     offsetYDp: Int = STREAMING_BLOCK_REVEAL_OFFSET_DP,
 ): Modifier {
     val scope = LocalStreamingMarkdownMotionScope.current
-    val revealActive = enabled && LocalCharRevealController.current != null
+    val revealActive = enabled && LocalStreamingTailActive.current != null
     val shouldAnimate = remember(key) {
         mutableStateOf(false)
     }
@@ -2010,7 +2061,7 @@ private fun Paragraph(
 
     // Streaming-aware text build: static parsed text is opaque; only the
     // live suffix (newest, not-yet-parsed text) fades in as one batch.
-    val revealController = LocalCharRevealController.current
+    val streamingTailActive = LocalStreamingTailActive.current
     val baseColor = LocalContentColor.current
     val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
 
@@ -2059,24 +2110,34 @@ private fun Paragraph(
                 }
             }
         }
-        // Batch reveal (L4 decoupled): only the unparsed live suffix animates.
-        // The settled prefix stays opaque; it already revealed earlier while
-        // it was itself the live suffix.
-        val combined = remember(staticAnnotated, liveSuffix, baseColor) {
-            if (liveSuffix.isEmpty()) {
+        // Batch reveal (L4 decoupled): only inline unparsed suffix animates.
+        // Block-boundary suffixes render as plain tail text to avoid reflow.
+        val suffixPlacement = liveSuffixPlacementFor(liveSuffix)
+        val inlineLiveSuffix = if (suffixPlacement == LiveSuffixPlacement.Inline) {
+            liveSuffix
+        } else {
+            ""
+        }
+        val plainLiveSuffix = if (suffixPlacement == LiveSuffixPlacement.Plain) {
+            liveSuffix.replace(BREAK_LINE_REGEX, "\n")
+        } else {
+            ""
+        }
+        val combined = remember(staticAnnotated, inlineLiveSuffix, baseColor) {
+            if (inlineLiveSuffix.isEmpty()) {
                 staticAnnotated
             } else {
                 buildAnnotatedString {
                     append(staticAnnotated)
-                    append(liveSuffix.replace(BREAK_LINE_REGEX, "\n"))
+                    append(inlineLiveSuffix.replace(BREAK_LINE_REGEX, "\n"))
                 }
             }
         }
-        // revealController != null marks the active streaming block; only then
+        // streamingTailActive != null marks the active streaming block; only then
         // is there a suffix to fade. liveSuffixSourceOffset changes once per
         // parse tick, so it is the batch key — a fresh Animatable per batch
         // drives the newly-arrived text from 0→1.
-        val streamingTail = revealController != null && liveSuffix.isNotEmpty()
+        val streamingTail = streamingTailActive != null && inlineLiveSuffix.isNotEmpty()
         val suffixAlpha = if (streamingTail) {
             val anim = remember(liveSuffixSourceOffset) { Animatable(0f) }
             LaunchedEffect(liveSuffixSourceOffset) {
@@ -2111,6 +2172,21 @@ private fun Paragraph(
                 lineHeight = if (hasInlineMath && enableLatexRendering) TextUnit.Unspecified else LocalTextStyle.current.lineHeight
             )
         )
+        if (plainLiveSuffix.isNotEmpty()) {
+            Text(
+                text = plainLiveSuffix,
+                modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
+                softWrap = true,
+                overflow = TextOverflow.Visible,
+                style = LocalTextStyle.current.copy(
+                    lineHeight = if (hasInlineMath && enableLatexRendering) {
+                        TextUnit.Unspecified
+                    } else {
+                        LocalTextStyle.current.lineHeight
+                    },
+                ),
+            )
+        }
     }
 }
 

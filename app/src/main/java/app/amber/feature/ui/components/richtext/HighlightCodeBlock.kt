@@ -159,7 +159,7 @@ fun HighlightCodeBlock(
             )
         }
         val codeTextStyle = LocalTextStyle.current.merge(style)
-        val activeStreamingBlock = LocalCharRevealController.current != null
+        val activeStreamingBlock = LocalStreamingTailActive.current != null
         Column(
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
         ) {

@@ -61,9 +61,8 @@ object PerfFlags {
 
     /**
      * Streaming rich text A/B — feed new model output into layout immediately
-     * and let CharReveal animate only the bounded tail. Default paced display
-     * buffer remains the production path until real-device verification says
-     * the immediate path is better.
+     * without the paced display buffer. Batch reveal (suffix fade + block
+     * motion) still applies on the active tail block.
      */
     const val STREAMING_IMMEDIATE_CONTENT_REVEAL = false
 

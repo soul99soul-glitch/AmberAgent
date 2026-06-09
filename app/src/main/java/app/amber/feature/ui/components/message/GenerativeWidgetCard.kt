@@ -524,6 +524,7 @@ fun ExpandedGenerativeWidgetDialog(
                                     renderer = widget.renderer,
                                     specJson = widget.specJson,
                                     setting = setting,
+                                    streaming = !widget.complete,
                                     modifier = if (widget.renderer == "slides") Modifier.fillMaxSize() else Modifier.align(Alignment.TopCenter),
                                     maxHeightDp = maxHeight.value.toInt().coerceAtLeast(240),
                                     onWebViewReady = { webView = it },
@@ -723,9 +724,18 @@ private fun SafeGenerativeWidgetWebView(
     var hasMeasuredHeight by remember {
         mutableStateOf(heightCache.get(cacheKey) != null)
     }
+    LaunchedEffect(renderedHtml, streaming) {
+        if (streaming && renderedHtml.isNotBlank()) {
+            hasMeasuredHeight = false
+        }
+    }
     val animatedHeight by animateDpAsState(
         targetValue = heightDp.coerceIn(minHeightDp, maxHeight).dp,
-        animationSpec = if (hasMeasuredHeight) tween(durationMillis = 180) else snap(),
+        animationSpec = if (streaming || !hasMeasuredHeight) {
+            snap()
+        } else {
+            tween(durationMillis = 180)
+        },
         label = "generative-widget-height",
     )
     val receiverHtml = remember(
@@ -1638,6 +1648,7 @@ private fun RichSandboxWebView(
     setting: GenerativeUiSetting,
     modifier: Modifier = Modifier,
     maxHeightDp: Int = 720,
+    streaming: Boolean = false,
     onWebViewReady: (WebView?) -> Unit = {},
 ) {
     val fontRepository = koinInject<SlidesFontRepository>()
@@ -1662,7 +1673,7 @@ private fun RichSandboxWebView(
     }
     val animatedHeight by animateDpAsState(
         targetValue = heightDp.coerceIn(240, maxHeightDp).dp,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = if (streaming) snap() else tween(durationMillis = 200),
         label = "rich-widget-height",
     )
 

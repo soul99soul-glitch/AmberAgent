@@ -1,10 +1,5 @@
 package app.amber.feature.ui.components.message
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -318,7 +313,6 @@ internal fun ChatMessageVirtualItemContent(
                             is ThinkingStep.CouncilTaskStep -> step.tools
                         }
                     },
-                    annotations = emptyList(),
                     loading = loading,
                     model = model,
                     onToolApproval = onToolApproval,
@@ -341,7 +335,6 @@ internal fun ChatMessageVirtualItemContent(
                         is ThinkingStep.SubAgentTaskStep -> step.tools
                         is ThinkingStep.CouncilTaskStep -> step.tools
                     },
-                    annotations = emptyList(),
                     loading = loading,
                     model = model,
                     onToolApproval = onToolApproval,
@@ -373,7 +366,6 @@ internal fun ChatMessageVirtualItemContent(
                             assistant = assistant,
                             role = message.role,
                             parts = listOf(item.block.part),
-                            annotations = emptyList(),
                             loading = loading,
                             model = model,
                             onToolApproval = onToolApproval,
@@ -472,11 +464,12 @@ private fun ChatMessageVirtualFooter(
     val navController = LocalNavController.current
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
-    val showActions = if (lastMessage) {
-        !loading
-    } else {
-        message.parts.isEmptyUIMessage().not()
-    }
+    val actionFooterMode = resolveActionFooterMode(
+        role = message.role,
+        lastMessage = lastMessage,
+        loading = loading,
+        hasContent = message.parts.isEmptyUIMessage().not(),
+    )
 
     Column(
         modifier = Modifier
@@ -485,29 +478,19 @@ private fun ChatMessageVirtualFooter(
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        ProvideTextStyle(textStyle) {
-            MessageAnnotations(annotations = message.annotations, loading = loading)
-        }
-
-        AnimatedVisibility(
-            visible = showActions,
-            enter = slideInVertically { it / 2 } + fadeIn(),
-            exit = slideOutVertically { it / 2 } + fadeOut()
-        ) {
-            Column(
-                modifier = Modifier.animateContentSizeIf(loading && lastMessage)
-            ) {
-                ChatMessageActionButtons(
-                    message = message,
-                    onRegenerate = onRegenerate,
-                    node = node,
-                    onUpdate = onUpdate,
-                    onOpenActionSheet = {
-                        showActionsSheet = true
-                    },
-                )
-            }
-        }
+        ChatMessageMessageFooter(
+            annotations = message.annotations,
+            loading = loading,
+            textStyle = textStyle,
+            actionFooterMode = actionFooterMode,
+            message = message,
+            node = node,
+            onRegenerate = onRegenerate,
+            onUpdate = onUpdate,
+            onOpenActionSheet = {
+                showActionsSheet = true
+            },
+        )
     }
 
     if (showActionsSheet) {
