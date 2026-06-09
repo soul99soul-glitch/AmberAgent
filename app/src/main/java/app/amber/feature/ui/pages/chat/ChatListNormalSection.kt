@@ -53,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -159,6 +160,7 @@ internal fun ChatListNormal(
     var programmaticScrollToken by remember(conversation.id) { mutableIntStateOf(0) }
     var imeProgrammaticScrollToken by remember(conversation.id) { mutableStateOf<Int?>(null) }
     var userScrollInTimeline by remember(conversation.id) { mutableStateOf(false) }
+    var userDragInTimeline by remember(conversation.id) { mutableStateOf(false) }
     var previousActiveGeneration by remember(conversation.id) { mutableStateOf(activeGeneration) }
     val density = LocalDensity.current
     val captureProgress = LocalScrollCaptureInProgress.current
@@ -267,11 +269,23 @@ internal fun ChatListNormal(
     ) {
         val token = beginProgrammaticScroll()
         logScroll("scrollToTimelineBottom.enter", "reason=$reason token=$token")
+        var interruptedByUser = false
+        fun shouldStopSmoothFollow(): Boolean {
+            if (!smoothLargeMove) return false
+            if (userDragInTimeline) {
+                interruptedByUser = true
+                pauseAutoFollowTemporarily(TimelineFollowMode.PausedForUser)
+                logScroll("scrollToTimelineBottom.interrupt", "reason=$reason token=$token")
+                return true
+            }
+            return !activeGenerationState || followMode != TimelineFollowMode.FollowingBottom
+        }
         try {
             val maxSmoothStepPx = with(density) { 18.dp.toPx() }
             val maxFrames = if (smoothLargeMove) 8 else 1
             var frameIndex = 0
             while (frameIndex < maxFrames) {
+                if (shouldStopSmoothFollow()) break
                 val totalItems = state.layoutInfo.totalItemsCount
                 if (totalItems <= 0) break
                 val distancePx = state.distanceToTimelineBottomPx()
@@ -299,6 +313,7 @@ internal fun ChatListNormal(
                         )
                         frameIndex++
                         withFrameNanos { }
+                        if (shouldStopSmoothFollow()) break
                     }
 
                     distancePx > 0 -> {
@@ -315,9 +330,31 @@ internal fun ChatListNormal(
                         if (!smoothLargeMove || distancePx.toFloat() <= maxSmoothStepPx) break
                         frameIndex++
                         withFrameNanos { }
+                        if (shouldStopSmoothFollow()) break
                     }
 
                     else -> break
+                }
+            }
+            if (smoothLargeMove && !interruptedByUser && !shouldStopSmoothFollow()) {
+                val totalItems = state.layoutInfo.totalItemsCount
+                val remainingDistancePx = state.distanceToTimelineBottomPx()
+                when {
+                    remainingDistancePx != null && remainingDistancePx > 0 -> {
+                        state.scrollBy(remainingDistancePx.toFloat())
+                        logScroll(
+                            "scrollToTimelineBottom.smoothSettle",
+                            "reason=$reason token=$token distancePx=$remainingDistancePx",
+                        )
+                    }
+
+                    remainingDistancePx == null && totalItems > 0 -> {
+                        state.scrollToItem(totalItems - 1)
+                        logScroll(
+                            "scrollToTimelineBottom.smoothSnap",
+                            "reason=$reason token=$token totalItems=$totalItems",
+                        )
+                    }
                 }
             }
         } finally {
@@ -624,9 +661,11 @@ internal fun ChatListNormal(
         }
     }
 
-    LaunchedEffect(state.isScrollInProgress) {
+    LaunchedEffect(state.isScrollInProgress, userDragInTimeline) {
         logScroll("LE_scrollProgress", "isScrollInProgress=${state.isScrollInProgress}")
         if (state.isScrollInProgress) {
+            val userDrivenScroll = userScrollInTimeline &&
+                (!programmaticScrollInProgress || userDragInTimeline)
             // 2026-05-14: gate isRecentScroll on `!programmaticScrollInProgress`.
             // Previously this was unconditional, which meant programmatic
             // bottom-follow scrolls during streaming kept re-arming "the user
@@ -636,10 +675,10 @@ internal fun ChatListNormal(
             // jumper card to slide in/out repeatedly — user reported it as
             // "右边这个四个箭头的导航按钮疯狂的往外弹". Only mark recent-scroll
             // when the user actually initiated the gesture.
-            if (userScrollInTimeline && !programmaticScrollInProgress) {
+            if (userDrivenScroll) {
                 isRecentScroll = true
             }
-            if (activeGenerationState && userScrollInTimeline && !programmaticScrollInProgress) {
+            if (activeGenerationState && userDrivenScroll) {
                 pauseAutoFollowTemporarily(TimelineFollowMode.PausedForUser)
             }
         } else {
@@ -781,6 +820,7 @@ internal fun ChatListNormal(
     val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
     val latestRenderToken = conversation.latestRenderToken()
     val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
+    val showBottomFollowAnimationState by rememberUpdatedState(showBottomFollowAnimation)
     // Keep the working indicator inside the LazyColumn during streaming. The
     // old pinned overlay looked detached from the generated content: it hid
     // abruptly when the user scrolled history and reappeared abruptly when
@@ -811,11 +851,16 @@ internal fun ChatListNormal(
                         followMode == TimelineFollowMode.FollowingBottom &&
                         !userScrollInTimeline
                     if (stillFollowing) {
+                        val animateBottomFollow = showBottomFollowAnimationState
                         if (
+                            animateBottomFollow ||
                             PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW ||
                             PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL
                         ) {
-                            scrollToTimelineBottom("stream-$reason", smoothLargeMove = false)
+                            scrollToTimelineBottom(
+                                reason = "stream-$reason",
+                                smoothLargeMove = animateBottomFollow,
+                            )
                         } else {
                             requestTimelineBottom("stream-$reason")
                         }
@@ -884,6 +929,7 @@ internal fun ChatListNormal(
                         // until every pointer is actually lifted.
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                         userScrollInTimeline = true
+                        userDragInTimeline = false
                         try {
                             logScroll(
                                 "pointerDown",
@@ -891,9 +937,13 @@ internal fun ChatListNormal(
                             )
                             do {
                                 val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                                if (event.changes.any { it.positionChange().getDistance() > 0.5f }) {
+                                    userDragInTimeline = true
+                                }
                             } while (event.changes.any { it.pressed })
                         } finally {
                             userScrollInTimeline = false
+                            userDragInTimeline = false
                         }
                     }
                 }

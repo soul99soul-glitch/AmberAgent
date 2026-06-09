@@ -218,10 +218,9 @@ internal fun MessagePartsBlock(
                     is UIMessagePart.Text -> {
                         MessageSelectionContainer {
                                 if (role == MessageRole.USER) {
-                                    // Graphite user bubble: userBubble fill + userBubbleEdge
-                                    // hairline, asymmetric corners (see shape below), no left
-                                    // stripe. 长按弹 menu sheet（复制/重试/编辑/分享/...); 短按维持
-                                    // edit 兼容旧行为.
+                                    // Graphite user bubble: solid userBubble fill, asymmetric
+                                    // corners, no outline/stripe. 长按弹 menu sheet
+                                    //（复制/重试/编辑/分享/...); 短按维持 edit 兼容旧行为.
                                     // DisableSelection 屏蔽 Android 系统的 text selection toolbar
                                     // (复制/全选/朗读/搜索) ——避免跟我们的 menu sheet 两个面板同时出现.
                                     androidx.compose.foundation.text.selection.DisableSelection {
@@ -263,10 +262,6 @@ internal fun MessagePartsBlock(
                                         contentColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.userBubbleInk,
                                         tonalElevation = 0.dp,
                                         shadowElevation = 0.dp,
-                                        border = BorderStroke(
-                                            1.dp,
-                                            app.amber.feature.ui.pages.chat.LocalChatTheme.current.userBubbleEdge,
-                                        ),
                                     ) {
                                         Column(
                                             modifier = Modifier

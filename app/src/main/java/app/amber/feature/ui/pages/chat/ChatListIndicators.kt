@@ -393,16 +393,18 @@ internal fun PendingUserMessageBubble(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
+    val accent = LocalChatTheme.current.accent
     val borderColor = when (message.mode) {
         PendingUserMessageMode.FOLLOWUP -> workspace.muted.copy(alpha = 0.42f)
-        PendingUserMessageMode.STEER -> workspace.blue.copy(alpha = 0.48f)
-        PendingUserMessageMode.COLLECT -> workspace.blue.copy(alpha = 0.28f)
+        PendingUserMessageMode.STEER -> accent.copy(alpha = 0.48f)
+        PendingUserMessageMode.COLLECT -> accent.copy(alpha = 0.28f)
     }
     val textColor = when (message.mode) {
         PendingUserMessageMode.FOLLOWUP -> workspace.muted
-        PendingUserMessageMode.STEER -> workspace.blue.copy(alpha = 0.82f)
+        PendingUserMessageMode.STEER -> workspace.muted
         PendingUserMessageMode.COLLECT -> workspace.muted.copy(alpha = 0.9f)
     }
+    val cancelTint = workspace.muted.copy(alpha = 0.84f)
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
@@ -443,7 +445,7 @@ internal fun PendingUserMessageBubble(
                             Icon(
                                 imageVector = HugeIcons.Cancel01,
                                 contentDescription = "取消排队消息",
-                                tint = textColor.copy(alpha = 0.72f),
+                                tint = cancelTint,
                                 modifier = Modifier.size(15.dp),
                             )
                         }
