@@ -92,4 +92,17 @@ class BatchRevealSuffixTest {
         assertNotNull(first.baselineShift)
         assertTrue(first.baselineShift!!.multiplier < 0f)
     }
+
+    @Test
+    fun `plain live suffix also receives batch reveal and lift`() {
+        val out = applyBatchRevealPlainSuffix("\n\nbody", suffixProgress = 0f, baseColor = base)
+
+        assertTrue(out.spanStyles.isNotEmpty())
+        assertEquals(0, out.spanStyles.first().start)
+        assertEquals(out.length, out.spanStyles.last().end)
+        val first = out.spanStyles.first().item
+        assertEquals(0.24f, first.color.alpha, 0.003f)
+        assertNotNull(first.baselineShift)
+        assertTrue(first.baselineShift!!.multiplier < 0f)
+    }
 }

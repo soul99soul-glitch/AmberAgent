@@ -201,6 +201,18 @@ class ChatListSupportTest {
         assertTrue(createStreamingBottomFollowEvents().tryEmit("visible"))
     }
 
+    @Test
+    fun `streaming tail indicator uses pinned overlay with retained reserve`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+
+        assertTrue(source.contains("retainedTailIndicatorMessageId"))
+        assertTrue(source.contains("tailIndicatorReserveVisible"))
+        assertTrue(source.contains("pinTailIndicator"))
+        assertTrue(source.contains("TimelineTailWorkingIndicator("))
+        assertTrue(source.contains("visible = tailIndicatorDotVisible && !pinTailIndicator"))
+        assertTrue(source.contains("visible = pinTailIndicator && !captureProgress"))
+    }
+
     private fun repoFile(pathInAppModule: String): File {
         return listOf(
             File(pathInAppModule),

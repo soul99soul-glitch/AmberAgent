@@ -453,6 +453,30 @@ internal fun liveSuffixPlacementFor(suffix: String): LiveSuffixPlacement {
     }
 }
 
+/**
+ * Splits an unparsed live suffix at the first top-level block boundary — a
+ * blank line (`\n\n` or `\r\n\r\n`). The first component continues the current
+ * block; the second (including the blank line) belongs to subsequent blocks.
+ * With no blank line the whole suffix stays with the current block.
+ *
+ * Pure split — callers apply `<br>` normalization where the parts are rendered.
+ */
+internal fun splitLiveSuffixAtBlockBoundary(suffix: String): Pair<String, String> {
+    val boundary = suffix.indexOf("\n\n").let { unix ->
+        val windows = suffix.indexOf("\r\n\r\n")
+        when {
+            unix == -1 -> windows
+            windows == -1 -> unix
+            else -> minOf(unix, windows)
+        }
+    }
+    return if (boundary == -1) {
+        suffix to ""
+    } else {
+        suffix.substring(0, boundary) to suffix.substring(boundary)
+    }
+}
+
 internal fun streamingLiveSuffixForLastRenderableChild(
     children: List<ASTNode>,
     child: ASTNode,
@@ -523,10 +547,13 @@ private const val STREAMING_BATCH_CHAR_STAGGER_MS = 12
 private const val STREAMING_BATCH_STAGGER_MAX_CODEPOINTS = 96
 private const val STREAMING_BATCH_MAX_STAGGER_FRACTION = 0.42f
 private const val STREAMING_BATCH_REVEAL_START_ALPHA = 0.24f
-private const val STREAMING_BATCH_REVEAL_LIFT_EM = 0.10f
-private const val STREAMING_BLOCK_REVEAL_MS = 170
+// Per-glyph baseline lift for the streaming tail. baselineShift only moves the
+// glyph baseline, so it does NOT reflow the line or push the block below.
+private const val STREAMING_BATCH_REVEAL_LIFT_EM = 0.28f
+private const val STREAMING_BLOCK_REVEAL_MS = 190
 private const val STREAMING_BLOCK_REVEAL_START_ALPHA = 0.86f
-private const val STREAMING_BLOCK_REVEAL_OFFSET_DP = 3
+// Whole-block translationY rise on first settle, complementing the per-glyph tail lift.
+private const val STREAMING_BLOCK_REVEAL_OFFSET_DP = 9
 private const val STREAMING_TABLE_CELL_REVEAL_MS = 150
 private const val STREAMING_TABLE_CELL_REVEAL_START_ALPHA = 0.72f
 private const val STREAMING_TABLE_CELL_REVEAL_MAX_CELLS = 48
@@ -1422,6 +1449,10 @@ private fun MarkdownNode(
                 MarkdownElementTypes.ATX_6 -> 6.dp
                 else -> 8.dp
             }
+            // Capture the body style BEFORE switching to the heading style, so
+            // the live-suffix preview of the paragraph that follows the heading
+            // renders as body text rather than leaking the heading's large bold.
+            val bodyStyle = LocalTextStyle.current
             ProvideTextStyle(value = style) {
                 StreamingBlockReveal(node = node, modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current)) { revealModifier ->
                     FlowRow(
@@ -1442,6 +1473,7 @@ private fun MarkdownNode(
                                     onClickCitation = onClickCitation,
                                     modifier = Modifier.padding(vertical = headingPadding),
                                     trim = true,
+                                    plainSuffixStyle = bodyStyle,
                                     liveSuffix = childLiveSuffix.text,
                                     liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                                 )
@@ -2001,6 +2033,12 @@ private fun Paragraph(
     trim: Boolean = false,
     onClickCitation: (String) -> Unit = {},
     modifier: Modifier,
+    // Style for the plain tail suffix (text belonging to the NEXT block, shown
+    // as a preview before the parser stabilizes it). Defaults to the current
+    // text style, but callers that override LocalTextStyle for their own block
+    // (e.g. a heading) must pass the base body style so the preview of the
+    // following block isn't rendered with this block's style.
+    plainSuffixStyle: TextStyle = LocalTextStyle.current,
     liveSuffix: String = "",
     liveSuffixSourceOffset: Int = 0,
 ) {
@@ -2110,18 +2148,23 @@ private fun Paragraph(
                 }
             }
         }
-        // Batch reveal (L4 decoupled): only inline unparsed suffix animates.
-        // Block-boundary suffixes render as plain tail text to avoid reflow.
+        // Batch reveal (L4 decoupled): only the inline unparsed suffix animates.
+        // A suffix that opens a new block renders as plain tail text below to
+        // avoid block-boundary reflow.
         val suffixPlacement = liveSuffixPlacementFor(liveSuffix)
-        val inlineLiveSuffix = if (suffixPlacement == LiveSuffixPlacement.Inline) {
-            liveSuffix
+        // Even an Inline-classified suffix can spill past a blank line into the
+        // next block (e.g. a heading's trailing words followed by the paragraph
+        // after it). Keep only the pre-boundary part inline (this block's
+        // style); everything past the blank line drops below as plain body text.
+        val (blockInlineSuffix, blockPlainSuffix) = splitLiveSuffixAtBlockBoundary(liveSuffix)
+        val inlineLiveSuffix: String
+        val plainLiveSuffix: String
+        if (suffixPlacement == LiveSuffixPlacement.Inline) {
+            inlineLiveSuffix = blockInlineSuffix
+            plainLiveSuffix = blockPlainSuffix.replace(BREAK_LINE_REGEX, "\n")
         } else {
-            ""
-        }
-        val plainLiveSuffix = if (suffixPlacement == LiveSuffixPlacement.Plain) {
-            liveSuffix.replace(BREAK_LINE_REGEX, "\n")
-        } else {
-            ""
+            inlineLiveSuffix = ""
+            plainLiveSuffix = liveSuffix.replace(BREAK_LINE_REGEX, "\n")
         }
         val combined = remember(staticAnnotated, inlineLiveSuffix, baseColor) {
             if (inlineLiveSuffix.isEmpty()) {
@@ -2137,7 +2180,8 @@ private fun Paragraph(
         // is there a suffix to fade. liveSuffixSourceOffset changes once per
         // parse tick, so it is the batch key — a fresh Animatable per batch
         // drives the newly-arrived text from 0→1.
-        val streamingTail = streamingTailActive != null && inlineLiveSuffix.isNotEmpty()
+        val streamingTail = streamingTailActive != null &&
+            (inlineLiveSuffix.isNotEmpty() || plainLiveSuffix.isNotEmpty())
         val suffixAlpha = if (streamingTail) {
             val anim = remember(liveSuffixSourceOffset) { Animatable(0f) }
             LaunchedEffect(liveSuffixSourceOffset) {
@@ -2173,16 +2217,23 @@ private fun Paragraph(
             )
         )
         if (plainLiveSuffix.isNotEmpty()) {
+            val plainAnnotatedString = remember(plainLiveSuffix, suffixAlpha, baseColor) {
+                applyBatchRevealPlainSuffix(
+                    text = plainLiveSuffix,
+                    suffixProgress = suffixAlpha,
+                    baseColor = baseColor,
+                )
+            }
             Text(
-                text = plainLiveSuffix,
+                text = plainAnnotatedString,
                 modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
                 softWrap = true,
                 overflow = TextOverflow.Visible,
-                style = LocalTextStyle.current.copy(
+                style = plainSuffixStyle.copy(
                     lineHeight = if (hasInlineMath && enableLatexRendering) {
                         TextUnit.Unspecified
                     } else {
-                        LocalTextStyle.current.lineHeight
+                        plainSuffixStyle.lineHeight
                     },
                 ),
             )
@@ -2641,6 +2692,20 @@ internal fun applyBatchRevealSuffix(
             index++
         }
     }
+}
+
+internal fun applyBatchRevealPlainSuffix(
+    text: String,
+    suffixProgress: Float,
+    baseColor: Color,
+): AnnotatedString {
+    if (text.isEmpty()) return AnnotatedString("")
+    return applyBatchRevealSuffix(
+        combined = buildAnnotatedString { append(text) },
+        staticLength = 0,
+        suffixProgress = suffixProgress,
+        baseColor = baseColor,
+    )
 }
 
 private fun streamingRevealSpanStyle(

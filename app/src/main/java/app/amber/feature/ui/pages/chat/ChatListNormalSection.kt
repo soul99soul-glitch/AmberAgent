@@ -189,15 +189,43 @@ internal fun ChatListNormal(
         emptyList()
     }
     val latestMessage = conversation.messageNodes.lastOrNull()?.currentMessage
+    val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
     val conversationId = conversation.id.toString()
     val postSendState = chatTimelinePlan.postSendState
     val timelineLoading = chatTimelinePlan.timelineLoading
     val timelineBottomPadding = TimelineBottomSafetyPadding +
         if (postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
+    var retainedTailIndicatorMessageId by remember(conversation.id) {
+        mutableStateOf(
+            if (
+                showBottomFollowAnimation &&
+                timelineLoading &&
+                latestMessage?.role == MessageRole.ASSISTANT
+            ) {
+                latestMessage.id
+            } else {
+                null
+            }
+        )
+    }
 
     LaunchedEffect(conversation.id, activeGeneration) {
         if (!activeGeneration) {
             ChatSendTransitionTracker.clear(conversationId)
+        }
+    }
+    LaunchedEffect(
+        conversation.id,
+        timelineLoading,
+        latestMessage?.id,
+        latestMessage?.role,
+        showBottomFollowAnimation,
+    ) {
+        retainedTailIndicatorMessageId = when {
+            !showBottomFollowAnimation -> null
+            timelineLoading && latestMessage?.role == MessageRole.ASSISTANT -> latestMessage.id
+            latestMessage?.id == retainedTailIndicatorMessageId -> retainedTailIndicatorMessageId
+            else -> null
         }
     }
 
@@ -400,6 +428,21 @@ internal fun ChatListNormal(
     }
 
     suspend fun settleAfterGenerationEnd() {
+        // 问题③(结束跳变):若流式结束时内容已经贴底(②让逐批跟随稳定贴底),
+        // 不要再做任何 settle 贴底滚动 —— 末尾的圆点 item 此刻即将被移除,其高度
+        // 变化会和 settle 的向下贴底滚动叠加,把画面往上拽,就是用户看到的"结束
+        // 跳变"。已在底部缓冲区内时直接定住、让圆点淡出即可;只有真正没贴底(用户
+        // 中途滚走等)才走下面的逐帧 settle 兜底。
+        val initialDistancePx = state.distanceToTimelineBottomPx()
+        if (
+            TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
+                distancePx = initialDistancePx,
+                bottomBufferPx = bottomFollowBufferPx,
+            )
+        ) {
+            logScroll("generationEndSettle.alreadyAtBottom", "distancePx=$initialDistancePx")
+            return
+        }
         if (!waitForGenerationEndSettleGate()) {
             logScroll("generationEndSettle.skip", "gate=false")
             return
@@ -819,14 +862,21 @@ internal fun ChatListNormal(
     )
     val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
     val latestRenderToken = conversation.latestRenderToken()
-    val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
     val showBottomFollowAnimationState by rememberUpdatedState(showBottomFollowAnimation)
-    // Keep the working indicator inside the LazyColumn during streaming. The
-    // old pinned overlay looked detached from the generated content: it hid
-    // abruptly when the user scrolled history and reappeared abruptly when
-    // returning. As a timeline item it moves with the real content bottom,
-    // matching RikkaHub's simpler bottom-follow feel.
-    val showPinnedAgentWorkingIndicator = false
+    val tailIndicatorReserveVisible = showBottomFollowAnimation &&
+        (
+            timelineLoading ||
+                latestMessage?.id == retainedTailIndicatorMessageId
+            )
+    val tailIndicatorDotVisible = showBottomFollowAnimation && timelineLoading
+    val pinTailIndicator by remember(tailIndicatorDotVisible, followMode, userScrollInTimeline) {
+        derivedStateOf {
+            tailIndicatorDotVisible &&
+                followMode == TimelineFollowMode.FollowingBottom &&
+                !userScrollInTimeline &&
+                (state.canScrollBackward || state.canScrollForward)
+        }
+    }
     val streamingVisibleEvents = remember(conversation.id) {
         createStreamingBottomFollowEvents()
     }
@@ -859,7 +909,12 @@ internal fun ChatListNormal(
                         ) {
                             scrollToTimelineBottom(
                                 reason = "stream-$reason",
-                                smoothLargeMove = animateBottomFollow,
+                                // 问题②(圆点抖):逐批流式增长用立即贴底,而非分帧
+                                // 平滑追赶。分帧追赶(8帧×18dp)是为"一次大跳跃"设计
+                                // 的,套在逐批小增长上会与内容增高产生相位差 —— 每批
+                                // 先把末尾圆点推出视口、再分帧拉回,圆点就一直抖。snap
+                                // 让每批内容一落地就贴底,圆点稳定锚定在底部。
+                                smoothLargeMove = false,
                             )
                         } else {
                             requestTimelineBottom("stream-$reason")
@@ -1263,23 +1318,29 @@ internal fun ChatListNormal(
                             key = LoadingIndicatorKey,
                             contentType = "loading",
                         ) {
-                            if (showPinnedAgentWorkingIndicator) {
-                                Spacer(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(AgentWorkingIndicatorReserveHeight)
+                            if (tailIndicatorReserveVisible) {
+                                TimelineTailWorkingIndicator(
+                                    processingStatus = processingStatus,
+                                    visible = tailIndicatorDotVisible && !pinTailIndicator,
+                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
                                 )
-                            } else {
-                                if (showBottomFollowAnimation) {
-                                    Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
-                                        AgentWorkingIndicator(processingStatus = processingStatus)
-                                    }
-                                }
                             }
                         }
                     }
 
                     ChatTimelineEntry.ScrollBottom -> {
+                        if (tailIndicatorReserveVisible && !timelineLoading) {
+                            item(
+                                key = LoadingIndicatorKey,
+                                contentType = "loading",
+                            ) {
+                                TimelineTailWorkingIndicator(
+                                    processingStatus = processingStatus,
+                                    visible = false,
+                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                )
+                            }
+                        }
                         item(
                             key = ScrollBottomKey,
                             contentType = "scroll-bottom",
@@ -1330,7 +1391,7 @@ internal fun ChatListNormal(
             )
 
             AnimatedVisibility(
-                visible = showPinnedAgentWorkingIndicator && !captureProgress,
+                visible = pinTailIndicator && !captureProgress,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = AgentWorkingIndicatorOverlayBottomOffset)
