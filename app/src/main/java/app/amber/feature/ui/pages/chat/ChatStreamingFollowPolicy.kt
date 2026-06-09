@@ -4,7 +4,8 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 internal object TimelineFollowEndSettlePolicy {
-    const val MaxSettleFrames = 4
+    const val MaxSettleFrames = 8
+    const val RequiredStableBottomFrames = 2
 
     fun effectPlan(
         wasActiveGeneration: Boolean,
@@ -45,6 +46,9 @@ internal object TimelineFollowEndSettlePolicy {
         distancePx: Int?,
         bottomBufferPx: Int,
     ): Boolean = distancePx != null && distancePx <= bottomBufferPx
+
+    fun hasEnoughStableBottomFrames(stableBottomFrames: Int): Boolean =
+        stableBottomFrames >= RequiredStableBottomFrames
 }
 
 internal data class GenerationEndEffectPlan(

@@ -193,6 +193,7 @@ internal fun ChatListNormal(
     val conversationId = conversation.id.toString()
     val postSendState = chatTimelinePlan.postSendState
     val timelineLoading = chatTimelinePlan.timelineLoading
+    val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
     val timelineBottomPadding = TimelineBottomSafetyPadding +
         if (postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
     var retainedTailIndicatorMessageId by remember(conversation.id) {
@@ -428,6 +429,10 @@ internal fun ChatListNormal(
     }
 
     suspend fun settleAfterGenerationEnd() {
+        // Let loading=false commit at least one real layout before measuring.
+        // The retained tail indicator usually keeps height stable, but the
+        // completed-message action row can still settle one frame later.
+        withFrameNanos { }
         // 问题③(结束跳变):若流式结束时内容已经贴底(②让逐批跟随稳定贴底),
         // 不要再做任何 settle 贴底滚动 —— 末尾的圆点 item 此刻即将被移除,其高度
         // 变化会和 settle 的向下贴底滚动叠加,把画面往上拽,就是用户看到的"结束
@@ -447,6 +452,7 @@ internal fun ChatListNormal(
             logScroll("generationEndSettle.skip", "gate=false")
             return
         }
+        var stableBottomFrames = 0
         repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) { frame ->
             val distanceBefore = state.distanceToTimelineBottomPx()
             if (
@@ -455,9 +461,19 @@ internal fun ChatListNormal(
                     bottomBufferPx = bottomFollowBufferPx,
                 )
             ) {
-                logScroll("generationEndSettle.done", "frame=$frame distancePx=$distanceBefore")
-                return
+                stableBottomFrames += 1
+                logScroll(
+                    "generationEndSettle.stable",
+                    "frame=$frame distancePx=$distanceBefore stable=$stableBottomFrames",
+                )
+                if (TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(stableBottomFrames)) {
+                    logScroll("generationEndSettle.done", "frame=$frame distancePx=$distanceBefore")
+                    return
+                }
+                withFrameNanos { }
+                return@repeat
             }
+            stableBottomFrames = 0
             if (
                 !TimelineFollowEndSettlePolicy.canAttemptSettle(
                     followMode = followMode,
@@ -477,7 +493,7 @@ internal fun ChatListNormal(
             val distanceAfter = state.distanceToTimelineBottomPx()
             logScroll(
                 "generationEndSettle.frame",
-                "frame=$frame before=$distanceBefore after=$distanceAfter",
+                "frame=$frame before=$distanceBefore after=$distanceAfter stable=$stableBottomFrames",
             )
             if (
                 TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
@@ -485,7 +501,13 @@ internal fun ChatListNormal(
                     bottomBufferPx = bottomFollowBufferPx,
                 )
             ) {
-                return
+                stableBottomFrames += 1
+                if (TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(stableBottomFrames)) {
+                    return
+                }
+                withFrameNanos { }
+            } else {
+                stableBottomFrames = 0
             }
         }
     }

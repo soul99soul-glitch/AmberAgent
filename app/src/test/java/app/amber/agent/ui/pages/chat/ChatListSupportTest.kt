@@ -181,6 +181,13 @@ class ChatListSupportTest {
     }
 
     @Test
+    fun `generation end settle waits for consecutive stable bottom frames`() {
+        assertFalse(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(0))
+        assertFalse(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(1))
+        assertTrue(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(2))
+    }
+
+    @Test
     fun `chat streaming follow path keeps stable pointer key and chunk emits only`() {
         val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
 
