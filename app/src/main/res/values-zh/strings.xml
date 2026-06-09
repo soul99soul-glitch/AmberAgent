@@ -994,7 +994,7 @@
   <string name="setting_page_agent_tool_loop_steps_desc">单次回复最多调用多少轮工具。</string>
   <string name="setting_page_agent_tool_loop_steps_value">%1$d 步</string>
   <string name="setting_page_agent_auto_approve">全局自动批准</string>
-  <string name="setting_page_agent_auto_approve_desc">自动批准常规工具调用。</string>
+  <string name="setting_page_agent_auto_approve_desc">自动批准常规工具调用。和高风险自动批准同时开启时，除需要你回答的 ask_user 外，审批工具会无人值守执行。</string>
   <string name="setting_page_interaction_notification_settings">互动与通知</string>
   <string name="setting_page_mcp">MCP</string>
   <string name="setting_page_mcp_desc">管理外部 MCP 工具</string>
@@ -1305,9 +1305,9 @@
   <string name="setting_page_system_access_desc">授权并审计 Agent 工具可调用的 Android 系统权限。</string>
   <string name="setting_system_access_title">系统权限</string>
   <string name="setting_page_agent_high_risk_auto_approve">高风险自动批准</string>
-  <string name="setting_page_agent_high_risk_auto_approve_desc">允许短信、拨号、联系人等敏感动作。</string>
+  <string name="setting_page_agent_high_risk_auto_approve_desc">配合全局自动批准，允许短信、拨号、文件写入、终端/屏幕动作、SubAgent 内部工具等审批工具无人值守执行。</string>
   <string name="setting_page_agent_high_risk_auto_approve_confirm_title">确认开启高风险自动批准？</string>
-  <string name="setting_page_agent_high_risk_auto_approve_confirm_desc">开启后，AmberAgent 可以自动批准发送短信、直接拨号、写入联系人或日历、录音等高风险工具。只有在你完全信任当前设备、模型和会话上下文时才建议开启。</string>
+  <string name="setting_page_agent_high_risk_auto_approve_confirm_desc">开启后，如果全局自动批准也开启，AmberAgent 可以无人值守执行原本需要审批的工具，包括发送短信、直接拨号、写入文件/联系人/日历、录音、终端/屏幕动作和 SubAgent 内部工具。ask_user 仍会等待你的回答。只有在你完全信任当前设备、模型和会话上下文时才建议开启。</string>
   <string name="setting_agent_execution_live_mode_section">Live 伴随</string>
   <string name="setting_page_agent_live_mode">启用 Live 伴随</string>
   <string name="setting_page_agent_live_mode_desc">通过无障碍观察另一侧应用，自动更新一张紧凑的只读伴随卡片。</string>

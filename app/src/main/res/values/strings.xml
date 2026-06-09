@@ -696,7 +696,7 @@
   <string name="setting_page_agent_tool_loop_steps_desc">Maximum tool rounds in one reply.</string>
   <string name="setting_page_agent_tool_loop_steps_value">%1$d steps</string>
   <string name="setting_page_agent_auto_approve">Global Auto-Approve</string>
-  <string name="setting_page_agent_auto_approve_desc">Auto-approve normal tool calls.</string>
+  <string name="setting_page_agent_auto_approve_desc">Auto-approve normal tool calls. When high-risk auto approve is also enabled, approval-gated tools run unattended except ask_user prompts that need your answer.</string>
   <string name="setting_page_interaction_notification_settings">Interaction &amp;amp; Notifications</string>
   <string name="setting_page_mcp">MCP</string>
   <string name="setting_page_mcp_desc">Manage external MCP tool servers the Agent can call</string>
@@ -1315,9 +1315,9 @@
   <string name="setting_page_system_access_desc">Grant and audit Android permissions for Agent tools.</string>
   <string name="setting_system_access_title">System Access</string>
   <string name="setting_page_agent_high_risk_auto_approve">High-risk auto approve</string>
-  <string name="setting_page_agent_high_risk_auto_approve_desc">Allow SMS, calls, contacts and other sensitive actions.</string>
+  <string name="setting_page_agent_high_risk_auto_approve_desc">Together with global auto-approve, allow unattended execution for approval-gated tools such as SMS, calls, file writes, terminal/screen actions, and SubAgent tools.</string>
   <string name="setting_page_agent_high_risk_auto_approve_confirm_title">Enable high-risk auto approve?</string>
-  <string name="setting_page_agent_high_risk_auto_approve_confirm_desc">AmberAgent will be allowed to automatically approve tools that can send messages, place direct calls, write contacts or calendars, and record audio. Keep this off unless you fully trust this device, model, and session context.</string>
+  <string name="setting_page_agent_high_risk_auto_approve_confirm_desc">When global auto-approve is also enabled, AmberAgent can run approval-gated tools unattended, including sending messages, placing direct calls, writing files, contacts, or calendars, recording audio, terminal/screen actions, and SubAgent tools. ask_user prompts still wait for your answer. Keep this off unless you fully trust this device, model, and session context.</string>
   <string name="setting_agent_execution_live_mode_section">Live companion</string>
   <string name="setting_page_agent_live_mode">Enable Live companion</string>
   <string name="setting_page_agent_live_mode_desc">Observe another app through Accessibility and update a compact read-only companion card.</string>

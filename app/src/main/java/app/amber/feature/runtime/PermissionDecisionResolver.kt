@@ -113,6 +113,17 @@ class PermissionDecisionResolver {
         if (tool.approvalState !is ToolApprovalState.Auto) {
             return decision(PermissionDecisionAction.ALLOW, "User already decided.", "approval_state", policy)
         }
+        if (tool.toolName == ASK_USER_TOOL_NAME && policy.needsApproval) {
+            return decision(PermissionDecisionAction.ASK, "ask_user always needs a human answer.", "hitl", policy)
+        }
+        if (autoApproveTools && autoApproveHighRiskTools) {
+            return decision(
+                PermissionDecisionAction.ALLOW,
+                "Both auto-approval toggles allow unattended tool execution.",
+                "settings_unattended",
+                policy,
+            )
+        }
         if (policy.alwaysAsk) {
             return decision(PermissionDecisionAction.ASK, "Tool always requires explicit human approval.", "always_ask", policy)
         }
@@ -136,9 +147,6 @@ class PermissionDecisionResolver {
                 "mandatory_approval",
                 policy,
             )
-        }
-        if (tool.toolName == ASK_USER_TOOL_NAME && policy.needsApproval) {
-            return decision(PermissionDecisionAction.ASK, "ask_user always needs a human answer.", "hitl", policy)
         }
         if (invocationContext == ToolInvocationContext.SubAgent) {
             if (tool.toolName in HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT && tool.hasSessionGrant()) {

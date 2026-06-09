@@ -121,6 +121,22 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
+    fun workspaceWriteUsesUnattendedAutoApprovalEvenWhenOrdinaryAutoApprovalIsDisabledForTool() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("file_write", allowsAutoApproval = false),
+            tool = toolCall("file_write", """{"path":"notes/test.md","content":"ok"}"""),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+        )
+
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("settings_unattended", decision.source)
+        val policy = decision.trace.policy!!
+        assertTrue(policy.mutates)
+        assertFalse(policy.autoApprovable)
+    }
+
+    @Test
     fun implicitMutatingOrDangerousCategoryToolsFailClosedForAutoApproval() {
         val mutatingName = resolver.resolve(
             toolDef = approvalTool("adapter_create", allowsAutoApproval = true),
@@ -195,7 +211,7 @@ class PermissionDecisionResolverTest {
         )
 
         assertEquals(PermissionDecisionAction.ALLOW, decision.action)
-        assertEquals("settings_high_risk_subagent", decision.source)
+        assertEquals("settings_unattended", decision.source)
     }
 
     @Test
@@ -218,7 +234,7 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
-    fun subAgentCannotSilentlyStartNestedSubAgent() {
+    fun subAgentCanStartNestedSubAgentWhenUnattendedAutoApprovalIsEnabled() {
         val decision = resolver.resolve(
             toolDef = readOnlyTool("subagent_start"),
             tool = toolCall("subagent_start"),
@@ -227,12 +243,12 @@ class PermissionDecisionResolverTest {
             invocationContext = ToolInvocationContext.SubAgent,
         )
 
-        assertEquals(PermissionDecisionAction.ASK, decision.action)
-        assertEquals("subagent", decision.source)
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("settings_unattended", decision.source)
     }
 
     @Test
-    fun subAgentSensitiveToolStillAsksEvenWithHighRiskAutoApproval() {
+    fun subAgentSensitiveToolUsesUnattendedAutoApproval() {
         val decision = resolver.resolve(
             toolDef = approvalTool("screen_tap"),
             tool = toolCall("screen_tap"),
@@ -241,8 +257,8 @@ class PermissionDecisionResolverTest {
             invocationContext = ToolInvocationContext.SubAgent,
         )
 
-        assertEquals(PermissionDecisionAction.ASK, decision.action)
-        assertEquals("subagent", decision.source)
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("settings_unattended", decision.source)
     }
 
     @Test
@@ -288,7 +304,7 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
-    fun subAgentCloudToolStillAsksEvenWithHighRiskAutoApproval() {
+    fun subAgentCloudToolUsesUnattendedAutoApproval() {
         val decision = resolver.resolve(
             toolDef = approvalTool("icloud_status"),
             tool = toolCall("icloud_status"),
@@ -297,13 +313,13 @@ class PermissionDecisionResolverTest {
             invocationContext = ToolInvocationContext.SubAgent,
         )
 
-        assertEquals(PermissionDecisionAction.ASK, decision.action)
-        assertEquals("subagent", decision.source)
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("settings_unattended", decision.source)
         assertEquals("cloud", decision.trace.policy!!.category)
     }
 
     @Test
-    fun directPhoneCallAlwaysAsksButDialerCanUseHighRiskAutoApproval() {
+    fun directPhoneCallAndDialerUseUnattendedAutoApproval() {
         val directCall = resolver.resolve(
             toolDef = approvalTool("call_phone", allowsAutoApproval = false),
             tool = toolCall("call_phone", """{"phone_number":"123","direct_call":true}"""),
@@ -317,11 +333,11 @@ class PermissionDecisionResolverTest {
             autoApproveHighRiskTools = true,
         )
 
-        assertEquals(PermissionDecisionAction.ASK, directCall.action)
-        assertEquals("always_ask", directCall.source)
+        assertEquals(PermissionDecisionAction.ALLOW, directCall.action)
+        assertEquals("settings_unattended", directCall.source)
         assertTrue(directCall.trace.policy!!.alwaysAsk)
         assertEquals(PermissionDecisionAction.ALLOW, dialer.action)
-        assertEquals("settings_high_risk", dialer.source)
+        assertEquals("settings_unattended", dialer.source)
         assertFalse(dialer.trace.policy!!.alwaysAsk)
     }
 
@@ -338,7 +354,7 @@ class PermissionDecisionResolverTest {
         )
 
         assertEquals(PermissionDecisionAction.ALLOW, decision.action)
-        assertEquals("settings_high_risk_mandatory", decision.source)
+        assertEquals("settings_unattended", decision.source)
         assertTrue(decision.trace.policy!!.mandatoryApproval)
     }
 
@@ -399,7 +415,7 @@ class PermissionDecisionResolverTest {
 
         val policy = decision.trace.policy!!
         assertEquals(PermissionDecisionAction.ALLOW, decision.action)
-        assertEquals("settings_high_risk_mandatory", decision.source)
+        assertEquals("settings_unattended", decision.source)
         assertEquals(ToolRisk.Sensitive, policy.risk)
         assertTrue(policy.mandatoryApproval)
     }
