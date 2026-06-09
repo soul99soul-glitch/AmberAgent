@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>搜索图文混排结构示意 — 4 张图片</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif; background: #f5f5f5; padding: 20px; }
+  .phone {
+    width: 390px; margin: 0 auto; background: #fff; border-radius: 24px;
+    overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+  }
+  .status-bar {
+    height: 44px; background: #fafafa; display: flex; align-items: center;
+    justify-content: center; font-size: 12px; color: #888;
+  }
+  .chat-area { padding: 12px 16px; }
+
+  /* 用户消息 */
+  .user-bubble {
+    background: #e8f0fe; border-radius: 18px 18px 4px 18px;
+    padding: 10px 14px; margin-left: 60px; margin-bottom: 16px;
+    font-size: 14px; color: #1a1a1a;
+  }
+
+  /* AI 消息容器 */
+  .ai-msg { margin-bottom: 16px; }
+  .ai-avatar {
+    width: 28px; height: 28px; border-radius: 50%; background: #1a1a1a;
+    color: #d6ff3f; font-size: 14px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 8px;
+  }
+  .ai-content {
+    background: #fafafa; border: 1px solid #e8e5de; border-radius: 16px;
+    padding: 16px; font-size: 14px; line-height: 1.7; color: #1a1a1a;
+  }
+
+  /* ===== 顶部缩略图区 ===== */
+  .thumbnail-strip {
+    display: flex; gap: 8px; margin-bottom: 14px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  .thumbnail-strip img {
+    width: 80px; height: 56px; object-fit: cover; border-radius: 8px;
+    border: 1px solid #e8e5de; cursor: pointer; flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+  .thumbnail-strip img:hover { transform: scale(1.05); }
+  .thumb-label {
+    font-size: 10px; color: #999; margin-bottom: 4px; letter-spacing: 0.5px;
+  }
+
+  /* ===== 正文 ===== */
+  .body-text { margin-bottom: 12px; }
+  .body-text p { margin-bottom: 10px; }
+  .body-text strong { color: #1a1a1a; }
+
+  /* 正文中穿插的图片 */
+  .inline-image {
+    width: 100%; border-radius: 10px; margin: 10px 0 6px;
+    border: 1px solid #e8e5de; cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+  .inline-image:hover { transform: scale(1.01); }
+  .img-caption {
+    font-size: 11px; color: #999; margin-bottom: 12px; text-align: center;
+  }
+
+  /* 引用标记 */
+  .cite {
+    display: inline; font-size: 11px; color: #5b7ff5; cursor: pointer;
+    border-bottom: 1px dashed #5b7ff5; margin-left: 2px;
+  }
+
+  /* ===== 搜索来源折叠条 ===== */
+  .search-bar {
+    display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+    background: #f0ede6; border-radius: 10px; margin-bottom: 12px;
+    font-size: 12px; color: #666;
+  }
+  .search-bar .favicons { display: flex; gap: -4px; }
+  .search-bar .fav {
+    width: 16px; height: 16px; border-radius: 50%; background: #ddd;
+    border: 1px solid #fff; margin-left: -4px; font-size: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .search-bar .fav:first-child { margin-left: 0; }
+
+  /* 分隔线 */
+  hr { border: none; border-top: 1px solid #e8e5de; margin: 14px 0; }
+
+  /* 注释框 */
+  .annotation {
+    margin-top: 24px; padding: 16px; background: #fffbf0; border: 1px dashed #e0c080;
+    border-radius: 12px; font-size: 13px; color: #666; line-height: 1.8;
+  }
+  .annotation h3 { color: #b8860b; font-size: 14px; margin-bottom: 8px; }
+
+  .arrow {
+    display: flex; align-items: center; justify-content: center;
+    color: #e85d2f; font-size: 12px; font-weight: 600; margin: 6px 0;
+    gap: 4px;
+  }
+  .arrow::before, .arrow::after { content: ''; flex: 1; height: 1px; background: #e85d2f44; }
+</style>
+</head>
+<body>
+
+<div class="phone">
+  <div class="status-bar">AmberAgent</div>
+  <div class="chat-area">
+
+    <!-- 用户消息 -->
+    <div class="user-bubble">帮我搜一下 Vision Pro 2 的最新消息</div>
+
+    <!-- AI 回复 -->
+    <div class="ai-msg">
+      <div class="ai-avatar">A</div>
+
+      <!-- 搜索来源条 -->
+      <div class="search-bar">
+        <div class="favicons">
+          <div class="fav">P</div><div class="fav">T</div><div class="fav">B</div>
+        </div>
+        <span>8 条搜索结果 · Perplexity + Tavily + Brave</span>
+      </div>
+
+      <div class="ai-content">
+
+        <!-- ===== 顶部缩略图区 ===== -->
+        <div class="thumb-label">相关图片 (4)</div>
+        <div class="thumbnail-strip">
+          <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='112' fill='%23e8e5de'%3E%3Crect width='160' height='112' rx='8'/%3E%3Ctext x='80' y='60' text-anchor='middle' font-size='24' fill='%23bbb'%3E1%3C/text%3E%3C/svg%3E" alt="Vision Pro 2 正面" />
+          <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='112' fill='%23dde8d5'%3E%3Crect width='160' height='112' rx='8'/%3E%3Ctext x='80' y='60' text-anchor='middle' font-size='24' fill='%23999'%3E2%3C/text%3E%3C/svg%3E" alt="佩戴效果" />
+          <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='112' fill='%23d5dde8'%3E%3Crect width='160' height='112' rx='8'/%3E%3Ctext x='80' y='60' text-anchor='middle' font-size='24' fill='%23999'%3E3%3C/text%3E%3C/svg%3E" alt="M5 芯片" />
+          <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='112' fill='%23e8d5de'%3E%3Crect width='160' height='112' rx='8'/%3E%3Ctext x='80' y='60' text-anchor='middle' font-size='24' fill='%23999'%3E4%3C/text%3E%3C/svg%3E" alt="价格对比" />
+        </div>
+
+        <div class="arrow">顶部缩略图 — 点击可放大预览</div>
+
+        <!-- ===== 正文开始 ===== -->
+        <div class="body-text">
+
+          <p>
+            <strong>Apple Vision Pro 2</strong> 预计将于 2026 年秋季发布，搭载全新
+            <strong>M5 芯片</strong>，较初代性能提升约 60%。<span class="cite">[theverge.com]</span>
+          </p>
+
+          <!-- 正文中插入的图片 1 — 在介绍外观后 -->
+          <img class="inline-image"
+               src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='358' height='200' fill='%23e8e5de'%3E%3Crect width='358' height='200' rx='10'/%3E%3Ctext x='179' y='90' text-anchor='middle' font-size='16' fill='%23aaa'%3EVision Pro 2 正面渲染图%3C/text%3E%3Ctext x='179' y='115' text-anchor='middle' font-size='12' fill='%23ccc'%3E图 1 · theverge.com%3C/text%3E%3C/svg%3E"
+               alt="Vision Pro 2 正面渲染图" />
+          <div class="img-caption">Vision Pro 2 正面渲染图 · The Verge</div>
+
+          <p>
+            外观上最大的变化是<strong>重量减轻约 30%</strong>，采用铝镁合金框架替代初代的玻璃+铝方案。
+            佩戴舒适度显著改善，连续使用时间从 ~2 小时延长到 ~4 小时。<span class="cite">[macrumors.com]</span>
+          </p>
+
+          <p>
+            显示方面升级为 <strong>Micro-OLED 2.0</strong> 面板，单眼分辨率从 3660×3200 提升到 4K×3800，
+            PPD（每度像素数）达到 42，接近人眼分辨极限。<span class="cite">[9to5mac.com]</span>
+          </p>
+
+          <!-- 正文中插入的图片 2 — 在讨论佩戴后 -->
+          <img class="inline-image"
+               src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='358' height='220' fill='%23dde8d5'%3E%3Crect width='358' height='220' rx='10'/%3E%3Ctext x='179' y='100' text-anchor='middle' font-size='16' fill='%23888'%3E佩戴效果实拍%3C/text%3E%3Ctext x='179' y='125' text-anchor='middle' font-size='12' fill='%23bbb'%3E图 2 · macrumors.com%3C/text%3E%3C/svg%3E"
+               alt="佩戴效果" />
+          <div class="img-caption">佩戴效果实拍 · MacRumors</div>
+
+          <p>
+            <strong>价格方面</strong>，消息称入门款将降至 $2,499（初代 $3,499），
+            同时推出 $1,999 的"SE"版本（去掉眼动追踪、降低分辨率）来扩大市场。<span class="cite">[bloomberg.com]</span>
+          </p>
+
+          <hr />
+
+          <p>
+            生态层面，visionOS 3 引入了<strong>空间多任务</strong>和<strong>手势快捷键</strong>，
+            支持同时打开最多 8 个空间窗口（初代限制 4 个），并且全面兼容 iPad 应用。
+          </p>
+
+          <!-- 正文中插入的图片 3 — 在讨论芯片后 -->
+          <img class="inline-image"
+               src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='358' height='180' fill='%23d5dde8'%3E%3Crect width='358' height='180' rx='10'/%3E%3Ctext x='179' y='80' text-anchor='middle' font-size='16' fill='%23888'%3EM5 芯片架构图%3C/text%3E%3Ctext x='179' y='105' text-anchor='middle' font-size='12' fill='%23bbb'%3E图 3 · 9to5mac.com%3C/text%3E%3C/svg%3E"
+               alt="M5 芯片" />
+          <div class="img-caption">M5 芯片架构 · 9to5Mac</div>
+
+          <p>
+            竞争对手方面，Meta Quest Pro 2 定价 $999，三星 XR 头显预计 $1,200。
+            Apple 的策略是以高端体验拉开差距，同时用 SE 版本覆盖中端市场。
+          </p>
+
+          <!-- 正文中插入的图片 4 — 在讨论价格后 -->
+          <img class="inline-image"
+               src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='358' height='160' fill='%23e8d5de'%3E%3Crect width='358' height='160' rx='10'/%3E%3Ctext x='179' y='70' text-anchor='middle' font-size='16' fill='%23888'%3E价格对比图%3C/text%3E%3Ctext x='179' y='95' text-anchor='middle' font-size='12' fill='%23bbb'%3E图 4 · bloomberg.com%3C/text%3E%3C/svg%3E"
+               alt="价格对比" />
+          <div class="img-caption">XR 头显价格对比 · Bloomberg</div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 结构说明 -->
+<div class="annotation" style="max-width: 390px; margin: 24px auto;">
+  <h3>结构说明</h3>
+  <p><strong>顶部缩略图区</strong>：4 张图横向并排，可滑动。点击任意一张跳转到正文中对应位置或打开大图预览。</p>
+  <p><strong>正文图文混排</strong>：图片不集中在一起，而是按内容语义插在合适的段落之后 —— 外观描述后跟外观图，佩戴讨论后跟佩戴图，芯片介绍后跟架构图，价格对比后跟对比图。</p>
+  <p><strong>图片交互</strong>：点击正文中任意图片 → 打开全屏大图预览（pinch-zoom + 保存/分享）。</p>
+  <p><strong>规则</strong>：一条回复最多 5 张图。LLM 在 Markdown 中用 <code>![描述](url)</code> 插入图片，渲染器已支持。</p>
+  <p><strong>实现路径</strong>：搜索 API 返回 images[] → 传给 LLM 作为 tool result → LLM 在 Markdown 回复中自然地嵌入图片 → 现有 MarkdownBlock 渲染 ZoomableAsyncImage。顶部缩略图区是额外 UI 增强。</p>
+</div>
+
+</body>
+</html>

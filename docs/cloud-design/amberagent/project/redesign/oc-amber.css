@@ -1,0 +1,197 @@
+/* ===========================================================================
+   Amber · Redesign — design tokens
+   "Terminal × Modern", warm-neutral graphite. Terracotta accent.
+   Borrowed visual language from OpenCode Mobile, applied to Amber (consumer
+   AI assistant). Light + Dark.
+   =========================================================================== */
+
+:root {
+  --font-ui:   "Hanken Grotesk", "Noto Sans SC", system-ui, sans-serif;
+  --font-cn:   "Noto Sans SC", "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Noto Sans SC", ui-monospace, monospace;
+  --accent:     #b8623a;   /* terracotta — "amber" */
+  --accent-ink: #ffffff;
+  --signal:     #5e9c6e;   /* live green */
+}
+
+/* ---- LIGHT (warm off-white / graphite) ---------------------------------- */
+.amb[data-theme="light"] {
+  --bg:        #f4f2ec;
+  --surface:   #faf9f5;
+  --surface-2: #efece4;
+  --raised:    #ffffff;
+  --ink:       #1b1a17;
+  --ink-2:     #57544c;
+  --ink-3:     #8f8b80;
+  --ink-4:     #b6b1a4;
+  --line:      #e4e0d6;
+  --line-2:    #d6d1c4;
+  --user-bg:   #1b1a17;
+  --user-ink:  #f6f4ee;
+  --code-bg:   #edeae1;
+  --shadow:    0 1px 2px rgba(40,36,28,.05), 0 8px 24px -16px rgba(40,36,28,.18);
+  --shadow-lg: 0 2px 6px rgba(40,36,28,.06), 0 24px 48px -24px rgba(40,36,28,.28);
+  color-scheme: light;
+}
+
+/* ---- DARK (warm graphite) ----------------------------------------------- */
+.amb[data-theme="dark"] {
+  --bg:        #161512;
+  --surface:   #1c1b17;
+  --surface-2: #211f1a;
+  --raised:    #23211c;
+  --ink:       #ece8df;
+  --ink-2:     #a8a298;
+  --ink-3:     #756f64;
+  --ink-4:     #564f45;
+  --line:      #2e2b25;
+  --line-2:    #3a362e;
+  --user-bg:   #ece8df;
+  --user-ink:  #1b1a17;
+  --code-bg:   #211f1a;
+  --shadow:    0 1px 2px rgba(0,0,0,.3), 0 10px 28px -18px rgba(0,0,0,.7);
+  --shadow-lg: 0 2px 8px rgba(0,0,0,.4), 0 28px 56px -28px rgba(0,0,0,.8);
+  color-scheme: dark;
+}
+
+/* ---- SAGE LIGHT (green-tinted neutrals) — accent comes from data-accent -- */
+.amb[data-theme="sage"] {
+  --signal:     #2f8f76;   /* teal-green "live" */
+  --bg:        #f0f2ea;
+  --surface:   #f6f8f0;
+  --surface-2: #e7eadf;
+  --raised:    #ffffff;
+  --ink:       #1b201a;
+  --ink-2:     #535a4d;
+  --ink-3:     #888f7e;
+  --ink-4:     #b0b5a4;
+  --line:      #e0e3d6;
+  --line-2:    #d0d4c4;
+  --user-bg:   #1b201a;
+  --user-ink:  #f3f5ec;
+  --code-bg:   #e8ebdf;
+  --shadow:    0 1px 2px rgba(32,40,28,.05), 0 8px 24px -16px rgba(32,40,28,.18);
+  --shadow-lg: 0 2px 6px rgba(32,40,28,.06), 0 24px 48px -24px rgba(32,40,28,.28);
+  color-scheme: light;
+}
+
+/* ---- SAGE DARK (deep forest graphite) — accent comes from data-accent --- */
+.amb[data-theme="sage-dark"] {
+  --signal:     #4caf8e;
+  --bg:        #131711;
+  --surface:   #191d15;
+  --surface-2: #1e2219;
+  --raised:    #20241b;
+  --ink:       #e6ebdf;
+  --ink-2:     #a0a896;
+  --ink-3:     #6e7563;
+  --ink-4:     #515845;
+  --line:      #2a2e22;
+  --line-2:    #353a2c;
+  --user-bg:   #e6ebdf;
+  --user-ink:  #1b201a;
+  --code-bg:   #1e2219;
+  --shadow:    0 1px 2px rgba(0,0,0,.3), 0 10px 28px -18px rgba(0,0,0,.7);
+  --shadow-lg: 0 2px 8px rgba(0,0,0,.4), 0 28px 56px -28px rgba(0,0,0,.8);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+.amb {
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.01em;
+}
+
+.mono { font-family: var(--font-mono); letter-spacing: 0; font-feature-settings: "tnum" 1, "zero" 1; }
+.tnum { font-variant-numeric: tabular-nums; }
+.cn   { font-family: var(--font-cn); letter-spacing: 0; }
+
+.amb ::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+
+/* ---- blinking terminal cursor ---- */
+.cursor {
+  display: inline-block;
+  width: 0.54em; height: 1.0em;
+  margin-left: 0.04em;
+  vertical-align: -0.13em;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: blink 1.05s steps(1) infinite;
+}
+.cursor.ink { background: var(--ink); }
+.cursor.signal { background: var(--signal); }
+@keyframes blink { 0%,50% { opacity: 1; } 50.01%,100% { opacity: 0; } }
+
+/* ---- breathing / online dot ---- */
+.dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--signal); position: relative; flex: none;
+}
+.dot::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  background: var(--signal); opacity: .35;
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%,100% { transform: scale(.7); opacity: .35; }
+  50%     { transform: scale(1.5); opacity: 0; }
+}
+.dot.idle { background: var(--ink-4); }
+.dot.idle::after { display: none; }
+
+/* ---- press feedback ---- */
+.pressable { transition: transform .14s cubic-bezier(.2,.8,.2,1), background-color .16s ease, border-color .16s ease, opacity .16s ease; -webkit-tap-highlight-color: transparent; }
+.pressable:active { transform: scale(.975); }
+
+/* ---- hairline helper ---- */
+.hair { border-bottom: 1px solid var(--line); }
+
+/* ---- animations ---- */
+@keyframes fadeRise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes screenIn { from { opacity: 0; transform: translateY(8px) scale(.992); } to { opacity: 1; transform: none; } }
+@keyframes slideInR { from { opacity: .3; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+@keyframes slideInL { from { opacity: .3; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+
+/* ---- primitives ---- */
+.field {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  transition: border-color .16s ease, background-color .16s ease;
+}
+.field:focus-within { border-color: var(--ink-3); background: var(--raised); }
+
+.btn-ink {
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: 15px;
+  corner-shape: superellipse(4);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.btn-accent { background: var(--accent); color: var(--accent-ink); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+/* hide scrollbars but keep scroll */
+.noscroll::-webkit-scrollbar { width: 0; height: 0; }
+.noscroll { scrollbar-width: none; }
+
+/* markdown-ish content */
+.md code { font-family: var(--font-mono); font-size: .86em; background: var(--code-bg); padding: .08em .34em; border-radius: 5px; letter-spacing: 0; }
+.md strong { font-weight: 700; }
+.md p { margin: 0 0 .6em; }
+.md p:last-child { margin-bottom: 0; }
+.md ul { margin: .2em 0 .6em; padding-left: 1.1em; }
+.md li { margin: .2em 0; }
+.md li::marker { color: var(--ink-4); }

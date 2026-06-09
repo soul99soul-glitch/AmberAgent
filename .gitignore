@@ -1,0 +1,26 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/dist
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.cursor
+.history
+.kotlin
+
+# Perfetto trace binaries (large, regeneratable). Keep .md analysis reports.
+*.pftrace
+*.perfetto-trace
+core/**/build/
+feature/**/build/
+
+# Design handoff reference (large binaries; keep the .md/.css/.jsx specs tracked)
+/amberagent-handoff.zip
+docs/cloud-design/**/uploads/
+docs/cloud-design/**/screenshots/
+docs/cloud-design/**/.thumbnail

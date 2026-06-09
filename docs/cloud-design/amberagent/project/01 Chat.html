@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AmberAgent · 01 聊天</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { font-family: "Noto Sans SC", -apple-system, system-ui, sans-serif; background: #f0eee9; }
+  *, *::before, *::after { box-sizing: border-box; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="themes.jsx"></script>
+<script type="text/babel" src="phone-screen.jsx"></script>
+<script type="text/babel" src="convo-user.jsx"></script>
+<script type="text/babel" src="convo-agent.jsx"></script>
+<script type="text/babel" src="convo-ask.jsx"></script>
+<script type="text/babel" src="convo-tool-result.jsx"></script>
+<script type="text/babel" src="model-picker.jsx"></script>
+<script type="text/babel" src="model-picker-v3.jsx"></script>
+<script type="text/babel" src="model-picker-v6.jsx"></script>
+<script type="text/babel" src="concept-floating.jsx"></script>
+<script type="text/babel" src="settings-screen.jsx"></script>
+<script type="text/babel" src="provider-screens.jsx"></script>
+<script type="text/babel" src="settings-shell.jsx"></script>
+<script type="text/babel" src="settings-experimental.jsx"></script>
+<script type="text/babel" src="settings-memory.jsx"></script>
+<script type="text/babel" src="settings-memory-v2.jsx"></script>
+<script type="text/babel" src="settings-runtime.jsx"></script>
+<script type="text/babel" src="settings-models.jsx"></script>
+<script type="text/babel" src="attachments-panel.jsx"></script>
+<script type="text/babel" src="settings-search.jsx"></script>
+<script type="text/babel" src="settings-search-v2.jsx"></script>
+<script type="text/babel" src="settings-skills.jsx"></script>
+<script type="text/babel" src="convo-screen.jsx"></script>
+<script type="text/babel" src="convo-history.jsx"></script>
+<script type="text/babel" src="tablet-screen.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  const T = window.THEMES;
+  return (
+    <DesignCanvas>
+            <DCSection
+        id="empty"
+        title="Empty State · 四个主题"
+        subtitle="同样的元素，四种高级简洁的审美方向。"
+      >
+        <DCArtboard id="empty-whisper" label="微光 · Whisper" width={380} height={832}>
+          <PhoneScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="empty-plain" label="素白 · Plain" width={380} height={832}>
+          <PhoneScreen t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="empty-paper" label="暖纸 · Paper" width={380} height={832}>
+          <PhoneScreen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="empty-night" label="夜墨 · Midnight" width={380} height={832}>
+          <PhoneScreen t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="empty-sage" label="鼠尾草 · Sage" width={380} height={832}>
+          <PhoneScreen t={T.SAGE} />
+        </DCArtboard>
+        <DCArtboard id="empty-lavender" label="薰衣草 · Lavender" width={380} height={832}>
+          <PhoneScreen t={T.LAVENDER} />
+        </DCArtboard>
+        <DCArtboard id="empty-ocean" label="深海 · Ocean" width={380} height={832}>
+          <PhoneScreen t={T.OCEAN} />
+        </DCArtboard>
+        <DCArtboard id="empty-peach" label="蜜桃 · Peach" width={380} height={832}>
+          <PhoneScreen t={T.PEACH} />
+        </DCArtboard>
+        <DCArtboard id="empty-moss" label="苔藓 · Moss" width={380} height={832}>
+          <PhoneScreen t={T.MOSS} />
+        </DCArtboard>
+        <DCArtboard id="empty-sand" label="沙土 · Sand" width={380} height={832}>
+          <PhoneScreen t={T.SAND} />
+        </DCArtboard>
+        <DCArtboard id="empty-rose" label="玫瑰金 · Rose Gold" width={380} height={832}>
+          <PhoneScreen t={T.ROSE} />
+        </DCArtboard>
+        <DCArtboard id="empty-mist" label="雾松 · Pine Mist" width={380} height={832}>
+          <PhoneScreen t={T.MIST} />
+        </DCArtboard>
+        <DCArtboard id="empty-charcoal" label="灰雀 · Charcoal" width={380} height={832}>
+          <PhoneScreen t={T.CHARCOAL} />
+        </DCArtboard>
+        <DCArtboard id="empty-tundra" label="苔原 · Tundra" width={380} height={832}>
+          <PhoneScreen t={T.TUNDRA} />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="convo"
+        title="Conversation · 四个主题"
+        subtitle="对话页：浅灰气泡 · 极简思考条 · 单胶囊工具调用 · Context 环 · 共享发送按钮。"
+      >
+        <DCArtboard id="convo-whisper" label="对话 · Whisper" width={380} height={832}>
+          <ConvoScreen t={T.WHISPER} />
+        </DCArtboard>
+        <DCArtboard id="convo-plain" label="对话 · Plain" width={380} height={832}>
+          <ConvoScreen t={T.PLAIN} />
+        </DCArtboard>
+        <DCArtboard id="convo-paper" label="对话 · Paper" width={380} height={832}>
+          <ConvoScreen t={T.PAPER} />
+        </DCArtboard>
+        <DCArtboard id="convo-night" label="对话 · Midnight" width={380} height={832}>
+          <ConvoScreen t={T.NIGHT} />
+        </DCArtboard>
+        <DCArtboard id="convo-sage" label="对话 · Sage" width={380} height={832}>
+          <ConvoScreen t={T.SAGE} />
+        </DCArtboard>
+        <DCArtboard id="convo-lavender" label="对话 · Lavender" width={380} height={832}>
+          <ConvoScreen t={T.LAVENDER} />
+        </DCArtboard>
+        <DCArtboard id="convo-ocean" label="对话 · Ocean" width={380} height={832}>
+          <ConvoScreen t={T.OCEAN} />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="convo-states"
+        title="Conversation · 状态变体"
+        subtitle="思考展开 / 用量面板 / 环阈值（黄、红、Paper 褐）/ 询问用户 / 工具预览。均为 Whisper 主题。"
+      >
+        <DCArtboard id="convo-thought-expanded" label="思考展开" width={380} height={832}>
+          <ConvoScreen t={T.WHISPER} expandedThought />
+        </DCArtboard>
+        <DCArtboard id="convo-usage-panel" label="用量面板" width={380} height={832}>
+          <ConvoScreen t={T.WHISPER} expandedRing />
+        </DCArtboard>
+        <DCArtboard id="convo-ring-warn" label="环 60%" width={380} height={832}>
+          <ConvoScreen t={T.WHISPER} ringUsed={240} ringTotal={400} />
+        </DCArtboard>
+        <DCArtboard id="convo-ring-urgent" label="环 88%" width={380} height={832}>
+          <ConvoScreen t={T.WHISPER} ringUsed={352} ringTotal={400} />
+        </DCArtboard>
+        <DCArtboard id="convo-ring-paper" label="环褐色（Paper 88%）" width={380} height={832}>
+          <ConvoScreen t={T.PAPER} ringUsed={352} ringTotal={400} />
+        </DCArtboard>
+        <DCArtboard id="convo-ask" label="询问用户 · Whisper" width={380} height={832}>
+          <ConvoScreen t={T.WHISPER} showAsk />
+        </DCArtboard>
+        <DCArtboard id="convo-ask-plain" label="询问用户 · Plain" width={380} height={832}>
+          <ConvoScreen t={T.PLAIN} showAsk />
+        </DCArtboard>
+        <DCArtboard id="convo-ask-paper" label="询问用户 · Paper" width={380} height={832}>
+          <ConvoScreen t={T.PAPER} showAsk />
+        </DCArtboard>
+        <DCArtboard id="convo-ask-night" label="询问用户 · Midnight" width={380} height={832}>
+          <ConvoScreen t={T.NIGHT} showAsk />
+        </DCArtboard>
+        <DCArtboard id="convo-preview" label="工具预览 3:4 · Whisper" width={380} height={832}>
+          <ConvoScreen t={T.WHISPER} showPreview />
+        </DCArtboard>
+        <DCArtboard id="convo-preview-plain" label="工具预览 3:4 · Plain" width={380} height={832}>
+          <ConvoScreen t={T.PLAIN} showPreview />
+        </DCArtboard>
+        <DCArtboard id="convo-preview-paper" label="工具预览 3:4 · Paper" width={380} height={832}>
+          <ConvoScreen t={T.PAPER} showPreview />
+        </DCArtboard>
+        <DCArtboard id="convo-preview-night" label="工具预览 3:4 · Midnight" width={380} height={832}>
+          <ConvoScreen t={T.NIGHT} showPreview />
+        </DCArtboard>
+      </DCSection>
+
+            <DCSection
+        id="attachments"
+        title="附件面板 · 三个方向"
+        subtitle="原稿的方块卡片跟胶囊输入框曲率不搭。A 单条胶囊 / B 圆形图标排 / C 大圆角面板。"
+      >
+        <DCArtboard id="attach-a-paper" label="A · 单胶囊条（Paper）" width={380} height={832}>
+          <AttachmentsDemo t={T.PAPER} variant="A" />
+        </DCArtboard>
+        <DCArtboard id="attach-b-paper" label="B · 圆形图标排（Paper）" width={380} height={832}>
+          <AttachmentsDemo t={T.PAPER} variant="B" />
+        </DCArtboard>
+        <DCArtboard id="attach-c-paper" label="C · 大圆角面板（Paper）" width={380} height={832}>
+          <AttachmentsDemo t={T.PAPER} variant="C" />
+        </DCArtboard>
+        <DCArtboard id="attach-a-whisper" label="A · 单胶囊条（Whisper）" width={380} height={832}>
+          <AttachmentsDemo t={T.WHISPER} variant="A" />
+        </DCArtboard>
+        <DCArtboard id="attach-b-whisper" label="B · 圆形图标排（Whisper）" width={380} height={832}>
+          <AttachmentsDemo t={T.WHISPER} variant="B" />
+        </DCArtboard>
+        <DCArtboard id="attach-c-whisper" label="C · 大圆角面板（Whisper）" width={380} height={832}>
+          <AttachmentsDemo t={T.WHISPER} variant="C" />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

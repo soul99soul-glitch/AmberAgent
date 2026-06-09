@@ -1,0 +1,24 @@
+{
+  "id": "reddit",
+  "name": "Reddit",
+  "version": 1,
+  "origins": [
+    "https://www.reddit.com",
+    "https://old.reddit.com",
+    "https://reddit.com"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "interactive_selectors": {
+      "post": "shreddit-post, div[data-testid=post-container], .Post",
+      "comment": "shreddit-comment, div[data-testid=comment]",
+      "subreddit_link": "a[data-click-id=subreddit]"
+    },
+    "rate_limit": {
+      "http_status": 429,
+      "map_to": "DEGRADED"
+    }
+  },
+  "permissions": ["detect_rate_limit"],
+  "notes": "Reddit's public JSON endpoints (covered by the reddit_* adapter) handle most listing/post-reading needs. The profile helps wm_extract on new.reddit.com's web-component DOM."
+}

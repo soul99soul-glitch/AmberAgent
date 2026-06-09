@@ -1,0 +1,2157 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-brand="amber" data-density="comfortable">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AmberAgent · Material 3 Expressive UI Refactor Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   Design Tokens — Material 3 Expressive (Amber)
+   ============================================================ */
+:root {
+  /* — Color: Light, Amber — */
+  --md-sys-color-primary: #905200;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #ffdcbe;
+  --md-sys-color-on-primary-container: #2e1500;
+  --md-sys-color-secondary: #735943;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #ffdcbe;
+  --md-sys-color-on-secondary-container: #281806;
+  --md-sys-color-tertiary: #57633a;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #dbe9b3;
+  --md-sys-color-on-tertiary-container: #151f00;
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6;
+  --md-sys-color-on-error-container: #410002;
+  --md-sys-color-surface: #fffbf8;
+  --md-sys-color-surface-dim: #e6ddd2;
+  --md-sys-color-surface-bright: #fffbf8;
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #fbf2e8;
+  --md-sys-color-surface-container: #f5ece1;
+  --md-sys-color-surface-container-high: #efe6db;
+  --md-sys-color-surface-container-highest: #e9e0d5;
+  --md-sys-color-on-surface: #1f1b16;
+  --md-sys-color-on-surface-variant: #4f4539;
+  --md-sys-color-outline: #80766a;
+  --md-sys-color-outline-variant: #d2c5b6;
+  --md-sys-color-inverse-surface: #352f29;
+  --md-sys-color-inverse-on-surface: #faefe2;
+
+  /* — Shape tokens — */
+  --md-shape-xs: 4px;
+  --md-shape-sm: 8px;
+  --md-shape-md: 12px;
+  --md-shape-lg: 16px;
+  --md-shape-xl: 28px;
+  --md-shape-full: 9999px;
+  /* expressive */
+  --md-shape-cookie: 28px 28px 28px 28px / 36px 36px 36px 36px;
+  --md-shape-pill: 9999px;
+  --md-shape-bubble-user: 22px 8px 22px 22px;
+  --md-shape-bubble-asst: 8px 22px 22px 22px;
+  --md-shape-bubble-user-x: 28px 12px 26px 30px;
+  --md-shape-bubble-asst-x: 12px 28px 30px 26px;
+
+  /* — Motion (M3 spec) — */
+  --md-motion-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-motion-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-motion-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-motion-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --md-motion-spring: cubic-bezier(0.3, -0.05, 0.5, 1.05);
+  --md-dur-short: 200ms;
+  --md-dur-medium: 300ms;
+  --md-dur-long: 500ms;
+
+  /* — Spacing — */
+  --gutter: 24px;
+  --frame-radius: 44px;
+  --frame-bezel: #1a1a1a;
+}
+
+/* — Color: Dark, Amber — */
+[data-theme="dark"] {
+  --md-sys-color-primary: #ffb872;
+  --md-sys-color-on-primary: #4d2700;
+  --md-sys-color-primary-container: #6e3c00;
+  --md-sys-color-on-primary-container: #ffdcbe;
+  --md-sys-color-secondary: #e2bf9d;
+  --md-sys-color-on-secondary: #402c12;
+  --md-sys-color-secondary-container: #594226;
+  --md-sys-color-on-secondary-container: #ffdcbe;
+  --md-sys-color-tertiary: #bfcd91;
+  --md-sys-color-on-tertiary: #2a3408;
+  --md-sys-color-tertiary-container: #404a1f;
+  --md-sys-color-on-tertiary-container: #dbe9b3;
+  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000a;
+  --md-sys-color-on-error-container: #ffdad6;
+  --md-sys-color-surface: #17130d;
+  --md-sys-color-surface-dim: #17130d;
+  --md-sys-color-surface-bright: #3e382f;
+  --md-sys-color-surface-container-lowest: #110d08;
+  --md-sys-color-surface-container-low: #1f1b16;
+  --md-sys-color-surface-container: #231e18;
+  --md-sys-color-surface-container-high: #2e2922;
+  --md-sys-color-surface-container-highest: #39342d;
+  --md-sys-color-on-surface: #ebe0d6;
+  --md-sys-color-on-surface-variant: #d2c5b6;
+  --md-sys-color-outline: #9b9082;
+  --md-sys-color-outline-variant: #4f4539;
+  --md-sys-color-inverse-surface: #ebe0d6;
+  --md-sys-color-inverse-on-surface: #352f29;
+  --frame-bezel: #050505;
+}
+
+/* — Brand: Lavender — */
+[data-brand="lavender"] {
+  --md-sys-color-primary: #735bc6;
+  --md-sys-color-primary-container: #e6deff;
+  --md-sys-color-on-primary-container: #20005d;
+  --md-sys-color-secondary: #61597b;
+  --md-sys-color-secondary-container: #e6deff;
+  --md-sys-color-on-secondary-container: #1e1635;
+  --md-sys-color-tertiary: #7d525e;
+  --md-sys-color-tertiary-container: #ffd8e3;
+  --md-sys-color-on-tertiary-container: #31101c;
+  --md-sys-color-surface-container-low: #f5eefa;
+  --md-sys-color-surface-container: #ede5f4;
+  --md-sys-color-surface-container-high: #e7dded;
+}
+[data-brand="lavender"][data-theme="dark"] {
+  --md-sys-color-primary: #cdc1ff;
+  --md-sys-color-primary-container: #5944ad;
+  --md-sys-color-on-primary-container: #e6deff;
+  --md-sys-color-secondary: #cbc1e1;
+  --md-sys-color-secondary-container: #494163;
+  --md-sys-color-on-secondary-container: #e6deff;
+  --md-sys-color-tertiary: #efb8c8;
+  --md-sys-color-surface-container-low: #1e1a25;
+  --md-sys-color-surface-container: #221d29;
+  --md-sys-color-surface-container-high: #2c2734;
+  --md-sys-color-on-surface: #e6e0e9;
+  --md-sys-color-on-surface-variant: #c8c4d0;
+  --md-sys-color-surface: #14111a;
+}
+
+/* — Brand: Sage — */
+[data-brand="sage"] {
+  --md-sys-color-primary: #386a20;
+  --md-sys-color-primary-container: #b7f397;
+  --md-sys-color-on-primary-container: #042100;
+  --md-sys-color-secondary: #55624c;
+  --md-sys-color-secondary-container: #d8e7cb;
+  --md-sys-color-on-secondary-container: #131f0d;
+  --md-sys-color-tertiary: #386669;
+  --md-sys-color-tertiary-container: #bcebef;
+  --md-sys-color-on-tertiary-container: #002022;
+  --md-sys-color-surface-container-low: #f1f4ec;
+  --md-sys-color-surface-container: #ebeee6;
+  --md-sys-color-surface-container-high: #e5e9e0;
+}
+[data-brand="sage"][data-theme="dark"] {
+  --md-sys-color-primary: #9cd67d;
+  --md-sys-color-primary-container: #1f5005;
+  --md-sys-color-on-primary-container: #b7f397;
+  --md-sys-color-secondary: #bdcbb0;
+  --md-sys-color-secondary-container: #3e4a37;
+  --md-sys-color-on-secondary-container: #d8e7cb;
+  --md-sys-color-tertiary: #a0cfd2;
+  --md-sys-color-surface-container-low: #1a1f17;
+  --md-sys-color-surface-container: #1e231b;
+  --md-sys-color-surface-container-high: #292e25;
+  --md-sys-color-on-surface: #e1e4dc;
+  --md-sys-color-on-surface-variant: #c2c8bc;
+  --md-sys-color-surface: #11140f;
+}
+
+/* — Density: Compact — */
+[data-density="compact"] {
+  --gutter: 16px;
+}
+
+/* ============================================================
+   Reset & Base
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #f5f4f1;
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(255,184,114,0.18), transparent 60%),
+    radial-gradient(circle at 90% 30%, rgba(115,91,198,0.10), transparent 50%),
+    linear-gradient(180deg, #f5f4f1 0%, #ece9e3 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  text-wrap: pretty;
+  -webkit-font-smoothing: antialiased;
+}
+body[data-canvas-theme="dark"] {
+  color: #ebe0d6;
+  background: #14110d;
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(255,184,114,0.10), transparent 60%),
+    radial-gradient(circle at 90% 30%, rgba(115,91,198,0.06), transparent 50%),
+    linear-gradient(180deg, #14110d 0%, #08070a 100%);
+}
+button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.display { font-family: 'Bricolage Grotesque', sans-serif; }
+
+/* ============================================================
+   Page Canvas
+   ============================================================ */
+.canvas {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 64px 32px 160px;
+}
+.hero {
+  margin-bottom: 56px;
+}
+.hero .eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #905200;
+  margin-bottom: 16px;
+}
+body[data-canvas-theme="dark"] .hero .eyebrow { color: #ffb872; }
+.hero h1 {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 700;
+  font-size: clamp(40px, 5vw, 72px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  margin-bottom: 24px;
+  font-variation-settings: "opsz" 96;
+}
+.hero h1 em {
+  font-style: normal;
+  font-weight: 400;
+  color: #905200;
+  font-variation-settings: "opsz" 96, "wght" 400;
+}
+body[data-canvas-theme="dark"] .hero h1 em { color: #ffb872; }
+.hero p.lede {
+  font-size: 18px;
+  max-width: 720px;
+  color: #4f4539;
+  line-height: 1.55;
+}
+body[data-canvas-theme="dark"] .hero p.lede { color: #b8a999; }
+
+/* ============================================================
+   Tokens Strip
+   ============================================================ */
+.tokens-strip {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 24px;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(20px);
+  border-radius: 24px;
+  border: 1px solid rgba(0,0,0,0.06);
+  margin-bottom: 80px;
+}
+body[data-canvas-theme="dark"] .tokens-strip {
+  background: rgba(35, 30, 24, 0.6);
+  border-color: rgba(255,255,255,0.08);
+}
+.tokens-strip h3 {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  color: #4f4539;
+}
+body[data-canvas-theme="dark"] .tokens-strip h3 { color: #b8a999; }
+.swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+.swatch {
+  flex: 1 1 0;
+  min-width: 60px;
+  height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: flex-end;
+  padding: 6px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: rgba(0,0,0,0.55);
+  position: relative;
+}
+.swatch.on-dark { color: rgba(255,255,255,0.7); }
+
+.shape-row { display: flex; gap: 12px; align-items: center; }
+.shape-cell {
+  width: 44px; height: 44px;
+  background: linear-gradient(135deg, var(--md-sys-color-primary-container), var(--md-sys-color-secondary-container));
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--md-sys-color-on-primary-container);
+}
+.shape-xs { border-radius: 4px; }
+.shape-sm { border-radius: 8px; }
+.shape-md { border-radius: 12px; }
+.shape-lg { border-radius: 16px; }
+.shape-xl { border-radius: 28px; }
+.shape-pill { border-radius: 9999px; padding: 0 14px; min-width: auto; }
+.shape-cookie { border-radius: 38% 62% 60% 40% / 50% 45% 55% 50%; }
+.shape-clover {
+  clip-path: polygon(
+    50% 0%, 65% 8%, 80% 8%, 85% 25%, 100% 32%,
+    92% 50%, 100% 68%, 85% 75%, 80% 92%, 65% 92%,
+    50% 100%, 35% 92%, 20% 92%, 15% 75%, 0% 68%,
+    8% 50%, 0% 32%, 15% 25%, 20% 8%, 35% 8%
+  );
+}
+
+.type-row { display: flex; flex-direction: column; gap: 4px; font-family: 'Bricolage Grotesque', sans-serif; }
+.type-display { font-size: 28px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; font-variation-settings: "opsz" 36; }
+.type-headline { font-size: 18px; font-weight: 500; }
+.type-body { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 13px; color: #4f4539; }
+body[data-canvas-theme="dark"] .type-body { color: #b8a999; }
+
+/* ============================================================
+   Scene comparison sections
+   ============================================================ */
+.scene {
+  margin-bottom: 96px;
+}
+.scene-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+.scene-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: #80766a;
+  background: rgba(144,82,0,0.08);
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+body[data-canvas-theme="dark"] .scene-number {
+  color: #d2c5b6;
+  background: rgba(255,184,114,0.10);
+}
+.scene-title {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: clamp(24px, 3vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variation-settings: "opsz" 48;
+}
+.scene-title em {
+  font-style: normal;
+  font-weight: 400;
+  color: #80766a;
+}
+body[data-canvas-theme="dark"] .scene-title em { color: #b8a999; }
+
+.scene-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.1fr;
+  gap: 32px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .scene-grid { grid-template-columns: 1fr 1fr; }
+  .scene-grid .notes { grid-column: span 2; }
+}
+@media (max-width: 720px) {
+  .scene-grid { grid-template-columns: 1fr; }
+  .scene-grid .notes { grid-column: 1; }
+}
+
+.phone-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.phone-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.phone-label .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+}
+.phone-label.before .dot { background: #c0bbb3; }
+.phone-label.after .dot { background: #905200; }
+body[data-canvas-theme="dark"] .phone-label.after .dot { background: #ffb872; }
+.phone-label .lbl-en { opacity: 0.55; margin-left: auto; }
+
+/* ============================================================
+   Phone frame
+   ============================================================ */
+.phone {
+  width: 100%;
+  max-width: 360px;
+  aspect-ratio: 360 / 740;
+  margin: 0 auto;
+  background: var(--frame-bezel);
+  border-radius: var(--frame-radius);
+  padding: 10px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.05) inset,
+    0 0 0 1.5px rgba(255,255,255,0.06) inset,
+    0 30px 60px -20px rgba(0,0,0,0.35),
+    0 10px 20px -10px rgba(0,0,0,0.25);
+  position: relative;
+}
+.phone::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -3px;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60px;
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,0.18), transparent);
+  border-radius: 4px;
+}
+.phone-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: calc(var(--frame-radius) - 8px);
+  overflow: hidden;
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  font-family: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.status-bar {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  background: transparent;
+  z-index: 5;
+}
+.status-bar .indicators {
+  display: flex; align-items: center; gap: 4px;
+}
+.status-bar .battery {
+  width: 22px; height: 11px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 1px;
+}
+.status-bar .battery::after {
+  content: "";
+  position: absolute; right: -3px; top: 3px;
+  width: 2px; height: 5px;
+  background: currentColor;
+  border-radius: 0 1px 1px 0;
+}
+.status-bar .battery .fill {
+  height: 100%; width: 70%;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+/* ============================================================
+   Top App Bars
+   ============================================================ */
+.top-app-bar {
+  display: flex;
+  align-items: center;
+  padding: 8px 8px;
+  height: 56px;
+  gap: 4px;
+}
+.top-app-bar .icon-btn {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--md-sys-color-on-surface);
+  transition: background var(--md-dur-short) var(--md-motion-standard);
+}
+.top-app-bar .icon-btn:hover { background: rgba(0,0,0,0.05); }
+.top-app-bar .title {
+  font-size: 20px;
+  font-weight: 500;
+  flex: 1;
+  text-align: left;
+  padding-left: 4px;
+  font-family: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
+}
+
+/* Large Flexible — used in "After" */
+.top-app-bar.large {
+  height: auto;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 4px 8px 16px;
+  gap: 0;
+}
+.top-app-bar.large .row {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  gap: 4px;
+}
+.top-app-bar.large .title-block {
+  padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.top-app-bar.large .display-title {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  font-variation-settings: "opsz" 36;
+}
+.top-app-bar.large .subtitle {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.subtitle .pulse {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--md-sys-color-primary);
+  animation: pulse 2s var(--md-motion-emphasized-decelerate) infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* ============================================================
+   Chat list & messages
+   ============================================================ */
+.chat-area {
+  flex: 1;
+  overflow: hidden;
+  padding: 8px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+}
+.message-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.message-row.user { align-items: flex-end; }
+.message-row.assistant { align-items: flex-start; }
+
+.bubble {
+  max-width: 85%;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.55;
+  position: relative;
+}
+.bubble.user {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-radius: var(--md-shape-bubble-user);
+}
+.bubble.assistant {
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface);
+  border-radius: var(--md-shape-bubble-asst);
+}
+/* "After" — refined corners that read as expressive cookie shape */
+.scene-after .bubble.user { border-radius: var(--md-shape-bubble-user-x); }
+.scene-after .bubble.assistant { border-radius: var(--md-shape-bubble-asst-x); }
+
+.avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.avatar {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--md-sys-color-primary), var(--md-sys-color-tertiary));
+  display: flex; align-items: center; justify-content: center;
+  color: var(--md-sys-color-on-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.scene-after .avatar {
+  border-radius: 38% 62% 60% 40% / 50% 45% 55% 50%;
+}
+
+/* — Chain of thought block — */
+.cot {
+  background: transparent;
+  border-left: 2px solid var(--md-sys-color-outline-variant);
+  padding-left: 12px;
+  margin-left: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scene-after .cot {
+  border-left: none;
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: var(--md-shape-lg);
+  padding: 10px 14px;
+  margin-left: 0;
+}
+.cot-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-weight: 500;
+}
+.cot-header .chev {
+  margin-left: auto;
+  color: var(--md-sys-color-outline);
+}
+.cot-step {
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface);
+  line-height: 1.5;
+  padding: 4px 0;
+}
+
+/* — Tool capsule — */
+.tool-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 6px;
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  border-radius: 24px;
+  font-size: 12px;
+  max-width: 100%;
+  border: 1px solid rgba(0,0,0,0.04);
+}
+.tool-capsule .icon-circle {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.10);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.tool-capsule .title {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+.tool-capsule .pill {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  flex-shrink: 0;
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-secondary);
+}
+.tool-capsule.success { background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); }
+.tool-capsule.success .icon-circle { background: rgba(0,0,0,0.10); }
+.tool-capsule.success .pill { background: var(--md-sys-color-tertiary); color: var(--md-sys-color-on-tertiary); }
+.tool-capsule.running { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+.tool-capsule.running .pill { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
+
+/* "After" — tool capsule shape morph */
+.scene-after .tool-capsule {
+  border-radius: 9999px;
+  transition:
+    border-radius var(--md-dur-long) var(--md-motion-spring),
+    background var(--md-dur-medium) var(--md-motion-standard);
+}
+.scene-after .tool-capsule.success {
+  /* asymmetric squircle in absolute px — won't elongate into a lens on wide capsules */
+  border-radius: 26px 14px 26px 14px;
+  padding: 8px 14px 8px 8px;
+}
+.scene-after .tool-capsule.success .icon-circle {
+  /* icon container stays roughly square, percentage cookie is safe here */
+  border-radius: 38% 62% 60% 40%;
+}
+
+/* — Tool extra panel — */
+.tool-extra {
+  margin-top: 6px;
+  margin-left: 32px;
+  padding: 8px 12px;
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface-variant);
+  border-radius: 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  font-family: 'JetBrains Mono', monospace;
+  max-width: 280px;
+}
+
+/* — Loading — */
+.loading-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
+}
+.dots-loading {
+  display: flex; gap: 4px;
+}
+.dots-loading span {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--md-sys-color-on-surface-variant);
+  animation: dot-bounce 1.4s var(--md-motion-emphasized) infinite;
+  opacity: 0.6;
+}
+.dots-loading span:nth-child(2) { animation-delay: 0.16s; }
+.dots-loading span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+
+/* — Wavy progress (Expressive LoadingIndicator) — */
+.wavy-bar {
+  width: 100%;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  margin: 4px 0;
+}
+.wavy-bar svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.wavy-bar path {
+  fill: none;
+  stroke: var(--md-sys-color-primary);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 14 8;
+  animation: wavy-march 1.5s linear infinite;
+}
+@keyframes wavy-march {
+  to { stroke-dashoffset: -22; }
+}
+
+.wavy-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: 9999px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
+  width: fit-content;
+}
+.wavy-loading svg { width: 36px; height: 14px; flex-shrink: 0; overflow: visible; }
+.wavy-loading svg path {
+  fill: none;
+  stroke: var(--md-sys-color-primary);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.wavy-loading svg path.run {
+  stroke-dasharray: 8 6;
+  animation: wavy-march 1.2s linear infinite;
+}
+
+/* ============================================================
+   Composer (Section 2)
+   ============================================================ */
+.composer {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 16px;
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: 32px 32px 28px 14px;
+  padding: 12px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 4px 20px -8px rgba(0,0,0,0.10);
+}
+.composer-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  min-height: 40px;
+}
+.composer-input .placeholder {
+  flex: 1;
+  font-family: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
+  color: var(--md-sys-color-on-surface-variant);
+  opacity: 0.7;
+}
+.composer-input .caret {
+  width: 1.5px; height: 18px;
+  background: var(--md-sys-color-primary);
+  animation: caret 1s steps(2) infinite;
+}
+@keyframes caret { 50% { opacity: 0; } }
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 0;
+  flex-wrap: wrap;
+}
+.act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface-variant);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  white-space: nowrap;
+}
+.act.icon-only { padding: 7px; }
+.act.primary {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border-color: transparent;
+}
+.act.add {
+  background: transparent;
+  border: 0;
+  width: 32px; height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  color: var(--md-sys-color-on-surface);
+}
+.act.send {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  margin-left: auto;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border: 0;
+}
+
+/* — After: Button group — */
+.button-group {
+  display: inline-flex;
+  background: var(--md-sys-color-surface);
+  border-radius: 9999px;
+  padding: 3px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  gap: 2px;
+}
+.button-group .btn {
+  padding: 6px 12px;
+  border-radius: 9999px;
+  font-size: 11px;
+  color: var(--md-sys-color-on-surface-variant);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all var(--md-dur-short) var(--md-motion-standard);
+}
+.button-group .btn.active {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-weight: 500;
+}
+
+/* — After: Split button — */
+.split-button {
+  display: inline-flex;
+  margin-left: auto;
+  height: 38px;
+  border-radius: 19px;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  overflow: hidden;
+  position: relative;
+}
+.split-button .main {
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  position: relative;
+}
+.split-button .main::after {
+  content: "";
+  position: absolute;
+  right: 0; top: 7px; bottom: 7px;
+  width: 1px;
+  background: rgba(255,255,255,0.25);
+}
+.split-button .more {
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* — After: FAB Menu (clover layout) — */
+.fab-menu-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+.fab-menu {
+  position: absolute;
+  bottom: 80px;
+  left: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  grid-template-rows: repeat(3, 56px);
+  gap: 8px;
+  pointer-events: auto;
+}
+.fab-item {
+  width: 56px; height: 56px;
+  border-radius: 38% 62% 60% 40% / 50% 45% 55% 50%;
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 4px 12px -2px rgba(0,0,0,0.20);
+  animation: fab-rise var(--md-dur-long) var(--md-motion-spring) backwards;
+}
+.fab-item:nth-child(1) { animation-delay: 0ms; }
+.fab-item:nth-child(2) { animation-delay: 60ms; }
+.fab-item:nth-child(3) { animation-delay: 120ms; }
+.fab-item:nth-child(4) { animation-delay: 180ms; }
+.fab-item:nth-child(5) { animation-delay: 240ms; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
+@keyframes fab-rise {
+  from { opacity: 0; transform: scale(0.4) translateY(20px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ============================================================
+   Notification (Section 3)
+   ============================================================ */
+.notif-shade {
+  flex: 1;
+  background: linear-gradient(180deg, rgba(0,0,0,0.06) 0%, rgba(0,0,0,0.02) 100%);
+  padding: 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: hidden;
+}
+body[data-canvas-theme="dark"] .notif-shade,
+[data-theme="dark"] .notif-shade {
+  background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%);
+}
+.notif-time {
+  text-align: center;
+  padding: 8px 0;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 36px;
+  font-weight: 500;
+  font-variation-settings: "opsz" 48;
+}
+.notif-time .date {
+  display: block;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 2px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.notif-card {
+  background: var(--md-sys-color-surface-container-high);
+  border-radius: 22px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notif-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+}
+.notif-icon {
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+}
+.notif-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.notif-card-title .chip {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.notif-card-body {
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.45;
+}
+.notif-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.notif-action {
+  padding: 6px 12px;
+  border-radius: 9999px;
+  font-size: 11px;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+}
+
+/* Live status island */
+.island {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0d0d0d;
+  color: #ffffff;
+  height: 28px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.06em;
+  box-shadow: 0 2px 8px -2px rgba(0,0,0,0.40);
+  z-index: 6;
+}
+.island .small-icon {
+  width: 18px; height: 18px;
+  flex-shrink: 0;
+}
+
+/* Pig logo (faithful to current vector) */
+.pig-icon {
+  width: 100%; height: 100%;
+  fill: currentColor;
+}
+.pig-icon-light {
+  background: #ffffff;
+  border-radius: 50%;
+  padding: 1px;
+  color: #1a1a1a;
+}
+
+/* ============================================================
+   Settings (Section 4)
+   ============================================================ */
+.settings-area {
+  flex: 1;
+  overflow-y: hidden;
+  padding: 0 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.card-group {
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.scene-after .card-group {
+  border-radius: 24px;
+  background: var(--md-sys-color-surface-container);
+}
+.scene-after .card-group + .card-group {
+  border-radius: 24px 24px 32px 16px;
+}
+.card-group-title {
+  padding: 12px 16px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.list-item {
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.list-item .leading {
+  width: 36px; height: 36px;
+  border-radius: 12px;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.scene-after .list-item .leading {
+  border-radius: 38% 62% 60% 40% / 50% 45% 55% 50%;
+}
+.list-item .body {
+  flex: 1;
+  display: flex; flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.list-item .body .head {
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface);
+  font-weight: 500;
+}
+.list-item .body .sub {
+  font-size: 11px;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.list-item .trail {
+  flex-shrink: 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* Hero status card (After only) */
+.hero-card {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-radius: 28px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+  overflow: hidden;
+}
+.hero-card::before {
+  content: "";
+  position: absolute;
+  width: 120px; height: 120px;
+  right: -30px; bottom: -50px;
+  background: var(--md-sys-color-primary);
+  opacity: 0.10;
+  border-radius: 38% 62% 60% 40% / 50% 45% 55% 50%;
+}
+.hero-card .ico {
+  width: 48px; height: 48px;
+  border-radius: 38% 62% 60% 40% / 50% 45% 55% 50%;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.hero-card .meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  z-index: 1;
+}
+.hero-card .meta .name {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  font-variation-settings: "opsz" 24;
+}
+.hero-card .meta .stat {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+/* — M3 Switch (expressive) — */
+.switch-x {
+  width: 52px; height: 32px;
+  background: var(--md-sys-color-primary);
+  border-radius: 16px;
+  position: relative;
+  flex-shrink: 0;
+}
+.switch-x::after {
+  content: "";
+  position: absolute;
+  width: 24px; height: 24px;
+  background: var(--md-sys-color-on-primary);
+  border-radius: 12px;
+  top: 4px; right: 4px;
+  transition: all var(--md-dur-medium) var(--md-motion-spring);
+}
+.switch-x.off {
+  background: var(--md-sys-color-surface-container-highest);
+}
+.switch-x.off::after {
+  background: var(--md-sys-color-outline);
+  width: 16px; height: 16px;
+  top: 8px; right: auto; left: 8px;
+  border-radius: 50%;
+}
+
+/* ============================================================
+   Notes column (right of each scene)
+   ============================================================ */
+.notes {
+  font-family: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #4f4539;
+  padding: 8px 0;
+}
+body[data-canvas-theme="dark"] .notes { color: #d2c5b6; }
+.notes h4 {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 14px;
+  color: #1f1b16;
+  font-variation-settings: "opsz" 24;
+}
+body[data-canvas-theme="dark"] .notes h4 { color: #ebe0d6; }
+.notes ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notes li {
+  padding-left: 20px;
+  position: relative;
+  font-size: 13px;
+}
+.notes li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 8px;
+  height: 8px;
+  background: #905200;
+  border-radius: 38% 62% 60% 40% / 50% 45% 55% 50%;
+}
+body[data-canvas-theme="dark"] .notes li::before { background: #ffb872; }
+.notes li strong {
+  color: #1f1b16;
+  font-weight: 600;
+}
+body[data-canvas-theme="dark"] .notes li strong { color: #ebe0d6; }
+.notes .api {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  background: rgba(144,82,0,0.10);
+  color: #905200;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+body[data-canvas-theme="dark"] .notes .api {
+  background: rgba(255,184,114,0.10);
+  color: #ffb872;
+}
+
+/* Stable / Alpha tag */
+.tag {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.10em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.tag.stable { background: rgba(57,99,58,0.15); color: #386a20; }
+.tag.alpha { background: rgba(186,26,26,0.10); color: #ba1a1a; }
+body[data-canvas-theme="dark"] .tag.stable { background: rgba(156,214,125,0.18); color: #9cd67d; }
+body[data-canvas-theme="dark"] .tag.alpha { background: rgba(255,180,171,0.15); color: #ffb4ab; }
+
+/* ============================================================
+   Caveats footer
+   ============================================================ */
+.caveats {
+  margin-top: 96px;
+  padding: 32px;
+  background: rgba(186,26,26,0.04);
+  border: 1px solid rgba(186,26,26,0.12);
+  border-radius: 24px;
+}
+body[data-canvas-theme="dark"] .caveats {
+  background: rgba(255,180,171,0.05);
+  border-color: rgba(255,180,171,0.10);
+}
+.caveats h3 {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+.caveats p {
+  font-size: 13px;
+  color: #4f4539;
+  line-height: 1.55;
+  margin-bottom: 8px;
+}
+body[data-canvas-theme="dark"] .caveats p { color: #d2c5b6; }
+
+/* ============================================================
+   Tweaks Panel
+   ============================================================ */
+.tweaks {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 24px;
+  padding: 16px;
+  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.15);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 240px;
+  transition: transform var(--md-dur-medium) var(--md-motion-spring);
+}
+body[data-canvas-theme="dark"] .tweaks {
+  background: rgba(35,30,24,0.85);
+  border-color: rgba(255,255,255,0.08);
+}
+.tweaks.collapsed {
+  transform: translateX(calc(100% + 24px));
+}
+.tweaks-toggle {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 38% 62% 60% 40% / 50% 45% 55% 50%;
+  background: #905200;
+  color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  box-shadow: 0 8px 20px -6px rgba(144,82,0,0.40);
+  z-index: 99;
+  transition: transform var(--md-dur-medium) var(--md-motion-spring);
+}
+.tweaks-toggle:hover {
+  transform: scale(1.05);
+}
+.tweaks-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.tweaks-title button {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+.tweak-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tweak-label {
+  font-size: 11px;
+  opacity: 0.7;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.tweak-options {
+  display: flex;
+  background: rgba(0,0,0,0.04);
+  border-radius: 9999px;
+  padding: 3px;
+  gap: 2px;
+}
+body[data-canvas-theme="dark"] .tweak-options {
+  background: rgba(255,255,255,0.05);
+}
+.tweak-options button {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  transition: all var(--md-dur-short) var(--md-motion-standard);
+}
+.tweak-options button.active {
+  background: var(--md-sys-color-primary, #905200);
+  color: var(--md-sys-color-on-primary, white);
+}
+
+/* ============================================================
+   Misc
+   ============================================================ */
+.lucide {
+  width: 1em; height: 1em;
+  stroke-width: 1.6;
+}
+.icon-sm { width: 14px; height: 14px; }
+.icon-md { width: 18px; height: 18px; }
+.icon-lg { width: 22px; height: 22px; }
+</style>
+</head>
+<body data-canvas-theme="light">
+
+<main class="canvas">
+
+  <!-- ============= HERO ============= -->
+  <header class="hero">
+    <div class="eyebrow">UI Refactor Mockup · 2026-05-05</div>
+    <h1 class="display">让 AmberAgent <em>用上 Material 3 Expressive</em></h1>
+    <p class="lede">基于当前项目已接入的 Material3 1.5.0-alpha18 与 Expressive 主题 · LoadingIndicator 形变、WavyProgress、ButtonGroup、SplitButton、FloatingToolbar / 自定义 FAB 编组、FlexibleTopAppBar，对照"现在"和"重构后"四个核心场景。Tweaks 面板可切换浅深色 / 品牌色 / 密度。</p>
+  </header>
+
+  <!-- ============= TOKENS STRIP ============= -->
+  <section class="tokens-strip">
+    <div>
+      <h3>Color · primary container family</h3>
+      <div class="swatches">
+        <div class="swatch" style="background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary)">primary</div>
+        <div class="swatch" style="background: var(--md-sys-color-primary-container)">P-cont</div>
+        <div class="swatch" style="background: var(--md-sys-color-secondary-container)">S-cont</div>
+        <div class="swatch" style="background: var(--md-sys-color-tertiary-container)">T-cont</div>
+        <div class="swatch" style="background: var(--md-sys-color-surface-container-high)">surf-h</div>
+        <div class="swatch on-dark" style="background: var(--md-sys-color-inverse-surface)">inv</div>
+      </div>
+    </div>
+    <div>
+      <h3>Shape · token scale</h3>
+      <div class="shape-row">
+        <div class="shape-cell shape-xs">XS</div>
+        <div class="shape-cell shape-md">MD</div>
+        <div class="shape-cell shape-xl">XL</div>
+        <div class="shape-cell shape-pill">PILL</div>
+        <div class="shape-cell shape-cookie">COOK</div>
+      </div>
+    </div>
+    <div>
+      <h3>Type · Bricolage + Jakarta + Noto SC</h3>
+      <div class="type-row">
+        <div class="type-display">Display 28</div>
+        <div class="type-headline">标题 18 / Headline</div>
+        <div class="type-body">Body 13 · Plus Jakarta Sans + Noto Sans SC</div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ============= SCENE 1: CHAT ============= -->
+  <section class="scene" id="scene-chat">
+    <div class="scene-header">
+      <span class="scene-number">SCENE 01</span>
+      <h2 class="scene-title">流式对话 + 工具卡片 <em>· chat list & tool capsule</em></h2>
+    </div>
+    <div class="scene-grid">
+
+      <!-- Phone: BEFORE -->
+      <div class="phone-wrap">
+        <div class="phone-label before">
+          <span class="dot"></span><span>现在</span>
+          <span class="lbl-en">v0.8.3</span>
+        </div>
+        <div class="phone scene-before">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>10:24</span>
+              <div class="indicators"><i data-lucide="signal" class="lucide icon-sm"></i><i data-lucide="wifi" class="lucide icon-sm"></i><div class="battery"><div class="fill"></div></div></div>
+            </div>
+            <div class="top-app-bar">
+              <button class="icon-btn"><i data-lucide="menu" class="lucide icon-md"></i></button>
+              <div class="title">AmberAgent</div>
+              <button class="icon-btn"><i data-lucide="message-square-plus" class="lucide icon-md"></i></button>
+            </div>
+            <div class="chat-area">
+
+              <div class="message-row user">
+                <div class="bubble user">帮我看一下 workspace 里的依赖结构，再读一下 package.json</div>
+              </div>
+
+              <div class="message-row assistant">
+                <div class="avatar-row"><div class="avatar">A</div><span>Claude Opus 4.7</span></div>
+                <div class="bubble assistant">好的，我来分两步执行。</div>
+              </div>
+
+              <div class="message-row assistant">
+                <div class="cot">
+                  <div class="cot-header">
+                    <i data-lucide="brain" class="lucide icon-sm"></i>
+                    <span>分析完成 · 2 步</span>
+                    <i data-lucide="chevron-down" class="lucide icon-sm chev"></i>
+                  </div>
+                  <div class="tool-capsule success">
+                    <div class="icon-circle"><i data-lucide="terminal" class="lucide icon-sm"></i></div>
+                    <span class="title">执行 Alpine 命令 ls /work…</span>
+                    <span class="pill">成功</span>
+                  </div>
+                  <div class="tool-capsule running">
+                    <div class="icon-circle"><i data-lucide="file-text" class="lucide icon-sm"></i></div>
+                    <span class="title">读取文件 package.json</span>
+                    <span class="pill">执行中</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="loading-row">
+                <div class="dots-loading"><span></span><span></span><span></span></div>
+                <span>正在生成回复…</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phone: AFTER -->
+      <div class="phone-wrap">
+        <div class="phone-label after">
+          <span class="dot"></span><span>重构后</span>
+          <span class="lbl-en">M3 Expressive</span>
+        </div>
+        <div class="phone scene-after">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>10:24</span>
+              <div class="indicators"><i data-lucide="signal" class="lucide icon-sm"></i><i data-lucide="wifi" class="lucide icon-sm"></i><div class="battery"><div class="fill"></div></div></div>
+            </div>
+            <div class="top-app-bar large">
+              <div class="row">
+                <button class="icon-btn"><i data-lucide="menu" class="lucide icon-md"></i></button>
+                <div style="flex:1"></div>
+                <button class="icon-btn"><i data-lucide="search" class="lucide icon-md"></i></button>
+                <button class="icon-btn"><i data-lucide="message-square-plus" class="lucide icon-md"></i></button>
+              </div>
+              <div class="title-block">
+                <div class="display-title">AmberAgent</div>
+                <div class="subtitle"><span class="pulse"></span>Agent · Alpine · 2 tools</div>
+              </div>
+            </div>
+            <div class="chat-area">
+
+              <div class="message-row user">
+                <div class="bubble user">帮我看一下 workspace 里的依赖结构，再读一下 package.json</div>
+              </div>
+
+              <div class="message-row assistant">
+                <div class="avatar-row"><div class="avatar">A</div><span>Claude Opus 4.7</span></div>
+                <div class="bubble assistant">好的，我来分两步执行。</div>
+              </div>
+
+              <div class="message-row assistant">
+                <div class="cot">
+                  <div class="cot-header">
+                    <i data-lucide="sparkles" class="lucide icon-sm"></i>
+                    <span>分析完成 · 2 步</span>
+                    <i data-lucide="chevron-down" class="lucide icon-sm chev"></i>
+                  </div>
+                  <div class="tool-capsule success">
+                    <div class="icon-circle"><i data-lucide="terminal" class="lucide icon-sm"></i></div>
+                    <span class="title">执行 Alpine 命令</span>
+                    <span class="pill">成功</span>
+                  </div>
+                  <div class="tool-capsule running">
+                    <div class="icon-circle"><i data-lucide="file-text" class="lucide icon-sm"></i></div>
+                    <span class="title">读取文件 package.json</span>
+                    <span class="pill">执行中</span>
+                  </div>
+                  <div class="wavy-bar">
+                    <svg viewBox="0 0 200 18" preserveAspectRatio="none">
+                      <path d="M 0 9 Q 6 1 12 9 T 24 9 T 36 9 T 48 9 T 60 9 T 72 9 T 84 9 T 96 9 T 108 9 T 120 9 T 132 9 T 144 9 T 156 9 T 168 9 T 180 9 T 200 9"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div class="wavy-loading">
+                <svg viewBox="0 0 36 14" preserveAspectRatio="none"><path class="run" d="M 0 7 Q 3 1 6 7 T 12 7 T 18 7 T 24 7 T 30 7 T 36 7"/></svg>
+                <span>正在生成回复</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>Section 01 — 改了什么</h4>
+        <ul>
+          <li><strong>顶栏</strong>从 <span class="api">TopAppBar</span> 升级为 <span class="api">LargeFlexibleTopAppBar</span><span class="tag stable">stable 1.4</span>，标题用 Bricolage Grotesque 显示字体，下方 subtitle 显示运行时和工具数 — 信息密度更高、更有"Agent 控制台"的气质。</li>
+          <li><strong>工具胶囊</strong> 在状态切换时做受控形状变化：执行中 = pill（运动感），成功 = 非对称 squircle（沉稳）。官方已给 <span class="api">LoadingIndicator</span> 与部分 Chip 提供形变能力；工具胶囊落地时建议封装 <span class="api">AmberToolCapsule</span>，用 <span class="api">animateContentSize</span> / shape state 收口，而不是把实验 API 散落在业务代码里。</li>
+          <li><strong>Loading</strong> 替换 <span class="api">PigLoadingIndicator</span> 旁的 dots，改用 <span class="api">LoadingIndicator</span> / <span class="api">WavyProgressIndicator</span><span class="tag alpha">alpha 1.5</span> 的波形线，工具卡片下方也用同款表示"正在拉取"。</li>
+          <li><strong>气泡</strong>角形从字面量 <span class="api">RoundedCornerShape(22dp,8dp,…)</span> 收敛到 cookie 形状 token（通过 <span class="api">MaterialShapes</span> 派生），保持当前不规则气泡的辨识度但更柔。</li>
+          <li><strong>ChainOfThought</strong> 从纯左侧竖线升级为带容器的 <span class="api">surface-container-low</span> 圆角块，分隔感更强、不再"贴在边上"。</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- ============= SCENE 2: COMPOSER ============= -->
+  <section class="scene" id="scene-composer">
+    <div class="scene-header">
+      <span class="scene-number">SCENE 02</span>
+      <h2 class="scene-title">底部输入区 + 操作行 <em>· composer & action row</em></h2>
+    </div>
+    <div class="scene-grid">
+
+      <!-- Phone: BEFORE -->
+      <div class="phone-wrap">
+        <div class="phone-label before"><span class="dot"></span><span>现在</span><span class="lbl-en">v0.8.3</span></div>
+        <div class="phone scene-before">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>10:24</span>
+              <div class="indicators"><i data-lucide="signal" class="lucide icon-sm"></i><i data-lucide="wifi" class="lucide icon-sm"></i><div class="battery"><div class="fill"></div></div></div>
+            </div>
+            <div class="top-app-bar">
+              <button class="icon-btn"><i data-lucide="menu" class="lucide icon-md"></i></button>
+              <div class="title">AmberAgent</div>
+              <button class="icon-btn"><i data-lucide="message-square-plus" class="lucide icon-md"></i></button>
+            </div>
+            <div class="chat-area">
+              <div class="message-row assistant">
+                <div class="avatar-row"><div class="avatar">A</div><span>Claude Opus 4.7</span></div>
+                <div class="bubble assistant">好的，已经准备好了，请告诉我你想做什么。</div>
+              </div>
+            </div>
+            <div class="composer">
+              <div class="composer-input">
+                <span class="placeholder">输入消息…</span>
+                <span class="caret"></span>
+              </div>
+              <div class="action-row">
+                <button class="act add"><i data-lucide="plus" class="lucide icon-md"></i></button>
+                <button class="act"><i data-lucide="zap" class="lucide icon-sm"></i><span>Claude</span></button>
+                <button class="act"><i data-lucide="search" class="lucide icon-sm"></i></button>
+                <button class="act icon-only"><i data-lucide="package" class="lucide icon-sm"></i></button>
+                <button class="act send"><i data-lucide="arrow-up" class="lucide icon-md"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phone: AFTER -->
+      <div class="phone-wrap">
+        <div class="phone-label after"><span class="dot"></span><span>重构后</span><span class="lbl-en">M3 Expressive</span></div>
+        <div class="phone scene-after">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>10:24</span>
+              <div class="indicators"><i data-lucide="signal" class="lucide icon-sm"></i><i data-lucide="wifi" class="lucide icon-sm"></i><div class="battery"><div class="fill"></div></div></div>
+            </div>
+            <div class="top-app-bar large">
+              <div class="row">
+                <button class="icon-btn"><i data-lucide="menu" class="lucide icon-md"></i></button>
+                <div style="flex:1"></div>
+                <button class="icon-btn"><i data-lucide="search" class="lucide icon-md"></i></button>
+                <button class="icon-btn"><i data-lucide="message-square-plus" class="lucide icon-md"></i></button>
+              </div>
+              <div class="title-block">
+                <div class="display-title">AmberAgent</div>
+                <div class="subtitle"><span class="pulse"></span>就绪 · Alpine</div>
+              </div>
+            </div>
+            <div class="chat-area">
+              <div class="message-row assistant">
+                <div class="avatar-row"><div class="avatar">A</div><span>Claude Opus 4.7</span></div>
+                <div class="bubble assistant">好的，已经准备好了，请告诉我你想做什么。</div>
+              </div>
+            </div>
+
+            <div class="composer">
+              <div class="composer-input">
+                <span class="placeholder">向 AmberAgent 提问…</span>
+                <span class="caret"></span>
+              </div>
+              <div class="action-row">
+                <div class="button-group">
+                  <button class="btn active"><i data-lucide="zap" class="lucide icon-sm"></i><span>Opus 4.7</span></button>
+                  <button class="btn"><i data-lucide="search" class="lucide icon-sm"></i></button>
+                  <button class="btn"><i data-lucide="package" class="lucide icon-sm"></i></button>
+                </div>
+                <div class="split-button">
+                  <span class="main"><i data-lucide="arrow-up" class="lucide icon-sm"></i><span>发送</span></span>
+                  <span class="more"><i data-lucide="chevron-down" class="lucide icon-sm"></i></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>Section 02 — 改了什么</h4>
+        <ul>
+          <li><strong>操作行</strong>从散落的 chip + icon button，收敛为 <span class="api">ButtonGroup</span><span class="tag stable">stable 1.4</span>：模型 / 搜索 / MCP 视觉成组，状态压缩成"一个胶囊"。</li>
+          <li><strong>发送按钮</strong>升级为 <span class="api">SplitButton</span><span class="tag stable">stable 1.4</span>：主键 = 发送，副键 = 长按发送 / 不获取回复 / 仅推送。原来这些藏在长按手势里，用户根本不知道存在。</li>
+          <li><strong>"+" 附件</strong>保留现有 <span class="api">ExpandState.Files</span> 折叠行为不动 — 不引入 FAB Menu。只把展开后的每个附件 chip 用统一的 cookie leading icon container（图片 / 拍照 / 文件 / 语音），跟工具胶囊里的 icon-circle 形状语言对齐即可。</li>
+          <li><strong>Composer 形状</strong>保留你们原本设计的非对称 32/32/28/14 角形（这个气质不能丢），但把内部按钮的字面 dp 半径替换为统一 shape token。</li>
+          <li><strong>不动的部分</strong>：<span class="api">inputState</span>、<span class="api">messageContent</span>、附件启动器、camera/UCrop、权限、MCP picker、WebView 预览 — 全部不碰，按 handoff 的红线办。</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- ============= SCENE 3: LIVE STATUS NOTIFICATION ============= -->
+  <section class="scene" id="scene-live">
+    <div class="scene-header">
+      <span class="scene-number">SCENE 03</span>
+      <h2 class="scene-title">Live Status 通知 + Fluid Cloud <em>· promoted ongoing & status island</em></h2>
+    </div>
+    <div class="scene-grid">
+
+      <!-- Phone: BEFORE -->
+      <div class="phone-wrap">
+        <div class="phone-label before"><span class="dot"></span><span>现在</span><span class="lbl-en">v0.8.3</span></div>
+        <div class="phone scene-before">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>10:24</span>
+              <div class="indicators"><i data-lucide="signal" class="lucide icon-sm"></i><i data-lucide="wifi" class="lucide icon-sm"></i><div class="battery"><div class="fill"></div></div></div>
+            </div>
+            <div class="notif-shade">
+              <div class="notif-time">10:24<span class="date">星期一 · 5 月 5 日</span></div>
+
+              <div class="notif-card">
+                <div class="notif-card-head">
+                  <span class="pig-icon-light notif-icon"><svg viewBox="0 0 128 128" class="pig-icon"><path fill-rule="evenodd" d="M64,8C94.9,8 120,33.1 120,64C120,94.9 94.9,120 64,120C33.1,120 8,94.9 8,64C8,33.1 33.1,8 64,8 Z M36.97,35.28C31.9,20.07 42.04,13.31 52.17,28.52C60.62,25.14 69.07,25.14 77.52,28.52C87.65,13.31 97.79,20.07 91.03,35.28C101.17,43.72 106.24,58.93 102.86,72.45C97.79,94.41 82.59,106.24 64,106.24C45.41,106.24 30.21,94.41 25.14,72.45C21.76,58.93 26.83,43.72 36.97,35.28 Z M44.57,42.88C41.19,32.74 47.1,28.52 55.21,37.81C60.96,35.62 67.04,35.62 72.79,37.81C80.9,28.52 86.81,32.74 83.43,42.88C91.03,49.64 94.41,60.62 91.88,70.76C88.33,85.96 77.52,94.41 64,94.41C50.48,94.41 39.67,85.96 36.12,70.76C33.59,60.62 36.97,49.64 44.57,42.88 Z M47.1,67.38C47.1,53.86 55.55,47.1 64,47.1C72.45,47.1 80.9,53.86 80.9,67.38C80.9,79.21 72.45,85.96 64,85.96C55.55,85.96 47.1,79.21 47.1,67.38 Z M54.71,67.38C54.71,60.62 58.93,56.4 64,56.4C69.07,56.4 73.29,60.62 73.29,67.38C73.29,73.29 69.07,77.52 64,77.52C58.93,77.52 54.71,73.29 54.71,67.38 Z M42.04,52.17C42.04,48.45 45.07,45.41 48.79,45.41C52.52,45.41 55.55,48.45 55.55,52.17C55.55,55.9 52.52,58.93 48.79,58.93C45.07,58.93 42.04,55.9 42.04,52.17 Z M72.45,52.17C72.45,48.45 75.48,45.41 79.21,45.41C82.93,45.41 85.96,48.45 85.96,52.17C85.96,55.9 82.93,58.93 79.21,58.93C75.48,58.93 72.45,55.9 72.45,52.17 Z M57.24,65.69C57.24,63.33 59.1,61.47 61.47,61.47C63.83,61.47 65.69,63.33 65.69,65.69L65.69,72.45C65.69,74.81 63.83,76.67 61.47,76.67C59.1,76.67 57.24,74.81 57.24,72.45 Z M69.07,65.69C69.07,63.33 70.93,61.47 73.29,61.47C75.66,61.47 77.52,63.33 77.52,65.69L77.52,72.45C77.52,74.81 75.66,76.67 73.29,76.67C70.93,76.67 69.07,74.81 69.07,72.45 Z"/></svg></span>
+                  <span>AMBERAGENT · 现在</span>
+                </div>
+                <div class="notif-card-title">
+                  <span>正在执行工具</span>
+                  <span class="chip">工具</span>
+                </div>
+                <div class="notif-card-body">执行 Alpine 命令 ls /workspace</div>
+                <div class="notif-card-actions">
+                  <button class="notif-action">停止</button>
+                </div>
+              </div>
+
+              <div class="notif-card">
+                <div class="notif-card-head">
+                  <span class="pig-icon-light notif-icon"><svg viewBox="0 0 128 128" class="pig-icon"><path fill-rule="evenodd" d="M64,8C94.9,8 120,33.1 120,64C120,94.9 94.9,120 64,120C33.1,120 8,94.9 8,64C8,33.1 33.1,8 64,8 Z M36.97,35.28C31.9,20.07 42.04,13.31 52.17,28.52C60.62,25.14 69.07,25.14 77.52,28.52C87.65,13.31 97.79,20.07 91.03,35.28C101.17,43.72 106.24,58.93 102.86,72.45C97.79,94.41 82.59,106.24 64,106.24C45.41,106.24 30.21,94.41 25.14,72.45C21.76,58.93 26.83,43.72 36.97,35.28 Z"/></svg></span>
+                  <span>AMBERAGENT · 5 分钟前</span>
+                </div>
+                <div class="notif-card-title">
+                  <span>对话已完成</span>
+                </div>
+                <div class="notif-card-body">已生成 4 段回复，3 个工具调用</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phone: AFTER -->
+      <div class="phone-wrap">
+        <div class="phone-label after"><span class="dot"></span><span>重构后</span><span class="lbl-en">M3 Expressive</span></div>
+        <div class="phone scene-after">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>10:24</span>
+              <div class="indicators"><i data-lucide="signal" class="lucide icon-sm"></i><i data-lucide="wifi" class="lucide icon-sm"></i><div class="battery"><div class="fill"></div></div></div>
+            </div>
+            <!-- OPPO Fluid Cloud / Pixel promoted ongoing island -->
+            <div class="island">
+              <span class="pig-icon-light small-icon" style="background:white;color:#1a1a1a"><svg viewBox="0 0 128 128" class="pig-icon"><path fill-rule="evenodd" d="M64,8C94.9,8 120,33.1 120,64C120,94.9 94.9,120 64,120C33.1,120 8,94.9 8,64C8,33.1 33.1,8 64,8 Z M36.97,35.28C31.9,20.07 42.04,13.31 52.17,28.52C60.62,25.14 69.07,25.14 77.52,28.52C87.65,13.31 97.79,20.07 91.03,35.28C101.17,43.72 106.24,58.93 102.86,72.45C97.79,94.41 82.59,106.24 64,106.24C45.41,106.24 30.21,94.41 25.14,72.45C21.76,58.93 26.83,43.72 36.97,35.28 Z M47.1,67.38C47.1,53.86 55.55,47.1 64,47.1C72.45,47.1 80.9,53.86 80.9,67.38C80.9,79.21 72.45,85.96 64,85.96C55.55,85.96 47.1,79.21 47.1,67.38 Z M42.04,52.17C42.04,48.45 45.07,45.41 48.79,45.41C52.52,45.41 55.55,48.45 55.55,52.17C55.55,55.9 52.52,58.93 48.79,58.93C45.07,58.93 42.04,55.9 42.04,52.17 Z M72.45,52.17C72.45,48.45 75.48,45.41 79.21,45.41C82.93,45.41 85.96,48.45 85.96,52.17C85.96,55.9 82.93,58.93 79.21,58.93C75.48,58.93 72.45,55.9 72.45,52.17 Z"/></svg></span>
+              <span>ALPINE · 1/3</span>
+            </div>
+            <div class="notif-shade" style="padding-top: 40px;">
+              <div class="notif-time">10:24<span class="date">星期一 · 5 月 5 日</span></div>
+
+              <div class="notif-card">
+                <div class="notif-card-head">
+                  <span class="pig-icon-light notif-icon"><svg viewBox="0 0 128 128" class="pig-icon"><path fill-rule="evenodd" d="M64,8C94.9,8 120,33.1 120,64C120,94.9 94.9,120 64,120C33.1,120 8,94.9 8,64C8,33.1 33.1,8 64,8 Z M36.97,35.28C31.9,20.07 42.04,13.31 52.17,28.52C60.62,25.14 69.07,25.14 77.52,28.52C87.65,13.31 97.79,20.07 91.03,35.28C101.17,43.72 106.24,58.93 102.86,72.45C97.79,94.41 82.59,106.24 64,106.24C45.41,106.24 30.21,94.41 25.14,72.45C21.76,58.93 26.83,43.72 36.97,35.28 Z M47.1,67.38C47.1,53.86 55.55,47.1 64,47.1C72.45,47.1 80.9,53.86 80.9,67.38C80.9,79.21 72.45,85.96 64,85.96C55.55,85.96 47.1,79.21 47.1,67.38 Z M42.04,52.17C42.04,48.45 45.07,45.41 48.79,45.41C52.52,45.41 55.55,48.45 55.55,52.17C55.55,55.9 52.52,58.93 48.79,58.93C45.07,58.93 42.04,55.9 42.04,52.17 Z M72.45,52.17C72.45,48.45 75.48,45.41 79.21,45.41C82.93,45.41 85.96,48.45 85.96,52.17C85.96,55.9 82.93,58.93 79.21,58.93C75.48,58.93 72.45,55.9 72.45,52.17 Z"/></svg></span>
+                  <span>AMBERAGENT · 进行中</span>
+                </div>
+                <div class="notif-card-title">
+                  <span>Alpine 终端 · 步骤 1/3</span>
+                  <span class="chip">运行</span>
+                </div>
+                <div class="notif-card-body">
+                  ls /workspace
+                </div>
+                <div class="wavy-bar" style="margin-top:6px">
+                  <svg viewBox="0 0 200 18" preserveAspectRatio="none"><path d="M 0 9 Q 6 1 12 9 T 24 9 T 36 9 T 48 9 T 60 9 T 72 9 T 84 9 T 96 9 T 108 9 T 120 9 T 132 9 T 144 9 T 156 9 T 168 9 T 180 9 T 200 9"/></svg>
+                </div>
+                <div class="notif-card-actions">
+                  <button class="notif-action">停止生成</button>
+                </div>
+              </div>
+
+              <div class="notif-card">
+                <div class="notif-card-head">
+                  <span class="pig-icon-light notif-icon"><svg viewBox="0 0 128 128" class="pig-icon"><path fill-rule="evenodd" d="M64,8C94.9,8 120,33.1 120,64C120,94.9 94.9,120 64,120C33.1,120 8,94.9 8,64C8,33.1 33.1,8 64,8 Z M36.97,35.28C31.9,20.07 42.04,13.31 52.17,28.52C60.62,25.14 69.07,25.14 77.52,28.52C87.65,13.31 97.79,20.07 91.03,35.28C101.17,43.72 106.24,58.93 102.86,72.45C97.79,94.41 82.59,106.24 64,106.24C45.41,106.24 30.21,94.41 25.14,72.45C21.76,58.93 26.83,43.72 36.97,35.28 Z"/></svg></span>
+                  <span>AMBERAGENT · 5 分钟前</span>
+                </div>
+                <div class="notif-card-title">
+                  <span>对话已完成</span>
+                </div>
+                <div class="notif-card-body">4 段回复 · 3 个工具调用 · 8 秒</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>Section 03 — 改了什么</h4>
+        <ul>
+          <li><strong>Small icon 不变</strong>：保留现有的 cutout 矢量（白底 + 透明镂空），它在系统模板着色下是正确的"小猪剪影" — 这是上轮已经修过的，我不打算再动。</li>
+          <li><strong>Fluid Cloud / Promoted ongoing 状态岛</strong>：用 <span class="api">requestPromotedOngoing = true</span> + <span class="api">shortCriticalText</span><span class="tag stable">existing</span>。我把 chip 文案从冗长的"工具"/"等待"压成 4 个字符的强标识 <span class="mono">ALPINE · 1/3</span>，跟系统时钟竞争空间时不会被截。</li>
+          <li><strong>正在生成</strong>的卡片里加了 <span class="api">WavyProgressIndicator</span><span class="tag alpha">alpha 1.5</span> 进度条 — 这是 Expressive 最大的视觉签名之一，比传统线性进度条更有"AI 在做事"的叙事感。</li>
+          <li><strong>停止按钮</strong>从隐性的 <span class="api">notification action</span> 升级为更显眼的 chip 状按钮，颜色改用 primary 而非纯灰，符合 M3 emphasized button 规范。</li>
+          <li><strong>不动的部分</strong>：<span class="api">smallIcon</span> 资源、<span class="api">notifyRunning()</span> 通道、<span class="api">PendingIntent</span> 路径 — 全部按 handoff 的红线保留。</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- ============= SCENE 4: SETTINGS ============= -->
+  <section class="scene" id="scene-settings">
+    <div class="scene-header">
+      <span class="scene-number">SCENE 04</span>
+      <h2 class="scene-title">设置首页 <em>· settings index with expressive shapes</em></h2>
+    </div>
+    <div class="scene-grid">
+
+      <!-- Phone: BEFORE -->
+      <div class="phone-wrap">
+        <div class="phone-label before"><span class="dot"></span><span>现在</span><span class="lbl-en">v0.8.3</span></div>
+        <div class="phone scene-before">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>10:24</span>
+              <div class="indicators"><i data-lucide="signal" class="lucide icon-sm"></i><i data-lucide="wifi" class="lucide icon-sm"></i><div class="battery"><div class="fill"></div></div></div>
+            </div>
+            <div class="top-app-bar large">
+              <div class="row">
+                <button class="icon-btn"><i data-lucide="arrow-left" class="lucide icon-md"></i></button>
+              </div>
+              <div class="title-block" style="padding: 4px 16px 12px;">
+                <div class="display-title" style="font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 500;">设置</div>
+              </div>
+            </div>
+            <div class="settings-area">
+              <div class="card-group">
+                <div class="card-group-title">通用</div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="sun" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">颜色模式</span><span class="sub">跟随系统</span></div>
+                  <i data-lucide="chevron-right" class="lucide icon-md trail"></i>
+                </div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="settings-2" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">显示设置</span><span class="sub">气泡 · 字号 · 触控反馈</span></div>
+                  <i data-lucide="chevron-right" class="lucide icon-md trail"></i>
+                </div>
+              </div>
+              <div class="card-group">
+                <div class="card-group-title">Agent 运行时</div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="brain" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">记忆</span><span class="sub">核心 / 短期 / 长期</span></div>
+                  <i data-lucide="chevron-right" class="lucide icon-md trail"></i>
+                </div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="puzzle" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">扩展</span><span class="sub">22 个工具 · 1 个 Skill</span></div>
+                  <i data-lucide="chevron-right" class="lucide icon-md trail"></i>
+                </div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="terminal" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">沙箱</span><span class="sub">Alpine proot stage1</span></div>
+                  <i data-lucide="chevron-right" class="lucide icon-md trail"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phone: AFTER -->
+      <div class="phone-wrap">
+        <div class="phone-label after"><span class="dot"></span><span>重构后</span><span class="lbl-en">M3 Expressive</span></div>
+        <div class="phone scene-after">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>10:24</span>
+              <div class="indicators"><i data-lucide="signal" class="lucide icon-sm"></i><i data-lucide="wifi" class="lucide icon-sm"></i><div class="battery"><div class="fill"></div></div></div>
+            </div>
+            <div class="top-app-bar large">
+              <div class="row">
+                <button class="icon-btn"><i data-lucide="arrow-left" class="lucide icon-md"></i></button>
+                <div style="flex:1"></div>
+                <button class="icon-btn"><i data-lucide="search" class="lucide icon-md"></i></button>
+              </div>
+              <div class="title-block">
+                <div class="display-title">设置</div>
+                <div class="subtitle">个性化 AmberAgent</div>
+              </div>
+            </div>
+            <div class="settings-area">
+
+              <div class="hero-card">
+                <div class="ico"><i data-lucide="zap" class="lucide icon-lg"></i></div>
+                <div class="meta">
+                  <span class="name">Agent 状态</span>
+                  <span class="stat">就绪 · Alpine · 22 工具 · 1 skill</span>
+                </div>
+                <i data-lucide="chevron-right" class="lucide icon-md"></i>
+              </div>
+
+              <div class="card-group">
+                <div class="card-group-title">通用</div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="sun" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">颜色模式</span><span class="sub">跟随系统 · 琥珀</span></div>
+                  <i data-lucide="chevron-right" class="lucide icon-md trail"></i>
+                </div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="haptik" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">触控反馈</span><span class="sub">输出消息时震动</span></div>
+                  <div class="switch-x"></div>
+                </div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="volume-2" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">音量键滚动</span><span class="sub">用音量键翻阅长对话</span></div>
+                  <div class="switch-x off"></div>
+                </div>
+              </div>
+
+              <div class="card-group">
+                <div class="card-group-title">Agent 运行时</div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="brain" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">记忆</span><span class="sub">核心 8 · 短期 24 · 长期 156</span></div>
+                  <i data-lucide="chevron-right" class="lucide icon-md trail"></i>
+                </div>
+                <div class="list-item">
+                  <div class="leading"><i data-lucide="puzzle" class="lucide icon-md"></i></div>
+                  <div class="body"><span class="head">扩展</span><span class="sub">22 个工具 · 1 个 Skill</span></div>
+                  <i data-lucide="chevron-right" class="lucide icon-md trail"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>Section 04 — 改了什么</h4>
+        <ul>
+          <li><strong>Hero 状态卡</strong>：顶部加了一张 Agent 实时状态卡（cookie 形状 + 装饰背景几何）。当前 settings 进去看不到 Agent 的实时状态，必须返回主对话才知道 — 这是 AmberAgent 作为"应用级 Agent"产品定位下应该被强调的信息。</li>
+          <li><strong>开关 (Switch)</strong>从 Material 2 风格升级为 M3 Expressive Switch — 选中态 thumb 是 pill 形（跟着 ripple 形变），未选中是小圆点。比当前 ListItem 末尾的 chevron 更有"可立即操作"的暗示。</li>
+          <li><strong>CardGroup shape</strong>：每组 card 的下两个角用更大的 corner（24/24/32/16），形成"由上至下渐进圆"的视觉节奏 — 这是 M3 Expressive 文档强调的 <span class="api">shape morphing per group</span> 写法。</li>
+          <li><strong>Leading icon container</strong> 从 RoundedCornerShape(12dp) 改为 cookie 形状，跟头像 / FAB / 工具胶囊形成统一的"软方"语言。</li>
+          <li><strong>支持信息更具体</strong>：原来 sub text 是分类描述（"核心 / 短期 / 长期"），现在带具体数字（"核心 8 · 短期 24 · 长期 156"）— 信息密度上去了，用户不需要点进去才知道里面有多少东西。</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- ============= CAVEATS ============= -->
+  <section class="caveats">
+    <h3>注意事项 · 这只是一个 HTML 仿真</h3>
+    <p>1. <strong>Shape morph 真实质感要等真机</strong>：CSS 的 transition 只能模拟方向和时长；Compose 侧已在 <span class="api">LoadingIndicator</span> 与部分 Chip overload 中提供形变能力，工具胶囊这种自定义组件要通过 wrapper 控制何时 morph。长对话里同时 morph 30 个工具卡可能掉帧，需要按"状态首次变化时 morph，稳态后回静态"原则收口。</p>
+    <p>2. <strong>WavyProgressIndicator 的真实形态</strong>：这里用 SVG dasharray 平移近似，Compose 里的 Wavy API 已在 1.5.0-alpha18 推进；视觉方向一致，但真机上需要确认波幅、触控反馈和低端设备帧率。</p>
+    <p>3. <strong>Alpha API 风险</strong>：LoadingIndicator / WavyProgress / shape-morphing chip overloads / expressive theme 相关 API 仍在 <span class="mono">1.5.0-alpha18</span> 线。建议每个用到 alpha API 的位置都包一层自家 wrapper Composable（<span class="mono">AmberWavyLoading</span> / <span class="mono">AmberToolCapsule</span>），收敛未来一次性改名。FAB clover layout 在这里是视觉原型，可用 FloatingToolbar 或自定义 FAB 编组实现，不应当先承诺为现成官方组件。</p>
+    <p>4. <strong>不要把品牌色当装饰</strong>：你看到的琥珀色是 M3 You 派生出来的 hue chroma tone 系统，不是平面 orange。如果偏要换品牌主色（Lavender / Sage 在 Tweaks 里），整套色板会自动重算 — 但不要混用两个色板。</p>
+  </section>
+
+</main>
+
+
+<!-- ============= TWEAKS PANEL ============= -->
+<button class="tweaks-toggle" id="tweaksToggle">TWEAKS</button>
+<aside class="tweaks collapsed" id="tweaksPanel">
+  <div class="tweaks-title">
+    <span>Tweaks</span>
+    <button id="tweaksClose">×</button>
+  </div>
+
+  <div class="tweak-row">
+    <div class="tweak-label">主题 · theme</div>
+    <div class="tweak-options" data-tweak="theme">
+      <button data-value="light" class="active">浅色</button>
+      <button data-value="dark">深色</button>
+    </div>
+  </div>
+
+  <div class="tweak-row">
+    <div class="tweak-label">品牌色 · brand</div>
+    <div class="tweak-options" data-tweak="brand">
+      <button data-value="amber" class="active">琥珀</button>
+      <button data-value="lavender">薰衣草</button>
+      <button data-value="sage">灰绿</button>
+    </div>
+  </div>
+
+  <div class="tweak-row">
+    <div class="tweak-label">密度 · density</div>
+    <div class="tweak-options" data-tweak="density">
+      <button data-value="comfortable" class="active">舒适</button>
+      <button data-value="compact">紧凑</button>
+    </div>
+  </div>
+
+  <div class="tweak-row">
+    <div class="tweak-label">强调形状 · expressive shape</div>
+    <div class="tweak-options" data-tweak="shape-emphasis">
+      <button data-value="balanced" class="active">平衡</button>
+      <button data-value="strong">激进</button>
+    </div>
+  </div>
+</aside>
+
+
+<script>
+  // — Lucide icons —
+  if (window.lucide) lucide.createIcons();
+
+  // — Tweaks —
+  const html = document.documentElement;
+  const body = document.body;
+  const panel = document.getElementById('tweaksPanel');
+  const toggle = document.getElementById('tweaksToggle');
+  const close = document.getElementById('tweaksClose');
+
+  toggle.addEventListener('click', () => {
+    panel.classList.toggle('collapsed');
+  });
+  close.addEventListener('click', () => {
+    panel.classList.add('collapsed');
+  });
+
+  document.querySelectorAll('.tweak-options').forEach(group => {
+    const tweak = group.dataset.tweak;
+    group.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        group.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const value = btn.dataset.value;
+
+        if (tweak === 'theme') {
+          html.dataset.theme = value;
+          body.dataset.canvasTheme = value;
+        } else if (tweak === 'brand') {
+          html.dataset.brand = value;
+          // Recolor the toggle button to match new brand
+          const colors = { amber: '#905200', lavender: '#5944ad', sage: '#1f5005' };
+          toggle.style.background = colors[value];
+          toggle.style.boxShadow = `0 8px 20px -6px ${colors[value]}66`;
+        } else if (tweak === 'density') {
+          html.dataset.density = value;
+        } else if (tweak === 'shape-emphasis') {
+          // Toggle a more aggressive cookie shape on demand
+          const r = (value === 'strong')
+            ? '32% 68% 60% 40% / 60% 40% 50% 50%'
+            : '38% 62% 60% 40% / 50% 45% 55% 50%';
+          document.documentElement.style.setProperty('--md-shape-cookie-strong', r);
+          document.querySelectorAll('.scene-after .tool-capsule.success, .scene-after .avatar, .scene-after .list-item .leading, .hero-card .ico, .hero-card::before, .fab-item').forEach(el => {
+            el.style.borderRadius = r;
+          });
+        }
+      });
+    });
+  });
+</script>
+
+</body>
+</html>

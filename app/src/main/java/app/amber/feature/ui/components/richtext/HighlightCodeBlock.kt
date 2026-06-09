@@ -1,0 +1,517 @@
+package app.amber.feature.ui.components.richtext
+
+import android.content.ClipData
+import android.net.Uri
+import androidx.activity.compose.ManagedActivityResultLauncher
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import app.amber.highlight.HighlightText
+import app.amber.highlight.HighlightTextColorPalette
+import app.amber.highlight.Highlighter
+import app.amber.highlight.LocalHighlighter
+import app.amber.highlight.buildHighlightText
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
+import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Download04
+import me.rerere.hugeicons.stroke.Eye
+import app.amber.agent.R
+import app.amber.agent.Screen
+import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.context.LocalSettings
+import app.amber.feature.ui.context.Navigator
+import app.amber.feature.ui.modifier.onClick
+import app.amber.feature.ui.theme.AtomOneDarkPalette
+import app.amber.feature.ui.theme.AtomOneLightPalette
+import app.amber.feature.ui.theme.JetbrainsMono
+import app.amber.feature.ui.theme.LocalDarkMode
+import app.amber.core.utils.base64Encode
+import app.amber.core.utils.toDp
+import kotlin.time.Clock
+
+private const val COLLAPSE_LINES = 10
+private const val CODE_HIGHLIGHT_CROSSFADE_MS = 120
+
+internal fun displayCodeBlockContent(
+    code: String,
+    isExpanded: Boolean,
+    activeStreamingBlock: Boolean,
+): String {
+    if (activeStreamingBlock || isExpanded) return code
+    return code.lines().take(COLLAPSE_LINES).joinToString("\n")
+}
+
+@Composable
+fun HighlightCodeBlock(
+    code: String,
+    language: String,
+    modifier: Modifier = Modifier,
+    completeCodeBlock: Boolean = true,
+    style: TextStyle? = TextStyle(
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+    ),
+    forceAutoWrap: Boolean = false,
+) {
+    val darkMode = LocalDarkMode.current
+    val colorPalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette
+    val scrollState = rememberScrollState()
+    val clipboardManager = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    val navController = LocalNavController.current
+    val context = LocalContext.current
+    val settings = LocalSettings.current
+
+    var isExpanded by remember(settings.displaySetting.codeBlockAutoCollapse) {
+        mutableStateOf(!settings.displaySetting.codeBlockAutoCollapse)
+    }
+    val autoWrap = forceAutoWrap || settings.displaySetting.codeBlockAutoWrap
+    val showLineNumbers = settings.displaySetting.showLineNumbers
+
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*")
+    ) { uri: Uri? ->
+        uri?.let {
+            scope.launch {
+                try {
+                    context.contentResolver.openOutputStream(it)?.use { outputStream ->
+                        outputStream.write(code.toByteArray())
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large)
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            HighlightCodeActions(
+                language = language,
+                scope = scope,
+                clipboardManager = clipboardManager,
+                code = code,
+                createDocumentLauncher = createDocumentLauncher,
+                navController = navController,
+                completeCodeBlock = completeCodeBlock,
+            )
+        }
+        val codeTextStyle = LocalTextStyle.current.merge(style)
+        val activeStreamingBlock = LocalStreamingTailActive.current != null
+        Column(
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+        ) {
+            when {
+                completeCodeBlock && language == "mermaid" -> {
+                    Mermaid(
+                        code = code,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                else -> {
+                    val textStyle = codeTextStyle
+                    val codeLines = remember(code) { code.lines() }
+                    val displayCode = remember(code, isExpanded, activeStreamingBlock) {
+                        displayCodeBlockContent(
+                            code = code,
+                            isExpanded = isExpanded,
+                            activeStreamingBlock = activeStreamingBlock,
+                        )
+                    }
+                    val displayLines = remember(displayCode) { displayCode.lines() }
+
+                    // 如果显示行号且自动换行，需要逐行渲染以保持对齐
+                    when {
+                        showLineNumbers && autoWrap -> {
+                            CodeBlockWithLineNumbersWrapped(
+                                displayLines = displayLines,
+                                language = language,
+                                textStyle = textStyle,
+                                colorPalette = colorPalette,
+                                completeCodeBlock = completeCodeBlock,
+                            )
+                        }
+                        else -> {
+                            CodeBlockDefault(
+                                displayCode = displayCode,
+                                displayLines = displayLines,
+                                language = language,
+                                textStyle = textStyle,
+                                colorPalette = colorPalette,
+                                autoWrap = autoWrap,
+                                showLineNumbers = showLineNumbers,
+                                scrollState = scrollState,
+                                completeCodeBlock = completeCodeBlock,
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+                    // 代码折叠按钮
+                    if (settings.displaySetting.codeBlockAutoCollapse && codeLines.size > COLLAPSE_LINES) {
+                        Box(
+                            modifier = Modifier
+                                .onClick {
+                                    isExpanded = !isExpanded
+                                }
+                                .fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (isExpanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(textStyle.fontSize.toDp())
+                                )
+                                Text(
+                                    text = if (isExpanded) {
+                                        stringResource(id = R.string.code_block_collapse)
+                                    } else {
+                                        stringResource(id = R.string.code_block_expand)
+                                    },
+                                    fontSize = textStyle.fontSize,
+                                    lineHeight = textStyle.lineHeight,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CodeBlockWithLineNumbersWrapped(
+    displayLines: List<String>,
+    language: String,
+    textStyle: TextStyle,
+    colorPalette: HighlightTextColorPalette,
+    completeCodeBlock: Boolean = true,
+) {
+    val lineNumberWidth = remember(displayLines.size) {
+        displayLines.size.toString().length
+    }
+    SelectionContainer {
+        Column {
+            displayLines.forEachIndexed { index, line ->
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = (index + 1).toString().padStart(lineNumberWidth, ' '),
+                        fontSize = textStyle.fontSize,
+                        lineHeight = textStyle.lineHeight,
+                        fontFamily = JetbrainsMono,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        softWrap = false,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    SmoothHighlightText(
+                        highlighted = completeCodeBlock,
+                        code = line,
+                        language = language,
+                        textStyle = textStyle,
+                        colorPalette = colorPalette,
+                        overflow = TextOverflow.Visible,
+                        softWrap = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CodeBlockDefault(
+    displayCode: String,
+    displayLines: List<String>,
+    language: String,
+    textStyle: TextStyle,
+    colorPalette: HighlightTextColorPalette,
+    autoWrap: Boolean,
+    showLineNumbers: Boolean,
+    scrollState: ScrollState,
+    completeCodeBlock: Boolean = true,
+) {
+    Row(
+        modifier = if (autoWrap) {
+            Modifier.fillMaxWidth()
+        } else {
+            Modifier.horizontalScroll(scrollState)
+        }
+    ) {
+        // 行号列
+        if (showLineNumbers) {
+            val lineNumberWidth = remember(displayLines.size) {
+                displayLines.size.toString().length
+            }
+            Column(
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
+                displayLines.forEachIndexed { index, _ ->
+                    Text(
+                        text = (index + 1).toString().padStart(lineNumberWidth, ' '),
+                        fontSize = textStyle.fontSize,
+                        lineHeight = textStyle.lineHeight,
+                        fontFamily = JetbrainsMono,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        softWrap = false,
+                    )
+                }
+            }
+        }
+
+        // 代码列：autoWrap 时占满剩余宽度，softWrap 才能在最大宽度处折行；
+        // 否则保持 wrap-content 让 horizontalScroll 生效。
+        SelectionContainer(
+            modifier = if (autoWrap) Modifier.weight(1f) else Modifier
+        ) {
+            SmoothHighlightText(
+                highlighted = completeCodeBlock,
+                code = displayCode,
+                language = language,
+                textStyle = textStyle,
+                colorPalette = colorPalette,
+                overflow = TextOverflow.Visible,
+                softWrap = autoWrap,
+                modifier = Modifier.animateContentSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmoothHighlightText(
+    highlighted: Boolean,
+    code: String,
+    language: String,
+    textStyle: TextStyle,
+    colorPalette: HighlightTextColorPalette,
+    overflow: TextOverflow,
+    softWrap: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Crossfade(
+        targetState = highlighted,
+        animationSpec = tween(CODE_HIGHLIGHT_CROSSFADE_MS),
+        label = "code-highlight",
+        modifier = modifier,
+    ) { showHighlight ->
+        if (showHighlight) {
+            HighlightText(
+                code = code,
+                language = language,
+                fontSize = textStyle.fontSize,
+                lineHeight = textStyle.lineHeight,
+                colors = colorPalette,
+                overflow = overflow,
+                softWrap = softWrap,
+                fontFamily = JetbrainsMono,
+            )
+        } else {
+            Text(
+                text = code,
+                fontSize = textStyle.fontSize,
+                lineHeight = textStyle.lineHeight,
+                overflow = overflow,
+                softWrap = softWrap,
+                fontFamily = JetbrainsMono,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HighlightCodeActions(
+    language: String,
+    scope: CoroutineScope,
+    clipboardManager: Clipboard,
+    code: String,
+    createDocumentLauncher: ManagedActivityResultLauncher<String, Uri?>,
+    navController: Navigator,
+    completeCodeBlock: Boolean = true,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = language,
+            fontSize = 12.sp,
+            lineHeight = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+                .copy(alpha = 0.5f),
+        )
+        Spacer(Modifier.weight(1f))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val iconSize = 16.dp
+            val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+
+            Icon(
+                imageVector = HugeIcons.Download04,
+                contentDescription = stringResource(id = R.string.chat_page_save),
+                tint = iconTint,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .onClick {
+                        val extension = when (language.lowercase()) {
+                            "kotlin" -> "kt"
+                            "java" -> "java"
+                            "python" -> "py"
+                            "javascript" -> "js"
+                            "typescript" -> "ts"
+                            "cpp", "c++" -> "cpp"
+                            "c" -> "c"
+                            "html" -> "html"
+                            "css" -> "css"
+                            "xml" -> "xml"
+                            "json" -> "json"
+                            "yaml", "yml" -> "yml"
+                            "markdown", "md" -> "md"
+                            "sql" -> "sql"
+                            "sh", "bash" -> "sh"
+                            "svg" -> "svg"
+                            else -> "txt"
+                        }
+                        createDocumentLauncher.launch(
+                            "code_${
+                                Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                            }.$extension"
+                        )
+                    }
+                    .padding(4.dp)
+                    .size(iconSize)
+            )
+
+            Icon(
+                imageVector = HugeIcons.Copy01,
+                contentDescription = stringResource(id = R.string.code_block_copy),
+                tint = iconTint,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .onClick {
+                        scope.launch {
+                            clipboardManager.setClipEntry(ClipEntry(ClipData.newPlainText("code", code)))
+                        }
+                    }
+                    .padding(4.dp)
+                    .size(iconSize)
+            )
+
+            if (completeCodeBlock && (language == "html" || language == "svg")) {
+                Icon(
+                    imageVector = HugeIcons.Eye,
+                    contentDescription = stringResource(id = R.string.code_block_preview),
+                    tint = iconTint,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .onClick {
+                            val content = if (language == "svg") {
+                                """<!DOCTYPE html><html><body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;">$code</body></html>"""
+                            } else {
+                                code
+                            }
+                            navController.navigate(Screen.WebView(content = content.base64Encode()))
+                        }
+                        .padding(4.dp)
+                        .size(iconSize)
+                )
+            }
+        }
+    }
+}
+
+class HighlightCodeVisualTransformation(
+    val language: String,
+    val highlighter: Highlighter,
+    val darkMode: Boolean
+) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        return TransformedText(
+            text = text,
+            offsetMapping = OffsetMapping.Identity
+        )
+    }
+
+    companion object {
+        @Composable
+        fun regex() = HighlightCodeVisualTransformation(
+            language = "regex",
+            highlighter = LocalHighlighter.current,
+            darkMode = LocalDarkMode.current,
+        )
+    }
+}

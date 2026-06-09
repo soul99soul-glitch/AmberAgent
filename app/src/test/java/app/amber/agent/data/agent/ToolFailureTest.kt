@@ -1,0 +1,19 @@
+package app.amber.feature.runtime
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ToolFailureTest {
+    @Test
+    fun toolFailureJsonDoesNotExposeStackFrames() {
+        val error = IllegalStateException("boom")
+
+        val payload = error.toAgentToolFailureJson()
+
+        assertTrue(payload.contains("\"status\":\"failed\""))
+        assertTrue(payload.contains("\"message\":\"boom\""))
+        assertFalse(payload.contains("at app.amber."))
+        assertFalse(payload.contains("at java."))
+    }
+}

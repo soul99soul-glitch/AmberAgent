@@ -1,0 +1,30 @@
+{
+  "id": "douban",
+  "name": "豆瓣",
+  "version": 1,
+  "origins": [
+    "https://movie.douban.com",
+    "https://book.douban.com",
+    "https://music.douban.com",
+    "https://www.douban.com"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "login_cookie": "dbcl2",
+    "interactive_selectors": {
+      "subject_title": "#wrapper h1 span",
+      "rating_average": "strong.rating_num",
+      "review_text": ".review-content, .review-short .short-content"
+    },
+    "rate_limit": {
+      "http_status": 403,
+      "map_to": "DEGRADED"
+    }
+  },
+  "permissions": [
+    "read_cookie:dbcl2",
+    "detect_login",
+    "detect_rate_limit"
+  ],
+  "notes": "Pure profile — no native adapter. Use wm_open + wm_extract; expect occasional anti-bot 403 even when logged in."
+}

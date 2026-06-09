@@ -1,0 +1,72 @@
+[
+  {
+    "id": "source-han-serif-sc-regular",
+    "displayName": "思源宋体 SC Regular",
+    "category": "serif",
+    "language": "zh-Hans",
+    "familyCss": "Source Han Serif SC",
+    "fileName": "SourceHanSerifSC-Regular.otf",
+    "sourceUrl": "https://raw.githubusercontent.com/adobe-fonts/source-han-serif/release/OTF/SimplifiedChinese/SourceHanSerifSC-Regular.otf",
+    "licenseName": "SIL Open Font License 1.1",
+    "licenseUrl": "https://github.com/adobe-fonts/source-han-serif/blob/release/LICENSE.md",
+    "sourcePageUrl": "https://github.com/adobe-fonts/source-han-serif",
+    "fileSizeBytes": 24543332,
+    "sha256": "78aa7a328fd974df2d688c8a9fd74a33d8334dfa84ab24d9d11efb2ffc464117"
+  },
+  {
+    "id": "source-han-sans-sc-regular",
+    "displayName": "思源黑体 SC Regular",
+    "category": "sans",
+    "language": "zh-Hans",
+    "familyCss": "Source Han Sans SC",
+    "fileName": "SourceHanSansSC-Regular.otf",
+    "sourceUrl": "https://raw.githubusercontent.com/adobe-fonts/source-han-sans/release/OTF/SimplifiedChinese/SourceHanSansSC-Regular.otf",
+    "licenseName": "SIL Open Font License 1.1",
+    "licenseUrl": "https://github.com/adobe-fonts/source-han-sans/blob/release/LICENSE.md",
+    "sourcePageUrl": "https://github.com/adobe-fonts/source-han-sans",
+    "fileSizeBytes": 16529832,
+    "sha256": "f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256"
+  },
+  {
+    "id": "noto-serif-cjk-sc-regular",
+    "displayName": "Noto Serif CJK SC Regular",
+    "category": "serif",
+    "language": "zh-Hans",
+    "familyCss": "Noto Serif CJK SC",
+    "fileName": "NotoSerifCJKsc-Regular.otf",
+    "sourceUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Serif/OTF/SimplifiedChinese/NotoSerifCJKsc-Regular.otf",
+    "licenseName": "SIL Open Font License 1.1",
+    "licenseUrl": "https://github.com/notofonts/noto-cjk/blob/main/LICENSE",
+    "sourcePageUrl": "https://github.com/notofonts/noto-cjk",
+    "fileSizeBytes": 24543080,
+    "sha256": "2a2eae2628df83556c54018c41e20fa532c1b862c5256ae8b3f23feb918d12ca"
+  },
+  {
+    "id": "noto-sans-cjk-sc-regular",
+    "displayName": "Noto Sans CJK SC Regular",
+    "category": "sans",
+    "language": "zh-Hans",
+    "familyCss": "Noto Sans CJK SC",
+    "fileName": "NotoSansCJKsc-Regular.otf",
+    "sourceUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    "licenseName": "SIL Open Font License 1.1",
+    "licenseUrl": "https://github.com/notofonts/noto-cjk/blob/main/LICENSE",
+    "sourcePageUrl": "https://github.com/notofonts/noto-cjk",
+    "fileSizeBytes": 16437364,
+    "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b"
+  },
+  {
+    "id": "lxgw-wenkai-regular",
+    "displayName": "霞鹜文楷 Regular",
+    "category": "handwriting",
+    "language": "zh-Hans",
+    "familyCss": "LXGW WenKai",
+    "fileName": "LXGWWenKai-Regular.ttf",
+    "sourceUrl": "https://github.com/lxgw/LxgwWenKai/releases/download/v1.522/LXGWWenKai-Regular.ttf",
+    "licenseName": "SIL Open Font License 1.1",
+    "licenseUrl": "https://github.com/lxgw/LxgwWenKai/blob/main/OFL.txt",
+    "sourcePageUrl": "https://github.com/lxgw/LxgwWenKai",
+    "fileSizeBytes": 25575676,
+    "sha256": "39ad71264b588165b469e35e6afb162a378dacd1f95348160240ba9038ac3009"
+  }
+]

@@ -1,0 +1,117 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Rust + Android target
+        # Phase 2 Rust JNI: build the four native .so files into the release
+        # APK. Pinned to match local dev — drifting toolchains across two CI
+        # runs has caused codegen changes elsewhere; this is HARD-GATE-bound
+        # code so reproducibility wins.
+        #
+        # Action ref pinned to the version tag rather than @master — the
+        # action implementation itself has changed input names mid-cycle
+        # before (round 2 review R2-P2-3).
+        uses: dtolnay/rust-toolchain@1.82.0
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked --version 3.5.4
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        # Pinned to the full version triple to match local dev exactly
+        # (document/build.gradle.kts defaults to `27.0.12077973`).
+        # Mismatched NDK micro versions can change R8/ProGuard interactions
+        # with native code; lock to one (review P2-4).
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: 27.0.12077973
+          add-to-path: true
+          local-cache: true
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/**/Cargo.lock', 'native/**/Cargo.toml') }}
+
+      - name: Prepare build files
+        run: |
+          # 解码base64编码的keystore文件
+          echo "${{ secrets.KEY_BASE64 }}" | base64 -d > app/app.key
+
+          # 写入签名配置到local.properties
+          echo "${{ secrets.SIGNING_CONFIG }}" > local.properties
+
+          # 写入Google Services配置
+          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
+
+      - name: Gradle Build
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Verify native .so files present in release APK
+        # Phase 2 HARD GATE assertion (SPIKE_PLAN §8.3): if the release APK
+        # ships without one of the 4 native libraries, every user on the
+        # native cohort would silently fall back to JVM — a regression we
+        # would only catch via metrics. Fail loud at build time instead.
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          echo "Inspecting $APK"
+          expected=(
+            "lib/arm64-v8a/liboffice_parsers.so"
+            "lib/arm64-v8a/libmarkdown_parser.so"
+            "lib/arm64-v8a/libhighlight_parser.so"
+            "lib/arm64-v8a/libregex_transformer.so"
+          )
+          missing=()
+          for so in "${expected[@]}"; do
+            if ! unzip -l "$APK" | awk '{print $4}' | grep -qx "$so"; then
+              missing+=("$so")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Release APK is missing native libraries:"
+            printf '  - %s\n' "${missing[@]}"
+            exit 1
+          fi
+          echo "All 4 native libraries present."
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: artifacts
+          path: app/build/outputs/apk/release/*.apk

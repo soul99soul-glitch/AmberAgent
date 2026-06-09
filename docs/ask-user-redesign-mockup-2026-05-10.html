@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ask_user UI 重设计对比 — AmberAgent</title>
+<style>
+  :root{
+    --bg:#f5f5f7;
+    --panel:#ffffff;
+    --ink:#1c1c1e;
+    --ink2:#3a3a3c;
+    --muted:#6b6b70;
+    --faint:#a1a1a6;
+    --hair:#e5e5e7;
+    --chip-bg:#eef0f3;
+    --chip-bg-on:#e3e8ef;
+    --chip-fg:#3a3a3c;
+    --chip-fg-on:#1c1c1e;
+    --primary:#6b4eff;
+    --primary-on:#ffffff;
+    --primary-soft:#efeaff;
+    --secondary:#3a3a3c;
+    --success:#1f9d55;
+    --danger:#d83a3a;
+    --warning:#c97f00;
+    --note-bg:#fff7e2;
+    --note-fg:#7a5800;
+    --good-bg:#e7f7ec;
+    --good-fg:#1f6f3d;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);font-family:-apple-system,system-ui,"PingFang SC","Helvetica Neue",sans-serif;color:var(--ink);}
+  .wrap{max-width:1480px;margin:0 auto;padding:32px 24px 64px;}
+  h1{font-size:26px;font-weight:700;margin:0 0 6px;}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 28px;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;}
+  @media (max-width:980px){.grid{grid-template-columns:1fr;}}
+
+  .col{display:flex;flex-direction:column;gap:14px;}
+  .col h2{font-size:15px;font-weight:600;margin:0;letter-spacing:.02em;color:var(--ink2);}
+  .col h2 .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;margin-left:6px;vertical-align:middle;}
+  .tag.before{background:#fde2e2;color:var(--danger);}
+  .tag.after{background:var(--good-bg);color:var(--good-fg);}
+
+  /* phone frame */
+  .phone{background:var(--panel);border:1px solid var(--hair);border-radius:18px;padding:14px;box-shadow:0 6px 20px rgba(0,0,0,.04);}
+  .phone .topbar{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--faint);padding:0 4px 10px;border-bottom:1px dashed var(--hair);}
+  .phone .topbar small{font-weight:600;color:var(--muted);}
+  .convo{padding:14px 4px 4px;display:flex;flex-direction:column;gap:14px;}
+
+  /* user bubble */
+  .user-bubble{align-self:flex-end;max-width:78%;background:#eef0f3;border-radius:12px;padding:10px 12px;font-size:13px;color:var(--ink2);}
+
+  /* assistant header */
+  .a-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);}
+  .a-head .dot{width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#7e6bff,#a892ff);}
+
+  /* ============ BEFORE: ask_user inside ChainOfThought ============ */
+  .chain{
+    border-left:2px solid var(--hair);
+    padding:6px 0 6px 14px;
+    margin-left:8px;
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .chain .step{
+    display:flex;align-items:flex-start;gap:8px;
+    font-size:12px;color:var(--muted);
+  }
+  .chain .step .ico{width:14px;height:14px;border-radius:3px;background:#cdd2db;flex-shrink:0;margin-top:2px;}
+  .chain .step.collapsed-ask{
+    background:transparent;
+  }
+  .chain .ask-step{
+    margin-top:2px;
+  }
+  .chain .ask-head{
+    display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);
+    cursor:default;
+  }
+  .chain .ask-head .ico-q{width:14px;height:14px;border:1.5px solid var(--muted);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0;}
+  .chain .ask-head .qlabel{font-size:13px;color:#5854b3;font-weight:500;}
+  .chain .ask-body{margin-top:6px;display:flex;flex-direction:column;gap:10px;}
+  .chain .ask-body .qtext{font-size:11.5px;color:var(--ink);line-height:1.4;}
+  .chain .chips{display:flex;flex-wrap:wrap;gap:5px;}
+  .chain .chip{
+    border:1px solid #d4d6db;
+    background:#f7f8fa;
+    color:#494c52;
+    padding:3px 9px;border-radius:9px;font-size:10.5px;
+  }
+  .chain .chip.sel{
+    background:#dde2ff;border-color:#b9c0ff;color:#3a3f80;
+  }
+  .chain .input{
+    border:1px solid #cdd2db;border-radius:6px;padding:6px 8px;font-size:11.5px;color:var(--faint);background:#fafbfc;
+  }
+  .chain .submit-tonal{
+    align-self:flex-end;
+    background:#e6e6f5;color:#5854b3;
+    border:none;border-radius:18px;
+    padding:5px 12px;font-size:11.5px;font-weight:500;
+    display:inline-flex;align-items:center;gap:4px;cursor:default;
+  }
+
+  /* ============ AFTER: standalone Ask card ============ */
+  .ask-card{
+    background:linear-gradient(180deg,var(--primary-soft),#fafaff 35%);
+    border:1.5px solid #d4c8ff;
+    border-radius:14px;
+    padding:14px 14px 12px;
+    box-shadow:0 4px 14px rgba(107,78,255,.08);
+    display:flex;flex-direction:column;gap:12px;
+    position:relative;
+  }
+  .ask-card::before{
+    content:"";position:absolute;left:-2px;top:14px;bottom:14px;width:3px;background:var(--primary);border-radius:2px;
+  }
+  .ask-card .head{
+    display:flex;align-items:center;gap:8px;font-size:12px;color:var(--primary);font-weight:600;
+  }
+  .ask-card .head .ico-q{width:18px;height:18px;border:1.5px solid var(--primary);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;}
+  .ask-card .head .pulse{margin-left:auto;font-size:10px;color:var(--primary);background:#fff;border:1px solid var(--primary);padding:2px 7px;border-radius:9px;}
+  .ask-card .qblock{display:flex;flex-direction:column;gap:8px;}
+  .ask-card .qblock + .qblock{border-top:1px dashed #d6cdff;padding-top:10px;}
+  .ask-card .qtext{font-size:14px;color:var(--ink);font-weight:500;line-height:1.45;}
+  .ask-card .chips{display:flex;flex-wrap:wrap;gap:6px;}
+  .ask-card .chip{
+    border:1.5px solid #d4d6db;
+    background:#fff;
+    color:var(--ink2);
+    padding:6px 12px;border-radius:18px;font-size:13px;font-weight:500;
+    display:inline-flex;align-items:center;gap:4px;
+  }
+  .ask-card .chip.sel{
+    background:var(--primary);
+    color:var(--primary-on);
+    border-color:var(--primary);
+    box-shadow:0 2px 8px rgba(107,78,255,.25);
+  }
+  .ask-card .chip.sel::before{
+    content:"✓";font-weight:700;font-size:11px;
+  }
+  .ask-card .input{
+    border:1.5px solid #d4c8ff;border-radius:10px;padding:10px 12px;font-size:13.5px;color:var(--ink);background:#fff;
+    min-height:38px;
+  }
+  .ask-card .input.placeholder{color:var(--faint);}
+  .ask-card .actions{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .ask-card .reset{
+    color:var(--muted);background:transparent;border:none;font-size:12px;font-weight:500;
+    padding:4px 10px;cursor:default;
+  }
+  .ask-card .submit{
+    background:var(--primary);color:#fff;border:none;border-radius:22px;
+    padding:9px 18px;font-size:13.5px;font-weight:600;
+    display:inline-flex;align-items:center;gap:6px;
+    box-shadow:0 4px 12px rgba(107,78,255,.3);cursor:default;
+  }
+
+  /* answered state */
+  .answered{
+    background:#fafbfc;border:1px solid var(--hair);border-radius:12px;padding:12px;
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .answered .qa{display:flex;gap:10px;align-items:flex-start;}
+  .answered .qa .lbl{font-size:11px;font-weight:700;color:var(--muted);min-width:14px;padding-top:1px;}
+  .answered .qa .lbl.q{color:var(--muted);}
+  .answered .qa .lbl.a{color:var(--primary);}
+  .answered .qa .txt-q{font-size:13px;color:var(--ink2);line-height:1.4;}
+  .answered .qa .txt-a{font-size:13.5px;color:var(--ink);font-weight:500;line-height:1.4;}
+  .answered.before-style{
+    background:transparent;border:none;padding:0;
+  }
+  .answered.before-style .qa{display:block;font-size:12px;}
+  .answered.before-style .qa .txt-q{font-size:11.5px;color:var(--ink);}
+  .answered.before-style .qa .txt-a{font-size:12px;color:#5854b3;font-weight:400;}
+
+  /* ============ annotation system ============ */
+  .annotations{margin-top:18px;display:flex;flex-direction:column;gap:8px;}
+  .anno{display:flex;gap:10px;font-size:12.5px;color:var(--ink2);align-items:flex-start;}
+  .anno .num{
+    flex-shrink:0;width:22px;height:22px;border-radius:50%;
+    background:var(--primary);color:#fff;font-size:11px;font-weight:700;
+    display:inline-flex;align-items:center;justify-content:center;
+  }
+  .anno .text{padding-top:2px;line-height:1.5;}
+  .anno .text b{color:var(--ink);}
+  .anno .text .from{color:var(--danger);}
+  .anno .text .to{color:var(--good-fg);font-weight:600;}
+
+  /* hot-spot markers on the mockups */
+  .marker{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:18px;height:18px;border-radius:50%;
+    background:var(--primary);color:#fff;font-size:10px;font-weight:700;
+    margin-left:6px;vertical-align:middle;
+    box-shadow:0 0 0 2px #fff,0 0 0 3px var(--primary);
+  }
+  .marker.before{background:var(--danger);box-shadow:0 0 0 2px #fff,0 0 0 3px var(--danger);}
+
+  .legend{
+    background:var(--note-bg);border-left:3px solid var(--warning);
+    padding:10px 14px;border-radius:6px;font-size:13px;color:var(--note-fg);margin-bottom:24px;
+  }
+  .legend b{color:#5e4400;}
+
+  .section-title{
+    font-size:18px;font-weight:600;margin:36px 0 14px;color:var(--ink);
+    border-bottom:1px solid var(--hair);padding-bottom:8px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ask_user UI 重设计对比</h1>
+  <p class="sub">AmberAgent · ChatMessageTools.kt:1049 / AskUserToolStep · 2026-05-10 · 重新打开预览</p>
+
+  <div class="legend">
+    <b>看法说明：</b>左边是<b>当前实现</b>（ChainOfThought 内嵌折叠子卡），右边是<b>建议改造</b>（独立 Ask 卡片）。同一份 ask_user 数据：3 个问题（single / multi / text 各一）。
+  </div>
+
+  <div class="section-title">Pending 状态（用户尚未回答）</div>
+
+  <div class="grid">
+    <!-- ====================== BEFORE ====================== -->
+    <div class="col">
+      <h2>当前 <span class="tag before">现状</span></h2>
+      <div class="phone">
+        <div class="topbar"><small>晚餐食谱 PPT</small><span>00:42</span></div>
+        <div class="convo">
+          <div class="user-bubble">帮我做一份 6 页晚餐食谱 PPT</div>
+
+          <div class="a-head"><span class="dot"></span>deepseek-v4-pro</div>
+
+          <div class="chain">
+            <div class="step"><span class="ico"></span><span>思考了 4.2 秒</span></div>
+            <div class="step"><span class="ico"></span><span>调用工具 use_skill</span></div>
+
+            <div class="ask-step">
+              <div class="ask-head">
+                <span class="ico-q">?</span>
+                <span class="qlabel">需要 3 项确认 <span class="marker before">2</span></span>
+              </div>
+              <div class="ask-body">
+                <div>
+                  <div class="qtext">这份 PPT 给谁看？<span class="marker before">2</span></div>
+                  <div class="chips">
+                    <span class="chip">家人</span>
+                    <span class="chip sel">朋友聚餐</span>
+                    <span class="chip">同事分享</span>
+                  </div>
+                </div>
+                <div>
+                  <div class="qtext">想要包含哪几类菜？(可多选)</div>
+                  <div class="chips">
+                    <span class="chip sel">凉菜</span>
+                    <span class="chip">硬菜</span>
+                    <span class="chip sel">主食</span>
+                    <span class="chip">汤</span>
+                    <span class="chip">甜品</span>
+                  </div>
+                </div>
+                <div>
+                  <div class="qtext">有什么忌口？</div>
+                  <div class="input placeholder">点击输入…</div>
+                </div>
+                <button class="submit-tonal"><span>✓</span>提交 <span class="marker before">5</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="annotations">
+        <div class="anno"><span class="num" style="background:var(--danger);">1</span><span class="text"><b class="from">混在 ChainOfThought 折叠区</b>：和 reasoning step / tool call 同层级，视觉权重等同"附属信息"，用户容易划过</span></div>
+        <div class="anno"><span class="num" style="background:var(--danger);">2</span><span class="text"><b class="from">字号最小档</b>：问题 11.5px (bodySmall)、chip 文字 10.5px (labelSmall)，"需要做决定"的 UI 用最小字号反人类</span></div>
+        <div class="anno"><span class="num" style="background:var(--danger);">3</span><span class="text"><b class="from">Chip 选中态弱</b>：FilterChip 默认浅蓝填充 + 浅蓝边框，选了哪个不一眼可见</span></div>
+        <div class="anno"><span class="num" style="background:var(--danger);">4</span><span class="text"><b class="from">无视觉聚焦</b>：出现时不滚动、不振动、不高亮，用户低头看其他 chip 时会漏</span></div>
+        <div class="anno"><span class="num" style="background:var(--danger);">5</span><span class="text"><b class="from">CTA 等级错</b>：用 FilledTonalButton（次级），但这是唯一推动对话的关键操作</span></div>
+        <div class="anno"><span class="num" style="background:var(--danger);">6</span><span class="text"><b class="from">无重置/跳过</b>：选错只能逐个改；无法跳过单个问题</span></div>
+      </div>
+    </div>
+
+    <!-- ====================== AFTER ====================== -->
+    <div class="col">
+      <h2>建议 <span class="tag after">改造后</span></h2>
+      <div class="phone">
+        <div class="topbar"><small>晚餐食谱 PPT</small><span>00:42</span></div>
+        <div class="convo">
+          <div class="user-bubble">帮我做一份 6 页晚餐食谱 PPT</div>
+
+          <div class="a-head"><span class="dot"></span>deepseek-v4-pro</div>
+
+          <div class="chain">
+            <div class="step"><span class="ico"></span><span>思考了 4.2 秒</span></div>
+            <div class="step"><span class="ico"></span><span>调用工具 use_skill</span></div>
+          </div>
+
+          <!-- standalone, OUT of chain -->
+          <div class="ask-card">
+            <div class="head">
+              <span class="ico-q">?</span>
+              <span>Amber 想确认 3 件事</span>
+              <span class="pulse">需要回答</span>
+            </div>
+
+            <div class="qblock">
+              <div class="qtext">这份 PPT 给谁看？</div>
+              <div class="chips">
+                <span class="chip">家人</span>
+                <span class="chip sel">朋友聚餐</span>
+                <span class="chip">同事分享</span>
+              </div>
+            </div>
+
+            <div class="qblock">
+              <div class="qtext">想要包含哪几类菜？<span style="font-size:11px;color:var(--muted);font-weight:400;">（可多选）</span></div>
+              <div class="chips">
+                <span class="chip sel">凉菜</span>
+                <span class="chip">硬菜</span>
+                <span class="chip sel">主食</span>
+                <span class="chip">汤</span>
+                <span class="chip">甜品</span>
+              </div>
+            </div>
+
+            <div class="qblock">
+              <div class="qtext">有什么忌口？</div>
+              <div class="input placeholder">不吃辣 / 不吃海鲜… 留空也可</div>
+            </div>
+
+            <div class="actions">
+              <button class="reset">↺ 重置</button>
+              <button class="submit"><span>✓</span> 提交回答</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="annotations">
+        <div class="anno"><span class="num">1</span><span class="text"><b>独立卡片</b>：移出 ChainOfThought，左侧 3px 紫色脊柱条 + 浅紫渐变背景，视觉权重升到"必须处理"</span></div>
+        <div class="anno"><span class="num">2</span><span class="text"><b>字号升档</b>：问题 14px (bodyMedium 加粗)、chip 文字 13px (bodyMedium)；输入框 13.5px</span></div>
+        <div class="anno"><span class="num">3</span><span class="text"><b>Chip 强对比</b>：选中变 primary 色填充 + 白字 + ✓ 前缀 + 阴影，未选中是白底浅灰边框，对比一目了然</span></div>
+        <div class="anno"><span class="num">4</span><span class="text"><b>视觉聚焦</b>：出现时自动滚动到卡片 + 短促 haptic + 右上角 "需要回答" 标签提示状态；多问题之间有虚线分隔</span></div>
+        <div class="anno"><span class="num">5</span><span class="text"><b>CTA 升 Primary</b>：FilledButton 紫色 + 阴影 + 圆角 22dp，明确"这是必须点的按钮"</span></div>
+        <div class="anno"><span class="num">6</span><span class="text"><b>左下加重置</b>：选错可一键清空；text 输入有占位提示 "留空也可" 暗示可跳过</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">Answered 状态（用户已回答完毕）</div>
+
+  <div class="grid">
+    <!-- BEFORE answered -->
+    <div class="col">
+      <h2>当前 <span class="tag before">现状</span></h2>
+      <div class="phone">
+        <div class="topbar"><small>晚餐食谱 PPT</small><span>00:43</span></div>
+        <div class="convo">
+          <div class="a-head"><span class="dot"></span>deepseek-v4-pro</div>
+          <div class="chain">
+            <div class="step"><span class="ico"></span><span>调用工具 ask_user</span></div>
+            <div class="answered before-style">
+              <div class="qa">
+                <div class="txt-q">这份 PPT 给谁看？</div>
+                <div class="txt-a">朋友聚餐</div>
+              </div>
+              <div class="qa">
+                <div class="txt-q">想要包含哪几类菜？</div>
+                <div class="txt-a">凉菜, 主食</div>
+              </div>
+              <div class="qa">
+                <div class="txt-q">有什么忌口？</div>
+                <div class="txt-a">不吃香菜</div>
+              </div>
+            </div>
+            <div class="step"><span class="ico"></span><span>思考了 6.8 秒</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="annotations">
+        <div class="anno"><span class="num" style="background:var(--danger);">1</span><span class="text"><b class="from">Q/A 没有视觉区分</b>：问题用一种暗灰色，答案用 primary 紫色，但都是 12px、堆叠紧密，扫读时分不清谁是问、谁是答</span></div>
+        <div class="anno"><span class="num" style="background:var(--danger);">2</span><span class="text"><b class="from">multi 答案用 ", " 拼字符串</b>：模型收到 "凉菜, 主食"，可能把它当一个 string，含逗号的选项会破坏结构</span></div>
+        <div class="anno"><span class="num" style="background:var(--danger);">3</span><span class="text">折叠后历史不能查阅，重新展开 ChainOfThought 才能看到</span></div>
+      </div>
+    </div>
+
+    <!-- AFTER answered -->
+    <div class="col">
+      <h2>建议 <span class="tag after">改造后</span></h2>
+      <div class="phone">
+        <div class="topbar"><small>晚餐食谱 PPT</small><span>00:43</span></div>
+        <div class="convo">
+          <div class="a-head"><span class="dot"></span>deepseek-v4-pro</div>
+          <div class="chain">
+            <div class="step"><span class="ico"></span><span>调用工具 ask_user</span></div>
+          </div>
+          <div class="answered">
+            <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.04em;">已回答</div>
+            <div class="qa">
+              <span class="lbl q">Q</span>
+              <div style="flex:1;">
+                <div class="txt-q">这份 PPT 给谁看？</div>
+              </div>
+            </div>
+            <div class="qa">
+              <span class="lbl a">A</span>
+              <div style="flex:1;">
+                <div class="txt-a">朋友聚餐</div>
+              </div>
+            </div>
+            <div class="qa">
+              <span class="lbl q">Q</span>
+              <div style="flex:1;">
+                <div class="txt-q">想要包含哪几类菜？</div>
+              </div>
+            </div>
+            <div class="qa">
+              <span class="lbl a">A</span>
+              <div style="flex:1;">
+                <div class="txt-a">凉菜 · 主食</div>
+              </div>
+            </div>
+            <div class="qa">
+              <span class="lbl q">Q</span>
+              <div style="flex:1;">
+                <div class="txt-q">有什么忌口？</div>
+              </div>
+            </div>
+            <div class="qa">
+              <span class="lbl a">A</span>
+              <div style="flex:1;">
+                <div class="txt-a">不吃香菜</div>
+              </div>
+            </div>
+          </div>
+          <div class="chain">
+            <div class="step"><span class="ico"></span><span>思考了 6.8 秒</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="annotations">
+        <div class="anno"><span class="num">1</span><span class="text"><b>清晰 Q / A 标签</b>：左侧 11px 字母圆角徽章，灰色 Q 配紫色 A，扫读节奏分明</span></div>
+        <div class="anno"><span class="num">2</span><span class="text"><b>multi 改用 JSON array 提交</b>，UI 显示用 "·" 替代 ", "（含逗号选项不会被破坏；模型解析为 ["凉菜","主食"]）</span></div>
+        <div class="anno"><span class="num">3</span><span class="text"><b>独立卡片留在对话流</b>，不被折叠；后续滚动也能随时回看</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">变更覆盖范围</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+    <div style="background:#fff;border:1px solid var(--hair);border-radius:12px;padding:16px;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px;color:var(--good-fg);">建议改造（前 6 条 · 约 1 小时）</div>
+      <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.7;color:var(--ink2);">
+        <li><b>CTA 升 Primary</b> + <b>字号升一档</b>（5min）</li>
+        <li><b>Chip 选中态强化</b>：primary 填充 + ✓ 前缀（15min）</li>
+        <li><b>自动滚动 + haptic</b>：出现时聚焦（15min）</li>
+        <li><b>multi 改 JSON array 提交</b>（5min）</li>
+        <li><b>键盘 IME action = Done</b>，单 question 时回车提交（10min）</li>
+        <li><b>已答态 Q / A 分行</b> + 浅灰背景区分（15min）</li>
+      </ul>
+    </div>
+    <div style="background:#fff;border:1px solid var(--hair);border-radius:12px;padding:16px;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px;color:#5854b3;">独立卡片化（约 1 小时 · 影响范围大）</div>
+      <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.7;color:var(--ink2);">
+        <li>抽出 AskUserToolStep 不进 ChainOfThought</li>
+        <li>新增 <code style="background:#f0eef9;padding:1px 4px;border-radius:3px;font-size:12px;">AskUserCard</code> 顶层组件</li>
+        <li>ChatMessage / VirtualItem 增加 ASK_USER 分支</li>
+        <li>需要权衡：嵌入思考链上下文连贯 vs 独立卡视觉权重</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

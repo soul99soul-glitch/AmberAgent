@@ -1,0 +1,1906 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amber Agent · 主聊天页 UI 重构稿 · 2026-05-23</title>
+<style>
+  /* ============================================================
+     DESIGN TOKENS
+     ============================================================ */
+  :root {
+    /* Light */
+    --canvas: #F7F7F5;
+    --paper: #FFFFFF;
+    --row: #FAFAF8;
+    --ink: #1F1F1F;
+    --muted: #6B6761;
+    --faint: #9B9690;
+    --hairline: rgba(0, 0, 0, 0.085);
+    --hairline-soft: rgba(0, 0, 0, 0.045);
+
+    /* Brand blue — light scope */
+    --blue: #6BA8FF;
+    --blue-deep: #4A8FE8;
+    --blue-container: color-mix(in srgb, var(--blue) 16%, white);
+    --blue-glow: color-mix(in srgb, var(--blue) 28%, transparent);
+  }
+
+  .phone.dark {
+    --canvas: #0B0B0D;
+    --paper: #141417;
+    --row: #18181C;
+    --ink: #F1F3F5;
+    --muted: #A7ABB2;
+    --faint: #666C74;
+    --hairline: #22252B;
+    --hairline-soft: #1A1D22;
+
+    --blue: #82B7FF;
+    --blue-deep: #6BA8FF;
+    --blue-container: color-mix(in srgb, var(--blue) 22%, #0D1620);
+    --blue-glow: color-mix(in srgb, var(--blue) 30%, transparent);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Segoe UI", "Microsoft Yahei", sans-serif; }
+
+  body {
+    background: #ECECEE;
+    color: #1F1F1F;
+    padding: 64px 24px 160px;
+    -webkit-font-smoothing: antialiased;
+    text-wrap: pretty;
+  }
+
+  /* ============================================================
+     DOC HEADER
+     ============================================================ */
+  .doc-header {
+    max-width: 1280px;
+    margin: 0 auto 64px;
+    padding: 0 8px;
+  }
+  .doc-eyebrow {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: #6B6761;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .doc-title {
+    font-size: 34px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin-bottom: 14px;
+    color: #1A1A1C;
+  }
+  .doc-lede {
+    font-size: 15.5px;
+    color: #5C5853;
+    max-width: 760px;
+    line-height: 1.65;
+  }
+  .doc-lede strong { color: #1F1F1F; font-weight: 600; }
+
+  .token-strip {
+    margin-top: 32px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    max-width: 1080px;
+  }
+  .token-card {
+    background: white;
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .token-card h4 {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6B6761;
+    margin-bottom: 11px;
+    font-weight: 600;
+  }
+  .token-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    margin-bottom: 7px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #3D3A36;
+  }
+  .token-row:last-child { margin-bottom: 0; }
+  .token-row .lbl { color: #6B6761; min-width: 64px; }
+  .token-swatch {
+    width: 14px; height: 14px;
+    border-radius: 4px;
+    border: 1px solid rgba(0,0,0,0.08);
+    flex-shrink: 0;
+  }
+
+  /* ============================================================
+     FRAME GRID
+     ============================================================ */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+    gap: 64px 36px;
+    justify-items: center;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .frame {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    max-width: 420px;
+  }
+
+  .caption {
+    text-align: center;
+    max-width: 380px;
+  }
+  .caption .title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1F1F1F;
+    margin-bottom: 5px;
+    letter-spacing: -0.005em;
+  }
+  .caption .note {
+    font-size: 12.5px;
+    color: #6B6761;
+    line-height: 1.6;
+  }
+  .caption .note code {
+    background: rgba(0,0,0,0.05);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+  }
+
+  /* ============================================================
+     PHONE BEZEL
+     ============================================================ */
+  .phone {
+    width: 390px;
+    height: 844px;
+    background: var(--canvas);
+    border-radius: 52px;
+    box-shadow:
+      0 0 0 1.5px #2A2A2E,
+      0 0 0 11px #16161B,
+      0 0 0 12px #2E2E33,
+      0 38px 80px -28px rgba(20, 20, 40, 0.22),
+      0 12px 28px -10px rgba(20, 20, 40, 0.14);
+    overflow: hidden;
+    position: relative;
+    color: var(--ink);
+    isolation: isolate;
+  }
+
+  /* Inner screen */
+  .screen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--canvas);
+  }
+
+  /* ============================================================
+     STATUS BAR
+     ============================================================ */
+  .status-bar {
+    height: 46px;
+    padding: 14px 28px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    flex-shrink: 0;
+    color: var(--ink);
+    position: relative;
+    z-index: 5;
+  }
+  .status-bar .right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .status-bar .right svg { color: var(--ink); }
+  .battery {
+    border: 1.2px solid var(--ink);
+    border-radius: 4px;
+    padding: 1.5px 4px 1.5px 3px;
+    font-size: 9px;
+    font-weight: 700;
+    position: relative;
+    line-height: 1;
+  }
+  .battery::after {
+    content: "";
+    position: absolute;
+    right: -3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1.5px; height: 5px;
+    background: var(--ink);
+    border-radius: 0 1px 1px 0;
+  }
+
+  /* ============================================================
+     TOP BAR
+     ============================================================ */
+  .top-bar {
+    height: 52px;
+    padding: 0 12px 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 4;
+    background: var(--canvas);
+  }
+  .top-bar .left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 120ms ease;
+  }
+  .icon-btn:hover { background: var(--hairline-soft); }
+  .icon-btn.muted { color: var(--muted); }
+  .icon-btn.accent { color: var(--blue-deep); }
+
+  .model-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px 4px 8px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 17px;
+    color: var(--ink);
+    letter-spacing: -0.012em;
+    min-width: 0;
+    transition: background 120ms ease;
+  }
+  .model-pill:hover { background: var(--hairline-soft); }
+  .model-pill .chev {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--muted);
+    margin-top: 1px;
+  }
+
+  /* ============================================================
+     CONTENT AREA
+     ============================================================ */
+  .content {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Sky-blue ambient — Gemini-style atmospheric rise from bottom half of the
+     screen, not a tiny glow. Linear lift + a slightly off-center radial
+     for natural-looking light. */
+  .sky-glow {
+    position: absolute;
+    left: 0; right: 0; bottom: -80px;
+    height: 520px;
+    pointer-events: none;
+    background:
+      linear-gradient(to top,
+        var(--blue-glow) 0%,
+        color-mix(in srgb, var(--blue) 12%, transparent) 36%,
+        color-mix(in srgb, var(--blue) 4%, transparent) 62%,
+        transparent 84%),
+      radial-gradient(150% 80% at 50% 120%,
+        color-mix(in srgb, var(--blue) 22%, transparent) 0%,
+        transparent 58%);
+    z-index: 0;
+  }
+
+  /* ============================================================
+     INPUT REGION (capsule composer)
+     ============================================================ */
+  .input-region {
+    padding: 4px 12px 28px;
+    position: relative;
+    z-index: 3;
+  }
+  .composer {
+    height: 62px;
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: 31px;
+    display: flex;
+    align-items: center;
+    padding: 0 7px 0 6px;
+    gap: 4px;
+    box-shadow:
+      0 1px 0 rgba(0,0,0,0.02),
+      0 12px 28px -16px rgba(0,0,0,0.08);
+  }
+  .composer .add-btn {
+    width: 44px; height: 44px;
+    border-radius: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink);
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .composer .add-btn:hover { background: var(--hairline-soft); }
+  .composer .add-btn.expanded {
+    color: var(--blue-deep);
+    background: var(--blue-container);
+  }
+  .composer .divider {
+    width: 1px; height: 22px;
+    background: var(--hairline);
+    flex-shrink: 0;
+    margin: 0 2px;
+  }
+  .composer .field {
+    flex: 1;
+    font-size: 15px;
+    color: var(--faint);
+    padding: 0 4px;
+    letter-spacing: -0.005em;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .composer .field.typed {
+    color: var(--ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 14.5px;
+  }
+  .composer .field.typed .caret {
+    display: inline-block;
+    width: 1.5px; height: 16px;
+    background: var(--blue);
+    vertical-align: -3px;
+    margin-left: 1px;
+    animation: blink 1.05s steps(1) infinite;
+  }
+  .composer .slash-chip {
+    height: 30px;
+    min-width: 30px;
+    padding: 0 9px;
+    border-radius: 9px;
+    border: 1px solid color-mix(in srgb, var(--blue) 45%, transparent);
+    background: var(--blue-container);
+    color: var(--blue-deep);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 14.5px;
+    font-weight: 700;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    flex-shrink: 0;
+    margin-right: 4px;
+    cursor: pointer;
+  }
+  .composer .slash-chip.active {
+    background: var(--blue);
+    color: white;
+    border-color: var(--blue);
+  }
+  .composer .send {
+    width: 44px; height: 44px;
+    border-radius: 22px;
+    background: var(--blue);
+    color: white;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--blue) 55%, transparent);
+    transition: background 120ms ease;
+  }
+  .composer .send:hover { background: var(--blue-deep); }
+  .composer .send.muted {
+    background: var(--blue-container);
+    color: color-mix(in srgb, var(--blue) 60%, white);
+    box-shadow: none;
+  }
+  .phone.dark .composer .send.muted {
+    color: color-mix(in srgb, var(--blue) 70%, transparent);
+  }
+
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+
+  /* ============================================================
+     OPTIONAL GREETING (toggled via Tweaks → 问候)
+     ============================================================ */
+  .greeting {
+    position: absolute;
+    left: 0; right: 0;
+    top: 40%;
+    transform: translateY(-50%);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    z-index: 1;
+    padding: 0 32px;
+    pointer-events: none;
+  }
+  body.show-greeting .greeting { display: flex; }
+  .sparkle {
+    width: 28px; height: 28px;
+    background:
+      conic-gradient(from 90deg at 50% 50%,
+        #5390ff 0%, #b385f0 28%, #ff80a6 52%, #ffb068 76%, #5390ff 100%);
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 1.6 13.7 8.6 22 12 13.7 15.4 12 22.4 10.3 15.4 2 12 10.3 8.6z'/></svg>") center / contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 1.6 13.7 8.6 22 12 13.7 15.4 12 22.4 10.3 15.4 2 12 10.3 8.6z'/></svg>") center / contain no-repeat;
+  }
+  .greet-text {
+    font-size: 28px;
+    font-weight: 400;
+    color: var(--ink);
+    letter-spacing: -0.022em;
+    text-align: center;
+    line-height: 1.3;
+    text-wrap: balance;
+  }
+
+  /* ============================================================
+     CHAT MESSAGES
+     ============================================================ */
+  .messages {
+    padding: 10px 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+  }
+  .msg-user {
+    align-self: flex-end;
+    max-width: 86%;
+    background: var(--blue-container);
+    color: var(--ink);
+    padding: 10px 14px;
+    border-radius: 20px 20px 6px 20px;
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+  .msg-ai {
+    align-self: flex-start;
+    max-width: 96%;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .msg-ai .avatar {
+    width: 26px; height: 26px;
+    border-radius: 8px;
+    background: linear-gradient(140deg, var(--blue), var(--blue-deep));
+    color: white;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10.5px;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 1px;
+    letter-spacing: -0.02em;
+  }
+  .msg-ai .body {
+    flex: 1;
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  .msg-ai .body p { margin-bottom: 6px; }
+  .msg-ai .body p:last-child { margin-bottom: 0; }
+  .ai-cursor {
+    display: inline-block;
+    width: 6px; height: 14px;
+    background: var(--blue);
+    vertical-align: text-bottom;
+    margin-left: 2px;
+    border-radius: 1px;
+    animation: blink 1.05s steps(1) infinite;
+  }
+
+  /* ============================================================
+     MODEL PICKER SHEET
+     ============================================================ */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.34);
+    z-index: 2;
+    backdrop-filter: blur(2px);
+  }
+  .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 78%;
+    background: var(--paper);
+    border-radius: 24px 24px 0 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 3;
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.10);
+  }
+  .sheet-handle {
+    width: 36px; height: 4px;
+    background: var(--hairline);
+    border-radius: 2px;
+    margin: 8px auto 4px;
+    flex-shrink: 0;
+  }
+  .sheet-head {
+    padding: 6px 14px 6px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .sheet-head .title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  .search-input {
+    margin: 4px 14px 8px;
+    height: 40px;
+    border-radius: 12px;
+    background: var(--row);
+    border: 1px solid var(--hairline);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    font-size: 14px;
+    color: var(--faint);
+    flex-shrink: 0;
+  }
+  .search-input svg { color: var(--muted); }
+
+  .model-list {
+    flex: 1;
+    overflow: hidden;
+    padding: 4px 12px 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .provider-head {
+    padding: 12px 8px 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+  }
+  .model-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px 10px 16px;
+    border-radius: 12px;
+    position: relative;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+  .model-row:hover { background: var(--row); }
+  .model-row.selected {
+    background: var(--blue-container);
+  }
+  .model-row.selected::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 16px; bottom: 16px;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--blue);
+  }
+  .model-row .ic {
+    width: 30px; height: 30px;
+    border-radius: 9px;
+    background: var(--row);
+    border: 1px solid var(--hairline);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    color: var(--ink);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .model-row.selected .ic {
+    background: var(--paper);
+    border-color: color-mix(in srgb, var(--blue) 35%, transparent);
+  }
+  .model-row .meta { flex: 1; min-width: 0; }
+  .model-row .name {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 3px;
+    letter-spacing: -0.008em;
+  }
+  .model-row .sub {
+    font-size: 11.5px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .cap-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--row);
+    border: 1px solid var(--hairline);
+    font-size: 10.5px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .model-row.selected .cap-chip {
+    background: var(--paper);
+    border-color: color-mix(in srgb, var(--blue) 22%, transparent);
+  }
+  .cap-chip svg { width: 11px; height: 11px; }
+  .model-row .check {
+    width: 22px; height: 22px;
+    border-radius: 11px;
+    background: var(--blue);
+    color: white;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .model-row:not(.selected) .check { display: none; }
+
+  /* ============================================================
+     DRAWER
+     ============================================================ */
+  .drawer {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 304px;
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 8px 0 24px rgba(0,0,0,0.06);
+    z-index: 2;
+    padding-top: 46px; /* leave room for status bar */
+  }
+  .drawer-head {
+    padding: 12px 12px 6px;
+  }
+  .new-chat-btn {
+    height: 40px;
+    border-radius: 14px;
+    border: 1px solid var(--hairline);
+    background: var(--paper);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink);
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+  .new-chat-btn:hover { background: var(--row); }
+  .new-chat-btn .ic-plus { color: var(--blue); display: inline-flex; }
+  .drawer-search {
+    margin: 8px 12px 4px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--row);
+    border: 1px solid var(--hairline);
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 10px;
+    font-size: 13px;
+    color: var(--faint);
+  }
+  .drawer-search svg { color: var(--muted); }
+  .drawer-list {
+    flex: 1;
+    overflow: hidden;
+    padding: 4px 8px 12px;
+  }
+  .drawer-group-head {
+    padding: 14px 10px 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .drawer-group-head svg { width: 11px; height: 11px; }
+  .conv-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+  .conv-row:hover { background: var(--row); }
+  .conv-row.active { background: var(--blue-container); }
+  .conv-row .ic {
+    width: 24px; height: 24px;
+    border-radius: 7px;
+    background: var(--row);
+    border: 1px solid var(--hairline);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: var(--muted);
+    margin-top: 2px;
+    letter-spacing: -0.02em;
+  }
+  .conv-row.active .ic { background: var(--paper); color: var(--blue-deep); border-color: color-mix(in srgb, var(--blue) 30%, transparent); }
+  .conv-row .text { flex: 1; min-width: 0; }
+  .conv-row .title-line {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+    letter-spacing: -0.005em;
+  }
+  .conv-row .preview {
+    font-size: 11.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .drawer-foot {
+    padding: 10px 14px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-top: 1px solid var(--hairline);
+  }
+  .user-mini {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+  }
+  .user-mini .av {
+    width: 30px; height: 30px;
+    border-radius: 15px;
+    background: linear-gradient(140deg, #FFD27C, #FF9447);
+    color: white;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11.5px;
+    font-weight: 700;
+  }
+  .user-mini .label {
+    font-size: 13.5px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .drawer-scrim {
+    position: absolute;
+    left: 304px; right: 0; top: 0; bottom: 0;
+    background: rgba(0,0,0,0.30);
+    z-index: 2;
+    backdrop-filter: blur(0.5px);
+  }
+
+  /* ============================================================
+     ATTACHMENT TRAY (floating above input)
+     ============================================================ */
+  .attach-tray {
+    position: absolute;
+    left: 12px; right: 12px;
+    bottom: 14px;
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: 22px;
+    padding: 14px 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    box-shadow:
+      0 1px 0 rgba(0,0,0,0.02),
+      0 16px 36px -14px rgba(0,0,0,0.14);
+    z-index: 2;
+  }
+  .attach-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 12px;
+    cursor: pointer;
+    color: var(--ink);
+  }
+  .attach-tile:hover { background: var(--row); }
+  .attach-tile .ic-wrap {
+    width: 46px; height: 46px;
+    border-radius: 14px;
+    background: var(--blue-container);
+    color: var(--blue-deep);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .attach-tile .lbl {
+    font-size: 11.5px;
+    color: var(--muted);
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+
+  /* ============================================================
+     SLASH COMMAND PALETTE
+     ============================================================ */
+  .slash-card {
+    position: absolute;
+    left: 16px; right: 16px;
+    bottom: 14px;
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    padding: 6px;
+    box-shadow:
+      0 1px 0 rgba(0,0,0,0.02),
+      0 18px 44px -16px rgba(0,0,0,0.16);
+    z-index: 2;
+  }
+  .slash-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .slash-row.focus { background: var(--row); }
+  .slash-row:hover { background: var(--row); }
+  .slash-row .ic {
+    width: 34px; height: 34px;
+    border-radius: 10px;
+    background: var(--blue-container);
+    color: var(--blue-deep);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .slash-row .meta { flex: 1; min-width: 0; }
+  .slash-row .cmd {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 2px;
+    letter-spacing: -0.005em;
+  }
+  .slash-row .desc {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .slash-row .hint {
+    font-size: 10.5px;
+    color: var(--faint);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    flex-shrink: 0;
+  }
+
+  /* ============================================================
+     SECTION SEPARATOR
+     ============================================================ */
+  .section-mark {
+    grid-column: 1 / -1;
+    text-align: center;
+    margin: 8px 0 -16px;
+  }
+  .section-mark .label {
+    display: inline-block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: #6B6761;
+    font-weight: 700;
+    background: #ECECEE;
+    padding: 0 14px;
+    position: relative;
+  }
+  .section-mark::before {
+    content: "";
+    display: block;
+    height: 1px;
+    background: rgba(0,0,0,0.08);
+    position: relative;
+    top: 12px;
+    margin: 0 auto;
+    max-width: 720px;
+  }
+
+  /* ============================================================
+     TWEAKS PANEL
+     ============================================================ */
+  .tweaks {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: 0 12px 32px -8px rgba(0,0,0,0.16);
+    font-size: 12px;
+    color: #1F1F1F;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    z-index: 99;
+  }
+  .tweaks-label {
+    font-weight: 600;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #6B6761;
+  }
+  .tweaks-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tweaks input[type="color"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 28px; height: 28px;
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 0;
+    background: transparent;
+  }
+  .tweaks input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  .tweaks input[type="color"]::-webkit-color-swatch { border: none; border-radius: 6px; }
+  .tweaks .hex {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    color: #3D3A36;
+    min-width: 64px;
+  }
+  .tweaks button {
+    appearance: none;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: white;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    color: #3D3A36;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .tweaks button:hover { background: #F7F7F5; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     ICON LIBRARY (defined once, used via <use>)
+     ============================================================ -->
+<svg style="position:absolute; width:0; height:0;" aria-hidden="true">
+  <defs>
+    <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+      <path d="M4 7h16M4 12h16M4 17h16"/>
+    </symbol>
+    <symbol id="i-chev-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 9.5l6 6 6-6"/>
+    </symbol>
+    <symbol id="i-compose" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10" stroke-dasharray="1.6 2.4"/>
+      <path d="m14.7 7.4 2.4 2.4-6.6 6.6-2.9.5.5-2.9z"/>
+      <path d="m13.6 8.6 2.4 2.4"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <path d="M12 5.5v13M5.5 12h13"/>
+    </symbol>
+    <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <path d="M18 6L6 18M6 6l12 12"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 6L9 17l-5-5"/>
+    </symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 19V5M5 12l7-7 7 7"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <circle cx="11" cy="11" r="7"/>
+      <path d="m20 20-3.6-3.6"/>
+    </symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+    </symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 17v5"/>
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V5a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>
+    </symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 8.5h2.6l1.7-2h9.4l1.7 2H21a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V9.5a1 1 0 0 1 1-1z"/>
+      <circle cx="12" cy="13.5" r="3.6"/>
+    </symbol>
+    <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4.5" width="18" height="15" rx="2.4"/>
+      <circle cx="8.6" cy="9.6" r="1.5"/>
+      <path d="m3.5 17 5-5 4 4 2.5-2.5 5.5 5.5"/>
+    </symbol>
+    <symbol id="i-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="6" width="13.5" height="12" rx="2"/>
+      <path d="m21 8-4.5 3v2L21 16z"/>
+    </symbol>
+    <symbol id="i-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 18V6l11-2v12"/>
+      <circle cx="6" cy="18" r="2.6"/>
+      <circle cx="17" cy="16" r="2.6"/>
+    </symbol>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/>
+      <path d="M14 3v5h5"/>
+    </symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 5.5A2 2 0 0 1 5 3.5h6.5v17H5a2 2 0 0 1-2-2z"/>
+      <path d="M21 5.5a2 2 0 0 0-2-2h-6.5v17H19a2 2 0 0 0 2-2z"/>
+    </symbol>
+    <symbol id="i-translate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 5.5h10"/>
+      <path d="M7.5 3.5v2"/>
+      <path d="M11 5.5c-.6 4-3.5 7.5-7.5 9"/>
+      <path d="M5 9.5c1.7 2.7 4 4.6 7 5.6"/>
+      <path d="m13 20 4-9 4 9"/>
+      <path d="M14.5 17h5"/>
+    </symbol>
+    <symbol id="i-summary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 6h16M4 12h12M4 18h8"/>
+    </symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M3.5 12h17"/>
+      <path d="M12 3.2c2.5 2.4 3.8 5.6 3.8 8.8s-1.3 6.4-3.8 8.8c-2.5-2.4-3.8-5.6-3.8-8.8s1.3-6.4 3.8-8.8z"/>
+    </symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/>
+      <circle cx="12" cy="12" r="2.8"/>
+    </symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14.7 5.3a4.6 4.6 0 0 1 6.3 4.3 4.6 4.6 0 0 1-6.1 4.3l-7.5 7.5a2 2 0 0 1-2.8-2.8l7.5-7.5a4.6 4.6 0 0 1 2.6-5.8z"/>
+    </symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 4a2.5 2.5 0 0 0-2.5 2.5v.7A3 3 0 0 0 4 10v.5a3 3 0 0 0 0 5V16a3 3 0 0 0 3 3 2.5 2.5 0 0 0 2 1 2.5 2.5 0 0 0 2.5-2.5V4.5A2.5 2.5 0 0 0 9 4z"/>
+      <path d="M15 4a2.5 2.5 0 0 1 2.5 2.5v.7A3 3 0 0 1 20 10v.5a3 3 0 0 1 0 5V16a3 3 0 0 1-3 3 2.5 2.5 0 0 1-2 1 2.5 2.5 0 0 1-2.5-2.5V4.5A2.5 2.5 0 0 1 15 4z"/>
+    </symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 9a16 16 0 0 1 20 0"/>
+      <path d="M5 13a11 11 0 0 1 14 0"/>
+      <path d="M8.5 16.5a6 6 0 0 1 7 0"/>
+      <circle cx="12" cy="20" r="1" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-signal" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="2" y="14" width="3" height="6" rx="0.5"/>
+      <rect x="7" y="10" width="3" height="10" rx="0.5"/>
+      <rect x="12" y="6" width="3" height="14" rx="0.5"/>
+      <rect x="17" y="2" width="3" height="18" rx="0.5"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ============================================================
+     DOC HEADER
+     ============================================================ -->
+<div class="doc-header">
+  <div class="doc-eyebrow">DESIGN COMPS · 2026-05-23</div>
+  <h1 class="doc-title">Amber Agent · 主聊天页 UI 重构</h1>
+  <p class="doc-lede">
+    一套 Gemini 级别的克制感主聊天页设计稿。<strong>顶栏只露当前模型 + 下拉</strong>，
+    新建聊天图标变成无填充的轻量线条；<strong>中间彻底留白</strong>，没有大 logo、问候、prompt chips；
+    <strong>底部输入框是真正的高级大胶囊</strong>，[+] 附件、[/] 斜杠命令、淡蓝圆形发送各司其职。
+    主色锁定淡蓝 <code>#6BA8FF</code>，可在右下 Tweaks 实时换 hue 看效果。
+  </p>
+
+  <div class="token-strip">
+    <div class="token-card">
+      <h4>Brand Blue（淡蓝）</h4>
+      <div class="token-row"><span class="token-swatch" style="background:#6BA8FF"></span><span class="lbl">blue</span><span>#6BA8FF</span></div>
+      <div class="token-row"><span class="token-swatch" style="background:#4A8FE8"></span><span class="lbl">deep</span><span>#4A8FE8</span></div>
+      <div class="token-row"><span class="token-swatch" style="background:#EAF2FF"></span><span class="lbl">container</span><span>#EAF2FF</span></div>
+    </div>
+    <div class="token-card">
+      <h4>Neutral（浅色）</h4>
+      <div class="token-row"><span class="token-swatch" style="background:#FFFFFF;border-color:#DDD"></span><span class="lbl">paper</span><span>#FFFFFF</span></div>
+      <div class="token-row"><span class="token-swatch" style="background:#F7F7F5"></span><span class="lbl">canvas</span><span>#F7F7F5</span></div>
+      <div class="token-row"><span class="token-swatch" style="background:#1F1F1F"></span><span class="lbl">ink</span><span>#1F1F1F</span></div>
+      <div class="token-row"><span class="token-swatch" style="background:#6B6761"></span><span class="lbl">muted</span><span>#6B6761</span></div>
+    </div>
+    <div class="token-card">
+      <h4>Typography</h4>
+      <div class="token-row"><span class="lbl">title</span><span>17px / 600</span></div>
+      <div class="token-row"><span class="lbl">body</span><span>14.5–15px / 400</span></div>
+      <div class="token-row"><span class="lbl">sub</span><span>11.5–12.5px / 500</span></div>
+      <div class="token-row"><span class="lbl">eyebrow</span><span>10.5px UPPER · ls 0.1em</span></div>
+    </div>
+    <div class="token-card">
+      <h4>Shape</h4>
+      <div class="token-row"><span class="lbl">capsule</span><span>radius 31px</span></div>
+      <div class="token-row"><span class="lbl">round-btn</span><span>22px (圆)</span></div>
+      <div class="token-row"><span class="lbl">card</span><span>radius 12–18px</span></div>
+      <div class="token-row"><span class="lbl">stroke</span><span>1px hairline 8.5%</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     FRAMES
+     ============================================================ -->
+<div class="grid">
+
+  <!-- =========================================================
+       FRAME 1 — EMPTY CHAT (LIGHT)
+       ========================================================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="screen">
+        <div class="status-bar">
+          <span>00:35</span>
+          <span class="right">
+            <svg width="15" height="13"><use href="#i-signal"/></svg>
+            <span>5G</span>
+            <svg width="15" height="13"><use href="#i-wifi"/></svg>
+            <span class="battery">100</span>
+          </span>
+        </div>
+        <div class="top-bar">
+          <div class="left">
+            <div class="icon-btn"><svg width="20" height="20"><use href="#i-menu"/></svg></div>
+            <div class="model-pill">
+              DeepSeek V4 Pro
+              <span class="chev"><svg width="14" height="14"><use href="#i-chev-down"/></svg></span>
+            </div>
+          </div>
+          <div class="icon-btn"><svg width="22" height="22"><use href="#i-compose"/></svg></div>
+        </div>
+        <div class="content">
+          <div class="sky-glow"></div>
+          <div class="greeting">
+            <div class="sparkle"></div>
+            <div class="greet-text">想问什么？</div>
+          </div>
+        </div>
+        <div class="input-region">
+          <div class="composer">
+            <div class="add-btn"><svg width="20" height="20"><use href="#i-plus"/></svg></div>
+            <div class="divider"></div>
+            <div class="field">输入消息</div>
+            <div class="slash-chip">/</div>
+            <div class="send muted"><svg width="20" height="20"><use href="#i-arrow-up"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <div class="title">01 · 空白态主聊天页</div>
+      <div class="note">顶栏只展示当前模型名 + 下拉；中央彻底留白；底部胶囊由淡蓝晕光向上托起，呼应用户参考目标。空状态发送键灰化，避免误触。</div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       FRAME 2 — ACTIVE CONVERSATION (LIGHT, STREAMING)
+       ========================================================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="screen">
+        <div class="status-bar">
+          <span>00:36</span>
+          <span class="right">
+            <svg width="15" height="13"><use href="#i-signal"/></svg>
+            <span>5G</span>
+            <svg width="15" height="13"><use href="#i-wifi"/></svg>
+            <span class="battery">100</span>
+          </span>
+        </div>
+        <div class="top-bar">
+          <div class="left">
+            <div class="icon-btn"><svg width="20" height="20"><use href="#i-menu"/></svg></div>
+            <div class="model-pill">
+              DeepSeek V4 Pro
+              <span class="chev"><svg width="14" height="14"><use href="#i-chev-down"/></svg></span>
+            </div>
+          </div>
+          <div class="icon-btn"><svg width="22" height="22"><use href="#i-compose"/></svg></div>
+        </div>
+        <div class="content">
+          <div class="sky-glow"></div>
+          <div class="messages">
+            <div class="msg-user">请把这段日语合同的第 4 条翻译成中文，注意法律语气。</div>
+            <div class="msg-ai">
+              <div class="avatar">DS</div>
+              <div class="body">
+                <p>好的。第 4 条原文为「乙は本契約に基づき、甲から提供された資料につき秘密保持義務を負う」。</p>
+                <p>直译："乙方依据本合同，对甲方提供的资料承担保密义务，未经书面同意不得披露给第三方。"</p>
+              </div>
+            </div>
+            <div class="msg-user">再帮我润色得更正式一些。</div>
+            <div class="msg-ai">
+              <div class="avatar">DS</div>
+              <div class="body">当然。润色后的版本：<br>"乙方依据本合同之约定，对甲方所提供之全部资料承担严格保密义务，<span class="ai-cursor"></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="input-region">
+          <div class="composer">
+            <div class="add-btn"><svg width="20" height="20"><use href="#i-plus"/></svg></div>
+            <div class="divider"></div>
+            <div class="field">输入消息</div>
+            <div class="slash-chip">/</div>
+            <div class="send muted"><svg width="20" height="20"><use href="#i-arrow-up"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <div class="title">02 · 活跃对话态（流式输出中）</div>
+      <div class="note">用户气泡淡蓝底贴右；助手消息无气泡，模型小头像 + 纯正文，便于阅读；流式末尾用细单条淡蓝光标，不抢戏。</div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       FRAME 3 — MODEL PICKER BOTTOM SHEET (LIGHT)
+       ========================================================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="screen">
+        <div class="status-bar">
+          <span>00:35</span>
+          <span class="right">
+            <svg width="15" height="13"><use href="#i-signal"/></svg>
+            <span>5G</span>
+            <svg width="15" height="13"><use href="#i-wifi"/></svg>
+            <span class="battery">100</span>
+          </span>
+        </div>
+        <div class="top-bar">
+          <div class="left">
+            <div class="icon-btn"><svg width="20" height="20"><use href="#i-menu"/></svg></div>
+            <div class="model-pill">
+              DeepSeek V4 Pro
+              <span class="chev"><svg width="14" height="14"><use href="#i-chev-down"/></svg></span>
+            </div>
+          </div>
+          <div class="icon-btn"><svg width="22" height="22"><use href="#i-compose"/></svg></div>
+        </div>
+        <div class="content"><div class="sky-glow"></div></div>
+        <div class="input-region">
+          <div class="composer">
+            <div class="add-btn"><svg width="20" height="20"><use href="#i-plus"/></svg></div>
+            <div class="divider"></div>
+            <div class="field">输入消息</div>
+            <div class="slash-chip">/</div>
+            <div class="send muted"><svg width="20" height="20"><use href="#i-arrow-up"/></svg></div>
+          </div>
+        </div>
+
+        <!-- Overlay: scrim + sheet -->
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="sheet-handle"></div>
+          <div class="sheet-head">
+            <span class="title">选择模型</span>
+            <div class="icon-btn muted"><svg width="18" height="18"><use href="#i-close"/></svg></div>
+          </div>
+          <div class="search-input">
+            <svg width="16" height="16"><use href="#i-search"/></svg>
+            <span>搜索模型</span>
+          </div>
+          <div class="model-list">
+            <div class="provider-head">DeepSeek</div>
+            <div class="model-row selected">
+              <div class="ic">DS</div>
+              <div class="meta">
+                <div class="name">DeepSeek V4 Pro</div>
+                <div class="sub">
+                  <span>128K</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                  <span class="cap-chip"><svg><use href="#i-brain"/></svg>推理</span>
+                </div>
+              </div>
+              <div class="check"><svg width="13" height="13"><use href="#i-check"/></svg></div>
+            </div>
+            <div class="model-row">
+              <div class="ic">DS</div>
+              <div class="meta">
+                <div class="name">DeepSeek V3.5</div>
+                <div class="sub">
+                  <span>64K</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                </div>
+              </div>
+            </div>
+            <div class="provider-head">OpenAI</div>
+            <div class="model-row">
+              <div class="ic">GPT</div>
+              <div class="meta">
+                <div class="name">GPT-5 Pro</div>
+                <div class="sub">
+                  <span>200K</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                  <span class="cap-chip"><svg><use href="#i-brain"/></svg>推理</span>
+                </div>
+              </div>
+            </div>
+            <div class="model-row">
+              <div class="ic">GPT</div>
+              <div class="meta">
+                <div class="name">GPT-5</div>
+                <div class="sub">
+                  <span>200K</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                </div>
+              </div>
+            </div>
+            <div class="provider-head">Anthropic</div>
+            <div class="model-row">
+              <div class="ic">CL</div>
+              <div class="meta">
+                <div class="name">Claude Opus 4.7</div>
+                <div class="sub">
+                  <span>1M</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                  <span class="cap-chip"><svg><use href="#i-brain"/></svg>推理</span>
+                </div>
+              </div>
+            </div>
+            <div class="provider-head">Google</div>
+            <div class="model-row">
+              <div class="ic">GM</div>
+              <div class="meta">
+                <div class="name">Gemini 3 Pro</div>
+                <div class="sub">
+                  <span>1M</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-brain"/></svg>推理</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <div class="title">03 · 模型选择面板（复用现有 ModalBottomSheet）</div>
+      <div class="note">按 Provider 分组；选中行淡蓝底 + 内嵌 3px 竖条 + 右侧实心淡蓝勾；上下文窗大小与能力 chip（视觉 / 工具 / 推理）同行简述，可一眼对比。</div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       FRAME 4 — DRAWER (LIGHT)
+       ========================================================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="screen">
+        <div class="status-bar">
+          <span>00:35</span>
+          <span class="right">
+            <svg width="15" height="13"><use href="#i-signal"/></svg>
+            <span>5G</span>
+            <svg width="15" height="13"><use href="#i-wifi"/></svg>
+            <span class="battery">100</span>
+          </span>
+        </div>
+        <div class="drawer">
+          <div class="drawer-head">
+            <div class="new-chat-btn">
+              <span class="ic-plus"><svg width="16" height="16"><use href="#i-plus"/></svg></span>
+              新对话
+            </div>
+          </div>
+          <div class="drawer-search">
+            <svg width="14" height="14"><use href="#i-search"/></svg>
+            <span>搜索会话</span>
+          </div>
+          <div class="drawer-list">
+            <div class="drawer-group-head"><svg><use href="#i-pin"/></svg>置顶</div>
+            <div class="conv-row active">
+              <div class="ic">DS</div>
+              <div class="text">
+                <div class="title-line">Amber Agent 主聊天 UI 重构</div>
+                <div class="preview">好的，我先整理整套设计稿…</div>
+              </div>
+            </div>
+            <div class="conv-row">
+              <div class="ic">CL</div>
+              <div class="text">
+                <div class="title-line">KMP 多平台架构梳理</div>
+                <div class="preview">commonMain 里这层 use case…</div>
+              </div>
+            </div>
+            <div class="drawer-group-head">今天</div>
+            <div class="conv-row">
+              <div class="ic">DS</div>
+              <div class="text">
+                <div class="title-line">翻译日语合同第 4–7 条</div>
+                <div class="preview">乙方依据本合同之约定…</div>
+              </div>
+            </div>
+            <div class="conv-row">
+              <div class="ic">GPT</div>
+              <div class="text">
+                <div class="title-line">Compose 性能优化 checklist</div>
+                <div class="preview">推荐顺序：1) defer 状态…</div>
+              </div>
+            </div>
+            <div class="drawer-group-head">昨天</div>
+            <div class="conv-row">
+              <div class="ic">GM</div>
+              <div class="text">
+                <div class="title-line">Gemini 3 体验记录</div>
+                <div class="preview">1M 上下文确实是质变…</div>
+              </div>
+            </div>
+            <div class="drawer-group-head">7 天内</div>
+            <div class="conv-row">
+              <div class="ic">CL</div>
+              <div class="text">
+                <div class="title-line">读 Designing Data-Intensive Applications 第 5 章</div>
+                <div class="preview">单 leader 复制的核心问题…</div>
+              </div>
+            </div>
+            <div class="conv-row">
+              <div class="ic">DS</div>
+              <div class="text">
+                <div class="title-line">Android Room 迁移调研</div>
+                <div class="preview">先把 @Insert 改成挂起函数…</div>
+              </div>
+            </div>
+          </div>
+          <div class="drawer-foot">
+            <div class="user-mini">
+              <div class="av">A</div>
+              <div class="label">Arquiel</div>
+            </div>
+            <div class="icon-btn muted"><svg width="18" height="18"><use href="#i-settings"/></svg></div>
+          </div>
+        </div>
+        <div class="drawer-scrim"></div>
+      </div>
+    </div>
+    <div class="caption">
+      <div class="title">04 · 侧边抽屉（会话列表）</div>
+      <div class="note">顶部轻量"新对话"按钮 + 搜索；按 <code>置顶 / 今天 / 昨天 / 7 天内</code> 分组；每行模型小图标 + 标题 + 最后一句预览；底部用户头像与设置入口。当前会话用淡蓝底高亮。</div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       FRAME 5 — ATTACHMENT TRAY (LIGHT)
+       ========================================================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="screen">
+        <div class="status-bar">
+          <span>00:35</span>
+          <span class="right">
+            <svg width="15" height="13"><use href="#i-signal"/></svg>
+            <span>5G</span>
+            <svg width="15" height="13"><use href="#i-wifi"/></svg>
+            <span class="battery">100</span>
+          </span>
+        </div>
+        <div class="top-bar">
+          <div class="left">
+            <div class="icon-btn"><svg width="20" height="20"><use href="#i-menu"/></svg></div>
+            <div class="model-pill">
+              DeepSeek V4 Pro
+              <span class="chev"><svg width="14" height="14"><use href="#i-chev-down"/></svg></span>
+            </div>
+          </div>
+          <div class="icon-btn"><svg width="22" height="22"><use href="#i-compose"/></svg></div>
+        </div>
+        <div class="content">
+          <div class="sky-glow"></div>
+          <div class="attach-tray">
+            <div class="attach-tile">
+              <div class="ic-wrap"><svg width="22" height="22"><use href="#i-camera"/></svg></div>
+              <span class="lbl">拍照</span>
+            </div>
+            <div class="attach-tile">
+              <div class="ic-wrap"><svg width="22" height="22"><use href="#i-image"/></svg></div>
+              <span class="lbl">图片</span>
+            </div>
+            <div class="attach-tile">
+              <div class="ic-wrap"><svg width="22" height="22"><use href="#i-video"/></svg></div>
+              <span class="lbl">视频</span>
+            </div>
+            <div class="attach-tile">
+              <div class="ic-wrap"><svg width="22" height="22"><use href="#i-music"/></svg></div>
+              <span class="lbl">音频</span>
+            </div>
+            <div class="attach-tile">
+              <div class="ic-wrap"><svg width="22" height="22"><use href="#i-file"/></svg></div>
+              <span class="lbl">文件</span>
+            </div>
+          </div>
+        </div>
+        <div class="input-region">
+          <div class="composer">
+            <div class="add-btn expanded"><svg width="18" height="18"><use href="#i-close"/></svg></div>
+            <div class="divider"></div>
+            <div class="field">输入消息</div>
+            <div class="slash-chip">/</div>
+            <div class="send muted"><svg width="20" height="20"><use href="#i-arrow-up"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <div class="title">05 · 附件菜单（轻量浮层）</div>
+      <div class="note">点击左侧加号后，输入框上方浮出一排淡蓝容器的图标按钮；不是全屏 sheet，不打断输入焦点；加号变为关闭叉，状态变化清晰。</div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       FRAME 6 — SLASH COMMAND PALETTE (LIGHT)
+       ========================================================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="screen">
+        <div class="status-bar">
+          <span>00:35</span>
+          <span class="right">
+            <svg width="15" height="13"><use href="#i-signal"/></svg>
+            <span>5G</span>
+            <svg width="15" height="13"><use href="#i-wifi"/></svg>
+            <span class="battery">100</span>
+          </span>
+        </div>
+        <div class="top-bar">
+          <div class="left">
+            <div class="icon-btn"><svg width="20" height="20"><use href="#i-menu"/></svg></div>
+            <div class="model-pill">
+              DeepSeek V4 Pro
+              <span class="chev"><svg width="14" height="14"><use href="#i-chev-down"/></svg></span>
+            </div>
+          </div>
+          <div class="icon-btn"><svg width="22" height="22"><use href="#i-compose"/></svg></div>
+        </div>
+        <div class="content">
+          <div class="sky-glow"></div>
+          <div class="slash-card">
+            <div class="slash-row focus">
+              <div class="ic"><svg width="18" height="18"><use href="#i-book"/></svg></div>
+              <div class="meta">
+                <div class="cmd">/deepread</div>
+                <div class="desc">把链接送入深度阅读，生成杂志风长文</div>
+              </div>
+              <span class="hint">↵</span>
+            </div>
+            <div class="slash-row">
+              <div class="ic"><svg width="18" height="18"><use href="#i-translate"/></svg></div>
+              <div class="meta">
+                <div class="cmd">/translate</div>
+                <div class="desc">把选中或下一条消息翻译成中文</div>
+              </div>
+            </div>
+            <div class="slash-row">
+              <div class="ic"><svg width="18" height="18"><use href="#i-summary"/></svg></div>
+              <div class="meta">
+                <div class="cmd">/summarize</div>
+                <div class="desc">把当前对话总结成 5 条要点</div>
+              </div>
+            </div>
+            <div class="slash-row">
+              <div class="ic"><svg width="18" height="18"><use href="#i-globe"/></svg></div>
+              <div class="meta">
+                <div class="cmd">/search</div>
+                <div class="desc">联网搜索后再让模型回答</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="input-region">
+          <div class="composer">
+            <div class="add-btn"><svg width="20" height="20"><use href="#i-plus"/></svg></div>
+            <div class="divider"></div>
+            <div class="field typed">/<span class="caret"></span></div>
+            <div class="slash-chip active">/</div>
+            <div class="send muted"><svg width="20" height="20"><use href="#i-arrow-up"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <div class="title">06 · 斜杠命令面板</div>
+      <div class="note">键入 <code>/</code> 或点击 [/] chip 触发；浮卡列出已挂载命令，每行 icon + 命令名 + 一行说明；首项 focus 态高亮，<code>↵</code> 提示直接执行。</div>
+    </div>
+  </div>
+
+  <!-- Section separator -->
+  <div class="section-mark"><span class="label">Dark Mode</span></div>
+
+  <!-- =========================================================
+       FRAME 7 — EMPTY CHAT (DARK)
+       ========================================================= -->
+  <div class="frame">
+    <div class="phone dark">
+      <div class="screen">
+        <div class="status-bar">
+          <span>00:35</span>
+          <span class="right">
+            <svg width="15" height="13"><use href="#i-signal"/></svg>
+            <span>5G</span>
+            <svg width="15" height="13"><use href="#i-wifi"/></svg>
+            <span class="battery">100</span>
+          </span>
+        </div>
+        <div class="top-bar">
+          <div class="left">
+            <div class="icon-btn"><svg width="20" height="20"><use href="#i-menu"/></svg></div>
+            <div class="model-pill">
+              DeepSeek V4 Pro
+              <span class="chev"><svg width="14" height="14"><use href="#i-chev-down"/></svg></span>
+            </div>
+          </div>
+          <div class="icon-btn"><svg width="22" height="22"><use href="#i-compose"/></svg></div>
+        </div>
+        <div class="content">
+          <div class="sky-glow"></div>
+          <div class="greeting">
+            <div class="sparkle"></div>
+            <div class="greet-text">想问什么？</div>
+          </div>
+        </div>
+        <div class="input-region">
+          <div class="composer">
+            <div class="add-btn"><svg width="20" height="20"><use href="#i-plus"/></svg></div>
+            <div class="divider"></div>
+            <div class="field">输入消息</div>
+            <div class="slash-chip">/</div>
+            <div class="send muted"><svg width="20" height="20"><use href="#i-arrow-up"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <div class="title">07 · 空白态 · 深色</div>
+      <div class="note">深底用 <code>#0B0B0D</code> canvas + <code>#141417</code> paper；淡蓝在深底转为 <code>#82B7FF</code>，对比度足够；底部蓝晕仍能浮起胶囊。</div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       FRAME 8 — MODEL PICKER SHEET (DARK)
+       ========================================================= -->
+  <div class="frame">
+    <div class="phone dark">
+      <div class="screen">
+        <div class="status-bar">
+          <span>00:35</span>
+          <span class="right">
+            <svg width="15" height="13"><use href="#i-signal"/></svg>
+            <span>5G</span>
+            <svg width="15" height="13"><use href="#i-wifi"/></svg>
+            <span class="battery">100</span>
+          </span>
+        </div>
+        <div class="top-bar">
+          <div class="left">
+            <div class="icon-btn"><svg width="20" height="20"><use href="#i-menu"/></svg></div>
+            <div class="model-pill">
+              DeepSeek V4 Pro
+              <span class="chev"><svg width="14" height="14"><use href="#i-chev-down"/></svg></span>
+            </div>
+          </div>
+          <div class="icon-btn"><svg width="22" height="22"><use href="#i-compose"/></svg></div>
+        </div>
+        <div class="content"><div class="sky-glow"></div></div>
+        <div class="input-region">
+          <div class="composer">
+            <div class="add-btn"><svg width="20" height="20"><use href="#i-plus"/></svg></div>
+            <div class="divider"></div>
+            <div class="field">输入消息</div>
+            <div class="slash-chip">/</div>
+            <div class="send muted"><svg width="20" height="20"><use href="#i-arrow-up"/></svg></div>
+          </div>
+        </div>
+
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="sheet-handle"></div>
+          <div class="sheet-head">
+            <span class="title">选择模型</span>
+            <div class="icon-btn muted"><svg width="18" height="18"><use href="#i-close"/></svg></div>
+          </div>
+          <div class="search-input">
+            <svg width="16" height="16"><use href="#i-search"/></svg>
+            <span>搜索模型</span>
+          </div>
+          <div class="model-list">
+            <div class="provider-head">DeepSeek</div>
+            <div class="model-row selected">
+              <div class="ic">DS</div>
+              <div class="meta">
+                <div class="name">DeepSeek V4 Pro</div>
+                <div class="sub">
+                  <span>128K</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                  <span class="cap-chip"><svg><use href="#i-brain"/></svg>推理</span>
+                </div>
+              </div>
+              <div class="check"><svg width="13" height="13"><use href="#i-check"/></svg></div>
+            </div>
+            <div class="model-row">
+              <div class="ic">DS</div>
+              <div class="meta">
+                <div class="name">DeepSeek V3.5</div>
+                <div class="sub">
+                  <span>64K</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                </div>
+              </div>
+            </div>
+            <div class="provider-head">Anthropic</div>
+            <div class="model-row">
+              <div class="ic">CL</div>
+              <div class="meta">
+                <div class="name">Claude Opus 4.7</div>
+                <div class="sub">
+                  <span>1M</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                  <span class="cap-chip"><svg><use href="#i-brain"/></svg>推理</span>
+                </div>
+              </div>
+            </div>
+            <div class="model-row">
+              <div class="ic">CL</div>
+              <div class="meta">
+                <div class="name">Claude Sonnet 4.6</div>
+                <div class="sub">
+                  <span>200K</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-tool"/></svg>工具</span>
+                </div>
+              </div>
+            </div>
+            <div class="provider-head">Google</div>
+            <div class="model-row">
+              <div class="ic">GM</div>
+              <div class="meta">
+                <div class="name">Gemini 3 Pro</div>
+                <div class="sub">
+                  <span>1M</span>
+                  <span class="cap-chip"><svg><use href="#i-eye"/></svg>视觉</span>
+                  <span class="cap-chip"><svg><use href="#i-brain"/></svg>推理</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <div class="title">08 · 模型选择面板 · 深色</div>
+      <div class="note">选中行 <code>#10263A</code> 深蓝容器 + 淡蓝竖条与勾，识别度足够而不刺眼；scrim 32% 黑 + 微模糊维持层级。</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============================================================
+     TWEAKS (实时调主蓝色调)
+     ============================================================ -->
+<div class="tweaks">
+  <span class="tweaks-label">Tweaks</span>
+  <div class="tweaks-row">
+    <span style="font-size:11.5px;color:#6B6761;">主蓝</span>
+    <input type="color" id="tw-color" value="#6BA8FF">
+    <span class="hex" id="tw-hex">#6BA8FF</span>
+  </div>
+  <div class="tweaks-row">
+    <label for="tw-greeting" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:11.5px; color:#6B6761;">
+      <input type="checkbox" id="tw-greeting" style="width:14px; height:14px; accent-color:#6BA8FF; cursor:pointer;">
+      显示问候
+    </label>
+  </div>
+  <button id="tw-reset">重置</button>
+</div>
+
+<script>
+  // Live recolor — updates --blue, all derived tokens (container, glow, deep)
+  // recompute automatically via color-mix.
+  const colorInput = document.getElementById('tw-color');
+  const hexLabel   = document.getElementById('tw-hex');
+  const resetBtn   = document.getElementById('tw-reset');
+
+  // Derive a slightly darker hex for --blue-deep (for hover/active and avatar gradient)
+  function darken(hex, amount) {
+    const h = hex.replace('#', '');
+    const r = Math.max(0, parseInt(h.slice(0, 2), 16) - amount);
+    const g = Math.max(0, parseInt(h.slice(2, 4), 16) - amount);
+    const b = Math.max(0, parseInt(h.slice(4, 6), 16) - amount);
+    return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+
+  function apply(hex) {
+    document.documentElement.style.setProperty('--blue', hex);
+    document.documentElement.style.setProperty('--blue-deep', darken(hex, 36));
+    // dark phones override --blue/--blue-deep inside .phone.dark; mirror the bump there.
+    document.querySelectorAll('.phone.dark').forEach(p => {
+      p.style.setProperty('--blue', hex);
+      p.style.setProperty('--blue-deep', darken(hex, 24));
+    });
+    hexLabel.textContent = hex.toUpperCase();
+  }
+
+  colorInput.addEventListener('input', e => apply(e.target.value));
+
+  // Greeting toggle
+  const greetingInput = document.getElementById('tw-greeting');
+  greetingInput.addEventListener('change', e => {
+    document.body.classList.toggle('show-greeting', e.target.checked);
+  });
+
+  resetBtn.addEventListener('click', () => {
+    colorInput.value = '#6BA8FF';
+    apply('#6BA8FF');
+    greetingInput.checked = false;
+    document.body.classList.remove('show-greeting');
+    // also clear per-phone overrides
+    document.querySelectorAll('.phone.dark').forEach(p => {
+      p.style.removeProperty('--blue');
+      p.style.removeProperty('--blue-deep');
+    });
+  });
+</script>
+
+</body>
+</html>

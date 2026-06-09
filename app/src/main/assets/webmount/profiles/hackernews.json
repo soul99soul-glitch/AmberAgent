@@ -1,0 +1,17 @@
+{
+  "id": "hackernews",
+  "name": "Hacker News",
+  "version": 1,
+  "origins": [
+    "https://news.ycombinator.com"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "interactive_selectors": {
+      "story_title": "tr.athing td.title a.titlelink, tr.athing td.title a.storylink",
+      "comment_tree": "table.comment-tree, .comment-tree",
+      "user_link": "a.hnuser"
+    }
+  },
+  "notes": "Hacker News is fully public; the matching adapter (hn_*) covers most needs via the Firebase + Algolia APIs. This profile mostly helps wm_extract pick out story/comment elements without DOM guessing."
+}

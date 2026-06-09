@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Amber · Redesign（Terminal × Modern）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="redesign/oc-amber.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { font-family: "Hanken Grotesk", "Noto Sans SC", system-ui, sans-serif; background: #f0eee9; }
+  *, *::before, *::after { box-sizing: border-box; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="redesign/tweaks-panel.jsx"></script>
+<script type="text/babel" src="redesign/aa-base.jsx"></script>
+<script type="text/babel" src="redesign/aa-chat.jsx"></script>
+<script type="text/babel" src="redesign/aa-model.jsx"></script>
+<script type="text/babel" src="redesign/aa-settings.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "mix": false,
+  "family": "暖 Warm",
+  "mode": "浅色",
+  "accent": "#5e9c6e"
+}/*EDITMODE-END*/;
+
+const ACCENT_SWATCHES = ["#b8623a", "#5e9c6e", "#4f86d6", "#9277c4", "#c2607a"];
+
+function baseTheme(family, mode) {
+  const dark = mode === "深色";
+  return family === "鼠尾草 Sage" ? (dark ? "sage-dark" : "sage") : (dark ? "dark" : "light");
+}
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const ctx = { locked: t.mix, theme: baseTheme(t.family, t.mode), accent: t.accent };
+  return (
+    <AmbCtx.Provider value={ctx}>
+    <DesignCanvas>
+      <DCSection id="home" title="主页 · 空状态"
+        subtitle="终端感的 amber 字标 + 收敛的问候。浅色为主方向，深色为同一系统的另一模式。">
+        <DCArtboard id="home-light" label="Home · Light" width={380} height={832}>
+          <HomeScreen theme="light" />
+        </DCArtboard>
+        <DCArtboard id="home-dark" label="Home · Dark" width={380} height={832}>
+          <HomeScreen theme="dark" />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="convo" title="对话进行中"
+        subtitle="amber 标签 + 可折叠 Thinking + 等宽工具行 + Markdown 正文 + 询问卡片。">
+        <DCArtboard id="convo-think" label="思考 · 工具 · 回复" width={380} height={832}>
+          <ConversationScreen theme="light" />
+        </DCArtboard>
+        <DCArtboard id="convo-ask" label="询问用户 · 流式" width={380} height={832}>
+          <AskScreen theme="light" />
+        </DCArtboard>
+        <DCArtboard id="convo-dark" label="对话 · Dark" width={380} height={832}>
+          <ConversationScreen theme="dark" />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="model" title="模型选择 · 可交互"
+        subtitle="点顶栏模型名，菜单从标题下方下拉展开（grid 行高过渡）。服务商分组手风琴 −/+ 展开，已连接的显示绿色；点模型即换、顶栏实时更新。这套下拉可作任意展开菜单的模板。">
+        <DCArtboard id="model-anthropic" label="下拉 · Anthropic 展开" width={380} height={832}>
+          <ConversationScreen theme="light" openSheet />
+        </DCArtboard>
+        <DCArtboard id="model-closed" label="点顶栏模型名下拉 →" width={380} height={832}>
+          <ConversationScreen theme="light" />
+        </DCArtboard>
+        <DCArtboard id="model-dark" label="下拉 · Dark" width={380} height={832}>
+          <ConversationScreen theme="dark" openSheet />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="settings" title="设置 · 主页与子页"
+        subtitle="账户卡 · 浅/深分段 · accent 色板 · 等宽 // 分组标签。子页：核心记忆、模型分配。">
+        <DCArtboard id="set-home" label="设置主页" width={380} height={832}>
+          <SettingsScreen theme="light" accent="#b8623a" />
+        </DCArtboard>
+        <DCArtboard id="set-memory" label="子页 · 核心记忆" width={380} height={832}>
+          <MemoryScreen theme="light" />
+        </DCArtboard>
+        <DCArtboard id="set-models" label="子页 · 模型分配" width={380} height={832}>
+          <ModelsSubScreen theme="light" />
+        </DCArtboard>
+        <DCArtboard id="set-dark" label="设置主页 · Dark" width={380} height={832}>
+          <SettingsScreen theme="dark" accent="#b8623a" />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="sage" title="绿色主题 · Sage"
+        subtitle="同一套终端 × 现代结构，换成绿调暖中性 + 鼠尾草绿强调（live 圆点偏青绿以作区分）。浅 / 深双模式。">
+        <DCArtboard id="sage-home" label="主页 · Sage Light" width={380} height={832}>
+          <HomeScreen theme="sage" accent="#5e9c6e" />
+        </DCArtboard>
+        <DCArtboard id="sage-convo" label="对话 · Sage" width={380} height={832}>
+          <ConversationScreen theme="sage" accent="#5e9c6e" />
+        </DCArtboard>
+        <DCArtboard id="sage-model" label="模型选择 · Sage" width={380} height={832}>
+          <ConversationScreen theme="sage" accent="#5e9c6e" openSheet />
+        </DCArtboard>
+        <DCArtboard id="sage-set" label="设置 · Sage" width={380} height={832}>
+          <SettingsScreen theme="sage" accent="#5e9c6e" />
+        </DCArtboard>
+        <DCArtboard id="sage-home-dark" label="主页 · Sage Dark" width={380} height={832}>
+          <HomeScreen theme="sage-dark" accent="#5e9c6e" />
+        </DCArtboard>
+        <DCArtboard id="sage-convo-dark" label="对话 · Sage Dark" width={380} height={832}>
+          <ConversationScreen theme="sage-dark" accent="#5e9c6e" />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+
+    <TweaksPanel title="Tweaks">
+      <TweakSection label="混搭 · 底色 × 强调色" />
+      <TweakToggle label="应用到全部屏" value={t.mix}
+        onChange={(v) => setTweak('mix', v)} />
+      <TweakRadio label="色系" value={t.family}
+        options={["暖 Warm", "鼠尾草 Sage"]}
+        onChange={(v) => setTweak('family', v)} />
+      <TweakRadio label="明暗" value={t.mode}
+        options={["浅色", "深色"]}
+        onChange={(v) => setTweak('mode', v)} />
+      <TweakColor label="强调色" value={t.accent}
+        options={ACCENT_SWATCHES}
+        onChange={(v) => setTweak('accent', v)} />
+    </TweaksPanel>
+    </AmbCtx.Provider>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

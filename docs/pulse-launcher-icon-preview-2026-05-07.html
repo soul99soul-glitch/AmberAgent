@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pulse Launcher Icon — Preview</title>
+<style>
+  :root {
+    --cream: #F5F1EA;
+    --tan: #EDE5D8;
+    --ink: #1A1A1A;
+    --grey: #7A716A;
+    --chartreuse: #D6FF3F;
+    --orange: #E85D2F;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--cream);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background-image: radial-gradient(circle at 1px 1px, rgba(122,113,106,0.10) 1px, transparent 0);
+    background-size: 22px 22px;
+    padding: 60px 48px 96px;
+    min-height: 100vh;
+  }
+  header {
+    max-width: 1200px;
+    margin: 0 auto 48px;
+  }
+  header .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.18em;
+    font-size: 11px; font-weight: 700;
+    color: var(--orange); margin-bottom: 12px;
+  }
+  header h1 {
+    font-size: 44px; line-height: 1.05;
+    font-weight: 800; letter-spacing: -0.025em;
+    margin-bottom: 12px;
+  }
+  header h1 em { font-style: normal; color: var(--orange); }
+  header p {
+    font-size: 15px; color: var(--grey); max-width: 640px; line-height: 1.5;
+  }
+  .grid {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 32px;
+  }
+  .card {
+    display: flex; flex-direction: column; align-items: center; gap: 20px;
+    padding: 28px 20px;
+    background: var(--cream);
+  }
+  .card-on-dark {
+    background: var(--ink);
+    border-radius: 24px;
+    padding: 28px 20px;
+  }
+  .card-on-dark .label,
+  .card-on-dark .desc { color: var(--cream); }
+  .label {
+    font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.10em;
+    color: var(--grey);
+  }
+  .desc {
+    font-size: 11px; color: var(--grey); text-align: center; line-height: 1.4;
+  }
+  .icon-wrap {
+    width: 192px; height: 192px;
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-wrap.large { width: 240px; height: 240px; }
+  .icon-mask {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 12px 24px -8px rgba(26,26,26,0.25);
+  }
+  .icon-mask.square      { border-radius: 18px; }
+  .icon-mask.squircle    { border-radius: 28px; }
+  .icon-mask.circle      { border-radius: 50%; }
+  .icon-mask.themed      { border-radius: 28px; background: #2A2A2A; }
+  .bg {
+    position: absolute; inset: 0;
+    background: var(--chartreuse);
+  }
+  .fg {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .fg svg {
+    width: 100%; height: 100%;
+  }
+  /* size variants for the small thumbnails */
+  .size-row {
+    grid-column: 1 / -1;
+    display: flex; gap: 32px; align-items: end; justify-content: center;
+    margin-top: 28px;
+  }
+  .size-cell { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .size-cell .icon-mask { box-shadow: 0 6px 16px -4px rgba(26,26,26,0.20); }
+  .size-cell.s48 .icon-mask  { width: 48px;  height: 48px;  border-radius: 8px; }
+  .size-cell.s72 .icon-mask  { width: 72px;  height: 72px;  border-radius: 12px; }
+  .size-cell.s96 .icon-mask  { width: 96px;  height: 96px;  border-radius: 16px; }
+  .size-cell.s128 .icon-mask { width: 128px; height: 128px; border-radius: 22px; }
+
+  footer {
+    max-width: 1200px; margin: 64px auto 0;
+    padding-top: 32px;
+    border-top: 1.5px dashed rgba(122,113,106,0.3);
+    color: var(--grey); font-size: 13px; line-height: 1.6;
+  }
+  footer h4 { color: var(--ink); font-size: 14px; margin-bottom: 4px; font-weight: 700; }
+  footer .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 28px; }
+  footer code { background: var(--tan); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--ink); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Launcher Mark · 2026.05.07</div>
+  <h1>AmberAgent <em>Pulse</em><br>launcher icon</h1>
+  <p>An ECG/pulse trace mark on a chartreuse field with a sport-orange focal dot at the R-wave apex. Reads as a heartbeat, a data signal, and faintly an "A" — designed to feel sport-tech, AI-aware, and unmistakably part of the Pulse design system.</p>
+</header>
+
+<section class="grid">
+
+  <!-- Squircle (most common Android default) -->
+  <div class="card">
+    <div class="icon-wrap large">
+      <div class="icon-mask squircle">
+        <div class="bg"></div>
+        <div class="fg">
+          <svg viewBox="0 0 108 108" preserveAspectRatio="xMidYMid meet">
+            <path d="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+                  fill="none" stroke="#1A1A1A" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="54" cy="18" r="6" fill="#E85D2F" />
+          </svg>
+        </div>
+      </div>
+    </div>
+    <div class="label">Squircle · Default</div>
+    <div class="desc">Most common Android launcher mask — Pixel, OPPO/realme, OnePlus, Samsung One UI.</div>
+  </div>
+
+  <!-- Circle -->
+  <div class="card">
+    <div class="icon-wrap large">
+      <div class="icon-mask circle">
+        <div class="bg"></div>
+        <div class="fg">
+          <svg viewBox="0 0 108 108" preserveAspectRatio="xMidYMid meet">
+            <path d="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+                  fill="none" stroke="#1A1A1A" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="54" cy="18" r="6" fill="#E85D2F" />
+          </svg>
+        </div>
+      </div>
+    </div>
+    <div class="label">Circle</div>
+    <div class="desc">Classic circular mask — Nova Launcher default, some MIUI configurations.</div>
+  </div>
+
+  <!-- Square -->
+  <div class="card">
+    <div class="icon-wrap large">
+      <div class="icon-mask square">
+        <div class="bg"></div>
+        <div class="fg">
+          <svg viewBox="0 0 108 108" preserveAspectRatio="xMidYMid meet">
+            <path d="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+                  fill="none" stroke="#1A1A1A" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="54" cy="18" r="6" fill="#E85D2F" />
+          </svg>
+        </div>
+      </div>
+    </div>
+    <div class="label">Rounded Square</div>
+    <div class="desc">Minimal-radius mask used by some legacy launchers.</div>
+  </div>
+
+  <!-- Themed (monochrome) -->
+  <div class="card card-on-dark">
+    <div class="icon-wrap large">
+      <div class="icon-mask themed">
+        <div class="fg">
+          <svg viewBox="0 0 108 108" preserveAspectRatio="xMidYMid meet">
+            <path d="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+                  fill="none" stroke="#F5F1EA" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="54" cy="18" r="6" fill="#F5F1EA" />
+          </svg>
+        </div>
+      </div>
+    </div>
+    <div class="label">Themed (Android 13+)</div>
+    <div class="desc">When themed-icons is on, the OS strips color and tints by system scheme. Silhouette retains the focal dot.</div>
+  </div>
+
+</section>
+
+<!-- Size resilience row -->
+<section class="grid" style="margin-top: 56px;">
+  <div class="size-row">
+    <div class="size-cell s48">
+      <div class="icon-mask squircle">
+        <div class="bg"></div>
+        <div class="fg">
+          <svg viewBox="0 0 108 108" preserveAspectRatio="xMidYMid meet">
+            <path d="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+                  fill="none" stroke="#1A1A1A" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="54" cy="18" r="6" fill="#E85D2F" />
+          </svg>
+        </div>
+      </div>
+      <div class="label" style="font-size: 10px;">48px</div>
+    </div>
+    <div class="size-cell s72">
+      <div class="icon-mask squircle">
+        <div class="bg"></div>
+        <div class="fg">
+          <svg viewBox="0 0 108 108" preserveAspectRatio="xMidYMid meet">
+            <path d="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+                  fill="none" stroke="#1A1A1A" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="54" cy="18" r="6" fill="#E85D2F" />
+          </svg>
+        </div>
+      </div>
+      <div class="label" style="font-size: 10px;">72px</div>
+    </div>
+    <div class="size-cell s96">
+      <div class="icon-mask squircle">
+        <div class="bg"></div>
+        <div class="fg">
+          <svg viewBox="0 0 108 108" preserveAspectRatio="xMidYMid meet">
+            <path d="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+                  fill="none" stroke="#1A1A1A" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="54" cy="18" r="6" fill="#E85D2F" />
+          </svg>
+        </div>
+      </div>
+      <div class="label" style="font-size: 10px;">96px</div>
+    </div>
+    <div class="size-cell s128">
+      <div class="icon-mask squircle">
+        <div class="bg"></div>
+        <div class="fg">
+          <svg viewBox="0 0 108 108" preserveAspectRatio="xMidYMid meet">
+            <path d="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+                  fill="none" stroke="#1A1A1A" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="54" cy="18" r="6" fill="#E85D2F" />
+          </svg>
+        </div>
+      </div>
+      <div class="label" style="font-size: 10px;">128px</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="grid-2">
+    <div>
+      <h4>Foreground</h4>
+      <p>ECG path <code>M20,60 L42,60 L46,66 L54,24 L62,66 L66,60 L88,60</code> in ink <code>#1A1A1A</code>, 4.5dp round-cap stroke. Sport-orange dot <code>#E85D2F</code>, r=6dp at the R-wave apex (54, 18).</p>
+    </div>
+    <div>
+      <h4>Background</h4>
+      <p>Solid chartreuse <code>#D6FF3F</code> fill across the 108×108 viewport. Whatever mask the OS applies inherits the brand color.</p>
+    </div>
+    <div>
+      <h4>Files</h4>
+      <p><code>app/src/debug/res/drawable/pulse_launcher_foreground.xml</code><br>
+      <code>app/src/debug/res/drawable/pulse_launcher_background.xml</code><br>
+      <code>app/src/debug/res/drawable/pulse_launcher_monochrome.xml</code><br>
+      <code>app/src/debug/res/mipmap-anydpi-v26/ic_launcher.xml</code></p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

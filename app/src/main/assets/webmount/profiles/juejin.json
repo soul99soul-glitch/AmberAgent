@@ -1,0 +1,27 @@
+{
+  "id": "juejin",
+  "name": "掘金",
+  "version": 1,
+  "origins": [
+    "https://juejin.cn",
+    "https://api.juejin.cn"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "login_cookie": "passport_csrf_token",
+    "interactive_selectors": {
+      "article_content": "article.markdown-body, .article-content",
+      "article_title": "h1.article-title",
+      "author_name": ".author-name-text, .username"
+    },
+    "rate_limit": {
+      "body_pattern": "\"err_no\":403",
+      "map_to": "DEGRADED"
+    }
+  },
+  "permissions": [
+    "read_cookie:passport_csrf_token",
+    "detect_login",
+    "detect_rate_limit"
+  ]
+}

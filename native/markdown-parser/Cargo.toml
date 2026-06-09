@@ -1,0 +1,22 @@
+[package]
+name = "markdown-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "markdown_parser"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni.workspace = true
+jni-common.workspace = true
+pulldown-cmark.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+similar = "2"

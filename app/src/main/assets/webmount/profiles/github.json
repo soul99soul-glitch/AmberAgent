@@ -1,0 +1,25 @@
+{
+  "id": "github",
+  "name": "GitHub",
+  "version": 1,
+  "origins": [
+    "https://github.com",
+    "https://api.github.com",
+    "https://gist.github.com"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "login_cookie": "user_session",
+    "interactive_selectors": {
+      "repo_readme": "article.markdown-body",
+      "code_blob": "table.highlight",
+      "issue_title": "bdi.js-issue-title",
+      "comment_body": "td.comment-body, .markdown-body"
+    }
+  },
+  "permissions": [
+    "read_cookie:user_session",
+    "detect_login"
+  ],
+  "notes": "The github_* adapter uses the REST API (anonymous; optional PAT). This profile gives wm_extract DOM hints for the web UI when an LLM is reasoning over a rendered page."
+}

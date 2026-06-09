@@ -1,0 +1,96 @@
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+        maven("https://repo.itextsupport.com/android")
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "io.objectbox") {
+                useModule("io.objectbox:objectbox-gradle-plugin:${requested.version}")
+            }
+            // (Removed) `org.mozilla.rust-android-gradle.rust-android` override:
+            // it mapped to a non-existent module
+            // `gradle.plugin.org.mozilla.rust-android-gradle:plugin:0.9.6` and
+            // broke fresh-clone Gradle config. The standard plugins DSL +
+            // gradlePluginPortal above resolve the plugin correctly without
+            // any override — Codex review fix.
+        }
+    }
+}
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        maven("https://maven.aliyun.com/repository/google") {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+        mavenLocal()
+    }
+}
+
+rootProject.name = "amberagent"
+include(":app")
+include(":app:baselineprofile")
+include(":highlight")
+include(":ai")
+include(":search")
+include(":tts")
+include(":common")
+include(":document")
+include(":core:agent-runtime")
+include(":core:agent-store-room")
+include(":feature:deepread:api")
+include(":feature:chat:api")
+include(":core:agent-utils")
+include(":core:app-infra")
+include(":core:model")
+include(":feature:history")
+include(":feature:webview")
+include(":feature:task")
+include(":feature:workspace")
+include(":feature:icloud")
+include(":core:event")
+include(":core:usage")
+include(":core:llm")
+include(":core:agent-runtime-impl")
+include(":core:settings")
+include(":feature:terminal:api")
+include(":feature:board:api")
+include(":feature:live:api")
+include(":feature:modelcouncil:api")
+include(":feature:office:api")
+include(":feature:subagent:api")
+include(":core:ai-prompts")
+include(":core:memory:api")
+include(":core:sync:api")
+include(":core:context:api")
+include(":core:ai:api")
+include(":core:ai:transformers:api")
+include(":core:ai:generation:api")
+include(":feature:subagent")
+include(":core:automation:api")
+include(":feature:tools:impl")
+include(":feature:board:impl")
+include(":feature:runtime:api")
+include(":feature:tools:api")
+include(":feature:terminal")
+include(":feature:modelcouncil")
+include(":feature:tools:access")
+include(":feature:system")

@@ -1,0 +1,20 @@
+[package]
+name = "sync-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "sync_crypto"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni.workspace = true
+jni-common.workspace = true
+thiserror.workspace = true
+log.workspace = true
+# ring is pinned 0.17.x — covers PBKDF2-HMAC-SHA256, AES-256-GCM, SHA-256, HMAC-SHA256.
+# Statically built; no system OpenSSL dependency. ~600 KB to the .so.
+ring = "0.17"

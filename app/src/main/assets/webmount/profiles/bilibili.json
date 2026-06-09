@@ -1,0 +1,41 @@
+{
+  "id": "bilibili",
+  "name": "Bilibili",
+  "version": 2,
+  "origins": [
+    "https://www.bilibili.com",
+    "https://api.bilibili.com",
+    "https://passport.bilibili.com",
+    "https://space.bilibili.com",
+    "https://search.bilibili.com",
+    "https://t.bilibili.com"
+  ],
+  "capabilities": ["read", "signing"],
+  "hints": {
+    "login_cookie": "SESSDATA",
+    "interactive_selectors": {
+      "video_title": "h1.video-title, .video-title-cur",
+      "uploader": ".up-name, a.up-name__text",
+      "danmu_box": ".bpx-player-dm-input"
+    },
+    "rate_limit": {
+      "http_status": 412,
+      "map_to": "DEGRADED"
+    }
+  },
+  "scripts": {
+    "sign_request": {
+      "call_page_fn": "window.__amberBiliWbi",
+      "args": ["url", "method", "body", "extra_params"]
+    }
+  },
+  "permissions": [
+    "read_cookie:SESSDATA",
+    "detect_login",
+    "detect_rate_limit",
+    "call_page_fn:__amberBiliWbi",
+    "send_signed:https://api.bilibili.com"
+  ],
+  "rate_limit_per_sec": 8,
+  "notes": "WBI signing is provided by a host-defined shim (assets/webmount/shims/bilibili.js). The shim performs the fetch in-page so the user's SESSDATA cookie is attached automatically. Use wm_extract mode=signed_fetch to invoke."
+}
