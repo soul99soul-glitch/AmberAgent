@@ -220,6 +220,17 @@ class ChatListSupportTest {
         assertTrue(source.contains("visible = pinTailIndicator && !captureProgress"))
     }
 
+    @Test
+    fun `pinned tail indicator overlay aligns with in-list resting position`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+
+        // The overlay's bottom padding must be derived from the same values
+        // that position the in-list reserve dot, or the pin handoff teleports.
+        assertTrue(source.contains("bottom = timelineBottomPadding + ScrollBottomSpacerHeight +"))
+        assertTrue(source.contains("TimelineItemSpacing + TailIndicatorDotBottomPadding"))
+        assertFalse(source.contains("AgentWorkingIndicatorOverlayBottomOffset"))
+    }
+
     private fun repoFile(pathInAppModule: String): File {
         return listOf(
             File(pathInAppModule),

@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.chat
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -32,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -195,10 +197,23 @@ internal fun TimelineTailWorkingIndicator(
             .height(AgentWorkingIndicatorReserveHeight),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        if (visible) {
+        // Crossfade instead of popping: this dot hides exactly when the pinned
+        // overlay takes over (and reappears when the pin disengages). Both sit
+        // at the same resting position, so a short fade makes the handoff
+        // seamless. Below 0.01 alpha the dot leaves composition entirely so the
+        // retained (visible=false) reserve doesn't keep an infinite pulse
+        // transition running.
+        val dotAlpha by animateFloatAsState(
+            targetValue = if (visible) 1f else 0f,
+            animationSpec = tween(durationMillis = TailIndicatorHandoffFadeMs),
+            label = "tail_indicator_handoff",
+        )
+        if (dotAlpha > 0.01f) {
             AgentWorkingIndicator(
                 processingStatus = processingStatus,
-                modifier = Modifier.padding(bottom = 18.dp),
+                modifier = Modifier
+                    .padding(bottom = TailIndicatorDotBottomPadding)
+                    .alpha(dotAlpha),
             )
         }
     }

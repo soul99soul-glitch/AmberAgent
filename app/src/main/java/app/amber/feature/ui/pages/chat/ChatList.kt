@@ -99,9 +99,16 @@ private fun String.compactSummaryPreview(maxLength: Int = 1_000): String {
 internal val TimelineTopPadding = 12.dp
 internal val TimelineBottomSafetyPadding = 28.dp
 internal val PostSendWaitingBottomReserve = 156.dp
-internal val AgentWorkingIndicatorOverlayBottomOffset = 8.dp
 internal val AgentWorkingIndicatorReserveHeight = 56.dp
 internal val TimelineItemSpacing = 14.dp
+// Components of the streaming tail dot's resting position. The pinned overlay
+// computes its bottom padding from these same values (timelineBottomPadding +
+// ScrollBottomSpacerHeight + TimelineItemSpacing + TailIndicatorDotBottomPadding)
+// so the in-list dot and the pinned dot sit at the SAME spot when the list is
+// snapped to the bottom — the pin handoff must stay a pure in-place crossfade.
+internal val ScrollBottomSpacerHeight = 5.dp
+internal val TailIndicatorDotBottomPadding = 18.dp
+internal const val TailIndicatorHandoffFadeMs = 180
 internal val TimelineMessageInnerSpacing = 4.dp
 internal val TimelineSelectionToolbarOffset = 56.dp
 internal const val MarkdownPrewarmBeforeItems = 4

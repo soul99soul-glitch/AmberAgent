@@ -1358,12 +1358,14 @@ private fun streamingRevealModifier(
         mutableStateOf(false)
     }
     LaunchedEffect(scope, revealActive, key) {
+        // Once claimed, never un-claim: revealActive drops the moment
+        // generation ends, and resetting here snapped a mid-flight block rise
+        // to its final position — the message's final block settles right at
+        // the end, so its rise was almost always cut. A finished animation is
+        // a no-op graphicsLayer, so letting it complete costs nothing.
+        if (shouldAnimate.value) return@LaunchedEffect
         val motionScope = scope
-        shouldAnimate.value = if (revealActive && motionScope != null) {
-            motionScope.claim(key)
-        } else {
-            false
-        }
+        shouldAnimate.value = revealActive && motionScope != null && motionScope.claim(key)
     }
     if (!shouldAnimate.value) return Modifier
 
@@ -2099,7 +2101,6 @@ private fun Paragraph(
 
     // Streaming-aware text build: static parsed text is opaque; only the
     // live suffix (newest, not-yet-parsed text) fades in as one batch.
-    val streamingTailActive = LocalStreamingTailActive.current
     val baseColor = LocalContentColor.current
     val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
 
@@ -2176,12 +2177,15 @@ private fun Paragraph(
                 }
             }
         }
-        // streamingTailActive != null marks the active streaming block; only then
-        // is there a suffix to fade. liveSuffixSourceOffset changes once per
-        // parse tick, so it is the batch key — a fresh Animatable per batch
-        // drives the newly-arrived text from 0→1.
-        val streamingTail = streamingTailActive != null &&
-            (inlineLiveSuffix.isNotEmpty() || plainLiveSuffix.isNotEmpty())
+        // liveSuffixSourceOffset changes once per parse tick, so it is the
+        // batch key — a fresh Animatable per batch drives the newly-arrived
+        // text from 0→1. Gate on the suffix itself (only the active streaming
+        // block ever receives one), NOT on the streaming-tail marker: that
+        // marker drops the instant generation ends, and gating on it snapped
+        // the still-fading last batch to full alpha + zero lift — a visible
+        // end-of-stream click. With this gate the final batch finishes its
+        // fade and the next parse tick absorbs it into settled text.
+        val streamingTail = inlineLiveSuffix.isNotEmpty() || plainLiveSuffix.isNotEmpty()
         val suffixAlpha = if (streamingTail) {
             val anim = remember(liveSuffixSourceOffset) { Animatable(0f) }
             LaunchedEffect(liveSuffixSourceOffset) {

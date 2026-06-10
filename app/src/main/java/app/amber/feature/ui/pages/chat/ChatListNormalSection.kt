@@ -1369,7 +1369,7 @@ internal fun ChatListNormal(
                             Spacer(
                                 Modifier
                                     .fillMaxWidth()
-                                    .height(5.dp)
+                                    .height(ScrollBottomSpacerHeight)
                             )
                         }
                     }
@@ -1411,14 +1411,24 @@ internal fun ChatListNormal(
                     .zIndex(5f)
             )
 
+            // The pinned dot must sit exactly where the in-list reserve dot
+            // rests when the list is snapped to the bottom: afterContentPadding
+            // + the ScrollBottom spacer + the reserve item's bottom spacing +
+            // the dot's padding inside the reserve. Matching positions (plus
+            // the crossfade on both sides) keeps the pin handoff invisible —
+            // a fixed offset here previously made the dot teleport ~57dp the
+            // moment the pin engaged.
             AnimatedVisibility(
                 visible = pinTailIndicator && !captureProgress,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = AgentWorkingIndicatorOverlayBottomOffset)
+                    .padding(
+                        bottom = timelineBottomPadding + ScrollBottomSpacerHeight +
+                            TimelineItemSpacing + TailIndicatorDotBottomPadding,
+                    )
                     .zIndex(6f),
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(animationSpec = tween(TailIndicatorHandoffFadeMs)),
+                exit = fadeOut(animationSpec = tween(TailIndicatorHandoffFadeMs)),
             ) {
                 AgentWorkingIndicator(processingStatus = processingStatus)
             }
