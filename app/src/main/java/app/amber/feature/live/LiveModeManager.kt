@@ -6,6 +6,8 @@ import android.content.Context
 import android.util.Log
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.view.accessibility.AccessibilityManager
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,6 +22,9 @@ import app.amber.ai.provider.ProviderManager
 import app.amber.agent.AppScope
 import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.feature.live.bubble.LiveBubbleContent
+import app.amber.feature.live.bubble.LiveBubbleWindow
+import app.amber.feature.ui.theme.AmberAgentTheme
 
 class LiveModeManager(
     private val context: Context,
@@ -32,6 +37,7 @@ class LiveModeManager(
 
     private val analyzer = LiveAnalyzer(providerManager)
     private val screenshotter = LiveScreenshotter(context)
+    private val bubble = LiveBubbleWindow()
 
     private var loopJob: Job? = null
     private var eventJob: Job? = null
@@ -97,6 +103,7 @@ class LiveModeManager(
         eventJob = null
         analysisJob?.cancel()
         analysisJob = null
+        bubble.hide()
         engine = null
         pendingSnapshot = null
         screenDirty = true
@@ -168,6 +175,7 @@ class LiveModeManager(
         while (true) {
             val settings = settingsStore.settingsFlow.value
             val liveSetting = settings.agentRuntime.liveMode
+            syncBubble(liveSetting)
             if (!liveSetting.enabled) {
                 _state.update {
                     it.copy(
@@ -462,6 +470,34 @@ class LiveModeManager(
             ?: return LiveFillResult.NO_DRAFT
         clipboard.setPrimaryClip(ClipData.newPlainText("amber-live-draft", draft))
         return LiveFillResult.COPIED
+    }
+
+    /** 每个 runLoop tick 调一次：根据状态决定气泡显隐。仅主线程。 */
+    private fun syncBubble(liveSetting: LiveModeSetting) {
+        val service = AmberAccessibilityService.getActiveService()
+        if (service == null ||
+            !liveSetting.enabled ||
+            !liveSetting.bubbleEnabled ||
+            !_state.value.active ||
+            service.activePackageName() == context.packageName
+        ) {
+            bubble.hide()
+            return
+        }
+        bubble.show(service) {
+            AmberAgentTheme {
+                val uiState by state.collectAsState()
+                LiveBubbleContent(
+                    state = uiState,
+                    onFillDraft = ::fillCurrentDraft,
+                    onRefresh = ::refreshNow,
+                    onStop = ::stop,
+                    onDrag = bubble::moveBy,
+                    onDragEnd = bubble::snapToEdge,
+                    onSizeChanged = bubble::requestReclamp,
+                )
+            }
+        }
     }
 
     companion object {
