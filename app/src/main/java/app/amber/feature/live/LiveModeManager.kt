@@ -1,5 +1,7 @@
 package app.amber.feature.live
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
 import android.accessibilityservice.AccessibilityServiceInfo
@@ -14,15 +16,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.ProviderManager
-import app.amber.ai.provider.TextGenerationParams
-import app.amber.ai.ui.UIMessage
 import app.amber.agent.AppScope
 import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.core.settings.findProvider
-import app.amber.core.settings.getCurrentChatModel
 
 class LiveModeManager(
     private val context: Context,
@@ -33,28 +30,39 @@ class LiveModeManager(
     private val _state = MutableStateFlow(LiveModeUiState())
     val state: StateFlow<LiveModeUiState> = _state.asStateFlow()
 
-    private var observeJob: Job? = null
+    private val analyzer = LiveAnalyzer(providerManager)
+    private val screenshotter = LiveScreenshotter(context)
+
+    private var loopJob: Job? = null
+    private var eventJob: Job? = null
     private var analysisJob: Job? = null
     private var analysisGeneration = 0L
+    private var engine: LiveEngine? = null
     private var pendingSnapshot: LiveScreenSnapshot? = null
-    private var pendingChangedAtMillis: Long = 0L
-    private var lastAnalyzedHash: String? = null
-    private var lastAnalysisAtMillis: Long = 0L
-    private var analysisBackoffUntilMillis: Long = 0L
     private var focusInstruction: String = ""
 
+    @Volatile
+    private var screenDirty: Boolean = true // 启动先看一眼
+
     fun start() {
-        if (observeJob?.isActive == true) {
+        if (loopJob?.isActive == true) {
             resume()
             return
         }
-        _state.value = LiveModeUiState(
-            active = true,
-            statusText = "伴随已开启，正在检查权限",
+        val liveSetting = settingsStore.settingsFlow.value.agentRuntime.liveMode
+        engine = LiveEngine(
+            stableDelayMs = liveSetting.stableDelayMs.coerceIn(500L, 5_000L),
+            minAnalysisIntervalMs = liveSetting.minAnalysisIntervalMs.coerceIn(5_000L, 30_000L),
+            backoffMs = MODEL_BUSY_BACKOFF_MS,
         )
-        observeJob = appScope.launch(Dispatchers.Main.immediate) {
-            observeLoop()
+        screenDirty = true
+        _state.value = LiveModeUiState(active = true, statusText = "伴随已开启，正在检查权限")
+        eventJob = appScope.launch {
+            AmberAccessibilityService.screenEvents.collect { event ->
+                if (event.packageName != context.packageName) screenDirty = true
+            }
         }
+        loopJob = appScope.launch(Dispatchers.Main.immediate) { runLoop() }
     }
 
     fun pause() {
@@ -69,7 +77,7 @@ class LiveModeManager(
     }
 
     fun resume() {
-        if (observeJob?.isActive != true) {
+        if (loopJob?.isActive != true) {
             start()
             return
         }
@@ -83,12 +91,15 @@ class LiveModeManager(
     }
 
     fun stop() {
-        observeJob?.cancel()
-        observeJob = null
+        loopJob?.cancel()
+        loopJob = null
+        eventJob?.cancel()
+        eventJob = null
         analysisJob?.cancel()
         analysisJob = null
+        engine = null
         pendingSnapshot = null
-        analysisBackoffUntilMillis = 0L
+        screenDirty = true
         focusInstruction = ""
         _state.value = LiveModeUiState()
     }
@@ -153,7 +164,7 @@ class LiveModeManager(
         }.trim()
     }
 
-    private suspend fun observeLoop() {
+    private suspend fun runLoop() {
         while (true) {
             val settings = settingsStore.settingsFlow.value
             val liveSetting = settings.agentRuntime.liveMode
@@ -174,7 +185,7 @@ class LiveModeManager(
                 delay(500L)
                 continue
             }
-            val model = settings.getCurrentChatModel()
+            val model = analyzer.resolveModel(settings)
             if (model == null) {
                 _state.update {
                     it.copy(
@@ -208,112 +219,100 @@ class LiveModeManager(
                 continue
             }
 
-            val snapshot = service.captureLiveUiSnapshot(
-                ownPackageName = context.packageName,
-                maxNodes = liveSetting.maxNodes.coerceIn(40, 260),
-            )
-            if (snapshot == null) {
-                _state.update {
-                    it.copy(
-                        needsAccessibility = false,
-                        noModelConfigured = false,
-                        analyzing = false,
-                        statusText = "未识别到另一侧内容",
-                    )
-                }
-                delay(liveSetting.refreshIntervalMs.coerceIn(1_000L, 5_000L))
+            // 事件驱动：屏幕没动（无事件）且引擎也无待办时，跳过捕获
+            val engine = this.engine ?: break
+            val tickInterval = liveSetting.refreshIntervalMs.coerceIn(1_000L, 5_000L)
+            if (!screenDirty && pendingSnapshot == null) {
+                delay(tickInterval)
                 continue
             }
 
-            val now = System.currentTimeMillis()
-            if (snapshot.stableHash != pendingSnapshot?.stableHash) {
-                pendingSnapshot = snapshot
-                pendingChangedAtMillis = now
-                _state.update {
-                    val backingOff = now < analysisBackoffUntilMillis
-                    it.copy(
-                        active = true,
-                        needsAccessibility = false,
-                        noModelConfigured = false,
-                        currentPackage = snapshot.packageName,
-                        currentAppLabel = snapshot.appLabel,
-                        currentTitle = snapshot.title,
-                        lastSnapshotHash = snapshot.stableHash,
-                        statusText = if (backingOff) {
-                            "模型服务繁忙，稍后自动重试"
-                        } else if (it.requestedAction.isNotBlank()) {
-                            ongoingStatus(it.requestedAction)
-                        } else {
-                            "正在伴随 ${snapshot.appLabel.ifBlank { snapshot.packageName }}"
-                        },
-                        error = if (backingOff) it.error else null,
-                        nextAnalysisAfterMillis = if (backingOff) analysisBackoffUntilMillis else 0L,
-                    )
-                }
-            }
-
-            if (now < analysisBackoffUntilMillis) {
-                _state.update {
-                    it.copy(
-                        statusText = "模型服务繁忙，稍后自动重试",
-                        nextAnalysisAfterMillis = analysisBackoffUntilMillis,
-                    )
-                }
-                delay(liveSetting.refreshIntervalMs.coerceIn(1_000L, 5_000L))
-                continue
-            }
-
-            if (liveSetting.autoRefresh && LiveUiTreeProcessor.shouldAnalyze(
-                    previousHash = lastAnalyzedHash,
-                    nextHash = pendingSnapshot?.stableHash,
-                    nowMillis = now,
-                    changedAtMillis = pendingChangedAtMillis,
-                    lastAnalysisAtMillis = lastAnalysisAtMillis,
-                    stableDelayMs = liveSetting.stableDelayMs.coerceIn(500L, 5_000L),
-                    minAnalysisIntervalMs = liveSetting.minAnalysisIntervalMs.coerceIn(5_000L, 30_000L),
+            if (screenDirty) {
+                screenDirty = false
+                val snapshot = service.captureLiveUiSnapshot(
+                    ownPackageName = context.packageName,
+                    maxNodes = liveSetting.maxNodes.coerceIn(40, 260),
                 )
-            ) {
-                pendingSnapshot?.let { analyzeSnapshot(it, force = false) }
+                if (snapshot == null) {
+                    _state.update {
+                        it.copy(
+                            needsAccessibility = false, noModelConfigured = false,
+                            analyzing = false, statusText = "未识别到另一侧内容",
+                        )
+                    }
+                    delay(tickInterval)
+                    continue
+                }
+                val now = System.currentTimeMillis()
+                if (engine.onScreenSignature(snapshot.stableHash, now)) {
+                    pendingSnapshot = snapshot
+                    _state.update {
+                        it.copy(
+                            active = true, needsAccessibility = false, noModelConfigured = false,
+                            currentPackage = snapshot.packageName,
+                            currentAppLabel = snapshot.appLabel,
+                            currentTitle = snapshot.title,
+                            lastSnapshotHash = snapshot.stableHash,
+                            statusText = "正在伴随 ${snapshot.appLabel.ifBlank { snapshot.packageName }}",
+                        )
+                    }
+                }
             }
 
-            delay(liveSetting.refreshIntervalMs.coerceIn(1_000L, 5_000L))
+            // 场景静默：OTHER 且用户没给焦点指令 → 不自动分析
+            val snapshot = pendingSnapshot
+            if (snapshot != null && liveSetting.autoRefresh) {
+                val scene = LiveScenes.classify(snapshot.packageName)
+                val silent = scene == LiveScene.OTHER && focusInstruction.isBlank()
+                if (silent) {
+                    _state.update {
+                        if (it.analyzing || it.card != null) it
+                        else it.copy(statusText = "在 ${snapshot.appLabel.ifBlank { snapshot.packageName }} 待命，点击分析或下达指令")
+                    }
+                } else if (engine.decide(System.currentTimeMillis()) == LiveEngine.Decision.Analyze) {
+                    analyzeSnapshot(snapshot, force = false)
+                }
+            }
+            delay(tickInterval)
         }
     }
 
     private fun analyzeSnapshot(snapshot: LiveScreenSnapshot, force: Boolean) {
+        val engine = engine ?: return
         val now = System.currentTimeMillis()
         val settings = settingsStore.settingsFlow.value
         val liveSetting = settings.agentRuntime.liveMode
-        if (now < analysisBackoffUntilMillis) {
-            _state.update {
-                it.copy(
-                    statusText = if (it.requestedAction.isNotBlank()) {
-                        "${it.requestedAction}排队中"
-                    } else {
-                        "模型服务繁忙，稍后自动重试"
-                    },
-                    nextAnalysisAfterMillis = analysisBackoffUntilMillis,
-                )
+        when (val d = engine.decide(now, force)) {
+            is LiveEngine.Decision.Wait -> {
+                if (d.reason == "backoff") {
+                    _state.update {
+                        it.copy(
+                            statusText = "模型服务繁忙，稍后自动重试",
+                            nextAnalysisAfterMillis = engine.backoffUntilMillis(),
+                        )
+                    }
+                    return
+                }
+                if (!force) return
             }
-            return
+            LiveEngine.Decision.Analyze -> Unit
         }
-        if (!force && now - lastAnalysisAtMillis < liveSetting.minAnalysisIntervalMs.coerceIn(5_000L, 30_000L)) {
-            return
-        }
-        val model = settings.getCurrentChatModel()
+        val model = analyzer.resolveModel(settings)
         if (model == null) {
             _state.update { it.copy(noModelConfigured = true, statusText = "请先配置聊天模型") }
             return
         }
-        val provider = model.findProvider(settings.providers)
-        if (provider == null) {
-            _state.update { it.copy(noModelConfigured = true, statusText = "当前模型没有可用服务") }
-            return
+
+        // 场景默认动作：显式指令优先，其次场景画像，最后通用屏幕分析
+        val sceneDefault = LiveScenes.defaultActionLabel(LiveScenes.classify(snapshot.packageName))
+        val actionLabel = if (focusInstruction.isBlank()) {
+            sceneDefault ?: DEFAULT_ACTION_LABEL
+        } else {
+            liveActionLabel(focusInstruction)
         }
 
         val generation = ++analysisGeneration
-        val actionLabel = liveActionLabel(focusInstruction)
-        lastAnalysisAtMillis = now
+        engine.onAnalysisStarted(now)
         analysisJob?.cancel()
         analysisJob = appScope.launch(Dispatchers.IO) {
             try {
@@ -327,40 +326,32 @@ class LiveModeManager(
                         nextAnalysisAfterMillis = 0L,
                     )
                 }
-                val providerImpl = providerManager.getProviderByType(provider)
-                val result = providerImpl.generateText(
-                    providerSetting = provider,
-                    messages = listOf(
-                        UIMessage.system(LiveAnalyzer.LivePrompt.system),
-                        UIMessage.user(LiveAnalyzer.LivePrompt.user(snapshot, focusInstruction, actionLabel)),
-                    ),
-                    params = TextGenerationParams(
-                        model = model,
-                        temperature = 0.25f,
-                        topP = 0.8f,
-                        maxTokens = 420,
-                        tools = emptyList(),
-                        reasoningLevel = ReasoningLevel.OFF,
-                        customHeaders = model.customHeaders,
-                        customBody = model.customBodies,
-                    )
+                val screenshotUri = if (liveSetting.analysisMode == LiveAnalysisMode.AGGRESSIVE) {
+                    AmberAccessibilityService.getActiveService()
+                        ?.let { svc -> screenshotter.captureToFileUri(svc) }
+                } else null
+                val outcome = analyzer.analyze(
+                    settings = settings,
+                    model = model,
+                    snapshot = snapshot,
+                    focus = focusInstruction,
+                    actionLabel = actionLabel,
+                    mode = liveSetting.analysisMode,
+                    screenshotUri = screenshotUri,
                 )
-                val text = result.choices.firstOrNull()?.message?.toText()?.trim().orEmpty()
-                val card = LiveAnalyzer.LivePrompt.parseCard(text, actionLabel)
                 withContext(Dispatchers.Main.immediate) {
                     if (generation == analysisGeneration) {
-                        lastAnalyzedHash = snapshot.stableHash
-                        analysisBackoffUntilMillis = 0L
+                        engine.onAnalysisSucceeded(snapshot.stableHash)
                         _state.update {
                             it.copy(
                                 analyzing = false,
-                                card = card,
+                                card = outcome.card,
                                 currentPackage = snapshot.packageName,
                                 currentAppLabel = snapshot.appLabel,
                                 currentTitle = snapshot.title,
                                 requestedAction = "",
                                 completedAction = actionLabel,
-                                statusText = doneStatus(actionLabel),
+                                statusText = outcome.degradedReason ?: doneStatus(actionLabel),
                                 error = null,
                                 lastUpdatedAtMillis = System.currentTimeMillis(),
                                 nextAnalysisAfterMillis = 0L,
@@ -373,16 +364,14 @@ class LiveModeManager(
             } catch (error: Throwable) {
                 Log.e(TAG, "Live analysis failed", error)
                 val failure = LiveFailure.from(error)
-                if (failure.retryable) {
-                    analysisBackoffUntilMillis = System.currentTimeMillis() + MODEL_BUSY_BACKOFF_MS
-                }
+                if (failure.retryable) engine.onRetryableFailure(System.currentTimeMillis())
                 _state.update {
                     it.copy(
                         analyzing = false,
                         statusText = failure.statusText,
                         error = failure.message,
                         completedAction = "",
-                        nextAnalysisAfterMillis = if (failure.retryable) analysisBackoffUntilMillis else 0L,
+                        nextAnalysisAfterMillis = if (failure.retryable) engine.backoffUntilMillis() else 0L,
                     )
                 }
             }
@@ -449,9 +438,25 @@ class LiveModeManager(
         }
     }
 
+    /** 只填不发：草稿写进对方输入框；失败降级剪贴板。 */
+    fun fillCurrentDraft(): LiveFillResult {
+        val card = _state.value.card ?: return LiveFillResult.NO_DRAFT
+        val draft = card.suggestions.firstOrNull()?.takeIf { it.isNotBlank() }
+            ?: card.watching.takeIf { it.isNotBlank() }
+            ?: return LiveFillResult.NO_DRAFT
+        val service = AmberAccessibilityService.getActiveService()
+        if (service != null && service.setFocusedText(draft)) return LiveFillResult.FILLED
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+            ?: return LiveFillResult.NO_DRAFT
+        clipboard.setPrimaryClip(ClipData.newPlainText("amber-live-draft", draft))
+        return LiveFillResult.COPIED
+    }
+
     companion object {
         private const val TAG = "LiveModeManager"
         private const val DEFAULT_ACTION_LABEL = "屏幕分析"
         private const val MODEL_BUSY_BACKOFF_MS = 30_000L
     }
 }
+
+enum class LiveFillResult { FILLED, COPIED, NO_DRAFT }
