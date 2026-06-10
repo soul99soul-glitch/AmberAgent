@@ -193,7 +193,6 @@ internal fun ChatListNormal(
     val conversationId = conversation.id.toString()
     val postSendState = chatTimelinePlan.postSendState
     val timelineLoading = chatTimelinePlan.timelineLoading
-    val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
     val timelineBottomPadding = TimelineBottomSafetyPadding +
         if (postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
     var retainedTailIndicatorMessageId by remember(conversation.id) {
