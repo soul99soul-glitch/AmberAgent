@@ -9,7 +9,10 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
@@ -39,6 +42,7 @@ class LiveBubbleWindow {
         val view = ComposeView(service).apply {
             setViewTreeLifecycleOwner(newOwner)
             setViewTreeSavedStateRegistryOwner(newOwner)
+            setViewTreeViewModelStoreOwner(newOwner)
             setContent(content)
         }
         val dm = service.resources.displayMetrics
@@ -117,11 +121,12 @@ class LiveBubbleWindow {
         context.getSystemService(WindowManager::class.java)
 
     /** 常驻 RESUMED 的窗口生命周期——Compose 重组不受宿主 Activity 后台影响。 */
-    private class BubbleLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner {
+    private class BubbleLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
         private val registry = LifecycleRegistry(this)
         private val savedState = SavedStateRegistryController.create(this)
         override val lifecycle: Lifecycle get() = registry
         override val savedStateRegistry: SavedStateRegistry get() = savedState.savedStateRegistry
+        override val viewModelStore: ViewModelStore = ViewModelStore()
 
         fun create() {
             savedState.performRestore(null)
@@ -133,6 +138,7 @@ class LiveBubbleWindow {
         }
 
         fun destroy() {
+            viewModelStore.clear()
             registry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         }
     }
