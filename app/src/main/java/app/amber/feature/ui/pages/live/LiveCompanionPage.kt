@@ -69,8 +69,12 @@ import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.VolumeHigh
 import app.amber.agent.Screen
+import app.amber.ai.provider.ModelType
+import app.amber.feature.live.LiveAnalysisMode
+import app.amber.feature.live.LiveFillResult
 import app.amber.feature.live.LiveModeCard
 import app.amber.feature.live.LiveModeUiState
+import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.LiveDot
 import app.amber.feature.ui.components.ds.SectionLabel
@@ -81,6 +85,7 @@ import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import java.util.Locale
+import kotlin.uuid.Uuid
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -172,10 +177,42 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                 LiveStatusPanel(
                     state = state,
                     autoRefresh = liveSetting.autoRefresh,
+                    aggressive = liveSetting.analysisMode == LiveAnalysisMode.AGGRESSIVE,
                     onToggleAutoRefresh = vm::setAutoRefresh,
+                    onToggleAggressive = { enabled ->
+                        vm.setAnalysisMode(
+                            if (enabled) LiveAnalysisMode.AGGRESSIVE else LiveAnalysisMode.CONSERVATIVE
+                        )
+                    },
                     onStart = vm::start,
                     onPause = vm::pauseOrResume,
                 )
+
+                AmberCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "伴随模型",
+                            style = LocalAmberType.current.secondary,
+                            color = LocalAmberTokens.current.ink2,
+                            modifier = Modifier.weight(1f),
+                        )
+                        ModelSelector(
+                            modelId = liveSetting.companionModelId
+                                ?.let { runCatching { Uuid.parse(it) }.getOrNull() },
+                            providers = settings.providers,
+                            type = ModelType.CHAT,
+                            allowClear = true,
+                            emptyLabel = "跟随聊天模型",
+                            onClear = { vm.setCompanionModel(null) },
+                            onSelect = { model -> vm.setCompanionModel(model.id.toString()) },
+                        )
+                    }
+                }
 
                 state.error?.takeIf { it.isNotBlank() }?.let { error ->
                     ErrorNote(
@@ -213,6 +250,13 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                         pendingAction = state.requestedAction,
                         enabled = state.active && !state.paused && !state.analyzing,
                         onInstruction = vm::submitFocusInstruction,
+                        onFillDraft = {
+                            when (vm.fillDraft()) {
+                                LiveFillResult.FILLED -> Toast.makeText(context, "已填入，发送请自己按", Toast.LENGTH_SHORT).show()
+                                LiveFillResult.COPIED -> Toast.makeText(context, "没找到输入框，草稿已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                                LiveFillResult.NO_DRAFT -> Toast.makeText(context, "还没有可填入的草稿", Toast.LENGTH_SHORT).show()
+                            }
+                        },
                     )
 
                     else -> WaitingCard(state = state, onStart = vm::start)
@@ -228,7 +272,9 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
 private fun LiveStatusPanel(
     state: LiveModeUiState,
     autoRefresh: Boolean,
+    aggressive: Boolean,
     onToggleAutoRefresh: (Boolean) -> Unit,
+    onToggleAggressive: (Boolean) -> Unit,
     onStart: () -> Unit,
     onPause: () -> Unit,
 ) {
@@ -264,14 +310,25 @@ private fun LiveStatusPanel(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                TextButton(
-                    onClick = { onToggleAutoRefresh(!autoRefresh) },
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Text(
-                        text = if (autoRefresh) "自动分析：开" else "自动分析：关",
-                        style = LocalAmberType.current.secondary,
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = { onToggleAutoRefresh(!autoRefresh) },
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text(
+                            text = if (autoRefresh) "自动分析：开" else "自动分析：关",
+                            style = LocalAmberType.current.secondary,
+                        )
+                    }
+                    TextButton(
+                        onClick = { onToggleAggressive(!aggressive) },
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text(
+                            text = if (aggressive) "激进 · 截屏" else "保守 · 文字",
+                            style = LocalAmberType.current.secondary,
+                        )
+                    }
                 }
             }
             if (!state.active) {
@@ -361,6 +418,7 @@ private fun LiveCard(
     pendingAction: String = "",
     enabled: Boolean,
     onInstruction: (String) -> Unit,
+    onFillDraft: (() -> Unit)? = null,
 ) {
     AmberCard {
         Column(
@@ -412,6 +470,14 @@ private fun LiveCard(
                 "写回复" -> {
                     LiveSection(title = "回复草稿", content = card.suggestions.firstOrNull() ?: card.watching, prominent = true)
                     LiveSection(title = "语气", items = card.keyPoints)
+                    if (onFillDraft != null) {
+                        FilledTonalButton(
+                            onClick = onFillDraft,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
+                            Text("填入对方输入框")
+                        }
+                    }
                 }
 
                 else -> {

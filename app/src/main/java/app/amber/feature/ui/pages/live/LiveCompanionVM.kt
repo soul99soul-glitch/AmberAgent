@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import app.amber.feature.live.LiveAnalysisMode
+import app.amber.feature.live.LiveFillResult
 import app.amber.feature.live.LiveModeManager
 import app.amber.feature.live.LiveModeUiState
 import app.amber.core.settings.Settings
@@ -66,6 +68,32 @@ class LiveCompanionVM(
             }
         }
     }
+
+    fun setAnalysisMode(mode: LiveAnalysisMode) {
+        viewModelScope.launch {
+            settingsStore.update { settings ->
+                settings.copy(
+                    agentRuntime = settings.agentRuntime.copy(
+                        liveMode = settings.agentRuntime.liveMode.copy(analysisMode = mode)
+                    )
+                )
+            }
+        }
+    }
+
+    fun setCompanionModel(modelId: String?) {
+        viewModelScope.launch {
+            settingsStore.update { settings ->
+                settings.copy(
+                    agentRuntime = settings.agentRuntime.copy(
+                        liveMode = settings.agentRuntime.liveMode.copy(companionModelId = modelId)
+                    )
+                )
+            }
+        }
+    }
+
+    fun fillDraft(): LiveFillResult = liveModeManager.fillCurrentDraft()
 
     fun setVoiceInputEnabled(enabled: Boolean) {
         viewModelScope.launch {
