@@ -1,13 +1,16 @@
 package app.amber.feature.live
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
 enum class LiveAnalysisMode {
     /** 保守：只读无障碍 UI 树文字 */
+    @SerialName("conservative")
     CONSERVATIVE,
 
     /** 激进：截屏喂视觉模型，UI 树作辅助 */
+    @SerialName("aggressive")
     AGGRESSIVE,
 }
 
