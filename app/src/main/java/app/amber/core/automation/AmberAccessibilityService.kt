@@ -83,6 +83,37 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
     }
 
     /**
+     * 在指定包名的窗口里填入文本：优先该窗口的输入焦点节点，否则深度优先找第一个
+     * 可编辑节点。供 Live 伴随"只填不发"使用 —— 点击 Amber 自己的按钮时活动窗口
+     * 是 Amber，rootInActiveWindow 拿不到对方输入框，必须按包名扫 windows。
+     */
+    fun setTextInPackage(packageName: String, text: String): Boolean {
+        if (packageName.isBlank()) return false
+        for (window in windows.orEmpty()) {
+            val root = window.root ?: continue
+            if (root.packageName?.toString() != packageName) continue
+            val target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+                ?: findFirstEditable(root, depth = 0)
+                ?: continue
+            val arguments = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            if (target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)) return true
+        }
+        return false
+    }
+
+    private fun findFirstEditable(node: AccessibilityNodeInfo, depth: Int): AccessibilityNodeInfo? {
+        if (depth > 80) return null
+        if (node.isEditable && node.isVisibleToUser) return node
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            findFirstEditable(child, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    /**
      * API 30+ 截当前屏为软件 Bitmap；低版本或失败返回 null（调用方降级保守模式）。
      */
     @Suppress("NewApi")

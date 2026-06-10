@@ -327,8 +327,12 @@ class LiveModeManager(
                     )
                 }
                 val screenshotUri = if (liveSetting.analysisMode == LiveAnalysisMode.AGGRESSIVE) {
-                    AmberAccessibilityService.getActiveService()
-                        ?.let { svc -> screenshotter.captureToFileUri(svc) }
+                    AmberAccessibilityService.getActiveService()?.let { svc ->
+                        // Amber 自己全屏在前台时截屏只会拍到自己，喂给模型反而污染分析 → 跳过
+                        val activePackage = svc.activePackageName()
+                        if (activePackage == context.packageName) null
+                        else screenshotter.captureToFileUri(svc)
+                    }
                 } else null
                 val outcome = analyzer.analyze(
                     settings = settings,
@@ -447,7 +451,13 @@ class LiveModeManager(
             ?: card.watching.takeIf { it.isNotBlank() }
             ?: return LiveFillResult.NO_DRAFT
         val service = AmberAccessibilityService.getActiveService()
-        if (service != null && service.setFocusedText(draft)) return LiveFillResult.FILLED
+        if (service != null) {
+            val targetPackage = _state.value.currentPackage
+            if (targetPackage.isNotBlank() && service.setTextInPackage(targetPackage, draft)) {
+                return LiveFillResult.FILLED
+            }
+            if (service.setFocusedText(draft)) return LiveFillResult.FILLED
+        }
         val clipboard = context.getSystemService(ClipboardManager::class.java)
             ?: return LiveFillResult.NO_DRAFT
         clipboard.setPrimaryClip(ClipData.newPlainText("amber-live-draft", draft))
