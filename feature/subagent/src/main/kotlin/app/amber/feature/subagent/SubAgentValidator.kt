@@ -12,6 +12,13 @@ import kotlin.uuid.Uuid
 
 const val MAX_SUB_AGENT_CONTEXT_CHARS = 6_000
 
+private const val DEFAULT_TASK_OUTPUT_FORMAT =
+    "Brief summary, findings, evidence, risks, and recommended next steps."
+private const val DEFAULT_TASK_TOOLS_AND_SOURCES =
+    "Use only tools granted to this subagent. If no tools are granted, rely only on the task context."
+private const val DEFAULT_TASK_BOUNDARIES =
+    "Stay within the assigned objective; do not spawn subagents; report once and stop."
+
 object SubAgentValidator {
     private val genericNameParts = listOf(
         "general", "helper", "all-purpose", "allpurpose", "fullstack", "universal", "万能", "通用", "全能", "全栈"
@@ -30,9 +37,9 @@ object SubAgentValidator {
         val task = input["task"]?.jsonObject ?: error("task object is required")
         val spec = SubAgentTaskSpec(
             objective = task.string("objective"),
-            outputFormat = task.string("output_format"),
-            toolsAndSources = task.string("tools_and_sources"),
-            boundaries = task.string("boundaries"),
+            outputFormat = task.stringOrBlank("output_format").ifBlank { DEFAULT_TASK_OUTPUT_FORMAT },
+            toolsAndSources = task.stringOrBlank("tools_and_sources").ifBlank { DEFAULT_TASK_TOOLS_AND_SOURCES },
+            boundaries = task.stringOrBlank("boundaries").ifBlank { DEFAULT_TASK_BOUNDARIES },
             context = task.stringOrBlank("context"),
             sessionGrantId = task.stringOrBlank("session_grant_id"),
             sourceSessionIds = task["source_session_ids"]?.jsonArray
@@ -100,13 +107,13 @@ object SubAgentValidator {
         availableToolNames: Set<String>,
     ): SubAgentValidationResult {
         require(setting.allowDynamicSubAgents) { "Dynamic subagents are disabled in settings" }
-        val smartMode = setting.mode == SubAgentMode.SMART_DYNAMIC
 
         val requestedName = custom.stringOrBlank("name")
-        val rawName = if (requestedName.isBlank() || (smartMode && isGenericName(requestedName))) {
+        val taskObjective = input["task"]?.jsonObject?.stringOrBlank("objective").orEmpty()
+        val rawName = if (requestedName.isBlank() || isGenericName(requestedName)) {
             SmartSubAgentNames.pick(
                 seed = listOf(
-                    input["task"]?.jsonObject?.stringOrBlank("objective").orEmpty(),
+                    taskObjective,
                     custom.stringOrBlank("description"),
                     custom.stringOrBlank("system_prompt"),
                 ).joinToString("|")
@@ -114,13 +121,21 @@ object SubAgentValidator {
         } else {
             requestedName
         }
-        val description = custom.string("description")
-        val systemPrompt = custom.string("system_prompt")
+        val description = normalizeDynamicDescription(
+            value = custom.stringOrBlank("description"),
+            taskObjective = taskObjective,
+            displayName = rawName,
+        )
+        val systemPrompt = normalizeDynamicSystemPrompt(
+            value = custom.stringOrBlank("system_prompt"),
+            taskObjective = taskObjective,
+            description = description,
+        )
         val id = normalizeId(rawName).ifBlank {
             fallbackDynamicId(
                 seed = listOf(
                     requestedName,
-                    input["task"]?.jsonObject?.stringOrBlank("objective").orEmpty(),
+                    taskObjective,
                     description,
                     systemPrompt,
                 ).joinToString("|")
@@ -138,9 +153,6 @@ object SubAgentValidator {
             .filter { it in availableToolNames }
             .toSet()
         val requestedTools = explicitTools?.let { profileTools.intersect(it) } ?: profileTools
-        require(toolProfile == SubAgentToolProfile.NONE || requestedTools.isNotEmpty()) {
-            "Dynamic subagent has no available tools for profile ${toolProfile.name.lowercase()}"
-        }
         validateToolAllowlist(requestedTools, availableToolNames)
 
         val modelIdRaw = custom["model_id"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
@@ -191,6 +203,40 @@ object SubAgentValidator {
         require(missing.isEmpty()) {
             "Tool allowlist contains unavailable tools: ${missing.sorted().joinToString(", ")}"
         }
+    }
+
+    private fun normalizeDynamicDescription(
+        value: String,
+        taskObjective: String,
+        displayName: String,
+    ): String {
+        val trimmed = value.trim()
+        if (trimmed.isBlank()) {
+            val subject = taskObjective.ifBlank { displayName.ifBlank { "the assigned subtask" } }
+            return "Use when a bounded temporary subagent should handle: $subject."
+        }
+        if (trimmed.hasInvocationCue() || trimmed.isConciseTemporaryChineseRole()) return trimmed
+        return "Use when a bounded temporary subagent should handle this role: ${trimmed.replace('\n', ' ')}"
+    }
+
+    private fun normalizeDynamicSystemPrompt(
+        value: String,
+        taskObjective: String,
+        description: String,
+    ): String {
+        var prompt = value.trim().ifBlank {
+            "You are a temporary subagent for: ${taskObjective.ifBlank { description }}."
+        }
+        if (!prompt.hasBoundaryCue()) {
+            prompt += "\n\nBoundaries: stay within the assigned objective; do not spawn subagents; use only granted tools; do not ask the user."
+        }
+        if (!prompt.hasReportCue()) {
+            prompt += "\n\nReport output as: concise summary, findings, evidence, risks, and recommended next steps. Report once and stop."
+        }
+        if (prompt.length < 80) {
+            prompt += "\n\nFocus: produce a narrow, verifiable result for the supervisor and avoid broad commentary."
+        }
+        return prompt
     }
 
     fun validateNarrowDynamicRole(id: String, displayName: String, description: String, systemPrompt: String) {

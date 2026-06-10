@@ -122,22 +122,22 @@ class SubAgentTools(
 
     private fun startTool() = Tool(
         name = "subagent_start",
-        description = "Start a built-in or dynamic subagent as an isolated task. In smart dynamic mode, use custom_subagent and make its description explain when to invoke it; its system_prompt must include boundaries and report/output instructions.",
+        description = "Start a built-in or dynamic subagent as an isolated task. Pass exactly one of subagent_id or custom_subagent. In smart dynamic mode, use custom_subagent. Minimal dynamic roles can provide only task.objective; the app will fill safe defaults, but best results come from adding description, boundaries, and report/output instructions.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("subagent_id", stringProp("Roster subagent id. Omit this when using custom_subagent; do not pass placeholder ids like \"custom\" or \"dynamic\". In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. For OfficePro / terminal scenarios, call the underlying tools directly instead of dispatching a subagent."))
+                    put("subagent_id", stringProp("Roster subagent id. Omit this when using custom_subagent; passing both is invalid. In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. Do not pass placeholder ids like \"custom\" or \"dynamic\". For OfficePro / terminal scenarios, call the underlying tools directly instead of dispatching a subagent."))
                     put("custom_subagent", buildJsonObject {
                         put("type", "object")
-                        put("description", "Narrow dynamic subagent definition. name is optional; smart dynamic mode replaces missing or generic names, while roster/custom dynamic mode rejects broad names.")
+                        put("description", "Narrow dynamic subagent definition. name, description, and system_prompt are recommended, not strict: missing/generic names are replaced, and missing boundaries/report instructions are appended.")
                         put("properties", buildJsonObject {
-                            put("name", stringProp("Optional subagent display name. May be Chinese or English. Do not use root display_title as the name. Generic names are replaced only in smart dynamic mode."))
-                            put("description", stringProp("Required. Explain when to invoke this temporary role. Include a cue such as \"Use when ...\" or \"何时调用：...\"."))
-                            put("system_prompt", stringProp("Required. At least 80 characters. Must include explicit boundaries plus report/output instructions, e.g. \"Boundaries: read only... Report output as findings...\"."))
-                            put("tool_profile", stringProp("Optional. One of: ${toolProfileHelp()}. Default read_only."))
+                            put("name", stringProp("Optional subagent display name. May be Chinese or English. Missing or broad names such as general/helper/万能/通用 are replaced with a stable generated name. Do not use root display_title as the name."))
+                            put("description", stringProp("Recommended. Explain when to invoke this temporary role, e.g. \"Use when ...\" or \"何时调用：...\". If omitted or too terse, the app synthesizes a bounded invocation description."))
+                            put("system_prompt", stringProp("Recommended. Include explicit boundaries plus report/output instructions, e.g. \"Boundaries: read only... Report output as findings...\". If omitted or too short, the app appends safe defaults."))
+                            put("tool_profile", stringProp("Optional. One of: ${toolProfileHelp()}. Default read_only. Use none for pure creative/internal tasks. If no tools are available for the profile, the subagent runs without tools."))
                             put("tool_allowlist", buildJsonObject {
                                 put("type", "array")
-                                put("description", "Optional tool names. This can only narrow tool_profile; it cannot add write, terminal, send, install, delete, or subagent_* tools.")
+                                put("description", "Optional tool names. This can only narrow tool_profile; it cannot add write, terminal, send, install, delete, or subagent_* tools. subagent_* tools are always invalid.")
                                 put("items", buildJsonObject { put("type", "string") })
                             })
                             put("model_id", stringProp("Optional chat model UUID for this dynamic subagent. Omit to use the current chat model."))
@@ -147,20 +147,16 @@ class SubAgentTools(
                             put("timeout_ms", integerProp("Optional timeout in milliseconds. Capped by the SubAgent runtime setting."))
                             put("output_budget_chars", integerProp("Optional output budget in characters. Capped by the SubAgent runtime setting."))
                         })
-                        put("required", buildJsonArray {
-                            add("description")
-                            add("system_prompt")
-                        })
                     })
                     put("task", buildJsonObject {
                         put("type", "object")
                         put("description", "Required task spec.")
                         put("properties", buildJsonObject {
                             put("objective", stringProp("Required. The exact subtask objective."))
-                            put("output_format", stringProp("Required. How the subagent should report back."))
-                            put("tools_and_sources", stringProp("Required. Which tools/sources it may use or should avoid."))
-                            put("boundaries", stringProp("Required. Scope limits, non-goals, and safety constraints."))
-                            put("context", stringProp("Optional. Minimal context needed for the task; do not paste the whole parent conversation."))
+                            put("output_format", stringProp("Recommended. How the subagent should report back. Defaults to a concise summary with findings/evidence/risks/next steps."))
+                            put("tools_and_sources", stringProp("Recommended. Which tools/sources it may use or should avoid. Defaults to granted tools only."))
+                            put("boundaries", stringProp("Recommended. Scope limits, non-goals, and safety constraints. Defaults to staying within the objective, no subagents, report once and stop."))
+                            put("context", stringProp("Optional. Minimal context needed for the task; do not paste the whole parent conversation, raw tool results, or large dumps."))
                             put("session_grant_id", stringProp("Optional. Only use when the user granted historical session access."))
                             put("history_query", stringProp("Optional. Query for history-read workflows."))
                             put("source_session_ids", buildJsonObject {
@@ -179,9 +175,6 @@ class SubAgentTools(
                         })
                         put("required", buildJsonArray {
                             add("objective")
-                            add("output_format")
-                            add("tools_and_sources")
-                            add("boundaries")
                         })
                     })
                 },
