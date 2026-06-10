@@ -184,6 +184,8 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                             if (enabled) LiveAnalysisMode.AGGRESSIVE else LiveAnalysisMode.CONSERVATIVE
                         )
                     },
+                    bubbleEnabled = liveSetting.bubbleEnabled,
+                    onToggleBubble = vm::setBubbleEnabled,
                     onStart = vm::start,
                     onPause = vm::pauseOrResume,
                 )
@@ -275,6 +277,8 @@ private fun LiveStatusPanel(
     aggressive: Boolean,
     onToggleAutoRefresh: (Boolean) -> Unit,
     onToggleAggressive: (Boolean) -> Unit,
+    bubbleEnabled: Boolean,
+    onToggleBubble: (Boolean) -> Unit,
     onStart: () -> Unit,
     onPause: () -> Unit,
 ) {
@@ -326,6 +330,15 @@ private fun LiveStatusPanel(
                     ) {
                         Text(
                             text = if (aggressive) "激进 · 截屏" else "保守 · 文字",
+                            style = LocalAmberType.current.secondary,
+                        )
+                    }
+                    TextButton(
+                        onClick = { onToggleBubble(!bubbleEnabled) },
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text(
+                            text = if (bubbleEnabled) "气泡：开" else "气泡：关",
                             style = LocalAmberType.current.secondary,
                         )
                     }

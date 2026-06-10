@@ -95,6 +95,18 @@ class LiveCompanionVM(
 
     fun fillDraft(): LiveFillResult = liveModeManager.fillCurrentDraft()
 
+    fun setBubbleEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.update { settings ->
+                settings.copy(
+                    agentRuntime = settings.agentRuntime.copy(
+                        liveMode = settings.agentRuntime.liveMode.copy(bubbleEnabled = enabled)
+                    )
+                )
+            }
+        }
+    }
+
     fun setVoiceInputEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsStore.update { settings ->
