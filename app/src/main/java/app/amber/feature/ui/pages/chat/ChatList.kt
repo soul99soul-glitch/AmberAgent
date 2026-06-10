@@ -45,6 +45,11 @@ internal const val HistoryLoadingItemKey = "timeline-history-loading"
 internal const val ScrollBottomKey = "ScrollBottomKey"
 internal val TimelineHorizontalPadding = 16.dp
 internal val SendTransitionSlideDistance = 8.dp
+// iMessage-style send entrance: the just-sent user bubble springs up from the
+// input bar's direction into its slot. The distance approximates the visual
+// gap between the input field and where the bubble lands (above the bottom
+// padding + tail reserve).
+internal val SendEntranceSlideDistance = 84.dp
 
 // 2026-05-15 (1.9.7): top-level Regex avoids recompiling the pattern on every
 // recomposition of ContextCompactInProgressMarker. The streaming summary flow

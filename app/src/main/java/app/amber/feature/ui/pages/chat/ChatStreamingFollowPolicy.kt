@@ -4,7 +4,13 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 internal object TimelineFollowEndSettlePolicy {
-    const val MaxSettleFrames = 8
+    // Wide enough to cover the end-of-stream virtualization relayout: the
+    // finished message re-keys into header/blocks/footer items, and building
+    // that plan parses the full markdown — on long messages the displaced
+    // layout can land ~6-10 frames after loading flips. The loop exits after
+    // RequiredStableBottomFrames quiet frames, so the cap only matters while
+    // the layout is actually still moving.
+    const val MaxSettleFrames = 16
     const val RequiredStableBottomFrames = 2
 
     fun effectPlan(

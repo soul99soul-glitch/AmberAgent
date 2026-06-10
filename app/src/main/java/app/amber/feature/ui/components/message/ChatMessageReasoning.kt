@@ -170,6 +170,17 @@ private fun ReasoningContent(
             expanded = expandState == ReasoningCardState.Expanded,
         )
     }
+    // Streaming treatment only while the display text is the plain growing
+    // prefix. Once toDisplayReasoningText switches to its sliding tail window
+    // ("已省略前 N 字…"), every append rewrites the head — a prefix-breaking
+    // content that would make the display buffer snap per chunk and reset the
+    // reveal motion scope. Trimmed thoughts render statically, as before.
+    val displayTextStreaming = remember(reasoning.reasoning, loading, expandState) {
+        loading && !reasoning.reasoning.isReasoningTailTrimmed(
+            loading = loading,
+            expanded = expandState == ReasoningCardState.Expanded,
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -229,6 +240,11 @@ private fun ReasoningContent(
                         assistant = assistant,
                         scope = AssistantAffectScope.ASSISTANT,
                     ),
+                    // Thinking text streams like answer text: display-buffer
+                    // pacing + tail reveal. Without this the reasoning ran in
+                    // the post-stream drain-chase path (probe: id born with
+                    // streaming=false while its target kept growing).
+                    streaming = displayTextStreaming,
                     // Graphite §6.2: thoughts are human prose → SANS (.secondary), ink3/thinkBodyInk
                     // behind the 2dp thinkRule left rule (drawn above).
                     style = LocalAmberType.current.secondary.copy(
