@@ -6,6 +6,7 @@ import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.ComposeView
+import androidx.core.view.doOnNextLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -103,9 +104,9 @@ class LiveBubbleWindow {
     /** 内容尺寸变化（展开/收起卡片）后调用：等重新布局完把窗口夹回屏内。 */
     fun requestReclamp() {
         val view = host ?: return
-        view.post {
-            val lp = params ?: return@post
-            val service = hostService ?: return@post
+        view.doOnNextLayout {
+            val lp = params ?: return@doOnNextLayout
+            val service = hostService ?: return@doOnNextLayout
             clamp(service, lp, view.width, view.height)
             runCatching { windowManager(service).updateViewLayout(view, lp) }
         }
