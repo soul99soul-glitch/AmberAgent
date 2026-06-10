@@ -56,11 +56,13 @@ fun DataTable(
 
     Box(
         modifier = modifier
-            .clip(MaterialTheme.shapes.small)
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), MaterialTheme.shapes.small)
             .horizontalScroll(hScroll)
     ) {
-        SubcomposeLayout { constraints ->
+        SubcomposeLayout(
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), MaterialTheme.shapes.small)
+        ) { constraints ->
             val columnCount = max(headers.size, rows.maxOfOrNull { it.size } ?: 0)
             val rowCount = rows.size
             if (columnCount == 0) return@SubcomposeLayout layout(0, 0) {}
@@ -130,7 +132,7 @@ fun DataTable(
 
             val tableWidth = colWidths.sum()
             val tableHeight = headerHeight + rowHeights.sum()
-            val finalWidth = tableWidth.coerceIn(constraints.minWidth, constraints.maxWidth)
+            val finalWidth = tableWidth.coerceAtMost(constraints.maxWidth)
             val finalHeight = tableHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
             val currentLayoutDirection = layoutDirection
             val tableFrame = subcompose("table_frame") {

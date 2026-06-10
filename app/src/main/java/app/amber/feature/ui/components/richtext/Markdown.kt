@@ -2333,7 +2333,7 @@ private fun TableNode(
 @Composable
 private fun TableCellContent(content: String) {
     if (TABLE_CELL_MARKDOWN_HINT_REGEX.containsMatchIn(content)) {
-        MarkdownBlock(content = content)
+        MarkdownBlock(content = content, fillWidth = false)
     } else {
         Text(
             text = content,
