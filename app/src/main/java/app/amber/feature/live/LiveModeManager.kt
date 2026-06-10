@@ -363,16 +363,18 @@ class LiveModeManager(
                 throw error
             } catch (error: Throwable) {
                 Log.e(TAG, "Live analysis failed", error)
-                val failure = LiveFailure.from(error)
-                if (failure.retryable) engine.onRetryableFailure(System.currentTimeMillis())
-                _state.update {
-                    it.copy(
-                        analyzing = false,
-                        statusText = failure.statusText,
-                        error = failure.message,
-                        completedAction = "",
-                        nextAnalysisAfterMillis = if (failure.retryable) engine.backoffUntilMillis() else 0L,
-                    )
+                withContext(Dispatchers.Main.immediate) {
+                    val failure = LiveFailure.from(error)
+                    if (failure.retryable) engine.onRetryableFailure(System.currentTimeMillis())
+                    _state.update {
+                        it.copy(
+                            analyzing = false,
+                            statusText = failure.statusText,
+                            error = failure.message,
+                            completedAction = "",
+                            nextAnalysisAfterMillis = if (failure.retryable) engine.backoffUntilMillis() else 0L,
+                        )
+                    }
                 }
             }
         }
