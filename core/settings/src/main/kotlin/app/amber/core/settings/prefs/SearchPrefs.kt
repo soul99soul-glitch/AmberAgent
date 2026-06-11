@@ -57,14 +57,14 @@ class SearchPrefs(
 
     private fun readFrom(p: Preferences): SearchPrefsData = SearchPrefsData(
         searchServices = p[PreferencesKeys.SEARCH_SERVICES]?.let {
-            JsonInstant.decodeFromString<List<SearchServiceOptions>>(it)
+            it.decodeJsonOrNull<List<SearchServiceOptions>>()
         } ?: listOf(SearchServiceOptions.DEFAULT),
         searchCommonOptions = p[PreferencesKeys.SEARCH_COMMON]?.let {
-            JsonInstant.decodeFromString<SearchCommonOptions>(it)
+            it.decodeJsonOrNull<SearchCommonOptions>()
         } ?: SearchCommonOptions(),
         searchServiceSelected = p[PreferencesKeys.SEARCH_SELECTED] ?: 0,
         searchEnabledServiceIds = p[PreferencesKeys.SEARCH_ENABLED_SERVICE_IDS]?.let {
-            JsonInstant.decodeFromString<List<Uuid>>(it)
+            it.decodeJsonOrNull<List<Uuid>>()
         } ?: emptyList(),
         searchBuiltinDuckDuckGoEnabled = p[PreferencesKeys.SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] != false,
         searchBuiltinBingEnabled = p[PreferencesKeys.SEARCH_BUILTIN_BING_ENABLED] != false,

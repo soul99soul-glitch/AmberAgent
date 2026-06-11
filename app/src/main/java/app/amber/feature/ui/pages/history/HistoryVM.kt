@@ -40,7 +40,15 @@ class HistoryVM(
 
     fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {
-            conversationRepo.deleteConversation(conversation)
+            // Cleanup is deferred so the snackbar Undo can restore the
+            // conversation with attachments/images/favorites intact.
+            conversationRepo.deleteConversation(conversation, deferCleanup = true)
+        }
+    }
+
+    fun purgeDeletedConversation(conversation: Conversation) {
+        viewModelScope.launch {
+            conversationRepo.cleanupDeletedConversation(conversation)
         }
     }
 

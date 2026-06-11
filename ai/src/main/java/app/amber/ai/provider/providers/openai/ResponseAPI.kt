@@ -842,7 +842,7 @@ class ResponseAPI(
         )
     }
 
-    private fun parseResponseOutput(jsonObject: JsonObject): MessageChunk {
+    internal fun parseResponseOutput(jsonObject: JsonObject): MessageChunk {
         val outputs = jsonObject["output"]?.jsonArrayOrNull.orEmpty()
         val parts = arrayListOf<UIMessagePart>()
 
@@ -905,6 +905,26 @@ class ResponseAPI(
                     output["refusal"]?.jsonPrimitiveOrNull?.contentOrNull
                         ?.takeIf { it.isNotBlank() }
                         ?.let { refusal -> parts.add(UIMessagePart.Text(text = refusal)) }
+                }
+
+                "image_generation_call" -> {
+                    // Mirrors the streaming response.output_item.done handler; without
+                    // this, the final/non-stream message drops the generated image.
+                    output["result"]?.jsonPrimitiveOrNull?.contentOrNull
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { result ->
+                            parts.add(
+                                UIMessagePart.Image(
+                                    url = result,
+                                    metadata = buildJsonObject {
+                                        put(
+                                            "openai_image_call_id",
+                                            output["id"]?.jsonPrimitiveOrNull?.content ?: ""
+                                        )
+                                    }
+                                )
+                            )
+                        }
                 }
 
                 else -> {

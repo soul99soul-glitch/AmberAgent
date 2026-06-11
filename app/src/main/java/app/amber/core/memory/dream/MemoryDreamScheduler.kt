@@ -40,7 +40,7 @@ class MemoryDreamScheduler(
      * constraint); otherwise we wait until tonight 00:00 (or tomorrow 00:00 if 06:00 has
      * already passed today).
      */
-    fun scheduleNextNightRun() {
+    fun scheduleNextNightRun(skipCurrentWindow: Boolean = false) {
         val worker = settingsStore.settingsFlow.value.agentRuntime.memoryWorker
         val constraintsBuilder = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -52,7 +52,10 @@ class MemoryDreamScheduler(
         }
         val request = OneTimeWorkRequestBuilder<MemoryDreamWorker>()
             .setConstraints(constraintsBuilder.build())
-            .setInitialDelay(computeDelayUntilNextNightWindowMs(), TimeUnit.MILLISECONDS)
+            .setInitialDelay(
+                computeDelayUntilNextNightWindowMs(skipCurrentWindow = skipCurrentWindow),
+                TimeUnit.MILLISECONDS,
+            )
             .addTag(WORK_NAME)
             .build()
 
@@ -65,14 +68,20 @@ class MemoryDreamScheduler(
 
     private fun computeDelayUntilNextNightWindowMs(
         now: ZonedDateTime = ZonedDateTime.now(),
+        skipCurrentWindow: Boolean = false,
     ): Long {
         val zone = now.zone
         val today = now.toLocalDate()
         val nightStart = today.atTime(NIGHT_START).atZone(zone)
         val nightEnd = today.atTime(NIGHT_END).atZone(zone)
 
-        // Already inside today's window → run as soon as constraints allow.
-        if (!now.isBefore(nightStart) && now.isBefore(nightEnd)) return 0L
+        // Already inside today's window → run as soon as constraints allow, unless the
+        // caller just finished a run and wants the next night instead.
+        if (!now.isBefore(nightStart) && now.isBefore(nightEnd)) {
+            if (!skipCurrentWindow) return 0L
+            val tomorrowStart = today.plusDays(1).atTime(NIGHT_START).atZone(zone)
+            return Duration.between(now, tomorrowStart).toMillis().coerceAtLeast(0L)
+        }
 
         // Window starts in the future today (effectively only when LocalTime.now() < NIGHT_START,
         // which is impossible because NIGHT_START is 00:00, but kept for clarity).

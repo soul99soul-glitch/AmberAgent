@@ -174,7 +174,7 @@ fun Tool.invocationPolicy(inputText: String): ToolInvocationPolicy {
 // Static loopback/private host classification. Hostname-based (no DNS resolution),
 // so public names that resolve to private IPs are not caught here; this covers the
 // explicit localhost/RFC1918/link-local targets an agent would request directly.
-internal fun String?.isPrivateNetworkTarget(): Boolean {
+fun String?.isPrivateNetworkTarget(): Boolean {
     if (this.isNullOrBlank()) return false
     val host = runCatching { java.net.URI(trim()).host }.getOrNull()?.lowercase(Locale.ROOT) ?: return false
     val bare = host.removePrefix("[").removeSuffix("]")

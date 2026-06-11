@@ -9,7 +9,11 @@ import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -70,34 +74,43 @@ class MiniAppBridge(
     private val eventSubscriptionIds = mutableSetOf<String>()
     private val closed = AtomicBoolean(false)
 
+    // Bridge requests run off the WebView JavaBridge thread so a pending user
+    // confirmation or slow fetch can't stall every other bridge call. The JS
+    // side matches responses by request id, so out-of-order completion is fine.
+    // Parallelism is capped at 1: non-suspending sections execute one at a
+    // time, keeping the listener maps and rate-limit deque race-free.
+    private val bridgeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+
     @JavascriptInterface
     fun postMessage(raw: String) {
         if (closed.get()) return
-        val response = runCatching {
-            val request = json.decodeFromString<MiniAppBridgeRequest>(raw)
-            if (request.token != sessionToken) {
-                throw SecurityException("Invalid MiniApp session token")
-            }
-            MiniAppBridgeResponse(
-                id = request.id,
-                ok = true,
-                data = handle(request.method, request.params)
-            )
-        }.getOrElse { error ->
-            val id = runCatching { json.decodeFromString<MiniAppBridgeRequest>(raw).id }.getOrDefault(-1)
-            MiniAppBridgeResponse(
-                id = id,
-                ok = false,
-                error = when (error) {
-                    is SerializationException -> "Invalid bridge request"
-                    else -> error.message ?: error::class.java.simpleName
+        bridgeScope.launch {
+            val response = runCatching {
+                val request = json.decodeFromString<MiniAppBridgeRequest>(raw)
+                if (request.token != sessionToken) {
+                    throw SecurityException("Invalid MiniApp session token")
                 }
-            )
+                MiniAppBridgeResponse(
+                    id = request.id,
+                    ok = true,
+                    data = handle(request.method, request.params)
+                )
+            }.getOrElse { error ->
+                val id = runCatching { json.decodeFromString<MiniAppBridgeRequest>(raw).id }.getOrDefault(-1)
+                MiniAppBridgeResponse(
+                    id = id,
+                    ok = false,
+                    error = when (error) {
+                        is SerializationException -> "Invalid bridge request"
+                        else -> error.message ?: error::class.java.simpleName
+                    }
+                )
+            }
+            sendResponse(response)
         }
-        sendResponse(response)
     }
 
-    private fun handle(method: String, params: JsonObject): JsonElement {
+    private suspend fun handle(method: String, params: JsonObject): JsonElement {
         return when (method) {
             "storage.get" -> {
                 sandbox.require(MiniAppPermission.Storage)
@@ -135,13 +148,13 @@ class MiniAppBridge(
             "fetch" -> {
                 sandbox.require(MiniAppPermission.Network)
                 audit(method, MiniAppPermission.Network, "MiniApp network request", params)
-                runBlocking { httpClient.fetch(params) }
+                httpClient.fetch(params)
             }
 
             "search" -> {
                 sandbox.require(MiniAppPermission.Search)
                 audit(method, MiniAppPermission.Search, "MiniApp search request", params)
-                runBlocking { searchBridge.search(params) }
+                searchBridge.search(params)
             }
 
             "clipboard.copy" -> {
@@ -201,7 +214,7 @@ class MiniAppBridge(
                 val prompt = params.string("prompt").take(8000)
                 confirm("允许调用 Amber.ai？", prompt.take(360)) {
                     audit(method, MiniAppPermission.AiGenerate, "ai.generate", JsonPrimitive(prompt))
-                    runBlocking { aiBridge.generate(appId, params) }
+                    aiBridge.generate(appId, params)
                 }
             }
 
@@ -210,7 +223,7 @@ class MiniAppBridge(
                 val namespace = params.stringOrNull("namespace") ?: appId
                 val key = params.string("key")
                 audit(method, MiniAppPermission.SharedStore, "sharedStore.get", params)
-                runBlocking { repository.sharedGet(appId, namespace, key) } ?: JsonNull
+                repository.sharedGet(appId, namespace, key) ?: JsonNull
             }
 
             "sharedStore.set" -> {
@@ -219,7 +232,7 @@ class MiniAppBridge(
                 val key = params.string("key")
                 val value = params["value"] ?: JsonNull
                 requirePayloadSize(value, 32 * 1024)
-                runBlocking { repository.sharedSet(appId, namespace, key, value) }
+                repository.sharedSet(appId, namespace, key, value)
                 audit(method, MiniAppPermission.SharedStore, "sharedStore.set", JsonPrimitive("ok"))
                 JsonPrimitive(true)
             }
@@ -228,7 +241,7 @@ class MiniAppBridge(
                 sandbox.require(MiniAppPermission.SharedStore)
                 val namespace = params.stringOrNull("namespace") ?: appId
                 val key = params.string("key")
-                runBlocking { repository.sharedRemove(appId, namespace, key) }
+                repository.sharedRemove(appId, namespace, key)
                 audit(method, MiniAppPermission.SharedStore, "sharedStore.remove", params)
                 JsonPrimitive(true)
             }
@@ -273,7 +286,7 @@ class MiniAppBridge(
                 val targetAppId = params.string("appId")
                 MiniAppLaunchLimiter.check()
                 confirm("打开另一个小应用？", "「${appProvider().title}」想打开小应用 $targetAppId。") {
-                    val target = runBlocking { repository.getById(targetAppId) }
+                    val target = repository.getById(targetAppId)
                         ?: throw MiniAppValidationException("Target MiniApp does not exist")
                     audit(method, MiniAppPermission.Launch, "launch", JsonPrimitive(target.id))
                     mainHandler.post { launchApp(targetAppId) }
@@ -336,21 +349,19 @@ class MiniAppBridge(
 
     private fun JsonObject.stringOrNull(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 
-    private fun audit(method: String, permission: MiniAppPermission, summary: String, payload: JsonElement) {
-        runBlocking {
-            repository.audit(
-                appId = appId,
-                method = method,
-                permission = permission,
-                summary = summary,
-                payload = json.encodeToString(JsonElement.serializer(), payload),
-            )
-        }
+    private suspend fun audit(method: String, permission: MiniAppPermission, summary: String, payload: JsonElement) {
+        repository.audit(
+            appId = appId,
+            method = method,
+            permission = permission,
+            summary = summary,
+            payload = json.encodeToString(JsonElement.serializer(), payload),
+        )
     }
 
-    private fun confirm(title: String, message: String, block: () -> JsonElement): JsonElement {
+    private suspend fun confirm(title: String, message: String, block: suspend () -> JsonElement): JsonElement {
         if (closed.get()) throw SecurityException("MiniApp runner is closed")
-        val accepted = runBlocking { confirmation.confirm(title, message.take(420)) }
+        val accepted = confirmation.confirm(title, message.take(420))
         if (closed.get()) throw SecurityException("MiniApp runner is closed")
         if (!accepted) throw SecurityException("User denied MiniApp request")
         return block()
@@ -446,6 +457,7 @@ class MiniAppBridge(
 
     fun close() {
         closed.set(true)
+        bridgeScope.cancel()
         eventSubscriptionIds.toList().forEach {
             eventSubscriptionIds.remove(it)
             MiniAppEventBus.unsubscribe(it)

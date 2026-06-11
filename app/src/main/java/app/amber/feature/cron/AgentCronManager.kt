@@ -183,9 +183,15 @@ class AgentCronManager(
                 ).also { prepared = it }
             }
         }
-        prepared?.let { schedule(it) }
+        // The next occurrence is enqueued by the worker on its way out (see
+        // AgentCronWorker). Scheduling here — while the triggered run is already
+        // executing under the same unique work name — would REPLACE-cancel it.
         prepared?.let { agentTaskStore.upsert(it.toAgentTaskSnapshot(status = AgentTaskStatus.QUEUED)) }
         prepared
+    }
+
+    suspend fun scheduleNextRun(id: String) = withContext(Dispatchers.IO) {
+        listTasks().firstOrNull { it.id == id }?.let { schedule(it) }
     }
 
     suspend fun markRunStarted(id: String) = withContext(Dispatchers.IO) {

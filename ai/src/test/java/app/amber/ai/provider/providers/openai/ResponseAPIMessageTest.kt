@@ -1,5 +1,6 @@
 package app.amber.ai.provider.providers.openai
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -373,6 +374,45 @@ class ResponseAPIMessageTest {
         val reasoning = requestBody["reasoning"]?.jsonObject
         assertTrue("reasoning should exist", reasoning != null)
         assertEquals("low", reasoning!!["effort"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `parseResponseOutput should keep image_generation_call results`() {
+        val response = Json.parseToJsonElement(
+            """
+            {
+              "id": "resp_1",
+              "model": "gpt-test",
+              "status": "completed",
+              "output": [
+                {
+                  "type": "image_generation_call",
+                  "id": "ig_1",
+                  "status": "completed",
+                  "result": "data:image/png;base64,QUJD"
+                },
+                {
+                  "type": "message",
+                  "role": "assistant",
+                  "content": [{"type": "output_text", "text": "Here is your image."}]
+                }
+              ]
+            }
+            """.trimIndent()
+        ).jsonObject
+
+        val chunk = api.parseResponseOutput(response)
+
+        val parts = chunk.choices.first().message!!.parts
+        val image = parts.filterIsInstance<UIMessagePart.Image>().single()
+        assertEquals("data:image/png;base64,QUJD", image.url)
+        assertEquals(
+            "ig_1",
+            image.metadata?.jsonObject?.get("openai_image_call_id")?.jsonPrimitive?.content
+        )
+        assertTrue(
+            parts.filterIsInstance<UIMessagePart.Text>().any { it.text.contains("Here is your image.") }
+        )
     }
 
     @Test

@@ -50,13 +50,12 @@ class AssistantPrefs(
     }
 
     private fun readFrom(p: Preferences): AssistantPrefsData = AssistantPrefsData(
-        assistantId = p[PreferencesKeys.SELECT_ASSISTANT]?.let { Uuid.parse(it) }
+        assistantId = p[PreferencesKeys.SELECT_ASSISTANT]?.let { it.parseUuidOrNull() }
             ?: DEFAULT_ASSISTANT_ID,
-        assistants = JsonInstant.decodeFromString<List<Assistant>>(
-            p[PreferencesKeys.ASSISTANTS] ?: "[]"
-        ),
+        assistants = (p[PreferencesKeys.ASSISTANTS] ?: "[]")
+            .decodeJsonOrNull<List<Assistant>>() ?: emptyList(),
         assistantTags = p[PreferencesKeys.ASSISTANT_TAGS]?.let {
-            JsonInstant.decodeFromString<List<Tag>>(it)
+            it.decodeJsonOrNull<List<Tag>>()
         } ?: emptyList(),
     )
 
