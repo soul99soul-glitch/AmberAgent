@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.debounce
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.streamToolIndex
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote01
@@ -114,6 +115,7 @@ internal fun MessagePartsBlock(
 
     // Render parts in original order (group thinking/tool as chain-of-thought)
     val groupedParts = remember(parts) { parts.groupMessageParts() }
+    val contentBlockKeys = remember(groupedParts) { groupedParts.stableContentBlockKeys() }
     val hasVisibleWidgetContent = remember(parts) {
         parts.filterIsInstance<UIMessagePart.Text>().any { part ->
             GenerativeWidgetParser.hasRenderableWidget(part.text)
@@ -167,7 +169,7 @@ internal fun MessagePartsBlock(
                             }
 
                             is ThinkingStep.ToolStep -> {
-                                key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
+                                key(step.tool.stableStepKey()) {
                                     ChatMessageToolStep(
                                         tool = step.tool,
                                         loading = loading && !step.tool.isExecuted,
@@ -211,7 +213,7 @@ internal fun MessagePartsBlock(
                 }
             }
 
-            is MessagePartBlock.ContentBlock -> key(block.index) {
+            is MessagePartBlock.ContentBlock -> key(contentBlockKeys[blockIdx]) {
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
                         MessageSelectionContainer {
@@ -533,3 +535,31 @@ internal fun MessagePartsBlock(
         }
     }
 }
+
+/**
+ * ContentBlock 的稳定 Compose key: 用"同类 part 在消息内的序号"代替原始 part 下标。
+ *
+ * 原始下标 (`block.index`) 在流式中会平移 —— 例如 ThinkTagTransformer 把 `<think>`
+ * 提取成 Reasoning 插到 Text 之前时, Text 的 part 下标从 0 变 1, key 变化导致整块
+ * Compose 状态 (选区/MarkdownBlock 内部 remember) 被销毁重建, 视觉上闪一下。
+ * 同类序号在前面插入异类 part 时保持稳定。
+ */
+private fun List<MessagePartBlock>.stableContentBlockKeys(): List<String?> {
+    val counters = HashMap<String, Int>()
+    return map { block ->
+        if (block !is MessagePartBlock.ContentBlock) return@map null
+        val type = block.part::class.simpleName ?: "part"
+        val ordinal = counters.merge(type, 1, Int::plus)!! - 1
+        "content-$type-$ordinal"
+    }
+}
+
+/**
+ * Tool step 的稳定 Compose key: toolCallId 优先; blank id 时退到 provider 写入的
+ * stream tool index (参数流式增长时不再每个 chunk 换 key); 两者都缺时才退回
+ * hashCode (含 input, 每 chunk 都变, 仅作最后兜底)。
+ */
+private fun UIMessagePart.Tool.stableStepKey(): String =
+    toolCallId.ifBlank {
+        streamToolIndex()?.let { "stream-tool-$it" } ?: hashCode().toString()
+    }

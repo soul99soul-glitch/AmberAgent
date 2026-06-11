@@ -478,7 +478,8 @@ sealed class UIMessagePart {
     }
 }
 
-internal fun UIMessagePart.Tool.streamToolIndex(): Int? =
+// public: UI 层用它做 tool 卡片的稳定 Compose key (toolCallId 为空时的回退)
+fun UIMessagePart.Tool.streamToolIndex(): Int? =
     metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
 
 /**
@@ -532,14 +533,18 @@ internal fun UIMessagePart.Tool.withoutStreamArgsReplace(): UIMessagePart.Tool {
 internal fun UIMessagePart.Tool.findToolMergeTarget(
     tools: List<UIMessagePart.Tool>
 ): UIMessagePart.Tool? {
+    // 已执行 (有 output) 的 tool 已封口, 不能再作为合并目标: 多轮 tool 循环
+    // 共用同一条 assistant 消息, 第二轮的 stream index 从 0 重新计数, 不排除
+    // 已执行项会把新一轮 delta 串进上一轮同 index/末尾的 tool。
+    val candidates = tools.filter { !it.isExecuted }
     val streamIndex = streamToolIndex()
     val byStreamIndex = streamIndex?.let { index ->
-        tools.firstOrNull { it.streamToolIndex() == index }
+        candidates.firstOrNull { it.streamToolIndex() == index }
     }
     return if (toolCallId.isBlank()) {
-        byStreamIndex ?: if (streamIndex == null) tools.lastOrNull() else null
+        byStreamIndex ?: if (streamIndex == null) candidates.lastOrNull() else null
     } else {
-        tools.firstOrNull { it.toolCallId == toolCallId } ?: byStreamIndex
+        candidates.firstOrNull { it.toolCallId == toolCallId } ?: byStreamIndex
     }
 }
 

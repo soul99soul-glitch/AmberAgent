@@ -389,8 +389,10 @@ internal fun AgentToolCallCapsule(
                 } else {
                     Modifier
                 }
-            )
-            .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
+            ),
+        // 不在胶囊上再加 animateContentSize: 外层 ChatMessageToolStep Column 已有
+        // 一层 (input 流式增长/审批切换/output 回填时两层弹簧并行会弹跳)。
+        // 见 ChatMessage.kt 中关于 message 渲染路径禁止叠加 animateContentSize 的注释。
         shape = shape,
         color = theme.toolPillBg,
         contentColor = workspace.ink,

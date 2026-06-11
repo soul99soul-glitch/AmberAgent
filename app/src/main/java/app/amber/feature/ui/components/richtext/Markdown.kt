@@ -981,7 +981,11 @@ internal fun MarkdownParseResult.topLevelBlockCount(): Int {
 
 internal fun MarkdownParseResult.topLevelBlockKey(index: Int): String {
     val child = astTree.children.getOrNull(index) ?: return "missing-$index"
-    return "${child.type}:${child.startOffset}:${child.endOffset}"
+    // 不把 AST offset 编进 key: 前缀文本变化 (翻译/regex 视觉变换/重新解析) 会平移
+    // 所有后续 block 的 offset, 导致整条消息的虚拟化 LazyColumn item 全部换 key
+    // 销毁重建 (闪烁 + 滚动锚点丢失)。type + 块序号在内容平移时保持稳定;
+    // 块类型或结构变化时 key 仍会刷新。
+    return "${child.type}:$index"
 }
 
 @Composable
