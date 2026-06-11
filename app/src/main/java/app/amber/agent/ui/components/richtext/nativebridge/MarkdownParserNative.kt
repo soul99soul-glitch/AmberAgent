@@ -120,6 +120,42 @@ class PackedAstReader(private val blob: ByteArray) {
         return PackedAstNode(blob, offset = 8, parent = null, indexInParent = -1)
     }
 
+    /**
+     * Eagerly validates the entire packed blob with one bounds-checked walk.
+     *
+     * When this returns `true`, every later lazy [PackedAstNode] read on this blob is
+     * bounds-safe — no subsequent access can run past the buffer. Called once per parse
+     * on the native path by the Stage-4 parse funnel:
+     * ```
+     * reader.isValid && reader.validate()
+     * ```
+     *
+     * Returns `false` (never throws) for:
+     * - invalid header ([isValid] == false)
+     * - blob too short to hold even a root node body
+     * - truncated body (walk runs past [blob].size)
+     * - corrupt varint — [PackedAstNode.Companion.skipNode] calls [readVarint], which
+     *   throws [IllegalStateException] on >63-bit varints; that is caught here
+     * - childCount claims more children than bytes remaining (caught as
+     *   [ArrayIndexOutOfBoundsException] / [IndexOutOfBoundsException])
+     * - walk ends past [blob].size (consumed > available)
+     *
+     * Implementation reuses [PackedAstNode.Companion.skipNode] which already walks one
+     * node + all its descendants iteratively. The [ArrayDeque] allocation inside skipNode
+     * is acceptable (it already exists in production traversal paths).
+     */
+    fun validate(): Boolean {
+        if (!isValid || blob.size < 9) return false
+        return try {
+            val endCursor = PackedAstNode.skipNode(blob, 8)
+            endCursor <= blob.size
+        } catch (_: IndexOutOfBoundsException) {
+            false
+        } catch (_: IllegalStateException) {
+            false
+        }
+    }
+
     companion object {
         private const val SUPPORTED_VERSION = 1
     }
