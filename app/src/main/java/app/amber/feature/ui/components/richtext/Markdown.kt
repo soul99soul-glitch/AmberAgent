@@ -1,6 +1,5 @@
 package app.amber.feature.ui.components.richtext
 
-import android.os.Looper
 import android.os.Trace
 import android.util.Log
 import androidx.compose.foundation.background
@@ -104,19 +103,19 @@ import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.toDp
-import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.MarkdownParser
 import app.amber.feature.ui.components.richtext.tree.JvmMdNode
 import app.amber.feature.ui.components.richtext.tree.MdNode
 import app.amber.feature.ui.components.richtext.tree.MdNodeType
+import app.amber.feature.ui.components.richtext.tree.nativeMdTreeOrNull
 import app.amber.feature.ui.components.richtext.tree.textIn
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownPreprocessNative
+import app.amber.agent.ui.components.richtext.nativebridge.MarkdownParserNative
 import app.amber.agent.ui.components.richtext.nativebridge.PackedAstReader
 import java.util.LinkedHashMap
 import java.util.LinkedHashSet
-import kotlin.random.Random
 
 /**
  * When false, markdown nodes use wrap-content width instead of fill-max-width.
@@ -778,87 +777,45 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
         }
     }
 
-    val astTree = parser.buildMarkdownTreeFromString(preprocessed)
-    // Phase 2 Step 5: shadow-compare against native pulldown-cmark AST when
-    // `markdownAst` is enabled. The renderer still consumes `astTree` (JVM
-    // tree) — we don't swap the consumer because Markdown.kt is mid-migration
-    // (see `feedback_amber_agent_rust_native_spike` memory: 12+ commits/month,
-    // touching the renderer right now risks merge conflicts with active
-    // streaming-render fixes). The shadow path gives us correctness telemetry
-    // ahead of the eventual full swap.
+    // TD.Rust.1a Task 13 — parse-funnel switch. When the `markdownAst` flag is on
+    // (same flag the retired shadow-compare read: MarkdownNativeSwitch.isAstEnabled()),
+    // the renderer consumes the Rust-parsed packed AST via NativeMdNode instead of the
+    // JetBrains tree. Both feed the same parser-agnostic MdNode interface.
     //
-    // TD.Rust.1a — full renderer switch (consume PackedAstReader as primary
-    // AST) is documented in docs/td-rust-1a-feasibility.md as a dedicated
-    // multi-day sprint. The shadow path already validates structural parity
-    // when `markdownAst` flag is on; turning that into a render-time switch
-    // requires either a JVM-side ASTNode adapter over PackedAstReader
-    // (defeats the perf win) or a 2000-LOC renderer rewrite to consume
-    // PackedAstNode directly (needs on-device QA over 30+ markdown samples).
-    // Recommendation: defer until a device-test rig exists; until then the
-    // shadow path provides the same observability with zero render risk.
-    maybeShadowCompareNativeAst(preprocessed, astTree)
+    // [X] divergence (Part C / controller-accepted): the native path renders GFM-correct
+    // case-INSENSITIVE task checkboxes (`[X]` → checked, matching pulldown-cmark), whereas
+    // the JVM fallback below keeps the legacy case-SENSITIVE behavior (`[X]` → unchecked).
+    // Same input, opposite checkbox state — see NativeMdTree.taskChecked KDoc for the full
+    // rationale and the paired tree tests pinning both sides.
+    if (MarkdownNativeSwitch.isAstEnabled()) {
+        val blob = MarkdownParserNative.parse(preprocessed)
+        if (blob != null) {
+            val reader = PackedAstReader(blob)
+            if (reader.isValid && reader.validate()) {
+                nativeMdTreeOrNull(reader, preprocessed)?.let { root ->
+                    // hasHtmlBlocks comes from the blob header flag (bit 0). The Rust builder
+                    // sets it exactly when it emits a block-level HtmlBlock node (Event::Html),
+                    // deliberately excluding inline HTML — equivalent to the JVM
+                    // containsHtmlBlocks() which only recurses for MdNodeType.HtmlBlock
+                    // (JetBrains HTML_BLOCK). Verified parity (tree_builder.rs / packed_ast.rs).
+                    return MarkdownParseResult(preprocessed, root, reader.hasHtmlBlocks)
+                }
+            }
+            // Blob present but rejected (invalid header / failed bounds-walk / null root):
+            // report through the SAME pipeline the retired shadow-compare used, then fall
+            // through to the JVM path so the user still sees rendered markdown.
+            MarkdownNativeSwitch.reportAstBlobRejected()
+        }
+        // blob == null means the .so is missing or the bridge errored mid-flight — the
+        // bridge already logged/instrumented that (no extra report here); fall through.
+    }
+
+    // ── Unchanged JVM (JetBrains) path ──────────────────────────────────────────────────
+    val astTree = parser.buildMarkdownTreeFromString(preprocessed)
     // Rule 1: the ONLY place a JetBrains type crosses into the MdNode model.
     // Everything downstream consumes the parser-agnostic interface.
     val tree = JvmMdNode(astTree, preprocessed, null)
     return MarkdownParseResult(preprocessed, tree, tree.containsHtmlBlocks())
-}
-
-/**
- * Top-level structural compare. **Count-only** — the JVM ASTNode exposes
- * UTF-16 char offsets, pulldown-cmark exposes UTF-8 byte offsets; on a
- * CJK / emoji corpus (AmberAgent's bread-and-butter) span comparison
- * deterministically diverges and would swamp Crashlytics with false-positive
- * mismatches (review Step 5 P0-1). The "real" semantic-equivalence compare
- * needs an offset-normalizer + a JVM↔Rust type-name mapping table and
- * arrives with the eventual renderer swap.
- *
- * Cost-gated by the shared sample rate so streaming chunks don't pay the
- * JNI + decode bill per tick — only a fraction of parses run native and
- * compare (review Step 5 P1-1).
- */
-private fun maybeShadowCompareNativeAst(preprocessed: String, jvmTree: ASTNode) {
-    if (!MarkdownNativeSwitch.isAstEnabled()) return
-    // Skip when called on the composition (main) thread — the JNI parse +
-    // PackedAstReader decode would block the UI. Caches in this file
-    // sometimes hit a parse on main during first composition; let those
-    // fast-path through JVM and only sample compare on background renders.
-    if (Looper.myLooper() == Looper.getMainLooper()) return
-    val rate = MarkdownNativeSwitch.sampleRate()
-    if (rate <= 0f) return
-    // Caller-side roll decides whether to incur the JNI + decode cost at all.
-    // `reportAstDiff` also samples internally for matches (so dashboards see
-    // a sparse "sampling is alive" heartbeat) — that's an intentional second
-    // gate, the divergence path bypasses it and always reports.
-    if (Random.nextFloat() >= rate) return
-
-    // Whole-body try/catch: `PackedAstReader.root()` / `.children` is lazy
-    // and can throw (e.g. "varint too long") on a magic-valid but truncated
-    // native blob. Without this guard a corrupted Rust output would surface
-    // as an exception inside the JVM renderer path that just consumed the
-    // valid JVM tree — i.e. the shadow harness, which is supposed to NEVER
-    // affect the caller, would break the caller (Codex review P1-2).
-    try {
-        val blob = MarkdownNativeSwitch.parseAstOrNull(preprocessed) ?: return
-        val reader = PackedAstReader(blob)
-        val nativeRoot = reader.root()
-        if (!reader.isValid || nativeRoot == null) {
-            MarkdownNativeSwitch.reportAstBlobRejected()
-            return
-        }
-        val jvmCount = jvmTree.children.size
-        val nativeChildren = nativeRoot.children
-        val nativeCount = nativeChildren.size
-        val equal = jvmCount == nativeCount
-        val nativeTypeCodes = nativeChildren.take(8).map { it.typeCode }
-        MarkdownNativeSwitch.reportAstDiff(
-            equal = equal,
-            jvmSummary = "blocks=$jvmCount",
-            nativeSummary = "blocks=$nativeCount typeCodes=$nativeTypeCodes",
-        )
-    } catch (t: Throwable) {
-        android.util.Log.w("MarkdownAstShadow", "native AST decode/compare threw", t)
-        MarkdownNativeSwitch.reportAstBlobRejected()
-    }
 }
 
 private fun parseMarkdownUncached(content: String): MarkdownParseResult {
@@ -2457,6 +2414,12 @@ internal fun extractStreamingMarkdownTableData(
     // Re-parse the appended table text on the JVM parser and wrap the table node in JvmMdNode
     // so extractMarkdownTableData stays MdNode-typed (the only place a JetBrains parse leaks
     // here, mirroring the parse-funnel wrapping at parsePreprocessedMarkdownUncached).
+    //
+    // THIRD funnel site — stays JVM-only by design (TD.Rust.1a Task 13, not in scope): this
+    // re-parses a tiny appended table fragment for live streaming, not a full document. The
+    // `markdownAst` native switch is intentionally NOT applied here; the fragment is JvmMdNode
+    // regardless of the flag. Switching it would add JNI cost per streaming tick for no parity
+    // benefit (the settled table already went through the flag-gated main funnel).
     val streamingTable = JvmMdNode(parser.buildMarkdownTreeFromString(tableText), tableText, null)
         .children
         .firstOrNull { it.type == MdNodeType.Table }

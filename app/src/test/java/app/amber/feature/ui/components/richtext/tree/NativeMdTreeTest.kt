@@ -21,11 +21,13 @@ import java.io.File
  * disagree — currently only the case-insensitive `[X]` task marker (see [taskCheckedUppercaseX]).
  *
  * ### Source string for textIn (offset basis)
- * Native offsets are UTF-8 BYTE offsets (NativeMdTree.kt KU-2 note). `dump_corpus` generated each
- * blob from the raw `.md` file's bytes with no preprocessing, so we decode those same bytes as
- * ISO-8859-1 (one byte → one char) to align char indices with the blob's byte offsets. Production
- * will instead pass the preprocessed string with the blob generated from the same text; here the
- * raw-file/Latin-1 pairing reproduces the byte basis exactly.
+ * Native packed-AST offsets are UTF-8 BYTE offsets, but [NativeMdNode] now translates them to
+ * UTF-16 CHAR offsets internally (NativeMdTree.kt KU-2), so the [MdNode] contract is uniform char
+ * offsets. We therefore read each corpus `.md` file as a REAL UTF-8 string — no ISO-8859-1 trick —
+ * and the offset assertions still pass BECAUSE of the byte→char translation built in
+ * [nativeMdTreeOrNull]. Production passes the preprocessed string with the blob generated from the
+ * same text; reading the raw file as UTF-8 reproduces that basis (the corpus blobs were generated
+ * from the raw `.md` bytes with no preprocessing).
  *
  * Pure JVM — the [PackedAstReader] decoder is plain Kotlin, no Android/Robolectric needed.
  */
@@ -33,19 +35,19 @@ class NativeMdTreeTest {
 
     private val corpusDir = File("src/test/resources/markdown-corpus")
 
-    /** Load a golden blob, decode its source by the byte-aligned basis, wrap the root. */
+    /** Load a golden blob, decode its source as real UTF-8, wrap the root via the factory. */
     private fun parseCorpus(name: String): Pair<MdNode, String> {
         require(corpusDir.exists()) {
             "corpus not found — run via ./gradlew :app:testDebugUnitTest from repo root"
         }
         val baseName = name.removeSuffix(".md")
         val blob = File(corpusDir, "$baseName.pmda").readBytes()
-        // ISO-8859-1 so char index == byte index == the blob's offset basis (see class KDoc).
-        val source = String(File(corpusDir, "$baseName.md").readBytes(), Charsets.ISO_8859_1)
+        // Real UTF-8: byte→char translation inside NativeMdNode realigns offsets (see class KDoc).
+        val source = File(corpusDir, "$baseName.md").readText(Charsets.UTF_8)
         val reader = PackedAstReader(blob)
         require(reader.isValid) { "invalid blob for $baseName" }
-        val root = reader.root() ?: error("null root for $baseName")
-        return NativeMdNode(root, source, parent = null) to source
+        val root = nativeMdTreeOrNull(reader, source) ?: error("null root for $baseName")
+        return root to source
     }
 
     /** Pre-order DFS over the tree (excludes the receiver), mirroring [JvmMdTreeTest.descendants]. */
@@ -621,5 +623,131 @@ class NativeMdTreeTest {
             "native tree has no blockquote-marker token",
             root.descendants().any { it.isBlockquoteMarker },
         )
+    }
+
+    // ── KU-2: byte→char offset translation, CJK end-to-end (sample 24) ─
+
+    @Test
+    fun cjkHeadingTextInIsExactChineseSubstring() {
+        // The blob carries UTF-8 BYTE offsets; reading the file as real UTF-8 + the in-tree
+        // byte→char translation must make textIn slice the exact Chinese characters. The first
+        // heading in 24-cjk-mixed.md is `## CJK 混合内容`.
+        val (root, source) = parseCorpus("24-cjk-mixed")
+        val heading = root.allOfType(MdNodeType.Heading).first { it.headingLevel == 2 }
+        // The Heading node span is the ATX content (no leading `##`); its concatenated child text
+        // reconstructs the visible heading WITHOUT the marker.
+        val headingText = heading.children.joinToString("") { it.textIn(source) }
+        assertEquals("CJK 混合内容", headingText)
+        // And the full node-span textIn round-trips against the real UTF-8 source.
+        assertEquals(source.substring(heading.startOffset, heading.endOffset), heading.textIn(source))
+    }
+
+    @Test
+    fun cjkCodeFenceContentRangeSlicesTranslatedCharOffsets() {
+        // 24-cjk-mixed.md ends with a ```kotlin block whose body contains CJK comments (发送缓存值).
+        // codeFenceContentRange must be in TRANSLATED char offsets so the renderer's
+        // content.substring(range.first, range.last + 1) against the UTF-16 source is faithful —
+        // a regression guard for using wrapped (translated) children, not raw packed byte offsets.
+        val (root, source) = parseCorpus("24-cjk-mixed")
+        val fence = root.allOfType(MdNodeType.CodeBlock).first { it.isFencedCode }
+        val range = fence.codeFenceContentRange
+        assertNotNull("fenced kotlin block has a content range", range)
+        val body = source.substring(range!!.first, range.last + 1)
+        // The CJK comment text inside the code body must round-trip intact (would be garbled if the
+        // range were raw byte offsets indexed into the UTF-16 string).
+        assertTrue("body must contain the CJK code comment", body.contains("发送缓存值"))
+        assertTrue("body starts with the first code line", body.trimStart().startsWith("// 用户仓库"))
+        assertFalse("body must not contain the opening fence", body.contains("```kotlin"))
+    }
+
+    @Test
+    fun cjkParagraphTextInRoundTripsAgainstUtf8Source() {
+        // A non-heading CJK node must also slice correctly: pick a paragraph that contains both
+        // CJK and ASCII and assert textIn == the exact substring of the real UTF-8 source.
+        val (root, source) = parseCorpus("24-cjk-mixed")
+        val para = root.allOfType(MdNodeType.Paragraph)
+            .first { it.textIn(source).contains("Kotlin") && it.textIn(source).contains("静态类型") }
+        // Round-trip: translated offsets index the SAME UTF-16 string we read.
+        assertEquals(source.substring(para.startOffset, para.endOffset), para.textIn(source))
+        // Inline code inside the CJK content slices to the exact backtick span.
+        val inlineCode = root.allOfType(MdNodeType.InlineCode)
+            .firstOrNull { it.textIn(source) == "`Jetpack Compose`" }
+        assertNotNull("24 must contain `Jetpack Compose` inline code", inlineCode)
+    }
+
+    // ── KU-2: ByteToCharTranslator direct unit tests (no blob needed) ─
+
+    @Test
+    fun translatorIsNullForPureAscii() {
+        // Fast path: pure-ASCII source → identity → null translator (zero overhead).
+        assertNull(ByteToCharTranslator.of(""))
+        assertNull(ByteToCharTranslator.of("plain ascii text 123 !@#"))
+    }
+
+    @Test
+    fun translatorMapsCjkBytesToChars() {
+        // "中" is U+4E2D → 3 UTF-8 bytes, 1 UTF-16 char. "a中b": bytes a=[0], 中=[1..3], b=[4].
+        val t = ByteToCharTranslator.of("a中b")!!
+        assertEquals(0, t.toCharOffset(0)) // 'a' starts at char 0
+        assertEquals(1, t.toCharOffset(1)) // first byte of 中 → char 1
+        assertEquals(1, t.toCharOffset(2)) // mid byte of 中 clamps to its start char 1
+        assertEquals(1, t.toCharOffset(3)) // last byte of 中 → char 1
+        assertEquals(2, t.toCharOffset(4)) // 'b' starts at char 2
+        assertEquals(3, t.toCharOffset(5)) // end-of-string sentinel → char length 3
+    }
+
+    @Test
+    fun translatorHandlesSurrogatePairEmoji() {
+        // "🚀" is U+1F680 → 4 UTF-8 bytes, 2 UTF-16 chars (surrogate pair).
+        // "x🚀y": bytes x=[0], 🚀=[1..4], y=[5]; chars x=0, 🚀=1..2, y=3.
+        val src = "x🚀y"
+        val t = ByteToCharTranslator.of(src)!!
+        assertEquals(0, t.toCharOffset(0)) // 'x' → char 0
+        assertEquals(1, t.toCharOffset(1)) // first byte of 🚀 → char 1 (high surrogate)
+        assertEquals(1, t.toCharOffset(4)) // last byte of 🚀 → char 1 (start of code point)
+        assertEquals(3, t.toCharOffset(5)) // 'y' → char 3 (after the 2 surrogate chars)
+        assertEquals(4, t.toCharOffset(6)) // end sentinel → char length 4
+        // Cross-check against the actual UTF-16 string: substring by translated offsets is faithful.
+        // 'y' occupies a single byte at byte 5; its char offset is 3.
+        assertEquals("y", src.substring(t.toCharOffset(5), t.toCharOffset(6)))
+        // The emoji spans byte [1,5) → char [1,3).
+        assertEquals("🚀", src.substring(t.toCharOffset(1), t.toCharOffset(5)))
+    }
+
+    @Test
+    fun translatorHandlesMixedCjkAsciiAndClampsOutOfRange() {
+        val src = "Kotlin 是 a language"
+        val t = ByteToCharTranslator.of(src)!!
+        // "Kotlin " is 7 ASCII bytes/chars; 是 (U+662F) is 3 bytes, 1 char at char index 7.
+        assertEquals(7, t.toCharOffset(7))   // first byte of 是 → char 7
+        assertEquals(8, t.toCharOffset(10))  // byte right after 是 (the space) → char 8
+        // Out-of-range clamps to the string char length (never throws).
+        assertEquals(src.length, t.toCharOffset(Int.MAX_VALUE))
+        assertEquals(0, t.toCharOffset(-5))
+    }
+
+    @Test
+    fun asciiFastPathOffsetsIdenticalToByteOffsets() {
+        // Regression pin: a pure-ASCII corpus sample produces offsets identical to the raw packed
+        // byte offsets (the translator is null → identity), proving the fast path is preserved.
+        val baseName = "07-fenced-code-kotlin"
+        val blob = File(corpusDir, "$baseName.pmda").readBytes()
+        val source = File(corpusDir, "$baseName.md").readText(Charsets.UTF_8)
+        // Confirm the sample really is pure ASCII so this is a valid fast-path check.
+        assertTrue("01 must be pure ASCII for the fast-path pin", source.all { it.code < 128 })
+        assertNull("pure-ASCII source → null translator (identity)", ByteToCharTranslator.of(source))
+
+        val reader = PackedAstReader(blob)
+        val translated = nativeMdTreeOrNull(reader, source)!!
+        // Re-decode the raw packed byte offsets directly and compare to the translated offsets.
+        val rawRoot = PackedAstReader(blob).root()!!
+        fun assertSameOffsets(node: MdNode, raw: app.amber.agent.ui.components.richtext.nativebridge.PackedAstNode) {
+            assertEquals("startOffset identical on ASCII fast path", raw.startOffset, node.startOffset)
+            assertEquals("endOffset identical on ASCII fast path", raw.endOffset, node.endOffset)
+            node.children.forEachIndexed { i, child ->
+                assertSameOffsets(child, raw.children[i])
+            }
+        }
+        assertSameOffsets(translated, rawRoot)
     }
 }

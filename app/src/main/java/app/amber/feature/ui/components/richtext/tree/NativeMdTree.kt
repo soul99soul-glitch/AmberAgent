@@ -2,6 +2,7 @@ package app.amber.feature.ui.components.richtext.tree
 
 import app.amber.agent.ui.components.richtext.nativebridge.NodeType
 import app.amber.agent.ui.components.richtext.nativebridge.PackedAstNode
+import app.amber.agent.ui.components.richtext.nativebridge.PackedAstReader
 import app.amber.agent.ui.components.richtext.nativebridge.codeFenceKindExtra
 import app.amber.agent.ui.components.richtext.nativebridge.codeLangExtra
 import app.amber.agent.ui.components.richtext.nativebridge.headingLevelExtra
@@ -24,17 +25,19 @@ import app.amber.agent.ui.components.richtext.nativebridge.taskCheckedExtra
  * builder `native/markdown-parser/src/tree_builder.rs`. The [NodeType] → [MdNodeType] mapping in
  * [toMdNodeType] is near-1:1 (mapping doc §2); [NodeType.Unknown] → [MdNodeType.Unknown].
  *
- * ### Offsets are UTF-8 BYTE offsets (KU-2)
- * pulldown-cmark reports `range.start/range.end` as byte offsets into the UTF-8 source; the blob
- * stores them verbatim, so [startOffset]/[endOffset] are byte offsets. [textIn] slices the source
- * by char index, so a render-faithful slice requires the source string's char indices to align
- * with those byte offsets. In production the parse funnel MUST pass a source whose char index ==
- * byte index for the same preprocessed text the blob was generated from (e.g. by indexing the
- * UTF-8 bytes, or — for the parity rig — by decoding the bytes as ISO-8859-1 so one byte == one
- * char). For pure-ASCII text the two coincide; only non-ASCII input (CJK, em-dash, Greek, arrows)
- * makes byte and char indices diverge. [NativeMdNode] performs NO byte↔char conversion itself —
- * it is a thin view over [PackedAstNode] and leaves offset-basis alignment to the caller, matching
- * how [JvmMdNode] leaves slicing to `textIn`.
+ * ### Offsets are CHAR offsets at the interface; byte basis is internal (KU-2)
+ * pulldown-cmark reports `range.start/range.end` as UTF-8 BYTE offsets into the source; the blob
+ * stores them verbatim, so [PackedAstNode.startOffset]/[endOffset] are byte offsets. The [MdNode]
+ * interface contract, however, is Kotlin UTF-16 CHAR offsets (`textIn` does `String.substring`,
+ * and [JvmMdNode] already returns char offsets). To make the contract uniform across both
+ * implementations, [NativeMdNode] translates byte→char INSIDE the tree: [startOffset]/[endOffset]
+ * return TRANSLATED char offsets, so `source.substring(startOffset, endOffset)` is render-faithful
+ * for any source — CJK, emoji, em-dash, Greek, arrows — not only pure ASCII.
+ *
+ * The translation table ([ByteToCharTranslator]) is built ONCE per tree (via [nativeMdTreeOrNull])
+ * and shared by every node. For pure-ASCII sources byte index == char index, so the translator is
+ * `null` (identity, zero overhead). Out-of-range byte offsets clamp to the source length and never
+ * throw.
  *
  * ### Structural differences from JetBrains handled here (mapping doc §4)
  * The native tree is cleaner: no marker tokens (`*`/`**`/`~~`/`<`/`>`), no `ATX_CONTENT` wrapper,
@@ -43,19 +46,30 @@ import app.amber.agent.ui.components.richtext.nativebridge.taskCheckedExtra
  *
  * Not thread-confined; holds no mutable state beyond a lazily-computed children list.
  */
-internal class NativeMdNode(
+internal class NativeMdNode internal constructor(
     private val packed: PackedAstNode,
     private val source: String,
     override val parent: NativeMdNode?,
+    /**
+     * Shared byte→char translator for this whole tree, built once by [nativeMdTreeOrNull]. `null`
+     * means the source is pure ASCII (identity translation). Every node carries the same reference.
+     */
+    private val translator: ByteToCharTranslator?,
 ) : MdNode {
 
     override val type: MdNodeType = packed.type.toMdNodeType()
 
-    override val startOffset: Int get() = packed.startOffset
-    override val endOffset: Int get() = packed.endOffset
+    /** UTF-16 char offset (translated from the packed UTF-8 byte offset). */
+    override val startOffset: Int get() = translateOffset(packed.startOffset)
+
+    /** UTF-16 char offset (translated from the packed UTF-8 byte offset). */
+    override val endOffset: Int get() = translateOffset(packed.endOffset)
+
+    private fun translateOffset(byteOffset: Int): Int =
+        translator?.toCharOffset(byteOffset) ?: byteOffset.coerceIn(0, source.length)
 
     override val children: List<MdNode> by lazy {
-        packed.children.map { NativeMdNode(it, source, this) }
+        packed.children.map { NativeMdNode(it, source, this, translator) }
     }
 
     /**
@@ -215,7 +229,10 @@ internal class NativeMdNode(
     override val codeFenceContentRange: IntRange?
         get() {
             if (!isFencedCode) return null
-            val kids = packed.children
+            // Use the WRAPPED children so the range is in translated CHAR offsets — the renderer
+            // slices the char-indexed source with this range, so raw packed BYTE offsets would be
+            // wrong on non-ASCII code bodies (CJK comments etc.).
+            val kids = children
             val first = kids.firstOrNull() ?: return null
             val last = kids.last()
             if (last.endOffset <= first.startOffset) return null
@@ -301,6 +318,93 @@ internal class NativeMdNode(
                 if (found != null) return found
             }
             return null
+        }
+    }
+}
+
+/**
+ * Build a [NativeMdNode] root over [reader] for the given [source], with the byte→char translator
+ * computed EXACTLY ONCE and shared by every node in the tree.
+ *
+ * Returns `null` when the reader has no decodable root (`reader.root() == null`) — the caller falls
+ * back to the JVM path. Construction always goes through this factory so the translation table is
+ * never built per-node.
+ *
+ * Precondition: [source] is the same string the blob was generated from (the preprocessed markdown
+ * on the production funnel). [reader] should already be validated (`isValid && validate()`) by the
+ * caller; this factory does not re-validate.
+ */
+internal fun nativeMdTreeOrNull(reader: PackedAstReader, source: String): NativeMdNode? {
+    val root = reader.root() ?: return null
+    return NativeMdNode(root, source, parent = null, translator = ByteToCharTranslator.of(source))
+}
+
+/**
+ * Translates UTF-8 byte offsets (the packed-AST basis) into Kotlin UTF-16 char offsets (the
+ * [MdNode] interface basis). Built once per tree and shared by all nodes.
+ *
+ * For a pure-ASCII source byte index == char index, so [of] returns `null` (callers treat `null`
+ * as identity — no table, no per-offset lookup). For non-ASCII sources [of] precomputes a dense
+ * `utf8-byte-index → utf16-char-index` map by iterating the string by CODE POINTS: each code point
+ * contributes 1–4 UTF-8 bytes and 1–2 UTF-16 units (a code point above U+FFFF is a surrogate pair,
+ * i.e. 4 UTF-8 bytes ↔ 2 UTF-16 chars). The map has `utf8ByteLength + 1` entries so the inclusive
+ * end-of-string byte offset is representable. Out-of-range byte offsets clamp to the source length.
+ */
+internal class ByteToCharTranslator private constructor(
+    /** `byteToChar[b]` = UTF-16 char index for UTF-8 byte index `b`. Size = utf8ByteLength + 1. */
+    private val byteToChar: IntArray,
+) {
+    /** Char offset for [byteOffset], clamping out-of-range inputs (never throws). */
+    fun toCharOffset(byteOffset: Int): Int {
+        if (byteOffset <= 0) return 0
+        if (byteOffset >= byteToChar.size) return byteToChar[byteToChar.size - 1]
+        return byteToChar[byteOffset]
+    }
+
+    companion object {
+        /**
+         * Returns a translator for [source], or `null` when [source] is pure ASCII (identity).
+         * `null` is the fast path: no allocation, callers skip the lookup entirely.
+         */
+        fun of(source: String): ByteToCharTranslator? {
+            if (source.all { it.code < 128 }) return null
+
+            // Total UTF-8 byte length, computed without allocating the byte array.
+            var utf8Len = 0
+            var i = 0
+            while (i < source.length) {
+                val cp = source.codePointAt(i)
+                utf8Len += utf8ByteCount(cp)
+                i += Character.charCount(cp)
+            }
+
+            val map = IntArray(utf8Len + 1)
+            var bytePos = 0
+            var charPos = 0
+            i = 0
+            while (i < source.length) {
+                val cp = source.codePointAt(i)
+                val nBytes = utf8ByteCount(cp)
+                val nChars = Character.charCount(cp) // 1 (BMP) or 2 (surrogate pair)
+                // Every byte that belongs to this code point maps to the code point's START char.
+                for (b in 0 until nBytes) {
+                    map[bytePos + b] = charPos
+                }
+                bytePos += nBytes
+                charPos += nChars
+                i += nChars
+            }
+            // Sentinel: the byte position just past the last code point maps to the char length.
+            map[bytePos] = charPos
+            return ByteToCharTranslator(map)
+        }
+
+        /** UTF-8 byte width of a Unicode code point. */
+        private fun utf8ByteCount(cp: Int): Int = when {
+            cp < 0x80 -> 1
+            cp < 0x800 -> 2
+            cp < 0x10000 -> 3
+            else -> 4
         }
     }
 }
