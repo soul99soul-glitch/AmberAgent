@@ -120,12 +120,15 @@ class ICloudDriveTools(
         },
         execute = { input ->
             trackICloudTool("icloud_read", "读取 iCloud", input) {
+                val startChar = (input.int("start_char") ?: 0).coerceAtLeast(0)
+                val maxChars = (input.int("max_chars") ?: 65_536).coerceIn(1, 262_144)
                 val result = manager.readText(
                     path = input.string("path"),
                     nodeRef = input.string("node_ref"),
+                    maxBytes = ((startChar.toLong() + maxChars + 1) * 4)
+                        .coerceAtMost(MAX_ICLOUD_READ_BYTES.toLong())
+                        .toInt(),
                 )
-                val startChar = (input.int("start_char") ?: 0).coerceAtLeast(0)
-                val maxChars = (input.int("max_chars") ?: 65_536).coerceIn(1, 262_144)
                 val content = result.value.content
                 val endExclusive = (startChar + maxChars).coerceAtMost(content.length)
                 val slice = if (startChar >= content.length) "" else content.substring(startChar, endExclusive)
@@ -367,3 +370,5 @@ class ICloudDriveTools(
         }
     }
 }
+
+private const val MAX_ICLOUD_READ_BYTES = 4 * 1024 * 1024

@@ -66,7 +66,7 @@ class GoogleDriveAppDataClient(
         targetFile.parentFile?.mkdirs()
         response.body.byteStream().use { input ->
             targetFile.outputStream().buffered().use { output ->
-                input.copyTo(output)
+                input.copyToWithinLimit(output, MAX_DOWNLOAD_BYTES)
             }
         }
     }
@@ -165,6 +165,20 @@ class GoogleDriveAppDataClient(
         const val SYNC_FILE_NAME = "amberagent-sync.amberbackup"
         const val SYNC_FILE_PREFIX = "amberagent-sync-"
         const val DEFAULT_SNAPSHOT_PAGE_SIZE = 20
+    }
+}
+
+private const val MAX_DOWNLOAD_BYTES = 512L * 1024 * 1024
+
+private fun java.io.InputStream.copyToWithinLimit(output: java.io.OutputStream, limit: Long) {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+        val read = read(buffer)
+        if (read < 0) break
+        require(total <= limit - read) { "Google Drive backup exceeds ${limit} bytes" }
+        output.write(buffer, 0, read)
+        total += read
     }
 }
 

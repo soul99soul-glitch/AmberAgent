@@ -193,7 +193,7 @@ class ResponseAPI(
                     close()
                     return
                 }
-                Log.d(TAG, "onEvent: $id/$type $data")
+                Log.d(TAG, "onEvent: id=$id type=$type chars=${data.length}")
                 payloads.forEach { payload ->
                     val json = json.parseToJsonElement(payload).jsonObject
                     if (json["error"] != null) {
@@ -212,8 +212,7 @@ class ResponseAPI(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+                Log.w(TAG, "onFailure: status=${response?.code} type=${t?.javaClass?.simpleName}", t)
 
                 val bodyRaw = response?.body?.stringSafe()
                 try {
@@ -221,13 +220,11 @@ class ResponseAPI(
                         val bodyElement = Json.parseToJsonElement(
                             normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
                         )
-                        println(bodyElement)
                         exception = bodyElement.parseErrorDetail()
                         Log.i(TAG, "onFailure: $exception")
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                 } finally {
                     close(exception)
                 }

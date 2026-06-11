@@ -9,7 +9,7 @@ import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
@@ -27,6 +27,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.core.agent.utils.JsonInstant
+import io.ktor.utils.io.readAvailable
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 class ICloudDriveClient(
@@ -125,6 +127,7 @@ class ICloudDriveClient(
         session: ICloudDriveSession,
         resolvedPath: ICloudDriveResolvedPath,
         nodeRef: ICloudDriveNodeRef? = null,
+        maxBytes: Int = DEFAULT_READ_MAX_BYTES,
     ): ICloudDriveReadResult {
         val (node, matchLevel) = resolveNodeWithHint(session, resolvedPath, nodeRef)
         require(!node.isDirectory) { "Not a file: ${resolvedPath.relativePath}" }
@@ -145,7 +148,7 @@ class ICloudDriveClient(
             ?: tokenResponse.jsonObjectOrNull("package_token")?.string("url")
             ?: error("iCloud did not return a download token for ${node.name}")
         return ICloudDriveReadResult(
-            content = getText(downloadUrl, session),
+            content = getText(downloadUrl, session, maxBytes),
             entry = node.toEntry(resolvedPath.relativePath),
             matchLevel = matchLevel,
         )
@@ -393,14 +396,29 @@ class ICloudDriveClient(
             },
         ).jsonObject
 
-    private suspend fun getText(url: String, session: ICloudDriveSession): String {
+    private suspend fun getText(url: String, session: ICloudDriveSession, maxBytes: Int): String {
         val response = httpClient.get(url) {
             addICloudHeaders(session.cookies, session.endpoint)
             session.params.forEach { (key, value) -> parameter(key, value) }
         }
-        val body = response.bodyAsText()
+        val body = response.readTextWithinLimit(maxBytes)
         require(response.status.isSuccess()) { "iCloud download failed: ${response.status.value} ${body.take(500)}" }
         return body
+    }
+
+    private suspend fun HttpResponse.readTextWithinLimit(maxBytes: Int): String {
+        val channel = bodyAsChannel()
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0
+        while (!channel.isClosedForRead) {
+            val read = channel.readAvailable(buffer)
+            if (read <= 0) continue
+            require(total <= maxBytes - read) { "iCloud file exceeds $maxBytes byte read limit" }
+            output.write(buffer, 0, read)
+            total += read
+        }
+        return output.toByteArray().toString(Charsets.UTF_8)
     }
 
     private suspend fun postJson(
@@ -464,7 +482,7 @@ class ICloudDriveClient(
     }
 
     private suspend fun parseJson(response: HttpResponse): JsonElement {
-        val body = response.bodyAsText()
+        val body = response.readTextWithinLimit(MAX_JSON_RESPONSE_BYTES)
         require(response.status.isSuccess()) { "iCloud request failed: ${response.status.value} ${body.take(500)}" }
         return json.parseToJsonElement(body)
     }
@@ -496,6 +514,9 @@ class ICloudDriveClient(
         private const val MAX_SEARCH_FILE_BYTES = 512_000L
     }
 }
+
+private const val DEFAULT_READ_MAX_BYTES = 1024 * 1024
+private const val MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024
 
 object ICloudDriveResponseParser {
     fun parseSession(

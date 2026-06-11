@@ -249,12 +249,10 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        Log.i(TAG, "Error response: $bodyElement")
                         exception = bodyElement.parseErrorDetail()
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                 } finally {
                     close(exception)
                 }
@@ -584,9 +582,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
     private fun logStreamEvent(type: String?, data: String) {
         if (!Log.isLoggable(TAG, Log.VERBOSE)) return
-        val preview = data.take(512).replace("\n", "\\n")
-        val suffix = if (data.length > preview.length) "..." else ""
-        Log.v(TAG, "onEvent: type=$type, chars=${data.length}, data=$preview$suffix")
+        Log.v(TAG, "onEvent: type=$type chars=${data.length}")
     }
 
     private fun parseTokenUsage(bodyJson: JsonObject?): TokenUsage? {

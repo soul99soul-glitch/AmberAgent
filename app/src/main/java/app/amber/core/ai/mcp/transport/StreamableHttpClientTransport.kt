@@ -288,7 +288,7 @@ public class StreamableHttpClientTransport(
                     lastEventId = it
                     onResumptionToken?.invoke(it)
                 }
-                Log.d(TAG, "Client received SSE event: event=${event.event}, data=${event.data}, id=${event.id}")
+                Log.d(TAG, "Client received SSE event: event=${event.event}, chars=${event.data?.length ?: 0}, id=${event.id}")
                 when (event.event) {
                     null, "message" ->
                         event.data?.takeIf { it.isNotEmpty() }?.let { json ->

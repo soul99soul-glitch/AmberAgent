@@ -78,9 +78,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                 val bochaResponse = runCatching {
                     json.decodeFromString<BochaResponse>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
-                    error("Failed to decode response: $bodyRaw")
+                    error("Failed to decode Bocha response (${bodyRaw.length} chars): ${it.message}")
                 }.getOrThrow()
 
                 if (bochaResponse.code != 200) {
@@ -99,8 +97,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                     )
                 )
             } else {
-                println(response.body.string())
-                error("response failed #${response.code}")
+                error("Bocha response failed #${response.code}")
             }
         }
     }

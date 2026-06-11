@@ -54,7 +54,7 @@ class LocalBackupRepository(
         try {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 file.outputStream().buffered().use { output ->
-                    input.copyTo(output)
+                    input.copyToWithinLimit(output, MAX_IMPORT_ARCHIVE_BYTES)
                 }
             } ?: error("无法读取备份文件")
             return file
@@ -65,11 +65,25 @@ class LocalBackupRepository(
     }
 
     companion object {
+        private const val MAX_IMPORT_ARCHIVE_BYTES = 512L * 1024 * 1024
+
         fun suggestedFileName(now: Long = System.currentTimeMillis()): String {
             val stamp = Instant.ofEpochMilli(now)
                 .atZone(ZoneId.systemDefault())
                 .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
             return "AmberAgent-$stamp.$SYNC_ARCHIVE_EXTENSION"
         }
+    }
+}
+
+private fun java.io.InputStream.copyToWithinLimit(output: java.io.OutputStream, limit: Long) {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+        val read = read(buffer)
+        if (read < 0) break
+        require(total <= limit - read) { "Backup archive exceeds ${limit} bytes" }
+        output.write(buffer, 0, read)
+        total += read
     }
 }

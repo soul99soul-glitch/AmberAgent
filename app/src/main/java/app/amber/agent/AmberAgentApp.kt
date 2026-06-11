@@ -37,6 +37,7 @@ import app.amber.core.di.workspaceModule
 import app.amber.core.files.FilesManager
 import app.amber.core.files.SkillManager
 import app.amber.feature.cron.AgentCronManager
+import app.amber.feature.chat.impl.ChatEventProjector
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.prefs.SettingsProviderRescue
 import app.amber.core.nativepath.NativePathBootstrap
@@ -86,6 +87,8 @@ class AmberAgentApp : Application() {
 
         // sync upload files to DB
         syncManagedFiles()
+
+        recoverInterruptedAgentRuns()
 
         // install bundled agent skills
         installBuiltinSkills()
@@ -144,6 +147,13 @@ class AmberAgentApp : Application() {
                 }
             }
         )
+    }
+
+    private fun recoverInterruptedAgentRuns() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching { get<ChatEventProjector>().replayUnfinished() }
+                .onFailure { Log.w(TAG, "Failed to recover interrupted agent runs", it) }
+        }
     }
 
     private fun cleanupChatService() {

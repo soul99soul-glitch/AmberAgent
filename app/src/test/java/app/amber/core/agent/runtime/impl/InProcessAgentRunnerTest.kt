@@ -178,4 +178,27 @@ class InProcessAgentRunnerTest {
         // Status should be RUNNING or COMPLETED depending on timing
         assertTrue(snapshot.status in setOf(AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED))
     }
+
+    @Test
+    fun `completed runs are not reported as unfinished after cleanup`() = runBlocking {
+        val store = RecordingEventStore()
+        val registry = InMemoryAgentRegistry().apply {
+            register(
+                descriptor = FakeAgent().descriptor,
+                inputClass = FakeInput::class,
+                inputSerializer = FakeInput.serializer(),
+                artifactSerializer = FakeArtifact.serializer(),
+                factory = { FakeAgent() },
+            )
+        }
+        val runner = InProcessAgentRunner(registry, store)
+
+        runner.launch(AgentDescriptorId("fake"), FakeInput("done")).getOrThrow()
+        repeat(20) {
+            if (store.runs.lastOrNull()?.status == "completed") return@repeat
+            delay(50)
+        }
+
+        assertEquals(emptyList<AgentRunSnapshot>(), runner.listUnfinishedRuns())
+    }
 }

@@ -94,9 +94,7 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
                 val searchResponse = runCatching {
                     json.decodeFromString<SearXNGResponse>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println("SearXNG response body: $bodyRaw")
-                    error("Failed to decode SearXNG response: ${it.message}")
+                    error("Failed to decode SearXNG response (${bodyRaw.length} chars): ${it.message}")
                 }.getOrThrow()
 
                 // 转换为标准格式，取前 N 个结果
@@ -125,8 +123,6 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
 
                 return@withContext Result.success(SearchResult(items = items))
             } else {
-                val errorBody = response.body?.string()
-                println("SearXNG API error: ${response.code} - $errorBody")
                 error("SearXNG request failed with status ${response.code}")
             }
         }

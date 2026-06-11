@@ -92,9 +92,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                 val response = runCatching {
                     json.decodeFromString<ExaData>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
-                    error("Failed to decode response: $bodyRaw")
+                    error("Failed to decode Exa response (${bodyRaw.length} chars): ${it.message}")
                 }.getOrThrow()
 
                 return@withContext Result.success(
@@ -109,8 +107,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                         }
                     ))
             } else {
-                println(response.body.string())
-                error("response failed #${response.code}")
+                error("Exa response failed #${response.code}")
             }
         }
     }

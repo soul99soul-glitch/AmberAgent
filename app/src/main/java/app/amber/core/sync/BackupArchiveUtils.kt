@@ -65,12 +65,40 @@ internal fun resolveArchiveChild(parent: File, relativePath: String): File {
     return target
 }
 
-internal fun copyZipEntryToFile(zipIn: ZipInputStream, targetFile: File) {
+internal fun copyZipEntryToFile(
+    zipIn: ZipInputStream,
+    targetFile: File,
+    maxBytes: Long = MAX_BACKUP_ENTRY_BYTES,
+) {
     targetFile.parentFile?.mkdirs()
     FileOutputStream(targetFile).use { outputStream ->
-        zipIn.copyTo(outputStream)
+        zipIn.copyToBackupEntryWithinLimit(outputStream, maxBytes)
     }
 }
+
+internal fun readZipEntryTextWithinLimit(zipIn: ZipInputStream, maxBytes: Long = MAX_BACKUP_SETTINGS_BYTES): String {
+    val output = java.io.ByteArrayOutputStream()
+    zipIn.copyToBackupEntryWithinLimit(output, maxBytes)
+    return output.toByteArray().toString(Charsets.UTF_8)
+}
+
+internal fun ZipInputStream.copyToBackupEntryWithinLimit(
+    output: java.io.OutputStream,
+    limit: Long = MAX_BACKUP_ENTRY_BYTES,
+) {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+        val read = read(buffer)
+        if (read < 0) break
+        require(total <= limit - read) { "Backup archive entry exceeds $limit bytes" }
+        output.write(buffer, 0, read)
+        total += read
+    }
+}
+
+private const val MAX_BACKUP_SETTINGS_BYTES = 8L * 1024 * 1024
+private const val MAX_BACKUP_ENTRY_BYTES = 512L * 1024 * 1024
 
 internal fun databaseTempFile(tempDir: File, entryName: String): File? = when (entryName) {
     "amber_agent.db" -> File(tempDir, "amber_agent")

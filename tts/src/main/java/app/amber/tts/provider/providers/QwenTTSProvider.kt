@@ -38,7 +38,7 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
             })
         }
 
-        Log.i(TAG, "generateSpeech: $requestBody")
+        Log.i(TAG, "generateSpeech: provider=qwen model=${providerSetting.model} textChars=${request.text.length}")
 
         val httpRequest = Request.Builder()
             .url("${providerSetting.baseUrl}/services/aigc/multimodal-generation/generation")
@@ -51,8 +51,7 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
         val response = httpClient.newCall(httpRequest).execute()
 
         if (!response.isSuccessful) {
-            val errorBody = response.body.string()
-            Log.e(TAG, "Qwen TTS request failed: ${response.code} ${response.message}, body: $errorBody")
+            Log.e(TAG, "Qwen TTS request failed: ${response.code} ${response.message}")
             throw Exception("Qwen TTS request failed: ${response.code} ${response.message}")
         }
 

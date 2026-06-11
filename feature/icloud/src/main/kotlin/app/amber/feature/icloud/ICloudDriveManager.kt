@@ -155,12 +155,13 @@ class ICloudDriveManager(
     suspend fun readText(
         path: String?,
         nodeRef: String?,
+        maxBytes: Int = 1024 * 1024,
     ): ICloudDriveToolResult<ICloudDriveReadResult> = withReadySession(requireWrite = false) { session ->
         val decoded = nodeCache.resolve(nodeRef) ?: ICloudDriveNodeRefs.decode(nodeRef)
         val relativePath = decoded?.path ?: path
         require(!relativePath.isNullOrBlank()) { "path or node_ref is required" }
         val resolved = ICloudDrivePath.resolve(_state.value.vaultPath, relativePath)
-        val result = client.readText(session, resolved, decoded)
+        val result = client.readText(session, resolved, decoded, maxBytes)
         ICloudDriveToolResult(
             state = _state.value,
             path = resolved.relativePath,

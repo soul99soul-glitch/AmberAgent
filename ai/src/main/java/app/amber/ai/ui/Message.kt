@@ -405,6 +405,7 @@ sealed class UIMessagePart {
     @SerialName("video")
     data class Video(
         val url: String,
+        val mime: String = "video/mp4",
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 
@@ -412,12 +413,8 @@ sealed class UIMessagePart {
     @SerialName("audio")
     data class Audio(
         val url: String,
-        // Default so old persisted JSON without this field still deserializes. Render
-        // layer falls back to the URL's last path segment when fileName is blank.
-        // (mime intentionally not stored — every audio encoder downstream hard-codes
-        // `audio/mp3` today, so plumbing a per-file mime would be a half-wired
-        // feature. Add it when an encoder actually starts honouring it.)
         val fileName: String = "",
+        val mime: String = "audio/mpeg",
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 

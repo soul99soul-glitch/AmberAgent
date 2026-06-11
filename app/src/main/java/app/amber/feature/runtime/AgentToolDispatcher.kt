@@ -206,7 +206,7 @@ class AgentToolDispatcher(
                 return tool.copy(output = result.output).withHookMetadata(result.metadata)
             }
             val resolved = toolDef ?: error("Tool ${tool.toolName} not found")
-            logInfo("execute: ${resolved.name} args=$args")
+            logInfo("execute: ${resolved.name} argKeys=${(args as? JsonObject)?.keys.orEmpty()}")
             val executed = executeResolvedToolWithRetry(
                 tool = tool,
                 toolDef = resolved,

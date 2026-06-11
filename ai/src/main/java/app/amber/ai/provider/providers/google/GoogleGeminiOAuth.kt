@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import app.amber.ai.util.json
+import app.amber.ai.provider.providers.OAuthTokenSecureStore
 import app.amber.common.http.await
 import app.amber.common.oauth.LoopbackOAuthCallbackServer
 import kotlinx.coroutines.delay
@@ -89,40 +91,38 @@ data class GoogleGeminiAuthTokens(
 )
 
 class GoogleGeminiAuthStore(context: Context) {
-    private val prefs = context.applicationContext
-        .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    private val store = OAuthTokenSecureStore(
+        context = context,
+        prefName = PREF_NAME,
+        keyAlias = "amberagent_google_gemini_oauth",
+    )
 
     fun get(providerId: Uuid): GoogleGeminiAuthTokens? {
-        val raw = prefs.getString(providerId.toString(), null) ?: return null
+        val raw = store.get(providerId.toString()) ?: return null
         return runCatching { json.decodeFromString<GoogleGeminiAuthTokens>(raw) }
             .getOrNull()
-            .also { if (it == null) prefs.edit().remove(providerId.toString()).apply() }
+            .also { if (it == null) store.remove(providerId.toString()) }
     }
 
     fun save(providerId: Uuid, tokens: GoogleGeminiAuthTokens) {
-        prefs.edit().putString(providerId.toString(), json.encodeToString(tokens)).apply()
+        store.put(providerId.toString(), json.encodeToString(tokens))
     }
 
     fun clear(providerId: Uuid) {
-        prefs.edit().remove(providerId.toString()).apply()
+        store.remove(providerId.toString())
     }
 
     /** Serialize ALL provider tokens into a single JSON blob for Sync export. The blob is
      *  encrypted at the SyncArchive layer; we just hand over the raw map. */
     fun exportRawJsonForSync(): String {
-        val all = prefs.all.mapNotNull { (key, value) ->
-            val str = value as? String ?: return@mapNotNull null
-            key to str
-        }.toMap()
-        return json.encodeToString(all)
+        return json.encodeToString(store.exportPlainValues())
     }
 
     /** Inverse of [exportRawJsonForSync] — wipes current store then writes all entries. */
     fun restoreRawJsonFromSync(raw: String) {
         val map = runCatching { json.decodeFromString<Map<String, String>>(raw) }
             .getOrNull() ?: return
-        prefs.edit().clear().apply()
-        prefs.edit().apply { map.forEach { (k, v) -> putString(k, v) } }.apply()
+        store.replacePlainValues(map)
     }
 }
 

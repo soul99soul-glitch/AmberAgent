@@ -65,11 +65,53 @@ class WorkspaceManager(private val context: Context) {
             ?: error("Unable to read file: $relativePath")
     }
 
+    suspend fun readTextCapped(relativePath: String, maxChars: Int): WorkspaceTextRead = withContext(Dispatchers.IO) {
+        require(maxChars > 0) { "maxChars must be positive" }
+        val file = requireDocument(relativePath)
+        require(file.isFile) { "Not a file: $relativePath" }
+        val content = context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+            val buffer = CharArray(maxChars + 1)
+            var total = 0
+            while (total < buffer.size) {
+                val read = reader.read(buffer, total, buffer.size - total)
+                if (read < 0) break
+                total += read
+            }
+            String(buffer, 0, total)
+        } ?: error("Unable to read file: $relativePath")
+        WorkspaceTextRead(
+            content = content.take(maxChars),
+            truncated = content.length > maxChars,
+        )
+    }
+
     suspend fun readBytes(relativePath: String): ByteArray = withContext(Dispatchers.IO) {
         val file = requireDocument(relativePath)
         require(file.isFile) { "Not a file: $relativePath" }
         context.contentResolver.openInputStream(file.uri)?.use { it.readBytes() }
             ?: error("Unable to read file: $relativePath")
+    }
+
+    suspend fun readBytesCapped(relativePath: String, maxBytes: Int): ByteArray = withContext(Dispatchers.IO) {
+        require(maxBytes > 0) { "maxBytes must be positive" }
+        val file = requireDocument(relativePath)
+        require(file.isFile) { "Not a file: $relativePath" }
+        if (file.length() > maxBytes) {
+            error("File exceeds $maxBytes byte limit: $relativePath")
+        }
+        context.contentResolver.openInputStream(file.uri)?.use { input ->
+            val output = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                require(total <= maxBytes - read) { "File exceeds $maxBytes byte limit: $relativePath" }
+                output.write(buffer, 0, read)
+                total += read
+            }
+            output.toByteArray()
+        } ?: error("Unable to read file: $relativePath")
     }
 
     suspend fun writeText(relativePath: String, content: String, append: Boolean = false): WorkspaceEntry =
@@ -558,6 +600,11 @@ data class WorkspaceEntry(
     val directory: Boolean,
     val sizeBytes: Long?,
     val mimeType: String?,
+)
+
+data class WorkspaceTextRead(
+    val content: String,
+    val truncated: Boolean,
 )
 
 data class EditResult(

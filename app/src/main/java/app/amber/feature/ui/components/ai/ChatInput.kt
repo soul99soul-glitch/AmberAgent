@@ -466,7 +466,10 @@ fun ChatInput(
         rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
             if (selectedUris.isNotEmpty()) {
                 scope.launch {
-                    state.addVideos(filesManager.createChatFilesByContents(selectedUris))
+                    val mimeTypes = withContext(Dispatchers.IO) {
+                        selectedUris.map { filesManager.getFileMimeType(it) }
+                    }
+                    state.addVideos(filesManager.createChatFilesByContents(selectedUris), mimeTypes)
                     dismissExpand()
                 }
             }
@@ -485,7 +488,10 @@ fun ChatInput(
                             filesManager.getFileNameFromUri(it) ?: it.lastPathSegment.orEmpty()
                         }
                     }
-                    state.addAudios(filesManager.createChatFilesByContents(selectedUris), originalNames)
+                    val mimeTypes = withContext(Dispatchers.IO) {
+                        selectedUris.map { filesManager.getFileMimeType(it) }
+                    }
+                    state.addAudios(filesManager.createChatFilesByContents(selectedUris), originalNames, mimeTypes)
                     dismissExpand()
                 }
             }

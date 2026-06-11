@@ -243,8 +243,23 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
-        val candidates = bodyJson["candidates"]!!.jsonArray
-        val usage = bodyJson["usageMetadata"]!!.jsonObject
+        val blockReason = bodyJson["promptFeedback"]
+            ?.jsonObject
+            ?.get("blockReason")
+            ?.jsonPrimitiveOrNull
+            ?.contentOrNull
+        require(blockReason == null) { "Google blocked the prompt: $blockReason" }
+        val candidates = bodyJson["candidates"]?.jsonArray
+            ?.takeIf { it.isNotEmpty() }
+            ?: error("Google returned no response candidates")
+        candidates.forEach { candidate ->
+            val candidateObj = candidate.jsonObject
+            val finishReason = candidateObj["finishReason"]?.jsonPrimitive?.contentOrNull
+            if (candidateObj["content"] == null && finishReason != null) {
+                error("Google returned no content for candidate with finishReason=$finishReason")
+            }
+        }
+        val usage = bodyJson["usageMetadata"] as? JsonObject
 
         val messageChunk = MessageChunk(
             id = Uuid.random().toString(),
@@ -309,7 +324,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             )
         }
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: model=${params.model.modelId}")
 
         val listener = object : EventSourceListener() {
             override fun onEvent(
@@ -318,7 +333,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.i(TAG, "onEvent: $data")
+                Log.d(TAG, "onEvent: type=$type chars=${data.length}")
 
                 try {
                     val rawJson = json.parseToJsonElement(data).jsonObject
@@ -367,8 +382,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
                     trySend(messageChunk)
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                    println("[onEvent] 解析错误: $data")
+                    Log.w(TAG, "onEvent: failed to parse event chars=${data.length}", e)
                 }
             }
 
@@ -769,9 +783,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         is UIMessagePart.Video -> {
             encodeBase64(false).getOrNull()?.let { base64Data ->
+                val mediaType = mime.takeIf { it.startsWith("video/") } ?: "video/mp4"
                 buildJsonObject {
                     put("inlineData", buildJsonObject {
-                        put("mimeType", "video/mp4")
+                        put("mimeType", mediaType)
                         put("data", base64Data)
                     })
                 }
@@ -780,9 +795,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         is UIMessagePart.Audio -> {
             encodeBase64(false).getOrNull()?.let { base64Data ->
+                val mediaType = mime.takeIf { it.startsWith("audio/") } ?: "audio/mpeg"
                 buildJsonObject {
                     put("inlineData", buildJsonObject {
-                        put("mimeType", "audio/mp3")
+                        put("mimeType", mediaType)
                         put("data", base64Data)
                     })
                 }

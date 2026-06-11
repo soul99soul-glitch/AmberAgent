@@ -185,11 +185,10 @@ class ChatCompletionsAPI(
             ) {
                 val payloads = normalizeOpenAIStreamDataLines(data)
                 if (payloads.isEmpty() && data.contains("[DONE]")) {
-                    println("[onEvent] (done) 结束流: $data")
                     close()
                     return
                 }
-                Log.d(TAG, "onEvent: $data")
+                Log.d(TAG, "onEvent: type=$type chars=${data.length}")
                 payloads
                     .map { json.parseToJsonElement(it).jsonObject }
                     .forEach {
@@ -235,8 +234,7 @@ class ChatCompletionsAPI(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+                Log.w(TAG, "onFailure: status=${response?.code} type=${t?.javaClass?.simpleName}", t)
 
                 val bodyRaw = response?.body?.stringSafe()
                 try {
@@ -244,13 +242,11 @@ class ChatCompletionsAPI(
                         val bodyElement = Json.parseToJsonElement(
                             normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
                         )
-                        println(bodyElement)
                         exception = bodyElement.parseErrorDetail()
                         Log.i(TAG, "onFailure: $exception")
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                     exception = e
                 } finally {
                     close(exception)
