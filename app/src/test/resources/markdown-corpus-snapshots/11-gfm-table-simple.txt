@@ -1,4 +1,4 @@
-  text=GFM Tables—Simple
+  text=GFM Tables — Simple
   text=GitHub Flavored Markdown extends CommonMark with pipe-delimited tables. Here is a simple table with no explicit alignment:
       text=Library
       text=Purpose

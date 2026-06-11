@@ -2307,7 +2307,7 @@ private fun Paragraph(
             textStyle,
             searchSources,
         ) {
-            buildAnnotatedString {
+            val built = buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
                         node = child,
@@ -2317,7 +2317,6 @@ private fun Paragraph(
                         onClickCitation = onClickCitation,
                         style = textStyle,
                         density = density,
-                        trim = trim,
                         enableLatexRendering = enableLatexRendering,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
@@ -2326,6 +2325,11 @@ private fun Paragraph(
                     )
                 }
             }
+            // Parity class [A] fix: trim the whole assembled heading content ONCE at its outer
+            // boundaries (only the heading path passes trim = true), instead of trimming each leaf
+            // token. This drops `## foo ` → `foo` while preserving interior spaces around
+            // punctuation that the JetBrains tree splits into separate TEXT leaves.
+            if (trim) built.trimEnds() else built
         }
         // Batch reveal (L4 decoupled): only the inline unparsed suffix animates.
         // A suffix that opens a new block renders as plain tail text below to
@@ -2627,6 +2631,20 @@ internal fun extractMarkdownTableData(node: MdNode, content: String): MarkdownTa
 }
 
 /**
+ * Trims leading/trailing whitespace from an [AnnotatedString] at its OUTER boundaries only,
+ * preserving all spans/annotations on the surviving range via [AnnotatedString.subSequence].
+ * Interior whitespace is untouched — used by the heading render path to drop `## foo ` → `foo`
+ * without collapsing the interior spaces the JetBrains tree splits across multiple TEXT leaves
+ * (parity class [A]). Returns the receiver unchanged when there is nothing to trim.
+ */
+internal fun AnnotatedString.trimEnds(): AnnotatedString {
+    val start = text.indexOfFirst { !it.isWhitespace() }
+    if (start < 0) return if (text.isEmpty()) this else AnnotatedString("")
+    val end = text.indexOfLast { !it.isWhitespace() } + 1
+    return if (start == 0 && end == text.length) this else subSequence(start, end)
+}
+
+/**
  * Walks a markdown [MdNode] and appends its rendered content into the
  * receiver [AnnotatedString.Builder] — including spans for EMPH /
  * STRONG / STRIKETHROUGH / links / code / inline math.
@@ -2635,7 +2653,6 @@ internal fun extractMarkdownTableData(node: MdNode, content: String): MarkdownTa
 internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
     node: MdNode,
     content: String,
-    trim: Boolean = false,
     inlineContents: MutableMap<String, InlineTextContent>,
     colorScheme: ColorScheme,
     density: Density,
@@ -2735,9 +2752,14 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
         }
 
         node.children.isEmpty() -> {
-            val rawText = node.textIn(content)
-            val text = (if (trim) rawText.trim() else rawText)
-                .replace(BREAK_LINE_REGEX, "\n")
+            // Parity class [A] fix: do NOT trim per leaf token. The JetBrains tree splits a
+            // heading's inline text into MULTIPLE TEXT leaves at punctuation (em-dash / `(` / `"` /
+            // `:`); trimming each leaf here ate the interior space on both sides of the punctuation
+            // (`## GFM Tables — Simple` → `GFM Tables—Simple`). The whole-heading leading/trailing
+            // trim that `trim = true` intends is now applied ONCE to the assembled AnnotatedString
+            // in [Paragraph] (see [AnnotatedString.trimEnds]), so interior token-boundary spaces
+            // survive while outer whitespace is still removed.
+            val text = node.textIn(content).replace(BREAK_LINE_REGEX, "\n")
             append(text)
         }
 

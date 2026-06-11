@@ -1,4 +1,4 @@
-  text=Ordered Lists—Non-Default Start Number
+  text=Ordered Lists — Non-Default Start Number
   text=CommonMark allows ordered lists to start at any number. The first item's number determines the start value; subsequent items' numbers are ignored by the spec (they are always incremented by one in rendered HTML), but many renderers simply use the numbers as written.
   text=This list starts at 7:
   text=7.
@@ -26,7 +26,7 @@
   text=Accept the RSA fingerprint prompt on the device
   text=45.
   text=Verify the device shows as device (not unauthorized)
-  text=Regression:Tight vs Loose
+  text=Regression: Tight vs Loose
   text=A tight list (no blank lines between items) starting at 7:
   text=7.
   text=First tight item

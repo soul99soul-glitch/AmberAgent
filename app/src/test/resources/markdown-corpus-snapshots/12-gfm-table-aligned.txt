@@ -1,4 +1,4 @@
-  text=GFM Tables—Alignment Markers
+  text=GFM Tables — Alignment Markers
   text=GFM tables support three column alignment markers in the delimiter row:
   text=•
   text=:--- — left-aligned (default)

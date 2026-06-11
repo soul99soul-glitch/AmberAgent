@@ -19,6 +19,7 @@ import app.amber.highlight.LocalHighlighter
 import kotlinx.coroutines.CoroutineExceptionHandler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -126,6 +127,41 @@ class MarkdownEdgeShapeRenderTest {
         assertFalse(
             "no literal `-` list marker may leak into the render; got:\n$dump",
             dump.contains("-"),
+        )
+    }
+
+    /**
+     * Parity class [A] regression guard — heading interior spaces around punctuation.
+     *
+     * The JetBrains tree splits a heading's inline text into MULTIPLE TEXT leaf tokens at
+     * punctuation (em-dash / `(` / `"` / `:`). The heading render path appends each leaf through
+     * [appendMarkdownNodeContent] with `trim = true`. When that trim was applied PER TOKEN, the
+     * space BEFORE/AFTER the punctuation was eaten on each side, so `## GFM Tables — Simple`
+     * rendered as `GFM Tables—Simple` (interior spaces lost). The fix trims the assembled heading
+     * content ONCE at its outer boundaries instead of trimming each token, so interior token-boundary
+     * spaces survive while leading/trailing whitespace of the whole heading is still removed.
+     */
+    @Test
+    fun headingPreservesInteriorSpacesAroundPunctuation() {
+        val dump = renderJvmTreeDump("## GFM Tables — Simple\n")
+        assertTrue(
+            "heading must preserve interior spaces around the em-dash; got dump:\n$dump",
+            dump.contains("text=GFM Tables — Simple"),
+        )
+    }
+
+    /**
+     * Companion to the class-[A] guard above: leading/trailing whitespace of the WHOLE heading must
+     * STILL be trimmed (the intentional part of `trim = true`). `## foo ` → `foo`, not `foo `.
+     * `dumpNormalized` itself trims line ends, so to pin this at the renderer level we assert the
+     * outer-boundary trim survives alongside an interior space being preserved.
+     */
+    @Test
+    fun headingTrimsOuterWhitespaceButKeepsInterior() {
+        val dump = renderJvmTreeDump("##   Alpha — Beta   \n")
+        assertTrue(
+            "heading must keep the interior space and trim outer whitespace; got dump:\n$dump",
+            dump.contains("text=Alpha — Beta"),
         )
     }
 

@@ -53,7 +53,7 @@
   text=List inside level 2 blockquote
   text=Level 3 blockquote
   text=This is the deepest nest in this file. The renderer must track indentation correctly across all three levels of quoting.
-  text=Paragraph+Code+Paragraph in a List Item(Loose)
+  text=Paragraph + Code + Paragraph in a List Item (Loose)
   text=•
   text=First loose item
   text=This is a paragraph inside the first list item.

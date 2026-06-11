@@ -1,4 +1,4 @@
-  text=Task Lists(GFM Extension)
+  text=Task Lists (GFM Extension)
   text=GitHub Flavored Markdown supports task lists using - [ ] for unchecked and - [x] for checked items. They are commonly used in assistant answers to suggest checklists or track progress.
   text=Android Release Checklist
   text=•

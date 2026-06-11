@@ -1,4 +1,4 @@
-  text=Blockquotes—Nested
+  text=Blockquotes — Nested
   text=Blockquotes use > prefixes. They can be nested by stacking multiple > characters.
   text=Simple Blockquote
   text=The best way to get a project done faster is to start sooner.

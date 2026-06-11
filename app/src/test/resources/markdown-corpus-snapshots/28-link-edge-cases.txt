@@ -24,7 +24,7 @@
   text=weird URL links=
   text=Nested Brackets in Link Text
   text=Link text can contain [ and ] if they are balanced: nested brackets — this is uncommon but must not crash the parser. links=https://example.com
-  text=Reference Link—Undefined Reference
+  text=Reference Link — Undefined Reference
   text=A reference link with no matching definition: [this reference][undefined-ref] — CommonMark requires rendering this as literal text [this reference][undefined-ref].
   text=Link with Fragment Only
   text=Jump to heading — a fragment-only URL is valid. links=#link-edge-cases

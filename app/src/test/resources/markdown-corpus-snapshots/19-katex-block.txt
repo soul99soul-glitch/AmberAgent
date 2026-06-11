@@ -1,4 +1,4 @@
-  text=KaTeX—Block Math
+  text=KaTeX — Block Math
   text=Block
   text=display
   text=math uses double dollar signs
@@ -32,7 +32,7 @@
     text=$e^x$
     text=$x = 0$
   text=$$e^x = \sum_{n=0}^{\infty} \frac{x^n}{n!} = 1 + x + \frac{x^2}{2!} + \frac{x^3}{3!} + \cdots$$
-  text=Bayes'Theorem
+  text=Bayes' Theorem
   text=$$P(A \mid B) = \frac{P(B \mid A)\, P(A)}{P(B)}$$
   text=where [Latex] is the posterior probability of event [Latex] given that [Latex] has occurred.
     text=$P(A \mid B)$

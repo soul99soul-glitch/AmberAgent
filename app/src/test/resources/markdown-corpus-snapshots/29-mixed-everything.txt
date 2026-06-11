@@ -1,4 +1,4 @@
-  text=Complete Feature Overview:AmberAgent Chat
+  text=Complete Feature Overview: AmberAgent Chat
   text=This document exercises nearly every Markdown feature in a single realistic assistant response.
   text=Summary
   text=AmberAgent is an AI chat client built on Jetpack Compose. It supports multiple assistants, each with its own system prompt, model parameters, and conversation isolation. Think of each assistant as a separate persona with its own memory and settings.
@@ -34,7 +34,7 @@
       text=Any local model
       text=✓
       text=partial
-  text=Architecture Diagram(Prose)
+  text=Architecture Diagram (Prose)
   text=The architecture follows a layered approach:
   text=1.
   text=Surfaces layer — Compose screens that observe StateFlow from ViewModels
@@ -45,7 +45,7 @@
   text=4.
   text=Agent Kernel — pure Kotlin contracts for agent execution and event streaming
   text=Note: The Agent Kernel (core/agent-runtime) has no Android dependencies. It is testable on the JVM without a device.
-  text=Example:Starting a Chat
+  text=Example: Starting a Chat
       text=kotlin
       role=Button desc=Save
       role=Button desc=Copy Code

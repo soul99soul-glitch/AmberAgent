@@ -1,4 +1,4 @@
-  text=Thematic Breaks(Horizontal Rules)
+  text=Thematic Breaks (Horizontal Rules)
   text=A thematic break is a visual divider rendered as an <hr>. CommonMark accepts three forms: three or more hyphens, asterisks, or underscores, optionally with spaces between them.
   text=The line above is a thematic break using three hyphens. Below is one using three asterisks:
   text=And here is one using three underscores:

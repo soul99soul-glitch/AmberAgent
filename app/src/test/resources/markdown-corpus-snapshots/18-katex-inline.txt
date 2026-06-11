@@ -1,4 +1,4 @@
-  text=KaTeX—Inline Math
+  text=KaTeX — Inline Math
   text=Inline math is delimited by single dollar signs: [Latex]. The pre-processor converts the original source to this form before it reaches the Markdown parser, so these samples use the post-preprocess $...$ syntax directly.
     text=$...$
   text=Physics

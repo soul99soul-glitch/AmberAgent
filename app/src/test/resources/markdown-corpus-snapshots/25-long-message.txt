@@ -1,6 +1,6 @@
   text=Building an Offline-First Android App with Room and Coroutines
   text=This is a long assistant answer (~80 lines) covering architecture, implementation steps, code, and caveats. It mixes prose, ordered lists, code blocks, and a summary table.
-  text=What is"Offline-First"?
+  text=What is "Offline-First"?
   text=An offline-first app treats the local database as the primary source of truth. The UI reads from the database, and a background sync process reconciles the local state with a remote API. Users can read and interact with stale data while offline, and changes are queued and flushed when connectivity returns.
   text=This is different from a "cache-aside" pattern, where the app tries the network first and falls back to cache on failure. Offline-first is more deliberate: local data is always available instantly, and network sync is a background concern.
   text=Architecture
@@ -16,7 +16,7 @@
   text=5.
   text=WorkManager schedules background sync jobs that run even when the app is closed.
   text=Step-by-Step Implementation
-  text=1.Define the Entity and DAO
+  text=1. Define the Entity and DAO
       text=kotlin
       role=Button desc=Save
       role=Button desc=Copy Code
@@ -40,7 +40,7 @@ interface ArticleDao {
  @Query("DELETE FROM articles WHERE id = :id")
  suspend fun delete(id: String)
 }
-  text=2.Write the Repository
+  text=2. Write the Repository
       text=kotlin
       role=Button desc=Save
       role=Button desc=Copy Code
@@ -60,7 +60,7 @@ interface ArticleDao {
  dao.upsertAll(remote.map(ArticleDto::toEntity))
  }
 }
-  text=3.Set Up the ViewModel
+  text=3. Set Up the ViewModel
       text=kotlin
       role=Button desc=Save
       role=Button desc=Copy Code
@@ -79,7 +79,7 @@ class ArticleListViewModel @Inject constructor(
 
  init { viewModelScope.launch { repository.sync() } }
 }
-  text=4.Compose UI
+  text=4. Compose UI
       text=kotlin
       role=Button desc=Save
       role=Button desc=Copy Code

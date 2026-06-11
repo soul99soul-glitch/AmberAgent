@@ -1,4 +1,4 @@
-  text=Strikethrough(GFM Extension)
+  text=Strikethrough (GFM Extension)
   text=Strikethrough text is wrapped in double tildes: ~~text~~. It is a GitHub Flavored Markdown extension and renders as an <s> or <del> HTML element.
   text=Basic Usage
   text=The old recommendation was to use AsyncTask for background work, but it has been deprecated since Android API 30. You should use Kotlin Coroutines or WorkManager instead.

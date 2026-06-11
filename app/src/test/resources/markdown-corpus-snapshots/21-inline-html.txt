@@ -5,9 +5,9 @@
   text=A <span style="color: red;">red span</span> via inline HTML — note that in many sandboxed renderers, inline styles are stripped for security.
   text=Superscript and Subscript
   text=The water molecule is H<sub>2</sub>O. The speed of light is approximately 3×10<sup>8</sup> m/s. These HTML tags have no Markdown equivalent in CommonMark, so inline HTML is the only way to achieve them (without KaTeX).
-  text=Abbreviation via<abbr>
+  text=Abbreviation via <abbr>
   text=The <abbr title="Application Programming Interface">API</abbr> documentation is available on the developer portal.
-  text=Line Break via<br>
+  text=Line Break via <br>
   text=This line ends with an inline HTML break.
 
 This line starts on a new line because of the <br> tag above.
