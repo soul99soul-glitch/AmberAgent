@@ -2,6 +2,7 @@ package app.amber.feature.ui.components.richtext.tree
 
 import app.amber.agent.ui.components.richtext.nativebridge.NodeType
 import app.amber.agent.ui.components.richtext.nativebridge.PackedAstNode
+import app.amber.agent.ui.components.richtext.nativebridge.codeFenceKindExtra
 import app.amber.agent.ui.components.richtext.nativebridge.codeLangExtra
 import app.amber.agent.ui.components.richtext.nativebridge.headingLevelExtra
 import app.amber.agent.ui.components.richtext.nativebridge.linkHrefExtra
@@ -146,20 +147,28 @@ internal class NativeMdNode(
      * needs this to pick the renderer's HighlightCodeBlock (fenced) vs plain-Text (indented) arm
      * (Markdown.kt:1776-1820).
      *
-     * **Native derivation (golden-blob evidence).** The Rust wire format discards pulldown's
-     * `CodeBlockKind`, storing only the language string in extras. So:
+     * **Primary path — kind byte from extras (T12.5).** pulldown-cmark's `CodeBlockKind` is now
+     * encoded as a trailing byte in the CodeBlock extras (after the lang string): `1u8` = Fenced,
+     * `0u8` = Indented. [codeFenceKindExtra] decodes this byte and returns the authoritative
+     * ground-truth from the parser. This eliminates the false-positive class where an indented
+     * block whose first content line is a literal ``` ``` ``` fence marker would be misclassified.
+     *
+     * **Null-fallback — heuristic for old blobs.** When [codeFenceKindExtra] returns `null` (blob
+     * generated before the layout-extension), the legacy heuristic applies:
      *  - a non-empty [codeLang] is unambiguously fenced (only fences carry an info string), AND
-     *  - a fenced block's node span *begins at the opening fence*, so its [textIn] (after leading
-     *    whitespace) starts with ``` ``` ``` or `~~~`; an indented block's node span begins at the
-     *    de-indented first code char (verified on 07/08 = fenced start with the fence, 09 =
-     *    indented start with code directly).
-     * `isFencedCode` is therefore `codeLang != null || textIn starts with a fence marker`. This
-     * also classifies the unclosed streaming fence (sample 26: node text `` ```kotlin\nfun… ``,
-     * no closing fence) as fenced. False for non-CodeBlock nodes.
+     *  - a fenced block's node span starts at the opening fence, so its [textIn] (after leading
+     *    whitespace) starts with ``` ``` ``` or `~~~`; an indented block's span begins at the
+     *    de-indented first code char (verified on 07/08 = fenced, 09 = indented).
+     * The heuristic also classifies the unclosed streaming fence (sample 26) as fenced. False for
+     * non-CodeBlock nodes.
      */
     override val isFencedCode: Boolean
         get() {
             if (packed.type != NodeType.CodeBlock) return false
+            // Primary path: authoritative kind byte from the wire extras (T12.5).
+            val kindFromExtras = packed.codeFenceKindExtra()
+            if (kindFromExtras != null) return kindFromExtras
+            // Null-fallback: old blob without kind byte — use legacy heuristic.
             if (codeLang != null) return true
             val text = textIn(source).trimStart()
             return text.startsWith("```") || text.startsWith("~~~")

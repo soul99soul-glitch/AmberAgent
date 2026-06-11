@@ -9,8 +9,12 @@ import app.amber.feature.ui.components.richtext.tree.TableAlign
  * ## Verified wire format per Rust source
  *
  * - **Heading**: extras[0] = heading level byte (1–6)
- * - **CodeBlock**: LEB128 varint lang-length + UTF-8 lang bytes;
- *   empty string "" for indented code blocks (no language)
+ * - **CodeBlock**: LEB128 varint lang-length + UTF-8 lang bytes,
+ *   followed by a **kind byte** (layout-extension, backward-compatible):
+ *   `1u8` = `CodeBlockKind::Fenced`, `0u8` = `CodeBlockKind::Indented`.
+ *   Old blobs generated before this extension are missing the kind byte;
+ *   decoders that read only the lang string (e.g. [codeLangExtra]) are
+ *   unaffected — they stop at the string end and never see the trailing byte.
  * - **Link / Image**: LEB128 varint dest_url-len + dest_url UTF-8 bytes
  *   followed by LEB128 varint title-len + title UTF-8 bytes
  * - **TaskListMarker**: extras[0] = 1 (checked) or 0 (unchecked)
@@ -43,6 +47,37 @@ internal fun PackedAstNode.headingLevelExtra(): Int? =
 internal fun PackedAstNode.codeLangExtra(): String? {
     if (type != NodeType.CodeBlock) return null
     return extras.readString(0)?.first?.ifEmpty { null }
+}
+
+/**
+ * Returns the authoritative `CodeBlockKind` from the wire extras kind byte, or `null` if:
+ * - this node is not a [NodeType.CodeBlock], or
+ * - the kind byte is absent (old blob generated before the layout-extension).
+ *
+ * ## Wire layout (CodeBlock extras)
+ * ```
+ * [LEB128 varint lang-len] [lang UTF-8 bytes] [kind byte]
+ * ```
+ * The kind byte is appended AFTER the lang string:
+ * - `1u8` → `CodeBlockKind::Fenced` (return `true`)
+ * - `0u8` → `CodeBlockKind::Indented` (return `false`)
+ * - missing (old blob) → return `null`
+ *
+ * [codeLangExtra] reads only the lang string at offset 0 via [readString] and ignores
+ * the trailing kind byte — both decoders are backward-compatible with old blobs.
+ *
+ * @return `true` if fenced, `false` if indented, `null` if the kind byte is absent
+ *         (callers should fall back to the heuristic when `null`).
+ */
+internal fun PackedAstNode.codeFenceKindExtra(): Boolean? {
+    if (type != NodeType.CodeBlock) return null
+    val (_, kindOffset) = extras.readString(0) ?: return null
+    if (kindOffset >= extras.size) return null
+    return when (extras[kindOffset].toInt() and 0xFF) {
+        1 -> true
+        0 -> false
+        else -> null
+    }
 }
 
 /**

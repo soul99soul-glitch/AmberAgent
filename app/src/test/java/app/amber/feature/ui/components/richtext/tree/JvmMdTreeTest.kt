@@ -140,6 +140,28 @@ class JvmMdTreeTest {
         links.forEach { assertNull("linkTitle is null on JVM path", it.linkTitle) }
     }
 
+    // ── T12.5 parity pin: sample 31 fenced blocks (JVM side) ──────────
+
+    /**
+     * T12.5 JVM parity pin for sample 31 (31-deep-nesting.md).
+     * The JVM tree uses JetBrains `CODE_FENCE` vs `CODE_BLOCK` node types, so
+     * [JvmMdNode.isFencedCode] is trivially correct (no heuristic needed). This pin
+     * exists for parity symmetry with [NativeMdTreeTest.sample31_fencedBlocks_isFencedCode_true].
+     * Both code blocks in 31 are genuinely fenced (`kotlin`) → isFencedCode must be true.
+     */
+    @Test
+    fun sample31_fencedBlocks_isFencedCode_true_jvm_parity() {
+        val (root, _) = parseCorpus("31-deep-nesting.md")
+        val blocks = root.allOfType(MdNodeType.CodeBlock)
+        assertTrue("31 must contain code blocks", blocks.isNotEmpty())
+        blocks.forEach { block ->
+            assertTrue(
+                "31 fenced kotlin block must have isFencedCode=true on JVM tree",
+                block.isFencedCode,
+            )
+        }
+    }
+
     // ── E3 / H4: fenced code lang (07-fenced-code-kotlin.md) ──────────
 
     @Test

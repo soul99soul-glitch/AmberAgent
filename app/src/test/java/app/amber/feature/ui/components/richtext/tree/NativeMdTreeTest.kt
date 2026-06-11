@@ -533,6 +533,81 @@ class NativeMdTreeTest {
         assertNull(root.firstOfType(MdNodeType.Paragraph)!!.linkInnerText)
     }
 
+    // ── T12.5 regression pins: CodeBlockKind wire extras (sample 07 + 31) ─────
+
+    /**
+     * T12.5 regression pin — sample 07 (07-fenced-code-kotlin):
+     * All code blocks are genuinely fenced; [isFencedCode] must be true.
+     * The new [codeFenceKindExtra] returns `true` (kind byte = 1) rather than
+     * falling through to the heuristic.
+     */
+    @Test
+    fun sample07_fencedBlocks_isFencedCode_true_via_kindByte() {
+        val (root, _) = parseCorpus("07-fenced-code-kotlin")
+        val blocks = root.allOfType(MdNodeType.CodeBlock)
+        assertTrue("07 must contain code blocks", blocks.isNotEmpty())
+        blocks.forEach { block ->
+            assertTrue(
+                "07 fenced kotlin block must have isFencedCode=true (kind byte path)",
+                block.isFencedCode,
+            )
+        }
+    }
+
+    /**
+     * T12.5 regression pin — sample 31 (31-deep-nesting):
+     * Both code blocks are genuinely fenced (` ```kotlin ` markers); [isFencedCode]
+     * must be true. This pin guards against future regressions where the extras
+     * path might malfunction for nested/deep fenced blocks.
+     *
+     * Note: sample 31 contains no indented code blocks — both blocks carry
+     * CodeBlockKind::Fenced in the wire extras (kind byte = 1). The false-positive
+     * threat class (indented block whose first content line is a literal fence) would
+     * require a different corpus sample; the kind-byte encoding eliminates that class
+     * unconditionally by deferring to pulldown-cmark's ground truth.
+     *
+     * Heuristic evidence: with the extras path disabled (codeFenceKindExtra returns null),
+     * both blocks would fall through to `codeLang != null` (lang="kotlin") → still true.
+     * So for sample 31 the heuristic and extras agree. The kind byte matters for the
+     * threat class (indented + literal fence line), where the heuristic gives a
+     * false-positive but the kind byte gives false (correct).
+     */
+    @Test
+    fun sample31_fencedBlocks_isFencedCode_true() {
+        val (root, _) = parseCorpus("31-deep-nesting")
+        val blocks = root.allOfType(MdNodeType.CodeBlock)
+        assertTrue("31 must contain code blocks", blocks.isNotEmpty())
+        // All 2 code blocks in 31-deep-nesting are genuinely fenced (```kotlin).
+        blocks.forEach { block ->
+            assertTrue(
+                "31 fenced kotlin block must have isFencedCode=true",
+                block.isFencedCode,
+            )
+        }
+    }
+
+    /**
+     * T12.5 pin — sample 09 (09-indented-code):
+     * All code blocks are genuinely indented; [isFencedCode] must be false.
+     * The [codeFenceKindExtra] returns `false` (kind byte = 0), which is the
+     * authoritative ground truth rather than the heuristic (which also returns
+     * false here, but for the right reasons). If an indented block's content
+     * started with ` ```kotlin `, the heuristic would give a false-positive while
+     * the kind byte path correctly returns false.
+     */
+    @Test
+    fun sample09_indentedBlocks_isFencedCode_false_via_kindByte() {
+        val (root, _) = parseCorpus("09-indented-code")
+        val blocks = root.allOfType(MdNodeType.CodeBlock)
+        assertTrue("09 must contain code blocks", blocks.isNotEmpty())
+        blocks.forEach { block ->
+            assertFalse(
+                "09 indented block must have isFencedCode=false (kind byte path)",
+                block.isFencedCode,
+            )
+        }
+    }
+
     // ── Stage-3 accessor #8: isBlockquoteMarker (always false on native) ─
 
     @Test

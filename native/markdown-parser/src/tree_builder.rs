@@ -194,12 +194,21 @@ fn attach_tag_extras(tag: &Tag<'_>, node: &mut Node) {
             node.extras.push(heading_level_byte(*level));
         }
         Tag::CodeBlock(kind) => {
+            // Wire layout (layout-extension, backward-compatible):
+            //   [LEB128 varint lang-len] [lang UTF-8 bytes] [kind byte]
+            // kind byte: 1u8 = CodeBlockKind::Fenced, 0u8 = CodeBlockKind::Indented
+            // Old Kotlin decoders that read only the lang string at offset 0 via
+            // readString() see no change — they stop at the string end and ignore
+            // the trailing kind byte. New codeFenceKindExtra() reads the byte after
+            // readString() returns to get the authoritative kind from pulldown-cmark.
             match kind {
                 pulldown_cmark::CodeBlockKind::Fenced(lang) => {
                     encode_string(lang.as_ref(), &mut node.extras);
+                    node.extras.push(1u8);
                 }
                 pulldown_cmark::CodeBlockKind::Indented => {
                     encode_string("", &mut node.extras);
+                    node.extras.push(0u8);
                 }
             }
         }
@@ -316,5 +325,57 @@ mod tests {
     fn html_block_sets_meta_flag() {
         let tree = build_tree("<div>raw</div>\n\nplain\n");
         assert!(tree.meta.has_html_blocks);
+    }
+
+    #[test]
+    fn fenced_code_block_extras_end_with_kind_byte_1() {
+        // A fenced CodeBlock must have extras ending with 1u8 (Fenced kind).
+        // Wire layout: [LEB128 lang-len][lang bytes][kind byte].
+        let tree = build_tree("```kotlin\nfn foo() {}\n```\n");
+        let code = tree.root.children.iter()
+            .find(|n| matches!(n.type_code, NodeTypeCode::CodeBlock))
+            .expect("fenced code block not found");
+        assert!(
+            !code.extras.is_empty(),
+            "fenced block extras must not be empty"
+        );
+        assert_eq!(
+            *code.extras.last().unwrap(),
+            1u8,
+            "fenced CodeBlock extras must end with kind byte 1 (Fenced)"
+        );
+    }
+
+    #[test]
+    fn indented_code_block_extras_end_with_kind_byte_0() {
+        // An indented CodeBlock must have extras ending with 0u8 (Indented kind).
+        // Wire layout: [LEB128 empty-lang (single 0x00 byte)][kind byte 0].
+        let tree = build_tree("    fn foo() {}\n");
+        let code = tree.root.children.iter()
+            .find(|n| matches!(n.type_code, NodeTypeCode::CodeBlock))
+            .expect("indented code block not found");
+        assert!(
+            !code.extras.is_empty(),
+            "indented block extras must not be empty"
+        );
+        assert_eq!(
+            *code.extras.last().unwrap(),
+            0u8,
+            "indented CodeBlock extras must end with kind byte 0 (Indented)"
+        );
+    }
+
+    #[test]
+    fn fenced_code_no_lang_extras_end_with_kind_byte_1() {
+        // A fenced block with no info-string still emits kind byte 1u8.
+        let tree = build_tree("```\nsome code\n```\n");
+        let code = tree.root.children.iter()
+            .find(|n| matches!(n.type_code, NodeTypeCode::CodeBlock))
+            .expect("fenced code block not found");
+        assert_eq!(
+            *code.extras.last().unwrap(),
+            1u8,
+            "fenced (no lang) CodeBlock extras must end with kind byte 1 (Fenced)"
+        );
     }
 }

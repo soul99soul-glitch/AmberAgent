@@ -349,7 +349,83 @@ class PackedAstExtrasTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 7. findChildOfTypeRecursive — self-first contract (td-rust-1a fix)
+    // 7. codeFenceKindExtra — kind byte appended after lang string (T12.5)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun codeFenceKindExtra_fenced_returns_true() {
+        // Wire: [varint 0 (empty lang)] [1u8 = Fenced]
+        val extras = concat(encodeString(""), bytes(1))
+        val node = nodeWith(NodeType.CodeBlock.code, extras)
+        assertEquals(true, node.codeFenceKindExtra())
+    }
+
+    @Test
+    fun codeFenceKindExtra_indented_returns_false() {
+        // Wire: [varint 0 (empty lang)] [0u8 = Indented]
+        val extras = concat(encodeString(""), bytes(0))
+        val node = nodeWith(NodeType.CodeBlock.code, extras)
+        assertEquals(false, node.codeFenceKindExtra())
+    }
+
+    @Test
+    fun codeFenceKindExtra_fenced_with_lang_returns_true() {
+        // Wire: [varint+bytes for "kotlin"] [1u8 = Fenced]
+        val extras = concat(encodeString("kotlin"), bytes(1))
+        val node = nodeWith(NodeType.CodeBlock.code, extras)
+        assertEquals(true, node.codeFenceKindExtra())
+    }
+
+    @Test
+    fun codeFenceKindExtra_missing_kind_byte_returns_null() {
+        // Old blob: only the lang string, no trailing kind byte — null (fallback to heuristic).
+        val extras = encodeString("kotlin")
+        val node = nodeWith(NodeType.CodeBlock.code, extras)
+        assertNull(node.codeFenceKindExtra())
+    }
+
+    @Test
+    fun codeFenceKindExtra_empty_extras_returns_null() {
+        // Completely empty extras — old blob with no data at all.
+        val node = nodeWith(NodeType.CodeBlock.code, ByteArray(0))
+        assertNull(node.codeFenceKindExtra())
+    }
+
+    @Test
+    fun codeFenceKindExtra_wrong_type_returns_null() {
+        val extras = concat(encodeString(""), bytes(1))
+        val node = nodeWith(NodeType.Paragraph.code, extras)
+        assertNull(node.codeFenceKindExtra())
+    }
+
+    @Test
+    fun golden_codeFenceKindExtra_07_fenced_returns_true() {
+        // Sample 07 has fenced kotlin blocks → kind byte = 1 (Fenced) in new blobs.
+        val blob = loadBlob("07-fenced-code-kotlin.pmda")
+        val root = PackedAstReader(blob).root()!!
+        val codeBlock = root.findChildOfTypeRecursive(NodeType.CodeBlock)!!
+        assertEquals(
+            "sample 07 fenced block must have kind byte true (Fenced)",
+            true,
+            codeBlock.codeFenceKindExtra(),
+        )
+    }
+
+    @Test
+    fun golden_codeFenceKindExtra_09_indented_returns_false() {
+        // Sample 09 has indented code blocks → kind byte = 0 (Indented) in new blobs.
+        val blob = loadBlob("09-indented-code.pmda")
+        val root = PackedAstReader(blob).root()!!
+        val codeBlock = root.findChildOfTypeRecursive(NodeType.CodeBlock)!!
+        assertEquals(
+            "sample 09 indented block must have kind byte false (Indented)",
+            false,
+            codeBlock.codeFenceKindExtra(),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 8. findChildOfTypeRecursive — self-first contract (td-rust-1a fix)
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
@@ -409,7 +485,7 @@ class PackedAstExtrasTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 8. Golden blob spot-checks (Rust-generated corpus files)
+    // 9. Golden blob spot-checks (Rust-generated corpus files)
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun loadBlob(name: String): ByteArray {
