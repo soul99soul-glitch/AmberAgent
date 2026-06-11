@@ -10,6 +10,8 @@ internal interface MdNode {
     fun nextSibling(): MdNode?
     fun findChildOfTypeRecursive(vararg types: MdNodeType): MdNode?
     // Typed attributes — null when the node kind doesn't carry the attribute.
+    // Carriers: headingLevel: Heading; codeLang: CodeBlock; linkHref/linkTitle: Link & Image;
+    // imageSrc: Image; taskChecked: TaskListMarker; listStart: ListOrdered; tableAlignments: Table (currently always null — see TableAlign KDoc).
     val headingLevel: Int?
     val codeLang: String?
     val linkHref: String?
@@ -20,8 +22,15 @@ internal interface MdNode {
     val tableAlignments: List<TableAlign>?
 }
 
-internal fun MdNode.textIn(source: String): String =
-    source.substring(startOffset.coerceIn(0, source.length), endOffset.coerceIn(0, source.length))
+/**
+ * Extract the text span for this node. Never throws — malformed/reversed offsets degrade to the empty string
+ * (render path must not crash on a corrupt tree).
+ */
+internal fun MdNode.textIn(source: String): String {
+    val start = startOffset.coerceIn(0, source.length)
+    val end = endOffset.coerceIn(start, source.length)
+    return source.substring(start, end)
+}
 
 internal enum class MdNodeType {
     // ── Block ──────────────────────────────────────────────
