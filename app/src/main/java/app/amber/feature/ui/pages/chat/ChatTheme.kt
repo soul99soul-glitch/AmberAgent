@@ -157,7 +157,9 @@ fun AmberTokens.toChatTheme(): ChatTheme = ChatTheme(
     toolLabelInk = accent,
     toolIconInk = accent,
     toolDoneBg = accent,
-    toolDoneBadgeInk = accentInk,
+    // 2026-06-10: fixed near-black (graphite ink) instead of accentInk — badge glyphs
+    // (tick/cross/clock) stay one color across all accents rather than flipping white/black.
+    toolDoneBadgeInk = Color(0xFF1B1A17),
     thinkRule = line2,
     thinkHeaderInk = accent,
     thinkBodyInk = ink3,
