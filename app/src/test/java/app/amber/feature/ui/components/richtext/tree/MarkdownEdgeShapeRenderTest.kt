@@ -8,7 +8,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import app.amber.agent.ui.components.richtext.nativebridge.PackedAstReader
 import app.amber.core.settings.Settings
+import app.amber.feature.ui.components.richtext.MarkdownParseResult
 import app.amber.feature.ui.components.richtext.MarkdownTreeForParityTest
 import app.amber.feature.ui.components.richtext.parseRawMarkdownForParityTest
 import app.amber.feature.ui.context.LocalNavController
@@ -75,6 +77,42 @@ class MarkdownEdgeShapeRenderTest {
         }
         compose.waitForIdle()
         // dumpNormalized ignores TestTag, so the tagged Box adds no line — only its rendered subtree.
+        return compose.onNodeWithTag(TAG).fetchSemanticsNode().dumpNormalized()
+    }
+
+    /**
+     * Render the production renderer over the NATIVE (packed-AST) tree, built from a corpus golden
+     * blob exactly as [MarkdownTreeParityTest] does its native side. Used to pin the class [F] / [G]
+     * fixes, which only fire on the native shape (the JVM tree carries the literal LIST_NUMBER marker
+     * and the relocated TaskListMarker, so it never reaches the native-only branches).
+     */
+    private fun renderNativeTreeDump(sampleBaseName: String): String {
+        val dir = java.io.File("src/test/resources/markdown-corpus")
+        val rawText = java.io.File(dir, "$sampleBaseName.md").readText()
+        val blob = java.io.File(dir, "$sampleBaseName.pmda").readBytes()
+        val reader = PackedAstReader(blob)
+        val root = nativeMdTreeOrNull(reader, rawText)
+            ?: error("native tree had no decodable root for $sampleBaseName")
+        val result = MarkdownParseResult(
+            preprocessed = rawText,
+            tree = root,
+            hasHtmlBlocks = reader.hasHtmlBlocks,
+        )
+        val highlighter = Highlighter(RuntimeEnvironment.getApplication())
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalSettings provides Settings(),
+                LocalNavController provides Navigator(mutableListOf()),
+                LocalHighlighter provides highlighter,
+            ) {
+                MaterialTheme {
+                    Box(Modifier.testTag(TAG)) {
+                        MarkdownTreeForParityTest(content = rawText, result = result)
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
         return compose.onNodeWithTag(TAG).fetchSemanticsNode().dumpNormalized()
     }
 
@@ -215,6 +253,63 @@ class MarkdownEdgeShapeRenderTest {
         assertTrue(
             "escape inside inline code must stay raw (`\\!`); got dump:\n$dump",
             dump.contains("\\!"),
+        )
+    }
+
+    /**
+     * Parity class [F] — native ordered-list start number. The native (pulldown) tree carries NO
+     * literal LIST_NUMBER marker child on its list items, so the renderer must derive the displayed
+     * number from the list's `listStart` accessor: `(listStart ?: 1) + itemIndex`. Sample 14 authors a
+     * list starting at 7 (`listStart == 7L`), so the native render must show `7.` `8.` `9.` … — NOT
+     * the old `1.`-renumbered fallback. Pins the [F] fix on the native shape (the JVM tree slices the
+     * literal marker and is exercised by the corpus snapshot suite).
+     */
+    @Test
+    fun nativeOrderedListStartRendersSourceNumbers() {
+        val dump = renderNativeTreeDump("14-ordered-list-start")
+        // The first ordered list (start = 7) must render its items beginning at 7, not 1.
+        assertTrue(
+            "native ordered list must render the source start number `7.`; got dump:\n$dump",
+            dump.contains("text=7."),
+        )
+        assertTrue(
+            "native ordered list must continue `8.`; got dump:\n$dump",
+            dump.contains("text=8."),
+        )
+        assertFalse(
+            "native ordered list authored at 7 must NOT renumber from 1; got dump:\n$dump",
+            dump.contains("text=1."),
+        )
+    }
+
+    /**
+     * Parity class [G] — native task-list `[x]` marker text. On the native tree a task item's
+     * checkbox is a CHILDLESS TaskListMarker leaf flat among the item's inline children; the renderer
+     * must render it as a checkbox composable (no contentDescription → no dump line) and EXCLUDE its
+     * `[x]` text from the grouped inline run. Sample 15's first item is `- [x] Increment …`: the
+     * rendered text must be `Increment …` with NO literal `[x]` / `[ ]` leaking in.
+     */
+    @Test
+    fun nativeTaskItemRendersCheckboxAndExcludesMarkerText() {
+        val dump = renderNativeTreeDump("15-task-lists")
+        // The item text must survive, with NO marker prefix — the bug rendered `[x]Increment …` as a
+        // single Text run (the childless TaskListMarker leaf appended its raw `[x]` ahead of the
+        // item's text). The fix renders the text run as `Increment …` (marker stripped, checkbox
+        // rendered separately with no contentDescription).
+        assertTrue(
+            "native task item text must render with no marker prefix; got dump:\n$dump",
+            dump.contains("text=Increment"),
+        )
+        // The leaked-marker shapes the bug produced — a task marker glued to the start of the item's
+        // text — must NOT appear. (A bare `[x]` also occurs in this sample's intro PROSE, so we assert
+        // the specific marker+text concatenation rather than a bare `[x]`/`[ ]`.)
+        assertFalse(
+            "no `[x]` task marker may be glued to the item text; got dump:\n$dump",
+            dump.contains("text=[x]"),
+        )
+        assertFalse(
+            "no `[ ]` task marker may be glued to the item text; got dump:\n$dump",
+            dump.contains("text=[ ]"),
         )
     }
 

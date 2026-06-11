@@ -1991,14 +1991,31 @@ private fun OrderedListNode(
             .fillWidthIf(LocalMarkdownFillWidth.current)
             .padding(start = (level * 8).dp)
     ) {
+        // Parity class [F] — ordered-list start number, shape-agnostic dispatch (same family as
+        // BUG #1 / class [C]). The displayed number per item is derived from two different tree
+        // shapes:
+        //  - JVM (JetBrains): each LIST_ITEM carries its literal LIST_NUMBER marker ("7. ", "8. ",
+        //    …) as its first child, mapping to MdNodeType.Unknown. R-E2 / KU-7 keep slicing that
+        //    literal to preserve the author's EXACT numbering (so `7. 8. 10.` survives gaps).
+        //  - Native (pulldown): the LIST_ITEM has NO literal marker child — its children are the
+        //    flat inline run (the native item starts directly at its first inline `Text`).
+        //    findChildOfTypeRecursive(Unknown) returns null there, so the OLD `?: "$index. "`
+        //    fallback renumbered the list from 1 (`1. 2. 3.` for a list authored `7. 8. 9.`).
+        // Fix: when the literal marker is ABSENT (native shape) derive the number from the list's
+        // `listStart` accessor — `(listStart ?: 1) + itemIndex` — which both trees decode to the
+        // first item's number (listStart == 7L on sample 14, both trees; NativeMdTreeTest
+        // orderedListStartIsSeven / JvmMdTree derives the same). This matches JVM's first-item
+        // number and increments per item, and for a `start=1` or nested ordered list listStart is 1
+        // so it yields `1. 2. 3.` exactly as before. JVM is BYTE-IDENTICAL: when the Unknown marker
+        // is present (always, on the JVM tree) the literal slice still wins, so the computed branch
+        // is native-only by construction.
+        val listStart = node.listStart ?: 1L
         var index = 1
         node.children.fastForEach { child ->
             if (child.type == MdNodeType.ListItem) {
-                // R-E2 / KU-7: keep slicing the per-item LIST_NUMBER literal to preserve the
-                // author's exact numbering ("7. "). LIST_NUMBER maps to Unknown and is the first
-                // Unknown child of the LIST_ITEM, so findChildOfTypeRecursive(Unknown) returns it.
                 val numberText =
-                    child.findChildOfTypeRecursive(MdNodeType.Unknown)?.textIn(content) ?: "$index. "
+                    child.findChildOfTypeRecursive(MdNodeType.Unknown)?.textIn(content)
+                        ?: "${listStart + (index - 1)}. "
                 val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
                     children = node.children,
                     child = child,
@@ -2148,7 +2165,38 @@ private fun ListItemNode(
                             // produce Unknown children (pulldown emits flat REAL inline nodes), so this
                             // filter is a JVM-only guard by construction and is a no-op for the native
                             // shape it was added to support.
-                            val inlineRun = directContent.filter { it.type != MdNodeType.Unknown }
+                            //
+                            // Parity class [G] — task-list `[x]` marker text. On the native (pulldown)
+                            // tree a task item's children are FLAT inline, with the checkbox emitted as
+                            // a CHILDLESS TaskListMarker leaf whose text is `[x]`/`[ ]` (native item =
+                            // [TaskListMarker «[x]», Text «Increment », …]). The old grouping fed that
+                            // TaskListMarker into InlineRunMdNode →
+                            // Paragraph, where its childless leaf hit the generic leaf arm and appended
+                            // the LITERAL `[x]` into the text run (`text=[x]Increment…`). The JVM tree
+                            // instead relocates the marker into a TaskListMarker node OUTSIDE the
+                            // Paragraph wrapper and renders it as a checkbox composable (the per-child
+                            // loop above dispatches it to MarkdownNode's TaskListMarker arm; the text
+                            // wrapper excludes `[x]`). Fix shape-agnostically: render any TaskListMarker
+                            // child as the checkbox via MarkdownNode (exactly as the JVM per-child loop
+                            // does), and EXCLUDE it from the grouped inline run so the `[x]` text never
+                            // reaches Paragraph. The checkbox carries no contentDescription, so the
+                            // remaining grouped text matches the JVM render. JVM is byte-identical: its
+                            // task items have a Paragraph wrapper and take the per-child branch above, so
+                            // this branch is native-only for task items by construction.
+                            directContent.fastForEach { contentChild ->
+                                if (contentChild.type == MdNodeType.TaskListMarker) {
+                                    MarkdownNode(
+                                        node = contentChild,
+                                        content = content,
+                                        modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
+                                        onClickCitation = onClickCitation,
+                                        listLevel = level,
+                                    )
+                                }
+                            }
+                            val inlineRun = directContent.filter {
+                                it.type != MdNodeType.Unknown && it.type != MdNodeType.TaskListMarker
+                            }
                             if (inlineRun.isNotEmpty()) {
                                 // Attribute the live suffix to this grouped inline run iff the item's
                                 // last renderable child lives inside directContent (i.e. there's no

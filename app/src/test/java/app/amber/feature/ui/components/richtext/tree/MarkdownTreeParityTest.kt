@@ -107,10 +107,10 @@ import java.io.File
  * had been masking. Class [A] (heading inline-token trim-space) was a renderer-fixable quirk and is now
  * RESOLVED (deliberate behavior change + golden regen); fixing it in turn unmasked two more residuals
  * ([F] ordered-list start number, [G] task-list `[x]` marker text) on samples that had been tagged [A]
- * only. The remaining classes are tree-/parser-level differences NOT fixable by renderer dispatch
- * without rewriting list grouping/numbering or the native parser. They stay in
- * [KNOWN_DIVERGENT_SAMPLES], skipped and individually cited. The rot guard still re-promotes any that
- * later reach parity.
+ * only — both of which are ALSO renderer-shape-dispatch bugs and are now RESOLVED too (see [F]/[G]
+ * below). The remaining classes are tree-/parser-level differences NOT fixable by renderer dispatch
+ * without rewriting the native parser. They stay in [KNOWN_DIVERGENT_SAMPLES], skipped and individually
+ * cited. The rot guard still re-promotes any that later reach parity.
  *
  *  - **[A] Heading inline-token trim-space (FIXED — parity class A resolved).** The JVM heading path
  *    renders inline content via `Paragraph(trim=true)`; the JetBrains tree splits heading text into
@@ -179,21 +179,38 @@ import java.io.File
  *    into many Text runs at punctuation (`(`/`)`/`:`) and soft-breaks while the native tree groups the
  *    whole sentence into ONE Text leaf — the paragraph analog of the list-item [C] grouping, tagged
  *    [C]+[E] on that sample.
- *  - **[F] Ordered-list start number (unmasked when [A] was fixed in sample 14).** A list `7. … 8. …`
- *    renders with the SOURCE numbers on the JVM tree (`7.`, `8.`, …) but RENUMBERED from `1.` on the
- *    native tree. Parser/renderer numbering disagreement in the tree's INPUT, NOT a shape bug — proven
- *    at the dump level (JVM `text=7.` vs native `text=1.`).
- *  - **[G] Task-list `[x]` marker text (unmasked when [A] was fixed in samples 15 / 29).** Source
- *    `- [x] Increment …`: the JVM tree relocates the `[x]` into a TaskListMarker (rendered checkbox,
- *    marker stripped from text); the native tree keeps `[x]` as LITERAL text (`[x]Increment …`).
- *    Unlike the `[X]` uppercase checkbox-STATE divergence (invisible to the dump), the leftover marker
- *    TEXT surfaces in the dump, so it perturbs parity. Tree-structure difference, not a shape bug.
+ *  - **[F] Ordered-list start number (FIXED — parity class F resolved).** A list `7. … 8. …` renders
+ *    with the SOURCE start number on the JVM tree, which slices each item's literal LIST_NUMBER token
+ *    (`7.`, `8.`, …); the native tree has NO literal marker child, so the renderer's old `?: "$index. "`
+ *    fallback RENUMBERED from `1.` (`1. 2. 3.` for an authored `7. 8. 9.`). FIX (Markdown.kt
+ *    `OrderedListNode`): when the literal LIST_NUMBER marker is ABSENT (native shape) derive the number
+ *    from the list's `listStart` accessor — `(listStart ?: 1) + itemIndex` — which both trees decode to
+ *    the first item's number (`listStart == 7L` on sample 14, both trees). JVM is byte-identical: the
+ *    Unknown marker is always present on the JVM tree, so the literal slice still wins and the computed
+ *    branch is native-only by construction. `start=1` / nested ordered lists have `listStart == 1` and
+ *    still render `1. 2. 3.`. Sample 14 promoted to hard parity; the
+ *    MarkdownEdgeShapeRenderTest `nativeOrderedListStartRendersSourceNumbers` guard pins it.
+ *  - **[G] Task-list `[x]` marker text (FIXED — parity class G resolved).** Source `- [x] Increment …`:
+ *    the JVM tree relocates the `[x]` into a TaskListMarker node OUTSIDE the Paragraph wrapper (rendered
+ *    as a checkbox composable, marker stripped from the text run); the native tree emits the checkbox as
+ *    a CHILDLESS TaskListMarker LEAF flat among the item's inline children, and the class-[C] inline-run
+ *    grouping fed that leaf into Paragraph where its raw `[x]` text surfaced (`[x]Increment …`). FIX
+ *    (Markdown.kt `ListItemNode`, native flat-inline branch): render any TaskListMarker child as the
+ *    checkbox via `MarkdownNode` (exactly as the JVM per-child loop does) and EXCLUDE it from the
+ *    grouped inline run, so the `[x]` text never reaches Paragraph on either shape. The `[X]` uppercase
+ *    checkbox-STATE divergence stays accepted (invisible to the dump — see ACCEPTED divergence above);
+ *    only the marker TEXT is fixed here. JVM is byte-identical: its task items carry a Paragraph wrapper
+ *    and take the per-child branch, so the fixed branch is native-only for task items by construction.
+ *    Sample 15 promoted to hard parity; sample 29's [G] component is resolved too (it stays skipped only
+ *    on the distinct [D] footnote-definition class below). The MarkdownEdgeShapeRenderTest
+ *    `nativeTaskItemRendersCheckboxAndExcludesMarkerText` guard pins it.
  *
- * All of these residuals live in the SHARED renderer's INPUT (the tree), not its shape-dispatch, so the
- * `markdownAst` flag must stay default-false until [D]/[E]/[F]/[G] (and the parser-level [B-tilde] /
- * [B-CJK]) are resolved. Class [A] (heading trim-space) and class [B] (backslash-escape resolution)
- * are now FIXED (see above) — [B] was a renderer-fixable Text-leaf concern, resolved in the shared
- * leaf paths. See the T14.5 handoff parity report for the full breakdown.
+ * The residuals that REMAIN live in the SHARED renderer's INPUT (the tree), not its shape-dispatch, so
+ * the `markdownAst` flag must stay default-false until [D]/[E] (and the parser-level [B-tilde] /
+ * [B-CJK]) are resolved. Classes [A] (heading trim-space), [B] (backslash-escape resolution), [C]
+ * (list-item inline-run grouping), [F] (ordered-list start number) and [G] (task-list `[x]` marker
+ * text) are now FIXED (see above) — all renderer-side, shape-agnostic or shared-leaf concerns. See the
+ * T14.5 handoff parity report for the full breakdown.
  *
  * Robolectric scaffolding (config / theme / locals / async-load handler) mirrors
  * [MarkdownRendererSnapshotTest] verbatim — a parity gap is attributable to the tree, not the harness.
@@ -287,19 +304,19 @@ class MarkdownTreeParityTest(
             if (parity) {
                 throw AssertionError(
                     "$sampleName now renders at parity — remove it from KNOWN_DIVERGENT_SAMPLES " +
-                        "(its documented residual divergence class [D]/[E]/[F]/[G] / [B-tilde] / " +
-                        "[B-CJK] appears fixed).",
+                        "(its documented residual divergence class [D]/[E] / [B-tilde] / [B-CJK] " +
+                        "appears fixed).",
                 )
             }
             // Still divergent as documented — skip loudly (visible as SKIPPED, never a false PASS).
             assumeTrue(
                 "$sampleName diverges due to a documented residual tree-/parser-level class " +
-                    "([D] link-footnote text / [E] soft-break whitespace / [F] ordered-list start " +
-                    "number / [G] task-list `[x]` marker text / [B-tilde] single-tilde strike / " +
-                    "[B-CJK] CJK-flanked strong — see class KDoc + parity report). BUG #1 " +
-                    "(heading-drop), BUG #2 (inline-code-backtick), class [A] (heading trim-space) " +
-                    "and class [B] (backslash-escape resolution) are FIXED; these residuals must be " +
-                    "resolved before markdownAst can flip on.",
+                    "([D] link-footnote text / [E] soft-break whitespace / [B-tilde] single-tilde " +
+                    "strike / [B-CJK] CJK-flanked strong — see class KDoc + parity report). BUG #1 " +
+                    "(heading-drop), BUG #2 (inline-code-backtick), class [A] (heading trim-space), " +
+                    "class [B] (backslash-escape resolution), class [C] (inline-run grouping), class " +
+                    "[F] (ordered-list start number) and class [G] (task-list `[x]` marker text) are " +
+                    "FIXED; these residuals must be resolved before markdownAst can flip on.",
                 false,
             )
         }
@@ -338,19 +355,21 @@ class MarkdownTreeParityTest(
          *  - `30-empty-and-whitespace` — whitespace-only input, both render nothing.
          */
         private val KNOWN_DIVERGENT_SAMPLES: Set<String> = setOf(
-            // BUG #1 (native-heading-drop), BUG #2 (native-inline-code-backtick) and class [A]
-            // (heading inline-token trim-space) and class [B] (backslash-escape resolution) are FIXED
-            // (shape-agnostic heading + inline-leaf dispatch, once-at-ends heading trim, and shared-arm
-            // escape resolution, Markdown.kt). Samples that diverged SOLELY on those have left this
-            // list: 01, 02, 07, 08, 09, 21, 26 (BUG #1/#2), 11, 12, 17, 18, 25, 31 (class [A]), and
-            // 03-emphasis-nesting (class [B] — the `middle\_of\_a\_word` escape now resolves on both
-            // trees); 20-html-block / 30-empty were never listed.
+            // BUG #1 (native-heading-drop), BUG #2 (native-inline-code-backtick), class [A]
+            // (heading inline-token trim-space), class [B] (backslash-escape resolution), class [C]
+            // (list-item inline-run grouping), class [F] (ordered-list start number) and class [G]
+            // (task-list `[x]` marker text) are ALL FIXED with shape-agnostic renderer dispatch in
+            // Markdown.kt. Samples that diverged SOLELY on those have left this list:
+            //   01, 02, 07, 08, 09, 21, 26 (BUG #1/#2),  11, 12, 17, 18, 25, 31 (class [A]),
+            //   03-emphasis-nesting (class [B] — `middle\_of\_a\_word`),  10, 13 (class [C]),
+            //   14-ordered-list-start (class [F]),  15-task-lists (class [G]).
+            // 20-html-block / 30-empty were never listed.
             // The samples that REMAIN here diverge on the residual tree-/parser-level classes those
             // fixes UNMASKED (see class KDoc §"residual classes"). These are NOT renderer-shape-dispatch
-            // or trim-space bugs fixable without rewriting list grouping/numbering or the native parser,
-            // so they stay skipped and cited. Tag legend: [B] backslash-escape resolution, [C] inline-run
-            // grouping, [D] link/autolink/footnote/reference text, [E] soft-break leading whitespace,
-            // [F] ordered-list start number, [G] task-list `[x]` marker text.
+            // bugs fixable without rewriting the native parser, so they stay skipped and cited. Tag
+            // legend: [B] backslash-escape resolution, [C] inline-run grouping, [D] link/autolink/
+            // footnote/reference text, [E] soft-break leading whitespace, [F] ordered-list start
+            // number, [G] task-list `[x]` marker text.
             "04-links-inline",            // [D] email autolink `<x>` kept by JVM, resolved by native
             "05-links-with-titles",       // [D] reference link `[t][ref]` literal (JVM) vs resolved
             "06-images",                  // [D] inline-image run split differs between trees
@@ -365,10 +384,10 @@ class MarkdownTreeParityTest(
             // diverge on a SECOND class that [A] was masking; their heading lines now match, so they
             // are re-tagged with the residual class proven at the tree-dump level (parity-rig first-diff
             // captured 2026-06-12):
-            "14-ordered-list-start",      // [F] ordered-list start number: JVM renders source numbers
-                                          //     (`7.` `8.` …), native renumbers from `1.` (parser/renderer)
-            "15-task-lists",              // [G] task-list `[x]` marker: native keeps `[x]` as literal
-                                          //     text (`[x]Increment…`), JVM relocates it to a checkbox
+            // 14-ordered-list-start, 15-task-lists: classes [F] (ordered-list start number) and [G]
+            // (task-list `[x]` marker text) are RESOLVED by the shape-agnostic OrderedListNode +
+            // ListItemNode dispatch (Markdown.kt) — both now render at hard parity and have left this
+            // list.
             "16-blockquotes-nested",      // [E] blockquote soft-break continuation `— Jim Highsmith`
                                           //     carries a leading space on JVM, none on native
             "19-katex-block",             // [C]+[E] paragraph inline run: JVM splits `Block (display)
@@ -396,8 +415,13 @@ class MarkdownTreeParityTest(
                                           //     into the link DESTINATION (href), never a Text leaf, so
                                           //     the class-[B] Text-leaf escape fix does not reach it —
                                           //     the residual is purely a link/href parser divergence.
-            "29-mixed-everything",        // [G] task-list `[x]` marker: native keeps `[x]` as literal
-                                          //     text (`[x]Multi-assistant…`), JVM relocates to a checkbox
+            "29-mixed-everything",        // [D] footnote def text ONLY (class [G] task markers RESOLVED):
+                                          //     the `[x]` task items (lines 13-17) now render at parity
+                                          //     via the shape-agnostic checkbox dispatch. The residual is
+                                          //     the footnote DEFINITIONS `[^agpl]:` / `[^commercial]:` —
+                                          //     JVM keeps the literal marker text, native strips it and
+                                          //     resolves the URL as a link (parity-rig first-diff
+                                          //     2026-06-12: only the 2 footnote-def lines differ).
             "32-special-chars-escapes",   // [D] residual link/href ONLY (class [B] escapes RESOLVED):
                                           //     escaped-bracket `\[not a link\](url)` — JVM attaches a
                                           //     `links=` annotation, native renders bare text; and an
