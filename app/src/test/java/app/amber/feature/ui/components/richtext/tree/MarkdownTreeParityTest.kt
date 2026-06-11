@@ -163,6 +163,19 @@ import java.io.File
  *    original loop, and the snapshot suite (JVM-tree path) stays 32/32. Samples 10 + 13 promoted to
  *    hard parity; sample 24's [C] component is resolved too (it stays skipped only on the distinct
  *    [B-CJK] strong-emphasis class below).
+ *  - **[C-para] Paragraph inline-run grouping around an Image/MathBlock (NOT fixed — different render
+ *    path from [C]).** Sample 19's `Block (display) math … $$...$$ … inline math.` paragraph contains a
+ *    block-level `MathBlock` child, which routes the WHOLE paragraph through the renderer's per-child
+ *    FlowRow path (each direct child rendered as its own composable), NOT the grouped `Paragraph()`
+ *    path that the [C] `InlineRunMdNode` fix covers. On that per-child path the JVM tree's MANY Text
+ *    leaves (split at `(`/`)`/`:` punctuation — `Block`, `display`, `math uses…`, …) each become a
+ *    SEPARATE dump line, while the native tree's 3 grouped leaves (`Block (display) math…signs: ` ·
+ *    MathBlock · `. It renders…`) become 3 lines — shifting EVERY subsequent line (parity-rig first-diff
+ *    2026-06-12: 45 differing lines, a pure top-to-bottom shift, no break nodes anywhere in the tree).
+ *    This is the paragraph analog of list-item [C] but on the Image/MathBlock per-child branch, which
+ *    the [C] fix deliberately did not touch; extending the grouping there is a larger change than the
+ *    `ListItemNode` shape dispatch and is left for a follow-up. Sample 19 was previously mis-tagged
+ *    `[C]+[E]` — corrected to `[C-para]` (it has ZERO soft breaks; the `[E]` half was fictional).
  *  - **[B-CJK] CJK-flanked strong emphasis (parser-level; unmasked when [C] was fixed in 24).**
  *    Source `常被称为**"离线优先"**策略`: the JVM (JetBrains) tree forms a Strong node (renders bold,
  *    `**` stripped); the native (pulldown-cmark) tree does NOT match the `**` delimiter run when both
@@ -173,12 +186,36 @@ import java.io.File
  *  - **[D] Link / autolink / footnote / reference text.** Email autolink `<x>` (JVM keeps the
  *    brackets, native resolves a mailto link), reference links `[t][ref]` (JVM literal, native
  *    resolved), footnote definitions `[^id]:` (JVM keeps the marker text). Tree-structure differences.
- *  - **[E] Soft-break leading whitespace.** A blockquote soft-break continuation line carries a
- *    leading space on the JVM tree, none on the native tree. Parser whitespace tokenization. Also
- *    surfaces in a top-level paragraph (sample 19) where the JVM tree additionally splits the sentence
- *    into many Text runs at punctuation (`(`/`)`/`:`) and soft-breaks while the native tree groups the
- *    whole sentence into ONE Text leaf — the paragraph analog of the list-item [C] grouping, tagged
- *    [C]+[E] on that sample.
+ *  - **[E] Soft-break continuation leading whitespace (DIAGNOSED — parser-level, NOT renderer-fixable
+ *    without regenerating the JVM golden; NOT a word-jam bug).** Inside a blockquote (or an indented
+ *    list-item continuation), a soft- or hard-break CONTINUATION line carries a leading space on the
+ *    JVM tree but NOT on the native tree. The two trees handle a line break differently in their INPUT:
+ *      - JVM (JetBrains): NO break node. A break is the flat-sibling sequence `Text` · `Unknown "\n"` ·
+ *        (`Unknown ">"` skipped by `isBlockquoteMarker`) · `Unknown " "` · `Text`. The `Unknown " "` is
+ *        the SPACE of the `> ` continuation prefix, and it renders as a literal space — so the JVM
+ *        render is `…line.\n Second…` (newline + leading space).
+ *      - Native (pulldown): an explicit `SoftBreak`/`HardBreak` leaf whose span IS the literal break
+ *        slice (`"\n"`, `"  \n"`, or `"\\n"`). The renderer has NO dedicated break arm, so the break
+ *        leaf falls into the generic leaf arm and appends that slice verbatim — emitting the newline.
+ *        The continuation `Text` leaf begins at the first NON-whitespace char (the `> ` prefix is sliced
+ *        away by the parser), so the native render is `…line.\nSecond…` (newline, NO leading space).
+ *    IMPORTANT — this is NOT the word-jam bug the divergence was suspected to be. The native break leaf
+ *    self-carries `"\n"`, so words are NEVER glued (`line1line2`); both trees emit a newline, they
+ *    differ ONLY by whether a single leading space follows it (TREEDIAG 2026-06-12, sample 27 trees +
+ *    renders). The divergence direction is the OPPOSITE of the fixed native-side classes [A]/[B]/[F]/[G]:
+ *    here the NATIVE side is CommonMark-correct (a blockquote/indent continuation prefix is structural
+ *    and must be stripped) and the JVM side carries the COSMETIC extra space. Reaching parity would
+ *    require EITHER making native add a spurious space (degrading the correct output) OR dropping the
+ *    JVM leading space — which REGENERATES the JVM golden (the snapshot pins `" Second"`/`" Third"`/
+ *    `" Fourth"` as production behavior, MarkdownRendererSnapshotTest 27 lines 24-26). The flag is
+ *    default-OFF, so the production (JVM) golden is authoritative and must not move for a flag that
+ *    isn't on. And it is NOT a renderer-shape concern: both trees walk the SAME flat-sibling leaf path,
+ *    and the JVM `Unknown " "` continuation-indent token is structurally indistinguishable from a
+ *    genuine inter-word space, so the renderer cannot strip it without a fragile 3-token lookbehind
+ *    heuristic. Left SKIPPED + documented. Affected: 16 (the `— Jim Highsmith` blockquote line) and 27
+ *    (4 lines: blockquote soft/hard-break continuations + a list-item hard-break continuation). Sample
+ *    19 was PREVIOUSLY mis-tagged `[C]+[E]`; it has ZERO break nodes (TREEDIAG 2026-06-12) — its
+ *    divergence is purely class [C], re-tagged below.
  *  - **[F] Ordered-list start number (FIXED — parity class F resolved).** A list `7. … 8. …` renders
  *    with the SOURCE start number on the JVM tree, which slices each item's literal LIST_NUMBER token
  *    (`7.`, `8.`, …); the native tree has NO literal marker child, so the renderer's old `?: "$index. "`
@@ -206,11 +243,17 @@ import java.io.File
  *    `nativeTaskItemRendersCheckboxAndExcludesMarkerText` guard pins it.
  *
  * The residuals that REMAIN live in the SHARED renderer's INPUT (the tree), not its shape-dispatch, so
- * the `markdownAst` flag must stay default-false until [D]/[E] (and the parser-level [B-tilde] /
- * [B-CJK]) are resolved. Classes [A] (heading trim-space), [B] (backslash-escape resolution), [C]
- * (list-item inline-run grouping), [F] (ordered-list start number) and [G] (task-list `[x]` marker
- * text) are now FIXED (see above) — all renderer-side, shape-agnostic or shared-leaf concerns. See the
- * T14.5 handoff parity report for the full breakdown.
+ * the `markdownAst` flag must stay default-false until [D]/[E]/[C-para] (and the parser-level
+ * [B-tilde] / [B-CJK]) are resolved. [E] (soft-break continuation leading-space) was DIAGNOSED
+ * 2026-06-12 and confirmed NOT renderer-fixable as a native-side shape fix: the native side is
+ * CommonMark-correct and the JVM golden carries the cosmetic leading space, so parity would require
+ * regenerating the production (JVM) golden for a flag that is OFF — out of scope and explicitly not a
+ * native-side fix. It is NOT a word-jam bug (native break leaves self-carry `\n`). [C-para] (paragraph
+ * inline-run grouping around a MathBlock) is a real renderer concern but on the per-child FlowRow path
+ * the list-item [C] fix deliberately did not cover; a follow-up. Classes [A] (heading trim-space),
+ * [B] (backslash-escape resolution), [C] (list-item inline-run grouping), [F] (ordered-list start
+ * number) and [G] (task-list `[x]` marker text) are now FIXED (see above) — all renderer-side,
+ * shape-agnostic or shared-leaf concerns. See the T14.5 handoff parity report for the full breakdown.
  *
  * Robolectric scaffolding (config / theme / locals / async-load handler) mirrors
  * [MarkdownRendererSnapshotTest] verbatim — a parity gap is attributable to the tree, not the harness.
@@ -304,19 +347,20 @@ class MarkdownTreeParityTest(
             if (parity) {
                 throw AssertionError(
                     "$sampleName now renders at parity — remove it from KNOWN_DIVERGENT_SAMPLES " +
-                        "(its documented residual divergence class [D]/[E] / [B-tilde] / [B-CJK] " +
-                        "appears fixed).",
+                        "(its documented residual divergence class [D]/[E]/[C-para] / [B-tilde] / " +
+                        "[B-CJK] appears fixed).",
                 )
             }
             // Still divergent as documented — skip loudly (visible as SKIPPED, never a false PASS).
             assumeTrue(
                 "$sampleName diverges due to a documented residual tree-/parser-level class " +
-                    "([D] link-footnote text / [E] soft-break whitespace / [B-tilde] single-tilde " +
-                    "strike / [B-CJK] CJK-flanked strong — see class KDoc + parity report). BUG #1 " +
+                    "([D] link-footnote text / [E] soft-break continuation leading-space / [C-para] " +
+                    "paragraph inline-run grouping around a MathBlock / [B-tilde] single-tilde strike / " +
+                    "[B-CJK] CJK-flanked strong — see class KDoc + parity report). BUG #1 " +
                     "(heading-drop), BUG #2 (inline-code-backtick), class [A] (heading trim-space), " +
-                    "class [B] (backslash-escape resolution), class [C] (inline-run grouping), class " +
-                    "[F] (ordered-list start number) and class [G] (task-list `[x]` marker text) are " +
-                    "FIXED; these residuals must be resolved before markdownAst can flip on.",
+                    "class [B] (backslash-escape resolution), class [C] (list-item inline-run grouping), " +
+                    "class [F] (ordered-list start number) and class [G] (task-list `[x]` marker text) " +
+                    "are FIXED; these residuals must be resolved before markdownAst can flip on.",
                 false,
             )
         }
@@ -367,9 +411,11 @@ class MarkdownTreeParityTest(
             // The samples that REMAIN here diverge on the residual tree-/parser-level classes those
             // fixes UNMASKED (see class KDoc §"residual classes"). These are NOT renderer-shape-dispatch
             // bugs fixable without rewriting the native parser, so they stay skipped and cited. Tag
-            // legend: [B] backslash-escape resolution, [C] inline-run grouping, [D] link/autolink/
-            // footnote/reference text, [E] soft-break leading whitespace, [F] ordered-list start
-            // number, [G] task-list `[x]` marker text.
+            // legend: [B] backslash-escape resolution, [C] list-item inline-run grouping (FIXED),
+            // [C-para] paragraph inline-run grouping around a MathBlock (per-child path; NOT fixed),
+            // [D] link/autolink/footnote/reference text, [E] soft-break continuation leading-space
+            // (parser-level; native correct, JVM keeps a cosmetic leading space; NOT a word-jam),
+            // [F] ordered-list start number, [G] task-list `[x]` marker text.
             "04-links-inline",            // [D] email autolink `<x>` kept by JVM, resolved by native
             "05-links-with-titles",       // [D] reference link `[t][ref]` literal (JVM) vs resolved
             "06-images",                  // [D] inline-image run split differs between trees
@@ -388,11 +434,18 @@ class MarkdownTreeParityTest(
             // (task-list `[x]` marker text) are RESOLVED by the shape-agnostic OrderedListNode +
             // ListItemNode dispatch (Markdown.kt) — both now render at hard parity and have left this
             // list.
-            "16-blockquotes-nested",      // [E] blockquote soft-break continuation `— Jim Highsmith`
-                                          //     carries a leading space on JVM, none on native
-            "19-katex-block",             // [C]+[E] paragraph inline run: JVM splits `Block (display)
-                                          //     math…:` into many Text runs at `(`/`)`/`:`/soft-break;
-                                          //     native groups the sentence into ONE Text leaf
+            "16-blockquotes-nested",      // [E]+[D-bq] 2 lines (parity first-diff 2026-06-12): (1) [E]
+                                          //     blockquote soft-break continuation `— Jim Highsmith`
+                                          //     carries a leading space on JVM, none on native; (2)
+                                          //     [D-bq] a code block INSIDE a blockquote — JVM keeps the
+                                          //     `> ` continuation prefix in the fence body (`> val msg…`),
+                                          //     native slices it (`val msg…`). Both parser-level.
+            "19-katex-block",             // [C-para] paragraph inline-run grouping around a MathBlock
+                                          //     (NOT [E] — zero break nodes): the MathBlock-containing
+                                          //     paragraph takes the per-child FlowRow path; JVM's many
+                                          //     punctuation-split Text leaves render as separate lines,
+                                          //     native's 3 grouped leaves as 3 — a 45-line top-to-bottom
+                                          //     shift. Different render path from the fixed list-item [C].
             "22-footnotes",               // [D] footnote def `[^id]:` text kept (JVM) vs stripped
             "23-strikethrough",           // [B-tilde] single tilde `~this is not struck~`: JVM keeps
                                           //     literal `~`, native strips it (parser delimiter
@@ -410,7 +463,13 @@ class MarkdownTreeParityTest(
             // renderer's INPUT, NOT a renderer-shape bug. Same family as [B] backslash-escape (the two
             // parsers resolve the same source differently), not [C].
             "24-cjk-mixed",               // [B-CJK] `**"离线优先"**` strong (JVM) vs literal `**` (native)
-            "27-hard-soft-breaks",        // [E] blockquote soft-break continuation leading-space
+            "27-hard-soft-breaks",        // [E] 4 lines (parity first-diff 2026-06-12), ALL the
+                                          //     continuation leading-space pattern: 3 blockquote soft/
+                                          //     hard-break continuations (`Second`/`Third`/`Fourth`) +
+                                          //     1 list-item hard-break continuation (`First item, second
+                                          //     line`). JVM keeps a leading space, native (correct) does
+                                          //     not. Native NEVER jams words — its break leaf carries
+                                          //     `\n`; both emit a newline (see class [E] KDoc).
             "28-link-edge-cases",         // [D] link/href: escaped-paren URL `path\(1\)` is preprocessed
                                           //     into the link DESTINATION (href), never a Text leaf, so
                                           //     the class-[B] Text-leaf escape fix does not reach it —
