@@ -32,12 +32,19 @@ class JvmMdTreeTest {
 
     /** Parse a corpus `.md` and wrap its JetBrains root as a [JvmMdNode]. */
     private fun parseCorpus(name: String): Pair<MdNode, String> {
+        require(corpusDir.exists()) {
+            "corpus not found — run via ./gradlew :app:testDebugUnitTest from repo root"
+        }
         val source = File(corpusDir, name).readText()
         val ast = parser.buildMarkdownTreeFromString(source)
         return JvmMdNode(ast, source, parent = null) to source
     }
 
-    /** Pre-order DFS over the tree (mirrors JetBrains child order). */
+    /**
+     * Pre-order DFS over the tree (mirrors JetBrains child order).
+     * Does NOT include the receiver, unlike findChildOfTypeRecursive which is self-first;
+     * all call sites start from root.
+     */
     private fun MdNode.descendants(): Sequence<MdNode> = sequence {
         for (child in children) {
             yield(child)
@@ -154,6 +161,18 @@ class JvmMdTreeTest {
             "indented code has null codeLang",
             codeBlocks.any { it.codeLang == null },
         )
+    }
+
+    @Test
+    fun fencedCodeNoLangIsNull() {
+        // 08-fenced-code-no-lang.md contains fences with no info-string (` ``` ` alone).
+        // Per the KDoc: empty fence info → JetBrains emits no FENCE_LANG token → codeLang null.
+        val (root, _) = parseCorpus("08-fenced-code-no-lang.md")
+        val codeBlocks = root.allOfType(MdNodeType.CodeBlock)
+        assertTrue("08 must contain fenced code blocks", codeBlocks.isNotEmpty())
+        codeBlocks.forEach { block ->
+            assertNull("fenced code with no info-string must have null codeLang", block.codeLang)
+        }
     }
 
     // ── E2 / R-E2: ordered-list start (14-ordered-list-start.md) ──────
@@ -312,8 +331,11 @@ class JvmMdTreeTest {
         val (root, _) = parseCorpus("06-images.md")
         val image = root.firstOfType(MdNodeType.Image)
         assertNotNull("06 must contain an image", image)
-        assertNotNull("image must expose a src", image!!.imageSrc)
-        assertTrue("imageSrc looks like a URL/path", image.imageSrc!!.isNotBlank())
+        // Pin the exact URL of the first image in corpus 06-images.md (line 5).
+        assertEquals(
+            "https://developer.android.com/images/brand/Android_Robot.png",
+            image!!.imageSrc,
+        )
     }
 
     @Test
