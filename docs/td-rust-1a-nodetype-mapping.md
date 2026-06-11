@@ -56,7 +56,7 @@ Rust wire side verified by reading `native/markdown-parser/src/tree_builder.rs`
 **Counts**: 45 distinct fully-qualified JetBrains identifiers referenced
 (`ATX_1..ATX_6` collapse to one `Heading` row; `BLOCK_QUOTE` appears as both an element and a
 token form, kept distinct) — these fold into **29 mapping rows** across §2.1-§2.4 plus 39
-sub-rows for trim/dig tokens; 11 extraction patterns (§3); 8 hard token cases classified (§4);
+sub-rows for trim/dig tokens; 15 extraction patterns (§3); 9 hard token cases classified (§4);
 0 unresolved rows. Verified distinct-identifier list:
 `grep -oE "(MarkdownElementTypes|GFMElementTypes|MarkdownTokenTypes|GFMTokenTypes)\.[A-Z_0-9]+" Markdown.kt | sort -u` → 45 lines.
 
@@ -299,15 +299,15 @@ bare-url forms and that italic styling survives.
 `GFMElementTypes.BLOCK_MATH`. These ARE real types in the project's GFM flavour — the
 preprocessor (`preProcess`) converts `\( \)` / `\[ \]` to `$…$` / `$$…$$`, and the GFM
 flavour descriptor in use recognizes `$`/`$$` as math spans/blocks, emitting `INLINE_MATH`/
-`BLOCK_MATH` nodes whose `getTextInNode()` is the formula (including the `$` delimiters,
-which `MathInline`/`MathBlock` strip). pulldown-cmark emits `MathInline`/`MathBlock` leaves
-(see `tree_builder.rs` lines 129-133: pulldown-cmark `Event::InlineMath`/`DisplayMath`).
+`BLOCK_MATH` nodes whose `getTextInNode()` is the formula. pulldown-cmark emits `MathInline`/
+`MathBlock` leaves (see `tree_builder.rs` lines 129-133: pulldown-cmark `Event::InlineMath`/
+`DisplayMath`). **Caveat to verify (KU-2)**: the composables (`MathInline`/`MathBlock` in
+`MathBlock.kt:18-53`) pass through the text unchanged; they do not strip delimiters. Whether
+JetBrains and pulldown-cmark offsets *both* include the `$`/`$$` delimiters is the open
+verification item tracked as KU-2.
 **Strategy**: **Direct map — `INLINE_MATH → MdNodeType.MathInline`,
 `BLOCK_MATH → MdNodeType.MathBlock`; formula via text slicing.** Both trees expose the
-formula as the node's `textIn(source)`. **Caveat to verify (KU-2)**: confirm whether
-pulldown-cmark's math node offsets *include* the `$` delimiters like the JetBrains node does.
-If they differ, `MathInline`/`MathBlock`'s internal `$`-stripping (or the slice) must be
-normalized so both yield the same LaTeX string. Tests 18/19 (`katex-inline`, `katex-block`)
+formula as the node's `textIn(source)`. Tests 18/19 (`katex-inline`, `katex-block`)
 pin this. **Risk: MEDIUM.**
 
 ### H9 — `MarkdownTokenTypes.BLOCK_QUOTE` (token form) in inline append
@@ -392,7 +392,7 @@ native tree and fall through the renderer's `else` (recurse/append) today — th
 variants so `NativeMdNode` can map `NodeType.X → MdNodeType.X` exhaustively (plan Task 12
 requires an exhaustive `when`).
 
-**32 variants** (matches the design's "~30-36" expectation):
+**30 variants** (matches the design's "~30-36" expectation):
 
 ```kotlin
 internal enum class MdNodeType {
@@ -488,6 +488,6 @@ internal enum class MdNodeType {
 | **KU-9** | `LeafASTNode` check (F8, line 2494) → `children.isEmpty()`. A native non-leaf with zero children (edge case) would change branch. | Stage 3 | Both `Emphasis`-with-no-content etc. are degenerate; covered by test 30 (`empty-and-whitespace`). |
 
 **GATE status: PASS.** 45 distinct JetBrains identifiers (29 mapping rows + token sub-rows)
-mapped, 11 extraction patterns mapped, 8 hard token cases each given a written non-TBD
-strategy, table alignment resolved (option c — genuinely unused), 32-variant `MdNodeType` enum
+mapped, 15 extraction patterns mapped, 9 hard token cases each given a written non-TBD
+strategy, table alignment resolved (option c — genuinely unused), 30-variant `MdNodeType` enum
 derived and paste-ready. Zero unresolved rows.
