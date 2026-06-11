@@ -1,5 +1,7 @@
 package app.amber.agent.ui.components.richtext.nativebridge
 
+import app.amber.feature.ui.components.richtext.tree.TableAlign
+
 /**
  * Typed decoders for [PackedAstNode.extras]. Wire format verified against
  * native/markdown-parser/src/tree_builder.rs (attach_tag_extras function).
@@ -108,28 +110,6 @@ internal fun PackedAstNode.tableAlignmentsExtra(): List<TableAlign>? {
     // Dead path today — extras is always empty for Table nodes (no Tag::Table arm in
     // attach_tag_extras); implemented here for when Rust adds the Table arm.
     return extras.map { b -> TableAlign.fromByte(b.toInt() and 0xFF) }
-}
-
-/**
- * Column alignment for GFM tables.
- *
- * NOTE: as of the verified Rust source (tree_builder.rs), no alignment bytes
- * are written — this enum exists for future compatibility only.
- */
-internal enum class TableAlign {
-    NONE,
-    LEFT,
-    CENTER,
-    RIGHT;
-
-    companion object {
-        fun fromByte(b: Int): TableAlign = when (b) {
-            1 -> LEFT
-            2 -> CENTER
-            3 -> RIGHT
-            else -> NONE
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
