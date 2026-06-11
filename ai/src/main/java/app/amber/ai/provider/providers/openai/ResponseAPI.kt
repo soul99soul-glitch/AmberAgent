@@ -3,12 +3,14 @@ package app.amber.ai.provider.providers.openai
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -36,8 +38,11 @@ import app.amber.ai.provider.providers.groupPartsByToolBoundary
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.withStreamArgsReplace
+import app.amber.ai.util.HttpException
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
@@ -62,6 +67,10 @@ import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ResponseAPI"
+
+// 流式 function_call 的 toolCallId 用 item id (fc_...), final output 用 call_id
+// (call_...); 该元数据保存两者的映射, 供 ResponseStreamReconciler 匹配 final tool
+internal const val OPENAI_TOOL_CALL_ID_METADATA_KEY = "openai_call_id"
 
 class ResponseAPI(
     private val client: OkHttpClient,
@@ -93,7 +102,7 @@ class ResponseAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: model=${params.model.modelId}")
 
         var response = client.newCall(request).await()
         if (response.code == 401) {
@@ -108,7 +117,7 @@ class ResponseAPI(
         }
 
         val bodyStr = response.body?.string() ?: ""
-        Log.i(TAG, "generateText: $bodyStr")
+        Log.i(TAG, "generateText: response ${bodyStr.length} chars")
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val output = parseResponseOutput(bodyJson)
 
@@ -120,43 +129,18 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): Flow<MessageChunk> = callbackFlow {
-        // V3 fix: ResponseAPI 在 delta / done / completed 各事件构造的 UIMessage 都用 fresh
-        // Uuid.random(). MessageStreamAccumulator.replaceActive 会把 active 整个换掉 (parts
-        // 全替换为 message.parts), 导致两个问题:
-        //   1) 新 id → ChatService merge by-id 找不到 → APPEND orphan node → 用户看到双
-        //      message + 多行 action button
-        //   2) replaceActive 把 acc 累积的 parts 重置 → 内容"闪一下消失", 只剩 action row
-        // 解法 (2 步):
-        //   - id 标准化: 所有 emit chunk 的 ASSISTANT id 都用流 scope sharedId
-        //   - 阻止 replaceActive: 把 done/completed 的 message=...,delta=null 转成空 delta,
-        //     accumulator 走 append 路径 (no-op 因为 parts 是空), 保留已累积内容
-        val streamAssistantId = kotlin.uuid.Uuid.random()
-        fun MessageChunk.normalizeAssistantId(): MessageChunk = copy(
-            choices = choices.map { choice ->
-                val delta = choice.delta
-                val msg = choice.message
-                when {
-                    delta != null && delta.role == MessageRole.ASSISTANT ->
-                        choice.copy(delta = delta.copy(id = streamAssistantId))
-                    // ASSISTANT "done" / "completed" event (delta=null, message=完整文本):
-                    // 转成空 delta (parts=emptyList), 阻止 replaceActive 重置 active.
-                    // delta 累积已含完整文本, message 是冗余 finish marker.
-                    delta == null && msg != null && msg.role == MessageRole.ASSISTANT ->
-                        choice.copy(
-                            delta = UIMessage(
-                                id = streamAssistantId,
-                                role = MessageRole.ASSISTANT,
-                                parts = emptyList(),
-                            ),
-                            message = null,
-                        )
-                    else -> choice
-                }
-            }
-        )
+        // ResponseStreamReconciler 解决两类问题 (详见该类注释):
+        //   1) id 标准化: 所有 ASSISTANT chunk 的 id 统一为流级 sharedId, 防止
+        //      ChatService merge by-id 失败产生 orphan node
+        //   2) final message 调和: done/completed 的 message=...,delta=null 不再
+        //      无条件转空 delta (会丢 final-only 的 refusal/annotations/tool args),
+        //      而是与流内累积做 diff, 缺失部分降级为增量 delta, 一致部分只保留
+        //      usage/annotations/finishReason; 同时仍阻止 replaceActive 重置累积
+        val reconciler = ResponseStreamReconciler()
         if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
             streamCodexText(providerSetting, messages, params).collect { chunk ->
-                trySend(chunk.normalizeAssistantId())
+                // suspend 上下文中用 send: 背压等待而不是 buffer 满时丢 chunk
+                send(reconciler.reconcile(chunk))
             }
             close()
             return@callbackFlow
@@ -179,7 +163,7 @@ class ResponseAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: model=${params.model.modelId}")
 
         val listener = object : EventSourceListener() {
             override fun onEvent(
@@ -193,18 +177,31 @@ class ResponseAPI(
                     close()
                     return
                 }
-                Log.d(TAG, "onEvent: $id/$type $data")
-                payloads.forEach { payload ->
-                    val json = json.parseToJsonElement(payload).jsonObject
-                    if (json["error"] != null) {
-                        throw json["error"]!!.parseErrorDetail()
+                Log.d(TAG, "onEvent: id=$id type=$type chars=${data.length}")
+                // parse 异常/error payload 必须主动 cancel + close, 不依赖在 OkHttp
+                // callback 中抛异常的隐式传播
+                runCatching {
+                    for (payload in payloads) {
+                        val json = json.parseToJsonElement(payload).jsonObject
+                        if (json["error"] != null) {
+                            throw json["error"]!!.parseErrorDetail()
+                        }
+                        val chunk = parseResponseDelta(json)
+                        if (chunk != null) {
+                            // 阻塞式发送形成背压, 避免 buffer 满时静默丢 token
+                            if (trySendBlocking(reconciler.reconcile(chunk)).isFailure) {
+                                eventSource.cancel()
+                                break
+                            }
+                        }
                     }
-                    val chunk = parseResponseDelta(json)
-                    if (chunk != null) {
-                        trySend(chunk.normalizeAssistantId())
-                    }
+                }.onFailure { error ->
+                    eventSource.cancel()
+                    close(error)
+                    return
                 }
-                if (type == "response.completed") {
+                // completed/incomplete 是终止事件; failed 在 parse 时抛错走上面的 close(error)
+                if (type == "response.completed" || type == "response.incomplete") {
                     close()
                 }
             }
@@ -212,8 +209,7 @@ class ResponseAPI(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+                Log.w(TAG, "onFailure: status=${response?.code} type=${t?.javaClass?.simpleName}", t)
 
                 val bodyRaw = response?.body?.stringSafe()
                 try {
@@ -221,13 +217,11 @@ class ResponseAPI(
                         val bodyElement = Json.parseToJsonElement(
                             normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
                         )
-                        println(bodyElement)
                         exception = bodyElement.parseErrorDetail()
                         Log.i(TAG, "onFailure: $exception")
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                 } finally {
                     close(exception)
                 }
@@ -268,7 +262,7 @@ class ResponseAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamCodexText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamCodexText: model=${params.model.modelId}")
 
         var response = client.newCall(request).await()
         if (response.code == 401) {
@@ -301,7 +295,7 @@ class ResponseAPI(
                 when {
                     line.isEmpty() -> {
                         drainEvent()?.let { emit(it) }
-                        if (eventType == "response.completed") {
+                        if (eventType == "response.completed" || eventType == "response.incomplete") {
                             return@use
                         }
                         eventType = null
@@ -370,9 +364,8 @@ class ResponseAPI(
                 }
             }
 
-            // tools
-            if (params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
-                putJsonArray("tools") {
+            val toolDefinitions = buildJsonArray {
+                if (params.model.abilities.contains(ModelAbility.TOOL)) {
                     params.tools.forEach { tool ->
                         add(buildJsonObject {
                             put("type", "function")
@@ -387,29 +380,27 @@ class ResponseAPI(
                         })
                     }
                 }
-            }
-            // built-in tools
-            if (params.model.tools.isNotEmpty()) {
-                putJsonArray("tools") {
-                    params.model.tools.forEach { builtInTool ->
-                        when (builtInTool) {
-                            BuiltInTools.Search -> {
-                                add(buildJsonObject {
-                                    put("type", "web_search")
-                                })
-                            }
+                params.model.tools.forEach { builtInTool ->
+                    when (builtInTool) {
+                        BuiltInTools.Search -> {
+                            add(buildJsonObject {
+                                put("type", "web_search")
+                            })
+                        }
 
-                            BuiltInTools.UrlContext -> {} // not supported
+                        BuiltInTools.UrlContext -> {} // not supported
 
-                            BuiltInTools.ImageGeneration -> {
-                                add(buildJsonObject {
-                                    put("type", "image_generation")
-                                    put("model", "gpt-image-2")
-                                })
-                            }
+                        BuiltInTools.ImageGeneration -> {
+                            add(buildJsonObject {
+                                put("type", "image_generation")
+                                put("model", "gpt-image-2")
+                            })
                         }
                     }
                 }
+            }
+            if (toolDefinitions.isNotEmpty()) {
+                put("tools", toolDefinitions)
             }
         }.mergeCustomBody(params.customBody)
             .withoutSamplingParamsIfNeeded(params.model)
@@ -577,11 +568,12 @@ class ResponseAPI(
         })
     }
 
-    private fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
+    internal fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
         val chunkType = jsonObject["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
 
         when (chunkType) {
-            "response.output_text.delta" -> {
+            // refusal 文本与 output_text 同属 message item, 都按文本增量累积
+            "response.output_text.delta", "response.refusal.delta" -> {
                 return MessageChunk(
                     id = jsonObject["item_id"]?.jsonPrimitive?.contentOrNull ?: "",
                     model = "",
@@ -590,6 +582,33 @@ class ResponseAPI(
                             index = 0,
                             delta = UIMessage.assistant(
                                 jsonObject["delta"]?.jsonPrimitive?.contentOrNull ?: ""
+                            ),
+                            message = null,
+                            finishReason = null
+                        )
+                    )
+                )
+            }
+
+            "response.output_text.annotation.added" -> {
+                val annotation = jsonObject["annotation"]?.jsonObjectOrNull ?: return null
+                if (annotation["type"]?.jsonPrimitiveOrNull?.contentOrNull != "url_citation") return null
+                val url = annotation["url"]?.jsonPrimitiveOrNull?.contentOrNull ?: return null
+                return MessageChunk(
+                    id = jsonObject["item_id"]?.jsonPrimitive?.contentOrNull ?: "",
+                    model = "",
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            delta = UIMessage(
+                                role = MessageRole.ASSISTANT,
+                                parts = emptyList(),
+                                annotations = listOf(
+                                    UIMessageAnnotation.UrlCitation(
+                                        title = annotation["title"]?.jsonPrimitiveOrNull?.contentOrNull ?: url,
+                                        url = url,
+                                    )
+                                ),
                             ),
                             message = null,
                             finishReason = null
@@ -645,6 +664,9 @@ class ResponseAPI(
                 val type = item["type"]?.jsonPrimitiveOrNull?.content ?: return null
                 val id = item["id"]?.jsonPrimitiveOrNull?.content ?: return null
                 if (type == "function_call") {
+                    // 流式 toolCallId 用 item id (fc_...), 但 final output 用 call_id
+                    // (call_...); 把 call_id 记入 metadata 供 reconciler 匹配 final tool
+                    val callId = item["call_id"]?.jsonPrimitiveOrNull?.contentOrNull
                     return MessageChunk(
                         id = id,
                         model = "",
@@ -660,7 +682,12 @@ class ResponseAPI(
                                             toolName = item["name"]?.jsonPrimitiveOrNull?.content ?: "",
                                             input = item["arguments"]?.jsonPrimitiveOrNull?.content
                                                 ?: "",
-                                            output = emptyList()
+                                            output = emptyList(),
+                                            metadata = callId?.let {
+                                                buildJsonObject {
+                                                    put(OPENAI_TOOL_CALL_ID_METADATA_KEY, it)
+                                                }
+                                            }
                                         )
                                     )
                                 ),
@@ -782,6 +809,35 @@ class ResponseAPI(
                 }
             }
 
+            // arguments.delta 是流式片段: append 语义
+            "response.function_call_arguments.delta" -> {
+                val toolCallId =
+                    jsonObject["item_id"]?.jsonPrimitive?.content ?: error("item_id not found")
+                return MessageChunk(
+                    id = toolCallId,
+                    model = "",
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            delta = UIMessage(
+                                role = MessageRole.ASSISTANT,
+                                parts = listOf(
+                                    UIMessagePart.Tool(
+                                        toolCallId = toolCallId,
+                                        toolName = "",
+                                        input = jsonObject["delta"]?.jsonPrimitive?.contentOrNull ?: "",
+                                        output = emptyList()
+                                    )
+                                )
+                            ),
+                            message = null,
+                            finishReason = null
+                        )
+                    ),
+                )
+            }
+
+            // arguments.done 携带完整参数: replace 语义, 避免与 delta 累积重复拼接
             "response.function_call_arguments.done" -> {
                 val toolCallId =
                     jsonObject["item_id"]?.jsonPrimitive?.content ?: error("item_id not found")
@@ -801,7 +857,7 @@ class ResponseAPI(
                                         toolName = "",
                                         input = arguments,
                                         output = emptyList()
-                                    )
+                                    ).withStreamArgsReplace()
                                 )
                             ),
                             message = null,
@@ -811,7 +867,16 @@ class ResponseAPI(
                 )
             }
 
-            "response.completed" -> {
+            "response.failed" -> {
+                val response = jsonObject["response"]?.jsonObjectOrNull
+                val error = (response?.get("error") ?: jsonObject["error"])
+                    ?.takeUnless { it is JsonNull }
+                throw error?.parseErrorDetail() ?: HttpException("Response stream failed")
+            }
+
+            // incomplete 与 completed 同构: response 对象携带 (可能不完整的) 最终输出,
+            // finishReason 由 incomplete_details.reason / status 给出
+            "response.completed", "response.incomplete" -> {
                 val response = jsonObject["response"]?.jsonObjectOrNull
                 if (response != null) {
                     return parseResponseOutput(response)
@@ -845,9 +910,10 @@ class ResponseAPI(
         )
     }
 
-    private fun parseResponseOutput(jsonObject: JsonObject): MessageChunk {
+    internal fun parseResponseOutput(jsonObject: JsonObject): MessageChunk {
         val outputs = jsonObject["output"]?.jsonArrayOrNull.orEmpty()
         val parts = arrayListOf<UIMessagePart>()
+        val annotations = arrayListOf<UIMessageAnnotation>()
 
         outputs.forEach { outputItem ->
             val output = outputItem.jsonObjectOrNull ?: return@forEach
@@ -891,11 +957,30 @@ class ResponseAPI(
                     output.extractMessageOutputText()
                         .takeIf { it.isNotEmpty() }
                         ?.let { text -> parts.add(UIMessagePart.Text(text = text)) }
-                    output["content"]?.jsonArrayOrNull.orEmpty()
+                    val contentItems = output["content"]?.jsonArrayOrNull.orEmpty()
                         .mapNotNull { it.jsonObjectOrNull }
+                    contentItems
                         .mapNotNull { it["refusal"]?.jsonPrimitiveOrNull?.contentOrNull }
                         .filter { it.isNotBlank() }
                         .forEach { refusal -> parts.add(UIMessagePart.Text(text = refusal)) }
+                    // output_text content 可携带 url_citation annotations (web_search 等);
+                    // 不解析会丢失 final-only 的引用来源
+                    contentItems.forEach { contentItem ->
+                        contentItem["annotations"]?.jsonArrayOrNull.orEmpty()
+                            .mapNotNull { it.jsonObjectOrNull }
+                            .filter { it["type"]?.jsonPrimitiveOrNull?.contentOrNull == "url_citation" }
+                            .forEach { citation ->
+                                val url = citation["url"]?.jsonPrimitiveOrNull?.contentOrNull
+                                    ?: return@forEach
+                                annotations.add(
+                                    UIMessageAnnotation.UrlCitation(
+                                        title = citation["title"]?.jsonPrimitiveOrNull?.contentOrNull
+                                            ?: url,
+                                        url = url,
+                                    )
+                                )
+                            }
+                    }
                 }
 
                 "output_text" -> {
@@ -908,6 +993,26 @@ class ResponseAPI(
                     output["refusal"]?.jsonPrimitiveOrNull?.contentOrNull
                         ?.takeIf { it.isNotBlank() }
                         ?.let { refusal -> parts.add(UIMessagePart.Text(text = refusal)) }
+                }
+
+                "image_generation_call" -> {
+                    // Mirrors the streaming response.output_item.done handler; without
+                    // this, the final/non-stream message drops the generated image.
+                    output["result"]?.jsonPrimitiveOrNull?.contentOrNull
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { result ->
+                            parts.add(
+                                UIMessagePart.Image(
+                                    url = result,
+                                    metadata = buildJsonObject {
+                                        put(
+                                            "openai_image_call_id",
+                                            output["id"]?.jsonPrimitiveOrNull?.content ?: ""
+                                        )
+                                    }
+                                )
+                            )
+                        }
                 }
 
                 else -> {
@@ -928,6 +1033,7 @@ class ResponseAPI(
                     message = UIMessage(
                         role = MessageRole.ASSISTANT,
                         parts = parts,
+                        annotations = annotations.distinct(),
                     ),
                     finishReason = jsonObject.responseFinishReason(),
                     delta = null

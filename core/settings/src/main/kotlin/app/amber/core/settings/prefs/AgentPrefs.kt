@@ -46,7 +46,7 @@ class AgentPrefs(
 
     private fun readFrom(p: Preferences): AgentPrefsData = AgentPrefsData(
         agentRuntime = p[PreferencesKeys.AGENT_RUNTIME]?.let {
-            JsonInstant.decodeFromString<AgentRuntimeSetting>(it)
+            it.decodeJsonOrNull<AgentRuntimeSetting>()
         } ?: AgentRuntimeSetting(),
     )
 

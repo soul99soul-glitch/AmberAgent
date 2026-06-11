@@ -131,6 +131,9 @@ class InProcessAgentRunner(
                     runCatching { Log.w(TAG, "Failed to update run record on failure", ex) }
                 }
                 runCatching { Log.e(TAG, "Run $runId failed", e) }
+            } finally {
+                jobs.remove(runId)
+                trimCompletedSnapshots()
             }
         }
         jobs[runId] = job
@@ -165,5 +168,17 @@ class InProcessAgentRunner(
         return snapshots.values
             .map { it.value }
             .filter { it.status == AgentRunStatus.RUNNING || it.status == AgentRunStatus.AWAITING_PERMISSION }
+    }
+
+    private fun trimCompletedSnapshots() {
+        val completed = snapshots.values
+            .map { it.value }
+            .filter { it.status !in setOf(AgentRunStatus.RUNNING, AgentRunStatus.AWAITING_PERMISSION) }
+            .sortedByDescending { it.finishedAt ?: Long.MAX_VALUE }
+        completed.drop(MAX_COMPLETED_SNAPSHOTS).forEach { snapshots.remove(it.runId) }
+    }
+
+    private companion object {
+        const val MAX_COMPLETED_SNAPSHOTS = 100
     }
 }

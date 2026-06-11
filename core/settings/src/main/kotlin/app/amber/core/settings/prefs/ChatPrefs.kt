@@ -65,25 +65,25 @@ class ChatPrefs(
     private fun readFrom(p: Preferences): ChatPrefsData = ChatPrefsData(
         enableWebSearch = p[PreferencesKeys.ENABLE_WEB_SEARCH] == true,
         favoriteModels = p[PreferencesKeys.FAVORITE_MODELS]?.let {
-            JsonInstant.decodeFromString<List<Uuid>>(it)
+            it.decodeJsonOrNull<List<Uuid>>()
         } ?: emptyList(),
-        chatModelId = p[PreferencesKeys.SELECT_MODEL]?.let { Uuid.parse(it) }
+        chatModelId = p[PreferencesKeys.SELECT_MODEL]?.let { it.parseUuidOrNull() }
             ?: DEFAULT_AUTO_MODEL_ID,
-        titleModelId = p[PreferencesKeys.TITLE_MODEL]?.let { Uuid.parse(it) }
+        titleModelId = p[PreferencesKeys.TITLE_MODEL]?.let { it.parseUuidOrNull() }
             ?: DEFAULT_AUTO_MODEL_ID,
-        suggestionModelId = p[PreferencesKeys.SUGGESTION_MODEL]?.let { Uuid.parse(it) }
+        suggestionModelId = p[PreferencesKeys.SUGGESTION_MODEL]?.let { it.parseUuidOrNull() }
             ?: DEFAULT_AUTO_MODEL_ID,
-        compressModelId = p[PreferencesKeys.COMPRESS_MODEL]?.let { Uuid.parse(it) }
+        compressModelId = p[PreferencesKeys.COMPRESS_MODEL]?.let { it.parseUuidOrNull() }
             ?: DEFAULT_AUTO_MODEL_ID,
         imageGenerationModelId = p[PreferencesKeys.IMAGE_GENERATION_MODEL]
-            ?.let { Uuid.parse(it) } ?: Uuid.random(),
-        ocrModelId = p[PreferencesKeys.OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
+            ?.let { it.parseUuidOrNull() } ?: Uuid.random(),
+        ocrModelId = p[PreferencesKeys.OCR_MODEL]?.let { it.parseUuidOrNull() } ?: Uuid.random(),
         titlePrompt = p[PreferencesKeys.TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
         suggestionPrompt = p[PreferencesKeys.SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
         ocrPrompt = p[PreferencesKeys.OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
         compressPrompt = p[PreferencesKeys.COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
         modelGroupSessionDefaults = p[PreferencesKeys.MODEL_GROUP_SESSION_DEFAULTS]?.let {
-            JsonInstant.decodeFromString<List<ModelGroupSessionDefault>>(it)
+            it.decodeJsonOrNull<List<ModelGroupSessionDefault>>()
         } ?: emptyList(),
     )
 

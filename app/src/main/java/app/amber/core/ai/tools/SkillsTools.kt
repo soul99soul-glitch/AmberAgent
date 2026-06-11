@@ -122,8 +122,13 @@ fun createSkillTools(
                     }
                     val path = it.jsonObject["path"]?.jsonPrimitive?.content
                     val content = if (path.isNullOrBlank()) {
-                        skillManager.readSkillBody(name)
+                        val skillFile = skillManager.resolveSkillFile(name, "SKILL.md")
                             ?: error("Skill '$name' not found")
+                        if (!skillFile.exists()) error("Skill '$name' not found")
+                        val skillMd = skillFile.inputStream().use { input ->
+                            input.readBytesWithinLimit(MAX_SKILL_FILE_BYTES, "SKILL.md").decodeToString()
+                        }
+                        SkillFrontmatterParser.extractBody(skillMd)
                     } else {
                         val target = skillManager.resolveSkillFile(name, path)
                             ?: error("Path '$path' is outside the skill directory")
@@ -136,7 +141,9 @@ fun createSkillTools(
                             }
                             error("File '$path' not found in skill '$name'. $hint")
                         }
-                        target.readText()
+                        target.inputStream().use { input ->
+                            input.readBytesWithinLimit(MAX_SKILL_FILE_BYTES, target.name).decodeToString()
+                        }
                     }
                     listOf(UIMessagePart.Text(wrapSkillForMobileRuntime(name, path, content)))
                 }
@@ -385,7 +392,9 @@ internal fun collectSkillFilesFromDirectory(dir: File?): Map<String, String> {
             val relative = canonical.relativeTo(root).invariantSeparatorsPath
             val name = relative.canonicalSkillFileName()
             if (name.isBlank() || name.contains("..") || !isLikelyTextSkillFile(name)) return@forEach
-            files[name] = canonical.readText()
+            files[name] = canonical.inputStream().use { input ->
+                input.readBytesWithinLimit(MAX_SKILL_FILE_BYTES, name).decodeToString()
+            }
         }
     return files
 }
@@ -399,11 +408,31 @@ internal fun unzipSkillFiles(bytes: ByteArray): Map<String, String> {
             val clean = entry.name.trim('/').substringAfter('/')
             val name = clean.ifBlank { entry.name.substringAfterLast('/') }.canonicalSkillFileName()
             if (name.isBlank() || name.contains("..") || !isLikelyTextSkillFile(name)) continue
-            files[name] = zip.readBytes().decodeToString()
+            files[name] = zip.readBytesWithinLimit(MAX_SKILL_FILE_BYTES, entry.name).decodeToString()
         }
     }
     return files
 }
+
+private fun ZipInputStream.readBytesWithinLimit(limit: Int, entryName: String): ByteArray {
+    return (this as java.io.InputStream).readBytesWithinLimit(limit, entryName)
+}
+
+private fun java.io.InputStream.readBytesWithinLimit(limit: Int, entryName: String): ByteArray {
+    val output = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0
+    while (true) {
+        val read = read(buffer)
+        if (read < 0) break
+        require(total <= limit - read) { "Skill archive entry $entryName exceeds $limit bytes" }
+        output.write(buffer, 0, read)
+        total += read
+    }
+    return output.toByteArray()
+}
+
+private const val MAX_SKILL_FILE_BYTES = 4 * 1024 * 1024
 
 private fun isLikelyTextSkillFile(name: String): Boolean {
     val lower = name.lowercase()

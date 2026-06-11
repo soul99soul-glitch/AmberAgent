@@ -12,11 +12,13 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.WebDavConfig
 import app.amber.agent.data.db.AppDatabase
+import app.amber.core.sync.copyToBackupEntryWithinLimit
 import app.amber.core.sync.copyZipEntryToFile
 import app.amber.core.sync.databaseTempFile
 import app.amber.core.sync.encodeSettingsForBackup
 import app.amber.core.sync.inspectBackupArchive
 import app.amber.core.sync.replaceDatabaseFilesFromTemp
+import app.amber.core.sync.readZipEntryTextWithinLimit
 import app.amber.core.sync.requireSafeZipEntryName
 import app.amber.core.sync.resolveArchiveChild
 import app.amber.core.utils.fileSizeToString
@@ -233,6 +235,7 @@ class WebDavSync(
         }
 
         try {
+            var stagedSettings: Settings? = null
             ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
                 var entry: ZipEntry?
                 while (zipIn.nextEntry.also { entry = it } != null) {
@@ -246,13 +249,10 @@ class WebDavSync(
 
                     when (zipEntry.name) {
                         "settings.json" -> {
-                            val settingsJson = zipIn.readBytes().toString(Charsets.UTF_8)
-                            Log.i(TAG, "restoreFromBackupFile: Restoring settings")
+                            val settingsJson = readZipEntryTextWithinLimit(zipIn)
                             try {
-                                val migratedJson = settingsJson
-                                val settings = json.decodeFromString<Settings>(migratedJson)
-                                settingsStore.update(settings)
-                                Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")
+                                stagedSettings = json.decodeFromString<Settings>(settingsJson)
+                                Log.i(TAG, "restoreFromBackupFile: Settings staged successfully")
                             } catch (e: Exception) {
                                 Log.e(TAG, "restoreFromBackupFile: Failed to restore settings", e)
                                 throw Exception("Failed to restore settings: ${e.message}")
@@ -327,6 +327,10 @@ class WebDavSync(
                 )
                 Log.i(TAG, "restoreFromBackupFile: Database restored; app restart is required")
             }
+            stagedSettings?.let { settings ->
+                settingsStore.update(settings)
+                Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")
+            }
         } finally {
             databaseRestoreDir?.deleteRecursively()
         }
@@ -387,7 +391,7 @@ class WebDavSync(
 
         try {
             FileOutputStream(targetFile).use { outputStream ->
-                zipIn.copyTo(outputStream)
+                zipIn.copyToBackupEntryWithinLimit(outputStream)
             }
             Log.i(TAG, "restoreFromBackupFile: Restored skill file $entryName (${targetFile.length()} bytes)")
         } catch (e: Exception) {

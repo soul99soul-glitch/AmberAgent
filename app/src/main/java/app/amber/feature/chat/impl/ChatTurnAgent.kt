@@ -39,6 +39,7 @@ class ChatTurnAgent(
 
         var lastMessages: List<UIMessage> = emptyList()
         var toolCallCount = 0
+        val checkpointCoalescer = StreamCheckpointCoalescer()
 
         try {
             generationHandler.generateText(
@@ -79,6 +80,33 @@ class ChatTurnAgent(
                                     delta = "",
                                 )
                             )
+                        }
+
+                        // Durable, coalesced (1s / 512 chars) stream checkpoint
+                        // so a process death mid-stream is recoverable.
+                        val tail = lastMessages.lastOrNull {
+                            it.role == app.amber.ai.core.MessageRole.ASSISTANT
+                        }
+                        if (tail != null) {
+                            val partsHash = tail.streamPartsHash()
+                            val charCount = tail.streamContentLength()
+                            val due = checkpointCoalescer.offer(
+                                nowMs = System.currentTimeMillis(),
+                                messageId = tail.id.toString(),
+                                partsHash = partsHash,
+                                charCount = charCount,
+                            )
+                            if (due) {
+                                scope.events.commit(
+                                    ChatEventPayload.StreamCheckpoint(
+                                        conversationId = input.conversationId.value,
+                                        messageId = tail.id.toString(),
+                                        partsHash = partsHash,
+                                        toolStates = tail.toolStateSnapshots(),
+                                        charCount = charCount,
+                                    )
+                                )
+                            }
                         }
                     }
                 }

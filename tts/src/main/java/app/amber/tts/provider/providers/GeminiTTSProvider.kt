@@ -84,7 +84,7 @@ class GeminiTTSProvider : TTSProvider<TTSProviderSetting.Gemini> {
             put("model", providerSetting.model)
         }
 
-        Log.i(TAG, "generateSpeech: $requestBody")
+        Log.i(TAG, "generateSpeech: provider=gemini model=${providerSetting.model} textChars=${request.text.length}")
 
         val httpRequest = Request.Builder()
             .url("${providerSetting.baseUrl}/models/${providerSetting.model}:generateContent")

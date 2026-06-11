@@ -53,9 +53,8 @@ class UIPrefs(
         dynamicColor = p[PreferencesKeys.DYNAMIC_COLOR] ?: false,
         themeId = p[PreferencesKeys.THEME_ID] ?: DEFAULT_PRESET_THEME_ID,
         developerMode = p[PreferencesKeys.DEVELOPER_MODE] == true,
-        displaySetting = JsonInstant.decodeFromString(
-            p[PreferencesKeys.DISPLAY_SETTING] ?: "{}"
-        ),
+        displaySetting = (p[PreferencesKeys.DISPLAY_SETTING] ?: "{}")
+            .decodeJsonOrNull<DisplaySetting>() ?: DisplaySetting(),
         launchCount = p[PreferencesKeys.LAUNCH_COUNT] ?: 0,
         sponsorAlertDismissedAt = p[PreferencesKeys.SPONSOR_ALERT_DISMISSED_AT] ?: 0,
     )

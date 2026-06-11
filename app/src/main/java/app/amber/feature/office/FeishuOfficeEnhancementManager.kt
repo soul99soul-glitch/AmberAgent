@@ -511,13 +511,13 @@ class FeishuOfficeEnhancementManager(
     ): List<FeishuOfficeWorkspaceSnippet> =
         paths.take(limit.coerceIn(1, 12)).mapNotNull { path ->
             runCatching {
-                val content = workspaceManager.readText(path)
                 val maxChars = 5_000
+                val read = workspaceManager.readTextCapped(path, maxChars)
                 FeishuOfficeWorkspaceSnippet(
                     path = path,
-                    content = content.take(maxChars),
-                    totalChars = content.length,
-                    truncated = content.length > maxChars,
+                    content = read.content,
+                    totalChars = if (read.truncated) maxChars + 1 else read.content.length,
+                    truncated = read.truncated,
                 )
             }.getOrNull()
         }

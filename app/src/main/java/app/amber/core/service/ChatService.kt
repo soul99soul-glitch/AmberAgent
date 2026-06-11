@@ -229,6 +229,7 @@ class ChatService(
     private val pendingMessageStore: PendingMessageStore,
     private val userInputPreprocessor: UserInputPreprocessor,
     private val agentRunner: app.amber.core.agent.runtime.AgentRunner? = null,
+    private val agentEventStore: app.amber.core.agent.runtime.AgentEventStore? = null,
 ) : ConversationAccess {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -1260,6 +1261,9 @@ class ChatService(
         } else {
             model.displayName
         }
+        // Hoisted above runCatching so onFailure can still finalize the run
+        // when generateText throws before the flow's onCompletion exists.
+        var streamRecorder: app.amber.feature.chat.impl.ChatStreamCheckpointRecorder? = null
         runCatching {
             val initialConversation = loadFullConversationForGeneration(conversationId)
 
@@ -1304,6 +1308,18 @@ class ChatService(
                 settings = settings,
             )
             val runTools = createRunTools(settings, conversationId)
+            // Stream checkpoints (coalesced to 1s / 512 chars) record run +
+            // tool state in the runtime event store so a process death
+            // mid-stream is recoverable by ChatEventProjector.replayUnfinished.
+            // The 10s conversation snapshot below still owns the content.
+            streamRecorder = agentEventStore?.let { store ->
+                app.amber.feature.chat.impl.ChatStreamCheckpointRecorder(
+                    eventStore = store,
+                    conversationId = conversationId.toString(),
+                    json = json,
+                )
+            }
+            streamRecorder?.onRunStarted()
             generationHandler.generateText(
                 settings = settings,
                 model = model,
@@ -1356,6 +1372,7 @@ class ChatService(
                         }
                 },
             ).onCompletion { cause ->
+                streamRecorder?.onRunFinished(cause)
                 cancelLiveUpdateNotification(conversationId)
                 if (!hasQueuedContinuation(conversationId)) {
                     stopGenerationKeepAlive(conversationId)
@@ -1404,6 +1421,10 @@ class ChatService(
                             )
                         updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
                         checkpointConversation(conversationId, updatedConversation)
+                        streamRecorder?.onChunk(
+                            messages = chunk.messages,
+                            streamingTailMessageId = chunk.update.streamingTailMessageId,
+                        )
 
                         updateAgentLiveStatus(
                             conversationId = conversationId,
@@ -1415,6 +1436,9 @@ class ChatService(
                 }
             }
         }.onFailure {
+            // No-op when onCompletion already finalized; covers failures
+            // thrown before the generation flow was even constructed.
+            streamRecorder?.onRunFinished(it)
             trustedRunToolNames.remove(conversationId)
             if (!hasQueuedContinuation(conversationId)) {
                 stopGenerationKeepAlive(conversationId)

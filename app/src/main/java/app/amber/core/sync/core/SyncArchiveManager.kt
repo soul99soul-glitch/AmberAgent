@@ -21,6 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import app.amber.core.settings.prefs.NativePathPrefs
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
+import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
 import app.amber.agent.BuildConfig
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import app.amber.core.settings.Settings
@@ -45,6 +46,7 @@ class SyncArchiveManager(
     private val filesManager: FilesManager,
     private val webMountOAuthTokenStore: WebMountOAuthTokenStore,
     private val openAICodexAuthStore: OpenAICodexAuthStore,
+    private val googleGeminiAuthStore: GoogleGeminiAuthStore,
     private val json: Json,
     private val nativePathPrefs: NativePathPrefs,
 ) {
@@ -169,6 +171,7 @@ class SyncArchiveManager(
                 SyncSecretSnapshot(
                     webMountOauth = webMountOAuthTokenStore.exportRawJsonForSync(),
                     openAICodexOAuth = openAICodexAuthStore.exportRawJsonForSync(),
+                    googleGeminiOAuth = googleGeminiAuthStore.exportRawJsonForSync(),
                 ),
                 mode,
             )
@@ -241,6 +244,8 @@ class SyncArchiveManager(
         val stagedFilesRoot = File(context.cacheDir, "sync-restore-stage").canonicalFile
         stagedFilesRoot.deleteRecursively()
         stagedFilesRoot.mkdirs()
+        var restoredFileCount = 0
+        var restoredFileBytes = 0L
 
         // CONFIG_ONLY skips both DB-table extraction and file-tree
         // extraction — we only care about the settings entry. Reading the
@@ -264,14 +269,14 @@ class SyncArchiveManager(
                 if (!entry.isDirectory) {
                     when {
                         entry.name == SETTINGS_ENTRY -> {
-                            settingsJson = zip.readBytes().decodeToString()
+                            settingsJson = zip.readBytesWithinLimit(MAX_CONFIG_ENTRY_BYTES, entry.name).decodeToString()
                         }
 
                         entry.name == SECRETS_ENTRY -> {
                             // Read even when CONFIG_ONLY skips applying — we
                             // ignore the bytes later but reading keeps the
                             // ZipInputStream's position consistent.
-                            secretsJson = zip.readBytes().decodeToString()
+                            secretsJson = zip.readBytesWithinLimit(MAX_CONFIG_ENTRY_BYTES, entry.name).decodeToString()
                         }
 
                         !skipBulkPayload &&
@@ -279,7 +284,7 @@ class SyncArchiveManager(
                             entry.name.endsWith(".jsonl") -> {
                             val table = entry.name.removePrefix("tables/").removeSuffix(".jsonl")
                             val rows = tableRows.getOrPut(table) { mutableListOf() }
-                            zip.readBytes()
+                            zip.readBytesWithinLimit(MAX_TABLE_ENTRY_BYTES, entry.name)
                                 .decodeToString()
                                 .lineSequence()
                                 .filter { it.isNotBlank() }
@@ -299,13 +304,25 @@ class SyncArchiveManager(
                             if ((skipChatImages && isChatImages) || (skipImages && isImages)) {
                                 // intentionally drop — local files of this root stay.
                             } else {
+                                require(restoredFileCount < MAX_PAYLOAD_FILE_COUNT) {
+                                    "Sync archive contains more than $MAX_PAYLOAD_FILE_COUNT files"
+                                }
                                 val target = File(stagedFilesRoot, relativePath).canonicalFile
                                 require(target.path.startsWith(stagedFilesRoot.path + File.separator)) {
                                     "Invalid file path in sync archive: $relativePath"
                                 }
                                 target.parentFile?.mkdirs()
                                 FileOutputStream(target).buffered().use { output ->
-                                    zip.copyTo(output)
+                                    val copied = zip.copyToWithinLimit(
+                                        output = output,
+                                        limit = MAX_PAYLOAD_FILE_ENTRY_BYTES,
+                                        entryName = entry.name,
+                                    )
+                                    require(restoredFileBytes <= MAX_PAYLOAD_FILES_TOTAL_BYTES - copied) {
+                                        "Sync archive files exceed $MAX_PAYLOAD_FILES_TOTAL_BYTES bytes"
+                                    }
+                                    restoredFileBytes += copied
+                                    restoredFileCount++
                                 }
                             }
                         }
@@ -553,6 +570,7 @@ class SyncArchiveManager(
         val snapshot = runCatching { json.decodeFromString<SyncSecretSnapshot>(secretsJson) }.getOrNull() ?: return
         snapshot.webMountOauth?.let { webMountOAuthTokenStore.restoreRawJsonFromSync(it) }
         snapshot.openAICodexOAuth?.let { openAICodexAuthStore.restoreRawJsonFromSync(it) }
+        snapshot.googleGeminiOAuth?.let { googleGeminiAuthStore.restoreRawJsonFromSync(it) }
     }
 
     private fun zipArchive(
@@ -587,7 +605,7 @@ class SyncArchiveManager(
                 if (!entry.isDirectory) {
                     when (entry.name) {
                         SYNC_MANIFEST_ENTRY -> {
-                            manifestJson = zip.readBytes().decodeToString()
+                            manifestJson = zip.readBytesWithinLimit(MAX_MANIFEST_ENTRY_BYTES, entry.name).decodeToString()
                         }
 
                         SYNC_PAYLOAD_ENTRY -> {
@@ -595,7 +613,7 @@ class SyncArchiveManager(
                             if (payloadTarget != null) {
                                 payloadTarget.parentFile?.mkdirs()
                                 FileOutputStream(payloadTarget).buffered().use { output ->
-                                    zip.copyTo(output)
+                                    zip.copyToWithinLimit(output, MAX_PAYLOAD_ENTRY_BYTES, entry.name)
                                 }
                             }
                         }
@@ -698,6 +716,13 @@ class SyncArchiveManager(
     )
 
     companion object {
+        private const val MAX_MANIFEST_ENTRY_BYTES = 1024 * 1024
+        private const val MAX_CONFIG_ENTRY_BYTES = 8 * 1024 * 1024
+        private const val MAX_TABLE_ENTRY_BYTES = 64 * 1024 * 1024
+        private const val MAX_PAYLOAD_ENTRY_BYTES = 1024L * 1024 * 1024
+        private const val MAX_PAYLOAD_FILE_ENTRY_BYTES = 512L * 1024 * 1024
+        private const val MAX_PAYLOAD_FILES_TOTAL_BYTES = 1024L * 1024 * 1024
+        private const val MAX_PAYLOAD_FILE_COUNT = 20_000
         private const val PAYLOAD_MANIFEST_ENTRY = "payload_manifest.json"
         private const val SETTINGS_ENTRY = "settings.json"
         private const val SECRETS_ENTRY = "secrets.json"
@@ -783,4 +808,31 @@ class SyncArchiveManager(
             FileFolders.CHAT_IMAGES,
         )
     }
+}
+
+private fun ZipInputStream.readBytesWithinLimit(limit: Int, entryName: String): ByteArray {
+    val output = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0
+    while (true) {
+        val read = read(buffer)
+        if (read < 0) break
+        require(total <= limit - read) { "Sync archive entry $entryName exceeds $limit bytes" }
+        output.write(buffer, 0, read)
+        total += read
+    }
+    return output.toByteArray()
+}
+
+private fun ZipInputStream.copyToWithinLimit(output: java.io.OutputStream, limit: Long, entryName: String): Long {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+        val read = read(buffer)
+        if (read < 0) break
+        require(total <= limit - read) { "Sync archive entry $entryName exceeds $limit bytes" }
+        output.write(buffer, 0, read)
+        total += read
+    }
+    return total
 }

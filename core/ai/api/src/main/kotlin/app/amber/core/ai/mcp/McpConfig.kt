@@ -19,7 +19,9 @@ data class McpTool(
     val name: String = "",
     val description: String? = null,
     val inputSchema: InputSchema? = null,
-    val needsApproval: Boolean = false
+    // Fail-closed: MCP tools not explicitly marked safe ask before running.
+    // Global auto-approval settings still pass them without prompting.
+    val needsApproval: Boolean = true
 )
 
 @Serializable

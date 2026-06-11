@@ -48,7 +48,7 @@ class ProviderPrefs(
 
     private fun readFrom(p: Preferences): ProviderPrefsData = ProviderPrefsData(
         providers = p[PreferencesKeys.PROVIDERS]?.let {
-            JsonInstant.decodeFromString<List<ProviderSetting>>(it)
+            it.decodeJsonOrNull<List<ProviderSetting>>()
         } ?: DEFAULT_PROVIDERS,
         imageModelsSeededVersion = if (p[PreferencesKeys.SEEDED_IMAGE_MODELS_V1] == true) 1 else 0,
     )

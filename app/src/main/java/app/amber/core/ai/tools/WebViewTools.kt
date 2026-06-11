@@ -350,7 +350,9 @@ fun createWebViewLinksTool(store: WebViewOperationStore): Tool = Tool(
         val state = store.refreshStalled()
         val query = input.jsonObject["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
         val limit = input.jsonObject["limit"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.coerceIn(1, 80) ?: 40
-        val links = state.links.filter { link ->
+        // Keep original positions: webview_open_link resolves the index against the
+        // unfiltered state.links list, so filtered output must not renumber.
+        val links = state.links.withIndex().filter { (_, link) ->
             query.isBlank() ||
                 link.title.contains(query, ignoreCase = true) ||
                 link.url.contains(query, ignoreCase = true)
@@ -362,7 +364,7 @@ fun createWebViewLinksTool(store: WebViewOperationStore): Tool = Tool(
             put(
                 "links",
                 buildJsonArray {
-                    links.take(limit).forEachIndexed { index, link ->
+                    links.take(limit).forEach { (index, link) ->
                         add(
                             buildJsonObject {
                                 put("index", index)

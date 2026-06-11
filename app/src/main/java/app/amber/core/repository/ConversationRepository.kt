@@ -397,7 +397,7 @@ class ConversationRepository(
         )
     }
 
-    suspend fun deleteConversation(conversation: Conversation) {
+    suspend fun deleteConversation(conversation: Conversation, deferCleanup: Boolean = false) {
         // 获取完整的 Conversation（包含 messageNodes）以正确清理文件
         val fullConversation = if (conversation.messageNodes.isEmpty()) {
             getConversationById(conversation.id) ?: conversation
@@ -411,7 +411,20 @@ class ConversationRepository(
                 conversationToConversationEntity(conversation)
             )
         }
-        filesManager.deleteChatFiles(fullConversation.files)
+        if (!deferCleanup) {
+            cleanupDeletedConversation(fullConversation)
+        }
+    }
+
+    /**
+     * Final cleanup once a deleted conversation can no longer be restored:
+     * favorites, attachments and generated images. Split from
+     * [deleteConversation] so the History undo window can restore the
+     * conversation with its files still intact.
+     */
+    suspend fun cleanupDeletedConversation(conversation: Conversation) {
+        favoriteDAO.deleteByConversation(conversation.id.toString())
+        filesManager.deleteChatFiles(conversation.files)
         // Drop any generate_image tool output bound to this conversation.
         // The dir is `filesDir/chat_images/{conversationId}/` and is created
         // lazily on first generation — deleteRecursively no-ops when missing.

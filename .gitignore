@@ -24,3 +24,6 @@ feature/**/build/
 docs/cloud-design/**/uploads/
 docs/cloud-design/**/screenshots/
 docs/cloud-design/**/.thumbnail
+
+# Local data backups — too large for GitHub, never commit
+/amberagent-notion-data-backup-*.tgz

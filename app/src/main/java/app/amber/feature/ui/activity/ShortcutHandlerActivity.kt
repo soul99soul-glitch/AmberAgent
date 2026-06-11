@@ -27,7 +27,10 @@ class ShortcutHandlerActivity : ComponentActivity() {
             photoURI?.let {
                 val intent = Intent(this, RouteActivity::class.java).apply {
                     action = Intent.ACTION_SEND
-                    putExtra(Intent.EXTRA_STREAM, it.toString())
+                    // RouteActivity reads EXTRA_STREAM as a Uri; a String extra is
+                    // silently dropped and the photo never reaches the chat.
+                    putExtra(Intent.EXTRA_STREAM, it)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 startActivity(intent)
             }

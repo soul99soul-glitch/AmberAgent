@@ -66,33 +66,33 @@ class ExtensionPrefs(
 
     private fun readFrom(p: Preferences): ExtensionPrefsData = ExtensionPrefsData(
         mcpServers = p[PreferencesKeys.MCP_SERVERS]?.let {
-            JsonInstant.decodeFromString<List<McpServerConfig>>(it)
+            it.decodeJsonOrNull<List<McpServerConfig>>()
         } ?: emptyList(),
         webDavConfig = p[PreferencesKeys.WEBDAV_CONFIG]?.let {
-            JsonInstant.decodeFromString<WebDavConfig>(it)
+            it.decodeJsonOrNull<WebDavConfig>()
         } ?: WebDavConfig(),
         s3Config = p[PreferencesKeys.S3_CONFIG]?.let {
-            JsonInstant.decodeFromString<S3Config>(it)
+            it.decodeJsonOrNull<S3Config>()
         } ?: S3Config(),
         ttsProviders = p[PreferencesKeys.TTS_PROVIDERS]?.let {
-            JsonInstant.decodeFromString<List<TTSProviderSetting>>(it)
+            it.decodeJsonOrNull<List<TTSProviderSetting>>()
         } ?: emptyList(),
         selectedTTSProviderId = p[PreferencesKeys.SELECTED_TTS_PROVIDER]
-            ?.let { Uuid.parse(it) } ?: DEFAULT_SYSTEM_TTS_ID,
+            ?.let { it.parseUuidOrNull() } ?: DEFAULT_SYSTEM_TTS_ID,
         modeInjections = p[PreferencesKeys.MODE_INJECTIONS]?.let {
-            JsonInstant.decodeFromString<List<PromptInjection.ModeInjection>>(it)
+            it.decodeJsonOrNull<List<PromptInjection.ModeInjection>>()
         } ?: emptyList(),
         lorebooks = p[PreferencesKeys.LOREBOOKS]?.let {
-            JsonInstant.decodeFromString<List<Lorebook>>(it)
+            it.decodeJsonOrNull<List<Lorebook>>()
         } ?: emptyList(),
         quickMessages = p[PreferencesKeys.QUICK_MESSAGES]?.let {
-            JsonInstant.decodeFromString<List<QuickMessage>>(it)
+            it.decodeJsonOrNull<List<QuickMessage>>()
         } ?: emptyList(),
         backupReminderConfig = p[PreferencesKeys.BACKUP_REMINDER_CONFIG]?.let {
-            JsonInstant.decodeFromString<BackupReminderConfig>(it)
+            it.decodeJsonOrNull<BackupReminderConfig>()
         } ?: BackupReminderConfig(),
         syncSettings = p[PreferencesKeys.SYNC_SETTINGS]?.let {
-            JsonInstant.decodeFromString<SyncSettings>(it)
+            it.decodeJsonOrNull<SyncSettings>()
         } ?: SyncSettings(),
         routingQuickMessagesSeededVersion =
             if (p[PreferencesKeys.SEEDED_ROUTING_QUICK_MESSAGES_V1] == true) 1 else 0,

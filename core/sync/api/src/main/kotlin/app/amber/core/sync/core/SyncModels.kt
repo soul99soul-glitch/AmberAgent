@@ -122,6 +122,7 @@ data class SyncPreview(
 data class SyncSecretSnapshot(
     val webMountOauth: String? = null,
     val openAICodexOAuth: String? = null,
+    val googleGeminiOAuth: String? = null,
 )
 
 @Serializable

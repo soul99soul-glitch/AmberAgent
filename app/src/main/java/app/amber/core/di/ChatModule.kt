@@ -56,6 +56,7 @@ val chatModule = module {
             pendingMessageStore = get(),
             userInputPreprocessor = get(),
             agentRunner = get(),
+            agentEventStore = get(),
         )
     }
     single<ConversationAccess> { get<ChatService>() }

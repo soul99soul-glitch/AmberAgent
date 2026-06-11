@@ -1,5 +1,6 @@
 package app.amber.ai.provider.providers.openai
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -7,6 +8,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.core.Tool
+import app.amber.ai.provider.BuiltInTools
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ProviderSetting
@@ -371,6 +374,80 @@ class ResponseAPIMessageTest {
         val reasoning = requestBody["reasoning"]?.jsonObject
         assertTrue("reasoning should exist", reasoning != null)
         assertEquals("low", reasoning!!["effort"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `parseResponseOutput should keep image_generation_call results`() {
+        val response = Json.parseToJsonElement(
+            """
+            {
+              "id": "resp_1",
+              "model": "gpt-test",
+              "status": "completed",
+              "output": [
+                {
+                  "type": "image_generation_call",
+                  "id": "ig_1",
+                  "status": "completed",
+                  "result": "data:image/png;base64,QUJD"
+                },
+                {
+                  "type": "message",
+                  "role": "assistant",
+                  "content": [{"type": "output_text", "text": "Here is your image."}]
+                }
+              ]
+            }
+            """.trimIndent()
+        ).jsonObject
+
+        val chunk = api.parseResponseOutput(response)
+
+        val parts = chunk.choices.first().message!!.parts
+        val image = parts.filterIsInstance<UIMessagePart.Image>().single()
+        assertEquals("data:image/png;base64,QUJD", image.url)
+        assertEquals(
+            "ig_1",
+            image.metadata?.jsonObject?.get("openai_image_call_id")?.jsonPrimitive?.content
+        )
+        assertTrue(
+            parts.filterIsInstance<UIMessagePart.Text>().any { it.text.contains("Here is your image.") }
+        )
+    }
+
+    @Test
+    fun `response api should combine custom function tools with built in tools`() {
+        val providerSetting = ProviderSetting.OpenAI(
+            baseUrl = "https://api.openai.com/v1"
+        )
+        val requestBody = invokeBuildRequestBody(
+            providerSetting = providerSetting,
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "gpt-5.1",
+                    displayName = "gpt-5.1",
+                    abilities = listOf(ModelAbility.TOOL),
+                    tools = setOf(BuiltInTools.Search)
+                ),
+                tools = listOf(
+                    Tool(
+                        name = "local_tool",
+                        description = "Local test tool",
+                        execute = { emptyList() }
+                    )
+                )
+            )
+        )
+
+        val tools = requestBody["tools"]!!.jsonArray.map { it.jsonObject }
+
+        assertTrue(tools.any { tool ->
+            tool["type"]?.jsonPrimitive?.content == "function" &&
+                tool["name"]?.jsonPrimitive?.content == "local_tool"
+        })
+        assertTrue(tools.any { tool ->
+            tool["type"]?.jsonPrimitive?.content == "web_search"
+        })
     }
 
     // ==================== Helper Functions ====================

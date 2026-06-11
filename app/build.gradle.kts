@@ -107,8 +107,8 @@ android {
         applicationId = baseApplicationId
         minSdk = 26
         targetSdk = 37
-        versionCode = 395
-        versionName = "2.6.7"
+        versionCode = 396
+        versionName = "2.6.8"
 
         testInstrumentationRunner = "app.amber.agent.AmberAgentAndroidTestRunner"
         manifestPlaceholders["xiaomiXmsAppId"] = xiaomiXmsAppId
@@ -482,9 +482,22 @@ afterEvaluate {
     }
 }
 
-fun downloadRuntimeFile(localPath: String, remoteUrl: String, expectedChecksum: String? = null) {
+fun downloadRuntimeFile(localPath: String, remoteUrl: String, expectedChecksum: String) {
     val file = file(localPath)
-    if (file.exists() && file.length() > 0L && expectedChecksum == null) return
+    if (file.exists() && file.length() > 0L) {
+        val existingChecksum = file.inputStream().use { input ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(8192)
+            while (true) {
+                val readBytes = input.read(buffer)
+                if (readBytes < 0) break
+                digest.update(buffer, 0, readBytes)
+            }
+            digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        }
+        if (existingChecksum == expectedChecksum) return
+        file.delete()
+    }
     file.parentFile?.mkdirs()
     val digest = MessageDigest.getInstance("SHA-256")
     val connection = URI(remoteUrl).toURL().openConnection()
@@ -501,7 +514,7 @@ fun downloadRuntimeFile(localPath: String, remoteUrl: String, expectedChecksum: 
     }
     var checksum = BigInteger(1, digest.digest()).toString(16)
     while (checksum.length < 64) checksum = "0$checksum"
-    if (expectedChecksum != null && checksum != expectedChecksum) {
+    if (checksum != expectedChecksum) {
         file.delete()
         throw GradleException(
             "Wrong checksum for $remoteUrl:\nExpected: $expectedChecksum\nActual:   $checksum"
@@ -517,15 +530,18 @@ val prepareEmbeddedTerminalRuntime by tasks.registering {
         root.mkdirs()
         downloadRuntimeFile(
             localPath = root.resolve("proot").absolutePath,
-            remoteUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/main/aarch64/proot"
+            remoteUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/main/aarch64/proot",
+            expectedChecksum = "f25ac0a0258e18671c699154cdc88001fbd1cbe09df75c960a1ee8dad29d88ae",
         )
         downloadRuntimeFile(
             localPath = root.resolve("libtalloc.so.2").absolutePath,
-            remoteUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/main/aarch64/libtalloc.so.2"
+            remoteUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/main/aarch64/libtalloc.so.2",
+            expectedChecksum = "368262b345120a4e09ae961f4bda92e0cdfc18004145317f923abe403df6facf",
         )
         downloadRuntimeFile(
             localPath = root.resolve("alpine.tar.gz").absolutePath,
-            remoteUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.0-aarch64.tar.gz"
+            remoteUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.0-aarch64.tar.gz",
+            expectedChecksum = "f31202c4070c4ef7de9e157e1bd01cb4da3a2150035d74ea5372c5e86f1efac1",
         )
     }
 }

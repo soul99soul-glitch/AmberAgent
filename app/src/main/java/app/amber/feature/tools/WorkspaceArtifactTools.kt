@@ -102,7 +102,9 @@ class WorkspaceArtifactTools(
                     val connection = openConnection(url, "GET", timeoutMs = 30_000)
                     val status = connection.responseCode
                     require(status in 200..299) { "Download failed with HTTP $status" }
-                    val bytes = connection.inputStream.use { it.readBytesLimited(MAX_DOWNLOAD_BYTES) }
+                    val bytes = connection.inputStream.use {
+                        it.readBytesWithinLimit(MAX_DOWNLOAD_BYTES, "Download")
+                    }
                     val destination = input.string("workspace_path")
                         ?.takeIf { it.isNotBlank() }
                         ?: "downloads/${safeFileName(fileNameFromUrl(url))}"
@@ -136,7 +138,7 @@ class WorkspaceArtifactTools(
             trackArtifactTool("archive_list", "查看压缩包", input) {
                 val path = input.requiredString("path")
                 val limit = input.limit(default = 200, max = 1000)
-                val bytes = workspaceManager.readBytes(path)
+                val bytes = workspaceManager.readBytesCapped(path, MAX_ARCHIVE_BYTES)
                 val entries = listArchiveEntries(path, bytes, limit)
                 textJson {
                     put("path", path)
@@ -165,7 +167,7 @@ class WorkspaceArtifactTools(
                 val destination = input.string("destination_path")?.takeIf { it.isNotBlank() }
                     ?: "extracted/${safeBaseName(path)}"
                 val overwrite = input.boolean("overwrite") ?: false
-                val bytes = workspaceManager.readBytes(path)
+                val bytes = workspaceManager.readBytesCapped(path, MAX_ARCHIVE_BYTES)
                 val result = extractArchive(path, bytes, destination, overwrite)
                 textJson {
                     put("path", path)
@@ -320,7 +322,7 @@ class WorkspaceArtifactTools(
         execute = { input ->
             trackArtifactTool("image_info", "读取图片信息", input) {
                 val path = input.requiredString("path")
-                val bytes = workspaceManager.readBytes(path)
+                val bytes = workspaceManager.readBytesCapped(path, MAX_IMAGE_BYTES)
                 val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
                 textJson {
@@ -509,7 +511,10 @@ class WorkspaceArtifactTools(
                         if (!overwrite && runCatching { workspaceManager.readBytes(target) }.isSuccess) {
                             error("Target already exists: $target")
                         }
-                        val data = zip.readBytesLimited(MAX_ARCHIVE_ENTRY_BYTES)
+                        val data = zip.readBytesWithinLimit(
+                            MAX_ARCHIVE_ENTRY_BYTES,
+                            "Archive entry ${entry.name}",
+                        )
                         workspaceManager.writeBytes(target, data, mimeFromName(target))
                         stats.files++
                         stats.bytes += data.size
@@ -568,7 +573,7 @@ class WorkspaceArtifactTools(
 
     private suspend fun <T> withTempWorkspaceFile(path: String, block: (File) -> T): T =
         withContext(Dispatchers.IO) {
-            val bytes = workspaceManager.readBytes(path)
+            val bytes = workspaceManager.readBytesCapped(path, MAX_WORKSPACE_TEMP_FILE_BYTES)
             val ext = path.substringAfterLast('.', "bin")
             val file = File.createTempFile("amberagent-${safeBaseName(path)}", ".$ext", context.cacheDir)
             try {
@@ -605,7 +610,10 @@ class WorkspaceArtifactTools(
                 .filter { it.name == "xl/sharedStrings.xml" || it.name.startsWith("xl/worksheets/sheet") }
                 .forEach { entry ->
                     text.appendLine("## ${entry.name}")
-                    text.appendLine(stripXml(zip.getInputStream(entry).bufferedReader().readText()))
+                    val xml = zip.getInputStream(entry).use { input ->
+                        input.readBytesWithinLimit(MAX_ARCHIVE_ENTRY_BYTES, entry.name).decodeToString()
+                    }
+                    text.appendLine(stripXml(xml))
                 }
         }
         return text.toString()
@@ -732,6 +740,20 @@ class WorkspaceArtifactTools(
         return output.toByteArray()
     }
 
+    private fun java.io.InputStream.readBytesWithinLimit(limit: Int, label: String): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) break
+            require(total <= limit - read) { "$label exceeds the $limit byte limit" }
+            output.write(buffer, 0, read)
+            total += read
+        }
+        return output.toByteArray()
+    }
+
     private fun java.io.InputStream.readExactly(length: Int): ByteArray {
         val bytes = ByteArray(length)
         var offset = 0
@@ -832,6 +854,9 @@ class WorkspaceArtifactTools(
     companion object {
         private const val MAX_HTTP_BODY_BYTES = 512 * 1024
         private const val MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024
+        private const val MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
         private const val MAX_ARCHIVE_ENTRY_BYTES = 64 * 1024 * 1024
+        private const val MAX_IMAGE_BYTES = 64 * 1024 * 1024
+        private const val MAX_WORKSPACE_TEMP_FILE_BYTES = 64 * 1024 * 1024
     }
 }

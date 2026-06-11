@@ -5,7 +5,7 @@
     <receiver
       android:name=".debug.AmberAgentSmokeReceiver"
       android:enabled="true"
-      android:exported="true">
+      android:exported="false">
       <intent-filter>
         <action android:name="app.amber.agent.debug.SMOKE_TERMINAL" />
         <action android:name="app.amber.agent.debug.SMOKE_SCREEN" />

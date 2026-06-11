@@ -44,7 +44,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
     }
 
     private fun parsePdfAsText(file: File): String {
-        return PdfParser.parserPdf(file)
+        return PdfParser.parserPdf(file, MAX_INLINE_TEXT_CHARS)
     }
 
     // Phase 2 Step 1: route through OfficeNativeSwitch. Default config is
@@ -76,15 +76,34 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         if (!file.exists() || !file.isFile) {
             return "[ERROR, file not found: ${document.fileName}]"
         }
+        if (file.length() > MAX_INLINE_FILE_BYTES) {
+            return "[ERROR, file too large to inline: ${document.fileName} (${file.length()} bytes)]"
+        }
         return runCatching {
-            when (document.mime) {
+            val content = when (document.mime) {
                 "application/pdf" -> parsePdfAsText(file)
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> parseDocxAsText(file)
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> parsePptxAsText(file)
                 "application/epub+zip" -> parseEpubAsText(file)
                 else -> {
                     if (document.isLikelyTextFile()) {
-                        file.readText()
+                        file.bufferedReader().use { reader ->
+                            val buffer = CharArray(MAX_INLINE_TEXT_CHARS + 1)
+                            var total = 0
+                            while (total < buffer.size) {
+                                val read = reader.read(buffer, total, buffer.size - total)
+                                if (read < 0) break
+                                total += read
+                            }
+                            String(buffer, 0, total).let { content ->
+                                if (content.length > MAX_INLINE_TEXT_CHARS) {
+                                    content.take(MAX_INLINE_TEXT_CHARS) +
+                                        "\n[TRUNCATED: document text exceeds $MAX_INLINE_TEXT_CHARS characters]"
+                                } else {
+                                    content
+                                }
+                            }
+                        }
                     } else {
                         buildString {
                             appendLine("[BINARY_OR_ARCHIVE_FILE]")
@@ -96,6 +115,12 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                         }
                     }
                 }
+            }
+            if (content.length > MAX_INLINE_TEXT_CHARS) {
+                content.take(MAX_INLINE_TEXT_CHARS) +
+                    "\n[TRUNCATED: document text exceeds $MAX_INLINE_TEXT_CHARS characters]"
+            } else {
+                content
             }
         }.getOrElse {
             "[ERROR, failed to read file: ${document.fileName}]"
@@ -113,4 +138,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                 "log", "svg"
             )
     }
+
+    private const val MAX_INLINE_TEXT_CHARS = 512 * 1024
+    private const val MAX_INLINE_FILE_BYTES = 64L * 1024 * 1024
 }

@@ -3,6 +3,7 @@ package app.amber.ai.provider.providers.openai
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
@@ -36,6 +37,7 @@ import app.amber.ai.provider.providers.PartGroup
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.MessageChunk
+import app.amber.ai.ui.STREAM_TOOL_INDEX_METADATA_KEY
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessageChoice
@@ -67,13 +69,25 @@ import kotlin.time.Clock
 
 private const val TAG = "ChatCompletionsAPI"
 
-internal fun normalizeOpenAIStreamDataLines(data: String): List<String> =
-    data.lineSequence()
+internal fun normalizeOpenAIStreamDataLines(data: String): List<String> {
+    // OkHttp EventSource 已按 SSE 语义把同一 event 的多行 data 用 \n 合并成一个字符串。
+    // 标准语义下整个 data 就是一个 payload; 服务端把单个 JSON 拆成多行 data 是合法的,
+    // 无脑按行拆会把它拆碎。因此: 多行时先尝试整体作为一个 JSON payload, 失败才退回
+    // 按行拆分 (兼容嵌套 data: 前缀的 wrapper 和单 event 多 JSON 行的异常 provider)。
+    val lines = data.lineSequence()
         .map { it.trim() }
         .filter { it.isNotBlank() }
         .map { it.withoutNestedSseDataPrefix() }
         .filter { it.isNotBlank() && it != "[DONE]" }
         .toList()
+    if (lines.size <= 1) return lines
+    val joined = lines.joinToString("\n")
+    return if (runCatching { json.parseToJsonElement(joined) }.isSuccess) {
+        listOf(joined)
+    } else {
+        lines
+    }
+}
 
 private fun String.withoutNestedSseDataPrefix(): String {
     var value = trimStart()
@@ -111,7 +125,7 @@ class ChatCompletionsAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: model=${params.model.modelId}")
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
@@ -170,7 +184,7 @@ class ChatCompletionsAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: model=${params.model.modelId}")
 
         // just for debugging response body
         // println(client.newCall(request).await().body?.string())
@@ -184,14 +198,15 @@ class ChatCompletionsAPI(
             ) {
                 val payloads = normalizeOpenAIStreamDataLines(data)
                 if (payloads.isEmpty() && data.contains("[DONE]")) {
-                    println("[onEvent] (done) 结束流: $data")
                     close()
                     return
                 }
-                Log.d(TAG, "onEvent: $data")
-                payloads
-                    .map { json.parseToJsonElement(it).jsonObject }
-                    .forEach {
+                Log.d(TAG, "onEvent: type=$type chars=${data.length}")
+                // parse 异常/error payload 必须主动 cancel + close, 不依赖在 OkHttp
+                // callback 中抛异常的隐式传播, 否则 flow 可能不可靠关闭或吞错
+                runCatching {
+                    for (payload in payloads) {
+                        val it = json.parseToJsonElement(payload).jsonObject
                         if (it["error"] != null) {
                             val error = it["error"]!!.parseErrorDetail()
                             throw error
@@ -227,15 +242,23 @@ class ChatCompletionsAPI(
                             choices = choiceList,
                             usage = usage
                         )
-                        trySend(messageChunk)
+                        // trySend 在 buffer 满时静默丢 chunk = 永久丢 token;
+                        // 阻塞 OkHttp 读线程形成天然背压, channel 关闭时立即失败
+                        if (trySendBlocking(messageChunk).isFailure) {
+                            eventSource.cancel()
+                            break
+                        }
                     }
+                }.onFailure { error ->
+                    eventSource.cancel()
+                    close(error)
+                }
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+                Log.w(TAG, "onFailure: status=${response?.code} type=${t?.javaClass?.simpleName}", t)
 
                 val bodyRaw = response?.body?.stringSafe()
                 try {
@@ -243,14 +266,12 @@ class ChatCompletionsAPI(
                         val bodyElement = Json.parseToJsonElement(
                             normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
                         )
-                        println(bodyElement)
                         exception = bodyElement.parseErrorDetail()
                         Log.i(TAG, "onFailure: $exception")
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
-                    exception = e
+                    // body 解析失败时保留原始网络异常, 不要用 parse 异常覆盖根因
+                    Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                 } finally {
                     close(exception)
                 }
@@ -751,6 +772,7 @@ class ChatCompletionsAPI(
                 toolCalls.forEach { toolCalls ->
                     val type = toolCalls.jsonObject["type"]?.jsonPrimitive?.contentOrNull
                     if (!type.isNullOrEmpty() && type != "function") error("tool call type not supported: $type")
+                    val toolCallIndex = toolCalls.jsonObject["index"]?.jsonPrimitive?.intOrNull
                     val toolCallId = toolCalls.jsonObject["id"]?.jsonPrimitive?.contentOrNull
                     val toolName =
                         toolCalls.jsonObject["function"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
@@ -761,7 +783,12 @@ class ChatCompletionsAPI(
                             toolCallId = toolCallId ?: "",
                             toolName = toolName ?: "",
                             input = arguments ?: "",
-                            output = emptyList()
+                            output = emptyList(),
+                            metadata = toolCallIndex?.let { index ->
+                                buildJsonObject {
+                                    put(STREAM_TOOL_INDEX_METADATA_KEY, index)
+                                }
+                            }
                         )
                     )
                 }

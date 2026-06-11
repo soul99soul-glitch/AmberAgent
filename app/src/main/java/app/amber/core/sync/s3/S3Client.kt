@@ -11,6 +11,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpMethod
+import io.ktor.http.contentLength
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import io.ktor.utils.io.readAvailable
@@ -176,16 +177,29 @@ class S3Client(
                     Log.e(TAG, "downloadObjectToFile failed: ${response.status} - $errorBody")
                     throw S3Exception("Failed to download object: ${response.status}", errorBody)
                 }
+                response.contentLength()?.let { length ->
+                    require(length <= MAX_DOWNLOAD_BYTES) { "S3 object exceeds $MAX_DOWNLOAD_BYTES byte download limit" }
+                }
 
                 val channel = response.bodyAsChannel()
-                targetFile.outputStream().use { outputStream ->
-                    val buffer = ByteArray(8192)
-                    while (!channel.isClosedForRead) {
-                        val bytesRead = channel.readAvailable(buffer)
-                        if (bytesRead > 0) {
-                            outputStream.write(buffer, 0, bytesRead)
+                try {
+                    targetFile.outputStream().use { outputStream ->
+                        val buffer = ByteArray(8192)
+                        var total = 0L
+                        while (!channel.isClosedForRead) {
+                            val bytesRead = channel.readAvailable(buffer)
+                            if (bytesRead > 0) {
+                                require(total <= MAX_DOWNLOAD_BYTES - bytesRead) {
+                                    "S3 object exceeds $MAX_DOWNLOAD_BYTES byte download limit"
+                                }
+                                outputStream.write(buffer, 0, bytesRead)
+                                total += bytesRead
+                            }
                         }
                     }
+                } catch (error: Throwable) {
+                    targetFile.delete()
+                    throw error
                 }
                 Log.d(TAG, "downloadObjectToFile success: downloaded ${targetFile.length()} bytes")
             }
@@ -427,6 +441,8 @@ class S3Client(
         )
     }
 }
+
+private const val MAX_DOWNLOAD_BYTES = 1024L * 1024 * 1024
 
 data class S3Object(
     val key: String,

@@ -3,8 +3,10 @@ package app.amber.feature.board.worker
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.BoardTaskRepository
 import app.amber.feature.board.OpportunityRepository
@@ -50,13 +52,33 @@ class BoardWorker(
         val notifier = get<BoardNotifier>()
         val scheduler = get<BoardScheduler>()
 
-        // Reschedule upfront so anchor loop continues even if this run fails. Manual /
-        // incremental runs shouldn't touch the anchor cadence.
+        // Manual / incremental runs shouldn't touch the anchor cadence. The next
+        // anchor is re-enqueued in the finally below — doing it upfront with
+        // REPLACE on the same unique work name cancels this very run.
         val isAnchor = tags.contains(BoardScheduler.TAG_ANCHOR)
-        if (isAnchor) {
-            runCatching { scheduler.rescheduleNextAnchor() }
+        try {
+            return runCycle(
+                aggregator, repository, taskRepository, opportunityRepository,
+                opportunityScanner, agent, notifier,
+            )
+        } finally {
+            if (isAnchor && !isStopped) {
+                withContext(NonCancellable) {
+                    runCatching { scheduler.rescheduleNextAnchor() }
+                }
+            }
         }
+    }
 
+    private suspend fun runCycle(
+        aggregator: SignalAggregator,
+        repository: BoardRepository,
+        taskRepository: BoardTaskRepository,
+        opportunityRepository: OpportunityRepository,
+        opportunityScanner: OpportunityScanner,
+        agent: BoardAgent,
+        notifier: BoardNotifier,
+    ): Result {
         val boardDate = repository.resolveBoardDate()
 
         runCatching {

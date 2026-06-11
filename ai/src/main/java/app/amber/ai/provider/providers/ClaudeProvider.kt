@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
@@ -39,6 +40,7 @@ import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.withStreamToolIndex
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
@@ -210,7 +212,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                 }
 
-                val deltaMessage = parseMessage(buildJsonArray {
+                var deltaMessage = parseMessage(buildJsonArray {
                     val contentBlockObj = dataJson["content_block"]?.jsonObject
                     val deltaObj = dataJson["delta"]?.jsonObject
                     if (contentBlockObj != null) {
@@ -220,6 +222,17 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         add(deltaObj)
                     }
                 })
+                // content_block_start/delta 事件顶层的 index 是并行 tool use 的唯一关联键:
+                // input_json_delta 不带 tool id, 不注入 index 时 merge 层只能回退到
+                // "最后一个 Tool", 并行 tool 的参数会串线
+                val blockIndex = dataJson["index"]?.jsonPrimitive?.intOrNull
+                if (blockIndex != null && deltaMessage.parts.any { it is UIMessagePart.Tool }) {
+                    deltaMessage = deltaMessage.copy(
+                        parts = deltaMessage.parts.map { part ->
+                            if (part is UIMessagePart.Tool) part.withStreamToolIndex(blockIndex) else part
+                        }
+                    )
+                }
                 val tokenUsage = parseTokenUsage(dataJson)
                 if (deltaMessage.parts.isEmpty() && tokenUsage == null) return
 
@@ -236,7 +249,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     ),
                     usage = tokenUsage
                 )
-                trySend(messageChunk)
+                // 阻塞式发送形成背压, 避免 buffer 满时静默丢 token
+                trySendBlocking(messageChunk)
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
@@ -249,12 +263,10 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        Log.i(TAG, "Error response: $bodyElement")
                         exception = bodyElement.parseErrorDetail()
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                 } finally {
                     close(exception)
                 }
@@ -545,8 +557,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 "redacted_thinking" -> {
-                    val data = block["data"]?.jsonPrimitiveOrNull?.contentOrNull
-                    println(data)
+                    // Payload is encrypted/redacted by the provider; never log it.
                 }
 
                 "tool_use" -> {
@@ -585,9 +596,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
     private fun logStreamEvent(type: String?, data: String) {
         if (!Log.isLoggable(TAG, Log.VERBOSE)) return
-        val preview = data.take(512).replace("\n", "\\n")
-        val suffix = if (data.length > preview.length) "..." else ""
-        Log.v(TAG, "onEvent: type=$type, chars=${data.length}, data=$preview$suffix")
+        Log.v(TAG, "onEvent: type=$type chars=${data.length}")
     }
 
     private fun parseTokenUsage(bodyJson: JsonObject?): TokenUsage? {

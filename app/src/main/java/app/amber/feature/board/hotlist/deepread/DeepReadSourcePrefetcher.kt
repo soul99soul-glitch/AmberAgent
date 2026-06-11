@@ -15,6 +15,7 @@ import app.amber.feature.board.hotlist.HotTopicSource
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.feature.tools.isPrivateNetworkTarget
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchResult
 import app.amber.search.SearchService
@@ -334,7 +335,19 @@ class DeepReadSourcePrefetcher(
             ?.takeIf { it.isNotBlank() }
     }
 
+    /**
+     * Background prefetch must not probe loopback/LAN services on its own. The
+     * user opts in by enabling both global and high-risk auto-approval — the
+     * same gate that lets http_request reach private hosts unattended.
+     */
+    private fun urlAllowedForBackgroundFetch(url: String): Boolean {
+        if (!url.isPrivateNetworkTarget()) return true
+        val runtime = settingsStore.settingsFlow.value.agentRuntime
+        return runtime.autoApproveAllToolCalls && runtime.autoApproveHighRiskToolCalls
+    }
+
     private suspend fun fetchPageImages(url: String): List<PageImage> = withContext(Dispatchers.IO) {
+        if (!urlAllowedForBackgroundFetch(url)) return@withContext null
         withTimeoutOrNull(OG_IMAGE_TIMEOUT_MS) {
             val request = Request.Builder()
                 .url(url)
@@ -353,6 +366,7 @@ class DeepReadSourcePrefetcher(
     }.orEmpty()
 
     private suspend fun fetchReadableText(url: String): String? = withContext(Dispatchers.IO) {
+        if (!urlAllowedForBackgroundFetch(url)) return@withContext null
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", DESKTOP_USER_AGENT)
@@ -441,6 +455,9 @@ class DeepReadSourcePrefetcher(
     }
 
     private suspend fun probeImageQuality(url: String): DeepReadImageQuality = withContext(Dispatchers.IO) {
+        if (!urlAllowedForBackgroundFetch(url)) {
+            return@withContext mergeQualityHints(DeepReadImageQuality(), url.imageQualityHints())
+        }
         val probed = runCatching {
             withTimeoutOrNull(IMAGE_PROBE_TIMEOUT_MS) {
                 val request = Request.Builder()
