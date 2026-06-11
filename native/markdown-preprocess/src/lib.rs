@@ -175,6 +175,13 @@ fn linkify_outside_code(input: &str, code_ranges: &[(usize, usize)]) -> String {
 
 fn linkify_segment(segment: &str) -> String {
     let re = re_bare_url();
+    // Pre-scan explicit-link `[label](dest)` spans so the bare-URL scanner never
+    // rewrites a domain-looking token already inside an explicit link — its label
+    // (`[see example.com](...)`) or its destination
+    // (`[guides](https://developer.android.com/guide)`). GFM does not re-linkify
+    // text inside an explicit link, so the WHOLE construct is skipped. Mirrors the
+    // Kotlin `findExplicitLinkRanges` reference (Markdown.kt); kept output-identical.
+    let skip_ranges = find_explicit_link_ranges(segment);
     let mut out = String::with_capacity(segment.len() + 16);
     let mut last = 0usize;
     for m in re.find_iter(segment) {
@@ -190,6 +197,10 @@ fn linkify_segment(segment: &str) -> String {
                     continue;
                 }
             }
+        }
+        // Skip candidates whose start falls inside an explicit link's label/dest.
+        if position_in_any_range(m.start(), &skip_ranges) {
+            continue;
         }
         let raw = m.as_str();
         let trimmed = raw.trim_end_matches(|c| {
@@ -207,6 +218,91 @@ fn linkify_segment(segment: &str) -> String {
     }
     out.push_str(&segment[last..]);
     out
+}
+
+/// Collects the BYTE ranges `[start, end_inclusive]` of explicit markdown links
+/// `[label](dest)` in `segment`, each spanning the whole construct (label `[` to
+/// destination `)`). The bare-URL linkifier skips any candidate whose start byte
+/// falls inside one. Mirrors the Kotlin `findExplicitLinkRanges` reference so both
+/// implementations stay output-identical.
+///
+/// `]`, `[`, `(`, `)`, `\` are all ASCII (one byte), so scanning the raw bytes is
+/// boundary-safe for them; multi-byte UTF-8 chars are skipped over as opaque
+/// non-delimiter bytes (their continuation bytes are all >= 0x80 and never equal
+/// an ASCII delimiter), so they cannot be mistaken for a bracket/paren.
+fn find_explicit_link_ranges(segment: &str) -> Vec<(usize, usize)> {
+    let b = segment.as_bytes();
+    let n = b.len();
+    if n < 4 {
+        return Vec::new();
+    }
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0usize;
+    while i + 1 < n {
+        if b[i] == b']' && b[i + 1] == b'(' {
+            if let Some(label_start) = find_label_start(b, i) {
+                if let Some(dest_end) = find_destination_end(b, i + 1) {
+                    ranges.push((label_start, dest_end));
+                    i = dest_end + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    ranges
+}
+
+/// From the `]` at `close_bracket`, scans back to the matching unescaped `[`,
+/// balancing nested `[]`. Returns the `[` byte index, or None.
+fn find_label_start(b: &[u8], close_bracket: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut j = close_bracket;
+    while j > 0 {
+        j -= 1;
+        let escaped = j > 0 && b[j - 1] == b'\\';
+        if !escaped {
+            if b[j] == b']' {
+                depth += 1;
+            } else if b[j] == b'[' {
+                if depth == 0 {
+                    return Some(j);
+                }
+                depth -= 1;
+            }
+        }
+    }
+    None
+}
+
+/// From the `(` at `open_paren`, scans forward to the matching `)`, balancing
+/// nested parens and honoring backslash escapes. Returns the `)` byte index, or None.
+fn find_destination_end(b: &[u8], open_paren: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut k = open_paren;
+    let n = b.len();
+    while k < n {
+        let c = b[k];
+        if c == b'\\' {
+            k += 2;
+            continue;
+        }
+        if c == b'(' {
+            depth += 1;
+        } else if c == b')' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(k);
+            }
+        }
+        k += 1;
+    }
+    None
+}
+
+/// True if `pos` lies within any inclusive `[start, end]` range.
+fn position_in_any_range(pos: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges.iter().any(|&(s, e)| pos >= s && pos <= e)
 }
 
 #[cfg(test)]
@@ -285,6 +381,56 @@ mod tests {
         // Two links outside
         let link_count = out.matches("[example.com](https://example.com)").count();
         assert_eq!(link_count, 2);
+    }
+
+    #[test]
+    fn linkify_skips_explicit_link_destination() {
+        // The bare-URL scanner must not rewrite a domain-looking token inside an
+        // explicit link's destination. Pre-fix this produced a nested link:
+        // `[guides](https://developer.[android.com/guide](https://android.com/guide))`.
+        let s = "[Android developer guides](https://developer.android.com/guide) are canonical.";
+        let out = preprocess(s);
+        assert_eq!(out, s);
+        assert!(!out.contains("[android.com/guide]"));
+    }
+
+    #[test]
+    fn linkify_skips_multiple_explicit_links_on_one_line() {
+        let s =
+            "For [Maven Central](https://search.maven.org) and [Google Maven](https://maven.google.com).";
+        let out = preprocess(s);
+        assert_eq!(out, s);
+        assert!(!out.contains("[maven.org]"));
+        assert!(!out.contains("[google.com]"));
+    }
+
+    #[test]
+    fn linkify_skips_domain_inside_link_label() {
+        // GFM does not re-linkify text inside an explicit link — its label included.
+        let s = "[see example.com](https://example.com)";
+        let out = preprocess(s);
+        assert_eq!(out, s);
+        assert!(!out.contains("[example.com]("));
+    }
+
+    #[test]
+    fn linkify_after_explicit_link_still_works() {
+        // The explicit link is skipped; a trailing bare domain still linkifies.
+        let s = "See [the docs](https://example.com/docs) or visit kotlinlang.org for more.";
+        let out = preprocess(s);
+        assert!(out.contains("[kotlinlang.org](https://kotlinlang.org)"));
+        assert!(out.contains("[the docs](https://example.com/docs)"));
+    }
+
+    #[test]
+    fn linkify_balanced_parens_in_destination() {
+        // Balanced parens in a URL (Wikipedia) must not confuse the destination
+        // scan or trigger re-linkification. (Note: an ESCAPED-paren destination
+        // like `path\(1\)` is converted to `path$1$` by the inline-LaTeX pass —
+        // a separate, pre-existing preprocess behavior unrelated to linkify — so
+        // it is deliberately not asserted here.)
+        let balanced = "[Wikipedia](https://en.wikipedia.org/wiki/Kotlin_(programming_language))";
+        assert_eq!(preprocess(balanced), balanced);
     }
 
     #[test]

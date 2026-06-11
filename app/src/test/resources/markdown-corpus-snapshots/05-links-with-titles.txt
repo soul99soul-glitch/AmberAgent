@@ -1,11 +1,11 @@
   text=Links with Titles
   text=Inline links can include an optional title in quotes after the URL. The title typically appears as a tooltip on hover in HTML renderers:
   text=Kotlin language site links=https://kotlinlang.org
-  text=Android Studio download links=https://developer.[android.com/studio](https://android.com/studio)
+  text=Android Studio download links=https://developer.android.com/studio
   text=Titles can also use single quotes:
-  text=Jetpack Compose links=https://developer.[android.com/jetpack/compose](https://android.com/jetpack/compose)
+  text=Jetpack Compose links=https://developer.android.com/jetpack/compose
   text=Or parentheses:
-  text=Material Design 3 links=https://m3.[material.io](https://material.io)
+  text=Material Design 3 links=https://m3.material.io
   text=Reference Links
   text=Reference-style links separate the link destination from the usage. This keeps long URLs out of the prose and makes text more readable:
   text=I recommend reading [the Kotlin docs][kotlin] and checking out [the Compose samples][compose-samples].

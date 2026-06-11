@@ -2,8 +2,8 @@
   text=This file tests link syntax that is likely to trip up parsers or renderers.
   text=Parentheses in URLs
   text=Links whose URLs contain unbalanced parentheses need careful handling. CommonMark allows balanced parentheses without escaping:
-  text=MDN Web Docs links=https://developer.[mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map](https://mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map)
-  text=Wikipedia: Kotlin (programming language) links=https://en.[wikipedia.org/wiki/Kotlin_](https://wikipedia.org/wiki/Kotlin_)(programming_language)
+  text=MDN Web Docs links=https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map
+  text=Wikipedia: Kotlin (programming language) links=https://en.wikipedia.org/wiki/Kotlin_(programming_language)
   text=An URL with an escaped closing paren: example links=https://example.com/path$1$
   text=Spaces in URLs
   text=Spaces in link destinations must be encoded as %20 or the link must use angle brackets:

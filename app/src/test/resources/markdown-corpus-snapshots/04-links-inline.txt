@@ -1,8 +1,8 @@
   text=Inline Links
   text=The most common link form in Markdown is the inline link: link text. The text in brackets is what the user sees; the URL in parentheses is the destination. links=https://example.com
   text=Here are a few realistic examples from an assistant answer:
-  text=You can read the official Kotlin documentation at kotlinlang.org for detailed language reference. The Android developer guides are the canonical source for platform APIs. links=https://kotlinlang.org|https://developer.[android.com/guide](https://android.com/guide)
-  text=For dependency management, Maven Central hosts most open-source JVM artifacts, while Google Maven hosts Android-specific ones. links=https://search.[maven.org](https://maven.org)|https://maven.[google.com](https://google.com)
+  text=You can read the official Kotlin documentation at kotlinlang.org for detailed language reference. The Android developer guides are the canonical source for platform APIs. links=https://kotlinlang.org|https://developer.android.com/guide
+  text=For dependency management, Maven Central hosts most open-source JVM artifacts, while Google Maven hosts Android-specific ones. links=https://search.maven.org|https://maven.google.com
   text=Autolinks
   text=Raw URLs written between angle brackets are autolinks: https://example.com. They produce a clickable link whose text is the URL itself. links=https://example.com
   text=Email autolinks also work: <user@example.com>. The renderer should produce a mailto: link.

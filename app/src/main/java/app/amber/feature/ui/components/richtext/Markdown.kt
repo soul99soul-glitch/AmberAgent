@@ -213,13 +213,151 @@ private fun linkifyBareUrlsOutsideCode(content: String): String {
     return output.toString()
 }
 
-private fun linkifyBareUrlSegment(segment: String): String =
-    BARE_WEB_URL_REGEX.replace(segment) { match ->
+private fun linkifyBareUrlSegment(segment: String): String {
+    // Pre-scan the segment for explicit-link `[label](dest)` spans so the bare-URL
+    // scanner never rewrites a domain-looking token that already lives inside an
+    // explicit link. Without this, a destination like
+    // `[guides](https://developer.android.com/guide)` has `android.com/guide`
+    // matched mid-destination and corrupted into a nested link; a label like
+    // `[see example.com](...)` has its label domain corrupted the same way.
+    // GFM does not re-linkify text inside an explicit link, so we skip the WHOLE
+    // `[label](dest)` construct (both the label and the destination).
+    val skipRanges = findExplicitLinkRanges(segment)
+    return BARE_WEB_URL_REGEX.replace(segment) { match ->
         val raw = match.value
+        if (positionInAnyRange(match.range.first, skipRanges)) {
+            // Inside an explicit link's label or destination — leave verbatim.
+            return@replace raw
+        }
         val url = raw.trimEnd('.', ',', ';', ':', '。', '，', '；', '：')
         val trailing = raw.removePrefix(url)
         "[$url](https://$url)$trailing"
     }
+}
+
+/**
+ * Collects the character ranges of explicit markdown links `[label](dest)` in
+ * [segment]. Each returned range spans the WHOLE construct (from the label's `[`
+ * to the destination's closing `)`), so the bare-URL linkifier can skip any
+ * candidate match whose start falls inside one.
+ *
+ * Single forward pass. For each `](` boundary it walks back to the matching
+ * (bracket-balanced, escape-aware) `[` for the label start, then forward over
+ * balanced parens (escape-aware) for the destination end — mirroring the one
+ * level of nesting the downstream parser tolerates in a destination
+ * (`Kotlin_(programming_language)`, `path\(1\)`). Allocation-light: returns a
+ * flat `IntArray` of `[start, end, start, end, …]` pairs, empty when there are
+ * no links.
+ */
+private fun findExplicitLinkRanges(segment: String): IntArray {
+    if (segment.length < 4) return EMPTY_INT_ARRAY // need at least "[](" + ")"
+    var ranges: IntArray? = null
+    var count = 0
+    var i = 0
+    val n = segment.length
+    while (i < n - 1) {
+        if (segment[i] == ']' && segment[i + 1] == '(') {
+            val labelStart = findLabelStart(segment, i)
+            if (labelStart < 0) {
+                i++
+                continue
+            }
+            val destEnd = findDestinationEnd(segment, i + 1)
+            if (destEnd < 0) {
+                i++
+                continue
+            }
+            if (ranges == null) ranges = IntArray(8)
+            if (count * 2 + 2 > ranges.size) {
+                ranges = ranges.copyOf(ranges.size * 2)
+            }
+            ranges[count * 2] = labelStart
+            ranges[count * 2 + 1] = destEnd
+            count++
+            i = destEnd + 1
+        } else {
+            i++
+        }
+    }
+    return when {
+        ranges == null -> EMPTY_INT_ARRAY
+        count * 2 == ranges.size -> ranges
+        else -> ranges.copyOf(count * 2)
+    }
+}
+
+/**
+ * From a `]` at [closeBracketIndex], scans back to the matching unescaped `[`,
+ * balancing nested `[]` pairs. Returns the index of the label's opening `[`, or
+ * -1 if none.
+ */
+private fun findLabelStart(segment: String, closeBracketIndex: Int): Int {
+    var depth = 0
+    var j = closeBracketIndex - 1
+    while (j >= 0) {
+        val c = segment[j]
+        val escaped = j > 0 && segment[j - 1] == '\\'
+        if (!escaped) {
+            if (c == ']') {
+                depth++
+            } else if (c == '[') {
+                if (depth == 0) return j
+                depth--
+            }
+        }
+        j--
+    }
+    return -1
+}
+
+/**
+ * From the `(` at [openParenIndex], scans forward to the matching `)`, balancing
+ * nested parens and honoring backslash escapes. Returns the index of the closing
+ * `)`, or -1 if unbalanced.
+ */
+private fun findDestinationEnd(segment: String, openParenIndex: Int): Int {
+    var depth = 0
+    var k = openParenIndex
+    val n = segment.length
+    while (k < n) {
+        val c = segment[k]
+        if (c == '\\') {
+            k += 2
+            continue
+        }
+        when (c) {
+            '(' -> depth++
+            ')' -> {
+                depth--
+                if (depth == 0) return k
+            }
+        }
+        k++
+    }
+    return -1
+}
+
+/** True if [position] lies within any `[start, end]` pair packed in [ranges]. */
+private fun positionInAnyRange(position: Int, ranges: IntArray): Boolean {
+    var idx = 0
+    while (idx < ranges.size) {
+        if (position >= ranges[idx] && position <= ranges[idx + 1]) return true
+        idx += 2
+    }
+    return false
+}
+
+private val EMPTY_INT_ARRAY = IntArray(0)
+
+/**
+ * Test-only seam exposing the pure-string [preProcess] transform (KaTeX delimiter
+ * conversion + bare-URL linkify). `preProcess` is file-private, so unit tests in
+ * this package cannot reach it directly; this thin `internal` wrapper pins the
+ * preprocessing contract (notably that bare-URL linkify skips explicit-link
+ * labels and destinations) without standing up a full render. Not for production.
+ */
+@androidx.annotation.VisibleForTesting
+internal fun preProcessForTest(content: String): String = preProcess(content)
 
 @Preview(showBackground = true)
 @Composable
