@@ -125,8 +125,32 @@ import java.io.File
  *    [A] now render at hard parity and have left [KNOWN_DIVERGENT_SAMPLES]: 11, 12, 17, 18, 25, 31.
  *    The MarkdownEdgeShapeRenderTest `headingPreservesInteriorSpacesAroundPunctuation` /
  *    `headingTrimsOuterWhitespaceButKeepsInterior` guards pin both halves.
- *  - **[B] Backslash-escape resolution.** JetBrains keeps `\_` / `\!` / `\(` literally in the text
- *    slice; pulldown resolves the escape (`_` / `!` / `(`). Parser-level; not a renderer concern.
+ *  - **[B] Backslash-escape resolution (FIXED — parity class B resolved).** The JetBrains (JVM) tree
+ *    keeps a CommonMark backslash escape (`\_` / `\!` / `\*`) LITERALLY in its Text-leaf source slice
+ *    (`textIn` is a raw `substring`), so escapes rendered as `\!`; the native (pulldown) tree slices
+ *    the escape away (its Text node spans only the punctuation). Per CommonMark §2.4 a `\` before any
+ *    ASCII-punctuation char escapes it, so the rendered text must show just the punctuation — the JVM
+ *    was the wrong side. FIX (Markdown.kt): `resolveBackslashEscapes()` is applied in BOTH leaf-text
+ *    render paths — the AnnotatedString leaf arm of `appendMarkdownNodeContent` (grouped-paragraph
+ *    path) AND the standalone-`Text` `MdNodeType.Text` arm of `MarkdownNode` (the per-child FlowRow
+ *    path a paragraph takes when it contains an Image/MathBlock, e.g. sample 32's escapable run, whose
+ *    `\( \)`/`\[ \\ \]` preprocess into inline/block math). The rule replaces `\X`→`X` only for X in
+ *    the CommonMark escapable set; a `\` before a non-punctuation char (`back\slash`, `\a \z \1`) or a
+ *    trailing `\` stays literal, and InlineCode/MathInline/CodeBlock slice their own raw source (their
+ *    arms are hoisted ABOVE the leaf/Text arm), so code/math escapes stay raw. Applying the SAME rule
+ *    to the SHARED leaf paths is idempotent on the native tree (its `!` has no backslash to strip).
+ *    The JVM goldens were intentionally REGENERATED (backslash removals before escapable punctuation,
+ *    samples 03 + 32 only). Sample 03 (whose ONLY divergence was the `middle\_of\_a\_word` escape) is
+ *    promoted to hard parity and has left [KNOWN_DIVERGENT_SAMPLES]; sample 32's `\! \#…` escape lines
+ *    now MATCH both trees — it stays skipped only on a residual [D] link/href pair the [B] divergence
+ *    was masking (parity-rig first-diff 2026-06-12: 2 differing lines, both `links=`). The
+ *    MarkdownEdgeShapeRenderTest `escapedPunctuationRendersLiterallyWithoutEmphasis` /
+ *    `backslashBeforeNonPunctuationStaysLiteral` / `escapeInsideInlineCodeStaysRaw` guards pin the
+ *    fix and its two scope boundaries.
+ *  - **[B-tilde] Single-tilde strikethrough delimiter (parser-level; NOT backslash-escape, NOT fixed
+ *    by the [B] escape fix).** Source `~this is not struck~`: JVM keeps the literal `~`, native strips
+ *    it as a strikethrough delimiter. A parser delimiter disagreement in the renderer's INPUT (sample
+ *    23), unrelated to backslash escapes; stays documented.
  *  - **[C] List-item inline-run grouping (FIXED — T14.6).** A TIGHT list item's inline content
  *    (`- Call `code` to…`) is a single grouped Text run on the JVM tree (a PARAGRAPH wrapper child)
  *    but FLAT inline children on the native tree (no Paragraph wrapper — same structural family as
@@ -166,8 +190,10 @@ import java.io.File
  *    TEXT surfaces in the dump, so it perturbs parity. Tree-structure difference, not a shape bug.
  *
  * All of these residuals live in the SHARED renderer's INPUT (the tree), not its shape-dispatch, so the
- * `markdownAst` flag must stay default-false until [B]/[C]/[D]/[E]/[F]/[G] are resolved. Class [A] is
- * now FIXED (see above). See the T14.5 handoff parity report for the full breakdown.
+ * `markdownAst` flag must stay default-false until [D]/[E]/[F]/[G] (and the parser-level [B-tilde] /
+ * [B-CJK]) are resolved. Class [A] (heading trim-space) and class [B] (backslash-escape resolution)
+ * are now FIXED (see above) — [B] was a renderer-fixable Text-leaf concern, resolved in the shared
+ * leaf paths. See the T14.5 handoff parity report for the full breakdown.
  *
  * Robolectric scaffolding (config / theme / locals / async-load handler) mirrors
  * [MarkdownRendererSnapshotTest] verbatim — a parity gap is attributable to the tree, not the harness.
@@ -261,17 +287,19 @@ class MarkdownTreeParityTest(
             if (parity) {
                 throw AssertionError(
                     "$sampleName now renders at parity — remove it from KNOWN_DIVERGENT_SAMPLES " +
-                        "(its documented residual divergence class [B]/[C]/[D]/[E]/[F]/[G] appears fixed).",
+                        "(its documented residual divergence class [D]/[E]/[F]/[G] / [B-tilde] / " +
+                        "[B-CJK] appears fixed).",
                 )
             }
             // Still divergent as documented — skip loudly (visible as SKIPPED, never a false PASS).
             assumeTrue(
                 "$sampleName diverges due to a documented residual tree-/parser-level class " +
-                    "([B] escape resolution / [C] inline-run grouping / [D] link-footnote text / " +
-                    "[E] soft-break whitespace / [F] ordered-list start number / [G] task-list " +
-                    "`[x]` marker text — see class KDoc + parity report). BUG #1 (heading-drop), " +
-                    "BUG #2 (inline-code-backtick) and class [A] (heading trim-space) are FIXED; " +
-                    "these residuals must be resolved before markdownAst can flip on.",
+                    "([D] link-footnote text / [E] soft-break whitespace / [F] ordered-list start " +
+                    "number / [G] task-list `[x]` marker text / [B-tilde] single-tilde strike / " +
+                    "[B-CJK] CJK-flanked strong — see class KDoc + parity report). BUG #1 " +
+                    "(heading-drop), BUG #2 (inline-code-backtick), class [A] (heading trim-space) " +
+                    "and class [B] (backslash-escape resolution) are FIXED; these residuals must be " +
+                    "resolved before markdownAst can flip on.",
                 false,
             )
         }
@@ -292,15 +320,18 @@ class MarkdownTreeParityTest(
 
         /**
          * Samples whose JVM-tree and native-tree renders STILL diverge after BUG #1 (heading-drop),
-         * BUG #2 (inline-code-backtick) and class [A] (heading inline-token trim-space) were fixed.
-         * Each remaining sample is tagged with the residual class [B]…[G] documented in the class
-         * KDoc — these are tree-/parser-level differences, NOT the renderer-shape-dispatch bugs T14.5
-         * addressed or the trim-space quirk [A] resolved. They are SKIPPED (not failed, not passed) so
-         * the suite is green WITHOUT pretending the native tree renders correctly — and the rot guard
-         * re-promotes any that later reach parity. Samples that are NOW (or were always) at hard parity
-         * are NOT here:
+         * BUG #2 (inline-code-backtick), class [A] (heading inline-token trim-space) and class [B]
+         * (backslash-escape resolution) were fixed. Each remaining sample is tagged with the residual
+         * class [D]…[G] (or the parser-level [B-tilde] / [B-CJK]) documented in the class KDoc — these
+         * are tree-/parser-level differences, NOT the renderer-shape-dispatch bugs T14.5 addressed, the
+         * trim-space quirk [A], or the Text-leaf escape resolution [B]. They are SKIPPED (not failed,
+         * not passed) so the suite is green WITHOUT pretending the native tree renders correctly — and
+         * the rot guard re-promotes any that later reach parity. Samples that are NOW (or were always)
+         * at hard parity are NOT here:
          *  - 01, 02, 07, 08, 09, 21, 26 — promoted to hard parity by the BUG #1/#2 fixes.
          *  - 11, 12, 17, 18, 25, 31 — promoted to hard parity by the class [A] heading trim-space fix.
+         *  - 03 — promoted to hard parity by the class [B] backslash-escape fix (its only divergence
+         *    was the `middle\_of\_a\_word` escape; both trees now render `middle_of_a_word`).
          *  - `20-html-block` — `hasHtmlBlocks`, both engines route to the identical `MarkdownNew`
          *    HTML path, so the tree is bypassed (trivially equal, but a real datapoint: the HTML
          *    arm is parity-safe).
@@ -308,17 +339,18 @@ class MarkdownTreeParityTest(
          */
         private val KNOWN_DIVERGENT_SAMPLES: Set<String> = setOf(
             // BUG #1 (native-heading-drop), BUG #2 (native-inline-code-backtick) and class [A]
-            // (heading inline-token trim-space) are FIXED (shape-agnostic heading + inline-leaf
-            // dispatch and once-at-ends heading trim, Markdown.kt). Samples that diverged SOLELY on
-            // those have left this list: 01, 02, 07, 08, 09, 21, 26 (BUG #1/#2) and 11, 12, 17, 18,
-            // 25, 31 (class [A]); 20-html-block / 30-empty were never listed.
+            // (heading inline-token trim-space) and class [B] (backslash-escape resolution) are FIXED
+            // (shape-agnostic heading + inline-leaf dispatch, once-at-ends heading trim, and shared-arm
+            // escape resolution, Markdown.kt). Samples that diverged SOLELY on those have left this
+            // list: 01, 02, 07, 08, 09, 21, 26 (BUG #1/#2), 11, 12, 17, 18, 25, 31 (class [A]), and
+            // 03-emphasis-nesting (class [B] — the `middle\_of\_a\_word` escape now resolves on both
+            // trees); 20-html-block / 30-empty were never listed.
             // The samples that REMAIN here diverge on the residual tree-/parser-level classes those
             // fixes UNMASKED (see class KDoc §"residual classes"). These are NOT renderer-shape-dispatch
             // or trim-space bugs fixable without rewriting list grouping/numbering or the native parser,
             // so they stay skipped and cited. Tag legend: [B] backslash-escape resolution, [C] inline-run
             // grouping, [D] link/autolink/footnote/reference text, [E] soft-break leading whitespace,
             // [F] ordered-list start number, [G] task-list `[x]` marker text.
-            "03-emphasis-nesting",        // [B] `middle\_of\_a\_word` (JVM keeps `\_`, native strips)
             "04-links-inline",            // [D] email autolink `<x>` kept by JVM, resolved by native
             "05-links-with-titles",       // [D] reference link `[t][ref]` literal (JVM) vs resolved
             "06-images",                  // [D] inline-image run split differs between trees
@@ -343,8 +375,10 @@ class MarkdownTreeParityTest(
                                           //     math…:` into many Text runs at `(`/`)`/`:`/soft-break;
                                           //     native groups the sentence into ONE Text leaf
             "22-footnotes",               // [D] footnote def `[^id]:` text kept (JVM) vs stripped
-            "23-strikethrough",           // [B] single tilde `~this is not struck~`: JVM keeps literal
-                                          //     `~`, native strips it (parser delimiter disagreement)
+            "23-strikethrough",           // [B-tilde] single tilde `~this is not struck~`: JVM keeps
+                                          //     literal `~`, native strips it (parser delimiter
+                                          //     disagreement — NOT backslash-escape; the [B] escape fix
+                                          //     does not touch it)
             // 24-cjk-mixed: the [C] list-item inline-run split is now RESOLVED (its list items render
             // at parity via the shape-agnostic dispatch). A DISTINCT residual remains and keeps it
             // here: [B-CJK] CJK-flanked strong emphasis. Source `常被称为**"离线优先"**策略` — the JVM
@@ -358,10 +392,18 @@ class MarkdownTreeParityTest(
             // parsers resolve the same source differently), not [C].
             "24-cjk-mixed",               // [B-CJK] `**"离线优先"**` strong (JVM) vs literal `**` (native)
             "27-hard-soft-breaks",        // [E] blockquote soft-break continuation leading-space
-            "28-link-edge-cases",         // [B]+[D] escaped-paren URL `path\(1\)` literal vs resolved
+            "28-link-edge-cases",         // [D] link/href: escaped-paren URL `path\(1\)` is preprocessed
+                                          //     into the link DESTINATION (href), never a Text leaf, so
+                                          //     the class-[B] Text-leaf escape fix does not reach it —
+                                          //     the residual is purely a link/href parser divergence.
             "29-mixed-everything",        // [G] task-list `[x]` marker: native keeps `[x]` as literal
                                           //     text (`[x]Multi-assistant…`), JVM relocates to a checkbox
-            "32-special-chars-escapes",   // [B] escapable-char run `\! \#…` kept (JVM) vs stripped
+            "32-special-chars-escapes",   // [D] residual link/href ONLY (class [B] escapes RESOLVED):
+                                          //     escaped-bracket `\[not a link\](url)` — JVM attaches a
+                                          //     `links=` annotation, native renders bare text; and an
+                                          //     HTML-entity-in-URL href (`&amp;url` JVM vs `&url` native).
+                                          //     All `\! \#…` escape lines now MATCH (parity-rig first-diff
+                                          //     2026-06-12: only the 2 link lines differ).
         )
 
         private fun blobFileFor(sampleName: String): File = File(CORPUS_DIR, "$sampleName.pmda")

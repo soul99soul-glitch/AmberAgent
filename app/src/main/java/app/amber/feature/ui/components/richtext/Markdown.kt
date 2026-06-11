@@ -1857,7 +1857,15 @@ private fun MarkdownNode(
         }
 
         MdNodeType.Text -> {
-            val text = node.textIn(content)
+            // Parity class [B] fix: resolve CommonMark backslash escapes here too. This is the
+            // SECOND leaf-text render path (the standalone-`Text` composable used by `MarkdownNode`'s
+            // per-child dispatch — Emphasis/Strong/Link loops AND the `Paragraph` FlowRow path taken
+            // when the block contains an Image/MathBlock). The AnnotatedString leaf arm in
+            // `appendMarkdownNodeContent` covers the grouped-paragraph path; both must apply the same
+            // rule so `\!`/`\*` render as `!`/`*` regardless of which path the block routes through.
+            // InlineCode/MathInline/CodeBlock have dedicated arms ABOVE this one, so code/math slices
+            // stay raw. Native Text leaves carry no backslash (escape already sliced away) → idempotent.
+            val text = resolveBackslashEscapes(node.textIn(content))
             Text(
                 text = text,
                 modifier = modifier,
@@ -2645,6 +2653,45 @@ internal fun AnnotatedString.trimEnds(): AnnotatedString {
 }
 
 /**
+ * The CommonMark "ASCII punctuation" set — every char a leading backslash may escape
+ * (CommonMark §2.4 Backslash escapes). A `\` before any of these is consumed and the char rendered
+ * literally; a `\` before anything else (letters, digits, whitespace) is NOT an escape and stays.
+ */
+private val COMMONMARK_ESCAPABLE = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~".toCharArray().toHashSet()
+
+/**
+ * Resolves CommonMark backslash escapes in a TEXT-leaf slice: replaces `\X` with `X` for every X in
+ * [COMMONMARK_ESCAPABLE]. A lone/trailing backslash, or a `\` before a non-punctuation char, is kept
+ * verbatim — so `\*` → `*`, `\_` → `_`, but `back\slash` and a trailing `\` mid-stream stay literal.
+ *
+ * Parity class [B]: the JetBrains (JVM) tree keeps the backslash in its Text-leaf source slice
+ * (`textIn` is a raw `substring`), so escapes render literally (`\!`); the native (pulldown) tree
+ * already slices the escape away (its Text node spans only the punctuation), so applying this rule to
+ * the SHARED leaf arm fixes the JVM side and is idempotent on the native side (`!` has no backslash
+ * to strip). This is applied ONLY in the generic `node.children.isEmpty()` leaf arm — InlineCode and
+ * MathInline are hoisted ABOVE it and slice their own raw source, so code/math escapes stay raw.
+ *
+ * Fast path: most leaves contain no backslash, so we scan once and return the receiver unchanged
+ * unless a real escape is present.
+ */
+internal fun resolveBackslashEscapes(text: String): String {
+    if (text.indexOf('\\') < 0) return text
+    val sb = StringBuilder(text.length)
+    var i = 0
+    while (i < text.length) {
+        val c = text[i]
+        if (c == '\\' && i + 1 < text.length && text[i + 1] in COMMONMARK_ESCAPABLE) {
+            sb.append(text[i + 1])
+            i += 2
+        } else {
+            sb.append(c)
+            i++
+        }
+    }
+    return sb.toString()
+}
+
+/**
  * Walks a markdown [MdNode] and appends its rendered content into the
  * receiver [AnnotatedString.Builder] — including spans for EMPH /
  * STRONG / STRIKETHROUGH / links / code / inline math.
@@ -2759,7 +2806,12 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             // trim that `trim = true` intends is now applied ONCE to the assembled AnnotatedString
             // in [Paragraph] (see [AnnotatedString.trimEnds]), so interior token-boundary spaces
             // survive while outer whitespace is still removed.
-            val text = node.textIn(content).replace(BREAK_LINE_REGEX, "\n")
+            // Parity class [B] fix: resolve CommonMark backslash escapes in the Text-leaf slice
+            // (`\*` → `*`, `\!` → `!`, …). The JetBrains tree keeps the backslash in `textIn` (raw
+            // substring), the native tree already slices it away — so resolving here in the SHARED
+            // leaf arm fixes the JVM side and is idempotent on the native side. InlineCode/MathInline
+            // are hoisted ABOVE this arm (slice their own raw source), so code/math escapes stay raw.
+            val text = resolveBackslashEscapes(node.textIn(content)).replace(BREAK_LINE_REGEX, "\n")
             append(text)
         }
 

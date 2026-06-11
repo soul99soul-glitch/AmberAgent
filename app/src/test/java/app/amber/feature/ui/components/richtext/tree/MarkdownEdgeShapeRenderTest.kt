@@ -165,6 +165,59 @@ class MarkdownEdgeShapeRenderTest {
         )
     }
 
+    /**
+     * Parity class [B] — CommonMark backslash-escape resolution in rendered Text leaves.
+     *
+     * The JetBrains (JVM) tree keeps a backslash escape (`\*` / `\!` / `\_`) LITERALLY in the Text
+     * leaf slice; per CommonMark a `\` before an ASCII-punctuation char escapes it, so the rendered
+     * text must show just the punctuation. `\*not italic\*` must render `*not italic*` (the
+     * backslashes consumed, the asterisks NOT interpreted as emphasis — there is no Emphasis span).
+     * The fix resolves escapes in the generic leaf arm of `appendMarkdownNodeContent`, which is the
+     * SHARED arm both tree shapes route Text leaves through, so the native tree (which already slices
+     * the escape away) is idempotent under the same rule.
+     */
+    @Test
+    fun escapedPunctuationRendersLiterallyWithoutEmphasis() {
+        val dump = renderJvmTreeDump("\\*not-emph\\*\n")
+        assertTrue(
+            "escaped asterisks must render as literal `*` with backslashes consumed; got dump:\n$dump",
+            dump.contains("text=*not-emph*"),
+        )
+        assertFalse(
+            "no backslash may survive before the escaped punctuation; got dump:\n$dump",
+            dump.contains("\\*"),
+        )
+    }
+
+    /**
+     * Companion to the escape guard: a backslash before a NON-punctuation character is NOT an escape
+     * (CommonMark only escapes the ASCII-punctuation set). `back\slash` must keep its literal
+     * backslash — the rule must not strip backslashes indiscriminately.
+     */
+    @Test
+    fun backslashBeforeNonPunctuationStaysLiteral() {
+        val dump = renderJvmTreeDump("back\\slash\n")
+        assertTrue(
+            "backslash before a letter is not an escape and must survive; got dump:\n$dump",
+            dump.contains("text=back\\slash"),
+        )
+    }
+
+    /**
+     * Scope guard: escapes inside an inline-code span must stay RAW. Code spans render via the
+     * dedicated `InlineCode` arm (which slices the raw source and only strips backticks), hoisted
+     * ABOVE the generic leaf arm, so the escape-resolution rule can never touch them. `` `\!` `` must
+     * render the literal `\!` inside the code span.
+     */
+    @Test
+    fun escapeInsideInlineCodeStaysRaw() {
+        val dump = renderJvmTreeDump("`\\!`\n")
+        assertTrue(
+            "escape inside inline code must stay raw (`\\!`); got dump:\n$dump",
+            dump.contains("\\!"),
+        )
+    }
+
     companion object {
         private const val TAG = "edge-shape-jvm-tree"
     }
