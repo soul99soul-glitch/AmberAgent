@@ -15,7 +15,9 @@ interface AgentRuntimeDao {
     @Update
     suspend fun updateRun(run: AgentRunEntity)
 
-    @Insert
+    // IGNORE + the unique (run_id, seq) index makes appendEvent idempotent:
+    // a retried insert for an already-persisted (runId, seq) is a no-op.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertEvent(event: AgentEventEntity)
 
     @Insert
@@ -32,6 +34,12 @@ interface AgentRuntimeDao {
 
     @Query("SELECT * FROM agent_event WHERE run_id = :id ORDER BY seq ASC")
     fun observeEvents(id: String): Flow<List<AgentEventEntity>>
+
+    @Query("SELECT * FROM agent_event WHERE run_id = :id ORDER BY seq ASC")
+    suspend fun listEvents(id: String): List<AgentEventEntity>
+
+    @Query("DELETE FROM agent_event WHERE run_id = :runId AND type = :type")
+    suspend fun deleteEventsByType(runId: String, type: String)
 
     @Query("SELECT * FROM agent_run WHERE status IN ('running', 'awaiting_permission')")
     suspend fun listUnfinished(): List<AgentRunEntity>

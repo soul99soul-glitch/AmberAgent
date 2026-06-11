@@ -30,6 +30,13 @@ class RoomAgentEventStore(
     override fun observeRun(runId: AgentRunId): Flow<AgentRunSnapshot> =
         dao.observeRun(runId.value).mapNotNull { it?.toSnapshot() }
 
+    override suspend fun listEvents(runId: AgentRunId): List<AgentEventRecord> =
+        dao.listEvents(runId.value).map { it.toRecord() }
+
+    override suspend fun deleteEventsByType(runId: AgentRunId, type: String) {
+        dao.deleteEventsByType(runId.value, type)
+    }
+
     override suspend fun listUnfinishedRuns(): List<AgentRunRecord> =
         dao.listUnfinished().map { it.toRecord() }
 
@@ -85,6 +92,21 @@ private fun AgentRunEntity.toSnapshot() = AgentRunSnapshot(
     },
     startedAt = startedAt,
     finishedAt = finishedAt,
+)
+
+private fun AgentEventEntity.toRecord() = AgentEventRecord(
+    eventId = eventId,
+    runId = runId,
+    parentRunId = parentRunId,
+    seq = seq,
+    type = type,
+    payloadType = payloadType,
+    payload = payload,
+    payloadSchemaVersion = payloadSchemaVersion,
+    agentDescriptorId = agentDescriptorId,
+    agentVersion = agentVersion,
+    isFinal = isFinal,
+    ts = ts,
 )
 
 private fun AgentEventRecord.toEntity() = AgentEventEntity(

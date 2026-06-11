@@ -4,9 +4,17 @@ import kotlinx.coroutines.flow.Flow
 
 interface AgentEventStore {
     suspend fun appendRun(run: AgentRunRecord)
+
+    /**
+     * Append an event record. Idempotent on (runId, seq): re-appending an
+     * event with an already-persisted (runId, seq) pair is a silent no-op,
+     * so retries after partial failures never duplicate or corrupt the log.
+     */
     suspend fun appendEvent(event: AgentEventRecord)
     suspend fun appendSpan(span: TraceSpanRecord)
     fun observeRun(runId: AgentRunId): Flow<AgentRunSnapshot>
+    suspend fun listEvents(runId: AgentRunId): List<AgentEventRecord>
+    suspend fun deleteEventsByType(runId: AgentRunId, type: String)
     suspend fun listUnfinishedRuns(): List<AgentRunRecord>
     suspend fun markInterrupted(runId: AgentRunId, reason: String)
 }

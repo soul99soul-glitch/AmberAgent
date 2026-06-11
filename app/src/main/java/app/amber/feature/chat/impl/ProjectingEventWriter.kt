@@ -31,19 +31,30 @@ class ProjectingEventWriter(
 
     override suspend fun commit(final: AgentEventPayload.Final) {
         val seqNum = seq.incrementAndGet()
-        when (final) {
+        // The writer owns event ids, so it stamps the checkpoint's
+        // last-covered-event pointer (the most recent prior committed event).
+        val resolved = if (
+            final is ChatEventPayload.StreamCheckpoint &&
+            final.lastEventId.isEmpty() &&
+            seqNum > 1
+        ) {
+            final.copy(lastEventId = "${runId.value}_${seqNum - 1}")
+        } else {
+            final
+        }
+        when (resolved) {
             is ChatEventPayload -> {
                 try {
-                    projector.commitEvent(runId, final, seqNum)
-                    if (final is ChatEventPayload.AssistantMessageFinalized) {
-                        projector.projectFinalized(conversationId, final)
+                    projector.commitEvent(runId, resolved, seqNum)
+                    if (resolved is ChatEventPayload.AssistantMessageFinalized) {
+                        projector.projectFinalized(conversationId, resolved)
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to commit event $final", e)
+                    Log.w(TAG, "Failed to commit event $resolved", e)
                 }
             }
             else -> {
-                Log.d(TAG, "Skipping non-chat Final event: $final")
+                Log.d(TAG, "Skipping non-chat Final event: $resolved")
             }
         }
     }
