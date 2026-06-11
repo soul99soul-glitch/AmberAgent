@@ -176,14 +176,18 @@ class PackedAstNode internal constructor(
     }
 
     /**
-     * Iterative **DFS pre-order** search through descendants (mirrors the
-     * original recursive impl's traversal: check each child, recurse, then
-     * next sibling). BFS would have been a behaviour change vs JetBrains'
-     * `ASTNode.findChildOfTypeRecursive` (review Round 3 P2 fix).
+     * Iterative **DFS pre-order** find by type.
      *
-     * Depth budget caps both stack growth and worst-case work.
+     * Checks the receiver itself first (JetBrains `ASTNode.findChildOfTypeRecursive` semantics —
+     * `if (this.type in types) return this`), then searches descendants in pre-order DFS
+     * (check each child, recurse into it, then next sibling). The depth budget applies to
+     * descendants only; the self-check is unconditional.
+     *
+     * BFS would have been a behaviour change vs JetBrains traversal order (review Round 3 P2
+     * fix). Depth budget caps both stack growth and worst-case work.
      */
     fun findChildOfTypeRecursive(vararg types: NodeType): PackedAstNode? {
+        if (this.type in types) return this
         val maxDepth = MAX_TRAVERSAL_DEPTH
         // Stack of (node, depth-from-this). Push children in reverse so the
         // first child ends up on top → popped next.

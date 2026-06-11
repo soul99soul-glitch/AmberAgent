@@ -2,6 +2,7 @@ package app.amber.agent.ui.components.richtext.nativebridge
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -348,7 +349,67 @@ class PackedAstExtrasTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 7. Golden blob spot-checks (Rust-generated corpus files)
+    // 7. findChildOfTypeRecursive — self-first contract (td-rust-1a fix)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Build a minimal blob whose root has exactly one child of the given type, then return
+     * the root PackedAstNode (type = Root) and its single child.
+     */
+    private fun rootWithChild(childTypeCode: Int): Pair<PackedAstNode, PackedAstNode> {
+        val blob = mutableListOf<Byte>()
+        // header
+        blob.addAll(listOf('P'.code.toByte(), 'M'.code.toByte(), 'D'.code.toByte(), 'A'.code.toByte()))
+        blob.add(1); blob.add(0); blob.add(0); blob.add(0)  // version + flags + reserved
+
+        // root node: tag=0(Root), start=0, delta=0, no extras, 1 child
+        blob.add(0)
+        writeVarint(0, blob); writeVarint(0, blob); writeVarint(0, blob)
+        writeVarint(1, blob)
+
+        // child node: tag=childTypeCode, no extras, no children
+        blob.add(childTypeCode.toByte())
+        writeVarint(0, blob); writeVarint(0, blob); writeVarint(0, blob)
+        writeVarint(0, blob)
+
+        val array = blob.toByteArray()
+        val root = PackedAstReader(array).root()!!
+        return root to root.children[0]
+    }
+
+    @Test
+    fun findChildOfTypeRecursive_selfMatch_returnsItself() {
+        // When the receiver's own type is in the searched set, it must return itself
+        // (JetBrains ASTNode.findChildOfTypeRecursive self-first semantics).
+        val (_, child) = rootWithChild(NodeType.Heading.code)
+        val result = child.findChildOfTypeRecursive(NodeType.Heading)
+        assertEquals("self-match must return the node itself", child, result)
+    }
+
+    @Test
+    fun findChildOfTypeRecursive_golden_root_selfMatch() {
+        // root().findChildOfTypeRecursive(NodeType.Root) must return the root itself.
+        val blob = loadBlob("02-headings-all-levels.pmda")
+        val root = PackedAstReader(blob).root()!!
+        val result = root.findChildOfTypeRecursive(NodeType.Root)
+        assertEquals("root self-match via golden blob", root, result)
+    }
+
+    @Test
+    fun findChildOfTypeRecursive_descendantSearch_stillWorks() {
+        // When the receiver does not match, descendant search must still find the first
+        // matching descendant (existing behavior must be preserved).
+        val blob = loadBlob("04-links-inline.pmda")
+        val root = PackedAstReader(blob).root()!!
+        // Root is NodeType.Root, not NodeType.Link — so self-check does not fire;
+        // descendant search must find the Link node.
+        val link = root.findChildOfTypeRecursive(NodeType.Link)
+        assertNotNull("descendant Link must be found from root", link)
+        assertEquals(NodeType.Link, link!!.type)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 8. Golden blob spot-checks (Rust-generated corpus files)
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun loadBlob(name: String): ByteArray {

@@ -8,6 +8,18 @@ internal interface MdNode {
     val children: List<MdNode>
     val parent: MdNode?
     fun nextSibling(): MdNode?
+
+    /**
+     * Pre-order DFS find by node type.
+     *
+     * **Contract (both implementations MUST follow — divergence = silent render differences):**
+     * checks the receiver itself first; if its own type is in [types], returns `this`.
+     * Otherwise searches descendants in pre-order DFS (check each child, recurse into it,
+     * then next sibling). This matches JetBrains `ASTNode.findChildOfTypeRecursive` semantics
+     * (Markdown.kt:2881-2888) and the call sites in Markdown.kt rely on self-inclusion
+     * (e.g. line 942 / 2072: `child.findChildOfTypeRecursive(IMAGE, BLOCK_MATH)` where
+     * child may itself be an IMAGE or BLOCK_MATH).
+     */
     fun findChildOfTypeRecursive(vararg types: MdNodeType): MdNode?
     // Typed attributes — null when the node kind doesn't carry the attribute.
     // Carriers: headingLevel: Heading; codeLang: CodeBlock; linkHref/linkTitle: Link & Image;
