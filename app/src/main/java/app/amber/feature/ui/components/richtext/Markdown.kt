@@ -887,35 +887,6 @@ private fun MdNode.containsHtmlBlocks(): Boolean {
 }
 
 private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownParseResult {
-    // T-B perf-layer dispatch — flag-gated Rust-renderer activation
-    // (`PerfFlags.USE_RUST_MARKDOWN_RENDERER`). Default `false` so the
-    // JVM JetBrains-AST path runs unchanged. When enabled, the native
-    // parse is invoked first and a successful blob is decoded eagerly
-    // to PackedAstReader; we still produce a JVM ASTNode and return it
-    // because the renderer body consumes ASTNode (the full renderer
-    // ASTNode→PackedAstNode swap is the dedicated sprint in
-    // docs/td-rust-1a-feasibility.md).
-    //
-    // What the flag actually buys you today: the native path's
-    // correctness signal is upgraded from sample-rate shadow to
-    // every-parse hard-validation, so any divergence in a single
-    // user-visible render trips immediately rather than statistically.
-    if (app.amber.agent.PerfFlags.USE_RUST_MARKDOWN_RENDERER) {
-        val nativeOk = runCatching {
-            val blob = MarkdownNativeSwitch.parseAstOrNull(preprocessed)
-            if (blob != null) {
-                PackedAstReader(blob).root() != null
-            } else false
-        }.getOrDefault(false)
-        if (!nativeOk) {
-            android.util.Log.w(
-                "Markdown",
-                "RUST_MARKDOWN_RENDERER flag on but native parse returned " +
-                    "null/error for ${preprocessed.length} chars; JVM fallback continues.",
-            )
-        }
-    }
-
     // TD.Rust.1a Task 13 — parse-funnel switch. When the `markdownAst` flag is on
     // (same flag the retired shadow-compare read: MarkdownNativeSwitch.isAstEnabled()),
     // the renderer consumes the Rust-parsed packed AST via NativeMdNode instead of the

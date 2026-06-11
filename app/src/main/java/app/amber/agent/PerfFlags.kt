@@ -34,14 +34,6 @@ object PerfFlags {
     const val USE_SPLIT_CHATPAGE_COMPOSABLES = false
 
     /**
-     * T3 — Use the Rust PackedAstReader as the primary markdown AST
-     * consumer. Default JVM (JetBrains ASTNode) path preserved.
-     *
-     * Revert if enabled and broken: `git revert <commit-T3-rust-renderer>`.
-     */
-    const val USE_RUST_MARKDOWN_RENDERER = false
-
-    /**
      * T4 — Use DeepReadScreenSplit (region-based sub-Composables) instead
      * of the monolithic DeepReadScreen. Default monolith path preserved.
      */
@@ -49,7 +41,7 @@ object PerfFlags {
 
     /**
      * T4 — Use MarkdownSplit (smaller per-node renderers) instead of the
-     * monolithic Markdown renderer. Independent of [USE_RUST_MARKDOWN_RENDERER].
+     * monolithic Markdown renderer.
      */
     const val USE_SPLIT_MARKDOWN = false
 
