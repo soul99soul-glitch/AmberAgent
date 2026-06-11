@@ -86,7 +86,7 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
                 }
                 .build()
 
-            Log.i(TAG, "search: $url")
+            Log.i(TAG, "search: ${url.toString().substringBefore('?')}")
 
             val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {

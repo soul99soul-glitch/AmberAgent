@@ -197,6 +197,13 @@ class FilesManager(
                             if (part.url.startsWith("data:image")) {
                                 val sourceByteArray = Base64.decode(part.url.substringAfter("base64,").toByteArray())
                                 val bitmap = BitmapFactory.decodeByteArray(sourceByteArray, 0, sourceByteArray.size)
+                                if (bitmap == null) {
+                                    Log.w(
+                                        TAG,
+                                        "convertBase64ImagePartToLocalFile: undecodable image (${sourceByteArray.size} bytes); keeping data url part"
+                                    )
+                                    return@map part
+                                }
                                 val byteArray = bitmap.compressToPng()
                                 val urls = createChatFilesByByteArrays(listOf(byteArray))
                                 Log.i(
@@ -341,6 +348,7 @@ class FilesManager(
             image.startsWith("data:image") -> {
                 val byteArray = Base64.decode(image.substringAfter("base64,").toByteArray())
                 val bitmap = BitmapFactory.decodeByteArray(byteArray, 0, byteArray.size)
+                    ?: error("Cannot decode image data")
                 activityContext.exportImage(activity, bitmap)
             }
 

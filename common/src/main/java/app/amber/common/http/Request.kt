@@ -23,5 +23,8 @@ suspend fun Call.await(): Response {
                 }
             }
         })
+        continuation.invokeOnCancellation {
+            runCatching { cancel() }
+        }
     }
 }

@@ -281,6 +281,8 @@ internal fun createSiteRemoveTool(
             required = listOf("site_id"),
         )
     },
+    needsApproval = true,
+    mandatoryApproval = true,
     execute = { input ->
         deps.track("wm_site_remove", "WebMount 删除网站", input) {
             val siteId = input.requiredString("site_id")

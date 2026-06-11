@@ -222,7 +222,7 @@ class WorkspaceManager(private val context: Context) {
     suspend fun copyUriToUploads(sourceUri: Uri, displayName: String): Uri = withContext(Dispatchers.IO) {
         mirrorMutex.withLock {
             val uploadsDir = mirrorDir.resolve("uploads").also { it.mkdirs() }
-            val target = pickUniqueUploadFile(uploadsDir, displayName.ifBlank { "file" })
+            val target = pickUniqueUploadFile(uploadsDir, sanitizeUploadName(displayName))
             context.contentResolver.openInputStream(sourceUri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: error("Unable to open input stream for $sourceUri")
@@ -249,6 +249,13 @@ class WorkspaceManager(private val context: Context) {
             if (!target.exists() || !target.isFile) return@withLock false
             runCatching { target.delete() }.getOrDefault(false)
         }
+    }
+
+    // Display names come from external ContentProviders; strip path components so a
+    // hostile "../../x" name cannot resolve outside the uploads dir.
+    private fun sanitizeUploadName(raw: String): String {
+        val name = raw.substringAfterLast('/').substringAfterLast('\\').trim()
+        return if (name.isBlank() || name == "." || name == "..") "file" else name
     }
 
     private fun pickUniqueUploadFile(dir: File, name: String): File {

@@ -387,9 +387,22 @@ val dataSourceModule = module {
             }
             .addNetworkInterceptor(RequestLoggingInterceptor())
             .addInterceptor(AIRequestInterceptor(remoteConfig = get()))
-            .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.HEADERS
-            })
+            .apply {
+                // Logcat HTTP tracing is debug-only; logcat is readable by adb and
+                // crash tooling, so credentials are redacted even there.
+                if (BuildConfig.DEBUG) {
+                    addInterceptor(HttpLoggingInterceptor().apply {
+                        level = HttpLoggingInterceptor.Level.HEADERS
+                        redactHeader("Authorization")
+                        redactHeader("Proxy-Authorization")
+                        redactHeader("Cookie")
+                        redactHeader("Set-Cookie")
+                        redactHeader("x-api-key")
+                        redactHeader("api-key")
+                        redactHeader("x-goog-api-key")
+                    })
+                }
+            }
             .build().also { SearchService.init(it, get()) }
     }
 

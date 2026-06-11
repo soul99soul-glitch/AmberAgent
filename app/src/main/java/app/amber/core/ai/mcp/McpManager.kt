@@ -88,15 +88,15 @@ class McpManager(
                 .map { settings -> settings.mcpServers }
                 .collect { mcpServerConfigs ->
                     runCatching {
-                        Log.i(TAG, "update configs: $mcpServerConfigs")
+                        Log.i(TAG, "update configs: ${mcpServerConfigs.map { it.commonOptions.name }}")
                         val newConfigs = mcpServerConfigs.filter { it.commonOptions.enable }
                         val currentConfigs = clients.keys.toList()
                         val (toAdd, toRemove) = currentConfigs.checkDifferent(
                             other = newConfigs,
                             eq = { a, b -> a.id == b.id }
                         )
-                        Log.i(TAG, "to_add: $toAdd")
-                        Log.i(TAG, "to_remove: $toRemove")
+                        Log.i(TAG, "to_add: ${toAdd.map { it.commonOptions.name }}")
+                        Log.i(TAG, "to_remove: ${toRemove.map { it.commonOptions.name }}")
                         toAdd.forEach { cfg ->
                             appScope.launch {
                                 runCatching { addClient(cfg) }
@@ -138,7 +138,7 @@ class McpManager(
             clients.entries.find { it.key.commonOptions.tools.any { it.name == toolName } }?.value
         if (client == null) return listOf(UIMessagePart.Text("Failed to execute tool, because no such mcp client for the tool"))
         val config = clients.entries.first { it.value == client }.key
-        Log.i(TAG, "callTool: $toolName / $args")
+        Log.i(TAG, "callTool: $toolName keys=${args.keys}")
 
         if (client.transport == null) client.connect(getTransport(config))
         val result = client.callTool(
@@ -185,7 +185,7 @@ class McpManager(
         val liveClient = client ?: error("MCP client is not connected: ${server.commonOptions.name}")
         val liveConfig = clients.keys.firstOrNull { it.id == server.id } ?: server
         if (liveClient.transport == null) liveClient.connect(getTransport(liveConfig))
-        Log.i(TAG, "callConfiguredTool: ${server.commonOptions.name}/$toolName / $args")
+        Log.i(TAG, "callConfiguredTool: ${server.commonOptions.name}/$toolName keys=${args.keys}")
         val result = liveClient.callTool(
             request = CallToolRequest(
                 params = CallToolRequestParams(

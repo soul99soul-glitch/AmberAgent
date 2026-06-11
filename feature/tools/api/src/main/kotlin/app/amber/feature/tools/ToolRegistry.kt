@@ -171,6 +171,36 @@ fun Tool.invocationPolicy(inputText: String): ToolInvocationPolicy {
     return invocationPolicy(input)
 }
 
+// Static loopback/private host classification. Hostname-based (no DNS resolution),
+// so public names that resolve to private IPs are not caught here; this covers the
+// explicit localhost/RFC1918/link-local targets an agent would request directly.
+internal fun String?.isPrivateNetworkTarget(): Boolean {
+    if (this.isNullOrBlank()) return false
+    val host = runCatching { java.net.URI(trim()).host }.getOrNull()?.lowercase(Locale.ROOT) ?: return false
+    val bare = host.removePrefix("[").removeSuffix("]")
+    if (bare == "localhost" || bare.endsWith(".localhost") || bare.endsWith(".local") ||
+        bare.endsWith(".internal") || bare.endsWith(".lan")
+    ) {
+        return true
+    }
+    if (bare.contains(':')) {
+        return bare == "::" || bare == "::1" || bare.startsWith("fe80:") ||
+            bare.startsWith("fc") || bare.startsWith("fd")
+    }
+    val parts = bare.split('.')
+    val octets = parts.mapNotNull { it.toIntOrNull() }
+    if (parts.size == 4 && octets.size == 4 && octets.all { it in 0..255 }) {
+        val a = octets[0]
+        val b = octets[1]
+        return a == 0 || a == 127 || a == 10 ||
+            (a == 192 && b == 168) ||
+            (a == 172 && b in 16..31) ||
+            (a == 169 && b == 254) ||
+            (a == 100 && b in 64..127)
+    }
+    return false
+}
+
 fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     val baseMutates = mutatesState()
     val baseRiskProfile = riskProfile()
@@ -186,8 +216,13 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     when (name) {
         "http_request" -> {
             val method = input.stringValue("method")?.uppercase(Locale.ROOT) ?: "GET"
-            val safe = method in setOf("GET", "HEAD")
-            mutates = !safe
+            val readMethod = method in setOf("GET", "HEAD")
+            // GET/HEAD against loopback/private hosts can probe localhost and LAN
+            // services, so they lose the read-only fast path and surface as High
+            // risk — auto-approved only via the explicit high-risk toggle.
+            val privateTarget = input.stringValue("url").isPrivateNetworkTarget()
+            val safe = readMethod && !privateTarget
+            mutates = !readMethod
             risk = if (safe) ToolRisk.Normal else ToolRisk.High
             riskExplicit = true
             needsApproval = !safe

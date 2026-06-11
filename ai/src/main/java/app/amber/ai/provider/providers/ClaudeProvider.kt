@@ -545,8 +545,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 "redacted_thinking" -> {
-                    val data = block["data"]?.jsonPrimitiveOrNull?.contentOrNull
-                    println(data)
+                    // Payload is encrypted/redacted by the provider; never log it.
                 }
 
                 "tool_use" -> {

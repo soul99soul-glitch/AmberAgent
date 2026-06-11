@@ -15,7 +15,6 @@ import app.amber.agent.R
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.core.utils.base64Encode
 import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -49,7 +48,9 @@ fun ShareHandlerPage(text: String, streamUris: List<String>) {
         }
         navigateToChatPage(
             navigator = navController,
-            initText = vm.shareText.base64Encode(),
+            // navigateToChatPage base64-encodes initText itself; passing pre-encoded
+            // text used to double-encode and show garbage in the input box.
+            initText = vm.shareText,
             initFiles = stagedUris,
         )
     }

@@ -334,10 +334,13 @@ class TerminalRuntime(
         if (session.process.isAlive) {
             session.process.destroyForcibly()
         }
-        workspaceManager.syncFromMirror()
+        // The session is already gone at this point; a missing SAF workspace must
+        // not turn a successful stop into a tool error.
+        val syncNote = runCatching { workspaceManager.syncFromMirror() }
+            .getOrElse { "sync skipped: ${it.message}" }
         TerminalReadResult(
             id = id,
-            output = "session stopped",
+            output = "session stopped; $syncNote",
             running = false,
         )
     }
