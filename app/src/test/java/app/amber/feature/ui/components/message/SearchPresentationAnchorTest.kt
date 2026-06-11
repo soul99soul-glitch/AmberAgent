@@ -72,12 +72,56 @@ class SearchPresentationAnchorTest {
         val block = parseResult.tree.children.first()
         val resolver = SearchBlockImageAnchorResolver(presentation)
 
+        // The extracted ref carries the raw markdown destination verbatim (www. intact);
+        // canonical www/non-www unification happens at match-time inside the resolver.
         assertEquals(
-            listOf(SearchBlockRef.Link("https://youtube.com/watch?v=B&utm_source=search")),
+            listOf(SearchBlockRef.Link("https://www.youtube.com/watch?v=B&utm_source=search")),
             extractSearchBlockReferences(block, parseResult.preprocessed),
         )
         assertEquals(listOf("https://img.example/b.jpg"), resolver.resolveBlock(block, parseResult.preprocessed).map { it.url })
         assertEquals(listOf("https://img.example/a.jpg"), resolver.orphans().map { it.url })
+    }
+
+    @Test
+    fun canonicalUrlMatchingUnifiesWwwWhenItemHasWwwAndLinkDoesNot() {
+        // Reverse direction of canonicalUrlMatchingKeepsDistinctQueries: the search item
+        // carries the www. host while the markdown link uses the bare host. Canonical
+        // matching must still unify them onto item A, leaving item B orphaned.
+        val presentation = deriveSearchPresentation(
+            listOf(
+                searchTool(
+                    """
+                    {
+                      "items": [
+                        {
+                          "id": "vid001",
+                          "title": "Video A",
+                          "url": "https://www.youtube.com/watch?v=A",
+                          "images": ["https://img.example/a.jpg"]
+                        },
+                        {
+                          "id": "vid002",
+                          "title": "Video B",
+                          "url": "https://youtube.com/watch?v=B",
+                          "images": ["https://img.example/b.jpg"]
+                        }
+                      ]
+                    }
+                    """.trimIndent(),
+                )
+            )
+        )
+        val markdown = "Video A source is [YouTube](https://youtube.com/watch?v=A&utm_source=search)."
+        val parseResult = MessageRenderCache.markdownParseResult(markdown)
+        val block = parseResult.tree.children.first()
+        val resolver = SearchBlockImageAnchorResolver(presentation)
+
+        assertEquals(
+            listOf(SearchBlockRef.Link("https://youtube.com/watch?v=A&utm_source=search")),
+            extractSearchBlockReferences(block, parseResult.preprocessed),
+        )
+        assertEquals(listOf("https://img.example/a.jpg"), resolver.resolveBlock(block, parseResult.preprocessed).map { it.url })
+        assertEquals(listOf("https://img.example/b.jpg"), resolver.orphans().map { it.url })
     }
 
     @Test
