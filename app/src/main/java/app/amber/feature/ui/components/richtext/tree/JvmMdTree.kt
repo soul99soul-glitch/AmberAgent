@@ -60,7 +60,6 @@ internal class JvmMdNode(
         val siblings = parent?.children ?: return null
         for (i in siblings.indices) {
             if ((siblings[i] as? JvmMdNode)?.ast === ast) {
-                // Fix 4: make the no-next case explicit for readability.
                 return if (i + 1 < siblings.size) siblings[i + 1] else null
             }
         }

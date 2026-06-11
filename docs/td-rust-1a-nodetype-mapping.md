@@ -321,6 +321,8 @@ drop it once the native path is sole — but for Stage 3 (JVM only) **keep it**,
 `MdNodeType.Unknown` (the marker token has no semantic variant) which the inline walker's
 `else`/no-op handles. **Resolved.**
 
+> **ERRATA (Stage-3, 2026-06-12)**: H9's earlier claim that the BLOCK_QUOTE marker can map to Unknown and be handled by the inline walker's else/no-op is incomplete. The marker is a LEAF token (no children) and therefore would hit the generic leaf arm in `appendMarkdownNodeContent`, rendering a literal `>` character into the output. The implemented fix is a dedicated `MdNode.isBlockquoteMarker` typed accessor with an explicit skip arm that must precede the generic leaf arm (Markdown.kt ~2516). Native side (Task 12) must implement `isBlockquoteMarker` accordingly per its KDoc in `MarkdownTree.kt`.
+
 ---
 
 ## 5. Table alignment resolution — DECISION
