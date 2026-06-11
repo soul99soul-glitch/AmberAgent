@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
@@ -45,6 +46,7 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.withStreamToolIndex
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
@@ -326,6 +328,26 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         Log.i(TAG, "streamText: model=${params.model.modelId}")
 
+        // Google functionCall 不携带 id; parseMessagePart 的随机 UUID 每个 chunk 都不同,
+        // merge 层无法识别同一 tool。这里在 stream scope 内分配单调递增的确定性 id +
+        // stream index, 保证同一流内 tool 标识稳定且并行 tool 不串线。
+        val streamToolIdPrefix = "google-fc-${Uuid.random().toString().take(8)}"
+        var nextToolCallOrdinal = 0
+        fun UIMessage.withStableToolCallIds(): UIMessage {
+            if (parts.none { it is UIMessagePart.Tool }) return this
+            return copy(
+                parts = parts.map { part ->
+                    if (part is UIMessagePart.Tool) {
+                        val ordinal = nextToolCallOrdinal++
+                        part.copy(toolCallId = "$streamToolIdPrefix-$ordinal")
+                            .withStreamToolIndex(ordinal)
+                    } else {
+                        part
+                    }
+                }
+            )
+        }
+
         val listener = object : EventSourceListener() {
             override fun onEvent(
                 eventSource: EventSource,
@@ -368,7 +390,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                         put("groundingMetadata", groundingMetadata)
                                     }
                                 })
-                            }
+                            }?.withStableToolCallIds()
 
                             UIMessageChoice(
                                 index = index,
@@ -380,9 +402,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         usage = usage
                     )
 
-                    trySend(messageChunk)
+                    // 阻塞式发送形成背压, 避免 buffer 满时静默丢 token
+                    trySendBlocking(messageChunk)
                 } catch (e: Exception) {
+                    // malformed event 不能只打日志吞掉: 否则表现为 silent empty assistant
+                    // 或流卡死, 用户看不到任何错误
                     Log.w(TAG, "onEvent: failed to parse event chars=${data.length}", e)
+                    eventSource.cancel()
+                    close(e)
                 }
             }
 

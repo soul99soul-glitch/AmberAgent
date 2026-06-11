@@ -11,14 +11,14 @@ class AgentPermissionRegistryTest {
     fun `sms read requires read sms permission`() {
         val capability = AgentPermissionRegistry.capabilities.single { it.id == "sms_read" }
 
-        assertEquals(listOf(Manifest.permission.READ_SMS), capability.runtimePermissions.map { it.name })
+        assertEquals(listOf(Manifest.permission.READ_SMS), capability.runtimePermissions.map { it.permission })
     }
 
     @Test
     fun `calendar create requires read and write calendar permissions`() {
         val capability = AgentPermissionRegistry.capabilities.single { it.id == "calendar_write" }
 
-        assertTrue(capability.runtimePermissions.map { it.name }.containsAll(
+        assertTrue(capability.runtimePermissions.map { it.permission }.containsAll(
             listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
         ))
     }

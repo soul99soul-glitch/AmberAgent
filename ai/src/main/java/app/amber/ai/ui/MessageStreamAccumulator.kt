@@ -94,7 +94,8 @@ class MessageStreamAccumulator(
             }
 
             if (delta.annotations.isNotEmpty()) {
-                annotations = delta.annotations
+                // append + dedupe: grounding/citation 可能增量到达或重发全量, 整体替换会丢失先前条目
+                annotations = (annotations + delta.annotations).distinct()
             }
         }
 
@@ -155,39 +156,17 @@ class MessageStreamAccumulator(
         }
 
         private fun appendTool(deltaPart: UIMessagePart.Tool) {
-            val tool = if (deltaPart.toolCallId.isBlank()) {
-                val streamIndex = deltaPart.streamToolIndex()
-                val targetTool = streamIndex?.let { index ->
-                    parts.find { it is MutablePart.Tool && it.tool.streamToolIndex() == index } as? MutablePart.Tool
-                } ?: if (streamIndex == null) {
-                    parts.lastOrNull { it is MutablePart.Tool } as? MutablePart.Tool
-                } else {
-                    null
+            val toolParts = parts.filterIsInstance<MutablePart.Tool>()
+            val target = deltaPart.findToolMergeTarget(toolParts.map { it.tool })
+            if (target != null) {
+                val wrapper = toolParts.first { it.tool === target }
+                val merged = target.merge(deltaPart)
+                parts.replaceAll { part ->
+                    if (part === wrapper) MutablePart.Tool(merged) else part
                 }
-                targetTool?.tool?.merge(deltaPart)?.let { merged ->
-                    parts.replaceAll { part ->
-                        if (part === targetTool) MutablePart.Tool(merged) else part
-                    }
-                    return
-                }
-                deltaPart.copy()
-            } else {
-                val existing = (parts.find {
-                    it is MutablePart.Tool && it.tool.toolCallId == deltaPart.toolCallId
-                } as? MutablePart.Tool)
-                    ?: deltaPart.streamToolIndex()?.let { index ->
-                        parts.find { it is MutablePart.Tool && it.tool.streamToolIndex() == index } as? MutablePart.Tool
-                    }
-                existing?.let {
-                    val merged = it.tool.merge(deltaPart)
-                    parts.replaceAll { part ->
-                        if (part === existing) MutablePart.Tool(merged) else part
-                    }
-                    return
-                }
-                deltaPart.copy()
+                return
             }
-            parts += MutablePart.Tool(tool)
+            parts += MutablePart.Tool(deltaPart.withoutStreamArgsReplace())
         }
 
         companion object {

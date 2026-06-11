@@ -103,6 +103,111 @@ class MessageStreamAccumulatorTest {
         assertEquals("""{"summary":"完整 JSON"}""", assistant.parts.filterIsInstance<UIMessagePart.Text>().single().text)
     }
 
+    @Test
+    fun `chinese text deltas merge in order`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+
+        accumulator.append(chunk(UIMessagePart.Text("你")))
+        accumulator.append(chunk(UIMessagePart.Text("好")))
+        accumulator.append(chunk(UIMessagePart.Text("世界")))
+
+        val assistant = accumulator.snapshot().last()
+        assertEquals("你好世界", assistant.parts.filterIsInstance<UIMessagePart.Text>().single().text)
+    }
+
+    @Test
+    fun `late tool call id merges into stream-indexed tool and adopts the real id`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+
+        // OpenAI 流式时序: 首个 delta 只有 index 没有 id, 真实 id 随后到达
+        accumulator.append(chunk(tool(id = "", name = "search", input = "{\"q\"", streamIndex = 0)))
+        accumulator.append(chunk(tool(id = "call_abc", name = "", input = ":\"amber\"}", streamIndex = 0)))
+
+        val tools = accumulator.snapshot().last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(1, tools.size)
+        assertEquals("call_abc", tools.single().toolCallId)
+        assertEquals("search", tools.single().toolName)
+        assertEquals("""{"q":"amber"}""", tools.single().input)
+    }
+
+    @Test
+    fun `parallel tool deltas merge by stream index without cross wiring`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+
+        // Claude 并行 tool_use: input_json_delta 只带 block index, 不带 id
+        accumulator.append(chunk(tool(id = "tool_a", name = "search", input = "", streamIndex = 0)))
+        accumulator.append(chunk(tool(id = "tool_b", name = "read_file", input = "", streamIndex = 1)))
+        accumulator.append(chunk(tool(id = "", name = "", input = """{"q":"amber"}""", streamIndex = 0)))
+
+        val tools = accumulator.snapshot().last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(2, tools.size)
+        assertEquals("""{"q":"amber"}""", tools.first { it.toolCallId == "tool_a" }.input)
+        assertEquals("", tools.first { it.toolCallId == "tool_b" }.input)
+    }
+
+    @Test
+    fun `blank tool delta without index falls back to last tool`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+
+        accumulator.append(chunk(tool(id = "call_1", name = "search", input = "{\"q\"")))
+        accumulator.append(chunk(tool(id = "", name = "", input = ":\"x\"}")))
+
+        val tools = accumulator.snapshot().last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(1, tools.size)
+        assertEquals("""{"q":"x"}""", tools.single().input)
+    }
+
+    @Test
+    fun `annotations accumulate across chunks and dedupe repeats`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+        val citationA = UIMessageAnnotation.UrlCitation(title = "A", url = "https://a.example")
+        val citationB = UIMessageAnnotation.UrlCitation(title = "B", url = "https://b.example")
+
+        accumulator.append(annotatedChunk(citationA))
+        // 模拟 provider 重发全量 grounding (含已有条目) + 新增条目
+        accumulator.append(annotatedChunk(citationA, citationB))
+
+        val assistant = accumulator.snapshot().last()
+        assertEquals(listOf(citationA, citationB), assistant.annotations)
+    }
+
+    private fun tool(
+        id: String,
+        name: String,
+        input: String,
+        streamIndex: Int? = null,
+    ): UIMessagePart.Tool {
+        val tool = UIMessagePart.Tool(toolCallId = id, toolName = name, input = input)
+        return if (streamIndex != null) tool.withStreamToolIndex(streamIndex) else tool
+    }
+
+    private fun annotatedChunk(vararg annotations: UIMessageAnnotation): MessageChunk = MessageChunk(
+        id = "chunk",
+        model = "test",
+        choices = listOf(
+            UIMessageChoice(
+                index = 0,
+                delta = UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(UIMessagePart.Text("t")),
+                    annotations = annotations.toList(),
+                ),
+                message = null,
+                finishReason = null,
+            )
+        )
+    )
+
     private fun chunk(vararg parts: UIMessagePart): MessageChunk = MessageChunk(
         id = "chunk",
         model = "test",

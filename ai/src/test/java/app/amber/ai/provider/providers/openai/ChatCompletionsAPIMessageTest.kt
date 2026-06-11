@@ -136,6 +136,31 @@ class ChatCompletionsAPIMessageTest {
     }
 
     @Test
+    fun `stream payload normalization keeps multi-line single json payload intact`() {
+        // SSE 允许服务端把一个 JSON payload 拆成多行 data:, OkHttp 用 \n 合并后
+        // 不应再被按行拆碎
+        val payloads = normalizeOpenAIStreamDataLines(
+            "{\"id\":\"x\",\"choices\":[{\"delta\":\n{\"content\":\"hello\"},\"finish_reason\":null}]}"
+        )
+
+        assertEquals(1, payloads.size)
+        val parsed = parseJsonObject(payloads.single())
+        assertEquals("x", parsed["id"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `stream payload normalization still splits independent json lines`() {
+        val payloads = normalizeOpenAIStreamDataLines(
+            """
+            {"a":1}
+            {"b":2}
+            """.trimIndent()
+        )
+
+        assertEquals(listOf("""{"a":1}""", """{"b":2}"""), payloads)
+    }
+
+    @Test
     fun `forced reasoning content keeps deepseek thinking tool history valid`() {
         val messages = listOf(
             UIMessage.user("Use a tool"),
