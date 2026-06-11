@@ -3,9 +3,12 @@ package app.amber.feature.ui.pages.chat
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -51,6 +54,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -428,25 +433,25 @@ internal fun ChatListNormal(
     }
 
     suspend fun settleAfterGenerationEnd() {
-        // 问题③(结束跳变):若流式结束时内容已经贴底(②让逐批跟随稳定贴底),
-        // 不要再做任何 settle 贴底滚动 —— 末尾的圆点 item 此刻即将被移除,其高度
-        // 变化会和 settle 的向下贴底滚动叠加,把画面往上拽,就是用户看到的"结束
-        // 跳变"。已在底部缓冲区内时直接定住、让圆点淡出即可;只有真正没贴底(用户
-        // 中途滚走等)才走下面的逐帧 settle 兜底。
-        val initialDistancePx = state.distanceToTimelineBottomPx()
-        if (
-            TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
-                distancePx = initialDistancePx,
-                bottomBufferPx = bottomFollowBufferPx,
-            )
-        ) {
-            logScroll("generationEndSettle.alreadyAtBottom", "distancePx=$initialDistancePx")
-            return
-        }
+        // Let loading=false commit at least one real layout before measuring.
+        // The retained tail indicator usually keeps height stable, but the
+        // completed-message action row can still settle one frame later.
+        withFrameNanos { }
+        // No early "already at bottom" return here: the end-of-stream
+        // virtualization re-keys the finished message (single item → header/
+        // blocks/footer), and that relayout can land SEVERAL frames after
+        // loading flips — past any single up-front measurement. A premature
+        // distance==0 return left the post-re-key viewport jump (anchored near
+        // the message header) uncorrected. The stable-frames loop below is the
+        // correct shape: when nothing moves it idles two frames and exits
+        // without scrolling; when the re-key displaces the viewport it snaps
+        // back to the bottom. The retained tail-indicator reserve keeps the
+        // indicator removal from fighting this settle.
         if (!waitForGenerationEndSettleGate()) {
             logScroll("generationEndSettle.skip", "gate=false")
             return
         }
+        var stableBottomFrames = 0
         repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) { frame ->
             val distanceBefore = state.distanceToTimelineBottomPx()
             if (
@@ -455,9 +460,19 @@ internal fun ChatListNormal(
                     bottomBufferPx = bottomFollowBufferPx,
                 )
             ) {
-                logScroll("generationEndSettle.done", "frame=$frame distancePx=$distanceBefore")
-                return
+                stableBottomFrames += 1
+                logScroll(
+                    "generationEndSettle.stable",
+                    "frame=$frame distancePx=$distanceBefore stable=$stableBottomFrames",
+                )
+                if (TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(stableBottomFrames)) {
+                    logScroll("generationEndSettle.done", "frame=$frame distancePx=$distanceBefore")
+                    return
+                }
+                withFrameNanos { }
+                return@repeat
             }
+            stableBottomFrames = 0
             if (
                 !TimelineFollowEndSettlePolicy.canAttemptSettle(
                     followMode = followMode,
@@ -477,7 +492,7 @@ internal fun ChatListNormal(
             val distanceAfter = state.distanceToTimelineBottomPx()
             logScroll(
                 "generationEndSettle.frame",
-                "frame=$frame before=$distanceBefore after=$distanceAfter",
+                "frame=$frame before=$distanceBefore after=$distanceAfter stable=$stableBottomFrames",
             )
             if (
                 TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
@@ -485,7 +500,13 @@ internal fun ChatListNormal(
                     bottomBufferPx = bottomFollowBufferPx,
                 )
             ) {
-                return
+                stableBottomFrames += 1
+                if (TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(stableBottomFrames)) {
+                    return
+                }
+                withFrameNanos { }
+            } else {
+                stableBottomFrames = 0
             }
         }
     }
@@ -1045,6 +1066,17 @@ internal fun ChatListNormal(
                             key = node.id,
                             contentType = "message-${node.currentMessage.role}",
                         ) {
+                            // iMessage-style send entrance: the just-sent user
+                            // bubble springs up from the input bar's direction.
+                            // The claim is one-shot and windowed (see tracker),
+                            // and only the freshly landed tail can take it —
+                            // scroll-backs re-composing old user items never
+                            // re-animate.
+                            val playSendEntrance = node.currentMessage.role == MessageRole.USER &&
+                                index >= conversation.messageNodes.lastIndex - 1 &&
+                                remember(node.id) {
+                                    ChatSendTransitionTracker.consumeSendEntrance(conversationId)
+                                }
                             Column(
                                 modifier = Modifier.padding(bottom = TimelineItemSpacing)
                             ) {
@@ -1058,7 +1090,8 @@ internal fun ChatListNormal(
                                     modifier = Modifier.padding(bottom = TimelineItemSpacing),
                                 )
                                 ListSelectableItem(
-                                    modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
+                                    modifier = (if (isPreCompacted) Modifier.alpha(0.4f) else Modifier)
+                                        .then(sendEntranceModifier(play = playSendEntrance)),
                                     key = node.id,
                                     onSelectChange = {
                                         if (!selectedItems.contains(node.id)) {
@@ -1348,7 +1381,7 @@ internal fun ChatListNormal(
                             Spacer(
                                 Modifier
                                     .fillMaxWidth()
-                                    .height(5.dp)
+                                    .height(ScrollBottomSpacerHeight)
                             )
                         }
                     }
@@ -1390,14 +1423,24 @@ internal fun ChatListNormal(
                     .zIndex(5f)
             )
 
+            // The pinned dot must sit exactly where the in-list reserve dot
+            // rests when the list is snapped to the bottom: afterContentPadding
+            // + the ScrollBottom spacer + the reserve item's bottom spacing +
+            // the dot's padding inside the reserve. Matching positions (plus
+            // the crossfade on both sides) keeps the pin handoff invisible —
+            // a fixed offset here previously made the dot teleport ~57dp the
+            // moment the pin engaged.
             AnimatedVisibility(
                 visible = pinTailIndicator && !captureProgress,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = AgentWorkingIndicatorOverlayBottomOffset)
+                    .padding(
+                        bottom = timelineBottomPadding + ScrollBottomSpacerHeight +
+                            TimelineItemSpacing + TailIndicatorDotBottomPadding,
+                    )
                     .zIndex(6f),
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(animationSpec = tween(TailIndicatorHandoffFadeMs)),
+                exit = fadeOut(animationSpec = tween(TailIndicatorHandoffFadeMs)),
             ) {
                 AgentWorkingIndicator(processingStatus = processingStatus)
             }
@@ -1531,4 +1574,35 @@ private fun LazyListState.distanceToTimelineBottomPx(): Int? {
         ?: return null
     val contentBottom = bottomItem.offset + bottomItem.size + layoutInfo.afterContentPadding
     return (contentBottom - layoutInfo.viewportEndOffset).coerceAtLeast(0)
+}
+
+/**
+ * iMessage-style send entrance for the just-sent user bubble: a spring slide
+ * up from the input bar's direction with a slight bottom-right-anchored scale.
+ * Pure graphicsLayer — the item's layout slot is final from frame one, the
+ * bubble just travels into it, so the surrounding timeline never reflows.
+ */
+@Composable
+private fun sendEntranceModifier(play: Boolean): Modifier {
+    if (!play) return Modifier
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = spring(
+                dampingRatio = 0.8f,
+                stiffness = Spring.StiffnessMediumLow,
+            ),
+        )
+    }
+    val slidePx = with(LocalDensity.current) { SendEntranceSlideDistance.toPx() }
+    return Modifier.graphicsLayer {
+        val eased = progress.value
+        translationY = slidePx * (1f - eased)
+        alpha = (0.4f + 0.6f * eased).coerceIn(0f, 1f)
+        val scale = (0.96f + 0.04f * eased).coerceAtMost(1.01f)
+        scaleX = scale
+        scaleY = scale
+        transformOrigin = TransformOrigin(0.92f, 1f)
+    }
 }

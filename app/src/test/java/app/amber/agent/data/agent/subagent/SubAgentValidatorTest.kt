@@ -19,43 +19,39 @@ class SubAgentValidatorTest {
     )
 
     @Test
-    fun taskSpecRequiresFourElements() {
+    fun taskSpecDefaultsOptionalPlanningFields() {
         val input = buildJsonObject {
             put("task", buildJsonObject {
                 put("objective", "Inspect one focused issue")
-                put("output_format", "Short findings")
-                put("tools_and_sources", "Use file_read only")
             })
         }
 
-        val error = runCatching { SubAgentValidator.parseTask(input) }.exceptionOrNull()
+        val task = SubAgentValidator.parseTask(input)
 
-        assertTrue(error is IllegalArgumentException)
-        assertTrue(error!!.message!!.contains("boundaries"))
+        assertEquals("Inspect one focused issue", task.objective)
+        assertTrue(task.outputFormat.isNotBlank())
+        assertTrue(task.toolsAndSources.isNotBlank())
+        assertTrue(task.boundaries.isNotBlank())
     }
 
     @Test
-    fun dynamicRoleRejectsGenericName() {
+    fun rosterModeReplacesGenericEnglishNameInsteadOfFailing() {
         val input = inputWithCustomSubagent(name = "General Helper")
 
-        val error = runCatching {
-            SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
-        }.exceptionOrNull()
+        val result = SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
 
-        assertTrue(error is IllegalArgumentException)
-        assertTrue(error!!.message!!.contains("too broad"))
+        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
+        assertFalse(result.definition.id.contains("general"))
     }
 
     @Test
-    fun rosterModeRejectsChineseGenericName() {
+    fun rosterModeReplacesGenericChineseNameInsteadOfFailing() {
         val input = inputWithCustomSubagent(name = "万能助手")
 
-        val error = runCatching {
-            SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
-        }.exceptionOrNull()
+        val result = SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
 
-        assertTrue(error is IllegalArgumentException)
-        assertTrue(error!!.message!!.contains("too broad"))
+        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
+        assertFalse(result.definition.name.contains("万能"))
     }
 
     @Test
@@ -260,6 +256,29 @@ class SubAgentValidatorTest {
     }
 
     @Test
+    fun dynamicRoleDefaultsMissingDescriptionAndSystemPrompt() {
+        val input = inputWithCustomSubagent(
+            name = "Tiny Poet",
+            description = null,
+            systemPrompt = null,
+            toolProfile = "none",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            availableToolNames = emptySet(),
+        )
+
+        assertEquals("tiny-poet", result.definition.id)
+        assertTrue(result.definition.description.contains("Use when"))
+        assertTrue(result.definition.systemPrompt.contains("Boundaries:"))
+        assertTrue(result.definition.systemPrompt.contains("Report output as:"))
+        assertTrue(result.definition.systemPrompt.length >= 80)
+        assertEquals(emptySet<String>(), result.definition.toolAllowlist)
+    }
+
+    @Test
     fun dynamicRoleToolProfileNarrowsToWebRead() {
         val input = inputWithCustomSubagent(
             toolProfile = "web_read",
@@ -300,6 +319,21 @@ class SubAgentValidatorTest {
             input = input,
             setting = setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
             availableToolNames = setOf("file_read"),
+        )
+
+        assertEquals(emptySet<String>(), result.definition.toolAllowlist)
+    }
+
+    @Test
+    fun dynamicRoleAllowsEmptyToolsWhenProfileHasNoAvailableTools() {
+        val input = inputWithCustomSubagent(
+            toolProfile = "workspace_read",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            availableToolNames = emptySet(),
         )
 
         assertEquals(emptySet<String>(), result.definition.toolAllowlist)
@@ -427,16 +461,14 @@ class SubAgentValidatorTest {
         timeoutMs: Long? = null,
         outputBudgetChars: Int? = null,
         subagentId: String? = null,
-        description: String = "Use when a narrow read-only code review is needed for a specific file or behavior.",
+        description: String? = "Use when a narrow read-only code review is needed for a specific file or behavior.",
+        systemPrompt: String? = "You are a narrow reviewer. Boundaries: do not edit files, do not spawn agents, and do not use tools outside the allowlist. Report output as summary, findings, evidence, risks, and next steps.",
     ) = buildJsonObject {
         subagentId?.let { put("subagent_id", it) }
         put("custom_subagent", buildJsonObject {
             name?.let { put("name", it) }
-            put("description", description)
-            put(
-                "system_prompt",
-                "You are a narrow reviewer. Boundaries: do not edit files, do not spawn agents, and do not use tools outside the allowlist. Report output as summary, findings, evidence, risks, and next steps."
-            )
+            description?.let { put("description", it) }
+            systemPrompt?.let { put("system_prompt", it) }
             toolProfile?.let { put("tool_profile", it) }
             toolAllowlist?.let { tools ->
                 put("tool_allowlist", buildJsonArray {

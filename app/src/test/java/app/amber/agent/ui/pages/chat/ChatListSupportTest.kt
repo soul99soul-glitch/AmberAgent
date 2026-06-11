@@ -181,6 +181,13 @@ class ChatListSupportTest {
     }
 
     @Test
+    fun `generation end settle waits for consecutive stable bottom frames`() {
+        assertFalse(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(0))
+        assertFalse(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(1))
+        assertTrue(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(2))
+    }
+
+    @Test
     fun `chat streaming follow path keeps stable pointer key and chunk emits only`() {
         val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
 
@@ -211,6 +218,17 @@ class ChatListSupportTest {
         assertTrue(source.contains("TimelineTailWorkingIndicator("))
         assertTrue(source.contains("visible = tailIndicatorDotVisible && !pinTailIndicator"))
         assertTrue(source.contains("visible = pinTailIndicator && !captureProgress"))
+    }
+
+    @Test
+    fun `pinned tail indicator overlay aligns with in-list resting position`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+
+        // The overlay's bottom padding must be derived from the same values
+        // that position the in-list reserve dot, or the pin handoff teleports.
+        assertTrue(source.contains("bottom = timelineBottomPadding + ScrollBottomSpacerHeight +"))
+        assertTrue(source.contains("TimelineItemSpacing + TailIndicatorDotBottomPadding"))
+        assertFalse(source.contains("AgentWorkingIndicatorOverlayBottomOffset"))
     }
 
     private fun repoFile(pathInAppModule: String): File {

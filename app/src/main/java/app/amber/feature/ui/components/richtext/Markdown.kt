@@ -39,12 +39,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -538,18 +542,32 @@ private const val MARKDOWN_PARSE_HIT_LOG_MIN_CHARS = 600
 private const val MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L
 
 /**
- * Codex-style batch reveal window. The live suffix starts faint but readable,
- * reaches near-opaque by the 200ms parse tick, then finishes softly. This keeps
- * the alpha motion visible without letting parse absorption pop the tail.
+ * Codex-style per-character reveal. Each suffix character runs its own
+ * fade+lift curve anchored to the moment IT first became visible (see
+ * [StreamingCharRevealClock]), instead of a curve shared by the whole parse
+ * batch — batch anchoring made late-arriving characters start most of the way
+ * through the shared curve and pop in nearly opaque.
+ *
+ * Absorption side: when a parse tick promotes suffix text into the settled
+ * AnnotatedString, mid-fade characters would snap to full opacity. The settled
+ * CATCHUP fade bridges that — the newly grown settled range continues from
+ * [STREAMING_SETTLED_CATCHUP_START_ALPHA] to opaque, so the tick boundary is
+ * invisible. Both mechanisms live entirely in L4.
  */
-private const val STREAMING_BATCH_FADE_MS = 220
-private const val STREAMING_BATCH_CHAR_STAGGER_MS = 12
-private const val STREAMING_BATCH_STAGGER_MAX_CODEPOINTS = 96
-private const val STREAMING_BATCH_MAX_STAGGER_FRACTION = 0.42f
-private const val STREAMING_BATCH_REVEAL_START_ALPHA = 0.24f
+private const val STREAMING_CHAR_REVEAL_FADE_MS = 170
+private const val STREAMING_CHAR_REVEAL_STAGGER_MS = 9
+private const val STREAMING_CHAR_REVEAL_MAX_CASCADE_MS = 140
+private const val STREAMING_CHAR_REVEAL_MAX_PENDING = 220
+private const val STREAMING_CHAR_REVEAL_START_ALPHA = 0f
 // Per-glyph baseline lift for the streaming tail. baselineShift only moves the
 // glyph baseline, so it does NOT reflow the line or push the block below.
-private const val STREAMING_BATCH_REVEAL_LIFT_EM = 0.28f
+private const val STREAMING_CHAR_REVEAL_LIFT_EM = 0.28f
+private const val STREAMING_SETTLED_CATCHUP_FADE_MS = 120
+private const val STREAMING_SETTLED_CATCHUP_START_ALPHA = 0.72f
+// Only the newest tail of an absorbed range was mid-fade; older characters
+// were already opaque. Capping the ramp also bounds span count when a deferred
+// parse resumes and absorbs thousands of characters at once.
+private const val STREAMING_SETTLED_CATCHUP_MAX_CODEPOINTS = 32
 private const val STREAMING_BLOCK_REVEAL_MS = 190
 private const val STREAMING_BLOCK_REVEAL_START_ALPHA = 0.86f
 // Whole-block translationY rise on first settle, complementing the per-glyph tail lift.
@@ -1358,12 +1376,14 @@ private fun streamingRevealModifier(
         mutableStateOf(false)
     }
     LaunchedEffect(scope, revealActive, key) {
+        // Once claimed, never un-claim: revealActive drops the moment
+        // generation ends, and resetting here snapped a mid-flight block rise
+        // to its final position — the message's final block settles right at
+        // the end, so its rise was almost always cut. A finished animation is
+        // a no-op graphicsLayer, so letting it complete costs nothing.
+        if (shouldAnimate.value) return@LaunchedEffect
         val motionScope = scope
-        shouldAnimate.value = if (revealActive && motionScope != null) {
-            motionScope.claim(key)
-        } else {
-            false
-        }
+        shouldAnimate.value = revealActive && motionScope != null && motionScope.claim(key)
     }
     if (!shouldAnimate.value) return Modifier
 
@@ -2099,7 +2119,6 @@ private fun Paragraph(
 
     // Streaming-aware text build: static parsed text is opaque; only the
     // live suffix (newest, not-yet-parsed text) fades in as one batch.
-    val streamingTailActive = LocalStreamingTailActive.current
     val baseColor = LocalContentColor.current
     val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
 
@@ -2159,12 +2178,15 @@ private fun Paragraph(
         val (blockInlineSuffix, blockPlainSuffix) = splitLiveSuffixAtBlockBoundary(liveSuffix)
         val inlineLiveSuffix: String
         val plainLiveSuffix: String
+        val plainSuffixSourceOffset: Int
         if (suffixPlacement == LiveSuffixPlacement.Inline) {
             inlineLiveSuffix = blockInlineSuffix
             plainLiveSuffix = blockPlainSuffix.replace(BREAK_LINE_REGEX, "\n")
+            plainSuffixSourceOffset = liveSuffixSourceOffset + blockInlineSuffix.length
         } else {
             inlineLiveSuffix = ""
             plainLiveSuffix = liveSuffix.replace(BREAK_LINE_REGEX, "\n")
+            plainSuffixSourceOffset = liveSuffixSourceOffset
         }
         val combined = remember(staticAnnotated, inlineLiveSuffix, baseColor) {
             if (inlineLiveSuffix.isEmpty()) {
@@ -2176,33 +2198,71 @@ private fun Paragraph(
                 }
             }
         }
-        // streamingTailActive != null marks the active streaming block; only then
-        // is there a suffix to fade. liveSuffixSourceOffset changes once per
-        // parse tick, so it is the batch key — a fresh Animatable per batch
-        // drives the newly-arrived text from 0→1.
-        val streamingTail = streamingTailActive != null &&
-            (inlineLiveSuffix.isNotEmpty() || plainLiveSuffix.isNotEmpty())
-        val suffixAlpha = if (streamingTail) {
-            val anim = remember(liveSuffixSourceOffset) { Animatable(0f) }
-            LaunchedEffect(liveSuffixSourceOffset) {
-                anim.animateTo(
+        // Appearance-anchored reveal: every suffix character runs its own
+        // fade+lift from the frame it first appears (clock keyed by absolute
+        // source offsets, so a parse tick shrinking the suffix does not
+        // restart carried-over characters). Gate on the suffix itself, NOT on
+        // the streaming-tail marker — the marker drops the instant generation
+        // ends, and the final batch must finish fading on its own clock.
+        // Separate clocks for the inline and plain segments: each clock prunes
+        // by its own source offset, and the plain segment starts at a higher
+        // offset than the inline one.
+        val streamingTail = inlineLiveSuffix.isNotEmpty() || plainLiveSuffix.isNotEmpty()
+        val inlineRevealClock = remember { StreamingCharRevealClock() }
+        val plainRevealClock = remember { StreamingCharRevealClock() }
+        // Seeded with System.nanoTime, NOT 0: Choreographer frame nanos share
+        // the System.nanoTime timebase, and characters stamped before the
+        // first frame callback would otherwise read as ages old and skip
+        // their fade entirely.
+        var revealNowNanos by remember { mutableLongStateOf(System.nanoTime()) }
+        LaunchedEffect(streamingTail) {
+            if (!streamingTail) return@LaunchedEffect
+            while (true) {
+                withFrameNanos { revealNowNanos = it }
+            }
+        }
+        // Settled catch-up: when a parse tick promotes suffix text into
+        // staticAnnotated, the newest characters are usually still mid-fade —
+        // without this they snap to full opacity at every tick boundary. The
+        // grown range keeps fading to opaque on its own short animation.
+        // (A non-streaming static grow — e.g. an edited message — also takes
+        // this path; a 120ms fade on appended text is harmless there.)
+        val staticLength = staticAnnotated.length
+        var settledCatchupStart by remember { mutableIntStateOf(staticLength) }
+        var prevStaticLength by remember { mutableIntStateOf(staticLength) }
+        val settledCatchupAnim = remember { Animatable(1f) }
+        LaunchedEffect(staticLength) {
+            if (staticLength > prevStaticLength && prevStaticLength > 0) {
+                settledCatchupStart = prevStaticLength
+                prevStaticLength = staticLength
+                settledCatchupAnim.snapTo(0f)
+                settledCatchupAnim.animateTo(
                     1f,
                     animationSpec = tween(
-                        durationMillis = STREAMING_BATCH_FADE_MS,
+                        durationMillis = STREAMING_SETTLED_CATCHUP_FADE_MS,
                         easing = LinearEasing,
                     ),
                 )
+            } else {
+                prevStaticLength = staticLength
             }
-            anim.value
-        } else {
-            1f
         }
-        val annotatedString = remember(combined, staticAnnotated.length, suffixAlpha, baseColor) {
-            applyBatchRevealSuffix(
+        val annotatedString = remember(
+            combined,
+            staticLength,
+            revealNowNanos,
+            settledCatchupAnim.value,
+            baseColor,
+        ) {
+            applyStreamingCharReveal(
                 combined = combined,
-                staticLength = staticAnnotated.length,
-                suffixProgress = suffixAlpha,
+                staticLength = staticLength,
+                suffixSourceOffset = liveSuffixSourceOffset,
+                clock = inlineRevealClock,
+                nowNanos = revealNowNanos,
                 baseColor = baseColor,
+                settledCatchupStart = settledCatchupStart,
+                settledCatchupAlpha = settledCatchupAnim.value,
             )
         }
 
@@ -2217,10 +2277,12 @@ private fun Paragraph(
             )
         )
         if (plainLiveSuffix.isNotEmpty()) {
-            val plainAnnotatedString = remember(plainLiveSuffix, suffixAlpha, baseColor) {
-                applyBatchRevealPlainSuffix(
+            val plainAnnotatedString = remember(plainLiveSuffix, revealNowNanos, baseColor) {
+                applyStreamingCharRevealPlain(
                     text = plainLiveSuffix,
-                    suffixProgress = suffixAlpha,
+                    suffixSourceOffset = plainSuffixSourceOffset,
+                    clock = plainRevealClock,
+                    nowNanos = revealNowNanos,
                     baseColor = baseColor,
                 )
             }
@@ -2333,7 +2395,7 @@ private fun TableNode(
 @Composable
 private fun TableCellContent(content: String) {
     if (TABLE_CELL_MARKDOWN_HINT_REGEX.containsMatchIn(content)) {
-        MarkdownBlock(content = content)
+        MarkdownBlock(content = content, fillWidth = false)
     } else {
         Text(
             text = content,
@@ -2623,87 +2685,128 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
 }
 
 /**
- * Per-arrival-batch streaming reveal layer.
- * Instead of mapping per-codepoint alpha back to source offsets, it styles
- * only one contiguous range — the live suffix appended after the
- * statically-parsed text. [staticLength] is the boundary between settled
- * text (always opaque) and the revealing suffix.
+ * Appearance-anchored streaming reveal layer (L4).
+ * Instead of mapping per-codepoint alpha back to source offsets through the
+ * markdown transforms, it styles only one contiguous range — the live suffix
+ * appended after the statically-parsed text. [staticLength] is the boundary
+ * between settled text and the revealing suffix. Each suffix character fades
+ * and lifts on its own clock (stamped by [clock] the first frame it is seen),
+ * so glyphs float in continuously regardless of parse-tick timing.
  *
- * Returns [combined] unchanged when there's nothing to fade (no usable
- * baseColor, suffix already fully revealed, or the boundary is out of range).
+ * [settledCatchupStart]/[settledCatchupAlpha] bridge the absorption boundary:
+ * the range of settled text grown by the latest parse tick keeps fading to
+ * opaque instead of snapping (the suffix characters it replaced were usually
+ * still mid-fade).
+ *
+ * Returns [combined] unchanged when there's nothing to animate.
  */
-internal fun applyBatchRevealSuffix(
+internal fun applyStreamingCharReveal(
     combined: AnnotatedString,
     staticLength: Int,
-    suffixProgress: Float,
+    suffixSourceOffset: Int,
+    clock: StreamingCharRevealClock,
+    nowNanos: Long,
     baseColor: Color,
+    settledCatchupStart: Int = staticLength,
+    settledCatchupAlpha: Float = 1f,
 ): AnnotatedString {
     if (baseColor == Color.Unspecified) return combined
-    if (suffixProgress >= 1f) return combined
-    if (staticLength < 0 || staticLength >= combined.length) return combined
-    val progress = suffixProgress.coerceIn(0f, 1f)
-    val codePointCount = combined.text
-        .codePointCount(staticLength, combined.length)
-        .coerceAtLeast(1)
-    if (codePointCount > STREAMING_BATCH_STAGGER_MAX_CODEPOINTS) {
-        val eased = easeStreamingReveal(progress)
-        return buildAnnotatedString {
-            append(combined)
-            addStyle(
-                style = streamingRevealSpanStyle(
-                    baseColor = baseColor,
-                    localProgress = progress,
-                    eased = eased,
-                ),
-                start = staticLength,
-                end = combined.length,
-            )
-        }
-    }
-    val staggerFraction = if (codePointCount <= 1) {
-        0f
-    } else {
-        minOf(
-            STREAMING_BATCH_CHAR_STAGGER_MS.toFloat() / STREAMING_BATCH_FADE_MS,
-            STREAMING_BATCH_MAX_STAGGER_FRACTION / (codePointCount - 1),
+    if (staticLength < 0 || staticLength > combined.length) return combined
+    val hasSuffix = staticLength < combined.length
+    val catchupActive = settledCatchupAlpha < 1f &&
+        settledCatchupStart in 0 until staticLength
+    if (!hasSuffix && !catchupActive) return combined
+
+    val fadeNanos = STREAMING_CHAR_REVEAL_FADE_MS * 1_000_000L
+    if (hasSuffix) {
+        clock.stamp(
+            suffixText = combined.text.substring(staticLength),
+            suffixSourceOffset = suffixSourceOffset,
+            nowNanos = nowNanos,
+            fadeNanos = fadeNanos,
+            staggerNanos = STREAMING_CHAR_REVEAL_STAGGER_MS * 1_000_000L,
+            maxCascadeNanos = STREAMING_CHAR_REVEAL_MAX_CASCADE_MS * 1_000_000L,
+            maxPending = STREAMING_CHAR_REVEAL_MAX_PENDING,
         )
     }
     return buildAnnotatedString {
         append(combined)
+        if (catchupActive) {
+            // Gradient tail: within the freshly absorbed range, older characters
+            // were already near-opaque when the parse tick promoted them, only
+            // the newest were mid-fade. A uniform overlay would visibly DARKEN
+            // the old end every tick, so the alpha ramps from opaque at the old
+            // end down to the catch-up floor at the newest, and the whole ramp
+            // animates to 1. Per-codepoint spans, bounded by the absorbed range.
+            val fullRamp = ArrayList<Pair<Int, Int>>()
+            var walker = settledCatchupStart
+            while (walker < staticLength) {
+                val cp = combined.text.codePointAt(walker)
+                val next = walker + Character.charCount(cp)
+                fullRamp.add(walker to next)
+                walker = next
+            }
+            val ramp = if (fullRamp.size > STREAMING_SETTLED_CATCHUP_MAX_CODEPOINTS) {
+                fullRamp.subList(
+                    fullRamp.size - STREAMING_SETTLED_CATCHUP_MAX_CODEPOINTS,
+                    fullRamp.size,
+                )
+            } else {
+                fullRamp
+            }
+            val animated = codexStreamingAlphaProgress(settledCatchupAlpha)
+            ramp.forEachIndexed { index, (start, end) ->
+                val youth = if (ramp.size <= 1) 1f else index.toFloat() / (ramp.size - 1)
+                val floor = 1f - (1f - STREAMING_SETTLED_CATCHUP_START_ALPHA) * youth
+                val alpha = floor + (1f - floor) * animated
+                if (alpha < 1f) {
+                    addStyle(
+                        style = SpanStyle(color = baseColor.copy(alpha = alpha)),
+                        start = start,
+                        end = end,
+                    )
+                }
+            }
+        }
         var offset = staticLength
-        var index = 0
         while (offset < combined.length) {
             val codePoint = combined.text.codePointAt(offset)
             val nextOffset = offset + Character.charCount(codePoint)
-            val delay = index * staggerFraction
-            val localProgress = ((progress - delay) / (1f - delay))
-                .coerceIn(0f, 1f)
-            val eased = easeStreamingReveal(localProgress)
-            addStyle(
-                style = streamingRevealSpanStyle(
-                    baseColor = baseColor,
-                    localProgress = localProgress,
-                    eased = eased,
-                ),
-                start = offset,
-                end = nextOffset,
+            val progress = clock.progressAt(
+                absOffset = suffixSourceOffset + (offset - staticLength),
+                nowNanos = nowNanos,
+                fadeNanos = fadeNanos,
             )
+            if (progress < 1f) {
+                addStyle(
+                    style = streamingRevealSpanStyle(
+                        baseColor = baseColor,
+                        localProgress = progress,
+                        eased = easeStreamingReveal(progress),
+                    ),
+                    start = offset,
+                    end = nextOffset,
+                )
+            }
             offset = nextOffset
-            index++
         }
     }
 }
 
-internal fun applyBatchRevealPlainSuffix(
+internal fun applyStreamingCharRevealPlain(
     text: String,
-    suffixProgress: Float,
+    suffixSourceOffset: Int,
+    clock: StreamingCharRevealClock,
+    nowNanos: Long,
     baseColor: Color,
 ): AnnotatedString {
     if (text.isEmpty()) return AnnotatedString("")
-    return applyBatchRevealSuffix(
+    return applyStreamingCharReveal(
         combined = buildAnnotatedString { append(text) },
         staticLength = 0,
-        suffixProgress = suffixProgress,
+        suffixSourceOffset = suffixSourceOffset,
+        clock = clock,
+        nowNanos = nowNanos,
         baseColor = baseColor,
     )
 }
@@ -2714,11 +2817,11 @@ private fun streamingRevealSpanStyle(
     eased: Float,
 ): SpanStyle {
     val alphaProgress = codexStreamingAlphaProgress(localProgress)
-    val alpha = STREAMING_BATCH_REVEAL_START_ALPHA +
-        (1f - STREAMING_BATCH_REVEAL_START_ALPHA) * alphaProgress
+    val alpha = STREAMING_CHAR_REVEAL_START_ALPHA +
+        (1f - STREAMING_CHAR_REVEAL_START_ALPHA) * alphaProgress
     return SpanStyle(
         color = baseColor.copy(alpha = alpha),
-        baselineShift = BaselineShift(-STREAMING_BATCH_REVEAL_LIFT_EM * (1f - eased)),
+        baselineShift = BaselineShift(-STREAMING_CHAR_REVEAL_LIFT_EM * (1f - eased)),
     )
 }
 

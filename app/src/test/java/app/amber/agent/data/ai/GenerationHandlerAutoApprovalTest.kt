@@ -66,8 +66,8 @@ class GenerationHandlerAutoApprovalTest {
     }
 
     @Test
-    fun alwaysAskToolsPauseEvenWithHighRiskAutoApproveEnabled() {
-        assertTrue(
+    fun alwaysAskToolsUseUnattendedAutoApproveWhenBothTogglesAreEnabled() {
+        assertFalse(
             resolver.shouldPauseForApproval(
                 toolDef = approvalTool("sms_send", allowsAutoApproval = false),
                 tool = toolCall("sms_send"),
@@ -84,6 +84,7 @@ class GenerationHandlerAutoApprovalTest {
                 toolDef = approvalTool("ask_user"),
                 tool = toolCall("ask_user"),
                 autoApproveTools = true,
+                autoApproveHighRiskTools = true,
             )
         )
     }

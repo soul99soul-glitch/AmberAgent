@@ -486,13 +486,15 @@ private fun V3ToolStatusBadge(
     // §6.2: a completed tool call uses signal-green (liveness/"just-finished"),
     // independent of the accent-derived toolDoneBg.
     val signal = app.amber.feature.ui.theme.LocalAmberTokens.current.signal
-    val statusIconInk = if (theme.isDark) theme.bg else Color.White
     val (bg, ink) = when (status) {
         AgentToolStatus.SUCCEEDED -> signal to theme.toolDoneBadgeInk
         AgentToolStatus.RUNNING -> Color.Transparent to theme.toolDoneBg
-        AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid to statusIconInk
-        AgentToolStatus.FAILED -> theme.contextHigh to statusIconInk
-        AgentToolStatus.CANCELLED -> Color.Transparent to theme.inkSoft
+        // 待授权/失败: 实心强调色底 + accentInk(随底色自适应黑/白)的图标 —— 与成功对勾共用同一套取色逻辑,
+        // 避免出现"对勾黑、叉白"的不一致。
+        AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid to theme.toolDoneBadgeInk
+        AgentToolStatus.FAILED -> theme.contextHigh to theme.toolDoneBadgeInk
+        // 已取消: 空心(透明底) + 强调色描边 + 强调色叉 —— 用"空心 vs 实心"与真正失败区分。
+        AgentToolStatus.CANCELLED -> Color.Transparent to theme.accent
     }
     if (status == AgentToolStatus.RUNNING) {
         // §6.2 ToolCall row: running → signal-green breathing live dot.

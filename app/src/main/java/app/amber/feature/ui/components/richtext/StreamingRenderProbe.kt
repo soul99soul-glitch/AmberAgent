@@ -69,6 +69,15 @@ internal object StreamingRenderProbe {
         parseTickCount = 0
     }
 
+    private var instanceCounter = 0
+
+    /**
+     * Per-instance id for display-buffer probes. Multiple display buffers run
+     * concurrently (reasoning block, text block, …) and interleave in the ring
+     * buffer; without an id their visible/target sequences are inseparable.
+     */
+    fun nextInstanceId(): Int = synchronized(lock) { ++instanceCounter }
+
     fun push(event: String) {
         synchronized(lock) {
             while (events.size >= StreamingRenderProbeCapacity) {

@@ -58,11 +58,39 @@ fun rememberStreamingDisplayText(
     val updatedContent by rememberUpdatedState(content)
     val updatedStreaming by rememberUpdatedState(streaming)
     val updatedOnVisibleFrame by rememberUpdatedState(onVisibleFrame)
-    val drainingAfterStream = !streaming && visible != content && content.startsWith(visible)
+    // Paced reveal is only ever legitimate for a stream THIS instance has
+    // tracked. A composable that is (re)created in the settled state and then
+    // receives different content is looking at a content CORRECTION — e.g. the
+    // end-of-stream path switch briefly feeding a stale snapshot, then the full
+    // text. Draining that correction re-revealed an entire already-read message
+    // over seconds (the "answer collapses to its first characters, then slowly
+    // re-types" end-of-stream jump). Settled corrections must render instantly.
+    var sawStreaming by remember { mutableStateOf(streaming) }
+    if (streaming && !sawStreaming) {
+        sawStreaming = true
+    }
+    val drainingAfterStream = sawStreaming &&
+        !streaming &&
+        visible != content &&
+        content.startsWith(visible)
     var previousStreaming by remember { mutableStateOf(streaming) }
+    // Instance-tagged birth/death probes: several display buffers run at once
+    // (reasoning + text blocks) and their emits interleave in the ring buffer.
+    // The birth event captures what content length a FRESH instance started
+    // from — the key evidence for "settled text collapsed then re-revealed".
+    val probeInstanceId = remember {
+        val id = StreamingRenderProbe.nextInstanceId()
+        StreamingRenderProbe.record {
+            "display_init id=$id visible=${content.length} streaming=$streaming"
+        }
+        id
+    }
 
     DisposableEffect(Unit) {
         onDispose {
+            StreamingRenderProbe.record {
+                "display_disposed id=$probeInstanceId visible=${visible.length}"
+            }
             StreamingRenderProbe.dump("streaming_display_disposed")
         }
     }
@@ -74,14 +102,26 @@ fun rememberStreamingDisplayText(
         previousStreaming = streaming
     }
 
-    if (!streaming && visible != content && !content.startsWith(visible)) {
+    // Settled-state sync: keep `visible` pinned to the latest content whenever
+    // we are NOT pacing it — on prefix mismatch (content replaced underneath)
+    // and on any correction reaching a never-streamed instance. Leaving the
+    // stale `visible` around would poison a later streaming start (the loop
+    // would treat the stale prefix as a huge backlog and re-pace it).
+    if (!streaming && visible != content && (!content.startsWith(visible) || !sawStreaming)) {
         SideEffect {
+            StreamingRenderProbe.record {
+                "display_snap_settled id=$probeInstanceId visible=${visible.length} " +
+                    "content=${content.length} prefix=${content.startsWith(visible)} sawStreaming=$sawStreaming"
+            }
             visible = content
         }
     }
 
     LaunchedEffect(streaming, drainingAfterStream) {
         if (!streaming && !drainingAfterStream) return@LaunchedEffect
+        StreamingRenderProbe.record {
+            "display_loop_start id=$probeInstanceId streaming=$streaming draining=$drainingAfterStream visible=${visible.length} target=${updatedContent.length}"
+        }
         var lastFrameNanos = 0L
         var lastEmitNanos = 0L
         var speed = STREAM_DISPLAY_BASE_CHARS_PER_SEC
@@ -128,7 +168,7 @@ fun rememberStreamingDisplayText(
                     budget = 0f
                     lastEmitNanos = frameNanos
                     StreamingRenderProbe.record {
-                        "display_backlog_cap backlog=$backlog skipped=$skipped visible=${visible.length} target=${target.length}"
+                        "display_backlog_cap id=$probeInstanceId backlog=$backlog skipped=$skipped visible=${visible.length} target=${target.length}"
                     }
                     updatedOnVisibleFrame?.invoke()
                     continue
@@ -171,7 +211,7 @@ fun rememberStreamingDisplayText(
             budget -= releaseCount
             lastEmitNanos = frameNanos
             StreamingRenderProbe.record {
-                "display_emit backlog=$backlog release=$releaseCount visible=${visible.length} target=${target.length} speed=${"%.1f".format(speed)}"
+                "display_emit id=$probeInstanceId backlog=$backlog release=$releaseCount visible=${visible.length} target=${target.length} speed=${"%.1f".format(speed)}"
             }
             updatedOnVisibleFrame?.invoke()
         }
