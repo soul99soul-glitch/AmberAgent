@@ -37,6 +37,10 @@
   `MarkdownPreprocessParityTest` is a documentation-pin for this reason) —
   drives the golden-blob rig design (§6).
 
+> **Naming errata (2026-06-12, plan phase)**: the interface ships as `MdNode`
+> (not `MarkdownNode` as written below) — `Markdown.kt:1410` already has a
+> `private fun MarkdownNode(...)` composable and the names would collide.
+
 ## 3. Architecture
 
 New subpackage `app/src/main/java/app/amber/feature/ui/components/richtext/tree/`:
