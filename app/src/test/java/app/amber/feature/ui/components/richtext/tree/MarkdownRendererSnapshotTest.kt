@@ -198,6 +198,11 @@ class MarkdownRendererSnapshotTest(
  * We assert through the real reader's `isValid` rather than poking the version byte
  * directly, so the guard tracks the production reader's actual accept criterion
  * automatically instead of duplicating its version constant.
+ *
+ * Scope note: content-only wire extensions that do NOT bump the version (e.g. the
+ * trailing CodeBlockKind byte) do not trip this guard — decoders must null-fallback on
+ * the missing bytes, which they do — so this only fires on an actual version bump vs
+ * stale blobs, not on backward-compatible additions.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)

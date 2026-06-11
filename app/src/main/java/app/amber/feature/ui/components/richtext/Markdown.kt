@@ -1500,29 +1500,42 @@ private fun MarkdownNode(
                         // children via appendMarkdownNodeContent (native). The old code filtered
                         // for `child.type == Paragraph` and rendered nothing on the native shape.
                         val paragraphChild = node.children.fastFirstOrNull { it.type == MdNodeType.Paragraph }
-                        val contentNode = paragraphChild ?: node
-                        val childLiveSuffix = if (paragraphChild != null) {
-                            streamingLiveSuffixForLastRenderableChild(
-                                children = node.children,
-                                child = paragraphChild,
-                                liveSuffix = liveSuffix,
-                                liveSuffixSourceOffset = liveSuffixSourceOffset,
+                        // Edge shape: a marker-only ATX heading (`##` with no trailing inline text)
+                        // has, on the JVM tree, ONLY an ATX_HEADER `#` marker child — an
+                        // MdNodeType.Unknown leaf — and NO Paragraph wrapper. The old `?: node`
+                        // fallback then routed that ATX node through Paragraph, whose leaf arm
+                        // appended the literal `##` markers (a flag-OFF render regression). Native
+                        // headings, by contrast, carry REAL inline children (no markers). So fall
+                        // back to `node` only when it has at least one NON-Unknown child (real inline
+                        // content to render); otherwise render nothing — matching the old code's
+                        // "nothing for a wrapper-less heading" behavior for the marker-only shape and
+                        // an empty native heading alike.
+                        val contentNode = paragraphChild
+                            ?: node.takeIf { it.children.fastFirstOrNull { c -> c.type != MdNodeType.Unknown } != null }
+                        if (contentNode != null) {
+                            val childLiveSuffix = if (paragraphChild != null) {
+                                streamingLiveSuffixForLastRenderableChild(
+                                    children = node.children,
+                                    child = paragraphChild,
+                                    liveSuffix = liveSuffix,
+                                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                                )
+                            } else {
+                                // No wrapper child to attribute the suffix to — pass it straight to the
+                                // heading-as-paragraph render (native shape).
+                                StreamingLiveSuffix(liveSuffix, liveSuffixSourceOffset)
+                            }
+                            Paragraph(
+                                node = contentNode,
+                                content = content,
+                                onClickCitation = onClickCitation,
+                                modifier = Modifier.padding(vertical = headingPadding),
+                                trim = true,
+                                plainSuffixStyle = bodyStyle,
+                                liveSuffix = childLiveSuffix.text,
+                                liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                             )
-                        } else {
-                            // No wrapper child to attribute the suffix to — pass it straight to the
-                            // heading-as-paragraph render (native shape).
-                            StreamingLiveSuffix(liveSuffix, liveSuffixSourceOffset)
                         }
-                        Paragraph(
-                            node = contentNode,
-                            content = content,
-                            onClickCitation = onClickCitation,
-                            modifier = Modifier.padding(vertical = headingPadding),
-                            trim = true,
-                            plainSuffixStyle = bodyStyle,
-                            liveSuffix = childLiveSuffix.text,
-                            liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
-                        )
                     }
                 }
             }
@@ -2112,26 +2125,44 @@ private fun ListItemNode(
                                 )
                             }
                         } else {
-                            // Attribute the live suffix to this grouped inline run iff the item's last
-                            // renderable child lives inside directContent (i.e. there's no trailing
-                            // nested list that would own the suffix instead) — mirrors the per-child
-                            // attribution the JVM loop performs against node.children.
-                            val groupSuffix = directContent.lastOrNull()?.let { last ->
-                                streamingLiveSuffixForLastRenderableChild(
-                                    children = node.children,
-                                    child = last,
-                                    liveSuffix = liveSuffix,
-                                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                            // Edge shape: the nested-FIRST list item `- \n  - nested` has, on the JVM
+                            // tree, a LIST_ITEM whose directContent is ONLY marker/whitespace Unknown
+                            // tokens (no Paragraph wrapper, because the item's leading line carries no
+                            // inline text). Grouping those raw Unknown tokens through InlineRunMdNode
+                            // → Paragraph would append the literal `-` marker (a flag-OFF render
+                            // regression). The OLD per-child loop fed each such Unknown token to
+                            // MarkdownNode, which has NO Unknown arm and so hit the generic `else`
+                            // arm — that walks `node.children`, and an Unknown marker LEAF has none,
+                            // so it rendered NOTHING (verified: no Unknown arm in the MarkdownNode
+                            // `when`; the else arm at the bottom is the only catch-all). Replicate
+                            // exactly: build the inline run from the NON-Unknown children only, and if
+                            // that set is empty, render nothing. NOTE: native list-item trees never
+                            // produce Unknown children (pulldown emits flat REAL inline nodes), so this
+                            // filter is a JVM-only guard by construction and is a no-op for the native
+                            // shape it was added to support.
+                            val inlineRun = directContent.filter { it.type != MdNodeType.Unknown }
+                            if (inlineRun.isNotEmpty()) {
+                                // Attribute the live suffix to this grouped inline run iff the item's
+                                // last renderable child lives inside directContent (i.e. there's no
+                                // trailing nested list that would own the suffix instead) — mirrors the
+                                // per-child attribution the JVM loop performs against node.children.
+                                val groupSuffix = inlineRun.lastOrNull()?.let { last ->
+                                    streamingLiveSuffixForLastRenderableChild(
+                                        children = node.children,
+                                        child = last,
+                                        liveSuffix = liveSuffix,
+                                        liveSuffixSourceOffset = liveSuffixSourceOffset,
+                                    )
+                                } ?: EMPTY_STREAMING_LIVE_SUFFIX
+                                Paragraph(
+                                    node = InlineRunMdNode(node, inlineRun),
+                                    content = content,
+                                    modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
+                                    onClickCitation = onClickCitation,
+                                    liveSuffix = groupSuffix.text,
+                                    liveSuffixSourceOffset = groupSuffix.sourceOffset,
                                 )
-                            } ?: EMPTY_STREAMING_LIVE_SUFFIX
-                            Paragraph(
-                                node = InlineRunMdNode(node, directContent),
-                                content = content,
-                                modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
-                                onClickCitation = onClickCitation,
-                                liveSuffix = groupSuffix.text,
-                                liveSuffixSourceOffset = groupSuffix.sourceOffset,
-                            )
+                            }
                         }
                     }
                 }

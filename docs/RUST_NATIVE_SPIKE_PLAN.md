@@ -532,7 +532,7 @@ JVM`，即使 `.so` 缺失或 panic 也不崩；这是 personal-use 默认开的
 实做项（personal-use 版 §8.3 — 4 条 insurance 全保留 + 2 条 enterprise-only 撤销）：
 
 - ✅ Feature flag / kill switch — `NativePathPrefs` 5 个 boolean + RC `native_path_kill_switch`
-- ✅ **默认 Rust 全开**（personal-use 决定）— `NativePathPrefsData` 4 个 user-facing flag default `true`；DataStore key 缺失时 `readFrom` 也 fallback 到 `true`。`markdownAst` 留 `false` 因为它是 shadow-only 没用户价值
+- ✅ **默认 Rust 全开**（personal-use 决定）— `NativePathPrefsData` 4 个 user-facing flag default `true`；DataStore key 缺失时 `readFrom` 也 fallback 到 `true`。`markdownAst` 现在选择 native renderer tree（TD.Rust.1a Phase 3-B，不再是 shadow-only）；默认仍 `false`，待 parity divergence 裁决（A/B/B-CJK/D/E 类）+ dogfood 后再 flip
 - ✅ Crashlytics — `NativePathFailure` / `NativePathDivergence` 子类（race-free，per-event payload 走 message 不走全局 custom key）
 - ✅ Diff sampling — 每 Switch 内置 sample rate 门控
 - ✅ Revert plan — merge commit 模式合 main 即可单步 `git revert <merge>`
@@ -643,7 +643,7 @@ Phase 3-C 写一个 `normalizeHtml(s: String): String`（Jsoup 解析 + canonica
 | 节点 | 状态 | 备注 |
 |---|---|---|
 | A. 灰度开 flag（dogfood → 5%→25%→100%） | ⏳ pending | 运营层，无代码；markdownHtml 依赖 C — 现可启动（C 已完成） |
-| B. Markdown.kt renderer 切到 packed AST | ✅ | renderer consumes packed AST behind MdNode interface (TD.Rust.1a); markdownAst flag default false pending dogfood; parity rig 2 samples green / 30 documented divergences (`MarkdownTreeParityTest`，全部归因于 2 个真实 renderer bug：native heading 渲染空 + native inline code 保留反引号，见测试 KDoc) |
+| B. Markdown.kt renderer 切到 packed AST | ✅ | renderer consumes packed AST behind MdNode interface (TD.Rust.1a)；markdownAst flag default false，待 parity divergence 裁决 + dogfood。parity rig：11 samples 硬 parity / 21 documented divergences（`MarkdownTreeParityTest`），分类：A JVM heading token-trim (12)、B escape resolution (3)、B-CJK CJK strong-emphasis flanking (1)、C（已 RESOLVED）、D link/footnote/reference structures (5)、E soft-break whitespace (1)。两个 renderer-shape bug（heading 渲染空 + inline-code 反引号）和 class C 均已 FIXED；flag 仍默认 false |
 | C. HTML normalizer + flip `HTML_DIFF_ENABLED` | ✅ | `HtmlDiffNormalizer.kt` (17 tests) + `HTML_DIFF_ENABLED=true`，2 轮 sub-agent review |
 | D-1 xlsx via calamine | ✅ | calamine 0.26 + Howard Hinnant date conv + 12 tests + Switch hard-gate sampling，2 轮 sub-agent review |
 | D-2 抽 native/jni-common crate | ✅ | `panic_to_string` + `init_logger_once!` macro + `write_varint` 4 crate 共享 + rust-version 1.75→1.76，2 轮 sub-agent review |

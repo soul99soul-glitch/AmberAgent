@@ -196,3 +196,13 @@ so any stage reverts in one step.
 - **Golden blobs can go stale vs the Rust crate** — mitigated by the
   staleness guard test + regen script; true drift also caught by on-device
   dogfood before the flag flips.
+- **[B-CJK] CJK-flanked `**strong**` fails on the native path (parser-level,
+  upstream)** — pulldown-cmark's CommonMark left/right-flanking rules treat CJK
+  as non-punctuation, so a `**…**` run whose BOTH flanks are CJK is
+  simultaneously left- and right-flanking and never opens/closes. Source
+  `常被称为**"离线优先"**策略` renders the literal asterisks on the native path;
+  the JetBrains JVM tree bolds it. This is in the renderer's INPUT (the parse),
+  not its shape-dispatch, so it is NOT renderer-fixable — it needs an upstream
+  pulldown-cmark fix or a CJK-aware delimiter pass. It is the PRIMARY flag-flip
+  blocker for CJK-heavy usage and is tracked as parity class B-CJK (sample 24,
+  `MarkdownTreeParityTest`).
