@@ -27,9 +27,10 @@ import app.amber.core.settings.PreferencesKeys
  * (`native_path_kill_switch`) remains the one-flip insurance if a native
  * crash surfaces in the wild.
  *
- * `markdownAst` stays `false`: it's a shadow-compare-only hook (the
- * renderer still consumes the JVM tree), turning it on without a renderer
- * swap is pure overhead.
+ * `markdownAst` stays `false`: flipping it to `true` switches the renderer to the
+ * native `NativeMdTree` as its primary AST (bc6716b7). Default `false` until the
+ * dogfood pass and the Stage-4 parity rig complete; see
+ * `docs/td-rust-1a-renderer-switch-design.md` for the rollout gate criteria.
  *
  * `regex` default `true` is **safe because `Assistant.replaceRegexes`
  * preflights the rule set** for JVM-only syntax (lookbehind / backref /
@@ -58,7 +59,7 @@ data class NativePathPrefsData(
     val highlight: Boolean = true,
     val regex: Boolean = true,         // safe — Assistant.kt preflights JVM-only syntax
     val markdownHtml: Boolean = true,
-    val markdownAst: Boolean = false,  // shadow-only, no user-facing win
+    val markdownAst: Boolean = false,  // false = JVM tree; true = NativeMdTree as renderer's primary AST (bc6716b7); default false until dogfood + parity rig pass
     /**
      * TA5.9 sync-crypto: PBKDF2/AES-GCM/SHA-256/HMAC for backup/restore.
      * Default on — produces byte-identical output to javax.crypto (Test:

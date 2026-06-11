@@ -354,7 +354,11 @@ internal class ByteToCharTranslator private constructor(
     /** `byteToChar[b]` = UTF-16 char index for UTF-8 byte index `b`. Size = utf8ByteLength + 1. */
     private val byteToChar: IntArray,
 ) {
-    /** Char offset for [byteOffset], clamping out-of-range inputs (never throws). */
+    /**
+     * Char offset for [byteOffset], clamping out-of-range inputs (never throws).
+     * Byte offsets past the end of the source clamp to the final sentinel entry, which equals
+     * the source's char length — equivalent to `source.length` as a char offset.
+     */
     fun toCharOffset(byteOffset: Int): Int {
         if (byteOffset <= 0) return 0
         if (byteOffset >= byteToChar.size) return byteToChar[byteToChar.size - 1]

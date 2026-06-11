@@ -55,23 +55,30 @@ class MarkdownFunnelGateTest {
 
     @Test
     fun flagOnFallsThroughToJvmWhenNativeLibAbsent() {
-        val md = "# Title\n\nA paragraph with **bold** and a list:\n\n- one\n- two\n"
+        // Two content strings with identical structure but different text so the cache never
+        // confuses the flag-off result for the flag-on result: each call is a guaranteed miss.
+        val mdOff = "# Title\n\nA paragraph with **bold** and a list:\n\n- one\n- two\n"
+        val mdOn  = "# Heading\n\nA sentence with **bold** and a list:\n\n- alpha\n- beta\n"
 
-        // Flag OFF (default) baseline.
+        // Flag OFF (default) baseline — parse mdOff.
         MarkdownNativeSwitch.config = MarkdownNativeSwitch.DisabledConfig
-        val off = parseMarkdownContent(md)
+        val off = parseMarkdownContent(mdOff)
 
         // Flag ON — gate is entered, native lib absent → blob null → JVM fall-through.
+        // mdOn is distinct from mdOff so this call is a cache MISS and genuinely re-enters
+        // parsePreprocessedMarkdownUncached with the gate active.
         MarkdownNativeSwitch.config = AstOnConfig
-        val on = parseMarkdownContent(md)
+        val on = parseMarkdownContent(mdOn)
 
         // The gate did not crash and produced a valid tree with the expected top-level structure.
         assertNotNull("flag-on funnel must still return a tree", on.tree)
         assertEquals(MdNodeType.Root, on.tree.type)
         assertTrue("tree must have parsed blocks", on.tree.children.isNotEmpty())
 
-        // Fall-through is byte-equivalent to the flag-off JVM path (same block types in order).
+        // Structural equivalence: both strings have the same block layout (heading, paragraph,
+        // bullet list), so the top-level block types must match regardless of text content.
         assertEquals(
+            "flag-on fall-through must yield the same block-type sequence as flag-off JVM",
             off.tree.children.map { it.type },
             on.tree.children.map { it.type },
         )
