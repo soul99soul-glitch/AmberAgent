@@ -69,6 +69,9 @@ private const val REASONING_PREVIEW_CHAR_LIMIT = 1_600
 private const val REASONING_EXPANDED_STREAM_CHAR_LIMIT = 6_000
 private const val REASONING_EXPANDED_FINAL_CHAR_LIMIT = 18_000
 
+// 自动折叠相对"生成结束"的延迟: 错开结束瞬间的虚拟化切换/footer 显隐等布局变化
+private const val REASONING_AUTO_COLLAPSE_DELAY_MS = 300L
+
 enum class ReasoningCardState(val expanded: Boolean) {
     Collapsed(false),
     Preview(true),
@@ -119,10 +122,16 @@ private fun rememberReasoningState(
                 state.expandState = ReasoningCardState.Preview
         } else {
             if (state.expandState.expanded) {
-                state.expandState = if (settings.displaySetting.autoCloseThinking)
-                    ReasoningCardState.Collapsed
-                else
-                    ReasoningCardState.Expanded
+                if (settings.displaySetting.autoCloseThinking) {
+                    // 生成结束的同一帧里还会发生: 消息从整条 item 切换成虚拟化多
+                    // item、ActionFooter 由占位转可见、流式/非流式渲染分支切换。
+                    // 把自动折叠错开一拍, 让这些布局变化先落定, 避免叠加成一次
+                    // 大跳变。loading 重新变 true (重新生成) 时此协程被取消。
+                    delay(REASONING_AUTO_COLLAPSE_DELAY_MS)
+                    state.expandState = ReasoningCardState.Collapsed
+                } else {
+                    state.expandState = ReasoningCardState.Expanded
+                }
             }
         }
     }

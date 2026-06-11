@@ -114,6 +114,49 @@ class UIMessageChunkMergeTest {
     }
 
     @Test
+    fun `executed tool is sealed and never a merge target`() {
+        // 多轮 tool 循环共用同一条 assistant 消息: 第二轮 stream index 从 0 重新
+        // 计数, 不能把新一轮 delta 串进上一轮已执行的同 index tool
+        val executed = UIMessagePart.Tool(
+            toolCallId = "round1",
+            toolName = "search",
+            input = """{"q":"old"}""",
+            output = listOf(UIMessagePart.Text("result")),
+        ).withStreamToolIndex(0)
+        var message = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(executed))
+
+        // 第二轮: 带新 id + index 0 的 delta, 以及后续 blank id + index 0 的参数分片
+        message += chunk(tool(id = "round2", name = "search", input = "{\"q\"", streamIndex = 0))
+        message += chunk(tool(id = "", name = "", input = ":\"new\"}", streamIndex = 0))
+
+        val tools = message.parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(2, tools.size)
+        val round1 = tools.first { it.toolCallId == "round1" }
+        val round2 = tools.first { it.toolCallId == "round2" }
+        assertEquals("""{"q":"old"}""", round1.input)
+        assertEquals(1, round1.output.size)
+        assertEquals("""{"q":"new"}""", round2.input)
+    }
+
+    @Test
+    fun `blank delta without index does not fall back onto executed tool`() {
+        val executed = UIMessagePart.Tool(
+            toolCallId = "round1",
+            toolName = "search",
+            input = "{}",
+            output = listOf(UIMessagePart.Text("result")),
+        )
+        var message = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(executed))
+
+        message += chunk(tool(id = "", name = "lookup", input = "{}"))
+
+        val tools = message.parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(2, tools.size)
+        assertEquals("{}", tools.first { it.toolCallId == "round1" }.input)
+        assertEquals("lookup", tools.last().toolName)
+    }
+
+    @Test
     fun `withStreamToolIndex preserves existing metadata`() {
         val tool = UIMessagePart.Tool(
             toolCallId = "id",
