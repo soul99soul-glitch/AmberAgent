@@ -93,7 +93,7 @@ class ResponseAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: model=${params.model.modelId}")
 
         var response = client.newCall(request).await()
         if (response.code == 401) {
@@ -108,7 +108,7 @@ class ResponseAPI(
         }
 
         val bodyStr = response.body?.string() ?: ""
-        Log.i(TAG, "generateText: $bodyStr")
+        Log.i(TAG, "generateText: response ${bodyStr.length} chars")
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val output = parseResponseOutput(bodyJson)
 
@@ -179,7 +179,7 @@ class ResponseAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: model=${params.model.modelId}")
 
         val listener = object : EventSourceListener() {
             override fun onEvent(
@@ -268,7 +268,7 @@ class ResponseAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamCodexText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamCodexText: model=${params.model.modelId}")
 
         var response = client.newCall(request).await()
         if (response.code == 401) {
@@ -370,9 +370,8 @@ class ResponseAPI(
                 }
             }
 
-            // tools
-            if (params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
-                putJsonArray("tools") {
+            val toolDefinitions = buildJsonArray {
+                if (params.model.abilities.contains(ModelAbility.TOOL)) {
                     params.tools.forEach { tool ->
                         add(buildJsonObject {
                             put("type", "function")
@@ -387,29 +386,27 @@ class ResponseAPI(
                         })
                     }
                 }
-            }
-            // built-in tools
-            if (params.model.tools.isNotEmpty()) {
-                putJsonArray("tools") {
-                    params.model.tools.forEach { builtInTool ->
-                        when (builtInTool) {
-                            BuiltInTools.Search -> {
-                                add(buildJsonObject {
-                                    put("type", "web_search")
-                                })
-                            }
+                params.model.tools.forEach { builtInTool ->
+                    when (builtInTool) {
+                        BuiltInTools.Search -> {
+                            add(buildJsonObject {
+                                put("type", "web_search")
+                            })
+                        }
 
-                            BuiltInTools.UrlContext -> {} // not supported
+                        BuiltInTools.UrlContext -> {} // not supported
 
-                            BuiltInTools.ImageGeneration -> {
-                                add(buildJsonObject {
-                                    put("type", "image_generation")
-                                    put("model", "gpt-image-2")
-                                })
-                            }
+                        BuiltInTools.ImageGeneration -> {
+                            add(buildJsonObject {
+                                put("type", "image_generation")
+                                put("model", "gpt-image-2")
+                            })
                         }
                     }
                 }
+            }
+            if (toolDefinitions.isNotEmpty()) {
+                put("tools", toolDefinitions)
             }
         }.mergeCustomBody(params.customBody)
             .withoutSamplingParamsIfNeeded(params.model)

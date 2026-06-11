@@ -8,6 +8,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.TokenUsage
 import app.amber.ai.provider.Model
@@ -15,6 +17,8 @@ import app.amber.ai.util.json
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
+
+internal const val STREAM_TOOL_INDEX_METADATA_KEY = "stream_tool_index"
 
 // 公共消息抽象, 具体的Provider实现会转换为API接口需要的DTO
 //
@@ -102,21 +106,31 @@ data class UIMessage(
                     }
 
                     is UIMessagePart.Tool -> {
+                        val streamIndex = deltaPart.streamToolIndex()
+                        val existingByStreamIndex = streamIndex?.let { index ->
+                            acc.find { it is UIMessagePart.Tool && it.streamToolIndex() == index }
+                                as? UIMessagePart.Tool
+                        }
                         if (deltaPart.toolCallId.isBlank()) {
-                            // No ID yet - append to the last Tool if it also has no ID
-                            val lastTool = acc.lastOrNull { it is UIMessagePart.Tool } as? UIMessagePart.Tool
-                            if (lastTool != null) {
+                            // No ID yet - OpenAI-compatible streams identify parallel tool deltas by index.
+                            val targetTool = existingByStreamIndex
+                                ?: if (streamIndex == null) {
+                                    acc.lastOrNull { it is UIMessagePart.Tool } as? UIMessagePart.Tool
+                                } else {
+                                    null
+                                }
+                            if (targetTool != null) {
                                 acc.map { part ->
-                                    if (part === lastTool) part.merge(deltaPart) else part
+                                    if (part === targetTool) part.merge(deltaPart) else part
                                 }
                             } else {
                                 acc + deltaPart.copy()
                             }
                         } else {
                             // Has ID - find and update by ID, or insert new
-                            val existsPart = acc.find {
+                            val existsPart = (acc.find {
                                 it is UIMessagePart.Tool && it.toolCallId == deltaPart.toolCallId
-                            } as? UIMessagePart.Tool
+                            } as? UIMessagePart.Tool) ?: existingByStreamIndex
                             if (existsPart == null) {
                                 acc + deltaPart.copy()
                             } else {
@@ -475,6 +489,9 @@ sealed class UIMessagePart {
         }
     }
 }
+
+internal fun UIMessagePart.Tool.streamToolIndex(): Int? =
+    metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
 
 fun UIMessage.finishReasoning(): UIMessage {
     return copy(

@@ -1,5 +1,6 @@
 package app.amber.ai.provider.providers.openai
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -15,7 +16,10 @@ import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.MessageChunk
+import app.amber.ai.ui.MessageStreamAccumulator
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.hasExplicitReasoningContentField
 import app.amber.ai.util.KeyRoulette
@@ -337,6 +341,55 @@ class ChatCompletionsAPIMessageTest {
     }
 
     @Test
+    fun `streamed parallel tool argument deltas should merge by tool call index`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("Use both tools"))
+        )
+
+        listOf(
+            """
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {"index": 0, "id": "call_a", "type": "function", "function": {"name": "tool_a", "arguments": ""}},
+                {"index": 1, "id": "call_b", "type": "function", "function": {"name": "tool_b", "arguments": ""}}
+              ]
+            }
+            """,
+            """
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {"index": 0, "function": {"arguments": "{\"a\""}},
+                {"index": 1, "function": {"arguments": "{\"b\""}}
+              ]
+            }
+            """,
+            """
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {"index": 0, "function": {"arguments": ":1}"}},
+                {"index": 1, "function": {"arguments": ":2}"}}
+              ]
+            }
+            """
+        ).forEach { raw ->
+            accumulator.append(streamChunk(invokeParseMessage(parseJsonObject(raw))))
+        }
+
+        val tools = accumulator.snapshot()
+            .last()
+            .getTools()
+            .associateBy { it.toolCallId }
+
+        assertEquals("""{"a":1}""", tools["call_a"]?.input)
+        assertEquals("""{"b":2}""", tools["call_b"]?.input)
+        assertEquals("tool_a", tools["call_a"]?.toolName)
+        assertEquals("tool_b", tools["call_b"]?.toolName)
+    }
+
+    @Test
     fun `reasoning should only be included for messages after last user message`() {
         // First assistant message (before user's last message) - reasoning should NOT be included
         val assistant1 = UIMessage(
@@ -521,6 +574,22 @@ class ChatCompletionsAPIMessageTest {
     }
 
     // ==================== Helper Functions ====================
+
+    private fun parseJsonObject(raw: String): JsonObject =
+        Json.parseToJsonElement(raw.trimIndent()).jsonObject
+
+    private fun streamChunk(delta: UIMessage): MessageChunk = MessageChunk(
+        id = "chunk",
+        model = "test",
+        choices = listOf(
+            UIMessageChoice(
+                index = 0,
+                delta = delta,
+                message = null,
+                finishReason = null,
+            )
+        )
+    )
 
     private fun createExecutedTool(
         callId: String,

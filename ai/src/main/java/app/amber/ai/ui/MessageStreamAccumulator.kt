@@ -156,18 +156,28 @@ class MessageStreamAccumulator(
 
         private fun appendTool(deltaPart: UIMessagePart.Tool) {
             val tool = if (deltaPart.toolCallId.isBlank()) {
-                val lastTool = parts.lastOrNull { it is MutablePart.Tool } as? MutablePart.Tool
-                lastTool?.tool?.merge(deltaPart)?.let { merged ->
+                val streamIndex = deltaPart.streamToolIndex()
+                val targetTool = streamIndex?.let { index ->
+                    parts.find { it is MutablePart.Tool && it.tool.streamToolIndex() == index } as? MutablePart.Tool
+                } ?: if (streamIndex == null) {
+                    parts.lastOrNull { it is MutablePart.Tool } as? MutablePart.Tool
+                } else {
+                    null
+                }
+                targetTool?.tool?.merge(deltaPart)?.let { merged ->
                     parts.replaceAll { part ->
-                        if (part === lastTool) MutablePart.Tool(merged) else part
+                        if (part === targetTool) MutablePart.Tool(merged) else part
                     }
                     return
                 }
                 deltaPart.copy()
             } else {
-                val existing = parts.find {
+                val existing = (parts.find {
                     it is MutablePart.Tool && it.tool.toolCallId == deltaPart.toolCallId
-                } as? MutablePart.Tool
+                } as? MutablePart.Tool)
+                    ?: deltaPart.streamToolIndex()?.let { index ->
+                        parts.find { it is MutablePart.Tool && it.tool.streamToolIndex() == index } as? MutablePart.Tool
+                    }
                 existing?.let {
                     val merged = it.tool.merge(deltaPart)
                     parts.replaceAll { part ->

@@ -7,6 +7,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.core.Tool
+import app.amber.ai.provider.BuiltInTools
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ProviderSetting
@@ -371,6 +373,41 @@ class ResponseAPIMessageTest {
         val reasoning = requestBody["reasoning"]?.jsonObject
         assertTrue("reasoning should exist", reasoning != null)
         assertEquals("low", reasoning!!["effort"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `response api should combine custom function tools with built in tools`() {
+        val providerSetting = ProviderSetting.OpenAI(
+            baseUrl = "https://api.openai.com/v1"
+        )
+        val requestBody = invokeBuildRequestBody(
+            providerSetting = providerSetting,
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "gpt-5.1",
+                    displayName = "gpt-5.1",
+                    abilities = listOf(ModelAbility.TOOL),
+                    tools = setOf(BuiltInTools.Search)
+                ),
+                tools = listOf(
+                    Tool(
+                        name = "local_tool",
+                        description = "Local test tool",
+                        execute = { emptyList() }
+                    )
+                )
+            )
+        )
+
+        val tools = requestBody["tools"]!!.jsonArray.map { it.jsonObject }
+
+        assertTrue(tools.any { tool ->
+            tool["type"]?.jsonPrimitive?.content == "function" &&
+                tool["name"]?.jsonPrimitive?.content == "local_tool"
+        })
+        assertTrue(tools.any { tool ->
+            tool["type"]?.jsonPrimitive?.content == "web_search"
+        })
     }
 
     // ==================== Helper Functions ====================
