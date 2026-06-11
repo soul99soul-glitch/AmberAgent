@@ -925,6 +925,57 @@ internal fun parseMarkdownContent(content: String): MarkdownParseResult {
     return MarkdownParseCache.getOrParse(content)
 }
 
+/**
+ * Test-only seam (TD.Rust.1a Phase 3-B parity rig). Builds the JVM (JetBrains) tree
+ * over the EXACT [rawText] given — bypassing [preProcess] — so the produced
+ * [MarkdownParseResult.tree] describes the same raw input the golden `.pmda` blobs were
+ * generated from. With all native flags off (the unit-test default), this runs the
+ * pure JetBrains parse path. See MarkdownTreeParityTest.
+ */
+@androidx.annotation.VisibleForTesting
+internal fun parseRawMarkdownForParityTest(rawText: String): MarkdownParseResult =
+    parsePreprocessedMarkdownUncached(rawText)
+
+/**
+ * Test-only seam (TD.Rust.1a Phase 3-B parity rig). Renders a PRE-BUILT [result] through the
+ * same render dispatch [MarkdownBlock] uses on the non-streaming path, so the parity test can
+ * render two different trees (JVM vs native) side by side inside ONE `setContent` (a Compose
+ * test rule allows only one). This is render-equivalent to `MarkdownBlock(content)` for a settled
+ * (non-streaming, no stable-block, no live-suffix) result: that input drives `MarkdownBlock` into
+ * exactly the `else` arm below, where every streaming CompositionLocal already equals its default
+ * (`activeBaseOffset == 0` == LocalMarkdownSourceOffsetBase default, `syntheticSuffixStart ==
+ * Int.MAX_VALUE` == LocalMarkdownSyntheticSuffixStart default, null tail/motion scope, empty
+ * liveSuffix). The HTML-block arm dispatches to the identical `MarkdownNew(content)` either way.
+ * See MarkdownTreeParityTest. Not for production use.
+ */
+@androidx.annotation.VisibleForTesting
+@Composable
+internal fun MarkdownTreeForParityTest(
+    content: String,
+    result: MarkdownParseResult,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+) {
+    CompositionLocalProvider(LocalMarkdownFillWidth provides true) {
+        if (result.hasHtmlBlocks) {
+            MarkdownNew(content = content, modifier = modifier, style = style)
+        } else {
+            ProvideTextStyle(style) {
+                Column(modifier = modifier.padding(start = 4.dp)) {
+                    val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
+                    result.tree.children.fastForEach { child ->
+                        MarkdownNode(
+                            node = child,
+                            content = result.preprocessed,
+                            modifier = nodeModifier,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 internal fun MarkdownParseResult.canRenderByTopLevelBlocks(): Boolean {
     return !hasHtmlBlocks && tree.children.size > 1
 }

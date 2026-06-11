@@ -643,7 +643,7 @@ Phase 3-C 写一个 `normalizeHtml(s: String): String`（Jsoup 解析 + canonica
 | 节点 | 状态 | 备注 |
 |---|---|---|
 | A. 灰度开 flag（dogfood → 5%→25%→100%） | ⏳ pending | 运营层，无代码；markdownHtml 依赖 C — 现可启动（C 已完成） |
-| B. Markdown.kt renderer 切到 packed AST | ⏳ blocked | 等 Markdown.kt streaming-render migration 收敛 ≥ 2 周 |
+| B. Markdown.kt renderer 切到 packed AST | ✅ | renderer consumes packed AST behind MdNode interface (TD.Rust.1a); markdownAst flag default false pending dogfood; parity rig 2 samples green / 30 documented divergences (`MarkdownTreeParityTest`，全部归因于 2 个真实 renderer bug：native heading 渲染空 + native inline code 保留反引号，见测试 KDoc) |
 | C. HTML normalizer + flip `HTML_DIFF_ENABLED` | ✅ | `HtmlDiffNormalizer.kt` (17 tests) + `HTML_DIFF_ENABLED=true`，2 轮 sub-agent review |
 | D-1 xlsx via calamine | ✅ | calamine 0.26 + Howard Hinnant date conv + 12 tests + Switch hard-gate sampling，2 轮 sub-agent review |
 | D-2 抽 native/jni-common crate | ✅ | `panic_to_string` + `init_logger_once!` macro + `write_varint` 4 crate 共享 + rust-version 1.75→1.76，2 轮 sub-agent review |
