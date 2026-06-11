@@ -1,0 +1,16 @@
+  text=Inline Links
+  text=The most common link form in Markdown is the inline link: link text. The text in brackets is what the user sees; the URL in parentheses is the destination.
+  text=Here are a few realistic examples from an assistant answer:
+  text=You can read the official Kotlin documentation at kotlinlang.org for detailed language reference. The Android developer guides are the canonical source for platform APIs.
+  text=For dependency management, Maven Central hosts most open-source JVM artifacts, while Google Maven hosts Android-specific ones.
+  text=Autolinks
+  text=Raw URLs written between angle brackets are autolinks: https://example.com. They produce a clickable link whose text is the URL itself.
+  text=Email autolinks also work: <user@example.com>. The renderer should produce a mailto: link.
+  text=Link Destinations
+  text=Links can point to relative paths: README. They can also contain query strings: search.
+  text=A link destination with a fragment: section anchor. These are especially common in long document navigation.
+  text=Bare URL Behaviour
+  text=In standard CommonMark a bare URL like https://example.com without angle brackets is not automatically linked. However, many renderers (including GFM) do auto-link bare URLs. This sample includes one to test which behaviour the renderer applies: https://github.com/jetbrains/kotlin.
+  text=Nested Inline Content in Link Text
+  text=Links can contain emphasis in their text: *Italic link text*. They can also contain inline code: `kotlin.collections`.
+  text=They cannot, however, contain other links — that would be invalid nesting.

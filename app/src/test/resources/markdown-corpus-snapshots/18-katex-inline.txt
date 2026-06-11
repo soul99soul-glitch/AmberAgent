@@ -1,0 +1,43 @@
+  text=KaTeX—Inline Math
+  text=Inline math is delimited by single dollar signs: [Latex]. The pre-processor converts the original source to this form before it reaches the Markdown parser, so these samples use the post-preprocess $...$ syntax directly.
+    text=$...$
+  text=Physics
+  text=Einstein's famous mass-energy equivalence is [Latex], where [Latex] is energy in joules, [Latex] is mass in kilograms, and [Latex] is the speed of light.
+    text=$E = mc^2$
+    text=$E$
+    text=$m$
+    text=$c \approx 3 \times 10^8\ \text{m/s}$
+  text=The Schrödinger equation describes how the quantum state of a system evolves: [Latex].
+    text=$i\hbar \frac{\partial}{\partial t} \Psi = \hat{H} \Psi$
+  text=Calculus
+  text=The derivative of [Latex] is [Latex] by the power rule.
+    text=$f(x) = x^n$
+    text=$f'(x) = nx^{n-1}$
+  text=The fundamental theorem of calculus connects differentiation and integration: [Latex].
+    text=$\int_a^b f'(x)\,dx = f(b) - f(a)$
+  text=Statistics
+  text=The expected value of a random variable [Latex] is [Latex] for a discrete distribution.
+    text=$X$
+    text=$\mathbb{E}[X] = \sum_{i} x_i \cdot P(X = x_i)$
+  text=The standard normal variable is [Latex], where [Latex] is the mean and [Latex] is the standard deviation.
+    text=$Z = \frac{X - \mu}{\sigma}$
+    text=$\mu$
+    text=$\sigma$
+  text=Combinatorics
+  text=The number of ways to choose [Latex] items from [Latex] is [Latex].
+    text=$k$
+    text=$n$
+    text=$\binom{n}{k} = \frac{n!}{k!(n-k)!}$
+  text=Algorithm Analysis
+  text=Quick sort has an average-case time complexity of [Latex] and a worst-case of [Latex]. Its space complexity is [Latex] due to the recursion stack.
+    text=$O(n \log n)$
+    text=$O(n^2)$
+    text=$O(\log n)$
+  text=Binary search runs in [Latex] time and [Latex] space for the iterative implementation.
+    text=$O(\log n)$
+    text=$O(1)$
+  text=Mixed Prose and Math
+  text=When you increase the learning rate [Latex] in gradient descent, each parameter update [Latex] takes a larger step. Too large an [Latex] causes oscillation; too small slows convergence.
+    text=$\alpha$
+    text=$\theta \leftarrow \theta - \alpha \nabla_\theta J(\theta)$
+    text=$\alpha$

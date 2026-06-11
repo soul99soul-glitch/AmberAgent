@@ -1,0 +1,38 @@
+  text=Blockquotes—Nested
+  text=Blockquotes use > prefixes. They can be nested by stacking multiple > characters.
+  text=Simple Blockquote
+  text=The best way to get a project done faster is to start sooner.
+ — Jim Highsmith
+  text=Multi-Paragraph Blockquote
+  text=Coroutines are a way of doing cooperative multitasking. Unlike threads, they don't block the underlying OS thread; they suspend execution and yield control back to the caller.
+  text=This means you can have thousands of coroutines running on just a handful of threads, making them much more memory-efficient than traditional thread-per-request models.
+  text=Nested Blockquote
+  text=Outer quote: Here is the original statement that was made in a previous message.
+  text=Inner quote: And this is a reply or elaboration nested inside the first quote.
+  text=The inner quote can also span multiple paragraphs.
+  text=We return to the outer quote level here, after the nested section.
+  text=Three Levels Deep
+  text=Level 1 — original message
+  text=Level 2 — first reply
+  text=Level 3 — reply to the reply
+  text=This is the deepest level in this example.
+  text=Back to level 2.
+  text=Back to level 1.
+  text=Blockquote Containing Other Blocks
+  text=Heading Inside a Blockquote
+  text=A blockquote can contain headings, lists, and code:
+  text=•
+  text=Item A inside a blockquote
+  text=•
+  text=Item B inside a blockquote
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=> val msg = "code inside a blockquote"
+> println(msg)
+  text=The content above is fully rendered inside the quote boundary.
+  text=Lazy Continuation
+  text=This is the start of a blockquote.
+The continuation line does not need a > prefix in lazy mode.
+But the next blank line ends it.
+  text=Back to regular prose here.

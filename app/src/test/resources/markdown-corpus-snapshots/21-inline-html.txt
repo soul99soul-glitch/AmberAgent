@@ -1,0 +1,27 @@
+  text=Inline HTML
+  text=Unlike HTML blocks, inline HTML tags appear inside a paragraph or other inline context. They are passed through verbatim.
+  text=Basic Inline Tags
+  text=You can use <strong>bold</strong> and <em>italic</em> via inline HTML, though the Markdown equivalents (** and *) are preferred. You can also use <code>monospace</code> inline.
+  text=A <span style="color: red;">red span</span> via inline HTML — note that in many sandboxed renderers, inline styles are stripped for security.
+  text=Superscript and Subscript
+  text=The water molecule is H<sub>2</sub>O. The speed of light is approximately 3×10<sup>8</sup> m/s. These HTML tags have no Markdown equivalent in CommonMark, so inline HTML is the only way to achieve them (without KaTeX).
+  text=Abbreviation via<abbr>
+  text=The <abbr title="Application Programming Interface">API</abbr> documentation is available on the developer portal.
+  text=Line Break via<br>
+  text=This line ends with an inline HTML break.
+
+This line starts on a new line because of the <br> tag above.
+  text=Kbd Tag
+  text=Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> to open the command palette in Android Studio.
+  text=Mark Tag
+  text=The <mark>highlighted text</mark> stands out visually when the <mark> tag is rendered by the browser.
+  text=Del and Ins
+  text=The price was <del>[Latex]49</ins> after the sale.
+    text=$99</del> <ins>$
+  text=Mixed Markdown and Inline HTML
+  text=You can mix bold Markdown with <em>italic HTML</em> in the same paragraph. The parser must handle both simultaneously without confusing the two systems.
+  text=Here is a code span next to <code>inline HTML code</code> — both should render as monospace.
+  text=Self-Closing Tags
+  text=An explicit break: line one
+line two. The self-closing />form is also valid inline HTML.
+  text=An inline image via HTML: <img src="https://example.com/icon.png" alt="icon" width="16" height="16" />

@@ -1,0 +1,8 @@
+  text=Streaming Truncated Response
+  text=This file simulates what happens when a streaming LLM response is cut off mid-generation. The parser and renderer must handle an unclosed code fence gracefully — without crashing and ideally rendering the partial code block as best it can.
+  text=The response below was truncated because the context window was exhausted mid-token:
+  text=Here is a code example:
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=fun partial(

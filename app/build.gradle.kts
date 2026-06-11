@@ -254,6 +254,16 @@ android {
         unitTests.isReturnDefaultValues = true
         // Robolectric Compose UI tests need real resources on the JVM classpath.
         unitTests.isIncludeAndroidResources = true
+        // TD.Rust.1a — pass the snapshot-regen flag through to the test JVM so
+        // MarkdownRendererSnapshotTest can WRITE goldens instead of asserting.
+        // Gradle -P props are project props, not JVM system props, so forward it
+        // explicitly: ./gradlew :app:testDebugUnitTest -PupdateMarkdownSnapshots=true
+        unitTests.all {
+            it.systemProperty(
+                "updateMarkdownSnapshots",
+                (project.findProperty("updateMarkdownSnapshots") as? String) ?: "false",
+            )
+        }
     }
     sourceSets {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")

@@ -1,0 +1,124 @@
+  text=Building an Offline-First Android App with Room and Coroutines
+  text=This is a long assistant answer (~80 lines) covering architecture, implementation steps, code, and caveats. It mixes prose, ordered lists, code blocks, and a summary table.
+  text=What is"Offline-First"?
+  text=An offline-first app treats the local database as the primary source of truth. The UI reads from the database, and a background sync process reconciles the local state with a remote API. Users can read and interact with stale data while offline, and changes are queued and flushed when connectivity returns.
+  text=This is different from a "cache-aside" pattern, where the app tries the network first and falls back to cache on failure. Offline-first is more deliberate: local data is always available instantly, and network sync is a background concern.
+  text=Architecture
+  text=The standard Android offline-first stack looks like this:
+  text=1.
+  text=Room persists data in SQLite and exposes reactive Flow<List<T>> queries.
+  text=2.
+  text=Repository layer reads from Room, triggers API calls, and writes results back to Room.
+  text=3.
+  text=ViewModel collects the repository's Flow and exposes StateFlow<UiState<T>> to the UI.
+  text=4.
+  text=Compose UI observes the StateFlow and recomposes on changes.
+  text=5.
+  text=WorkManager schedules background sync jobs that run even when the app is closed.
+  text=Step-by-Step Implementation
+  text=1.Define the Entity and DAO
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=@Entity(tableName = "articles")
+data class ArticleEntity(
+ @PrimaryKey val id: String,
+ val title: String,
+ val body: String,
+ val publishedAt: Long,
+ val isSynced: Boolean = true
+)
+
+@Dao
+interface ArticleDao {
+ @Query("SELECT * FROM articles ORDER BY publishedAt DESC")
+ fun observeAll(): Flow<List<ArticleEntity>>
+
+ @Upsert
+ suspend fun upsertAll(articles: List<ArticleEntity>)
+
+ @Query("DELETE FROM articles WHERE id = :id")
+ suspend fun delete(id: String)
+}
+  text=2.Write the Repository
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=class ArticleRepository(
+ private val dao: ArticleDao,
+ private val api: ArticleApi,
+ private val dispatcher: CoroutineDispatcher = Dispatchers.IO
+) {
+ /** Always read from the local DB — the UI never waits for network. */
+ val articles: Flow<List<Article>> = dao.observeAll()
+ .map { entities -> entities.map(ArticleEntity::toDomain) }
+ .flowOn(dispatcher)
+
+ /** Fetch from network and write into the DB; the Flow above auto-updates. */
+ suspend fun sync() = withContext(dispatcher) {
+ val remote = api.getArticles()
+ dao.upsertAll(remote.map(ArticleDto::toEntity))
+ }
+}
+  text=3.Set Up the ViewModel
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=@HiltViewModel
+class ArticleListViewModel @Inject constructor(
+ private val repository: ArticleRepository
+) : ViewModel() {
+
+ val uiState: StateFlow<UiState<List<Article>>> = repository.articles
+ .map { UiState.Success(it) }
+ .stateIn(
+ scope = viewModelScope,
+ started = SharingStarted.WhileSubscribed(5_000),
+ initialValue = UiState.Loading
+ )
+
+ init { viewModelScope.launch { repository.sync() } }
+}
+  text=4.Compose UI
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=@Composable
+fun ArticleListScreen(viewModel: ArticleListViewModel = hiltViewModel()) {
+ val state by viewModel.uiState.collectAsStateWithLifecycle()
+ when (state) {
+ is UiState.Loading -> LoadingIndicator()
+ is UiState.Error -> ErrorMessage((state as UiState.Error).message)
+ is UiState.Success -> ArticleList((state as UiState.Success).data)
+ }
+}
+  text=Trade-Offs at a Glance
+      text=Concern
+      text=Offline-First
+      text=Cache-Aside
+      text=Cold-start latency
+      text=Low (instant local read)
+      text=High (waits for network)
+      text=Data freshness
+      text=Eventually consistent
+      text=Closer to real-time
+      text=Complexity
+      text=Higher
+      text=Lower
+      text=Storage usage
+      text=Higher
+      text=Lower
+      text=Works offline
+      text=Yes
+      text=No
+  text=Common Pitfalls
+  text=•
+  text=Conflict resolution: if the user edits data offline and the server has a newer version, you need a merge strategy. Last-write-wins is simplest; vector clocks or CRDTs are more robust.
+  text=•
+  text=Sync loops: make sure a successful upsert doesn't re-trigger a sync via the Flow, which then triggers another upsert. Break the cycle by diffing before writing.
+  text=•
+  text=Large datasets: SELECT * FROM articles on a table with 100 000 rows blocks the IO thread. Use pagination with PagingSource from the Paging 3 library.
+  text=•
+  text=Auth tokens expiring while offline: queue the sync request with the token at the time of the change, not at the time of the flush.
+  text=Conclusion
+  text=Offline-first is the right default for any app where data is central and connectivity is unreliable. The Room + Coroutines + WorkManager stack makes it achievable without custom background service boilerplate. Start simple — a single sync() call on app start — and add complexity (incremental sync, conflict resolution, delta updates) only when you hit real problems.

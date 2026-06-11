@@ -1,0 +1,45 @@
+  text=KaTeX—Block Math
+  text=Block
+  text=display
+  text=math uses double dollar signs
+  text=$$...$$
+  text=.
+  text=It renders the expression centered on its own line,
+  text=typically at larger size than inline math.
+  text=Quadratic Formula
+  text=The solutions to [Latex] are given by:
+    text=$ax^2 + bx + c = 0$
+  text=$$x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$$
+  text=Euler's Identity
+  text=One of the most beautiful equations in mathematics:
+  text=$$e^{i\pi} + 1 = 0$$
+  text=Fourier Transform
+  text=The continuous Fourier transform of a function [Latex]:
+    text=$f(t)$
+  text=$$\hat{f}(\xi) = \int_{-\infty}^{\infty} f(t)\, e^{-2\pi i \xi t}\, dt$$
+  text=Gaussian Distribution
+  text=The probability density function of the normal distribution [Latex]:
+    text=$\mathcal{N}(\mu, \sigma^2)$
+  text=$$p(x) = \frac{1}{\sigma\sqrt{2\pi}} \exp\!\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)$$
+  text=Matrix Multiplication
+  text=Given matrices [Latex] and [Latex], their product [Latex] is:
+    text=$A \in \mathbb{R}^{m \times n}$
+    text=$B \in \mathbb{R}^{n \times p}$
+    text=$C = AB \in \mathbb{R}^{m \times p}$
+  text=$$C_{ij} = \sum_{k=1}^{n} A_{ik} B_{kj}$$
+  text=Taylor Series
+  text=The Taylor series expansion of [Latex] around [Latex]:
+    text=$e^x$
+    text=$x = 0$
+  text=$$e^x = \sum_{n=0}^{\infty} \frac{x^n}{n!} = 1 + x + \frac{x^2}{2!} + \frac{x^3}{3!} + \cdots$$
+  text=Bayes'Theorem
+  text=$$P(A \mid B) = \frac{P(B \mid A)\, P(A)}{P(B)}$$
+  text=where [Latex] is the posterior probability of event [Latex] given that [Latex] has occurred.
+    text=$P(A \mid B)$
+    text=$A$
+    text=$B$
+  text=Block Math Followed by Prose
+  text=Inline math [Latex] in the sentence before this block, then the block:
+    text=$x^2$
+  text=$$\nabla \cdot \mathbf{E} = \frac{\rho}{\varepsilon_0}$$
+  text=And regular prose continues here after the block — the renderer must leave no gap artefacts.

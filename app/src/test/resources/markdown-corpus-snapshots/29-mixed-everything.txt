@@ -1,0 +1,92 @@
+  text=Complete Feature Overview:AmberAgent Chat
+  text=This document exercises nearly every Markdown feature in a single realistic assistant response.
+  text=Summary
+  text=AmberAgent is an AI chat client built on Jetpack Compose. It supports multiple assistants, each with its own system prompt, model parameters, and conversation isolation. Think of each assistant as a separate persona with its own memory and settings.
+  text=Key Features
+  text=•
+  text=Multi-assistant support with per-assistant settings
+  text=•
+  text=Streaming responses via SSE
+  text=•
+  text=Fenced code blocks with syntax highlighting
+  text=•
+  text=Voice input (planned for v2.0)
+  text=•
+  text=Image generation (planned)
+  text=Supported Providers
+      text=Provider
+      text=Models
+      text=Streaming
+      text=Function Calling
+      text=OpenAI
+      text=GPT-4o, o1
+      text=✓
+      text=✓
+      text=Anthropic
+      text=Claude 3.5 Sonnet
+      text=✓
+      text=✓
+      text=Google
+      text=Gemini 1.5 Pro
+      text=✓
+      text=✓
+      text=Ollama
+      text=Any local model
+      text=✓
+      text=partial
+  text=Architecture Diagram(Prose)
+  text=The architecture follows a layered approach:
+  text=1.
+  text=Surfaces layer — Compose screens that observe StateFlow from ViewModels
+  text=2.
+  text=ViewModel layer — coordinates UI state and delegates to repositories
+  text=3.
+  text=Repository layer — single source of truth, backed by Room and remote API
+  text=4.
+  text=Agent Kernel — pure Kotlin contracts for agent execution and event streaming
+  text=Note: The Agent Kernel (core/agent-runtime) has no Android dependencies. It is testable on the JVM without a device.
+  text=Example:Starting a Chat
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=val input = ChatTurnInput(
+ assistantId = "assistant_01",
+ userMessage = "Explain coroutines in 3 sentences.",
+ attachments = emptyList()
+)
+
+viewModelScope.launch {
+ agentRunner.run(input).collect { event ->
+ when (event) {
+ is AgentEvent.TextDelta -> appendText(event.delta)
+ is AgentEvent.Done -> markComplete()
+ is AgentEvent.Error -> showError(event.cause)
+ }
+ }
+}
+  text=The agentRunner.run() call returns a Flow<AgentEvent> that the ViewModel collects. Each TextDelta carries a chunk of the assistant's response.
+  text=Math Example
+  text=The attention mechanism in transformers computes:
+  text=$$\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right) V$$
+  text=where [Latex], [Latex], [Latex] are the query, key, and value matrices and [Latex] is the key dimension.
+    text=$Q$
+    text=$K$
+    text=$V$
+    text=$d_k$
+  text=Footnotes and References
+  text=The project is licensed under AGPL v3[^agpl] for the open-source portions and a commercial license for proprietary forks.[^commercial]
+  text=[^agpl]: GNU Affero General Public License v3: https://www.[gnu.org/licenses/agpl-3.0.html](https://gnu.org/licenses/agpl-3.0.html)
+[^commercial]: Commercial licensing inquiries: contact@amberagent.app
+  text=CJK Support
+  text=AmberAgent 完整支持中文输入和渲染。表格、强调和代码块均可包含中文内容：
+      text=功能
+      text=状态
+      text=中文输入法 (IME)
+      text=✓ 支持
+      text=CJK 字符渲染
+      text=✓ 支持
+      text=混合中英文段落
+      text=✓ 支持
+  text=Conclusion
+  text=The old architecture has been replaced by the Agent Kernel pattern, which separates concerns cleanly and makes the system more testable. The combination of Kotlin Coroutines, Room, and Jetpack Compose provides a solid foundation.
+  text=For questions, open an issue or visit https://github.com/amberagent/amberagent.

@@ -1,0 +1,67 @@
+  text=Deep Nesting
+  text=This file tests deeply nested structures: blockquotes inside lists inside blockquotes, code inside nested lists, and other pathological but valid combinations.
+  text=Blockquote Inside a List Item
+  text=•
+  text=First list item at the top level.
+  text=This is a blockquote nested inside the first list item. It starts after a blank line and an indent.
+  text=The blockquote has a second paragraph.
+  text=•
+  text=Second list item at the top level.
+  text=Another blockquote inside the second item.
+  text=List Inside a Blockquote Inside a List
+  text=1.
+  text=Outer ordered item one.
+  text=Blockquote inside item one:
+  text=•
+  text=Unordered item A inside the blockquote
+  text=•
+  text=Unordered item B inside the blockquote
+  text=◦
+  text=Sub-item of B, still inside the blockquote
+  text=Back to blockquote prose.
+  text=2.
+  text=Outer ordered item two.
+  text=Code Block Inside Nested List
+  text=•
+  text=Level 1 item
+  text=◦
+  text=Level 2 item with a code block following it:
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=fun nestedCode() = "I am inside a level-2 list item"
+  text=◦
+  text=Level 2 item after the code block
+  text=•
+  text=Back to level 1
+  text=Blockquote Containing a Table
+      text=Column A
+      text=Column B
+      text=Cell 1
+      text=Cell 2
+      text=Cell 3
+      text=Cell 4
+  text=The table above is inside a blockquote.
+  text=Deeply Nested Blockquotes with Lists
+  text=Level 1 blockquote
+  text=•
+  text=List item inside level 1 blockquote
+  text=•
+  text=Another item
+  text=Level 2 blockquote
+  text=•
+  text=List inside level 2 blockquote
+  text=Level 3 blockquote
+  text=This is the deepest nest in this file. The renderer must track indentation correctly across all three levels of quoting.
+  text=Paragraph+Code+Paragraph in a List Item(Loose)
+  text=•
+  text=First loose item
+  text=This is a paragraph inside the first list item.
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=val x = "code inside loose list item"
+  text=Another paragraph in the same item.
+  text=•
+  text=Second loose item
+  text=Just a paragraph here.
