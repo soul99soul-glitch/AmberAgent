@@ -120,22 +120,27 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
     suspend fun takeScreenshotBitmap(): Bitmap? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         return suspendCancellableCoroutine { cont ->
-            takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                mainExecutor,
-                object : TakeScreenshotCallback {
-                    override fun onSuccess(result: ScreenshotResult) {
-                        val bitmap = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
-                            ?.copy(Bitmap.Config.ARGB_8888, false)
-                        result.hardwareBuffer.close()
-                        cont.resume(bitmap)
-                    }
+            // takeScreenshot 在服务未声明 canTakeScreenshot、或被系统限流时会同步抛异常；
+            // 吞掉并 resume(null)，让调用方降级保守模式，而不是把整次分析炸成失败。
+            val launched = runCatching {
+                takeScreenshot(
+                    Display.DEFAULT_DISPLAY,
+                    mainExecutor,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(result: ScreenshotResult) {
+                            val bitmap = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                                ?.copy(Bitmap.Config.ARGB_8888, false)
+                            result.hardwareBuffer.close()
+                            if (cont.isActive) cont.resume(bitmap)
+                        }
 
-                    override fun onFailure(errorCode: Int) {
-                        cont.resume(null)
-                    }
-                },
-            )
+                        override fun onFailure(errorCode: Int) {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    },
+                )
+            }.isSuccess
+            if (!launched && cont.isActive) cont.resume(null)
         }
     }
 
