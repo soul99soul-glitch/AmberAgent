@@ -81,31 +81,57 @@ import java.io.File
  *    (see [dumpNormalized] "does NOT capture" list), so this divergence cannot perturb the dumps and
  *    needs no normalization.
  *
- * ## ⚠ REAL renderer divergences DISCOVERED by this rig (DONE_WITH_CONCERNS — NOT papered over)
- * Two genuine bugs in the production renderer's tree walk surfaced when fed the native tree. They are
- * REAL rendering differences (category b), so they are NOT normalized away. The affected samples are
- * listed in [KNOWN_DIVERGENT_SAMPLES] and SKIPPED (JUnit `assumeTrue`) with this citation — never
- * silently passed. The non-divergent samples assert HARD parity. A divergent sample that
- * UNEXPECTEDLY matches FAILS the rot guard ("remove it from KNOWN_DIVERGENT_SAMPLES"), so the
- * exclusion list cannot rot once a bug is fixed.
+ * ## ✅ The two renderer bugs this rig discovered are now FIXED (T14.5 / td-rust-1a)
+ * The rig originally surfaced two genuine bugs in the production renderer's tree walk. Both are now
+ * fixed with SHAPE-AGNOSTIC renderer dispatch (Markdown.kt) — the trees stay honest to their parsers:
  *
- *  - **BUG #1 — native headings render EMPTY.** `MarkdownNode`'s Heading arm (Markdown.kt) iterates
- *    `node.children` and renders ONLY children whose type is [MdNodeType.Paragraph] — the JetBrains
- *    `ATX_CONTENT` wrapper (JvmMdTree.kt §4 H1: `ATX_CONTENT → Paragraph`). The native tree has NO
- *    such wrapper: its heading children are FLAT inline [MdNodeType.Text] nodes
- *    (NativeMdTreeTest.headingContentChildrenAreFlatInline). The `child.type == Paragraph` filter
- *    matches nothing → every native heading renders no text. Affects every sample with a heading.
- *  - **BUG #2 — native inline code keeps its backticks.** `appendMarkdownNodeContent`'s generic
- *    leaf arm `node.children.isEmpty()` (Markdown.kt) PRECEDES the `InlineCode` arm that does
- *    `textIn(content).trim('`')`. The JVM `InlineCode` node has child marker tokens, so it skips the
- *    leaf arm and reaches the trim. The native `InlineCode` is a childless LEAF
- *    (NativeMdTreeTest.inlineCodeTextInRoundTrip — its span includes the backticks), so it is caught
- *    by the leaf arm first and appended RAW (`` `code` `` with backticks) instead of trimmed.
+ *  - **BUG #1 (FIXED) — native headings render EMPTY.** The Heading arm of `MarkdownNode` rendered
+ *    ONLY children of type [MdNodeType.Paragraph] — the JetBrains `ATX_CONTENT → Paragraph` wrapper.
+ *    The native tree has NO wrapper; its heading children are FLAT inline nodes, so the filter matched
+ *    nothing. FIX: render the Paragraph wrapper child when present (JVM shape), else render the
+ *    heading node itself through `Paragraph()` (native shape — `Paragraph` walks the flat inline
+ *    children via `appendMarkdownNodeContent`). JVM golden output is byte-identical (one Paragraph
+ *    child per heading → exactly one render either way; snapshot test stays 32/32).
+ *  - **BUG #2 (FIXED) — native inline code keeps its backticks.** The generic leaf arm
+ *    (`node.children.isEmpty()`) of `appendMarkdownNodeContent` PRECEDED the type-specific arms, so a
+ *    childless native `InlineCode`/`MathInline` leaf hit it and was appended raw (backticks /
+ *    `$formula$`) instead of dispatching by type. FIX: hoist the `InlineCode` + `MathInline` arms
+ *    ABOVE the leaf arm (type-dispatch before shape-dispatch). Audit of every children-shape-gated
+ *    arm: only those two inline types are childless in the native tree AND have an arm after the leaf
+ *    arm; the Emphasis/Strong/Strikethrough/Link arms are inline CONTAINERS that always carry content
+ *    children, so they never hit the leaf arm. JVM byte-identical (those JVM nodes carry marker-token
+ *    children and never matched the leaf arm).
  *
- * Both bugs are in the SHARED renderer (`MarkdownNode` / `appendMarkdownNodeContent`), so they would
- * affect production if the `markdownAst` flag flipped on — which is exactly why it stays default-false
- * pending dogfood. Fixing them is the renderer's job (Phase 3-B follow-up), not this rig's; the rig's
- * job is to surface them, which it does. See the task handoff parity report for the full breakdown.
+ * ## ⚠ Residual classes UNMASKED once #1/#2 were fixed (DONE_WITH_CONCERNS — documented, skipped)
+ * Fixing #1/#2 promoted 9 samples to hard parity but uncovered FIVE further divergence classes that
+ * the two bugs had been masking. These are NOT the same class as #1/#2 — they are tree-/parser-level
+ * differences (or a golden-locked JVM rendering quirk), so they are NOT fixable by renderer dispatch
+ * without rewriting list grouping or REGENERATING the forbidden JVM goldens. They stay in
+ * [KNOWN_DIVERGENT_SAMPLES], skipped and individually cited. The rot guard still re-promotes any that
+ * later reach parity.
+ *
+ *  - **[A] Heading inline-token trim-space (golden-locked JVM quirk; native is faithful).** The JVM
+ *    heading path renders inline content via `Paragraph(trim=true)`; the JetBrains tree splits heading
+ *    text into multiple TEXT tokens at punctuation (em-dash / `(` / `"` / `:`), and each token is
+ *    `.trim()`'d, dropping the interior spaces. `## GFM Tables — Simple` → JVM `Tables—Simple` (the
+ *    GOLDEN snapshot pins this), native `Tables — Simple` (single Text leaf, trimmed once). Native is
+ *    arguably MORE correct, but the JVM behavior is locked by the goldens — un-fixable here.
+ *  - **[B] Backslash-escape resolution.** JetBrains keeps `\_` / `\!` / `\(` literally in the text
+ *    slice; pulldown resolves the escape (`_` / `!` / `(`). Parser-level; not a renderer concern.
+ *  - **[C] List-item inline-run grouping.** A TIGHT list item's inline content (`- Call `code` to…`)
+ *    is a single grouped Text run on the JVM tree but FLAT inline children on the native tree (no
+ *    Paragraph wrapper — same structural family as the old BUG #1, but in `ListItemNode`'s per-child
+ *    loop). Native renders `Call` / `code` / `to…` as separate Text composables. A shape-agnostic
+ *    grouping fix is possible but is a larger change scoped OUT of T14.5.
+ *  - **[D] Link / autolink / footnote / reference text.** Email autolink `<x>` (JVM keeps the
+ *    brackets, native resolves a mailto link), reference links `[t][ref]` (JVM literal, native
+ *    resolved), footnote definitions `[^id]:` (JVM keeps the marker text). Tree-structure differences.
+ *  - **[E] Soft-break leading whitespace.** A blockquote soft-break continuation line carries a
+ *    leading space on the JVM tree, none on the native tree. Parser whitespace tokenization.
+ *
+ * All five are in the SHARED renderer's INPUT (the tree), not its shape-dispatch, so the
+ * `markdownAst` flag must stay default-false until [C] (renderer-fixable) and [A]/[B]/[D]/[E]
+ * (tree-fixable) are resolved. See the T14.5 handoff parity report for the full breakdown.
  *
  * Robolectric scaffolding (config / theme / locals / async-load handler) mirrors
  * [MarkdownRendererSnapshotTest] verbatim — a parity gap is attributable to the tree, not the harness.
@@ -199,15 +225,16 @@ class MarkdownTreeParityTest(
             if (parity) {
                 throw AssertionError(
                     "$sampleName now renders at parity — remove it from KNOWN_DIVERGENT_SAMPLES " +
-                        "(BUG #1 heading-drop / BUG #2 inline-code-backtick appears fixed).",
+                        "(its documented residual divergence class [A]/[B]/[C]/[D]/[E] appears fixed).",
                 )
             }
             // Still divergent as documented — skip loudly (visible as SKIPPED, never a false PASS).
             assumeTrue(
-                "$sampleName diverges due to documented REAL renderer bug(s): native headings " +
-                    "render empty (BUG #1) and/or native inline code keeps backticks (BUG #2). " +
-                    "See class KDoc + parity report. NOT a test-harness issue — a renderer fix is " +
-                    "required before markdownAst can flip on.",
+                "$sampleName diverges due to a documented residual tree-/parser-level class " +
+                    "([A] heading trim-space / [B] escape resolution / [C] list-item grouping / " +
+                    "[D] link-footnote text / [E] soft-break whitespace — see class KDoc + parity " +
+                    "report). BUG #1 (heading-drop) and BUG #2 (inline-code-backtick) are FIXED; " +
+                    "these residuals must be resolved before markdownAst can flip on.",
                 false,
             )
         }
@@ -227,49 +254,54 @@ class MarkdownTreeParityTest(
         private const val TAG_NATIVE = "parity-native-tree"
 
         /**
-         * Samples whose JVM-tree and native-tree renders diverge solely because of the two REAL
-         * renderer bugs documented in the class KDoc (BUG #1 native-heading-drop, BUG #2
-         * native-inline-code-backtick). Determined empirically from the dual-render diff: every
-         * sample here contains a heading and/or inline code; the residual difference is exactly the
-         * two bugs. These are SKIPPED (not failed, not passed) so the suite is green WITHOUT
-         * pretending the native tree renders correctly — and the rot guard re-promotes any that get
-         * fixed. The two truly-equal samples are NOT here:
+         * Samples whose JVM-tree and native-tree renders STILL diverge after BUG #1 (heading-drop)
+         * and BUG #2 (inline-code-backtick) were fixed. Each remaining sample is tagged with the
+         * residual class [A]…[E] documented in the class KDoc — these are tree-/parser-level or
+         * golden-locked differences, NOT the renderer-shape-dispatch bugs T14.5 addressed. They are
+         * SKIPPED (not failed, not passed) so the suite is green WITHOUT pretending the native tree
+         * renders correctly — and the rot guard re-promotes any that later reach parity. Samples that
+         * are NOW (or were always) at hard parity are NOT here:
+         *  - 01, 02, 07, 08, 09, 21, 26 — promoted to hard parity by the BUG #1/#2 fixes.
          *  - `20-html-block` — `hasHtmlBlocks`, both engines route to the identical `MarkdownNew`
          *    HTML path, so the tree is bypassed (trivially equal, but a real datapoint: the HTML
          *    arm is parity-safe).
          *  - `30-empty-and-whitespace` — whitespace-only input, both render nothing.
          */
         private val KNOWN_DIVERGENT_SAMPLES: Set<String> = setOf(
-            "01-plain-paragraphs",        // BUG #2 (inline code `<p>`)
-            "02-headings-all-levels",     // BUG #1 + #2
-            "03-emphasis-nesting",        // BUG #1 + #2
-            "04-links-inline",            // BUG #1 + #2
-            "05-links-with-titles",       // BUG #1
-            "06-images",                  // BUG #1
-            "07-fenced-code-kotlin",      // BUG #1 + #2
-            "08-fenced-code-no-lang",     // BUG #1
-            "09-indented-code",           // BUG #1
-            "10-inline-code",             // BUG #1 + #2
-            "11-gfm-table-simple",        // BUG #1 + #2
-            "12-gfm-table-aligned",       // BUG #1 + #2
-            "13-nested-lists",            // BUG #1 + #2
-            "14-ordered-list-start",      // BUG #1 + #2
-            "15-task-lists",              // BUG #1 + #2
-            "16-blockquotes-nested",      // BUG #1 + #2
-            "17-thematic-breaks",         // BUG #1 + #2
-            "18-katex-inline",            // BUG #1 + #2
-            "19-katex-block",             // BUG #1
-            "21-inline-html",             // BUG #1 + #2
-            "22-footnotes",               // BUG #1 + #2
-            "23-strikethrough",           // BUG #1 + #2
-            "24-cjk-mixed",               // BUG #1 + #2
-            "25-long-message",            // BUG #1 + #2
-            "26-streaming-truncated",     // BUG #1 + #2
-            "27-hard-soft-breaks",        // BUG #1 + #2
-            "28-link-edge-cases",         // BUG #1 + #2
-            "29-mixed-everything",        // BUG #1 + #2
-            "31-deep-nesting",            // BUG #1 + #2
-            "32-special-chars-escapes",   // BUG #1 + #2
+            // BUG #1 (native-heading-drop) and BUG #2 (native-inline-code-backtick) are FIXED
+            // (shape-agnostic heading + inline-leaf dispatch, Markdown.kt). 9 samples that diverged
+            // SOLELY on those two bugs now render at hard parity and have left this list:
+            //   01, 02, 07, 08, 09, 21, 26 (plus 20-html-block / 30-empty, never listed).
+            // The samples that REMAIN here diverge on the residual tree-/parser-level classes the
+            // two bug-fixes UNMASKED (see class KDoc §"residual classes"). These are NOT
+            // renderer-shape-dispatch bugs fixable without either rewriting list-item/loose grouping
+            // or changing the JVM golden snapshots (forbidden), so they stay skipped and cited. Tag
+            // legend: [A] heading inline-token trim-space (golden-locked JVM quirk; native faithful),
+            // [B] backslash-escape resolution, [C] list-item inline-run grouping, [D] link/autolink/
+            // footnote/reference text, [E] soft-break leading whitespace.
+            "03-emphasis-nesting",        // [B] `middle\_of\_a\_word` (JVM keeps `\_`, native strips)
+            "04-links-inline",            // [D] email autolink `<x>` kept by JVM, resolved by native
+            "05-links-with-titles",       // [D] reference link `[t][ref]` literal (JVM) vs resolved
+            "06-images",                  // [D] inline-image run split differs between trees
+            "10-inline-code",             // [C] list-item `Call `code` to…` → native splits the run
+            "11-gfm-table-simple",        // [A] heading `Tables — Simple` → JVM `Tables—Simple`
+            "12-gfm-table-aligned",       // [A] heading em-dash trim-space
+            "13-nested-lists",            // [C] list-item `app — Main…` → native splits at em-dash
+            "14-ordered-list-start",      // [A] heading em-dash trim-space
+            "15-task-lists",              // [A] heading `Task Lists (GFM…` → JVM `Task Lists(GFM…`
+            "16-blockquotes-nested",      // [A] heading em-dash trim-space
+            "17-thematic-breaks",         // [A] heading `Breaks (Horizontal…` paren trim-space
+            "18-katex-inline",            // [A] heading em-dash trim-space
+            "19-katex-block",             // [A] heading em-dash trim-space
+            "22-footnotes",               // [D] footnote def `[^id]:` text kept (JVM) vs stripped
+            "23-strikethrough",           // [A] heading `(GFM Extension)` paren trim-space
+            "24-cjk-mixed",               // [C] CJK list-item inline-run split (same as [C] above)
+            "25-long-message",            // [A] heading `What is "Offline-First"?` quote trim-space
+            "27-hard-soft-breaks",        // [E] blockquote soft-break continuation leading-space
+            "28-link-edge-cases",         // [B]+[D] escaped-paren URL `path\(1\)` literal vs resolved
+            "29-mixed-everything",        // [A] heading `Overview: AmberAgent` colon trim-space
+            "31-deep-nesting",            // [A] heading `Paragraph + Code + …` trim-space
+            "32-special-chars-escapes",   // [B] escapable-char run `\! \#…` kept (JVM) vs stripped
         )
 
         private fun blobFileFor(sampleName: String): File = File(CORPUS_DIR, "$sampleName.pmda")

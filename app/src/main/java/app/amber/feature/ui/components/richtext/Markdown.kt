@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.fastFirstOrNull
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.CancellationException
@@ -1486,28 +1487,42 @@ private fun MarkdownNode(
                         modifier = revealModifier,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        node.children.fastForEach { child ->
-                            // ATX_CONTENT (heading inline-content wrapper) maps to
-                            // MdNodeType.Paragraph (mapping doc §4 H1); render that child only.
-                            if (child.type == MdNodeType.Paragraph) {
-                                val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
-                                    children = node.children,
-                                    child = child,
-                                    liveSuffix = liveSuffix,
-                                    liveSuffixSourceOffset = liveSuffixSourceOffset,
-                                )
-                                Paragraph(
-                                    node = child,
-                                    content = content,
-                                    onClickCitation = onClickCitation,
-                                    modifier = Modifier.padding(vertical = headingPadding),
-                                    trim = true,
-                                    plainSuffixStyle = bodyStyle,
-                                    liveSuffix = childLiveSuffix.text,
-                                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
-                                )
-                            }
+                        // Shape-agnostic heading content dispatch. Two tree shapes carry the
+                        // heading's inline content differently:
+                        //  - JVM (JetBrains): heading children = [`#` marker Unknown tokens…,
+                        //    ATX_CONTENT → MdNodeType.Paragraph wrapper] (mapping doc §4 H1). The
+                        //    inline content lives inside that Paragraph child.
+                        //  - Native (pulldown): NO ATX_CONTENT wrapper and NO `#` markers — the
+                        //    heading's children ARE the flat inline nodes
+                        //    (NativeMdTreeTest.headingContentChildrenAreFlatInline).
+                        // So: if a Paragraph child exists, render it (JVM); otherwise render the
+                        // heading node itself through Paragraph, which walks the flat inline
+                        // children via appendMarkdownNodeContent (native). The old code filtered
+                        // for `child.type == Paragraph` and rendered nothing on the native shape.
+                        val paragraphChild = node.children.fastFirstOrNull { it.type == MdNodeType.Paragraph }
+                        val contentNode = paragraphChild ?: node
+                        val childLiveSuffix = if (paragraphChild != null) {
+                            streamingLiveSuffixForLastRenderableChild(
+                                children = node.children,
+                                child = paragraphChild,
+                                liveSuffix = liveSuffix,
+                                liveSuffixSourceOffset = liveSuffixSourceOffset,
+                            )
+                        } else {
+                            // No wrapper child to attribute the suffix to — pass it straight to the
+                            // heading-as-paragraph render (native shape).
+                            StreamingLiveSuffix(liveSuffix, liveSuffixSourceOffset)
                         }
+                        Paragraph(
+                            node = contentNode,
+                            content = content,
+                            onClickCitation = onClickCitation,
+                            modifier = Modifier.padding(vertical = headingPadding),
+                            trim = true,
+                            plainSuffixStyle = bodyStyle,
+                            liveSuffix = childLiveSuffix.text,
+                            liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
+                        )
                     }
                 }
             }
@@ -2547,6 +2562,68 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
+        // ── Type-dispatch BEFORE shape-dispatch for leaf-eligible inline types ──
+        // The generic leaf arm below (`node.children.isEmpty()`) appends the node's RAW source span.
+        // For JVM (JetBrains) trees that is harmless because InlineCode/InlineMath carry marker-token
+        // children (`` ` `` / `$`), so they never reach the leaf arm and fall through to their own
+        // type arms which strip the delimiters / dispatch LaTeX. The native (pulldown) tree emits
+        // these as CHILDLESS leaves (tree_builder.rs: Event::Code → InlineCode leaf, Event::InlineMath
+        // → MathInline leaf), whose span INCLUDES the delimiters — so the leaf arm would append
+        // `` `code` `` with backticks (BUG #2) and `$formula$` as plain text instead of a rendered
+        // LaTeX inline. Audit of every type arm gated behind children-shape: only InlineCode and
+        // MathInline are childless in the native tree AND have a dedicated arm after the leaf arm;
+        // Emphasis/Strong/Strikethrough/Link(inline)/Link(autolink) are inline CONTAINERS that always
+        // carry content children (NativeMdTree.kt contentChildren KDoc), so they never hit the leaf
+        // arm. Hoisting these two ahead of the leaf arm fixes the CLASS for both tree shapes and is a
+        // no-op for JVM (those nodes never matched the leaf arm anyway).
+        node.type == MdNodeType.InlineCode -> {
+            val code = node.textIn(content).trim('`')
+            withStyle(
+                SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 0.95.em,
+                    background = colorScheme.secondaryContainer.copy(alpha = 0.2f),
+                )
+            ) {
+                append(code)
+            }
+        }
+
+        node.type == MdNodeType.MathInline -> {
+            if (enableLatexRendering) {
+                // formula as id
+                val formula = node.textIn(content)
+                appendInlineContent(formula, "[Latex]")
+                val (width, height) = with(density) {
+                    assumeLatexSize(
+                        latex = formula, fontSize = style.fontSize.toPx()
+                    ).let {
+                        it.width().toSp() to it.height().toSp()
+                    }
+                }
+                inlineContents.putIfAbsent(/* key = */ formula,/* value = */ InlineTextContent(
+                    placeholder = Placeholder(
+                        width = width, height = height, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                    ), children = {
+                        MathInline(
+                            latex = formula, modifier = Modifier
+                        )
+                    })
+                )
+            } else {
+                // 禁用 LaTeX 渲染时，以等宽字体显示原始公式
+                val formula = node.textIn(content)
+                withStyle(
+                    SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 0.95.em,
+                    )
+                ) {
+                    append(formula)
+                }
+            }
+        }
+
         node.children.isEmpty() -> {
             val rawText = node.textIn(content)
             val text = (if (trim) rawText.trim() else rawText)
@@ -2679,53 +2756,9 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
-        node.type == MdNodeType.InlineCode -> {
-            val code = node.textIn(content).trim('`')
-            withStyle(
-                SpanStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 0.95.em,
-                    background = colorScheme.secondaryContainer.copy(alpha = 0.2f),
-                )
-            ) {
-                append(code)
-            }
-        }
-
-        node.type == MdNodeType.MathInline -> {
-            if (enableLatexRendering) {
-                // formula as id
-                val formula = node.textIn(content)
-                appendInlineContent(formula, "[Latex]")
-                val (width, height) = with(density) {
-                    assumeLatexSize(
-                        latex = formula, fontSize = style.fontSize.toPx()
-                    ).let {
-                        it.width().toSp() to it.height().toSp()
-                    }
-                }
-                inlineContents.putIfAbsent(/* key = */ formula,/* value = */ InlineTextContent(
-                    placeholder = Placeholder(
-                        width = width, height = height, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
-                    ), children = {
-                        MathInline(
-                            latex = formula, modifier = Modifier
-                        )
-                    })
-                )
-            } else {
-                // 禁用 LaTeX 渲染时，以等宽字体显示原始公式
-                val formula = node.textIn(content)
-                withStyle(
-                    SpanStyle(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 0.95.em,
-                    )
-                ) {
-                    append(formula)
-                }
-            }
-        }
+        // InlineCode + MathInline arms hoisted ABOVE the generic leaf arm (see the children-shape
+        // audit comment there) — childless native leaves of these types must dispatch by type, not
+        // fall through to the raw-span leaf arm.
 
         // 其他类型继续递归处理
         else -> {
