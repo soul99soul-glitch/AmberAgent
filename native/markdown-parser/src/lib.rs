@@ -16,6 +16,10 @@ mod packed_ast;
 mod tree_builder;
 mod type_mapping;
 
+// Pure (non-JNI) entry points for the dump-corpus bin and host-side tools.
+pub use packed_ast::pack;
+pub use tree_builder::build_tree;
+
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use pulldown_cmark::Options;
 
