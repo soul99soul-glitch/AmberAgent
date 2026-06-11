@@ -1,7 +1,8 @@
 package app.amber.feature.ui.components.richtext
 
-import org.intellij.markdown.ast.ASTNode
-import org.intellij.markdown.flavours.gfm.GFMElementTypes
+import app.amber.feature.ui.components.richtext.tree.JvmMdNode
+import app.amber.feature.ui.components.richtext.tree.MdNode
+import app.amber.feature.ui.components.richtext.tree.MdNodeType
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.MarkdownParser
 import org.junit.Assert.assertEquals
@@ -16,9 +17,7 @@ class MarkdownTableTest {
             | --- | --- |
             | 1 | Amber |
         """.trimIndent()
-        val table = findTable(
-            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
-        )
+        val table = findTable(parseTree(content))
 
         val tableData = extractMarkdownTableData(table ?: error("table missing"), content)
         assertNotNull(tableData)
@@ -34,9 +33,7 @@ class MarkdownTableTest {
             | --- | --- |
             | 1 | [《无能的郝哥》](https://m.bilibili.com/video/BV1abc?spm_id_from=333.337) |
         """.trimIndent()
-        val table = findTable(
-            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
-        )
+        val table = findTable(parseTree(content))
 
         val tableData = extractMarkdownTableData(table ?: error("table missing"), content)
         assertNotNull(tableData)
@@ -53,9 +50,7 @@ class MarkdownTableTest {
             | --- | --- |
             | 1 | Amber |
         """.trimIndent()
-        val table = findTable(
-            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
-        ) ?: error("table missing")
+        val table = findTable(parseTree(content)) ?: error("table missing")
 
         val tableData = extractStreamingMarkdownTableData(
             node = table,
@@ -82,9 +77,7 @@ class MarkdownTableTest {
             | --- | --- |
             | 1 | Amber |
         """.trimIndent()
-        val table = findTable(
-            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
-        ) ?: error("table missing")
+        val table = findTable(parseTree(content)) ?: error("table missing")
 
         val tableData = extractStreamingMarkdownTableData(
             node = table,
@@ -98,8 +91,13 @@ class MarkdownTableTest {
         assertEquals(listOf(listOf("1", "Amber")), tableData?.rows)
     }
 
-    private fun findTable(node: ASTNode): ASTNode? {
-        if (node.type == GFMElementTypes.TABLE) return node
+    // Parse with the JVM parser and wrap as MdNode (the renderer's tree type) so the
+    // extractors stay MdNode-typed after the Task-9 re-type.
+    private fun parseTree(content: String): MdNode =
+        JvmMdNode(MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content), content, null)
+
+    private fun findTable(node: MdNode): MdNode? {
+        if (node.type == MdNodeType.Table) return node
         return node.children.firstNotNullOfOrNull(::findTable)
     }
 }

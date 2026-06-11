@@ -32,6 +32,85 @@ internal interface MdNode {
     val taskChecked: Boolean?
     val listStart: Long?
     val tableAlignments: List<TableAlign>?
+
+    /**
+     * Fenced-code discriminator (mapping doc §4 H4). JetBrains emits CODE_BLOCK (indented) and
+     * CODE_FENCE (fenced) as two distinct types; the unified [MdNodeType.CodeBlock] collapses
+     * them, so the renderer needs this flag to pick the simple-Text (indented) vs
+     * HighlightCodeBlock (fenced) path. `codeLang == null` cannot discriminate because an
+     * empty-info-string fence ALSO has null lang. False for non-code / indented nodes.
+     */
+    val isFencedCode: Boolean
+
+    /**
+     * Closing-fence end offset for the streaming `completeCodeBlock` position check
+     * (mapping doc §4 H4 / KU-5: `CODE_FENCE_END.endOffset`). Null when the fence is unclosed
+     * (streaming-truncated tail) or the node is not a fence.
+     */
+    val codeFenceEndOffset: Int?
+
+    /**
+     * Offset range of the fenced-code body (mapping doc §4 H4: the "back up to the last EOL"
+     * computation the renderer applied in-arm — start = the EOL before the first
+     * CODE_FENCE_CONTENT, end = the last CODE_FENCE_CONTENT's end). The renderer slices the body
+     * with this range AND feeds the same start/end to `streamingCodeFenceLiveSuffixFor`, so the
+     * raw offsets (not a pre-sliced string) are what it needs. Null when the node is not a
+     * fenced block or carries no fence content (malformed fence → renderer renders nothing,
+     * preserving the original three early-returns).
+     */
+    val codeFenceContentRange: IntRange?
+
+    /**
+     * Marker-free children for inline containers (mapping doc §4 H5 / H7). JetBrains includes
+     * the literal markers as child tokens that all map to [MdNodeType.Unknown], so the renderer
+     * cannot strip them by `MdNodeType` (every marker AND the inner content can be Unknown).
+     * This accessor applies the original type-based trim using the REAL JetBrains marker types:
+     *  - Emphasis  → strip 1 leading + 1 trailing `*`/`_` marker
+     *  - Strong    → strip 2 leading + 2 trailing markers
+     *  - Strikethrough → strip 2 leading + 2 trailing `~` markers
+     *  - Link (AUTOLINK `<url>` form) → strip the `<` and `>` delimiter tokens
+     *  - everything else → [children] unchanged
+     * `NativeMdNode` returns [children] (the native tree carries no marker children).
+     */
+    val contentChildren: List<MdNode>
+
+    /**
+     * True only for the JetBrains AUTOLINK element (`<url>` angle-bracket form) — distinct from
+     * an inline link `[text](url)` and a bare GFM autolink (a leaf). All three collapse to
+     * [MdNodeType.Link]; the renderer needs this to pick the AUTOLINK render arm (italic
+     * link over [contentChildren], no destination dig). False for non-Link nodes.
+     * (mapping doc §4 H7.)
+     */
+    val isAutolink: Boolean
+
+    /**
+     * The link/image LINK_TEXT label text, RAW (brackets included), relocated from the
+     * `findChildOfTypeRecursive(LINK_TEXT)?.getTextInNode()` digs (Markdown.kt image alt 1687,
+     * inline-link label 2567). Call sites apply their own trimming:
+     *  - image alt uses it as-is (`[alt]`),
+     *  - inline-link label trims `[`/`]`.
+     * Null when the node has no LINK_TEXT child. (mapping doc §3 E4/E5, §4 H6.)
+     */
+    val linkLabel: String?
+
+    /**
+     * The inner label token text for the block-level link arm (Markdown.kt 1600-1601:
+     * `findChildOfTypeRecursive(LINK_TEXT)?.findChildOfTypeRecursive(GFM_AUTOLINK, TEXT)`), i.e.
+     * the first autolink/text token INSIDE LINK_TEXT (no surrounding brackets, and for nested
+     * inline content like `[*x*]` it is the innermost text "x", not "*x*"). Null when absent.
+     * (mapping doc §4 H6.)
+     */
+    val linkInnerText: String?
+
+    /**
+     * True for the JetBrains BLOCK_QUOTE *marker token* (the `>` prefix), relocated from the
+     * `type == MarkdownTokenTypes.BLOCK_QUOTE -> {}` no-op in Markdown.kt:2483 (mapping doc §4 H9).
+     * The marker token collapses to [MdNodeType.Unknown] and cannot be distinguished from other
+     * `>` tokens (a closing autolink delimiter, an escaped `\>`) by type or text, so the inline
+     * walker uses this accessor to skip ONLY the genuine blockquote marker. False for everything
+     * else; `NativeMdNode` returns false (the native tree emits no such marker token).
+     */
+    val isBlockquoteMarker: Boolean
 }
 
 /**

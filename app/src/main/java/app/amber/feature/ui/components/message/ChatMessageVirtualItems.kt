@@ -194,7 +194,7 @@ internal fun buildChatMessageVirtualItems(
                             repeat(parseResult.topLevelBlockCount()) { blockIndex ->
                                 val attachments = imageAnchorResolver
                                     ?.resolveBlock(
-                                        blockNode = parseResult.astTree.children[blockIndex],
+                                        blockNode = parseResult.tree.children[blockIndex],
                                         content = parseResult.preprocessed,
                                     )
                                     ?.takeIf { it.isNotEmpty() }

@@ -1,10 +1,9 @@
 package app.amber.feature.ui.components.richtext
 
-import org.intellij.markdown.IElementType
-import org.intellij.markdown.MarkdownElementTypes
-import org.intellij.markdown.ast.ASTNode
+import app.amber.feature.ui.components.richtext.tree.JvmMdNode
+import app.amber.feature.ui.components.richtext.tree.MdNode
+import app.amber.feature.ui.components.richtext.tree.MdNodeType
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
-import org.intellij.markdown.flavours.gfm.GFMElementTypes
 import org.intellij.markdown.parser.MarkdownParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,7 +36,7 @@ class StreamingMarkdownMotionTest {
 
     @Test
     fun `motion key includes type and source offset base`() {
-        val quote = parse("> hello").find(MarkdownElementTypes.BLOCK_QUOTE)
+        val quote = parse("> hello").find(MdNodeType.Blockquote)
             ?: error("quote missing")
         val key = streamingMarkdownMotionKey(
             type = quote.type,
@@ -51,9 +50,9 @@ class StreamingMarkdownMotionTest {
 
     @Test
     fun `quote live suffix targets its last renderable child`() {
-        val quote = parse("> alpha\n> beta").find(MarkdownElementTypes.BLOCK_QUOTE)
+        val quote = parse("> alpha\n> beta").find(MdNodeType.Blockquote)
             ?: error("quote missing")
-        val paragraph = quote.find(MarkdownElementTypes.PARAGRAPH)
+        val paragraph = quote.find(MdNodeType.Paragraph)
             ?: error("paragraph missing")
 
         quote.children.forEach { child ->
@@ -74,9 +73,9 @@ class StreamingMarkdownMotionTest {
 
     @Test
     fun `list live suffix targets the final list item`() {
-        val list = parse("- one\n- two").find(MarkdownElementTypes.UNORDERED_LIST)
+        val list = parse("- one\n- two").find(MdNodeType.ListUnordered)
             ?: error("list missing")
-        val items = list.children.filter { it.type == MarkdownElementTypes.LIST_ITEM }
+        val items = list.children.filter { it.type == MdNodeType.ListItem }
 
         assertEquals(2, items.size)
         items.forEachIndexed { index, item ->
@@ -92,7 +91,7 @@ class StreamingMarkdownMotionTest {
 
     @Test
     fun `table cell keys keep old cells settled and new cells animatable`() {
-        val tableKey = StreamingMarkdownMotionKey(GFMElementTypes.TABLE.toString(), 8)
+        val tableKey = StreamingMarkdownMotionKey(MdNodeType.Table.toString(), 8)
         val scope = StreamingMarkdownMotionScope()
         val oldCell = streamingTableCellMotionKey(tableKey, rowIndex = 0, columnIndex = 0, header = false)
         val sameOldCell = streamingTableCellMotionKey(tableKey, rowIndex = 0, columnIndex = 0, header = false)
@@ -106,11 +105,16 @@ class StreamingMarkdownMotionTest {
         assertTrue(scope.claim(headerCell))
     }
 
-    private fun parse(content: String): ASTNode {
-        return MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
+    private fun parse(content: String): MdNode {
+        val source = content
+        return JvmMdNode(
+            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(source),
+            source,
+            null,
+        )
     }
 
-    private fun ASTNode.find(type: IElementType): ASTNode? {
+    private fun MdNode.find(type: MdNodeType): MdNode? {
         if (this.type == type) return this
         return children.firstNotNullOfOrNull { it.find(type) }
     }

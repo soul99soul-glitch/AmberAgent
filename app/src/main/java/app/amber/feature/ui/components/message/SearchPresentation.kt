@@ -12,10 +12,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.intellij.markdown.IElementType
-import org.intellij.markdown.MarkdownElementTypes
-import org.intellij.markdown.ast.ASTNode
-import org.intellij.markdown.ast.getTextInNode
+import app.amber.feature.ui.components.richtext.tree.MdNode
+import app.amber.feature.ui.components.richtext.tree.MdNodeType
+import app.amber.feature.ui.components.richtext.tree.textIn
 import java.net.URI
 import java.util.Locale
 
@@ -248,7 +247,7 @@ internal sealed interface SearchBlockRef {
     data class Link(val url: String) : SearchBlockRef
 }
 
-internal fun extractSearchBlockReferences(blockNode: ASTNode, content: String): List<SearchBlockRef> {
+internal fun extractSearchBlockReferences(blockNode: MdNode, content: String): List<SearchBlockRef> {
     val refs = mutableListOf<SearchBlockRef>()
     blockNode.collectSearchBlockReferences(content, refs)
     return refs
@@ -260,7 +259,7 @@ internal class SearchBlockImageAnchorResolver(
 ) {
     private val used = linkedSetOf<String>()
 
-    fun resolveBlock(blockNode: ASTNode, content: String): List<SearchImageRef> {
+    fun resolveBlock(blockNode: MdNode, content: String): List<SearchImageRef> {
         val images = mutableListOf<SearchImageRef>()
         extractSearchBlockReferences(blockNode, content).forEach { ref ->
             if (images.size >= perBlockCap) return@forEach
@@ -290,32 +289,35 @@ internal class SearchBlockImageAnchorResolver(
     }
 }
 
-private fun ASTNode.collectSearchBlockReferences(content: String, refs: MutableList<SearchBlockRef>) {
+private fun MdNode.collectSearchBlockReferences(content: String, refs: MutableList<SearchBlockRef>) {
     when (type) {
-        MarkdownElementTypes.CODE_BLOCK,
-        MarkdownElementTypes.CODE_FENCE,
-        MarkdownElementTypes.CODE_SPAN,
-        MarkdownElementTypes.IMAGE -> return
-        MarkdownElementTypes.INLINE_LINK -> {
-            val linkText = findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)
-                ?.getTextInNode(content)
-                ?.toString()
-                ?.trim { it == '[' || it == ']' }
-                .orEmpty()
-            val linkDest = findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)
-                ?.getTextInNode(content)
-                ?.toString()
-                ?.cleanSearchLinkDestination()
-                .orEmpty()
-            if (linkDest.isNotBlank()) {
-                if (linkText.startsWith("citation,") && linkDest.length == 6) {
-                    refs += SearchBlockRef.Citation(linkDest)
-                } else {
-                    refs += SearchBlockRef.Link(linkDest)
+        // CODE_BLOCK + CODE_FENCE both map to MdNodeType.CodeBlock; CODE_SPAN → InlineCode.
+        MdNodeType.CodeBlock,
+        MdNodeType.InlineCode,
+        MdNodeType.Image -> return
+        // INLINE_LINK + AUTOLINK + GFM_AUTOLINK all map to Link. The original ONLY matched
+        // INLINE_LINK (the `[text](dest)` form). Identify it as a non-leaf, non-autolink Link
+        // (leaf GFM_AUTOLINK and the <url> AUTOLINK form fall through to the generic recursion,
+        // exactly as before). The arm always returns, matching the original INLINE_LINK arm.
+        MdNodeType.Link -> {
+            if (!isAutolink && children.isNotEmpty()) {
+                // linkLabel relocates the LINK_TEXT dig; linkHref relocates LINK_DESTINATION (§4 H6).
+                val linkText = linkLabel
+                    ?.trim { it == '[' || it == ']' }
+                    .orEmpty()
+                val linkDest = (linkHref ?: "")
+                    .cleanSearchLinkDestination()
+                if (linkDest.isNotBlank()) {
+                    if (linkText.startsWith("citation,") && linkDest.length == 6) {
+                        refs += SearchBlockRef.Citation(linkDest)
+                    } else {
+                        refs += SearchBlockRef.Link(linkDest)
+                    }
                 }
+                return
             }
-            return
         }
+        else -> {}
     }
     children.forEach { child -> child.collectSearchBlockReferences(content, refs) }
 }
@@ -326,15 +328,6 @@ private fun String.cleanSearchLinkDestination(): String {
         ?.groupValues
         ?.getOrNull(1)
         ?: clean
-}
-
-private fun ASTNode.findChildOfTypeRecursive(vararg types: IElementType): ASTNode? {
-    if (type in types) return this
-    children.forEach { child ->
-        val result = child.findChildOfTypeRecursive(*types)
-        if (result != null) return result
-    }
-    return null
 }
 
 private fun MutableMap<String, MutableList<SearchImageRef>>.addImage(

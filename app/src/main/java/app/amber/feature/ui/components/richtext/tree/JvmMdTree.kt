@@ -174,6 +174,110 @@ internal class JvmMdNode(
      * data model has no alignment field). Kept in the interface for forward compatibility.
      */
     override val tableAlignments: List<TableAlign>? get() = null
+
+    /**
+     * True for fenced code (CODE_FENCE); false for indented code (CODE_BLOCK) and everything
+     * else. Mapping doc §4 H4 — the unified [MdNodeType.CodeBlock] needs this to reproduce the
+     * renderer's original two-arm split (Markdown.kt:1750 indented vs 1761 fenced).
+     */
+    override val isFencedCode: Boolean
+        get() = ast.type == MarkdownElementTypes.CODE_FENCE
+
+    /**
+     * Closing-fence end offset, relocated from Markdown.kt:1777
+     * (`findChildOfTypeRecursive(CODE_FENCE_END)`). Null when there is no closing fence
+     * (streaming-truncated tail) or the node is not a fence. The renderer's
+     * `completeCodeBlock` streaming-position check (1778) compares this against the synthetic
+     * suffix start, so the raw end offset is what it needs (mapping doc §4 H4 / KU-5).
+     */
+    override val codeFenceEndOffset: Int?
+        get() = ast.findChildOfTypeRecursive(MarkdownTokenTypes.CODE_FENCE_END)?.endOffset
+
+    /**
+     * Fenced-code body offset range, relocated VERBATIM from Markdown.kt:1762-1770. The first
+     * line's indent is NOT included in CODE_FENCE_CONTENT, so the start offset backs up to the
+     * last EOL preceding the first CODE_FENCE_CONTENT; the end is the last CODE_FENCE_CONTENT's
+     * end. Returns null (renderer renders nothing) when there is no fence content or no
+     * preceding EOL — matching the original arm's three early-returns. Indented CODE_BLOCK also
+     * returns null (it is not a fence). (mapping doc §4 H4.)
+     */
+    override val codeFenceContentRange: IntRange?
+        get() {
+            if (ast.type != MarkdownElementTypes.CODE_FENCE) return null
+            val children = ast.children
+            val contentStartIndex = children.indexOfFirst { it.type == MarkdownTokenTypes.CODE_FENCE_CONTENT }
+            if (contentStartIndex == -1) return null
+            val eolElement = children.subList(0, contentStartIndex)
+                .findLast { it.type == MarkdownTokenTypes.EOL } ?: return null
+            val codeContentStartOffset = eolElement.endOffset
+            val codeContentEndOffset = children
+                .findLast { it.type == MarkdownTokenTypes.CODE_FENCE_CONTENT }?.endOffset ?: return null
+            return codeContentStartOffset until codeContentEndOffset
+        }
+
+    /**
+     * Marker-free children, relocated VERBATIM from the call-site `trim(...)` invocations in
+     * Markdown.kt (EMPH:2503, STRONG:2524, STRIKETHROUGH:2545, AUTOLINK:2607). Uses the real
+     * JetBrains marker token types — which all map to [MdNodeType.Unknown] and so cannot be
+     * stripped by the renderer post-collapse (mapping doc §4 H5/H7). Each wrapped child is
+     * re-exposed as a [JvmMdNode] preserving parent identity.
+     */
+    override val contentChildren: List<MdNode>
+        get() {
+            val trimmed: List<ASTNode> = when (ast.type) {
+                MarkdownElementTypes.EMPH -> ast.children.trim(MarkdownTokenTypes.EMPH, 1)
+                MarkdownElementTypes.STRONG -> ast.children.trim(MarkdownTokenTypes.EMPH, 2)
+                GFMElementTypes.STRIKETHROUGH -> ast.children.trim(GFMTokenTypes.TILDE, 2)
+                MarkdownElementTypes.AUTOLINK ->
+                    ast.children.trim(MarkdownTokenTypes.LT, 1).trim(MarkdownTokenTypes.GT, 1)
+                else -> return children
+            }
+            // Re-wrap against this node so the trimmed children share this parent (the renderer
+            // recurses through them via appendMarkdownNodeContent which only reads type/text).
+            return trimmed.map { JvmMdNode(it, source, this) }
+        }
+
+    /** True for the JetBrains AUTOLINK element (`<url>`). Relocated from the 2606 arm dispatch. */
+    override val isAutolink: Boolean
+        get() = ast.type == MarkdownElementTypes.AUTOLINK
+
+    /**
+     * RAW LINK_TEXT text (brackets included), relocated from Markdown.kt:1687 (image alt) /
+     * 2567 (inline-link label before its own bracket trim).
+     */
+    override val linkLabel: String?
+        get() = ast.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(source)
+
+    /**
+     * Inner label token text, relocated from Markdown.kt:1600-1601
+     * (`findChildOfTypeRecursive(LINK_TEXT)?.findChildOfTypeRecursive(GFM_AUTOLINK, TEXT)`).
+     */
+    override val linkInnerText: String?
+        get() = ast.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)
+            ?.findChildOfTypeRecursive(GFMTokenTypes.GFM_AUTOLINK, MarkdownTokenTypes.TEXT)
+            ?.getTextInNode(source)
+
+    /** True for the BLOCK_QUOTE marker token; relocated from Markdown.kt:2483 (mapping doc §4 H9). */
+    override val isBlockquoteMarker: Boolean
+        get() = ast.type == MarkdownTokenTypes.BLOCK_QUOTE
+}
+
+/** Marker-trim on raw JetBrains children, relocated VERBATIM from Markdown.kt:2899-2916. */
+private fun List<ASTNode>.trim(type: IElementType, size: Int): List<ASTNode> {
+    if (this.isEmpty() || size <= 0) return this
+    var start = 0
+    var end = this.size
+    var trimmed = 0
+    while (start < end && trimmed < size && this[start].type == type) {
+        start++
+        trimmed++
+    }
+    trimmed = 0
+    while (end > start && trimmed < size && this[end - 1].type == type) {
+        end--
+        trimmed++
+    }
+    return this.subList(start, end)
 }
 
 /**

@@ -104,15 +104,13 @@ import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.toDp
-import org.intellij.markdown.IElementType
-import org.intellij.markdown.MarkdownElementTypes
-import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
-import org.intellij.markdown.ast.LeafASTNode
-import org.intellij.markdown.flavours.gfm.GFMElementTypes
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
-import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
+import app.amber.feature.ui.components.richtext.tree.JvmMdNode
+import app.amber.feature.ui.components.richtext.tree.MdNode
+import app.amber.feature.ui.components.richtext.tree.MdNodeType
+import app.amber.feature.ui.components.richtext.tree.textIn
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownPreprocessNative
 import app.amber.agent.ui.components.richtext.nativebridge.PackedAstReader
@@ -272,7 +270,7 @@ private fun MarkdownPreview() {
 
 internal data class MarkdownParseResult(
     val preprocessed: String,
-    val astTree: ASTNode,
+    val tree: MdNode,
     val hasHtmlBlocks: Boolean,
     val stableTopLevelBlocks: List<MarkdownTopLevelBlockSnapshot> = emptyList(),
     val activeBaseOffset: Int = 0,
@@ -324,7 +322,7 @@ internal class StreamingMarkdownMotionScope {
 }
 
 internal fun streamingMarkdownMotionKey(
-    type: IElementType,
+    type: MdNodeType,
     sourceOffsetBase: Int,
     nodeStartOffset: Int,
 ): StreamingMarkdownMotionKey {
@@ -482,8 +480,8 @@ internal fun splitLiveSuffixAtBlockBoundary(suffix: String): Pair<String, String
 }
 
 internal fun streamingLiveSuffixForLastRenderableChild(
-    children: List<ASTNode>,
-    child: ASTNode,
+    children: List<MdNode>,
+    child: MdNode,
     liveSuffix: String,
     liveSuffixSourceOffset: Int,
 ): StreamingLiveSuffix {
@@ -497,29 +495,25 @@ internal fun streamingLiveSuffixForLastRenderableChild(
     }
 }
 
-private fun ASTNode.isStreamingSuffixRenderableTarget(): Boolean {
+private fun MdNode.isStreamingSuffixRenderableTarget(): Boolean {
+    // ATX_1..6 → Heading, CODE_FENCE+CODE_BLOCK → CodeBlock, ATX_CONTENT+PARAGRAPH →
+    // Paragraph (mapping doc §2 #2/#3/#8/#9, §4 H1) collapse the JetBrains-side
+    // duplicates onto the unified MdNodeType variants below.
     return when (type) {
-        MarkdownElementTypes.PARAGRAPH,
-        MarkdownElementTypes.UNORDERED_LIST,
-        MarkdownElementTypes.ORDERED_LIST,
-        MarkdownElementTypes.LIST_ITEM,
-        MarkdownElementTypes.BLOCK_QUOTE,
-        MarkdownElementTypes.ATX_1,
-        MarkdownElementTypes.ATX_2,
-        MarkdownElementTypes.ATX_3,
-        MarkdownElementTypes.ATX_4,
-        MarkdownElementTypes.ATX_5,
-        MarkdownElementTypes.ATX_6,
-        MarkdownElementTypes.IMAGE,
-        MarkdownElementTypes.CODE_FENCE,
-        MarkdownElementTypes.CODE_BLOCK,
-        MarkdownElementTypes.HTML_BLOCK,
-        MarkdownTokenTypes.ATX_CONTENT,
-        MarkdownTokenTypes.TEXT,
-        MarkdownTokenTypes.HORIZONTAL_RULE,
-        GFMElementTypes.TABLE,
-        GFMElementTypes.BLOCK_MATH,
-        GFMTokenTypes.CHECK_BOX -> true
+        MdNodeType.Paragraph,
+        MdNodeType.ListUnordered,
+        MdNodeType.ListOrdered,
+        MdNodeType.ListItem,
+        MdNodeType.Blockquote,
+        MdNodeType.Heading,
+        MdNodeType.Image,
+        MdNodeType.CodeBlock,
+        MdNodeType.HtmlBlock,
+        MdNodeType.Text,
+        MdNodeType.HorizontalRule,
+        MdNodeType.Table,
+        MdNodeType.MathBlock,
+        MdNodeType.TaskListMarker -> true
 
         else -> children.any { it.isStreamingSuffixRenderableTarget() }
     }
@@ -749,8 +743,8 @@ private fun TraceMarkdownComposable(section: String, content: @Composable () -> 
     }
 }
 
-private fun ASTNode.containsHtmlBlocks(): Boolean {
-    if (type == MarkdownElementTypes.HTML_BLOCK) return true
+private fun MdNode.containsHtmlBlocks(): Boolean {
+    if (type == MdNodeType.HtmlBlock) return true
     return children.any { it.containsHtmlBlocks() }
 }
 
@@ -803,7 +797,10 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
     // Recommendation: defer until a device-test rig exists; until then the
     // shadow path provides the same observability with zero render risk.
     maybeShadowCompareNativeAst(preprocessed, astTree)
-    return MarkdownParseResult(preprocessed, astTree, astTree.containsHtmlBlocks())
+    // Rule 1: the ONLY place a JetBrains type crosses into the MdNode model.
+    // Everything downstream consumes the parser-agnostic interface.
+    val tree = JvmMdNode(astTree, preprocessed, null)
+    return MarkdownParseResult(preprocessed, tree, tree.containsHtmlBlocks())
 }
 
 /**
@@ -918,7 +915,7 @@ internal class StreamingMarkdownParseCache {
             return@traceMarkdown parseMarkdownUncached(content)
         }
 
-        val activeChildren = activeParse.astTree.children
+        val activeChildren = activeParse.tree.children
         if (activeChildren.size <= 1) {
             return@traceMarkdown parseRepairedTail(
                 tail = activePreprocessed,
@@ -937,9 +934,9 @@ internal class StreamingMarkdownParseCache {
             MarkdownTopLevelBlockSnapshot(
                 key = "${child.type}:${prefix.length + child.startOffset}:${blockContent.length}:${blockContent.hashCode()}",
                 parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
-                preserveParagraphBottomPadding = child.type == MarkdownElementTypes.PARAGRAPH &&
+                preserveParagraphBottomPadding = child.type == MdNodeType.Paragraph &&
                     child.nextSibling() != null &&
-                    child.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) == null,
+                    child.findChildOfTypeRecursive(MdNodeType.Image, MdNodeType.MathBlock) == null,
             )
         }
         val activeTailStart = newlyStableChildren.last().endOffset
@@ -972,15 +969,15 @@ internal fun parseMarkdownContent(content: String): MarkdownParseResult {
 }
 
 internal fun MarkdownParseResult.canRenderByTopLevelBlocks(): Boolean {
-    return !hasHtmlBlocks && astTree.children.size > 1
+    return !hasHtmlBlocks && tree.children.size > 1
 }
 
 internal fun MarkdownParseResult.topLevelBlockCount(): Int {
-    return astTree.children.size
+    return tree.children.size
 }
 
 internal fun MarkdownParseResult.topLevelBlockKey(index: Int): String {
-    val child = astTree.children.getOrNull(index) ?: return "missing-$index"
+    val child = tree.children.getOrNull(index) ?: return "missing-$index"
     return "${child.type}:${child.startOffset}:${child.endOffset}"
 }
 
@@ -992,7 +989,7 @@ internal fun MarkdownTopLevelBlock(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {}
 ) {
-    val child = data.astTree.children.getOrNull(blockIndex) ?: return
+    val child = data.tree.children.getOrNull(blockIndex) ?: return
     ProvideTextStyle(style) {
         Column(
             modifier = modifier
@@ -1190,7 +1187,7 @@ fun MarkdownBlock(
                         .amberTraceMeasure("Amber MarkdownBlock measure")
                 ) {
                     val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
-                    val children = data.astTree.children
+                    val children = data.tree.children
                     if (data.stableTopLevelBlocks.isNotEmpty()) {
                         data.stableTopLevelBlocks.fastForEach { block ->
                             key(block.key) {
@@ -1203,7 +1200,7 @@ fun MarkdownBlock(
                                     } else {
                                         nodeModifier
                                     }
-                                    block.parseResult.astTree.children.fastForEach { child ->
+                                    block.parseResult.tree.children.fastForEach { child ->
                                         MarkdownNode(
                                             node = child,
                                             content = block.parseResult.preprocessed,
@@ -1295,8 +1292,8 @@ private fun String.shouldBypassStreamingDisplayBuffer(): Boolean {
 }
 
 // for debug
-private fun dumpAst(node: ASTNode, text: String, indent: String = "") {
-    println("$indent${node.type} ${if (node.children.isEmpty()) node.getTextInNode(text) else ""} | ${node.javaClass.simpleName}")
+private fun dumpAst(node: MdNode, text: String, indent: String = "") {
+    println("$indent${node.type} ${if (node.children.isEmpty()) node.textIn(text) else ""}")
     node.children.fastForEach {
         dumpAst(it, text, "$indent  ")
     }
@@ -1330,7 +1327,7 @@ object HeaderStyle {
 
 @Composable
 private fun StreamingBlockReveal(
-    node: ASTNode,
+    node: MdNode,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     delayMillis: Int = 0,
@@ -1408,7 +1405,7 @@ private fun streamingRevealModifier(
 
 @Composable
 private fun MarkdownNode(
-    node: ASTNode,
+    node: MdNode,
     content: String,
     modifier: Modifier = Modifier,
     onClickCitation: (String) -> Unit = {},
@@ -1418,7 +1415,7 @@ private fun MarkdownNode(
 ) {
     when (node.type) {
         // 文件根节点
-        MarkdownElementTypes.MARKDOWN_FILE -> {
+        MdNodeType.Root -> {
             node.children.fastForEach { child ->
                 val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
                     children = node.children,
@@ -1438,7 +1435,7 @@ private fun MarkdownNode(
         }
 
         // 段落
-        MarkdownElementTypes.PARAGRAPH -> {
+        MdNodeType.Paragraph -> {
             Paragraph(
                 node = node,
                 content = content,
@@ -1450,23 +1447,25 @@ private fun MarkdownNode(
         }
 
         // 标题
-        MarkdownElementTypes.ATX_1, MarkdownElementTypes.ATX_2, MarkdownElementTypes.ATX_3, MarkdownElementTypes.ATX_4, MarkdownElementTypes.ATX_5, MarkdownElementTypes.ATX_6 -> {
-            val style = when (node.type) {
-                MarkdownElementTypes.ATX_1 -> HeaderStyle.H1
-                MarkdownElementTypes.ATX_2 -> HeaderStyle.H2
-                MarkdownElementTypes.ATX_3 -> HeaderStyle.H3
-                MarkdownElementTypes.ATX_4 -> HeaderStyle.H4
-                MarkdownElementTypes.ATX_5 -> HeaderStyle.H5
-                MarkdownElementTypes.ATX_6 -> HeaderStyle.H6
+        MdNodeType.Heading -> {
+            // ATX_1..ATX_6 collapse to one Heading variant; level via headingLevel
+            // accessor (mapping doc §3 E1, replaces the per-type when over ATX_n).
+            val style = when (node.headingLevel) {
+                1 -> HeaderStyle.H1
+                2 -> HeaderStyle.H2
+                3 -> HeaderStyle.H3
+                4 -> HeaderStyle.H4
+                5 -> HeaderStyle.H5
+                6 -> HeaderStyle.H6
                 else -> throw IllegalArgumentException("Unknown header type")
             }
-            val headingPadding = when (node.type) {
-                MarkdownElementTypes.ATX_1 -> 16.dp
-                MarkdownElementTypes.ATX_2 -> 14.dp
-                MarkdownElementTypes.ATX_3 -> 12.dp
-                MarkdownElementTypes.ATX_4 -> 10.dp
-                MarkdownElementTypes.ATX_5 -> 8.dp
-                MarkdownElementTypes.ATX_6 -> 6.dp
+            val headingPadding = when (node.headingLevel) {
+                1 -> 16.dp
+                2 -> 14.dp
+                3 -> 12.dp
+                4 -> 10.dp
+                5 -> 8.dp
+                6 -> 6.dp
                 else -> 8.dp
             }
             // Capture the body style BEFORE switching to the heading style, so
@@ -1480,7 +1479,9 @@ private fun MarkdownNode(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         node.children.fastForEach { child ->
-                            if (child.type == MarkdownTokenTypes.ATX_CONTENT) {
+                            // ATX_CONTENT (heading inline-content wrapper) maps to
+                            // MdNodeType.Paragraph (mapping doc §4 H1); render that child only.
+                            if (child.type == MdNodeType.Paragraph) {
                                 val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
                                     children = node.children,
                                     child = child,
@@ -1505,7 +1506,7 @@ private fun MarkdownNode(
         }
 
         // 列表
-        MarkdownElementTypes.UNORDERED_LIST -> {
+        MdNodeType.ListUnordered -> {
             UnorderedListNode(
                 node = node,
                 content = content,
@@ -1517,7 +1518,7 @@ private fun MarkdownNode(
             )
         }
 
-        MarkdownElementTypes.ORDERED_LIST -> {
+        MdNodeType.ListOrdered -> {
             OrderedListNode(
                 node = node,
                 content = content,
@@ -1530,8 +1531,9 @@ private fun MarkdownNode(
         }
 
         // Checkbox
-        GFMTokenTypes.CHECK_BOX -> {
-            val isChecked = node.getTextInNode(content).trim() == "[x]"
+        MdNodeType.TaskListMarker -> {
+            // taskChecked accessor relocates the `[x]` text-slice (mapping doc §3 E6 / §4 H2).
+            val isChecked = node.taskChecked == true
             Surface(
                 shape = RoundedCornerShape(2.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
@@ -1555,7 +1557,7 @@ private fun MarkdownNode(
         }
 
         // 引用块
-        MarkdownElementTypes.BLOCK_QUOTE -> {
+        MdNodeType.Blockquote -> {
             ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
                 // Bug fix: 之前用 drawWithContent + drawRect 把 bg 画在 content 之上 (蒙层覆盖
                 // 文字), 深色下文字几乎看不见. 改 drawBehind 让 bg 画在 content 之后.
@@ -1595,25 +1597,46 @@ private fun MarkdownNode(
             }
         }
 
-        // 链接
-        MarkdownElementTypes.INLINE_LINK -> {
-            val linkText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)
-                ?.findChildOfTypeRecursive(GFMTokenTypes.GFM_AUTOLINK, MarkdownTokenTypes.TEXT)?.getTextInNode(content)
-                ?: ""
-            val linkDest =
-                node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
-            val context = LocalContext.current
-            Text(
-                text = linkText,
-                color = MaterialTheme.colorScheme.primary,
-                textDecoration = TextDecoration.Underline,
-                modifier = modifier.clickable {
-                    context.openUrl(linkDest)
-                })
+        // 链接 — only the INLINE_LINK form had a block-level arm originally. GFM_AUTOLINK (leaf)
+        // and AUTOLINK (<url>) collapse to Link too, but the original `when` had no arm for them,
+        // so they fell to `else` (recurse). Reproduce: handle only non-leaf, non-autolink Links
+        // here; route the rest to the same child-recursion the `else` branch performs.
+        MdNodeType.Link -> {
+            if (node.isAutolink || node.children.isEmpty()) {
+                node.children.fastForEach { child ->
+                    val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                        children = node.children,
+                        child = child,
+                        liveSuffix = liveSuffix,
+                        liveSuffixSourceOffset = liveSuffixSourceOffset,
+                    )
+                    MarkdownNode(
+                        node = child,
+                        content = content,
+                        modifier = modifier,
+                        onClickCitation = onClickCitation,
+                        liveSuffix = childLiveSuffix.text,
+                        liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
+                    )
+                }
+            } else {
+                // INLINE_LINK. mapping doc §4 H6/KU-1. linkInnerText relocates the
+                // LINK_TEXT→GFM_AUTOLINK/TEXT dig (1600-1601); linkHref relocates LINK_DESTINATION (E5).
+                val linkText = node.linkInnerText ?: ""
+                val linkDest = node.linkHref ?: ""
+                val context = LocalContext.current
+                Text(
+                    text = linkText,
+                    color = MaterialTheme.colorScheme.primary,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = modifier.clickable {
+                        context.openUrl(linkDest)
+                    })
+            }
         }
 
         // 加粗和斜体
-        MarkdownElementTypes.EMPH -> {
+        MdNodeType.Emphasis -> {
             ProvideTextStyle(TextStyle(fontStyle = FontStyle.Italic)) {
                 node.children.fastForEach { child ->
                     val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
@@ -1634,7 +1657,7 @@ private fun MarkdownNode(
             }
         }
 
-        MarkdownElementTypes.STRONG -> {
+        MdNodeType.Strong -> {
             ProvideTextStyle(TextStyle(fontWeight = FontWeight.SemiBold)) {
                 node.children.fastForEach { child ->
                     val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
@@ -1656,13 +1679,13 @@ private fun MarkdownNode(
         }
 
         // GFM 特殊元素
-        GFMElementTypes.STRIKETHROUGH -> {
+        MdNodeType.Strikethrough -> {
             Text(
-                text = node.getTextInNode(content), textDecoration = TextDecoration.LineThrough, modifier = modifier
+                text = node.textIn(content), textDecoration = TextDecoration.LineThrough, modifier = modifier
             )
         }
 
-        GFMElementTypes.TABLE -> {
+        MdNodeType.Table -> {
             TableNode(
                 node = node,
                 content = content,
@@ -1672,7 +1695,7 @@ private fun MarkdownNode(
             )
         }
 
-        MarkdownTokenTypes.HORIZONTAL_RULE -> {
+        MdNodeType.HorizontalRule -> {
             StreamingBlockReveal(node = node) { revealModifier ->
                 HorizontalDivider(
                     modifier = revealModifier.padding(vertical = 16.dp),
@@ -1683,10 +1706,11 @@ private fun MarkdownNode(
         }
 
         // 图片
-        MarkdownElementTypes.IMAGE -> {
-            val altText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content) ?: ""
-            val imageUrl =
-                node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
+        MdNodeType.Image -> {
+            // alt = LINK_TEXT text (untrimmed, mapping doc §3 E4 — linkLabel relocates the
+            // findChildOfTypeRecursive(LINK_TEXT) dig); src via imageSrc accessor.
+            val altText = node.linkLabel ?: ""
+            val imageUrl = node.imageSrc ?: ""
             if (LocalSearchImageUrls.current?.contains(imageUrl) == true) return
             StreamingBlockReveal(node = node, modifier = modifier) { revealModifier ->
                 Column(
@@ -1705,8 +1729,8 @@ private fun MarkdownNode(
             }
         }
 
-        GFMElementTypes.INLINE_MATH -> {
-            val formula = node.getTextInNode(content)
+        MdNodeType.MathInline -> {
+            val formula = node.textIn(content)
             val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
             if (enableLatexRendering) {
                 MathInline(
@@ -1721,8 +1745,8 @@ private fun MarkdownNode(
             }
         }
 
-        GFMElementTypes.BLOCK_MATH -> {
-            val formula = node.getTextInNode(content)
+        MdNodeType.MathBlock -> {
+            val formula = node.textIn(content)
             val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
             StreamingBlockReveal(node = node, modifier = modifier.fillMaxWidth().padding(vertical = 8.dp)) { revealModifier ->
                 if (enableLatexRendering) {
@@ -1740,72 +1764,72 @@ private fun MarkdownNode(
             }
         }
 
-        MarkdownElementTypes.CODE_SPAN -> {
-            val code = node.getTextInNode(content).trim('`')
+        MdNodeType.InlineCode -> {
+            val code = node.textIn(content).trim('`')
             Text(
                 text = code, fontFamily = FontFamily.Monospace, modifier = modifier
             )
         }
 
-        MarkdownElementTypes.CODE_BLOCK -> {
-            val code = node.getTextInNode(content)
-            StreamingBlockReveal(node = node, modifier = modifier) { revealModifier ->
-                Text(
-                    text = code,
-                    modifier = revealModifier,
+        // 代码块 — CODE_BLOCK (indented) + CODE_FENCE (fenced) collapse to one MdNodeType.CodeBlock
+        // (mapping doc §2 #8/#9, §4 H4). isFencedCode picks the original two render paths.
+        MdNodeType.CodeBlock -> {
+            val fenceRange = node.codeFenceContentRange
+            if (!node.isFencedCode || fenceRange == null) {
+                // Indented code block (or a malformed fence whose body could not be located —
+                // matching the original CODE_FENCE arm's early-returns, which rendered nothing).
+                if (node.isFencedCode) return
+                val code = node.textIn(content)
+                StreamingBlockReveal(node = node, modifier = modifier) { revealModifier ->
+                    Text(
+                        text = code,
+                        modifier = revealModifier,
+                    )
+                }
+            } else {
+                // 这里不能直接取CODE_FENCE_CONTENT的内容，因为首行indent没有包含在内
+                // 因此，需要往上找到最后一个EOL元素，用它来作为代码块的起始offset
+                // (the EOL-backup body-offset computation now lives in JvmMdNode.codeFenceContentRange)
+                val codeContentStartOffset = fenceRange.first
+                val codeContentEndOffset = fenceRange.last + 1
+                val rawCode = content.substring(codeContentStartOffset, codeContentEndOffset)
+
+                val language = node.codeLang ?: "plaintext"
+                val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
+                val syntheticSuffixStart = LocalMarkdownSyntheticSuffixStart.current
+                val endFenceEnd = node.codeFenceEndOffset
+                val hasEnd = endFenceEnd != null && sourceOffsetBase + endFenceEnd <= syntheticSuffixStart
+                val liveCodeSuffix = streamingCodeFenceLiveSuffixFor(
+                    sourceOffsetBase = sourceOffsetBase,
+                    codeContentStartOffset = codeContentStartOffset,
+                    codeContentEndOffset = codeContentEndOffset,
+                    syntheticSuffixStart = syntheticSuffixStart,
+                    liveSuffix = liveSuffix,
+                    liveSuffixSourceOffset = liveSuffixSourceOffset,
                 )
+                val code = (rawCode + liveCodeSuffix).trimIndent()
+
+                StreamingBlockReveal(node = node, modifier = Modifier.padding(bottom = 4.dp).fillMaxWidth()) { revealModifier ->
+                    HighlightCodeBlock(
+                        code = code,
+                        language = language,
+                        modifier = revealModifier,
+                        completeCodeBlock = hasEnd
+                    )
+                }
             }
         }
 
-        // 代码块
-        MarkdownElementTypes.CODE_FENCE -> {
-            // 这里不能直接取CODE_FENCE_CONTENT的内容，因为首行indent没有包含在内
-            // 因此，需要往上找到最后一个EOL元素，用它来作为代码块的起始offset
-            val contentStartIndex = node.children.indexOfFirst { it.type == MarkdownTokenTypes.CODE_FENCE_CONTENT }
-            if (contentStartIndex == -1) return
-            val eolElement =
-                node.children.subList(0, contentStartIndex).findLast { it.type == MarkdownTokenTypes.EOL } ?: return
-            val codeContentStartOffset = eolElement.endOffset
-            val codeContentEndOffset =
-                node.children.findLast { it.type == MarkdownTokenTypes.CODE_FENCE_CONTENT }?.endOffset ?: return
-            val rawCode = content.substring(codeContentStartOffset, codeContentEndOffset)
-
-            val language =
-                node.findChildOfTypeRecursive(MarkdownTokenTypes.FENCE_LANG)?.getTextInNode(content) ?: "plaintext"
-            val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
-            val syntheticSuffixStart = LocalMarkdownSyntheticSuffixStart.current
-            val endFence = node.findChildOfTypeRecursive(MarkdownTokenTypes.CODE_FENCE_END)
-            val hasEnd = endFence != null && sourceOffsetBase + endFence.endOffset <= syntheticSuffixStart
-            val liveCodeSuffix = streamingCodeFenceLiveSuffixFor(
-                sourceOffsetBase = sourceOffsetBase,
-                codeContentStartOffset = codeContentStartOffset,
-                codeContentEndOffset = codeContentEndOffset,
-                syntheticSuffixStart = syntheticSuffixStart,
-                liveSuffix = liveSuffix,
-                liveSuffixSourceOffset = liveSuffixSourceOffset,
-            )
-            val code = (rawCode + liveCodeSuffix).trimIndent()
-
-            StreamingBlockReveal(node = node, modifier = Modifier.padding(bottom = 4.dp).fillMaxWidth()) { revealModifier ->
-                HighlightCodeBlock(
-                    code = code,
-                    language = language,
-                    modifier = revealModifier,
-                    completeCodeBlock = hasEnd
-                )
-            }
-        }
-
-        MarkdownTokenTypes.TEXT -> {
-            val text = node.getTextInNode(content)
+        MdNodeType.Text -> {
+            val text = node.textIn(content)
             Text(
                 text = text,
                 modifier = modifier,
             )
         }
 
-        MarkdownElementTypes.HTML_BLOCK -> {
-            val text = node.getTextInNode(content)
+        MdNodeType.HtmlBlock -> {
+            val text = node.textIn(content)
             StreamingBlockReveal(node = node, modifier = modifier) { revealModifier ->
                 SimpleHtmlBlock(
                     html = text, modifier = revealModifier
@@ -1864,7 +1888,7 @@ private fun String.withoutTrailingFenceTerminator(): String {
 
 @Composable
 private fun UnorderedListNode(
-    node: ASTNode,
+    node: MdNode,
     content: String,
     modifier: Modifier = Modifier,
     onClickCitation: (String) -> Unit = {},
@@ -1885,7 +1909,7 @@ private fun UnorderedListNode(
     ) {
         var itemIndex = 0
         node.children.fastForEach { child ->
-            if (child.type == MarkdownElementTypes.LIST_ITEM) {
+            if (child.type == MdNodeType.ListItem) {
                 val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
                     children = node.children,
                     child = child,
@@ -1910,7 +1934,7 @@ private fun UnorderedListNode(
 
 @Composable
 private fun OrderedListNode(
-    node: ASTNode,
+    node: MdNode,
     content: String,
     modifier: Modifier = Modifier,
     onClickCitation: (String) -> Unit = {},
@@ -1925,9 +1949,12 @@ private fun OrderedListNode(
     ) {
         var index = 1
         node.children.fastForEach { child ->
-            if (child.type == MarkdownElementTypes.LIST_ITEM) {
+            if (child.type == MdNodeType.ListItem) {
+                // R-E2 / KU-7: keep slicing the per-item LIST_NUMBER literal to preserve the
+                // author's exact numbering ("7. "). LIST_NUMBER maps to Unknown and is the first
+                // Unknown child of the LIST_ITEM, so findChildOfTypeRecursive(Unknown) returns it.
                 val numberText =
-                    child.findChildOfTypeRecursive(MarkdownTokenTypes.LIST_NUMBER)?.getTextInNode(content) ?: "$index. "
+                    child.findChildOfTypeRecursive(MdNodeType.Unknown)?.textIn(content) ?: "$index. "
                 val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
                     children = node.children,
                     child = child,
@@ -1952,7 +1979,7 @@ private fun OrderedListNode(
 
 @Composable
 private fun ListItemNode(
-    node: ASTNode,
+    node: MdNode,
     content: String,
     bulletText: String,
     onClickCitation: (String) -> Unit = {},
@@ -2029,12 +2056,12 @@ private fun ListItemNode(
 }
 
 // 分离列表项的直接内容和嵌套列表
-private fun separateContentAndLists(listItemNode: ASTNode): Pair<List<ASTNode>, List<ASTNode>> {
-    val directContent = mutableListOf<ASTNode>()
-    val nestedLists = mutableListOf<ASTNode>()
+private fun separateContentAndLists(listItemNode: MdNode): Pair<List<MdNode>, List<MdNode>> {
+    val directContent = mutableListOf<MdNode>()
+    val nestedLists = mutableListOf<MdNode>()
     listItemNode.children.fastForEach { child ->
         when (child.type) {
-            MarkdownElementTypes.UNORDERED_LIST, MarkdownElementTypes.ORDERED_LIST -> {
+            MdNodeType.ListUnordered, MdNodeType.ListOrdered -> {
                 nestedLists.add(child)
             }
 
@@ -2048,7 +2075,7 @@ private fun separateContentAndLists(listItemNode: ASTNode): Pair<List<ASTNode>, 
 
 @Composable
 private fun Paragraph(
-    node: ASTNode,
+    node: MdNode,
     content: String,
     trim: Boolean = false,
     onClickCitation: (String) -> Unit = {},
@@ -2069,7 +2096,7 @@ private fun Paragraph(
     // present) and the inline AnnotatedString path. Pre-cache mirrors
     // hasInlineMath's pattern further down.
     val hasImageOrBlockMath = remember(node) {
-        node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null
+        node.findChildOfTypeRecursive(MdNodeType.Image, MdNodeType.MathBlock) != null
     }
     if (hasImageOrBlockMath) {
         FlowRow(modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current)) {
@@ -2105,7 +2132,7 @@ private fun Paragraph(
         mutableStateMapOf<String, InlineTextContent>()
     }
     val hasInlineMath = remember(node) {
-        node.findChildOfTypeRecursive(GFMElementTypes.INLINE_MATH) != null
+        node.findChildOfTypeRecursive(MdNodeType.MathInline) != null
     }
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
 
@@ -2305,7 +2332,7 @@ private fun Paragraph(
 
 @Composable
 private fun TableNode(
-    node: ASTNode,
+    node: MdNode,
     content: String,
     modifier: Modifier = Modifier,
     liveSuffix: String = "",
@@ -2414,7 +2441,7 @@ internal data class MarkdownTableData(
 )
 
 internal fun extractStreamingMarkdownTableData(
-    node: ASTNode,
+    node: MdNode,
     content: String,
     sourceOffsetBase: Int,
     liveSuffix: String,
@@ -2426,30 +2453,32 @@ internal fun extractStreamingMarkdownTableData(
     val absoluteTableEnd = sourceOffsetBase + node.endOffset
     if (liveSuffixSourceOffset != absoluteTableEnd) return settledData
 
-    val tableText = node.getTextInNode(content) + liveSuffix
-    val streamingTable = parser
-        .buildMarkdownTreeFromString(tableText)
+    val tableText = node.textIn(content) + liveSuffix
+    // Re-parse the appended table text on the JVM parser and wrap the table node in JvmMdNode
+    // so extractMarkdownTableData stays MdNode-typed (the only place a JetBrains parse leaks
+    // here, mirroring the parse-funnel wrapping at parsePreprocessedMarkdownUncached).
+    val streamingTable = JvmMdNode(parser.buildMarkdownTreeFromString(tableText), tableText, null)
         .children
-        .firstOrNull { it.type == GFMElementTypes.TABLE }
+        .firstOrNull { it.type == MdNodeType.Table }
         ?: return settledData
 
     return extractMarkdownTableData(node = streamingTable, content = tableText) ?: settledData
 }
 
-internal fun extractMarkdownTableData(node: ASTNode, content: String): MarkdownTableData? {
-    val headerNode = node.children.find { it.type == GFMElementTypes.HEADER }
-    val rowNodes = node.children.filter { it.type == GFMElementTypes.ROW }
-    val columnCount = headerNode?.children?.count { it.type == GFMTokenTypes.CELL } ?: 0
+internal fun extractMarkdownTableData(node: MdNode, content: String): MarkdownTableData? {
+    val headerNode = node.children.find { it.type == MdNodeType.TableHead }
+    val rowNodes = node.children.filter { it.type == MdNodeType.TableRow }
+    val columnCount = headerNode?.children?.count { it.type == MdNodeType.TableCell } ?: 0
     if (columnCount == 0) return null
 
     val headerCells = headerNode?.children
-        ?.filter { it.type == GFMTokenTypes.CELL }
-        ?.map { it.getTextInNode(content).trim() }
+        ?.filter { it.type == MdNodeType.TableCell }
+        ?.map { it.textIn(content).trim() }
         ?: emptyList()
     val rows = rowNodes.map { rowNode ->
         rowNode.children
-            .filter { it.type == GFMTokenTypes.CELL }
-            .map { it.getTextInNode(content).trim() }
+            .filter { it.type == MdNodeType.TableCell }
+            .map { it.textIn(content).trim() }
     }
     return MarkdownTableData(
         columnCount = columnCount,
@@ -2459,13 +2488,13 @@ internal fun extractMarkdownTableData(node: ASTNode, content: String): MarkdownT
 }
 
 /**
- * Walks a markdown [ASTNode] and appends its rendered content into the
+ * Walks a markdown [MdNode] and appends its rendered content into the
  * receiver [AnnotatedString.Builder] — including spans for EMPH /
  * STRONG / STRIKETHROUGH / links / code / inline math.
  *
  */
 internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
-    node: ASTNode,
+    node: MdNode,
     content: String,
     trim: Boolean = false,
     inlineContents: MutableMap<String, InlineTextContent>,
@@ -2480,10 +2509,23 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
     searchSources: SearchSourcesRegistry? = null,
 ) {
     when {
-        node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
+        // BLOCK_QUOTE marker token (`>`) — mapping doc §4 H9. The token maps to Unknown; the
+        // original `type == BLOCK_QUOTE -> {}` no-op skipped rendering the `>` prefix.
+        // isBlockquoteMarker checks the real JetBrains type so only the genuine marker is skipped
+        // (a `>` autolink delimiter or escaped `\>` is NOT). Must precede the generic leaf arm.
+        node.isBlockquoteMarker -> {}
 
-        node.type == GFMTokenTypes.GFM_AUTOLINK -> {
-            val link = node.getTextInNode(content)
+        // Links — INLINE_LINK + AUTOLINK + GFM_AUTOLINK all map to MdNodeType.Link (mapping doc
+        // §2 #18/#19/#23, §4 H6/H7). Discriminate by structure (NOT linkHref — an inline link
+        // with an angle-bracket destination `[t](<url>)` has no LINK_DESTINATION child and so a
+        // null linkHref):
+        //  - leaf (no children)  → GFM_AUTOLINK (bare url), original 2485 arm
+        //  - isAutolink (<url>)  → AUTOLINK, original 2606 arm (trim LT/GT via contentChildren)
+        //  - otherwise           → INLINE_LINK, original 2564 arm (pills / normal link)
+        // Placed before the generic leaf arm so the leaf GFM_AUTOLINK is caught here (matching the
+        // original order where GFM_AUTOLINK precedes the leaf arm).
+        node.type == MdNodeType.Link && node.children.isEmpty() -> {
+            val link = node.textIn(content)
             withLink(openUrlLinkAnnotation(link, onClickUrl)) {
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                     append(link)
@@ -2491,16 +2533,18 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
-        node is LeafASTNode -> {
-            val rawText = node.getTextInNode(content)
+        node.children.isEmpty() -> {
+            val rawText = node.textIn(content)
             val text = (if (trim) rawText.trim() else rawText)
                 .replace(BREAK_LINE_REGEX, "\n")
             append(text)
         }
 
-        node.type == MarkdownElementTypes.EMPH -> {
+        node.type == MdNodeType.Emphasis -> {
             withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                node.children.trim(MarkdownTokenTypes.EMPH, 1).fastForEach {
+                // contentChildren strips the `*`/`_` markers via the real EMPH token type
+                // (mapping doc §4 H5 — markers collapse to Unknown so can't be stripped here).
+                node.contentChildren.fastForEach {
                     appendMarkdownNodeContent(
                         node = it,
                         content = content,
@@ -2519,9 +2563,10 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
-        node.type == MarkdownElementTypes.STRONG -> {
+        node.type == MdNodeType.Strong -> {
             withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
-                node.children.trim(MarkdownTokenTypes.EMPH, 2).fastForEach {
+                // contentChildren strips the 2+2 `**` markers via the real EMPH token type (§4 H5).
+                node.contentChildren.fastForEach {
                     appendMarkdownNodeContent(
                         node = it,
                         content = content,
@@ -2540,9 +2585,10 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
-        node.type == GFMElementTypes.STRIKETHROUGH -> {
+        node.type == MdNodeType.Strikethrough -> {
             withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-                node.children.trim(GFMTokenTypes.TILDE, 2).fastForEach {
+                // contentChildren strips the 2+2 `~~` markers via the real TILDE token type (§4 H5).
+                node.contentChildren.fastForEach {
                     appendMarkdownNodeContent(
                         node = it,
                         content = content,
@@ -2561,11 +2607,13 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
-        node.type == MarkdownElementTypes.INLINE_LINK -> {
-            val linkDest =
-                node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
-            val linkText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content)
-                ?.trim { it == '[' || it == ']' } ?: linkDest
+        node.type == MdNodeType.Link && !node.isAutolink -> {
+            // INLINE_LINK (everything that is a Link, non-leaf, and not the <url> autolink form;
+            // gating on linkHref would wrongly route `[t](<url>)` — which has no LINK_DESTINATION
+            // — to the autolink arm). Destination via linkHref (E5); visible label = LINK_TEXT
+            // text trimmed of brackets (linkLabel relocates the dig, §4 H6/KU-1).
+            val linkDest = node.linkHref ?: ""
+            val linkText = node.linkLabel?.trim { it == '[' || it == ']' } ?: linkDest
             val searchSource = searchSources?.lookup(linkDest)
             if (linkText.startsWith("citation,")) {
                 // 如果是引用，则特殊处理
@@ -2603,19 +2651,22 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
-        node.type == MarkdownElementTypes.AUTOLINK -> {
-            val links = node.children.trim(MarkdownTokenTypes.LT, 1).trim(MarkdownTokenTypes.GT, 1)
-            links.fastForEach { link ->
-                withLink(openUrlLinkAnnotation(link.getTextInNode(content), onClickUrl)) {
+        node.type == MdNodeType.Link -> {
+            // AUTOLINK (<url>) — the only remaining Link form here (leaf GFM_AUTOLINK and
+            // INLINE_LINK already handled). contentChildren strips the `<`/`>` delimiter tokens
+            // (LT/GT, which collapse to Unknown) via the real types (mapping doc §4 H7); the
+            // surviving inner-autolink token renders as an italic clickable link.
+            node.contentChildren.fastForEach { link ->
+                withLink(openUrlLinkAnnotation(link.textIn(content), onClickUrl)) {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                        append(link.getTextInNode(content))
+                        append(link.textIn(content))
                     }
                 }
             }
         }
 
-        node.type == MarkdownElementTypes.CODE_SPAN -> {
-            val code = node.getTextInNode(content).trim('`')
+        node.type == MdNodeType.InlineCode -> {
+            val code = node.textIn(content).trim('`')
             withStyle(
                 SpanStyle(
                     fontFamily = FontFamily.Monospace,
@@ -2627,10 +2678,10 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
-        node.type == GFMElementTypes.INLINE_MATH -> {
+        node.type == MdNodeType.MathInline -> {
             if (enableLatexRendering) {
                 // formula as id
-                val formula = node.getTextInNode(content)
+                val formula = node.textIn(content)
                 appendInlineContent(formula, "[Latex]")
                 val (width, height) = with(density) {
                     assumeLatexSize(
@@ -2650,7 +2701,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 )
             } else {
                 // 禁用 LaTeX 渲染时，以等宽字体显示原始公式
-                val formula = node.getTextInNode(content)
+                val formula = node.textIn(content)
                 withStyle(
                     SpanStyle(
                         fontFamily = FontFamily.Monospace,
@@ -2845,72 +2896,3 @@ private fun openUrlLinkAnnotation(url: String, onClickUrl: (String) -> Unit): Li
     )
 }
 
-private fun ASTNode.getTextInNode(text: String): String {
-    return text.substring(startOffset, endOffset)
-}
-
-private fun ASTNode.getTextInNode(text: String, type: IElementType): String {
-    var startOffset = -1
-    var endOffset = -1
-    children.fastForEach {
-        if (it.type == type) {
-            if (startOffset == -1) {
-                startOffset = it.startOffset
-            }
-            endOffset = it.endOffset
-        }
-    }
-    if (startOffset == -1 || endOffset == -1) {
-        return ""
-    }
-    return text.substring(startOffset, endOffset)
-}
-
-private fun ASTNode.nextSibling(): ASTNode? {
-    val brother = this.parent?.children ?: return null
-    for (i in brother.indices) {
-        if (brother[i] == this) {
-            if (i + 1 < brother.size) {
-                return brother[i + 1]
-            }
-        }
-    }
-    return null
-}
-
-private fun ASTNode.findChildOfTypeRecursive(vararg types: IElementType): ASTNode? {
-    if (this.type in types) return this
-    for (child in children) {
-        val result = child.findChildOfTypeRecursive(*types)
-        if (result != null) return result
-    }
-    return null
-}
-
-private fun ASTNode.traverseChildren(
-    action: (ASTNode) -> Unit
-) {
-    children.fastForEach { child ->
-        action(child)
-        child.traverseChildren(action)
-    }
-}
-
-private fun List<ASTNode>.trim(type: IElementType, size: Int): List<ASTNode> {
-    if (this.isEmpty() || size <= 0) return this
-    var start = 0
-    var end = this.size
-    // 从头裁剪
-    var trimmed = 0
-    while (start < end && trimmed < size && this[start].type == type) {
-        start++
-        trimmed++
-    }
-    // 从尾裁剪
-    trimmed = 0
-    while (end > start && trimmed < size && this[end - 1].type == type) {
-        end--
-        trimmed++
-    }
-    return this.subList(start, end)
-}

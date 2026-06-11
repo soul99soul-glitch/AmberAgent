@@ -34,7 +34,7 @@ class SearchPresentationAnchorTest {
         )
         val markdown = "Alpha has one image [citation,example](abc123).\n\nBeta is not referenced."
         val parseResult = MessageRenderCache.markdownParseResult(markdown)
-        val block = parseResult.astTree.children.first()
+        val block = parseResult.tree.children.first()
         val resolver = SearchBlockImageAnchorResolver(presentation)
 
         assertEquals(listOf("https://img.example/a.jpg"), resolver.resolveBlock(block, parseResult.preprocessed).map { it.url })
@@ -69,7 +69,7 @@ class SearchPresentationAnchorTest {
         )
         val markdown = "Video B source is [YouTube](https://www.youtube.com/watch?v=B&utm_source=search)."
         val parseResult = MessageRenderCache.markdownParseResult(markdown)
-        val block = parseResult.astTree.children.first()
+        val block = parseResult.tree.children.first()
         val resolver = SearchBlockImageAnchorResolver(presentation)
 
         assertEquals(
@@ -108,7 +108,7 @@ class SearchPresentationAnchorTest {
         )
         val markdown = "See [first](https://news.example/other) and [second](https://news.example/more)."
         val parseResult = MessageRenderCache.markdownParseResult(markdown)
-        val block = parseResult.astTree.children.first()
+        val block = parseResult.tree.children.first()
         val resolver = SearchBlockImageAnchorResolver(presentation)
 
         assertEquals(
@@ -140,7 +140,7 @@ class SearchPresentationAnchorTest {
         )
         val markdown = "`[citation,example](abc123)`\n\n![Alpha](https://example.com/a)"
         val parseResult = MessageRenderCache.markdownParseResult(markdown)
-        val blocks = parseResult.astTree.children
+        val blocks = parseResult.tree.children
         val resolver = SearchBlockImageAnchorResolver(presentation)
 
         assertTrue(resolver.resolveBlock(blocks[0], parseResult.preprocessed).isEmpty())
@@ -176,7 +176,7 @@ class SearchPresentationAnchorTest {
             Third paragraph repeats [citation,example](aaa111).
         """.trimIndent()
         val parseResult = MessageRenderCache.markdownParseResult(markdown)
-        val blocks = parseResult.astTree.children
+        val blocks = parseResult.tree.children
         val resolver = SearchBlockImageAnchorResolver(presentation)
 
         assertEquals(listOf("https://img.example/a.jpg"), resolver.resolveBlock(blocks[0], parseResult.preprocessed).map { it.url })
@@ -221,7 +221,7 @@ class SearchPresentationAnchorTest {
             Sources: [citation,example](aaa111), [citation,example](bbb222), [citation,example](ccc333).
         """.trimIndent()
         val parseResult = MessageRenderCache.markdownParseResult(markdown)
-        val block = parseResult.astTree.children.first()
+        val block = parseResult.tree.children.first()
         val resolver = SearchBlockImageAnchorResolver(presentation)
 
         assertEquals(
