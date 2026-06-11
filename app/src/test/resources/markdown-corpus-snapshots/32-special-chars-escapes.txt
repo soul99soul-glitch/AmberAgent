@@ -74,10 +74,10 @@
   text=URL-Safe Characters
   text=In link destinations (, ), and & need attention:
   text=•
-  text=Parentheses in URLs: example — balanced parens are fine.
+  text=Parentheses in URLs: example — balanced parens are fine. links=https://example.com/path(1)
   text=•
-  text=Ampersand in URLs: search — unescaped in Markdown source.
+  text=Ampersand in URLs: search — unescaped in Markdown source. links=https://example.com/?a=1&b=2
   text=•
-  text=HTML entity in URL: entity — entity should be decoded before use as href.
+  text=HTML entity in URL: entity — entity should be decoded before use as href. links=&amp;url
   text=Combining Escapes and Emphasis
   text=A sentence with an escaped asterisk \* followed by actual emphasis and then another escaped asterisk \* — the parser must handle the mix correctly.

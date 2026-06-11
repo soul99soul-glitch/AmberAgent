@@ -12,7 +12,7 @@
   text=Images Inside Links
   text=An image can be used as the clickable content of a link by nesting the image syntax inside link brackets:
   text=Kotlin logo
-  text=Clicking the image above would navigate to kotlinlang.org.
+  text=Clicking the image above would navigate to kotlinlang.org. links=https://kotlinlang.org
   text=Alt Text Matters
   text=The alt attribute is important for accessibility. When the image fails to load, the alt text is displayed in its place. A good alt text describes the image's content, not its appearance — for example, "screenshot of the Settings screen showing dark mode toggle" rather than just "screenshot".
   text=Inline Images in Paragraphs

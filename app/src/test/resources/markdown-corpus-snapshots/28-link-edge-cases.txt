@@ -2,31 +2,31 @@
   text=This file tests link syntax that is likely to trip up parsers or renderers.
   text=Parentheses in URLs
   text=Links whose URLs contain unbalanced parentheses need careful handling. CommonMark allows balanced parentheses without escaping:
-  text=MDN Web Docs
-  text=Wikipedia: Kotlin (programming language)
-  text=An URL with an escaped closing paren: example
+  text=MDN Web Docs links=https://developer.[mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map](https://mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map)
+  text=Wikipedia: Kotlin (programming language) links=https://en.[wikipedia.org/wiki/Kotlin_](https://wikipedia.org/wiki/Kotlin_)(programming_language)
+  text=An URL with an escaped closing paren: example links=https://example.com/path$1$
   text=Spaces in URLs
   text=Spaces in link destinations must be encoded as %20 or the link must use angle brackets:
-  text=Search with spaces
+  text=Search with spaces links=
   text=Empty Link Text
-  text=The spec allows an empty link text: . Renderers vary on whether they produce a visible link.
+  text=The spec allows an empty link text: . Renderers vary on whether they produce a visible link. links=https://example.com
   text=Empty URL
-  text=A link with an empty destination: empty URL — this is technically valid and should produce a link with href="".
+  text=A link with an empty destination: empty URL — this is technically valid and should produce a link with href="". links=
   text=Link Immediately After Emphasis
-  text=italiclink — no space between emphasis close and link open.
-  text=boldanother link — same with bold.
+  text=italiclink — no space between emphasis close and link open. links=https://example.com
+  text=boldanother link — same with bold. links=https://example.com/bold
   text=Link Followed Immediately by Punctuation
-  text=Visit example.com. The period is not part of the URL.
-  text=See the docs, then restart.
-  text=Link at end of sentence?
+  text=Visit example.com. The period is not part of the URL. links=https://example.com
+  text=See the docs, then restart. links=https://example.com/docs
+  text=Link at end of sentence? links=https://example.com
   text=Angle-Bracket Link Destinations
   text=The angle-bracket form allows spaces and most special characters:
-  text=weird URL
+  text=weird URL links=
   text=Nested Brackets in Link Text
-  text=Link text can contain [ and ] if they are balanced: nested brackets — this is uncommon but must not crash the parser.
+  text=Link text can contain [ and ] if they are balanced: nested brackets — this is uncommon but must not crash the parser. links=https://example.com
   text=Reference Link—Undefined Reference
   text=A reference link with no matching definition: [this reference][undefined-ref] — CommonMark requires rendering this as literal text [this reference][undefined-ref].
   text=Link with Fragment Only
-  text=Jump to heading — a fragment-only URL is valid.
+  text=Jump to heading — a fragment-only URL is valid. links=#link-edge-cases
   text=Protocol-Relative URL
-  text=Protocol-relative — starts with // and inherits the page protocol.
+  text=Protocol-relative — starts with // and inherits the page protocol. links=//example.com

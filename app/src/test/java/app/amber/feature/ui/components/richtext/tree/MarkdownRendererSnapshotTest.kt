@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import app.amber.agent.ui.components.richtext.nativebridge.PackedAstReader
 import app.amber.core.settings.Settings
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.context.LocalNavController
@@ -13,7 +14,6 @@ import app.amber.feature.ui.context.Navigator
 import app.amber.highlight.Highlighter
 import app.amber.highlight.LocalHighlighter
 import kotlinx.coroutines.CoroutineExceptionHandler
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -24,6 +24,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+
+/** Corpus root shared by the snapshot runner and the blob version guard below. */
+internal const val MARKDOWN_CORPUS_DIR = "src/test/resources/markdown-corpus"
 
 /**
  * Stage-1 golden pin of today's renderer output for the 32-sample corpus.
@@ -75,8 +78,16 @@ class MarkdownRendererSnapshotTest(
     // so we swallow it in the compose effect context instead of letting it crash
     // waitForIdle(). This is the same "async load can't complete on the JVM"
     // normalization the test header documents.
+    //
+    // Some hosts surface the native-lib failure wrapped (e.g. an
+    // ExceptionInInitializerError whose cause is the UnsatisfiedLinkError), so we
+    // walk the whole cause chain rather than matching only the top type. NOTE: this
+    // swallow is the one place a CI-host difference (native lib present/absent),
+    // not a renderer change, can make the suite pass or fail.
     private val swallowAsyncLoadFailures = CoroutineExceptionHandler { _, t ->
-        if (t !is UnsatisfiedLinkError) throw t
+        if (generateSequence<Throwable>(t) { it.cause }.none { it is UnsatisfiedLinkError }) {
+            throw t
+        }
     }
 
     @get:Rule
@@ -124,6 +135,9 @@ class MarkdownRendererSnapshotTest(
             goldenFile.exists(),
         )
         val expected = goldenFile.readText()
+        // Sample 30's golden is intentionally empty: whitespace-only input renders
+        // nothing. The non-empty goldens guard the "renders nothing for valid input"
+        // regression class (a renderer that silently drops content fails them).
         if (expected != actual) {
             throw AssertionError(buildSnapshotDiff(sampleName, expected, actual))
         }
@@ -131,7 +145,7 @@ class MarkdownRendererSnapshotTest(
 
     companion object {
         private val SNAPSHOT_DIR = File("src/test/resources/markdown-corpus-snapshots")
-        private val CORPUS_DIR = File("src/test/resources/markdown-corpus")
+        private val CORPUS_DIR = File(MARKDOWN_CORPUS_DIR)
         private val UPDATE_SNAPSHOTS: Boolean =
             System.getProperty("updateMarkdownSnapshots") == "true"
 
@@ -176,10 +190,14 @@ class MarkdownRendererSnapshotTest(
 
 /**
  * Wire-version guard for the golden parser blobs. Each `.pmda` in the corpus is a
- * binary AST snapshot whose 5th byte (index 4, right after the `PMDA` magic) is the
- * format version. Stage 3 re-types the renderer but must keep consuming version-1
- * blobs; if the native parser bumps the format and the committed blobs are stale,
- * this fails loudly and points at the regen script.
+ * binary AST snapshot consumed via [PackedAstReader]. Stage 3 re-types the renderer
+ * but must keep consuming blobs the reader still accepts; if the native parser bumps
+ * the format (and [PackedAstReader] bumps its SUPPORTED_VERSION to match) while the
+ * committed blobs stay stale, this fails loudly and points at the regen script.
+ *
+ * We assert through the real reader's `isValid` rather than poking the version byte
+ * directly, so the guard tracks the production reader's actual accept criterion
+ * automatically instead of duplicating its version constant.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
@@ -187,17 +205,14 @@ class MarkdownCorpusBlobVersionGuardTest {
 
     @Test
     fun everyCorpusBlobIsWireVersionOne() {
-        val corpusDir = File("src/test/resources/markdown-corpus")
+        val corpusDir = File(MARKDOWN_CORPUS_DIR)
         val blobs = corpusDir.listFiles { f -> f.extension == "pmda" }.orEmpty()
         assertTrue("no .pmda blobs found in ${corpusDir.path}", blobs.isNotEmpty())
 
         blobs.sortedBy { it.name }.forEach { blob ->
-            val bytes = blob.readBytes()
-            assertTrue("${blob.name} too short to hold a version byte", bytes.size > 4)
-            assertEquals(
-                "golden blob stale — run native/markdown-parser/regen-corpus.sh",
-                1,
-                bytes[4].toInt(),
+            assertTrue(
+                "${blob.name}: golden blob stale — run native/markdown-parser/regen-corpus.sh",
+                PackedAstReader(blob.readBytes()).isValid,
             )
         }
     }

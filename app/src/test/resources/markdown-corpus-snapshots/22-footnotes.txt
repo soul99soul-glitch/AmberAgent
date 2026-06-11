@@ -6,7 +6,7 @@
   text=[^kotlin-history]: JetBrains publicly announced Kotlin on July 22, 2011 at the JVM Language Summit.
 [^google-kotlin]: At Google I/O 2019, Google announced Kotlin-first for Android, meaning new APIs and samples would prefer Kotlin.
 [^coroutines]: See the Kotlin Coroutines documentation for a full introduction.
-[^thread-cost]: A typical JVM thread uses ~1 MB of stack memory; a coroutine uses only a few hundred bytes.
+[^thread-cost]: A typical JVM thread uses ~1 MB of stack memory; a coroutine uses only a few hundred bytes. links=https://kotlinlang.org/docs/coroutines-overview.html
   text=Footnote with Multi-Paragraph Content
   text=Some footnotes contain multiple paragraphs.[^long-note]
   text=[^long-note]: This is the first paragraph of the long footnote.
