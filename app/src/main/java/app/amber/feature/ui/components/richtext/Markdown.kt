@@ -2000,6 +2000,43 @@ private fun OrderedListNode(
     }
 }
 
+/**
+ * Render-time view of a list item's FLAT inline content as a single inline group (parity class
+ * [C]). The native tree gives a tight list item flat inline children (no PARAGRAPH wrapper, unlike
+ * JVM); to render them as ONE grouped Text the way the JVM Paragraph-wrapper child does, [Paragraph]
+ * walks `node.children`, so we hand it a node whose children ARE the inline run.
+ *
+ * This is renderer-side dispatch, NOT tree fakery: [inlineChildren] are the REAL parsed native
+ * nodes (a subset of [delegate]'s children with the nested lists removed by `separateContentAndLists`).
+ * Everything except the structural fields [Paragraph] reads is delegated to the real list-item node:
+ *  - [type] is pinned to [MdNodeType.Paragraph] so Paragraph's `else`-arm walkers and the
+ *    streaming-suffix target check classify it as a grouped inline block (it is one).
+ *  - [children] / [contentChildren] expose only the inline run (no nested lists).
+ *  - [findChildOfTypeRecursive] searches ONLY the inline run, so Paragraph's image/inline-math
+ *    pre-scans don't reach into a sibling nested list.
+ *  - [nextSibling] is null: the group is the item's leading content; its bottom-padding cue must
+ *    not depend on the list item's own sibling (a following list item).
+ * All other typed accessors delegate to [delegate]; none are read for a Paragraph-typed node.
+ */
+private class InlineRunMdNode(
+    private val delegate: MdNode,
+    private val inlineChildren: List<MdNode>,
+) : MdNode by delegate {
+    override val type: MdNodeType get() = MdNodeType.Paragraph
+    override val children: List<MdNode> get() = inlineChildren
+    override val contentChildren: List<MdNode> get() = inlineChildren
+    override val parent: MdNode? get() = delegate
+    override fun nextSibling(): MdNode? = null
+
+    override fun findChildOfTypeRecursive(vararg types: MdNodeType): MdNode? {
+        if (MdNodeType.Paragraph in types) return this
+        inlineChildren.fastForEach { child ->
+            child.findChildOfTypeRecursive(*types)?.let { return it }
+        }
+        return null
+    }
+}
+
 @Composable
 private fun ListItemNode(
     node: MdNode,
@@ -2037,21 +2074,63 @@ private fun ListItemNode(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         itemVerticalAlignment = Alignment.CenterVertically,
                     ) {
-                        directContent.fastForEach { contentChild ->
-                            val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
-                                children = node.children,
-                                child = contentChild,
-                                liveSuffix = liveSuffix,
-                                liveSuffixSourceOffset = liveSuffixSourceOffset,
-                            )
-                            MarkdownNode(
-                                node = contentChild,
+                        // Shape-agnostic list-item inline-content dispatch (parity class [C], same
+                        // structural family as the heading BUG #1 fix). A TIGHT list item carries its
+                        // inline content in two different tree shapes:
+                        //  - JVM (JetBrains): LIST_ITEM children = [`- ` marker Unknown, PARAGRAPH
+                        //    wrapper (→ MdNodeType.Paragraph) holding the inline run, EOL/indent
+                        //    Unknowns, nested LIST]. The inline content is GROUPED inside that one
+                        //    Paragraph child, which renders as a single Text run.
+                        //  - Native (pulldown): NO Paragraph wrapper — the LIST_ITEM's inline content
+                        //    is FLAT inline children (Text/InlineCode/Strong/… directly under the item;
+                        //    see MarkdownTreeParityTest TREEDIAG). The old per-child loop rendered each
+                        //    flat node as its OWN Text composable, splitting `Call ` / `code` / ` to…`
+                        //    into three runs instead of one (parity divergence [C]).
+                        // Fix: if directContent contains a Paragraph wrapper (JVM), render per-child as
+                        // before — the Paragraph groups, the marker/whitespace Unknowns render nothing.
+                        // Otherwise (native flat inline) group the whole directContent run into ONE
+                        // Paragraph render so it collapses to a single grouped Text exactly like JVM.
+                        // JVM byte-identical: the JVM branch is the unchanged original loop.
+                        val hasParagraphWrapper =
+                            directContent.fastFirstOrNull { it.type == MdNodeType.Paragraph } != null
+                        if (hasParagraphWrapper) {
+                            directContent.fastForEach { contentChild ->
+                                val childLiveSuffix = streamingLiveSuffixForLastRenderableChild(
+                                    children = node.children,
+                                    child = contentChild,
+                                    liveSuffix = liveSuffix,
+                                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                                )
+                                MarkdownNode(
+                                    node = contentChild,
+                                    content = content,
+                                    modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
+                                    onClickCitation = onClickCitation,
+                                    listLevel = level,
+                                    liveSuffix = childLiveSuffix.text,
+                                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
+                                )
+                            }
+                        } else {
+                            // Attribute the live suffix to this grouped inline run iff the item's last
+                            // renderable child lives inside directContent (i.e. there's no trailing
+                            // nested list that would own the suffix instead) — mirrors the per-child
+                            // attribution the JVM loop performs against node.children.
+                            val groupSuffix = directContent.lastOrNull()?.let { last ->
+                                streamingLiveSuffixForLastRenderableChild(
+                                    children = node.children,
+                                    child = last,
+                                    liveSuffix = liveSuffix,
+                                    liveSuffixSourceOffset = liveSuffixSourceOffset,
+                                )
+                            } ?: EMPTY_STREAMING_LIVE_SUFFIX
+                            Paragraph(
+                                node = InlineRunMdNode(node, directContent),
                                 content = content,
                                 modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
                                 onClickCitation = onClickCitation,
-                                listLevel = level,
-                                liveSuffix = childLiveSuffix.text,
-                                liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
+                                liveSuffix = groupSuffix.text,
+                                liveSuffixSourceOffset = groupSuffix.sourceOffset,
                             )
                         }
                     }

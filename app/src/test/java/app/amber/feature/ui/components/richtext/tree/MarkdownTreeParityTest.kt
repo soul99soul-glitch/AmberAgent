@@ -118,11 +118,25 @@ import java.io.File
  *    arguably MORE correct, but the JVM behavior is locked by the goldens — un-fixable here.
  *  - **[B] Backslash-escape resolution.** JetBrains keeps `\_` / `\!` / `\(` literally in the text
  *    slice; pulldown resolves the escape (`_` / `!` / `(`). Parser-level; not a renderer concern.
- *  - **[C] List-item inline-run grouping.** A TIGHT list item's inline content (`- Call `code` to…`)
- *    is a single grouped Text run on the JVM tree but FLAT inline children on the native tree (no
- *    Paragraph wrapper — same structural family as the old BUG #1, but in `ListItemNode`'s per-child
- *    loop). Native renders `Call` / `code` / `to…` as separate Text composables. A shape-agnostic
- *    grouping fix is possible but is a larger change scoped OUT of T14.5.
+ *  - **[C] List-item inline-run grouping (FIXED — T14.6).** A TIGHT list item's inline content
+ *    (`- Call `code` to…`) is a single grouped Text run on the JVM tree (a PARAGRAPH wrapper child)
+ *    but FLAT inline children on the native tree (no Paragraph wrapper — same structural family as
+ *    the old BUG #1, but in `ListItemNode`'s per-child loop). The old per-child loop rendered `Call`
+ *    / `code` / `to…` as separate Text composables on the native shape. FIX (Markdown.kt): in
+ *    `ListItemNode`, dispatch on shape — if the item's direct content contains a Paragraph wrapper
+ *    (JVM) render per-child as before; otherwise (native flat inline) group the whole inline run
+ *    through ONE `Paragraph()` via the render-time `InlineRunMdNode` view (children = the real flat
+ *    inline nodes, nested lists excluded). JVM is byte-identical: the JVM branch is the unchanged
+ *    original loop, and the snapshot suite (JVM-tree path) stays 32/32. Samples 10 + 13 promoted to
+ *    hard parity; sample 24's [C] component is resolved too (it stays skipped only on the distinct
+ *    [B-CJK] strong-emphasis class below).
+ *  - **[B-CJK] CJK-flanked strong emphasis (parser-level; unmasked when [C] was fixed in 24).**
+ *    Source `常被称为**"离线优先"**策略`: the JVM (JetBrains) tree forms a Strong node (renders bold,
+ *    `**` stripped); the native (pulldown-cmark) tree does NOT match the `**` delimiter run when both
+ *    flanks are CJK — CommonMark's left/right-flanking rules treat CJK as non-punctuation, so the run
+ *    is simultaneously left- and right-flanking and fails to open/close — and emits literal `*` Text
+ *    leaves instead. Verified at the TREE level (TREEDIAG): a Strong child on JVM vs bare `*` Text on
+ *    native. Like [B], this is a parser disagreement in the renderer's INPUT, not a shape bug.
  *  - **[D] Link / autolink / footnote / reference text.** Email autolink `<x>` (JVM keeps the
  *    brackets, native resolves a mailto link), reference links `[t][ref]` (JVM literal, native
  *    resolved), footnote definitions `[^id]:` (JVM keeps the marker text). Tree-structure differences.
@@ -283,10 +297,11 @@ class MarkdownTreeParityTest(
             "04-links-inline",            // [D] email autolink `<x>` kept by JVM, resolved by native
             "05-links-with-titles",       // [D] reference link `[t][ref]` literal (JVM) vs resolved
             "06-images",                  // [D] inline-image run split differs between trees
-            "10-inline-code",             // [C] list-item `Call `code` to…` → native splits the run
+            // 10-inline-code, 13-nested-lists: class [C] (list-item inline-run grouping) RESOLVED by
+            // the shape-agnostic ListItemNode dispatch (Markdown.kt InlineRunMdNode) — both now render
+            // at hard parity and have left this list.
             "11-gfm-table-simple",        // [A] heading `Tables — Simple` → JVM `Tables—Simple`
             "12-gfm-table-aligned",       // [A] heading em-dash trim-space
-            "13-nested-lists",            // [C] list-item `app — Main…` → native splits at em-dash
             "14-ordered-list-start",      // [A] heading em-dash trim-space
             "15-task-lists",              // [A] heading `Task Lists (GFM…` → JVM `Task Lists(GFM…`
             "16-blockquotes-nested",      // [A] heading em-dash trim-space
@@ -295,7 +310,18 @@ class MarkdownTreeParityTest(
             "19-katex-block",             // [A] heading em-dash trim-space
             "22-footnotes",               // [D] footnote def `[^id]:` text kept (JVM) vs stripped
             "23-strikethrough",           // [A] heading `(GFM Extension)` paren trim-space
-            "24-cjk-mixed",               // [C] CJK list-item inline-run split (same as [C] above)
+            // 24-cjk-mixed: the [C] list-item inline-run split is now RESOLVED (its list items render
+            // at parity via the shape-agnostic dispatch). A DISTINCT residual remains and keeps it
+            // here: [B-CJK] CJK-flanked strong emphasis. Source `常被称为**"离线优先"**策略` — the JVM
+            // (JetBrains) tree forms a Strong node (renders bold, markers stripped); the native
+            // (pulldown-cmark) tree does NOT match the `**` delimiter run when both flanks are CJK
+            // (CommonMark left/right-flanking rules treat CJK as non-punctuation, so the run is both
+            // left- and right-flanking and fails to open/close), emitting literal `*` Text leaves.
+            // Verified at the TREE level (parity-test TREEDIAG): JVM paragraph has a Strong child,
+            // native paragraph has bare `*`/`*` Text children — a parser-level divergence in the
+            // renderer's INPUT, NOT a renderer-shape bug. Same family as [B] backslash-escape (the two
+            // parsers resolve the same source differently), not [C].
+            "24-cjk-mixed",               // [B-CJK] `**"离线优先"**` strong (JVM) vs literal `**` (native)
             "25-long-message",            // [A] heading `What is "Offline-First"?` quote trim-space
             "27-hard-soft-breaks",        // [E] blockquote soft-break continuation leading-space
             "28-link-edge-cases",         // [B]+[D] escaped-paren URL `path\(1\)` literal vs resolved
