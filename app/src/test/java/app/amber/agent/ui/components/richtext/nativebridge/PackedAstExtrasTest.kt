@@ -124,6 +124,20 @@ class PackedAstExtrasTest {
         assertNull(node.headingLevelExtra())
     }
 
+    @Test
+    fun headingLevelExtra_byte_0_out_of_range_returns_null() {
+        // 0 is not a valid heading level (1–6 only)
+        val node = nodeWith(NodeType.Heading.code, bytes(0))
+        assertNull(node.headingLevelExtra())
+    }
+
+    @Test
+    fun headingLevelExtra_byte_7_out_of_range_returns_null() {
+        // 7 exceeds the maximum valid heading level
+        val node = nodeWith(NodeType.Heading.code, bytes(7))
+        assertNull(node.headingLevelExtra())
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // 2. codeLangExtra — varint encoding edge cases
     // ─────────────────────────────────────────────────────────────────────────
@@ -169,6 +183,33 @@ class PackedAstExtrasTest {
     fun codeLangExtra_wrong_type_returns_null() {
         val node = nodeWith(NodeType.Paragraph.code, encodeString("kotlin"))
         assertNull(node.codeLangExtra())
+    }
+
+    // ── Fuzz anchors: never-throw contract (M3) ──────────────────────────────
+
+    @Test
+    fun codeLangExtra_oversized_varint_returns_null_not_throw() {
+        // 0xFF,0xFF,0xFF,0xFF,0x7F encodes a varint far beyond the array length.
+        // readString must return null, not throw any exception.
+        val node = nodeWith(NodeType.CodeBlock.code, bytes(0xFF, 0xFF, 0xFF, 0xFF, 0x7F))
+        assertNull(node.codeLangExtra())
+    }
+
+    @Test
+    fun linkHrefExtra_oversized_varint_returns_null_not_throw() {
+        // Same oversized varint through linkHrefExtra path.
+        val node = nodeWith(NodeType.Link.code, bytes(0xFF, 0xFF, 0xFF, 0xFF, 0x7F))
+        assertNull(node.linkHrefExtra())
+    }
+
+    @Test
+    fun linkTitleExtra_oversized_second_varint_returns_null_not_throw() {
+        // Valid first string ("x"), then an oversized varint for the second string
+        // (title). readString for the second field must return null, not throw.
+        val validFirst = encodeString("x")
+        val oversized = bytes(0xFF, 0xFF, 0xFF, 0xFF, 0x7F)
+        val node = nodeWith(NodeType.Link.code, concat(validFirst, oversized))
+        assertNull(node.linkTitleExtra())
     }
 
     // ─────────────────────────────────────────────────────────────────────────

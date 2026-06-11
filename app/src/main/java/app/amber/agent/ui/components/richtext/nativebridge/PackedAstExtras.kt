@@ -23,11 +23,14 @@ package app.amber.agent.ui.components.richtext.nativebridge
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Returns the heading level (1–6), or `null` if this node is not a [NodeType.Heading]
- * or its extras are empty (malformed blob).
+ * Returns the heading level (1–6), or `null` if this node is not a [NodeType.Heading],
+ * its extras are empty (malformed blob), or the level byte is outside the valid 1–6
+ * range (malformed levels outside 1..6 → null).
  */
 internal fun PackedAstNode.headingLevelExtra(): Int? =
-    if (type == NodeType.Heading && extras.isNotEmpty()) extras[0].toInt() and 0xFF else null
+    if (type == NodeType.Heading && extras.isNotEmpty())
+        (extras[0].toInt() and 0xFF).takeIf { it in 1..6 }
+    else null
 
 /**
  * Returns the fenced-code language string, or `null` if:
@@ -65,6 +68,8 @@ internal fun PackedAstNode.linkTitleExtra(): String? {
 /**
  * Returns `true` if the task-list checkbox is checked, `false` if unchecked,
  * or `null` if this node is not a [NodeType.TaskListMarker] or extras are empty.
+ * Any byte value other than 1 — including unexpected values not defined by the
+ * wire format — is treated as unchecked (returns `false`).
  */
 internal fun PackedAstNode.taskCheckedExtra(): Boolean? {
     if (type != NodeType.TaskListMarker || extras.isEmpty()) return null
@@ -100,6 +105,8 @@ internal fun PackedAstNode.listStartExtra(): Long? {
 internal fun PackedAstNode.tableAlignmentsExtra(): List<TableAlign>? {
     if (type != NodeType.Table || extras.isEmpty()) return null
     // Future: decode one byte per column when Rust starts writing alignment extras.
+    // Dead path today — extras is always empty for Table nodes (no Tag::Table arm in
+    // attach_tag_extras); implemented here for when Rust adds the Table arm.
     return extras.map { b -> TableAlign.fromByte(b.toInt() and 0xFF) }
 }
 
@@ -134,6 +141,14 @@ internal enum class TableAlign {
  *
  * @return a pair of (decoded string, offset just past the string end), or
  *         `null` if the byte array is truncated / the varint is malformed.
+ *
+ * **Design note — never throws, always returns null on malformed input.**
+ * Extras decoding is best-effort on the render path: a corrupt or
+ * unrecognised extras blob must degrade gracefully, not crash. This
+ * deliberately DIFFERS from [PackedAstNode.Companion.readVarint], which
+ * throws on malformed node-tree data (node-tree decode is authoritative
+ * and a corrupt tree is unrecoverable). Future authors must NOT
+ * "harmonize" these two error strategies.
  */
 private fun ByteArray.readString(at: Int): Pair<String, Int>? {
     var value = 0L
