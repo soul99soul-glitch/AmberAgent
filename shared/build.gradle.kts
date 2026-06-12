@@ -13,45 +13,52 @@ kotlin {
     iosArm64()
     iosSimulatorArm64()
 
+    // Shared KMP modules — referenced by both framework export and commonMain
+    val sharedProjects = listOf(
+        ":ai-core",
+        ":core:types",
+        ":core:ai:api",
+        ":core:ai:generation:api",
+        ":core:ai:transformers:api",
+        ":core:event",
+        ":core:agent-runtime",
+        ":core:agent-utils",
+        ":core:llm",
+        ":core:ai-prompts",
+        ":core:sync:api",
+        ":core:context:api",
+        ":core:automation:api",
+        ":feature:history",
+        ":feature:webview",
+        ":feature:board:api",
+        ":feature:chat:api",
+        ":feature:deepread:api",
+        ":feature:live:api",
+        ":feature:office:api",
+        ":feature:terminal:api",
+        ":feature:modelcouncil:api",
+        ":feature:subagent:api",
+        ":feature:runtime:api",
+        ":feature:tools:api",
+        ":core:memory:api",
+        ":core:agent-store-room",
+        ":core:native",
+    )
+
     // Produce static Apple framework for iOS consumption
+    // export() causes Kotlin/Native to generate ObjC headers for all transitively
+    // visible types from these modules — api() alone does NOT do this.
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "Shared"
             isStatic = true
+            sharedProjects.forEach { export(project(it)) }
         }
     }
 
     sourceSets {
         commonMain.dependencies {
-            // Re-export all shared KMP modules via api() so Swift sees all types
-            api(project(":ai-core"))
-            api(project(":core:types"))
-            api(project(":core:ai:api"))
-            api(project(":core:ai:generation:api"))
-            api(project(":core:ai:transformers:api"))
-            api(project(":core:event"))
-            api(project(":core:agent-runtime"))
-            api(project(":core:agent-utils"))
-            api(project(":core:llm"))
-            api(project(":core:ai-prompts"))
-            api(project(":core:sync:api"))
-            api(project(":core:context:api"))
-            api(project(":core:automation:api"))
-            api(project(":feature:history"))
-            api(project(":feature:webview"))
-            api(project(":feature:board:api"))
-            api(project(":feature:chat:api"))
-            api(project(":feature:deepread:api"))
-            api(project(":feature:live:api"))
-            api(project(":feature:office:api"))
-            api(project(":feature:terminal:api"))
-            api(project(":feature:modelcouncil:api"))
-            api(project(":feature:subagent:api"))
-            api(project(":feature:runtime:api"))
-            api(project(":feature:tools:api"))
-            api(project(":core:memory:api"))
-            api(project(":core:agent-store-room"))
-            api(project(":core:native"))
+            sharedProjects.forEach { api(project(it)) }
         }
     }
 }
