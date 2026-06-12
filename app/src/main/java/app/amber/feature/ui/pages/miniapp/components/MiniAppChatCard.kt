@@ -38,6 +38,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Clock02
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Download01
+import me.rerere.hugeicons.stroke.ListView
 import me.rerere.hugeicons.stroke.MoreVertical
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -146,6 +147,7 @@ fun MiniAppChatCard(
                         }
                         DropdownMenuItem(
                             text = { Text("打开列表") },
+                            leadingIcon = { Icon(HugeIcons.ListView, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
                                 onOpenList()
