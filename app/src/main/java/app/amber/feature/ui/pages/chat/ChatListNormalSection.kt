@@ -441,30 +441,9 @@ internal fun ChatListNormal(
             return
         }
         var stableBottomFrames = 0
-        var lastContentBottom: Int? = state.lastItemContentBottom()
-        val minSettleFrames = TimelineFollowEndSettlePolicy.MinSettleFrames
         repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) { frame ->
             val distanceBefore = state.distanceToTimelineBottomPx()
-            val currentContentBottom = state.lastItemContentBottom()
-            // Detect bottom-item height change (Markdown re-parse, action row
-            // appearance, etc.). A change resets the stable counter so the loop
-            // keeps running through the layout displacement, regardless of how
-            // many frames the re-parse takes to land. This makes the settle
-            // self-adjusting rather than relying solely on a fixed frame count.
-            val contentBottomChanged = lastContentBottom != null &&
-                currentContentBottom != null &&
-                currentContentBottom != lastContentBottom
-            if (contentBottomChanged) {
-                logScroll(
-                    "generationEndSettle.contentBottomChanged",
-                    "frame=$frame last=$lastContentBottom current=$currentContentBottom",
-                )
-            }
-            lastContentBottom = currentContentBottom
-            val pastMinSettle = frame >= minSettleFrames
             if (
-                pastMinSettle &&
-                !contentBottomChanged &&
                 TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
                     distancePx = distanceBefore,
                     bottomBufferPx = bottomFollowBufferPx,
@@ -505,7 +484,6 @@ internal fun ChatListNormal(
                 "frame=$frame before=$distanceBefore after=$distanceAfter stable=$stableBottomFrames",
             )
             if (
-                pastMinSettle &&
                 TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
                     distancePx = distanceAfter,
                     bottomBufferPx = bottomFollowBufferPx,
@@ -1570,13 +1548,6 @@ private fun LazyListState.distanceToTimelineBottomPx(): Int? {
  * deferred layout changes alter the bottom item's height — resetting the
  * stable-frame counter so the loop keeps running through the displacement.
  */
-private fun LazyListState.lastItemContentBottom(): Int? {
-    val totalItems = layoutInfo.totalItemsCount
-    if (totalItems == 0) return null
-    val bottomItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == totalItems - 1 }
-        ?: return null
-    return bottomItem.offset + bottomItem.size
-}
 
 /**
  * iMessage-style send entrance for the just-sent user bubble: a spring slide

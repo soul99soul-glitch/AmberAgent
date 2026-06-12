@@ -13,18 +13,6 @@ internal object TimelineFollowEndSettlePolicy {
     const val MaxSettleFrames = 16
     const val RequiredStableBottomFrames = 2
 
-    // Minimum iterations before the settle loop may exit on stability.
-    // When loading → false, the Markdown composable triggers an asynchronous
-    // full re-parse via withContext(Dispatchers.Default) inside a LaunchedEffect.
-    // The re-parse + layout propagation can take 4-8 frames, but the settle
-    // sees "stable distance = 0" in the frames BEFORE the new layout lands and
-    // exits after just 2 consecutive stable frames — leaving the post-re-parse
-    // viewport displacement uncorrected.  This guard forces the loop to keep
-    // running (and scrolling) through the pre-re-parse quiet window.
-    // Set to 8 to cover the upper bound of re-parse latency; the real exit
-    // condition is bottom-item height change-detection (see settleAfterGenerationEnd).
-    const val MinSettleFrames = 8
-
     fun effectPlan(
         wasActiveGeneration: Boolean,
         activeGeneration: Boolean,

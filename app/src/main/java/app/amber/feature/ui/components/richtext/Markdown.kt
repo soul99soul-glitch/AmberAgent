@@ -908,7 +908,8 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
                     // deliberately excluding inline HTML — equivalent to the JVM
                     // containsHtmlBlocks() which only recurses for MdNodeType.HtmlBlock
                     // (JetBrains HTML_BLOCK). Verified parity (tree_builder.rs / packed_ast.rs).
-                    return MarkdownParseResult(preprocessed, root, reader.hasHtmlBlocks)
+                    val result = MarkdownParseResult(preprocessed, root, reader.hasHtmlBlocks)
+                    return if (result.hasHtmlBlocks) result else result.withStableTopLevelBlocks(preprocessed)
                 }
             }
             // Blob present but rejected (invalid header / failed bounds-walk / null root):
@@ -925,7 +926,46 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
     // Rule 1: the ONLY place a JetBrains type crosses into the MdNode model.
     // Everything downstream consumes the parser-agnostic interface.
     val tree = JvmMdNode(astTree, preprocessed, null)
-    return MarkdownParseResult(preprocessed, tree, tree.containsHtmlBlocks())
+    val result = MarkdownParseResult(preprocessed, tree, tree.containsHtmlBlocks())
+    return if (result.hasHtmlBlocks) result else result.withStableTopLevelBlocks(preprocessed)
+}
+
+/**
+ * Populate [stableTopLevelBlocks] for a non-streaming (complete) parse result.
+ *
+ * When streaming ends, the Markdown composable transitions from the streaming
+ * parse cache to [MarkdownParseCache.getOrParse]. Without stable blocks, the
+ * render path switches from the keyed-block structure (each stable block wrapped
+ * in `key(block.key)`) to an un-keyed positional loop. Compose then disposes the
+ * entire keyed subtree and rebuilds every node cold — complex nodes (code blocks,
+ * tables) measure at minimal height for 1-2 frames, and LazyColumn clamps the
+ * scroll offset to the item top, causing a visible "jump to the beginning".
+ *
+ * By populating stable blocks for the complete content, the render path stays in
+ * the keyed branch and Compose reuses the warm node compositions — no cold
+ * remeasure, no height collapse, no viewport jump.
+ *
+ * The key format matches [StreamingMarkdownParseCache]'s format exactly
+ * (`"$type:$absoluteOffset:$length:$hashCode"`) so Compose matches the old and
+ * new nodes by the same identity. Since this is a complete parse, every top-level
+ * block is "stable" (no still-growing tail).
+ */
+private fun MarkdownParseResult.withStableTopLevelBlocks(
+    preprocessed: String,
+): MarkdownParseResult {
+    val children = tree.children
+    if (children.isEmpty()) return this
+    val blocks = children.map { child ->
+        val blockContent = preprocessed.substring(child.startOffset, child.endOffset)
+        MarkdownTopLevelBlockSnapshot(
+            key = "${child.type}:${child.startOffset}:${blockContent.length}:${blockContent.hashCode()}",
+            parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
+            preserveParagraphBottomPadding = child.type == MdNodeType.Paragraph &&
+                child.nextSibling() != null &&
+                child.findChildOfTypeRecursive(MdNodeType.Image, MdNodeType.MathBlock) == null,
+        )
+    }
+    return copy(stableTopLevelBlocks = blocks)
 }
 
 private fun parseMarkdownUncached(content: String): MarkdownParseResult {
@@ -1156,6 +1196,43 @@ fun MarkdownBlock(
             onClickCitation = onClickCitation,
         )
         return
+    }
+    MarkdownBlockLegacy(
+        content = content,
+        modifier = modifier,
+        style = style,
+        fillWidth = fillWidth,
+        streaming = streaming,
+        deferStreamingParse = deferStreamingParse,
+        onStreamingVisibleFrame = onStreamingVisibleFrame,
+        onClickCitation = onClickCitation,
+    )
+}
+
+@Composable
+internal fun MarkdownBlockLegacy(
+    content: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    fillWidth: Boolean = true,
+    streaming: Boolean = false,
+    deferStreamingParse: Boolean = false,
+    onStreamingVisibleFrame: (() -> Unit)? = null,
+    onClickCitation: (String) -> Unit = {}
+) {
+    // Temporary stream-freeze probe (M0.2): logs the raw content length this
+    // MarkdownBlock instance composed with during streaming. Remove with fix.
+    if (BuildConfig.DEBUG && streaming) {
+        val lastLoggedMdLen = remember { intArrayOf(-1) }
+        SideEffect {
+            if (lastLoggedMdLen[0] != content.length) {
+                lastLoggedMdLen[0] = content.length
+                Log.d(
+                    "AmberStreamFreeze",
+                    "mdBlock len=${content.length} defer=$deferStreamingParse",
+                )
+            }
+        }
     }
     val bufferStreaming = streaming && !content.shouldBypassStreamingDisplayBuffer()
     val renderContent = rememberStreamingDisplayText(
@@ -3287,4 +3364,3 @@ private fun openUrlLinkAnnotation(url: String, onClickUrl: (String) -> Unit): Li
         },
     )
 }
-
