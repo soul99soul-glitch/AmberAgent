@@ -28,6 +28,7 @@ final class ChatViewModel {
 
     private let settingsStore: SettingsStore
     private let provider = OpenAIKmpProvider()
+    private let db: AgentRuntimeDatabase = AgentRuntimeDatabaseConstructor.shared.initialize()
     private var streamingTask: Task<Void, Never>?
 
     // MARK: - Init
@@ -42,10 +43,11 @@ final class ChatViewModel {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        let inputSnapshot = text
         let userMsg = UIMessage.companion.user(prompt: text)
         messages.append(userMsg)
         inputText = ""
-        generateResponse()
+        generateResponse(inputSnapshot: inputSnapshot)
     }
 
     func cancelGeneration() {
@@ -56,7 +58,7 @@ final class ChatViewModel {
 
     // MARK: - Private
 
-    private func generateResponse() {
+    private func generateResponse(inputSnapshot: String) {
         streamingTask?.cancel()
         isLoading = true
 
@@ -64,25 +66,12 @@ final class ChatViewModel {
         let params = makeTextGenerationParams()
         let runId = UUID().uuidString
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
-        let inputSnapshot = inputText
 
         streamingTask = Task { @MainActor in
-            // Create a placeholder assistant message
-            let placeholderId = KotlinUuid.companion.random()
-            let localDt = nowLocalDateTime()
-            let placeholder = UIMessage(
-                id: placeholderId,
-                role: MessageRole.assistant,
-                parts: [UIMessagePart.Text(text: "", metadata: nil)],
-                annotations: [],
-                createdAt: localDt,
-                finishedAt: nil,
-                modelId: nil,
-                usage: nil,
-                translation: nil
+            let accumulator = MessageStreamAccumulator(
+                initialMessages: self.messages,
+                model: params.model
             )
-            self.messages.append(placeholder)
-            var accumulatedText = ""
 
             do {
                 // Step 1: Obtain the Flow from streamText
@@ -90,7 +79,7 @@ final class ChatViewModel {
                     (cont: CheckedContinuation<any Kotlinx_coroutines_coreFlow, Error>) in
                     self.provider.streamText(
                         providerSetting: providerSetting,
-                        messages: Array(self.messages.dropLast()),
+                        messages: self.messages,
                         params: params
                     ) { flow, error in
                         if let flow { cont.resume(returning: flow) }
@@ -103,32 +92,11 @@ final class ChatViewModel {
                     (cont: CheckedContinuation<Void, Error>) in
                     let collector = ChunkCollector { [weak self] chunk in
                         guard let self else { return }
-                        // Extract the text delta from the first choice's delta message
-                        if let delta = chunk.choices.first?.delta {
-                            for part in delta.parts {
-                                if let textPart = part as? UIMessagePart.Text {
-                                    accumulatedText += textPart.text
-                                }
-                            }
-                        }
-
-                        // Update the placeholder on main actor
+                        accumulator.append(chunk: chunk)
+                        let snapshot = accumulator.snapshot()
                         Task { @MainActor [weak self] in
                             guard let self else { return }
-                            let updated = UIMessage(
-                                id: placeholderId,
-                                role: MessageRole.assistant,
-                                parts: [UIMessagePart.Text(text: accumulatedText, metadata: nil)],
-                                annotations: [],
-                                createdAt: localDt,
-                                finishedAt: self.nowLocalDateTime(),
-                                modelId: nil,
-                                usage: chunk.usage,
-                                translation: nil
-                            )
-                            if let idx = self.messages.indices.last {
-                                self.messages[idx] = updated
-                            }
+                            self.messages = snapshot
                         }
                     }
                     flow.collect(collector: collector) { error in
@@ -153,19 +121,19 @@ final class ChatViewModel {
                     inputDigest: inputSnapshot
                 )
             } catch {
-                // Error — replace placeholder with error message
+                // Error — append error message
                 let errMsg = UIMessage(
-                    id: placeholderId,
+                    id: KotlinUuid.companion.random(),
                     role: MessageRole.assistant,
                     parts: [UIMessagePart.Text(text: "Error: \(error.localizedDescription)", metadata: nil)],
                     annotations: [],
-                    createdAt: localDt,
-                    finishedAt: nowLocalDateTime(),
+                    createdAt: self.nowLocalDateTime(),
+                    finishedAt: self.nowLocalDateTime(),
                     modelId: nil,
                     usage: nil,
                     translation: nil
                 )
-                if let idx = messages.indices.last { messages[idx] = errMsg }
+                self.messages.append(errMsg)
 
                 await self.recordRun(
                     runId: runId,
@@ -185,7 +153,6 @@ final class ChatViewModel {
         status: String,
         inputDigest: String
     ) async {
-        let db = AgentRuntimeDatabaseConstructor.shared.initialize()
         let dao = db.agentRuntimeDao()
 
         let now = Int64(Date().timeIntervalSince1970 * 1000)

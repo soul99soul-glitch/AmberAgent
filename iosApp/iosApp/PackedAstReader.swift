@@ -146,9 +146,11 @@ class PackedAstNode: Identifiable {
         list.reserveCapacity(header.childCount)
         var cursor = header.bodyStart
         for i in 0..<header.childCount {
+            guard let next = try? PackedAstNode.skipNode(blob: blob, start: cursor) else {
+                return [] // corrupt data — return empty instead of partial list
+            }
             let node = PackedAstNode(blob: blob, offset: cursor, parent: self, indexInParent: i)
             list.append(node)
-            guard let next = try? PackedAstNode.skipNode(blob: blob, start: cursor) else { break }
             cursor = next
         }
         return list
@@ -167,7 +169,8 @@ class PackedAstNode: Identifiable {
     /// Heading level (1-6). Returns nil if not a heading.
     func headingLevel() -> Int? {
         guard type == .heading, !extras.isEmpty else { return nil }
-        return Int(extras[0])
+        let level = Int(extras[0])
+        return (1...6).contains(level) ? level : nil
     }
 
     /// Language string for a code block. Returns nil if not a code block or no lang.
