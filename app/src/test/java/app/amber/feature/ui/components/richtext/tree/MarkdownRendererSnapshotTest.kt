@@ -80,12 +80,19 @@ class MarkdownRendererSnapshotTest(
     // normalization the test header documents.
     //
     // Some hosts surface the native-lib failure wrapped (e.g. an
-    // ExceptionInInitializerError whose cause is the UnsatisfiedLinkError), so we
-    // walk the whole cause chain rather than matching only the top type. NOTE: this
-    // swallow is the one place a CI-host difference (native lib present/absent),
-    // not a renderer change, can make the suite pass or fail.
+    // ExceptionInInitializerError whose cause is the UnsatisfiedLinkError), and on
+    // some hosts the QuickJS wrapper surfaces it one layer later as a
+    // QuickJSException from the context layer instead of the loader. Both are the
+    // same root cause — the highlighter is unavailable in a host-JVM test — and
+    // highlighting only colors spans, never the dumped text, so both are safe to
+    // swallow. We walk the whole cause chain rather than matching only the top
+    // type. NOTE: this swallow is the one place a CI-host difference (native lib
+    // present/absent), not a renderer change, can make the suite pass or fail.
     private val swallowAsyncLoadFailures = CoroutineExceptionHandler { _, t ->
-        if (generateSequence<Throwable>(t) { it.cause }.none { it is UnsatisfiedLinkError }) {
+        val highlighterUnavailable = generateSequence<Throwable>(t) { it.cause }.any {
+            it is UnsatisfiedLinkError || it.javaClass.name == "com.whl.quickjs.wrapper.QuickJSException"
+        }
+        if (!highlighterUnavailable) {
             throw t
         }
     }

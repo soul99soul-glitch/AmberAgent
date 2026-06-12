@@ -51,7 +51,12 @@ import org.robolectric.annotation.GraphicsMode
 class MarkdownEdgeShapeRenderTest {
 
     private val swallowAsyncLoadFailures = CoroutineExceptionHandler { _, t ->
-        if (generateSequence<Throwable>(t) { it.cause }.none { it is UnsatisfiedLinkError }) {
+        // Mirrors MarkdownRendererSnapshotTest: UnsatisfiedLinkError or the QuickJS
+        // context-layer wrapper of the same host-JVM highlighter unavailability.
+        val highlighterUnavailable = generateSequence<Throwable>(t) { it.cause }.any {
+            it is UnsatisfiedLinkError || it.javaClass.name == "com.whl.quickjs.wrapper.QuickJSException"
+        }
+        if (!highlighterUnavailable) {
             throw t
         }
     }
