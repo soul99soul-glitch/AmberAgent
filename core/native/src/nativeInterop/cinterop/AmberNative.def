@@ -1,0 +1,3 @@
+headers = AmberNative.h
+headerFilter = AmberNative.h
+package = app.amber.core.native.ffi
