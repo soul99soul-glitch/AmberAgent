@@ -40,7 +40,7 @@ class ChatHistorySignalCollector(
         }.getOrElse { return@withContext emptyList() }
 
         candidates
-            .filter { it.updateAt.toEpochMilli() >= cutoff }
+            .filter { it.updateAt.toEpochMilliseconds() >= cutoff }
             .mapNotNull { conversation -> scoreAndExtract(conversation) }
             .sortedByDescending { it.relevanceScore }
             .take(limit)
@@ -81,7 +81,7 @@ class ChatHistorySignalCollector(
         // Build rich content for the signal
         val content = buildString {
             appendLine("对话深度：${nodeCount}轮")
-            appendLine("最近更新：${formatTime(conversation.updateAt.toEpochMilli())}")
+            appendLine("最近更新：${formatTime(conversation.updateAt.toEpochMilliseconds())}")
             appendLine()
             appendLine("--- 最近对话内容 ---")
             for (text in tailTexts.takeLast(MAX_CONTENT_TURNS)) {
@@ -94,7 +94,7 @@ class ChatHistorySignalCollector(
             sourceRef = conversation.id.toString(),
             title = title.take(120),
             content = content,
-            signalTime = conversation.updateAt.toEpochMilli(),
+            signalTime = conversation.updateAt.toEpochMilliseconds(),
             metadataJson = """{"conversation_id":"${conversation.id}","node_count":$nodeCount,"relevance":$score}""",
         )
         return ScoredCandidate(signal, score)

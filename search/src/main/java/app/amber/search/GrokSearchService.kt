@@ -22,8 +22,13 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 private const val TAG = "GrokSearchService"
 
@@ -93,16 +98,13 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
 
             Log.i(TAG, "search: $query")
 
-            val request = Request.Builder()
-                .url(serviceOptions.customUrl)
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string().let {
+            val response = httpClient.post(serviceOptions.customUrl) {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer ${serviceOptions.apiKey}")
+            }
+            if (response.status.isSuccess()) {
+                val responseBody = response.bodyAsText().let {
                     json.decodeFromString<GrokResponse>(it)
                 }
 
@@ -134,7 +136,7 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
                     )
                 )
             } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
+                error("response failed #${response.status.value}: ${response.bodyAsText()}")
             }
         }
     }

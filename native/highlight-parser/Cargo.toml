@@ -11,7 +11,6 @@ name = "highlight_parser"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-jni.workspace = true
 jni-common.workspace = true
 tree-sitter.workspace = true
 tree-sitter-highlight.workspace = true
@@ -33,3 +32,6 @@ tree-sitter-md.workspace = true
 tree-sitter-html.workspace = true
 tree-sitter-css.workspace = true
 tree-sitter-sequel.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true

@@ -2,16 +2,25 @@ package app.amber.ai.provider.providers
 
 import android.content.Context
 import android.util.Log
+import app.amber.common.http.SseEvent
+import app.amber.common.http.sseFlow
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.header
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -45,7 +54,6 @@ import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.parseErrorDetail
-import app.amber.ai.util.stringSafe
 import app.amber.ai.util.toHeaders
 import app.amber.common.http.await
 import app.amber.common.http.jsonPrimitiveOrNull
@@ -53,10 +61,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ClaudeProvider"
@@ -64,6 +68,12 @@ private const val ANTHROPIC_VERSION = "2023-06-01"
 
 class ClaudeProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Claude> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
+
+    private val sseClient by lazy {
+        HttpClient(OkHttp) {
+            install(SSE)
+        }
+    }
 
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> =
         withContext(Dispatchers.IO) {
@@ -153,124 +163,131 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<MessageChunk> = callbackFlow {
+    ): Flow<MessageChunk> {
         val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/messages")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
-            .addHeader("anthropic-version", ANTHROPIC_VERSION)
-            .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+        val apiKey = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        val baseUrl = providerSetting.baseUrl
 
         Log.i(TAG, "streamText: model=${params.model.modelId}, messages=${messages.size}, stream=true")
 
-        val listener = object : EventSourceListener() {
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                try {
-                    handleStreamEvent(id, type, data)
-                } catch (error: OutOfMemoryError) {
-                    Log.e(TAG, "Claude stream exhausted app heap; canceling stream")
-                    eventSource.cancel()
-                    close(error)
-                } catch (error: Throwable) {
-                    Log.e(TAG, "Claude stream event failed: ${error.message.orEmpty()}")
-                    eventSource.cancel()
-                    close(error)
+        return sseClient.sseFlow("$baseUrl/messages") {
+            method = HttpMethod.Post
+            contentType(ContentType.Application.Json)
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                header(it.name, it.value)
+            }
+            header("x-api-key", apiKey)
+            header("anthropic-version", ANTHROPIC_VERSION)
+            configureReferHeaders(baseUrl) { name, value ->
+                header(name, value)
+            }
+            setBody(json.encodeToString(requestBody))
+        }.transform { event ->
+            when (event) {
+                is SseEvent.Open -> { /* connection opened */ }
+                is SseEvent.Event -> {
+                    handleStreamEvent(event.id, event.type, event.data)
+                }
+                is SseEvent.Closed -> { /* stream completed normally */ }
+                is SseEvent.Failure -> {
+                    val exception = parseFailureException(event)
+                    throw exception
                 }
             }
+        }
+    }
 
-            private fun handleStreamEvent(
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                logStreamEvent(type, data)
-                if (data == "[DONE]") return
+    private fun parseFailureException(event: SseEvent.Failure): Throwable {
+        val throwable = event.throwable
+        throwable?.printStackTrace()
+        Log.e(TAG, "SSE failure: ${throwable?.javaClass?.name} ${throwable?.message}")
 
-                val dataJson = json.parseToJsonElement(data).jsonObject
-                when (type) {
-                    "message_stop" -> {
-                        Log.d(TAG, "Stream ended")
-                        close()
-                        return
-                    }
-
-                    "error" -> {
-                        val error = dataJson["error"]?.parseErrorDetail()
-                        close(error)
-                        return
-                    }
-                }
-
-                val deltaMessage = parseMessage(buildJsonArray {
-                    val contentBlockObj = dataJson["content_block"]?.jsonObject
-                    val deltaObj = dataJson["delta"]?.jsonObject
-                    if (contentBlockObj != null) {
-                        add(contentBlockObj)
-                    }
-                    if (deltaObj != null) {
-                        add(deltaObj)
-                    }
-                })
-                val tokenUsage = parseTokenUsage(dataJson)
-                if (deltaMessage.parts.isEmpty() && tokenUsage == null) return
-
-                val messageChunk = MessageChunk(
-                    id = id ?: "",
-                    model = "",
-                    choices = listOf(
-                        UIMessageChoice(
-                            index = 0,
-                            delta = deltaMessage,
-                            message = null,
-                            finishReason = null
-                        )
-                    ),
-                    usage = tokenUsage
-                )
-                trySend(messageChunk)
-            }
-
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
-
-                t?.printStackTrace()
-                Log.e(TAG, "onFailure: ${t?.javaClass?.name} ${t?.message} / $response")
-
-                val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        Log.i(TAG, "Error response: $bodyElement")
-                        exception = bodyElement.parseErrorDetail()
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
-                } finally {
-                    close(exception)
+        // Ktor sseFlow enriches ClientRequestException/ServerResponseException with
+        // "HTTP <status> <desc>: <body>" in the message. Try to parse the body portion.
+        val message = throwable?.message.orEmpty()
+        try {
+            val bodyStart = message.indexOf(": ", message.indexOf("HTTP"))
+            if (bodyStart >= 0) {
+                val bodyRaw = message.substring(bodyStart + 2).trim()
+                if (bodyRaw.isNotBlank()) {
+                    val bodyElement = Json.parseToJsonElement(bodyRaw)
+                    Log.i(TAG, "Error response: $bodyElement")
+                    val parsed = bodyElement.parseErrorDetail()
+                    if (parsed != null) return parsed
                 }
             }
+        } catch (e: Throwable) {
+            Log.w(TAG, "parseFailureException: failed to parse from $message")
+        }
+        return throwable ?: Exception("SSE connection failed")
+    }
 
-            override fun onClosed(eventSource: EventSource) {
-                close()
+    private suspend fun FlowCollector<MessageChunk>.handleStreamEvent(
+        id: String?,
+        type: String?,
+        data: String
+    ) {
+        logStreamEvent(type, data)
+        if (data == "[DONE]") return
+
+        val dataJson = json.parseToJsonElement(data).jsonObject
+        when (type) {
+            "message_stop" -> {
+                Log.d(TAG, "Stream ended")
+                return
+            }
+
+            "error" -> {
+                val error = dataJson["error"]?.parseErrorDetail()
+                throw error ?: Exception("Stream error event: $data")
             }
         }
 
-        val eventSource = EventSources.createFactory(client)
-            .newEventSource(request, listener)
+        val deltaMessage = parseMessage(buildJsonArray {
+            val contentBlockObj = dataJson["content_block"]?.jsonObject
+            val deltaObj = dataJson["delta"]?.jsonObject
+            if (contentBlockObj != null) {
+                add(contentBlockObj)
+            }
+            if (deltaObj != null) {
+                add(deltaObj)
+            }
+        })
+        val tokenUsage = parseTokenUsage(dataJson)
+        if (deltaMessage.parts.isEmpty() && tokenUsage == null) return
 
-        awaitClose {
-            Log.d(TAG, "Closing eventSource")
-            eventSource.cancel()
+        val messageChunk = MessageChunk(
+            id = id ?: "",
+            model = "",
+            choices = listOf(
+                UIMessageChoice(
+                    index = 0,
+                    delta = deltaMessage,
+                    message = null,
+                    finishReason = null
+                )
+            ),
+            usage = tokenUsage
+        )
+        emit(messageChunk)
+    }
+
+    private fun configureReferHeaders(
+        url: String,
+        addHeader: (name: String, value: String) -> Unit
+    ) {
+        val host = try {
+            val u = java.net.URL(url)
+            u.host
+        } catch (_: Exception) {
+            return
+        }
+        when (host) {
+            "aihubmix.com" -> addHeader("APP-Code", "DKHA9468")
+            "openrouter.ai" -> {
+                addHeader("X-Title", "AmberAgent")
+                addHeader("HTTP-Referer", "https://github.com")
+            }
         }
     }
 

@@ -403,7 +403,15 @@ val dataSourceModule = module {
                     })
                 }
             }
-            .build().also { SearchService.init(it, get()) }
+            .build().also { okClient ->
+                // Wrap OkHttpClient in Ktor HttpClient for search module
+                val searchKtorClient = io.ktor.client.HttpClient(io.ktor.client.engine.okhttp.OkHttp) {
+                    engine {
+                        preconfigured = okClient
+                    }
+                }
+                SearchService.init(searchKtorClient, get())
+            }
     }
 
     single {

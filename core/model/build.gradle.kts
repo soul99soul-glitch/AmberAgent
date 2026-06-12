@@ -29,6 +29,7 @@ kotlin {
 }
 
 dependencies {
+    api(project(":core:types"))
     api(project(":ai"))
     api(libs.kotlinx.serialization.json)
 

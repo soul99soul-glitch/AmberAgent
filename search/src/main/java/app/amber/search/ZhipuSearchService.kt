@@ -19,9 +19,13 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 object ZhipuSearchService : SearchService<SearchServiceOptions.ZhipuOptions> {
     override val name: String = "Zhipu"
@@ -65,16 +69,15 @@ object ZhipuSearchService : SearchService<SearchServiceOptions.ZhipuOptions> {
                 put("count", JsonPrimitive(commonOptions.resultSize))
             }
 
-            val request = Request.Builder()
-                .url("https://open.bigmodel.cn/api/paas/v4/web_search")
-                .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                .build()
+            val response = httpClient.post("https://open.bigmodel.cn/api/paas/v4/web_search") {
+                setBody(json.encodeToString(body))
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer ${serviceOptions.apiKey}")
+            }
 
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val bodyRaw = response.body?.string() ?: error("Failed to get response body")
-                val response = runCatching {
+            if (response.status.isSuccess()) {
+                val bodyRaw = response.bodyAsText()
+                val zhipuResponse = runCatching {
                     json.decodeFromString<ZhipuDto>(bodyRaw)
                 }.onFailure {
                     it.printStackTrace()
@@ -84,7 +87,7 @@ object ZhipuSearchService : SearchService<SearchServiceOptions.ZhipuOptions> {
 
                 return@withContext Result.success(
                     SearchResult(
-                        items = response.searchResult.map {
+                        items = zhipuResponse.searchResult.map {
                             SearchResultItem(
                                 title = it.title,
                                 url = it.link,
@@ -93,8 +96,8 @@ object ZhipuSearchService : SearchService<SearchServiceOptions.ZhipuOptions> {
                         }
                     ))
             } else {
-                println(response.body?.string())
-                error("response failed #${response.code}")
+                println(response.bodyAsText())
+                error("response failed #${response.status.value}")
             }
         }
     }

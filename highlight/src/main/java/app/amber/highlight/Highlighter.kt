@@ -30,14 +30,6 @@ import kotlin.coroutines.resumeWithException
 class Highlighter(ctx: Context) {
     private val executor = Executors.newSingleThreadExecutor()
 
-    init {
-        executor.submit {
-            QuickJSLoader.init()
-
-            context // init context
-        }
-    }
-
     private val script: String by lazy {
         ctx.resources.openRawResource(R.raw.prism).use {
             it.bufferedReader().readText()
@@ -45,6 +37,7 @@ class Highlighter(ctx: Context) {
     }
 
     private val context: QuickJSContext by lazy {
+        QuickJSLoader.init()
         QuickJSContext.create().also {
             it.evaluate(script)
         }

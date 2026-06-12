@@ -7,8 +7,11 @@ import kotlinx.serialization.Serializable
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Request
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 
 object WikipediaSearchService {
     const val name: String = "Wikipedia"
@@ -18,30 +21,26 @@ object WikipediaSearchService {
         commonOptions: SearchCommonOptions,
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
-            val host = if (query.any { it.code in 0x4E00..0x9FFF }) {
+            val apiBaseUrl = if (query.any { it.code in 0x4E00..0x9FFF }) {
                 "https://zh.wikipedia.org/w/api.php"
             } else {
                 "https://en.wikipedia.org/w/api.php"
             }
-            val url = host.toHttpUrl().newBuilder()
-                .addQueryParameter("action", "query")
-                .addQueryParameter("list", "search")
-                .addQueryParameter("srsearch", query)
-                .addQueryParameter("srlimit", commonOptions.resultSize.coerceIn(1, 10).toString())
-                .addQueryParameter("format", "json")
-                .addQueryParameter("utf8", "1")
-                .build()
-            val response = httpClient.newCall(
-                Request.Builder()
-                    .url(url)
-                    .addHeader("User-Agent", "AmberAgent/1.0 search (Android)")
-                    .build()
-            ).await()
-            if (!response.isSuccessful) {
-                error("Wikipedia request failed #${response.code}")
+            val response = httpClient.get(apiBaseUrl) {
+                parameter("action", "query")
+                parameter("list", "search")
+                parameter("srsearch", query)
+                parameter("srlimit", commonOptions.resultSize.coerceIn(1, 10).toString())
+                parameter("format", "json")
+                parameter("utf8", "1")
+                header("User-Agent", "AmberAgent/1.0 search (Android)")
             }
-            val payload = response.body.string().let { json.decodeFromString<WikipediaResponse>(it) }
-            val base = "${url.scheme}://${url.host}/wiki/"
+            if (!response.status.isSuccess()) {
+                error("Wikipedia request failed #${response.status.value}")
+            }
+            val payload = response.bodyAsText().let { json.decodeFromString<WikipediaResponse>(it) }
+            val wikiHost = if (query.any { it.code in 0x4E00..0x9FFF }) "zh.wikipedia.org" else "en.wikipedia.org"
+            val base = "https://$wikiHost/wiki/"
             SearchResult(
                 items = payload.query.search.map {
                     SearchResultItem(

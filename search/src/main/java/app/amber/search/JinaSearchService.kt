@@ -17,8 +17,13 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
     private const val DEFAULT_SEARCH_URL = "https://s.jina.ai/"
@@ -74,21 +79,16 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
 
             val searchUrl = serviceOptions.searchUrl.ifBlank { DEFAULT_SEARCH_URL }
 
-            val request = Request.Builder()
-                .url(searchUrl)
-                .post(body.toString().toRequestBody())
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .apply {
-                    if (serviceOptions.apiKey.isNotBlank()) {
-                        addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                    }
+            val response = httpClient.post(searchUrl) {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("Accept", "application/json")
+                if (serviceOptions.apiKey.isNotBlank()) {
+                    header("Authorization", "Bearer ${serviceOptions.apiKey}")
                 }
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseData = response.body.string().let {
+            }
+            if (response.status.isSuccess()) {
+                val responseData = response.bodyAsText().let {
                     json.decodeFromString<JinaSearchResponse>(it)
                 }
 
@@ -104,7 +104,7 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
                     )
                 )
             } else {
-                error("response failed #${response.code}")
+                error("response failed #${response.status.value}")
             }
         }
     }
@@ -123,24 +123,19 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
 
             val scrapeUrl = serviceOptions.scrapeUrl.ifBlank { DEFAULT_SCRAPE_URL }
 
-            val request = Request.Builder()
-                .url(scrapeUrl)
-                .post(body.toString().toRequestBody())
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .addHeader("X-Return-Format", "markdown")
-                .apply {
-                    if (serviceOptions.apiKey.isNotBlank()) {
-                        addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                    }
+            val response = httpClient.post(scrapeUrl) {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("Accept", "application/json")
+                header("X-Return-Format", "markdown")
+                if (serviceOptions.apiKey.isNotBlank()) {
+                    header("Authorization", "Bearer ${serviceOptions.apiKey}")
                 }
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (!response.isSuccessful) {
-                error("response failed for url $url #${response.code}")
             }
-            val responseData = response.body.string().let {
+            if (!response.status.isSuccess()) {
+                error("response failed for url $url #${response.status.value}")
+            }
+            val responseData = response.bodyAsText().let {
                 json.decodeFromString<JinaScrapeResponse>(it)
             }
 

@@ -2,6 +2,11 @@ package app.amber.tts.provider.providers
 
 import android.content.Context
 import android.util.Log
+import io.ktor.client.*
+import io.ktor.client.engine.okhttp.*
+import io.ktor.client.plugins.sse.*
+import io.ktor.client.request.*
+import io.ktor.http.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
@@ -15,10 +20,6 @@ import app.amber.tts.model.AudioFormat
 import app.amber.tts.model.TTSRequest
 import app.amber.tts.provider.TTSProvider
 import app.amber.tts.provider.TTSProviderSetting
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "MiniMaxTTSProvider"
@@ -36,9 +37,14 @@ private data class MiniMaxResponse(
 )
 
 class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
-    private val httpClient = OkHttpClient.Builder()
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = HttpClient(OkHttp) {
+        engine {
+            config {
+                readTimeout(60, TimeUnit.SECONDS)
+            }
+        }
+        install(SSE)
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -67,16 +73,13 @@ class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
 
         Log.i(TAG, "generateSpeech: $requestBody")
 
-        val httpRequest = Request.Builder()
-            .url("${providerSetting.baseUrl}/t2a_v2")
-            .addHeader("Authorization", "Bearer ${providerSetting.apiKey}")
-            .addHeader("Content-Type", "application/json")
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .build()
-
         var hasEmittedAudio = false
 
-        httpClient.sseFlow(httpRequest).collect {
+        httpClient.sseFlow("${providerSetting.baseUrl}/t2a_v2") {
+            header("Authorization", "Bearer ${providerSetting.apiKey}")
+            contentType(ContentType.Application.Json)
+            setBody(json.encodeToString(requestBody))
+        }.collect {
             when (it) {
                 is SseEvent.Open -> Log.i(TAG, "SSE connection opened")
                 is SseEvent.Event -> {

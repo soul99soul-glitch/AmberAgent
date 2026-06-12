@@ -5,7 +5,8 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.utils.toLocalDate
 import app.amber.core.utils.toLocalTime
-import java.time.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 class TemplateTransformer(
     private val settingsStore: SettingsAggregator,
@@ -18,7 +19,7 @@ class TemplateTransformer(
             .find { it.id == ctx.assistant.id }
             ?.messageTemplate
             ?: return messages
-        val now = Instant.now()
+        val now = Clock.System.now()
         return messages.map { message ->
             message.copy(
                 parts = message.parts.map { part ->

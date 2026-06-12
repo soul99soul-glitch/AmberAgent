@@ -93,6 +93,7 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
+    alias(libs.plugins.baselineprofile)
     // (Previously) org.mozilla.rust-android-gradle.rust-android — REMOVED for
     // AGP 9 incompatibility (see document/build.gradle.kts header). Native
     // builds for libmarkdown_parser.so + libregex_transformer.so are driven
@@ -579,6 +580,7 @@ dependencies {
     implementation(libs.googleid)
     implementation(libs.play.services.auth)
     implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":app:baselineprofile"))
 
     // Compose
     implementation(libs.androidx.activity.compose)

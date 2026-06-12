@@ -17,12 +17,11 @@
 //! JNI entry returns null on any failure → Kotlin adapter falls back to
 //! the original Kotlin implementation.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
-use jni::objects::{JClass, JString};
-use jni::sys::jstring;
-use jni::JNIEnv;
 use regex::Regex;
+
+// ---------------------------------------------------------------------------
+// Public API (platform-independent) — unchanged
+// ---------------------------------------------------------------------------
 
 // Cached regexes — same patterns as Markdown.kt
 fn re_inline_latex() -> &'static Regex {
@@ -58,14 +57,17 @@ fn re_bare_url() -> &'static Regex {
 /// JNI: `MarkdownPreprocessNative.preprocessNative(input: String): String?`.
 ///
 /// Returns the preprocessed markdown ready for the parser, or null on any
-/// failure (JNI conversion error, panic, regex compile failure — though
-/// the latter is a build-time guarantee since all regexes are static).
+/// failure. Only compiled on Android targets.
+#[cfg(target_os = "android")]
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_app_amber_feature_ui_components_richtext_nativebridge_MarkdownPreprocessNative_preprocessNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    input: JString<'local>,
-) -> jstring {
+    mut env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    input: jni::objects::JString<'local>,
+) -> jni::sys::jstring {
     jni_common::init_logger_once!("RustMarkdownPreprocess");
 
     let input_str: String = match env.get_string(&input) {

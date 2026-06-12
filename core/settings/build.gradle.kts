@@ -32,6 +32,7 @@ kotlin {
 }
 
 dependencies {
+    api(project(":core:types"))
     api(project(":ai"))
     api(project(":core:model"))
     api(project(":core:app-infra"))
@@ -49,7 +50,8 @@ dependencies {
     api(project(":core:ai:api"))
     api(project(":search"))
     api(project(":tts"))
-    api(libs.androidx.datastore.preferences)
+    api(libs.androidx.datastore.preferences.core)
+    implementation(libs.androidx.datastore.preferences)
     api(libs.kotlinx.serialization.json)
     implementation(platform(libs.androidx.compose.bom))
     implementation("androidx.compose.runtime:runtime")

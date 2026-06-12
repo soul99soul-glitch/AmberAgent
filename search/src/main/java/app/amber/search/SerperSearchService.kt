@@ -19,8 +19,13 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 object SerperSearchService : SearchService<SearchServiceOptions.SerperOptions> {
     override val name: String = "Serper"
@@ -64,18 +69,16 @@ object SerperSearchService : SearchService<SearchServiceOptions.SerperOptions> {
                 put("q", query)
                 put("num", commonOptions.resultSize.coerceIn(1, 20))
             }
-            val request = Request.Builder()
-                .url("https://google.serper.dev/$endpoint")
-                .post(body.toString().toRequestBody())
-                .addHeader("X-API-KEY", serviceOptions.apiKey)
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (!response.isSuccessful) {
-                error("Serper request failed #${response.code}")
+            val response = httpClient.post("https://google.serper.dev/$endpoint") {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("X-API-KEY", serviceOptions.apiKey)
+                header("Content-Type", "application/json")
             }
-            val payload = response.body.string().let { json.decodeFromString<SerperResponse>(it) }
+            if (!response.status.isSuccess()) {
+                error("Serper request failed #${response.status.value}")
+            }
+            val payload = response.bodyAsText().let { json.decodeFromString<SerperResponse>(it) }
             val items = (payload.news ?: payload.organic ?: emptyList()).map {
                 SearchResultItem(
                     title = it.title,

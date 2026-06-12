@@ -202,7 +202,7 @@ class DailyReviewAgent(
         // loading full message node trees. The node count is a bonus — we'll
         // read it via the lightweight countConversationNodes() per conversation.
         conversationRepository.getRecentConversations(20)
-            .filter { it.updateAt.toEpochMilli() >= todayStart }
+            .filter { it.updateAt.toEpochMilliseconds() >= todayStart }
             .filter { it.title.isNotBlank() }
             .take(10)
             .map { conv ->

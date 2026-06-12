@@ -38,8 +38,10 @@ android {
 dependencies {
     // okhttp
     api(libs.okhttp)
-    api(libs.okhttp.sse)
     api(libs.okhttp.logging)
+
+    // ktor client (SSE plugin bundled in ktor-client-core)
+    implementation(libs.ktor.client.core)
 
     // kotlinx
     api(libs.kotlinx.serialization.json)

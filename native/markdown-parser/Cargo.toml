@@ -11,12 +11,14 @@ name = "markdown_parser"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-jni.workspace = true
 jni-common.workspace = true
 pulldown-cmark.workspace = true
 regex.workspace = true
 thiserror.workspace = true
 log.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
 
 [dev-dependencies]
 similar = "2"

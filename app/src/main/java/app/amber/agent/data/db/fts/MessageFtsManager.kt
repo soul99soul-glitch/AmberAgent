@@ -9,7 +9,7 @@ import app.amber.agent.data.db.AppDatabase
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.utils.JsonInstant
-import java.time.Instant
+import kotlin.time.Instant
 
 data class MessageSearchResult(
     val nodeId: String,
@@ -33,7 +33,7 @@ class MessageFtsManager(private val database: AppDatabase) {
         insertNodes(
             conversationId = conversationId,
             title = conversation.title,
-            updateAt = conversation.updateAt.toEpochMilli().toString(),
+            updateAt = conversation.updateAt.toEpochMilliseconds().toString(),
             nodes = conversation.messageNodes,
         )
     }
@@ -46,7 +46,7 @@ class MessageFtsManager(private val database: AppDatabase) {
         insertNodes(
             conversationId = conversationId,
             title = conversation.title,
-            updateAt = conversation.updateAt.toEpochMilli().toString(),
+            updateAt = conversation.updateAt.toEpochMilliseconds().toString(),
             nodes = conversation.messageNodes,
         )
     }
@@ -68,7 +68,7 @@ class MessageFtsManager(private val database: AppDatabase) {
     suspend fun updateConversationMetadata(conversationId: String, title: String, updateAt: Instant) = withContext(Dispatchers.IO) {
         db.execSQL(
             "UPDATE message_fts SET title = ?, update_at = ? WHERE conversation_id = ?",
-            arrayOf(title, updateAt.toEpochMilli().toString(), conversationId)
+            arrayOf(title, updateAt.toEpochMilliseconds().toString(), conversationId)
         )
     }
 
@@ -170,7 +170,7 @@ class MessageFtsManager(private val database: AppDatabase) {
                         conversationId = it.getString(2),
                         assistantId = it.getString(3),
                         title = it.getString(4),
-                        updateAt = Instant.ofEpochMilli(it.getLong(5)),
+                        updateAt = Instant.fromEpochMilliseconds(it.getLong(5)),
                         snippet = it.getString(6),
                     )
                 )

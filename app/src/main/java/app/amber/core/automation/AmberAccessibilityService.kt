@@ -161,7 +161,7 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
                     contentDescription = description,
                     className = node.className?.toString().orEmpty(),
                     viewId = node.viewIdResourceName,
-                    bounds = Rect(rect),
+                    bounds = app.amber.core.automation.Rect(rect.left, rect.top, rect.right, rect.bottom),
                     clickable = node.isClickable,
                     enabled = node.isEnabled,
                 )

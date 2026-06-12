@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.service.ConversationAccess
-import java.time.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatEventProjector"
@@ -46,7 +47,7 @@ class ChatEventProjector(
         }
 
         val updatedConversation = if (existingNodeIndex >= 0) {
-            conversation.copy(updateAt = Instant.now())
+            conversation.copy(updateAt = Clock.System.now())
         } else {
             Log.w(TAG, "Finalized assistant message $messageId before any message body was projected")
             return

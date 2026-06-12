@@ -18,5 +18,5 @@ android {
 
 dependencies {
     api(libs.kotlinx.coroutines.core)
-    api(libs.androidx.datastore.preferences)
+    api(libs.androidx.datastore.preferences.core)
 }

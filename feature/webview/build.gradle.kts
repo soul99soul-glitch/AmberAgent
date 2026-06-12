@@ -1,16 +1,19 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
-}
-
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    alias(libs.plugins.kotlin.multiplatform)
 }
 
 kotlin {
-    jvmToolchain(17)
-}
+    jvm()
+    iosArm64()
+    iosSimulatorArm64()
 
-dependencies {
-    api(libs.kotlinx.coroutines.core)
+    sourceSets {
+        commonMain.dependencies {
+            api(libs.kotlinx.coroutines.core)
+        }
+        val jvmMain by getting
+        val nativeMain by creating { dependsOn(commonMain.get()) }
+        val iosArm64Main by getting { dependsOn(nativeMain) }
+        val iosSimulatorArm64Main by getting { dependsOn(nativeMain) }
+    }
 }

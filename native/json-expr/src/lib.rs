@@ -19,11 +19,9 @@
 //! - `evaluateNative(rootJson, expr) -> String?` — null on parse/eval error
 //! - `isValidNative(expr) -> Boolean`
 
+#[cfg(target_os = "android")]
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jstring, JNI_FALSE, JNI_TRUE};
-use jni::JNIEnv;
 use serde_json::Value;
 
 // ===========================================================================
@@ -500,16 +498,17 @@ pub fn is_valid(expr_src: &str) -> bool {
 }
 
 // ===========================================================================
-// JNI
+// JNI (Android only)
 // ===========================================================================
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_app_amber_core_json_expr_JsonExprNative_evaluateNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    root_json: JString<'local>,
-    expr: JString<'local>,
-) -> jstring {
+    mut env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    root_json: jni::objects::JString<'local>,
+    expr: jni::objects::JString<'local>,
+) -> jni::sys::jstring {
     jni_common::init_logger_once!("RustJsonExpr");
 
     let root_str: String = match env.get_string(&root_json) {
@@ -547,12 +546,14 @@ pub extern "system" fn Java_app_amber_core_json_expr_JsonExprNative_evaluateNati
     }
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_app_amber_core_json_expr_JsonExprNative_isValidNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    expr: JString<'local>,
-) -> jboolean {
+    mut env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    expr: jni::objects::JString<'local>,
+) -> jni::sys::jboolean {
+    use jni::sys::{JNI_FALSE, JNI_TRUE};
     jni_common::init_logger_once!("RustJsonExpr");
     let expr_str: String = match env.get_string(&expr) {
         Ok(s) => String::from(s),

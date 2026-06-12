@@ -3,6 +3,11 @@ package app.amber.tts.provider.providers
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import io.ktor.client.*
+import io.ktor.client.engine.okhttp.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
@@ -12,10 +17,6 @@ import app.amber.tts.model.AudioFormat
 import app.amber.tts.model.TTSRequest
 import app.amber.tts.provider.TTSProvider
 import app.amber.tts.provider.TTSProviderSetting
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -23,9 +24,13 @@ import java.util.concurrent.TimeUnit
 private const val TAG = "GeminiTTSProvider"
 
 class GeminiTTSProvider : TTSProvider<TTSProviderSetting.Gemini> {
-    private val httpClient = OkHttpClient.Builder()
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = HttpClient(OkHttp) {
+        engine {
+            config {
+                readTimeout(30, TimeUnit.SECONDS)
+            }
+        }
+    }
     private val json = Json { ignoreUnknownKeys = true }
 
     @Serializable
@@ -86,20 +91,17 @@ class GeminiTTSProvider : TTSProvider<TTSProviderSetting.Gemini> {
 
         Log.i(TAG, "generateSpeech: $requestBody")
 
-        val httpRequest = Request.Builder()
-            .url("${providerSetting.baseUrl}/models/${providerSetting.model}:generateContent")
-            .addHeader("x-goog-api-key", providerSetting.apiKey)
-            .addHeader("Content-Type", "application/json")
-            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
-            .build()
-
-        val response = httpClient.newCall(httpRequest).execute()
-
-        if (!response.isSuccessful) {
-            throw Exception("Gemini TTS request failed: ${response.code} ${response.message}")
+        val response = httpClient.post("${providerSetting.baseUrl}/models/${providerSetting.model}:generateContent") {
+            header("x-goog-api-key", providerSetting.apiKey)
+            contentType(ContentType.Application.Json)
+            setBody(requestBody.toString())
         }
 
-        val responseJson = response.body.string()
+        if (!response.status.isSuccess()) {
+            throw Exception("Gemini TTS request failed: ${response.status.value} ${response.status.description}")
+        }
+
+        val responseJson = response.bodyAsText()
         val geminiResponse = json.decodeFromString<GeminiTTSResponse>(responseJson)
 
         if (geminiResponse.candidates.isEmpty() ||

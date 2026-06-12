@@ -43,6 +43,7 @@ class ChatDrawerVM(
                                     ConversationListItem.PinnedHeader
                                 } else {
                                     val afterDate = after.conversation.updateAt
+                                        .let { java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()) }
                                         .atZone(ZoneId.systemDefault())
                                         .toLocalDate()
                                     ConversationListItem.DateHeader(
@@ -55,6 +56,7 @@ class ChatDrawerVM(
                             before is ConversationListItem.Item && after is ConversationListItem.Item -> {
                                 if (before.conversation.isPinned && !after.conversation.isPinned) {
                                     val afterDate = after.conversation.updateAt
+                                        .let { java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()) }
                                         .atZone(ZoneId.systemDefault())
                                         .toLocalDate()
                                     ConversationListItem.DateHeader(
@@ -63,9 +65,11 @@ class ChatDrawerVM(
                                     )
                                 } else if (!after.conversation.isPinned) {
                                     val beforeDate = before.conversation.updateAt
+                                        .let { java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()) }
                                         .atZone(ZoneId.systemDefault())
                                         .toLocalDate()
                                     val afterDate = after.conversation.updateAt
+                                        .let { java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()) }
                                         .atZone(ZoneId.systemDefault())
                                         .toLocalDate()
 

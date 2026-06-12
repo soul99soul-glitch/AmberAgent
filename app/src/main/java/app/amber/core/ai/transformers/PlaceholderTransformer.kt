@@ -165,7 +165,7 @@ object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
         var result = text
 
         val ctx = PlaceholderCtx(
-            context = ctx.context,
+            context = ctx.context as Context,
             settingsStore = settingsStore,
             model = ctx.model,
             assistant = ctx.assistant

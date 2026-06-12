@@ -1,35 +1,41 @@
 plugins {
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.androidx.room)
     alias(libs.plugins.ksp)
 }
 
-android {
-    namespace = "app.amber.core.agent.store"
-    compileSdk = 36
+kotlin {
+    jvm()
+    iosArm64()
+    iosSimulatorArm64()
 
-    defaultConfig {
-        minSdk = 26
+    sourceSets {
+        commonMain.dependencies {
+            api(project(":core:agent-runtime"))
+
+            implementation(libs.androidx.room.runtime)
+            implementation(libs.androidx.sqlite.bundled)
+            implementation(libs.kotlinx.coroutines.core)
+        }
+        val jvmMain by getting
+        val nativeMain by creating { dependsOn(commonMain.get()) }
+        val iosArm64Main by getting { dependsOn(nativeMain) }
+        val iosSimulatorArm64Main by getting { dependsOn(nativeMain) }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
+        }
+        jvmTest.dependencies {
+            implementation(libs.junit)
+        }
     }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-}
-
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
-    api(project(":core:agent-runtime"))
+    add("kspJvm", libs.androidx.room.compiler)
+    add("kspIosArm64", libs.androidx.room.compiler)
+    add("kspIosSimulatorArm64", libs.androidx.room.compiler)
+}
 
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
-
-    implementation(libs.kotlinx.coroutines.core)
-
-    testImplementation(libs.junit)
-    testImplementation(libs.kotlinx.coroutines.test)
+room {
+    schemaDirectory("$projectDir/schemas")
 }

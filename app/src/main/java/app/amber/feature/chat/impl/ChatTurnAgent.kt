@@ -12,7 +12,8 @@ import app.amber.ai.ui.UIMessage
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationHandler
 import app.amber.core.service.ConversationAccess
-import java.time.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
@@ -147,7 +148,7 @@ private fun mergeMessages(
     return if (!changed) conversation
     else conversation.copy(
         messageNodes = updatedNodes + appendedNodes,
-        updateAt = Instant.now(),
+        updateAt = Clock.System.now(),
     )
 }
 

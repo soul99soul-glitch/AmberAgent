@@ -118,7 +118,7 @@ class ConversationHistoryTools(
                             put("title", hit.title)
                             put("message_id", hit.messageId)
                             put("node_id", hit.nodeId)
-                            put("updated_at", hit.updateAt.toEpochMilli())
+                            put("updated_at", hit.updateAt.toEpochMilliseconds())
                             put("snippet", hit.snippet.take(1_200))
                         })
                     }
@@ -346,9 +346,9 @@ class ConversationHistoryTools(
         put("session_id", id.toString())
         put("assistant_id", assistantId.toString())
         put("title", title)
-        put("created_at", createAt.toEpochMilli())
-        put("updated_at", updateAt.toEpochMilli())
-        put("updated_date", DATE_FORMATTER.format(updateAt.atZone(ZoneId.systemDefault())))
+        put("created_at", createAt.toEpochMilliseconds())
+        put("updated_at", updateAt.toEpochMilliseconds())
+        put("updated_date", DATE_FORMATTER.format(java.time.Instant.ofEpochMilli(updateAt.toEpochMilliseconds()).atZone(ZoneId.systemDefault())))
         put("message_nodes", conversationRepo.countConversationNodes(id))
         put("is_pinned", isPinned)
     }

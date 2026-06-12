@@ -1,25 +1,29 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
 }
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
-}
-
 kotlin {
-    jvmToolchain(17)
-}
+    jvm()
+    iosArm64()
+    iosSimulatorArm64()
 
-dependencies {
-    api(libs.kotlinx.coroutines.core)
-    api(libs.kotlinx.serialization.json)
-
-    testImplementation(libs.junit)
-    testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.kotest.runner.junit5)
-    testImplementation(libs.kotest.property)
+    sourceSets {
+        commonMain.dependencies {
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.serialization.json)
+        }
+        val jvmMain by getting
+        val nativeMain by creating { dependsOn(commonMain.get()) }
+        val iosArm64Main by getting { dependsOn(nativeMain) }
+        val iosSimulatorArm64Main by getting { dependsOn(nativeMain) }
+        jvmTest.dependencies {
+            implementation(libs.junit)
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.kotest.runner.junit5)
+            implementation(libs.kotest.property)
+        }
+    }
 }
 
 tasks.withType<Test> {

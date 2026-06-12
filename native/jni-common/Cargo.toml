@@ -10,4 +10,6 @@ publish.workspace = true
 # Used by the `android_logger_init` helper. Other JNI crates depending on this
 # get android_logger transitively; they don't need to declare it again.
 log = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
 android_logger = { workspace = true }

@@ -2,11 +2,10 @@ package app.amber.ai.provider.providers.openai
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.transform
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
@@ -46,19 +45,26 @@ import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.parseErrorDetail
 import app.amber.ai.util.stringSafe
 import app.amber.ai.util.toHeaders
+import app.amber.common.http.SseEvent
 import app.amber.common.http.await
 import app.amber.common.http.jsonArrayOrNull
 import app.amber.common.http.jsonObjectOrNull
 import app.amber.common.http.jsonPrimitiveOrNull
+import app.amber.common.http.sseFlow
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.header
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ResponseAPI"
@@ -70,6 +76,7 @@ class ResponseAPI(
         keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
     },
 ) : OpenAIImpl {
+    private val sseClient by lazy { HttpClient(OkHttp) { install(SSE) } }
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
@@ -119,7 +126,7 @@ class ResponseAPI(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<MessageChunk> = callbackFlow {
+    ): Flow<MessageChunk> {
         // V3 fix: ResponseAPI 在 delta / done / completed 各事件构造的 UIMessage 都用 fresh
         // Uuid.random(). MessageStreamAccumulator.replaceActive 会把 active 整个换掉 (parts
         // 全替换为 message.parts), 导致两个问题:
@@ -155,11 +162,8 @@ class ResponseAPI(
             }
         )
         if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
-            streamCodexText(providerSetting, messages, params).collect { chunk ->
-                trySend(chunk.normalizeAssistantId())
-            }
-            close()
-            return@callbackFlow
+            return streamCodexText(providerSetting, messages, params)
+                .transform { emit(it.normalizeAssistantId()) }
         }
 
         val requestBody = buildRequestBody(
@@ -168,82 +172,91 @@ class ResponseAPI(
             params = params,
             stream = true,
         )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${bearerResolver(providerSetting, false)}"
-            )
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
 
         Log.i(TAG, "streamText: model=${params.model.modelId}")
 
-        val listener = object : EventSourceListener() {
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                val payloads = normalizeOpenAIStreamDataLines(data)
-                if (payloads.isEmpty() && data.contains("[DONE]")) {
-                    close()
-                    return
-                }
-                Log.d(TAG, "onEvent: $id/$type $data")
-                payloads.forEach { payload ->
-                    val json = json.parseToJsonElement(payload).jsonObject
-                    if (json["error"] != null) {
-                        throw json["error"]!!.parseErrorDetail()
-                    }
-                    val chunk = parseResponseDelta(json)
-                    if (chunk != null) {
-                        trySend(chunk.normalizeAssistantId())
-                    }
-                }
-                if (type == "response.completed") {
-                    close()
-                }
+        val sseUrl = "${providerSetting.baseUrl}/responses"
+        val bearerToken = bearerResolver(providerSetting, false)
+
+        return sseClient.sseFlow(sseUrl) {
+            method = HttpMethod.Post
+            contentType(ContentType.Application.Json)
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                header(it.name, it.value)
             }
-
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
-
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
-
-                val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(
-                            normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
-                        )
-                        println(bodyElement)
-                        exception = bodyElement.parseErrorDetail()
-                        Log.i(TAG, "onFailure: $exception")
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
-                } finally {
-                    close(exception)
-                }
+            header("Authorization", "Bearer $bearerToken")
+            configureReferHeaders(providerSetting.baseUrl) { name, value ->
+                header(name, value)
             }
+            setBody(json.encodeToString(requestBody))
+        }.transform { sseEvent ->
+            when (sseEvent) {
+                is SseEvent.Open -> { /* connection opened */ }
 
-            override fun onClosed(eventSource: EventSource) {
-                close()
+                is SseEvent.Event -> {
+                    val payloads = normalizeOpenAIStreamDataLines(sseEvent.data)
+                    if (payloads.isEmpty() && sseEvent.data.contains("[DONE]")) return@transform
+                    Log.d(TAG, "onEvent: ${sseEvent.id}/${sseEvent.type} ${sseEvent.data}")
+                    payloads.forEach { payload ->
+                        val json = json.parseToJsonElement(payload).jsonObject
+                        if (json["error"] != null) {
+                            throw json["error"]!!.parseErrorDetail()
+                        }
+                        val chunk = parseResponseDelta(json)
+                        if (chunk != null) {
+                            emit(chunk.normalizeAssistantId())
+                        }
+                    }
+                }
+
+                is SseEvent.Closed -> { /* stream completed normally */ }
+
+                is SseEvent.Failure -> {
+                    val exception = sseEvent.throwable
+                    exception?.printStackTrace()
+                    println("[onFailure] 发生错误: ${exception?.javaClass?.name} ${exception?.message}")
+
+                    val message = exception?.message.orEmpty()
+                    try {
+                        val bodyStart = message.indexOf(": ", message.indexOf("HTTP"))
+                        if (bodyStart >= 0) {
+                            val bodyRaw = message.substring(bodyStart + 2).trim()
+                            if (bodyRaw.isNotBlank()) {
+                                val bodyElement = Json.parseToJsonElement(
+                                    normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
+                                )
+                                println(bodyElement)
+                                val parsed = bodyElement.parseErrorDetail()
+                                Log.i(TAG, "onFailure: $parsed")
+                                if (parsed != null) throw parsed
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (e === exception) throw e
+                        Log.w(TAG, "onFailure: failed to parse from $message")
+                        e.printStackTrace()
+                    }
+                    throw exception ?: Exception("SSE connection failed")
+                }
             }
         }
+    }
 
-        val eventSource = EventSources.createFactory(client)
-            .newEventSource(request, listener)
-
-        awaitClose {
-            println("[awaitClose] 关闭eventSource ")
-            eventSource.cancel()
+    /**
+     * Ktor variant of configureReferHeaders — uses a lambda for adding headers
+     * instead of returning a Request.Builder.
+     */
+    private fun configureReferHeaders(
+        url: String,
+        addHeader: (name: String, value: String) -> Unit
+    ) {
+        val host = runCatching { java.net.URL(url).host }.getOrNull() ?: return
+        when (host) {
+            "aihubmix.com" -> addHeader("APP-Code", "DKHA9468")
+            "openrouter.ai" -> {
+                addHeader("X-Title", "AmberAgent")
+                addHeader("HTTP-Referer", "https://github.com")
+            }
         }
     }
 

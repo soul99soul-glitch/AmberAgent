@@ -17,9 +17,12 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.Credentials
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Request
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
+import io.ktor.http.takeFrom
 import java.net.URLEncoder
 
 private const val TAG = "SearXNGService"
@@ -61,36 +64,26 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
             // 构建查询URL
             val baseUrl = serviceOptions.url.trimEnd('/')
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = "$baseUrl/search?q=$encodedQuery&format=json"
-                .toHttpUrl()
-                .newBuilder()
-                .apply {
-                    if (serviceOptions.engines.isNotBlank()) {
-                        addQueryParameter("engines", serviceOptions.engines)
-                    }
-                    if (serviceOptions.language.isNotBlank()) {
-                        addQueryParameter("language", serviceOptions.language)
-                    }
-                }
-                .build()
 
             // 发送请求
-            val request = Request.Builder()
-                .url(url)
-                .get()
-                .apply {
-                    // 添加HTTP Basic Auth支持
-                    if (serviceOptions.username.isNotBlank() && serviceOptions.password.isNotBlank()) {
-                        header("Authorization", Credentials.basic(serviceOptions.username, serviceOptions.password))
-                    }
+            val response = httpClient.get {
+                url.takeFrom("$baseUrl/search?q=$encodedQuery&format=json")
+                if (serviceOptions.engines.isNotBlank()) {
+                    parameter("engines", serviceOptions.engines)
                 }
-                .build()
+                if (serviceOptions.language.isNotBlank()) {
+                    parameter("language", serviceOptions.language)
+                }
+                // 添加HTTP Basic Auth支持
+                if (serviceOptions.username.isNotBlank() && serviceOptions.password.isNotBlank()) {
+                    header("Authorization", "Basic ${java.util.Base64.getEncoder().encodeToString("${serviceOptions.username}:${serviceOptions.password}".toByteArray())}")
+                }
+            }
 
-            Log.i(TAG, "search: ${url.toString().substringBefore('?')}")
+            Log.i(TAG, "search: ${baseUrl}")
 
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val bodyRaw = response.body.string()
+            if (response.status.isSuccess()) {
+                val bodyRaw = response.bodyAsText()
                 val searchResponse = runCatching {
                     json.decodeFromString<SearXNGResponse>(bodyRaw)
                 }.onFailure {
@@ -125,9 +118,9 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
 
                 return@withContext Result.success(SearchResult(items = items))
             } else {
-                val errorBody = response.body?.string()
-                println("SearXNG API error: ${response.code} - $errorBody")
-                error("SearXNG request failed with status ${response.code}")
+                val errorBody = response.bodyAsText()
+                println("SearXNG API error: ${response.status.value} - $errorBody")
+                error("SearXNG request failed with status ${response.status.value}")
             }
         }
     }

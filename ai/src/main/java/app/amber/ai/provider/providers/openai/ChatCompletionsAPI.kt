@@ -2,9 +2,8 @@ package app.amber.ai.provider.providers.openai
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -49,21 +48,27 @@ import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.parseErrorDetail
-import app.amber.ai.util.stringSafe
 import app.amber.ai.util.toHeaders
+import app.amber.common.http.SseEvent
 import app.amber.common.http.await
 import app.amber.common.http.jsonArrayOrNull
 import app.amber.common.http.jsonObjectOrNull
 import app.amber.common.http.jsonPrimitiveOrNull
+import app.amber.common.http.sseFlow
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.header
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ChatCompletionsAPI"
@@ -91,6 +96,7 @@ class ChatCompletionsAPI(
         keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
     },
 ) : OpenAIImpl {
+    private val sseClient by lazy { HttpClient(OkHttp) { install(SSE) } }
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
@@ -153,7 +159,7 @@ class ChatCompletionsAPI(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): Flow<MessageChunk> = callbackFlow {
+    ): Flow<MessageChunk> {
         val requestBody = buildChatCompletionRequest(
             messages = messages,
             params = params,
@@ -162,37 +168,49 @@ class ChatCompletionsAPI(
         )
 
         val token = bearerResolver(providerSetting, false)
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addOpenAICompatibleAuthHeader(providerSetting, token)
-            .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+        val baseUrl = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}"
+
+        // Build headers map for Ktor request
+        val customHeaders = buildMap {
+            putAll(params.customHeaders.filter { it.name.isNotBlank() }.associate { it.name to it.value })
+            val host = providerSetting.baseUrl.toHttpUrl().host
+            if (providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
+                host.startsWith("token-plan-") && host.endsWith("xiaomimimo.com")
+            ) {
+                put("api-key", token)
+            } else {
+                put("Authorization", "Bearer $token")
+            }
+            // Refer headers
+            when (host) {
+                "aihubmix.com" -> put("APP-Code", "DKHA9468")
+                "openrouter.ai" -> {
+                    put("X-Title", "AmberAgent")
+                    put("HTTP-Referer", "https://github.com")
+                }
+            }
+        }
 
         Log.i(TAG, "streamText: model=${params.model.modelId}")
 
-        // just for debugging response body
-        // println(client.newCall(request).await().body?.string())
-
-        val listener = object : EventSourceListener() {
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                val payloads = normalizeOpenAIStreamDataLines(data)
-                if (payloads.isEmpty() && data.contains("[DONE]")) {
-                    println("[onEvent] (done) 结束流: $data")
-                    close()
-                    return
-                }
-                Log.d(TAG, "onEvent: $data")
-                payloads
-                    .map { json.parseToJsonElement(it).jsonObject }
-                    .forEach {
+        return sseClient.sseFlow(baseUrl) {
+            method = HttpMethod.Post
+            contentType(ContentType.Application.Json)
+            customHeaders.forEach { (k, v) -> header(k, v) }
+            setBody(json.encodeToString(requestBody))
+        }.mapNotNull { sseEvent ->
+            when (sseEvent) {
+                is SseEvent.Event -> {
+                    val data = sseEvent.data
+                    val payloads = normalizeOpenAIStreamDataLines(data)
+                    if (payloads.isEmpty() && data.contains("[DONE]")) {
+                        Log.d(TAG, "onEvent: (done) stream ended: $data")
+                        return@mapNotNull null
+                    }
+                    Log.d(TAG, "onEvent: $data")
+                    val chunks = mutableListOf<MessageChunk>()
+                    for (payload in payloads) {
+                        val it = json.parseToJsonElement(payload).jsonObject
                         if (it["error"] != null) {
                             val error = it["error"]!!.parseErrorDetail()
                             throw error
@@ -222,51 +240,26 @@ class ChatCompletionsAPI(
                         }
                         val usage = parseTokenUsage(it["usage"] as? JsonObject)
 
-                        val messageChunk = MessageChunk(
+                        chunks.add(MessageChunk(
                             id = id,
                             model = model,
                             choices = choiceList,
                             usage = usage
-                        )
-                        trySend(messageChunk)
+                        ))
                     }
-            }
-
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
-
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
-
-                val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(
-                            normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
-                        )
-                        println(bodyElement)
-                        exception = bodyElement.parseErrorDetail()
-                        Log.i(TAG, "onFailure: $exception")
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
-                    exception = e
-                } finally {
-                    close(exception)
+                    // Return last chunk if multiple, or single chunk
+                    chunks.lastOrNull()
                 }
+
+                is SseEvent.Failure -> {
+                    val exception = sseEvent.throwable
+                    exception?.printStackTrace()
+                    println("[onFailure] 发生错误: ${exception?.message}")
+                    throw exception ?: Exception("Stream failed")
+                }
+
+                is SseEvent.Closed, is SseEvent.Open -> null
             }
-
-            override fun onClosed(eventSource: EventSource) {
-                close()
-            }
-        }
-
-        val eventSource = EventSources.createFactory(client).newEventSource(request, listener)
-
-        awaitClose {
-            println("[awaitClose] 关闭eventSource ")
-            eventSource.cancel()
         }
     }
 

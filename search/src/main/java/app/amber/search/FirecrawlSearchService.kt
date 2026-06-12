@@ -25,8 +25,13 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 object FirecrawlSearchService : SearchService<SearchServiceOptions.FirecrawlOptions> {
     override val name: String = "Firecrawl"
@@ -112,19 +117,16 @@ object FirecrawlSearchService : SearchService<SearchServiceOptions.FirecrawlOpti
                 }
             }
 
-            val request = Request.Builder()
-                .url("https://api.firecrawl.dev/v2/search")
-                .post(body.toString().toRequestBody())
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (!response.isSuccessful) {
-                error("response failed #${'$'}{response.code}")
+            val response = httpClient.post("https://api.firecrawl.dev/v2/search") {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer ${serviceOptions.apiKey}")
+            }
+            if (!response.status.isSuccess()) {
+                error("response failed #${response.status.value}")
             }
 
-            val bodyString = response.body.string()
+            val bodyString = response.bodyAsText()
             val payload = json.parseToJsonElement(bodyString).jsonObject
             val data = payload["data"]?.jsonObject ?: error("empty response data")
             val resultData = json.decodeFromJsonElement<FirecrawlSearchResultData>(data)
@@ -171,19 +173,16 @@ object FirecrawlSearchService : SearchService<SearchServiceOptions.FirecrawlOpti
                 })
             }
 
-            val request = Request.Builder()
-                .url("https://api.firecrawl.dev/v2/scrape")
-                .post(body.toString().toRequestBody())
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (!response.isSuccessful) {
-                error("response failed #${response.code}")
+            val response = httpClient.post("https://api.firecrawl.dev/v2/scrape") {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer ${serviceOptions.apiKey}")
+            }
+            if (!response.status.isSuccess()) {
+                error("response failed #${response.status.value}")
             }
 
-            val bodyString = response.body.string()
+            val bodyString = response.bodyAsText()
             val payload = json.parseToJsonElement(bodyString).jsonObject
 
             val success = payload["success"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false

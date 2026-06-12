@@ -21,11 +21,9 @@
 //! converts panics to log + null return so the Kotlin adapter falls back to
 //! the JVM path.
 
+#[cfg(target_os = "android")]
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jbyteArray, jint};
-use jni::JNIEnv;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::digest::{digest, SHA256};
 use ring::hmac;
@@ -33,318 +31,301 @@ use ring::pbkdf2;
 use std::num::NonZeroU32;
 
 // ---------------------------------------------------------------------------
-// PBKDF2-HMAC-SHA256
+// Public API (platform-independent)
 // ---------------------------------------------------------------------------
 
-/// `pbkdf2HmacSha256Native(passphrase: String, salt: ByteArray, iterations: Int, keySizeBytes: Int): ByteArray`
-///
-/// Derives a key. Returns `null` ByteArray on any failure (invalid args,
-/// panic). Kotlin adapter falls back to javax.crypto on null.
-#[no_mangle]
-pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_pbkdf2HmacSha256Native<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    passphrase: JString<'local>,
-    salt: JByteArray<'local>,
-    iterations: jint,
-    key_size_bytes: jint,
-) -> jbyteArray {
-    jni_common::init_logger_once!("RustSyncCrypto");
+/// Derive a key using PBKDF2-HMAC-SHA256.
+pub fn pbkdf2_derive(passphrase: &[u8], salt: &[u8], iterations: u32, key_size: usize) -> Option<Vec<u8>> {
+    let iters = NonZeroU32::new(iterations)?;
+    let mut out = vec![0u8; key_size];
+    pbkdf2::derive(pbkdf2::PBKDF2_HMAC_SHA256, iters, salt, passphrase, &mut out);
+    Some(out)
+}
 
-    // P3 review fix: validate scalar args BEFORE the byte/string copies so
-    // a caller bug doesn't waste a 32-byte salt + passphrase round-trip.
-    if iterations <= 0 || key_size_bytes <= 0 {
-        log::error!(
-            "sync-crypto: invalid args (iterations={}, key_size_bytes={})",
-            iterations,
-            key_size_bytes
-        );
-        return std::ptr::null_mut();
+/// AES-256-GCM encrypt. Returns ciphertext with 16-byte auth tag appended.
+pub fn aes_gcm_encrypt(plaintext: &[u8], key: &[u8], iv: &[u8]) -> Option<Vec<u8>> {
+    let unbound = UnboundKey::new(&AES_256_GCM, key).ok()?;
+    let sealing_key = LessSafeKey::new(unbound);
+    let nonce = Nonce::try_assume_unique_for_key(iv).ok()?;
+    let mut in_out = plaintext.to_vec();
+    sealing_key
+        .seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
+        .ok()?;
+    Some(in_out)
+}
+
+/// AES-256-GCM decrypt. Returns plaintext on success, None on auth failure.
+pub fn aes_gcm_decrypt(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Option<Vec<u8>> {
+    let unbound = UnboundKey::new(&AES_256_GCM, key).ok()?;
+    let opening_key = LessSafeKey::new(unbound);
+    let nonce = Nonce::try_assume_unique_for_key(iv).ok()?;
+    let mut in_out = ciphertext.to_vec();
+    let plaintext = opening_key
+        .open_in_place(nonce, Aad::empty(), &mut in_out)
+        .ok()?;
+    Some(plaintext.to_vec())
+}
+
+/// SHA-256 hash.
+pub fn sha256(input: &[u8]) -> Vec<u8> {
+    let d = digest(&SHA256, input);
+    d.as_ref().to_vec()
+}
+
+/// HMAC-SHA256.
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> Vec<u8> {
+    let signing_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    let tag = hmac::sign(&signing_key, message);
+    tag.as_ref().to_vec()
+}
+
+// ---------------------------------------------------------------------------
+// Android JNI entry points
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "android")]
+mod jni_bridge {
+    use super::*;
+    use jni::objects::{JByteArray, JClass, JString};
+    use jni::sys::{jbyteArray, jint};
+    use jni::JNIEnv;
+
+    fn to_jbyte_array(env: &mut JNIEnv, src: &[u8]) -> jbyteArray {
+        match env.byte_array_from_slice(src) {
+            Ok(arr) => arr.into_raw(),
+            Err(e) => {
+                log::error!("sync-crypto: byte_array_from_slice failed: {}", e);
+                std::ptr::null_mut()
+            }
+        }
     }
 
-    let passphrase_str: String = match env.get_string(&passphrase) {
-        Ok(s) => String::from(s),
-        Err(e) => {
-            log::error!("sync-crypto: get_string(passphrase) failed: {}", e);
+    #[no_mangle]
+    pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_pbkdf2HmacSha256Native<'local>(
+        mut env: JNIEnv<'local>,
+        _class: JClass<'local>,
+        passphrase: JString<'local>,
+        salt: JByteArray<'local>,
+        iterations: jint,
+        key_size_bytes: jint,
+    ) -> jbyteArray {
+        jni_common::init_logger_once!("RustSyncCrypto");
+
+        if iterations <= 0 || key_size_bytes <= 0 {
+            log::error!(
+                "sync-crypto: invalid args (iterations={}, key_size_bytes={})",
+                iterations,
+                key_size_bytes
+            );
             return std::ptr::null_mut();
         }
-    };
 
-    let salt_bytes: Vec<u8> = match env.convert_byte_array(&salt) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(salt) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let iters = match NonZeroU32::new(iterations as u32) {
-            Some(n) => n,
-            None => return None,
+        let passphrase_str: String = match env.get_string(&passphrase) {
+            Ok(s) => String::from(s),
+            Err(e) => {
+                log::error!("sync-crypto: get_string(passphrase) failed: {}", e);
+                return std::ptr::null_mut();
+            }
         };
-        let mut out = vec![0u8; key_size_bytes as usize];
-        pbkdf2::derive(
-            pbkdf2::PBKDF2_HMAC_SHA256,
-            iters,
-            &salt_bytes,
-            passphrase_str.as_bytes(),
-            &mut out,
-        );
-        Some(out)
-    }));
 
-    match result {
-        Ok(Some(key)) => to_jbyte_array(&mut env, &key),
-        Ok(None) => std::ptr::null_mut(),
-        Err(panic) => {
-            log::error!(
-                "sync-crypto: pbkdf2 panic: {}",
-                jni_common::panic_to_string(&panic)
-            );
-            std::ptr::null_mut()
+        let salt_bytes: Vec<u8> = match env.convert_byte_array(&salt) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(salt) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            crate::pbkdf2_derive(passphrase_str.as_bytes(), &salt_bytes, iterations as u32, key_size_bytes as usize)
+        }));
+
+        match result {
+            Ok(Some(key)) => to_jbyte_array(&mut env, &key),
+            Ok(None) => std::ptr::null_mut(),
+            Err(panic) => {
+                log::error!(
+                    "sync-crypto: pbkdf2 panic: {}",
+                    jni_common::panic_to_string(&panic)
+                );
+                std::ptr::null_mut()
+            }
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// AES-256-GCM
-// ---------------------------------------------------------------------------
+    #[no_mangle]
+    pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_aesGcmEncryptNative<'local>(
+        mut env: JNIEnv<'local>,
+        _class: JClass<'local>,
+        plaintext: JByteArray<'local>,
+        key: JByteArray<'local>,
+        iv: JByteArray<'local>,
+    ) -> jbyteArray {
+        jni_common::init_logger_once!("RustSyncCrypto");
 
-/// `aesGcmEncryptNative(plaintext: ByteArray, key: ByteArray, iv: ByteArray): ByteArray`
-///
-/// Returns ciphertext-with-16-byte-tag-appended (the ring convention). Kotlin
-/// adapter's javax.crypto path uses the same layout (Cipher.GCM auto-appends).
-/// Returns null on any failure.
-#[no_mangle]
-pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_aesGcmEncryptNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    plaintext: JByteArray<'local>,
-    key: JByteArray<'local>,
-    iv: JByteArray<'local>,
-) -> jbyteArray {
-    jni_common::init_logger_once!("RustSyncCrypto");
+        let pt = match env.convert_byte_array(&plaintext) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(plaintext) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+        let key_bytes = match env.convert_byte_array(&key) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(key) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+        let iv_bytes = match env.convert_byte_array(&iv) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(iv) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
 
-    let pt = match env.convert_byte_array(&plaintext) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(plaintext) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-    let key_bytes = match env.convert_byte_array(&key) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(key) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-    let iv_bytes = match env.convert_byte_array(&iv) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(iv) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            crate::aes_gcm_encrypt(&pt, &key_bytes, &iv_bytes)
+        }));
 
-    let result = catch_unwind(AssertUnwindSafe(|| -> Option<Vec<u8>> {
-        let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).ok()?;
-        let sealing_key = LessSafeKey::new(unbound);
-        // ring requires a 12-byte nonce for AES-GCM. The JVM side uses 12B IVs
-        // (SyncCrypto.kt: IV_BYTES = 12) so this matches.
-        let nonce = Nonce::try_assume_unique_for_key(&iv_bytes).ok()?;
-        let mut in_out = pt;
-        // seal_in_place_append_tag appends a 16-byte auth tag in-place;
-        // exactly what JVM's Cipher in GCM mode produces.
-        sealing_key
-            .seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
-            .ok()?;
-        Some(in_out)
-    }));
-
-    match result {
-        Ok(Some(ct)) => to_jbyte_array(&mut env, &ct),
-        Ok(None) => {
-            log::error!("sync-crypto: aes-gcm encrypt failed (invalid key/iv?)");
-            std::ptr::null_mut()
-        }
-        Err(panic) => {
-            log::error!(
-                "sync-crypto: aes-gcm encrypt panic: {}",
-                jni_common::panic_to_string(&panic)
-            );
-            std::ptr::null_mut()
+        match result {
+            Ok(Some(ct)) => to_jbyte_array(&mut env, &ct),
+            Ok(None) => {
+                log::error!("sync-crypto: aes-gcm encrypt failed (invalid key/iv?)");
+                std::ptr::null_mut()
+            }
+            Err(panic) => {
+                log::error!(
+                    "sync-crypto: aes-gcm encrypt panic: {}",
+                    jni_common::panic_to_string(&panic)
+                );
+                std::ptr::null_mut()
+            }
         }
     }
-}
 
-/// `aesGcmDecryptNative(ciphertext: ByteArray, key: ByteArray, iv: ByteArray): ByteArray?`
-///
-/// Returns plaintext. Null on auth failure OR invalid args OR panic — Kotlin
-/// adapter handles fallback / error reporting from the null.
-#[no_mangle]
-pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_aesGcmDecryptNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    ciphertext: JByteArray<'local>,
-    key: JByteArray<'local>,
-    iv: JByteArray<'local>,
-) -> jbyteArray {
-    jni_common::init_logger_once!("RustSyncCrypto");
+    #[no_mangle]
+    pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_aesGcmDecryptNative<'local>(
+        mut env: JNIEnv<'local>,
+        _class: JClass<'local>,
+        ciphertext: JByteArray<'local>,
+        key: JByteArray<'local>,
+        iv: JByteArray<'local>,
+    ) -> jbyteArray {
+        jni_common::init_logger_once!("RustSyncCrypto");
 
-    let ct = match env.convert_byte_array(&ciphertext) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(ciphertext) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-    let key_bytes = match env.convert_byte_array(&key) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(key) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-    let iv_bytes = match env.convert_byte_array(&iv) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(iv) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
+        let ct = match env.convert_byte_array(&ciphertext) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(ciphertext) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+        let key_bytes = match env.convert_byte_array(&key) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(key) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+        let iv_bytes = match env.convert_byte_array(&iv) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(iv) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
 
-    let result = catch_unwind(AssertUnwindSafe(|| -> Option<Vec<u8>> {
-        let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).ok()?;
-        let opening_key = LessSafeKey::new(unbound);
-        let nonce = Nonce::try_assume_unique_for_key(&iv_bytes).ok()?;
-        let mut in_out = ct;
-        // open_in_place verifies the trailing 16-byte auth tag, returning the
-        // plaintext slice on success. On failure (corrupted ciphertext or wrong
-        // key) it returns Err — we propagate as None → null jbyteArray to the
-        // Kotlin adapter, which then either falls back to javax.crypto or
-        // surfaces a "wrong passphrase" error.
-        let plaintext = opening_key
-            .open_in_place(nonce, Aad::empty(), &mut in_out)
-            .ok()?;
-        Some(plaintext.to_vec())
-    }));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            crate::aes_gcm_decrypt(&ct, &key_bytes, &iv_bytes)
+        }));
 
-    match result {
-        Ok(Some(pt)) => to_jbyte_array(&mut env, &pt),
-        Ok(None) => {
-            // Don't log at error level — wrong-passphrase is an expected user
-            // case; spamming logcat is noise. Adapter side surfaces the UI msg.
-            log::info!("sync-crypto: aes-gcm decrypt returned null (auth fail or bad args)");
-            std::ptr::null_mut()
-        }
-        Err(panic) => {
-            log::error!(
-                "sync-crypto: aes-gcm decrypt panic: {}",
-                jni_common::panic_to_string(&panic)
-            );
-            std::ptr::null_mut()
+        match result {
+            Ok(Some(pt)) => to_jbyte_array(&mut env, &pt),
+            Ok(None) => {
+                log::info!("sync-crypto: aes-gcm decrypt returned null (auth fail or bad args)");
+                std::ptr::null_mut()
+            }
+            Err(panic) => {
+                log::error!(
+                    "sync-crypto: aes-gcm decrypt panic: {}",
+                    jni_common::panic_to_string(&panic)
+                );
+                std::ptr::null_mut()
+            }
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// SHA-256 / HMAC-SHA256
-// ---------------------------------------------------------------------------
+    #[no_mangle]
+    pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_sha256Native<'local>(
+        mut env: JNIEnv<'local>,
+        _class: JClass<'local>,
+        bytes: JByteArray<'local>,
+    ) -> jbyteArray {
+        jni_common::init_logger_once!("RustSyncCrypto");
 
-/// `sha256Native(bytes: ByteArray): ByteArray`
-///
-/// Returns the 32 raw digest bytes. Kotlin adapter hex-encodes (the existing
-/// SyncCrypto.sha256(...) wrap with `"%02x".format(it)`).
-#[no_mangle]
-pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_sha256Native<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    bytes: JByteArray<'local>,
-) -> jbyteArray {
-    jni_common::init_logger_once!("RustSyncCrypto");
+        let input = match env.convert_byte_array(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(bytes) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
 
-    let input = match env.convert_byte_array(&bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(bytes) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            crate::sha256(&input)
+        }));
 
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let d = digest(&SHA256, &input);
-        d.as_ref().to_vec()
-    }));
-
-    match result {
-        Ok(digest_bytes) => to_jbyte_array(&mut env, &digest_bytes),
-        Err(panic) => {
-            log::error!(
-                "sync-crypto: sha256 panic: {}",
-                jni_common::panic_to_string(&panic)
-            );
-            std::ptr::null_mut()
+        match result {
+            Ok(digest_bytes) => to_jbyte_array(&mut env, &digest_bytes),
+            Err(panic) => {
+                log::error!(
+                    "sync-crypto: sha256 panic: {}",
+                    jni_common::panic_to_string(&panic)
+                );
+                std::ptr::null_mut()
+            }
         }
     }
-}
 
-/// `hmacSha256Native(key: ByteArray, message: ByteArray): ByteArray`
-///
-/// 32-byte HMAC tag. Adapter uses for chunk integrity stamps.
-#[no_mangle]
-pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_hmacSha256Native<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    key: JByteArray<'local>,
-    message: JByteArray<'local>,
-) -> jbyteArray {
-    jni_common::init_logger_once!("RustSyncCrypto");
+    #[no_mangle]
+    pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_hmacSha256Native<'local>(
+        mut env: JNIEnv<'local>,
+        _class: JClass<'local>,
+        key: JByteArray<'local>,
+        message: JByteArray<'local>,
+    ) -> jbyteArray {
+        jni_common::init_logger_once!("RustSyncCrypto");
 
-    let key_bytes = match env.convert_byte_array(&key) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(hmac key) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-    let msg_bytes = match env.convert_byte_array(&message) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(hmac message) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
+        let key_bytes = match env.convert_byte_array(&key) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(hmac key) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+        let msg_bytes = match env.convert_byte_array(&message) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("sync-crypto: convert_byte_array(hmac message) failed: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
 
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let signing_key = hmac::Key::new(hmac::HMAC_SHA256, &key_bytes);
-        let tag = hmac::sign(&signing_key, &msg_bytes);
-        tag.as_ref().to_vec()
-    }));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            crate::hmac_sha256(&key_bytes, &msg_bytes)
+        }));
 
-    match result {
-        Ok(tag_bytes) => to_jbyte_array(&mut env, &tag_bytes),
-        Err(panic) => {
-            log::error!(
-                "sync-crypto: hmac panic: {}",
-                jni_common::panic_to_string(&panic)
-            );
-            std::ptr::null_mut()
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-fn to_jbyte_array(env: &mut JNIEnv, src: &[u8]) -> jbyteArray {
-    match env.byte_array_from_slice(src) {
-        Ok(arr) => arr.into_raw(),
-        Err(e) => {
-            log::error!("sync-crypto: byte_array_from_slice failed: {}", e);
-            std::ptr::null_mut()
+        match result {
+            Ok(tag_bytes) => to_jbyte_array(&mut env, &tag_bytes),
+            Err(panic) => {
+                log::error!(
+                    "sync-crypto: hmac panic: {}",
+                    jni_common::panic_to_string(&panic)
+                );
+                std::ptr::null_mut()
+            }
         }
     }
 }

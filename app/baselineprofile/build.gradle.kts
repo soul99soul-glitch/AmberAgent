@@ -1,10 +1,11 @@
 plugins {
     alias(libs.plugins.android.test)
+    alias(libs.plugins.baselineprofile)
 }
 
 android {
     namespace = "app.amber.baselineprofile"
-    compileSdk = 36
+    compileSdk = 37
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -13,7 +14,7 @@ android {
 
     defaultConfig {
         minSdk = 28
-        targetSdk = 36
+        targetSdk = 37
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -22,10 +23,18 @@ android {
 
 }
 
+baselineProfile {
+    useConnectedDevices = true
+}
+
 dependencies {
     implementation(libs.androidx.junit)
     implementation(libs.androidx.espresso.core)
-    implementation(libs.androidx.uiautomator)
+    implementation(libs.androidx.uiautomator) {
+        version {
+            strictly(libs.versions.uiautomator.get())
+        }
+    }
     implementation(libs.androidx.benchmark.macro.junit4)
 }
 

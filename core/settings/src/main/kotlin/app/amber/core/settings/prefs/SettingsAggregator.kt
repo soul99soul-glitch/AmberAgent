@@ -358,7 +358,7 @@ internal fun composeRawSettings(
  *
  * Byte-equivalent to the pre-M1.1.8e SettingsStore.settingsFlowRaw line 301-419:
  * - Remove deprecated providers (REMOVED_DEFAULT_PROVIDER_IDS)
- * - Sync built-in provider metadata (description / shortDescription / brand)
+ * - Sync built-in provider metadata (descriptionText / shortDescriptionText / brand)
  * - Seed gpt-image-2 / nano-banana-2 (gated by imageModelsSeededVersion < 1)
  * - Inject DEFAULT_ASSISTANTS that the user has not yet got
  * - Seed routing quick messages (/draw /svg /diagram /slide) + subscribe
@@ -376,8 +376,8 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
             if (defaultProvider != null) {
                 val withMeta = provider.copyProvider(
                     builtIn = defaultProvider.builtIn,
-                    description = defaultProvider.description,
-                    shortDescription = defaultProvider.shortDescription,
+                    descriptionText = defaultProvider.descriptionText,
+                    shortDescriptionText = defaultProvider.shortDescriptionText,
                 )
                 val withBrand = if (
                     withMeta is ProviderSetting.OpenAI &&

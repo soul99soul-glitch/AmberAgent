@@ -605,8 +605,8 @@ internal fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): Provi
             models = models,
             balanceOption = balanceOption,
             builtIn = builtIn,
-            description = description,
-            shortDescription = shortDescription,
+            descriptionText = descriptionText,
+            shortDescriptionText = shortDescriptionText,
             apiKey = apiKey,
             baseUrl = convertedBaseUrl,
         )
@@ -617,8 +617,8 @@ internal fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): Provi
             models = models,
             balanceOption = balanceOption,
             builtIn = builtIn,
-            description = description,
-            shortDescription = shortDescription,
+            descriptionText = descriptionText,
+            shortDescriptionText = shortDescriptionText,
             apiKey = apiKey,
             baseUrl = convertedBaseUrl,
         )
@@ -629,8 +629,8 @@ internal fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): Provi
             models = models,
             balanceOption = balanceOption,
             builtIn = builtIn,
-            description = description,
-            shortDescription = shortDescription,
+            descriptionText = descriptionText,
+            shortDescriptionText = shortDescriptionText,
             apiKey = apiKey,
             baseUrl = convertedBaseUrl,
         )

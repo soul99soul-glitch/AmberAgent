@@ -1,14 +1,16 @@
 package app.amber.common.http
 
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.ClientRequestException
+import io.ktor.client.plugins.ServerResponseException
+import io.ktor.client.plugins.sse.sse
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.statement.bodyAsText
+import io.ktor.sse.ServerSentEvent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 
 /**
  * 代表 SSE 连接中的各种事件
@@ -35,60 +37,71 @@ sealed class SseEvent {
     /**
      * 发生错误
      * @param throwable 异常信息
-     * @param response 错误时的响应（可能为null）
      */
-    data class Failure(val throwable: Throwable?, val response: Response?) : SseEvent()
+    data class Failure(val throwable: Throwable?) : SseEvent()
 }
 
-
 /**
- * 为 OkHttpClient 创建 SSE (Server-Sent Events) 连接的扩展函数
- * 
- * 将 OkHttp 的 EventSource 封装成 Kotlin Flow，提供响应式的 SSE 事件流
- * 
- * @param request HTTP 请求，用于建立 SSE 连接
+ * 为 Ktor HttpClient 创建 SSE (Server-Sent Events) 连接的扩展函数
+ *
+ * 将 Ktor 的 SSE 客户端封装成 Kotlin Flow，提供响应式的 SSE 事件流
+ * 复用 [SseEvent] 体系保持 API 一致性
+ *
+ * 注意：调用方需确保 HttpClient 已安装 SSE 插件（[SSE]）
+ *
+ * @param url SSE 端点 URL
+ * @param block 请求配置（headers、parameters 等）
  * @return Flow<SseEvent> 包含 SSE 事件的响应式流
  */
-fun OkHttpClient.sseFlow(request: Request): Flow<SseEvent> {
-    return callbackFlow {
-        // 1. 创建 EventSourceListener
-        // 监听 SSE 连接的各种事件并转换为 Flow 事件
-        val listener = object : EventSourceListener() {
-            override fun onOpen(eventSource: EventSource, response: Response) {
-                // 从回调中安全地发送事件到 Flow
-                // 连接成功建立时触发
-                trySend(SseEvent.Open)
-            }
-
-            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
-                // 收到服务器发送的数据事件时触发
-                // 将事件数据封装后发送到 Flow
-                trySend(SseEvent.Event(id, type, data))
-            }
-
-            override fun onClosed(eventSource: EventSource) {
-                // 连接正常关闭时触发
-                trySend(SseEvent.Closed)
-                channel.close() // 关闭 Flow 通道
-            }
-
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                // 连接发生错误时触发
-                trySend(SseEvent.Failure(t, response))
-                channel.close(t) // 以异常关闭 Flow 通道
+fun HttpClient.sseFlow(
+    url: String,
+    block: HttpRequestBuilder.() -> Unit = {},
+): Flow<SseEvent> = callbackFlow {
+    trySend(SseEvent.Open)
+    try {
+        this@sseFlow.sse(urlString = url, request = block) {
+            incoming.collect { serverSentEvent ->
+                trySend(SseEvent.Event(
+                    id = serverSentEvent.id,
+                    type = serverSentEvent.event,
+                    data = serverSentEvent.data ?: ""
+                ))
             }
         }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: ClientRequestException) {
+        // 4xx errors: extract status + response body for user-friendly messages
+        val body = readResponseBody(e.response)
+        val enriched = Exception("HTTP ${e.response.status.value} ${e.response.status.description}: $body", e)
+        trySend(SseEvent.Failure(enriched))
+        close()
+        return@callbackFlow
+    } catch (e: ServerResponseException) {
+        // 5xx errors: extract status + response body
+        val body = readResponseBody(e.response)
+        val enriched = Exception("HTTP ${e.response.status.value} ${e.response.status.description}: $body", e)
+        trySend(SseEvent.Failure(enriched))
+        close()
+        return@callbackFlow
+    } catch (e: Exception) {
+        trySend(SseEvent.Failure(e))
+        close()
+        return@callbackFlow
+    }
+    trySend(SseEvent.Closed)
+    close()
+    awaitClose { }
+}
 
-        // 2. 创建 EventSource
-        // 使用当前 OkHttpClient 创建 EventSource 工厂
-        val factory = EventSources.createFactory(this@sseFlow)
-        val eventSource = factory.newEventSource(request, listener)
-
-        // 3. awaitClose 用于在 Flow 被取消时执行清理操作
-        // 当收集 Flow 的协程被取消时，这个块会被调用
-        awaitClose {
-            // 关闭 SSE 连接，释放资源
-            eventSource.cancel()
-        }
+/**
+ * Safely read the response body from a Ktor HttpResponse, capping length.
+ * Returns empty string if reading fails (body already consumed, etc.).
+ */
+private suspend fun readResponseBody(response: io.ktor.client.statement.HttpResponse): String {
+    return try {
+        response.bodyAsText().take(2048)
+    } catch (_: Exception) {
+        ""
     }
 }

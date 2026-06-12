@@ -14,13 +14,11 @@
 //!
 //! Inputs longer than 64K chars skip normalization (matches JVM).
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
-use jni::objects::{JClass, JString};
-use jni::sys::jstring;
-use jni::JNIEnv;
 use regex::Regex;
 use scraper::{Html, Node};
+
+#[cfg(target_os = "android")]
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 const MAX_INPUT_CHARS: usize = 64 * 1024;
 
@@ -151,12 +149,13 @@ fn serialize(node: ego_tree::NodeRef<Node>, out: &mut String) {
     }
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_app_amber_feature_ui_components_richtext_nativebridge_HtmlDiffNormalizerNative_normalizeNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    input: JString<'local>,
-) -> jstring {
+    mut env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    input: jni::objects::JString<'local>,
+) -> jni::sys::jstring {
     jni_common::init_logger_once!("RustHtmlDiffNormalizer");
 
     let input_str: String = match env.get_string(&input) {

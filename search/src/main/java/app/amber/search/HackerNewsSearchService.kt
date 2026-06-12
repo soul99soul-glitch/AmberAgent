@@ -7,8 +7,10 @@ import kotlinx.serialization.Serializable
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Request
+import io.ktor.client.request.get
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 
 object HackerNewsSearchService {
     const val name: String = "Hacker News"
@@ -18,16 +20,15 @@ object HackerNewsSearchService {
         commonOptions: SearchCommonOptions,
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
-            val url = "https://hn.algolia.com/api/v1/search".toHttpUrl().newBuilder()
-                .addQueryParameter("query", query)
-                .addQueryParameter("tags", "story")
-                .addQueryParameter("hitsPerPage", commonOptions.resultSize.coerceIn(1, 20).toString())
-                .build()
-            val response = httpClient.newCall(Request.Builder().url(url).build()).await()
-            if (!response.isSuccessful) {
-                error("Hacker News request failed #${response.code}")
+            val response = httpClient.get("https://hn.algolia.com/api/v1/search") {
+                parameter("query", query)
+                parameter("tags", "story")
+                parameter("hitsPerPage", commonOptions.resultSize.coerceIn(1, 20).toString())
             }
-            val payload = response.body.string().let { json.decodeFromString<HackerNewsResponse>(it) }
+            if (!response.status.isSuccess()) {
+                error("Hacker News request failed #${response.status.value}")
+            }
+            val payload = response.bodyAsText().let { json.decodeFromString<HackerNewsResponse>(it) }
             SearchResult(
                 items = payload.hits.mapNotNull { hit ->
                     val title = hit.title ?: hit.storyTitle ?: return@mapNotNull null

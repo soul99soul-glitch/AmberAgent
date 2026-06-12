@@ -15,118 +15,141 @@
 //! and passes parallel `findPatterns` + `replacements` arrays. The JNI surface
 //! is intentionally narrow: take the post-filter list and apply.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
-use jni::objects::{JClass, JObjectArray, JString};
-use jni::sys::jstring;
-use jni::JNIEnv;
 use regex::Regex;
 
-/// JNI entry: `RegexTransformerNative.applyRegexesNative(input, findPatterns, replacements): String?`.
-///
-/// Returns:
-/// - The transformed string on success
-/// - The unchanged input on per-rule regex compile failure (skip the bad rule,
-///   continue with the rest — mirrors JVM `try { ... } catch { acc }`)
-/// - `null` on JString conversion failure or panic (Kotlin adapter falls back
-///   to the JVM implementation)
-#[no_mangle]
-pub extern "system" fn Java_app_amber_agent_data_model_nativebridge_RegexTransformerNative_applyRegexesNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    input: JString<'local>,
-    find_patterns: JObjectArray<'local>,
-    replacements: JObjectArray<'local>,
-) -> jstring {
-    jni_common::init_logger_once!("RustRegexTransformer");
+// ---------------------------------------------------------------------------
+// Public API (platform-independent)
+// ---------------------------------------------------------------------------
 
-    let input_str: String = match env.get_string(&input) {
-        Ok(s) => String::from(s),
-        Err(e) => {
-            log::error!("regex-transformer: failed to get input JString: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        apply_pipeline(&mut env, &input_str, &find_patterns, &replacements)
-    }));
-
-    match result {
-        Ok(Ok(transformed)) => match env.new_string(transformed) {
-            Ok(jstr) => jstr.into_raw(),
-            Err(e) => {
-                log::error!("regex-transformer: new_string failed: {}", e);
-                std::ptr::null_mut()
-            }
-        },
-        Ok(Err(e)) => {
-            log::error!("regex-transformer: pipeline error: {}", e);
-            std::ptr::null_mut()
-        }
-        Err(panic) => {
-            log::error!(
-                "regex-transformer: native panic: {:?}",
-                jni_common::panic_to_string(&panic)
-            );
-            std::ptr::null_mut()
-        }
-    }
-}
-
-fn apply_pipeline<'local>(
-    env: &mut JNIEnv<'local>,
-    input: &str,
-    find_patterns: &JObjectArray<'local>,
-    replacements: &JObjectArray<'local>,
-) -> Result<String, RegexTransformerError> {
-    let n_finds = env.get_array_length(find_patterns)? as usize;
-    let n_reps = env.get_array_length(replacements)? as usize;
-    if n_finds != n_reps {
-        return Err(RegexTransformerError::ArrayLengthMismatch {
-            finds: n_finds,
-            reps: n_reps,
-        });
-    }
-
+/// Apply a pipeline of regex find-replace rules sequentially.
+/// On individual regex compile failure, that rule is skipped (mirrors JVM behavior).
+pub fn apply_regex_pipeline(input: &str, rules: &[(&str, &str)]) -> String {
     let mut acc = input.to_string();
-    for i in 0..n_finds {
-        let find = read_string_at(env, find_patterns, i)?;
-        let replacement = read_string_at(env, replacements, i)?;
-
-        // JVM behaviour: on individual regex compile failure, log + skip
-        // that rule; do NOT abort the pipeline. We mirror that exactly.
-        let re = match Regex::new(&find) {
+    for (find, replacement) in rules {
+        let re = match Regex::new(find) {
             Ok(r) => r,
             Err(e) => {
-                log::warn!(
-                    "regex-transformer: rule #{} pattern compile failed ({}): skipping",
-                    i,
-                    e
-                );
+                log::warn!("regex-transformer: rule pattern compile failed ({}): skipping", e);
                 continue;
             }
         };
+        acc = re.replace_all(&acc, *replacement).into_owned();
+    }
+    acc
+}
 
-        // regex::Regex::replace_all takes `&str` for replacement — same semantics
-        // as Kotlin's String.replace(Regex, String) (group references $1, $name).
-        acc = re.replace_all(&acc, replacement.as_str()).into_owned();
+// ---------------------------------------------------------------------------
+// Android JNI entry points
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "android")]
+mod jni_bridge {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use jni::objects::{JClass, JObjectArray, JString};
+    use jni::sys::jstring;
+    use jni::JNIEnv;
+    use regex::Regex;
+
+    #[no_mangle]
+    pub extern "system" fn Java_app_amber_agent_data_model_nativebridge_RegexTransformerNative_applyRegexesNative<'local>(
+        mut env: JNIEnv<'local>,
+        _class: JClass<'local>,
+        input: JString<'local>,
+        find_patterns: JObjectArray<'local>,
+        replacements: JObjectArray<'local>,
+    ) -> jstring {
+        jni_common::init_logger_once!("RustRegexTransformer");
+
+        let input_str: String = match env.get_string(&input) {
+            Ok(s) => String::from(s),
+            Err(e) => {
+                log::error!("regex-transformer: failed to get input JString: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            apply_pipeline(&mut env, &input_str, &find_patterns, &replacements)
+        }));
+
+        match result {
+            Ok(Ok(transformed)) => match env.new_string(transformed) {
+                Ok(jstr) => jstr.into_raw(),
+                Err(e) => {
+                    log::error!("regex-transformer: new_string failed: {}", e);
+                    std::ptr::null_mut()
+                }
+            },
+            Ok(Err(e)) => {
+                log::error!("regex-transformer: pipeline error: {}", e);
+                std::ptr::null_mut()
+            }
+            Err(panic) => {
+                log::error!(
+                    "regex-transformer: native panic: {:?}",
+                    jni_common::panic_to_string(&panic)
+                );
+                std::ptr::null_mut()
+            }
+        }
     }
 
-    Ok(acc)
+    fn apply_pipeline<'local>(
+        env: &mut JNIEnv<'local>,
+        input: &str,
+        find_patterns: &JObjectArray<'local>,
+        replacements: &JObjectArray<'local>,
+    ) -> Result<String, super::RegexTransformerError> {
+        let n_finds = env.get_array_length(find_patterns)? as usize;
+        let n_reps = env.get_array_length(replacements)? as usize;
+        if n_finds != n_reps {
+            return Err(super::RegexTransformerError::ArrayLengthMismatch {
+                finds: n_finds,
+                reps: n_reps,
+            });
+        }
+
+        let mut acc = input.to_string();
+        for i in 0..n_finds {
+            let find = read_string_at(env, find_patterns, i)?;
+            let replacement = read_string_at(env, replacements, i)?;
+
+            let re = match Regex::new(&find) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!(
+                        "regex-transformer: rule #{} pattern compile failed ({}): skipping",
+                        i,
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            acc = re.replace_all(&acc, replacement.as_str()).into_owned();
+        }
+
+        Ok(acc)
+    }
+
+    fn read_string_at<'local>(
+        env: &mut JNIEnv<'local>,
+        arr: &JObjectArray<'local>,
+        idx: usize,
+    ) -> Result<String, super::RegexTransformerError> {
+        let obj = env.get_object_array_element(arr, idx as i32)?;
+        let jstr: JString = obj.into();
+        let s: String = env.get_string(&jstr)?.into();
+        Ok(s)
+    }
 }
 
-fn read_string_at<'local>(
-    env: &mut JNIEnv<'local>,
-    arr: &JObjectArray<'local>,
-    idx: usize,
-) -> Result<String, RegexTransformerError> {
-    let obj = env.get_object_array_element(arr, idx as i32)?;
-    let jstr: JString = obj.into();
-    let s: String = env.get_string(&jstr)?.into();
-    Ok(s)
-}
+// ---------------------------------------------------------------------------
+// Error type (shared between JNI bridge and tests)
+// ---------------------------------------------------------------------------
 
+#[cfg(target_os = "android")]
 #[derive(thiserror::Error, Debug)]
 enum RegexTransformerError {
     #[error("jni error: {0}")]
@@ -144,15 +167,7 @@ mod tests {
     // We test the pure-Rust pipeline portion via a helper.
 
     fn apply_pure(input: &str, rules: &[(&str, &str)]) -> String {
-        let mut acc = input.to_string();
-        for (find, replacement) in rules {
-            let re = match Regex::new(find) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            acc = re.replace_all(&acc, *replacement).into_owned();
-        }
-        acc
+        crate::apply_regex_pipeline(input, rules)
     }
 
     #[test]

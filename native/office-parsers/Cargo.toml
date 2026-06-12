@@ -11,13 +11,15 @@ name = "office_parsers"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-jni.workspace = true
 jni-common.workspace = true
 quick-xml.workspace = true
 zip.workspace = true
 calamine.workspace = true
 thiserror.workspace = true
 log.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
 
 [dev-dependencies]
 # Used by integration tests to compare against JVM-equivalent outputs

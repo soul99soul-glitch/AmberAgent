@@ -1,26 +1,21 @@
 plugins {
-    alias(libs.plugins.android.library)
-}
-
-android {
-    namespace = "app.amber.core.ai.transformers.api"
-    compileSdk = 36
-    defaultConfig { minSdk = 26 }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
+    alias(libs.plugins.kotlin.multiplatform)
 }
 
 kotlin {
+    jvm()
+    iosArm64()
+    iosSimulatorArm64()
+
     compilerOptions {
         optIn.add("kotlin.uuid.ExperimentalUuidApi")
     }
-}
 
-dependencies {
-    api(project(":ai"))
-    api(project(":core:model"))
-    api(project(":core:settings"))
-    api(libs.kotlinx.coroutines.core)
+    sourceSets {
+        commonMain.dependencies {
+            api(project(":ai-core"))
+            api(project(":core:types"))
+            api(libs.kotlinx.coroutines.core)
+        }
+    }
 }

@@ -11,9 +11,11 @@ name = "html_diff_normalizer"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-jni.workspace = true
 jni-common.workspace = true
 regex.workspace = true
 log.workspace = true
 scraper.workspace = true
 ego-tree = "0.10"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true

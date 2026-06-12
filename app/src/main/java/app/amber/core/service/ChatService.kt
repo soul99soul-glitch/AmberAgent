@@ -120,17 +120,18 @@ import app.amber.core.files.FilesManager
 import app.amber.core.memory.extraction.MemoryExtractor
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
+import app.amber.core.model.files
 import app.amber.core.model.toMessageNode
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
 import app.amber.core.utils.applyPlaceholders
 import app.amber.core.utils.ChatSendTransitionTracker
 import app.amber.core.utils.sendNotification
-import java.time.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
@@ -923,7 +924,7 @@ class ChatService(
                     if (nodeMessage.id == lastMessage.id) updatedMessage else nodeMessage
                 }
             ),
-            updateAt = Instant.now(),
+            updateAt = Clock.System.now(),
         )
         saveConversation(conversationId, updatedConversation)
         recordPendingMessageEvent(
@@ -1366,7 +1367,7 @@ class ChatService(
                     messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
                         node.copy(messages = node.messages.map { it.finishReasoning() })
                     },
-                    updateAt = Instant.now()
+                    updateAt = Clock.System.now()
                 )
                 updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
                 checkpointConversation(conversationId, updatedConversation, force = true)

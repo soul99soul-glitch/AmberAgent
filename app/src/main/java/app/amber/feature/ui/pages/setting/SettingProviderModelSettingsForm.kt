@@ -810,7 +810,6 @@ private fun ProviderOverrideSettings(
                         id = Uuid.random(),
                         builtIn = false,
                         models = emptyList(),
-                        description = {},
                     )
                     showProviderConfig = true
                 },

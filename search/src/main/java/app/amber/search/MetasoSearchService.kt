@@ -18,9 +18,13 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
     override val name: String = "Metaso"
@@ -63,17 +67,14 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
                 put("includeSummary", JsonPrimitive(false))
             }
 
-            val request = Request.Builder()
-                .url("https://metaso.cn/api/v1/search")
-                .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val bodyRaw = response.body?.string() ?: error("Failed to get response body")
+            val response = httpClient.post("https://metaso.cn/api/v1/search") {
+                setBody(requestBody.toString())
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer ${serviceOptions.apiKey}")
+                header("Accept", "application/json")
+            }
+            if (response.status.isSuccess()) {
+                val bodyRaw = response.bodyAsText()
                 val searchResponse = runCatching {
                     json.decodeFromString<MetasoSearchResponse>(bodyRaw)
                 }.onFailure {
@@ -94,9 +95,9 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
                     )
                 )
             } else {
-                val errorBody = response.body?.string()
-                println("Metaso search failed with code ${response.code}: $errorBody")
-                error("Search request failed with code ${response.code}: $errorBody")
+                val errorBody = response.bodyAsText()
+                println("Metaso search failed with code ${response.status.value}: $errorBody")
+                error("Search request failed with code ${response.status.value}: $errorBody")
             }
         }
     }

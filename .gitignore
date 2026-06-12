@@ -18,6 +18,17 @@ local.properties
 *.perfetto-trace
 core/**/build/
 feature/**/build/
+ai-core/build/
+ai/build/
+common/build/
+app/build/
+app/baselineprofile/build/
+search/build/
+tts/build/
+highlight/build/
+document/build/
+web/build/
+native/target/
 
 # Design handoff reference (large binaries; keep the .md/.css/.jsx specs tracked)
 /amberagent-handoff.zip
@@ -27,3 +38,4 @@ docs/cloud-design/**/.thumbnail
 
 # Local data backups — too large for GitHub, never commit
 /amberagent-notion-data-backup-*.tgz
+.DS_Store

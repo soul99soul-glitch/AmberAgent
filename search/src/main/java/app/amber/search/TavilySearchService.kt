@@ -23,8 +23,13 @@ import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
 import app.amber.search.SearchService.Companion.keyRoulette
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 private const val TAG = "TavilySearchService"
 
@@ -97,23 +102,22 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             }
             val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
 
-            val request = Request.Builder()
-                .url("https://api.tavily.com/search")
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer $apiKey")
-                .build()
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val response = response.body.string().let {
+            val response = httpClient.post("https://api.tavily.com/search") {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+            }
+            if (response.status.isSuccess()) {
+                val searchResponse = response.bodyAsText().let {
                     json.decodeFromString<SearchResponse>(it)
                 }
 
-                val tavilyImages = response.images.distinct().take(5)
+                val tavilyImages = searchResponse.images.distinct().take(5)
                 var imagesAttached = false
                 return@withContext Result.success(
                     SearchResult(
-                        answer = response.answer,
-                        items = response.results.map {
+                        answer = searchResponse.answer,
+                        items = searchResponse.results.map {
                             val imgs = if (!imagesAttached && tavilyImages.isNotEmpty()) {
                                 imagesAttached = true
                                 tavilyImages
@@ -127,7 +131,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                         }
                     ))
             } else {
-                error("response failed #${response.code}")
+                error("response failed #${response.status.value}")
             }
         }
     }
@@ -145,19 +149,18 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                 })
             }
             val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
-            val request = Request.Builder()
-                .url("https://api.tavily.com/extract")
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer $apiKey")
-                .build()
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val response = response.body.string().let {
+            val response = httpClient.post("https://api.tavily.com/extract") {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+            }
+            if (response.status.isSuccess()) {
+                val scrapeResponse = response.bodyAsText().let {
                     json.decodeFromString<ScrapeResponse>(it)
                 }
                 return@withContext Result.success(
                     ScrapedResult(
-                        urls = response.results.map {
+                        urls = scrapeResponse.results.map {
                             ScrapedResultUrl(
                                 url = it.url,
                                 content = it.rawContent,
@@ -166,7 +169,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                     )
                 )
             } else {
-                error("response failed #${response.code}")
+                error("response failed #${response.status.value}")
             }
         }
     }

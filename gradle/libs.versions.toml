@@ -58,15 +58,16 @@ appcompat = "1.7.1"
 material = "1.13.0"
 ucrop = "2.2.11-native"
 haze = "1.7.2"
-uiautomator = "2.3.0"
-benchmarkMacroJunit4 = "1.4.1"
-baselineprofile = "1.4.1"
+uiautomator = "2.4.0-beta02"
+benchmarkMacroJunit4 = "1.5.0-alpha06"
+baselineprofile = "1.5.0-alpha06"
 profileinstaller = "1.4.1"
 ktor = "3.4.3"
 sqlite-vector = "0.9.92"
 jmdns = "3.6.3"
 slf4j = "2.0.17"
 sqlite-android = "-SNAPSHOT"
+androidx-room-gradle-plugin = "2.8.4"
 
 [libraries]
 androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "cameraCore" }
@@ -108,9 +109,13 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler", vers
 androidx-room-paging = { group = "androidx.room", name = "room-paging", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+androidx-room-gradle-plugin = { group = "androidx.room", name = "room-gradle-plugin", version.ref = "room" }
+androidx-sqlite-bundled = { group = "androidx.sqlite", name = "sqlite-bundled", version = "2.5.0" }
 androidx-paging-runtime = { group = "androidx.paging", name = "paging-runtime", version.ref = "paging" }
 androidx-paging-compose = { group = "androidx.paging", name = "paging-compose", version.ref = "paging" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+androidx-datastore-preferences-core = { group = "androidx.datastore", name = "datastore-preferences-core", version.ref = "datastore" }
+koin-core = { group = "io.insert-koin", name = "koin-core" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workmanager" }
 jetbrains-markdown = { module = "com.github.rikkahub:markdown", version.ref = "markdown" }
 metadata-extractor = { module = "com.drewnoakes:metadata-extractor", version.ref = "metadataExtractor" }
@@ -166,6 +171,10 @@ androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profi
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-sse = { module = "io.ktor:ktor-client-sse", version.ref = "ktor" }
+ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
+ktor-client-logging = { module = "io.ktor:ktor-client-logging", version.ref = "ktor" }
+ktor-client-encoding = { module = "io.ktor:ktor-client-encoding", version.ref = "ktor" }
 ktor-server-default-headers = { module = "io.ktor:ktor-server-default-headers", version.ref = "ktor" }
 ktor-server-caching-headers = { module = "io.ktor:ktor-server-caching-headers", version.ref = "ktor" }
 ktor-server-conditional-headers = { module = "io.ktor:ktor-server-conditional-headers", version.ref = "ktor" }
@@ -197,3 +206,5 @@ firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "
 android-test = { id = "com.android.test", version.ref = "agp" }
 baselineprofile = { id = "androidx.baselineprofile", version.ref = "baselineprofile" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+androidx-room = { id = "androidx.room", version.ref = "room" }

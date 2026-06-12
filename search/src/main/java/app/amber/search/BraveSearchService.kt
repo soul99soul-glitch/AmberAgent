@@ -17,7 +17,10 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.Request
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 
 private const val TAG = "BraveSearchService"
 
@@ -56,19 +59,16 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
             val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
-            val url = "https://api.search.brave.com/res/v1/web/search" +
+            val requestUrl = "https://api.search.brave.com/res/v1/web/search" +
                     "?q=${java.net.URLEncoder.encode(query, "UTF-8")}" +
                     "&count=${commonOptions.resultSize}"
 
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("Accept", "application/json")
-                .addHeader("X-Subscription-Token", serviceOptions.apiKey)
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string()
+            val response = httpClient.get(requestUrl) {
+                header("Accept", "application/json")
+                header("X-Subscription-Token", serviceOptions.apiKey)
+            }
+            if (response.status.isSuccess()) {
+                val responseBody = response.bodyAsText()
                 val searchResponse = json.decodeFromString<BraveSearchResponse>(responseBody)
 
                 val items = searchResponse.web?.results?.map { result ->
@@ -98,7 +98,7 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                     )
                 )
             } else {
-                error("Brave search failed with code ${response.code}: ${response.message}")
+                error("Brave search failed with code ${response.status.value}: ${response.status.description}")
             }
         }
     }

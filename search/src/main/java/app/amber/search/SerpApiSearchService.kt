@@ -19,8 +19,10 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Request
+import io.ktor.client.request.get
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 
 object SerpApiSearchService : SearchService<SearchServiceOptions.SerpApiOptions> {
     override val name: String = "SerpAPI"
@@ -59,22 +61,19 @@ object SerpApiSearchService : SearchService<SearchServiceOptions.SerpApiOptions>
             require(serviceOptions.apiKey.isNotBlank()) { "SerpAPI key is required" }
             val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
             val topic = params["topic"]?.jsonPrimitive?.contentOrNull
-            val url = "https://serpapi.com/search.json".toHttpUrl().newBuilder()
-                .addQueryParameter("engine", "google")
-                .addQueryParameter("q", query)
-                .addQueryParameter("api_key", serviceOptions.apiKey)
-                .addQueryParameter("num", commonOptions.resultSize.coerceIn(1, 20).toString())
-                .apply {
-                    if (topic == "news") {
-                        addQueryParameter("tbm", "nws")
-                    }
+            val response = httpClient.get("https://serpapi.com/search.json") {
+                parameter("engine", "google")
+                parameter("q", query)
+                parameter("api_key", serviceOptions.apiKey)
+                parameter("num", commonOptions.resultSize.coerceIn(1, 20).toString())
+                if (topic == "news") {
+                    parameter("tbm", "nws")
                 }
-                .build()
-            val response = httpClient.newCall(Request.Builder().url(url).build()).await()
-            if (!response.isSuccessful) {
-                error("SerpAPI request failed #${response.code}")
             }
-            val payload = response.body.string().let { json.decodeFromString<SerpApiResponse>(it) }
+            if (!response.status.isSuccess()) {
+                error("SerpAPI request failed #${response.status.value}")
+            }
+            val payload = response.bodyAsText().let { json.decodeFromString<SerpApiResponse>(it) }
             val items = (payload.newsResults ?: payload.organicResults ?: emptyList()).map {
                 SearchResultItem(
                     title = it.title,

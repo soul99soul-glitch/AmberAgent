@@ -47,8 +47,12 @@ android {
 }
 
 dependencies {
+    api(project(":core:types"))
     implementation(project(":ai"))
-    implementation(libs.okhttp)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
     implementation(platform(libs.androidx.compose.bom))

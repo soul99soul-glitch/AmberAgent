@@ -1,26 +1,22 @@
 plugins {
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
 }
 
-android {
-    namespace = "app.amber.core.memory.api"
-    compileSdk = 36
-    defaultConfig { minSdk = 26 }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-}
-
 kotlin {
+    jvm()
+    iosArm64()
+    iosSimulatorArm64()
+
     compilerOptions {
         optIn.add("kotlin.uuid.ExperimentalUuidApi")
     }
-}
 
-dependencies {
-    api(project(":ai"))
-    api(project(":core:model"))
-    api(libs.kotlinx.serialization.json)
+    sourceSets {
+        commonMain.dependencies {
+            api(project(":ai-core"))
+            api(project(":core:types"))
+            api(libs.kotlinx.serialization.json)
+        }
+    }
 }

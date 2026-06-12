@@ -20,22 +20,11 @@ mod type_mapping;
 pub use packed_ast::pack;
 pub use tree_builder::build_tree;
 
+#[cfg(target_os = "android")]
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use pulldown_cmark::Options;
 
 /// Single source of truth for which pulldown-cmark extensions we enable.
-/// Both the packed-AST path (`tree_builder::build_tree`) and the HTML emit
-/// path (`render_to_html`) call this so they can't drift.
-///
-/// Choices:
-/// - `ENABLE_TABLES` / `ENABLE_FOOTNOTES` / `ENABLE_STRIKETHROUGH` /
-///   `ENABLE_TASKLISTS` — GFM extensions present in JetBrains GFMFlavour.
-/// - `ENABLE_HEADING_ATTRIBUTES` — supports `{#id}` heading anchors.
-/// - `ENABLE_MATH` — `$...$` / `$$...$$` math blocks.
-/// - `ENABLE_GFM` — GFM autolink for bare URLs + extension flags.
-/// - **NOT** `ENABLE_SMART_PUNCTUATION` — JetBrains doesn't do smart-quote
-///   conversion, so leaving it on would diff `'hello'` vs `'hello'` on
-///   every comparison run (Round 2 review P1 fix).
 pub(crate) fn markdown_options() -> Options {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
@@ -48,102 +37,95 @@ pub(crate) fn markdown_options() -> Options {
     opts
 }
 
-use jni::objects::{JClass, JString};
-use jni::sys::jbyteArray;
-use jni::JNIEnv;
+// ---------------------------------------------------------------------------
+// Android JNI entry points
+// ---------------------------------------------------------------------------
 
-/// JNI entry: `MarkdownParserNative.parseMarkdownNative(text: String): ByteArray`.
-///
-/// Returns a packed binary AST blob. On error returns an empty byte array
-/// and the Kotlin adapter falls back to the JVM JetBrains-markdown parser.
-///
-/// # Safety
-/// Standard JNI signature. Panics are caught and converted to empty returns.
-#[no_mangle]
-pub extern "system" fn Java_app_amber_agent_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    text: JString<'local>,
-) -> jbyteArray {
-    jni_common::init_logger_once!("RustMarkdownParser");
+#[cfg(target_os = "android")]
+mod jni_bridge {
+    use jni::objects::{JClass, JString};
+    use jni::sys::jbyteArray;
+    use jni::JNIEnv;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    let text_str: String = match env.get_string(&text) {
-        Ok(s) => String::from(s),
-        Err(e) => {
-            log::error!("markdown-parser: failed to get JString: {}", e);
-            return empty_array(&mut env);
-        }
-    };
+    #[no_mangle]
+    pub extern "system" fn Java_app_amber_agent_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownNative<'local>(
+        mut env: JNIEnv<'local>,
+        _class: JClass<'local>,
+        text: JString<'local>,
+    ) -> jbyteArray {
+        jni_common::init_logger_once!("RustMarkdownParser");
 
-    let result = catch_unwind(AssertUnwindSafe(|| parse_to_packed(&text_str)));
-    match result {
-        Ok(blob) => match env.byte_array_from_slice(&blob) {
-            Ok(arr) => arr.into_raw(),
+        let text_str: String = match env.get_string(&text) {
+            Ok(s) => String::from(s),
             Err(e) => {
-                log::error!("markdown-parser: byte_array_from_slice failed: {}", e);
+                log::error!("markdown-parser: failed to get JString: {}", e);
+                return empty_array(&mut env);
+            }
+        };
+
+        let result = catch_unwind(AssertUnwindSafe(|| crate::parse_to_packed(&text_str)));
+        match result {
+            Ok(blob) => match env.byte_array_from_slice(&blob) {
+                Ok(arr) => arr.into_raw(),
+                Err(e) => {
+                    log::error!("markdown-parser: byte_array_from_slice failed: {}", e);
+                    empty_array(&mut env)
+                }
+            },
+            Err(panic) => {
+                log::error!("markdown-parser: native panic: {:?}", jni_common::panic_to_string(&panic));
                 empty_array(&mut env)
             }
-        },
-        Err(panic) => {
-            log::error!("markdown-parser: native panic: {:?}", jni_common::panic_to_string(&panic));
-            empty_array(&mut env)
         }
     }
-}
 
-fn empty_array<'local>(env: &mut JNIEnv<'local>) -> jbyteArray {
-    match env.new_byte_array(0) {
-        Ok(arr) => arr.into_raw(),
-        Err(_) => std::ptr::null_mut(),
+    fn empty_array<'local>(env: &mut JNIEnv<'local>) -> jbyteArray {
+        match env.new_byte_array(0) {
+            Ok(arr) => arr.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_app_amber_agent_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownToHtmlNative<'local>(
+        mut env: JNIEnv<'local>,
+        _class: JClass<'local>,
+        text: JString<'local>,
+    ) -> jni::sys::jstring {
+        jni_common::init_logger_once!("RustMarkdownParser");
+
+        let text_str: String = match env.get_string(&text) {
+            Ok(s) => String::from(s),
+            Err(e) => {
+                log::error!("markdown-parser (to-html): failed to get JString: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+
+        let result = catch_unwind(AssertUnwindSafe(|| crate::render_to_html(&text_str)));
+        match result {
+            Ok(html) => match env.new_string(html) {
+                Ok(jstr) => jstr.into_raw(),
+                Err(e) => {
+                    log::error!("markdown-parser (to-html): new_string failed: {}", e);
+                    std::ptr::null_mut()
+                }
+            },
+            Err(panic) => {
+                log::error!(
+                    "markdown-parser (to-html): native panic: {:?}",
+                    jni_common::panic_to_string(&panic)
+                );
+                std::ptr::null_mut()
+            }
+        }
     }
 }
 
 fn parse_to_packed(text: &str) -> Vec<u8> {
     let tree = tree_builder::build_tree(text);
     packed_ast::pack(&tree)
-}
-
-/// JNI entry for Component #8: `MarkdownParserNative.parseMarkdownToHtmlNative(text): String?`.
-///
-/// Single-pass markdown → HTML conversion via `pulldown_cmark::html::push_html`,
-/// **intended** to replace the JVM `MarkdownNew.kt` HtmlGenerator hop. The
-/// production caller has not yet been switched over; this is spike infrastructure.
-///
-/// Returns `null` on JString conversion failure / panic — Kotlin adapter then
-/// falls back to the JVM HtmlGenerator path.
-#[no_mangle]
-pub extern "system" fn Java_app_amber_agent_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownToHtmlNative<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    text: JString<'local>,
-) -> jni::sys::jstring {
-    jni_common::init_logger_once!("RustMarkdownParser");
-
-    let text_str: String = match env.get_string(&text) {
-        Ok(s) => String::from(s),
-        Err(e) => {
-            log::error!("markdown-parser (to-html): failed to get JString: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-
-    let result = catch_unwind(AssertUnwindSafe(|| render_to_html(&text_str)));
-    match result {
-        Ok(html) => match env.new_string(html) {
-            Ok(jstr) => jstr.into_raw(),
-            Err(e) => {
-                log::error!("markdown-parser (to-html): new_string failed: {}", e);
-                std::ptr::null_mut()
-            }
-        },
-        Err(panic) => {
-            log::error!(
-                "markdown-parser (to-html): native panic: {:?}",
-                jni_common::panic_to_string(&panic)
-            );
-            std::ptr::null_mut()
-        }
-    }
 }
 
 /// Pure-Rust markdown → HTML emit. Uses the SAME `Options` set as
@@ -155,7 +137,7 @@ pub extern "system" fn Java_app_amber_agent_ui_components_richtext_nativebridge_
 ///   emits anchors (mirrors `makeHttpsAutoLinks = true`; Round 1 P1 fix).
 /// - Post-processing strips dangerous URL schemes (`javascript:`, `data:`,
 ///   `vbscript:`, `file:`) to mirror `useSafeLinks = true`.
-fn render_to_html(text: &str) -> String {
+pub fn render_to_html(text: &str) -> String {
     use pulldown_cmark::{html, Parser};
     let pre = autolink_bare_urls(text);
     let parser = Parser::new_ext(&pre, markdown_options());

@@ -22,9 +22,13 @@ import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
 import app.amber.search.SearchService.Companion.keyRoulette
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
     override val name: String = "Exa"
@@ -80,16 +84,15 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
             }
             val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
 
-            val request = Request.Builder()
-                .url("https://api.exa.ai/search")
-                .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
-                .addHeader("Authorization", "Bearer $apiKey")
-                .build()
+            val response = httpClient.post("https://api.exa.ai/search") {
+                setBody(json.encodeToString(body))
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+            }
 
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val bodyRaw = response.body.string()
-                val response = runCatching {
+            if (response.status.isSuccess()) {
+                val bodyRaw = response.bodyAsText()
+                val exaResponse = runCatching {
                     json.decodeFromString<ExaData>(bodyRaw)
                 }.onFailure {
                     it.printStackTrace()
@@ -99,8 +102,8 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
 
                 return@withContext Result.success(
                     SearchResult(
-                        answer = response.output?.content,
-                        items = response.results.map {
+                        answer = exaResponse.output?.content,
+                        items = exaResponse.results.map {
                             SearchResultItem(
                                 title = it.title,
                                 url = it.url,
@@ -109,8 +112,8 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                         }
                     ))
             } else {
-                println(response.body.string())
-                error("response failed #${response.code}")
+                println(response.bodyAsText())
+                error("response failed #${response.status.value}")
             }
         }
     }

@@ -13,7 +13,8 @@ import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.utils.applyPlaceholders
-import java.time.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 import java.util.Locale
 import kotlin.uuid.Uuid
 
@@ -64,7 +65,7 @@ class AiAuxiliaryGenerator(
             val title = result.choices[0].message?.toText()?.trim().orEmpty()
             val updatedConversation = conversationAccess.getConversationFlow(conversationId).value.copy(
                 title = title,
-                updateAt = Instant.now(),
+                updateAt = Clock.System.now(),
             )
             conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
             conversationRepo.updateConversationMetadata(
@@ -120,7 +121,7 @@ class AiAuxiliaryGenerator(
             val latest = conversationAccess.getConversationFlowOrNull(conversationId)?.value ?: conversation
             val updatedConversation = latest.copy(
                 chatSuggestions = suggestions.take(10),
-                updateAt = Instant.now(),
+                updateAt = Clock.System.now(),
             )
             conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
             conversationRepo.updateConversationMetadata(

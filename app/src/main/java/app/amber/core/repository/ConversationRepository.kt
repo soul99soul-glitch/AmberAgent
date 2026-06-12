@@ -26,8 +26,10 @@ import app.amber.agent.data.db.entity.MessageNodeStatEntity
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
+import app.amber.core.model.files
 import app.amber.core.utils.JsonInstant
-import java.time.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 class ConversationRepository(
@@ -378,7 +380,7 @@ class ConversationRepository(
         conversationId: Uuid,
         title: String? = null,
         chatSuggestions: List<String>? = null,
-        updateAt: Instant = Instant.now(),
+        updateAt: Instant = Clock.System.now(),
     ) {
         val entity = conversationDAO.getConversationById(conversationId.toString()) ?: return
         val updatedTitle = title ?: entity.title
@@ -387,7 +389,7 @@ class ConversationRepository(
                 title = updatedTitle,
                 chatSuggestions = chatSuggestions?.let { JsonInstant.encodeToString(it) }
                     ?: entity.chatSuggestions,
-                updateAt = updateAt.toEpochMilli(),
+                updateAt = updateAt.toEpochMilliseconds(),
             )
         )
         messageFtsManager.updateConversationMetadata(
@@ -458,8 +460,8 @@ class ConversationRepository(
             id = conversation.id.toString(),
             title = conversation.title,
             nodes = "[]",  // nodes 现在存储在单独的表中
-            createAt = conversation.createAt.toEpochMilli(),
-            updateAt = conversation.updateAt.toEpochMilli(),
+            createAt = conversation.createAt.toEpochMilliseconds(),
+            updateAt = conversation.updateAt.toEpochMilliseconds(),
             assistantId = conversation.assistantId.toString(),
             chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
             isPinned = conversation.isPinned,
@@ -475,8 +477,8 @@ class ConversationRepository(
             id = Uuid.parse(conversationEntity.id),
             title = conversationEntity.title,
             messageNodes = messageNodes.filter { it.messages.isNotEmpty() },
-            createAt = Instant.ofEpochMilli(conversationEntity.createAt),
-            updateAt = Instant.ofEpochMilli(conversationEntity.updateAt),
+            createAt = Instant.fromEpochMilliseconds(conversationEntity.createAt),
+            updateAt = Instant.fromEpochMilliseconds(conversationEntity.updateAt),
             assistantId = Uuid.parse(conversationEntity.assistantId),
             chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
             isPinned = conversationEntity.isPinned,
@@ -507,8 +509,8 @@ class ConversationRepository(
             assistantId = Uuid.parse(entity.assistantId),
             title = entity.title,
             isPinned = entity.isPinned,
-            createAt = Instant.ofEpochMilli(entity.createAt),
-            updateAt = Instant.ofEpochMilli(entity.updateAt),
+            createAt = Instant.fromEpochMilliseconds(entity.createAt),
+            updateAt = Instant.fromEpochMilliseconds(entity.updateAt),
             messageNodes = emptyList(),
         )
     }

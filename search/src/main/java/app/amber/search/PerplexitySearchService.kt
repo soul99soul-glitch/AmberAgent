@@ -20,8 +20,13 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 private const val PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/search"
 private const val TAG = "PerplexitySearchService"
@@ -87,30 +92,26 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
 
             Log.i(TAG, "search: $body")
 
-            val request = Request.Builder()
-                .url(PERPLEXITY_ENDPOINT)
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string().let {
-                    json.decodeFromString<PerplexityResponse>(it)
-                }
+            val response = httpClient.post(PERPLEXITY_ENDPOINT) {
+                setBody(body.toString())
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer ${serviceOptions.apiKey}")
+            }
+            if (response.status.isSuccess()) {
+                val responseBodyText = response.bodyAsText()
+                val perplexityResponse = json.decodeFromString<PerplexityResponse>(responseBodyText)
 
                 // Collect all image URLs from the response-level images array.
                 // Perplexity returns images at the response level, not per-result,
                 // so we distribute them across the top results (round-robin, max 5 total).
-                Log.i(TAG, "response images count: ${responseBody.images.size}, results: ${responseBody.results.size}")
-                val allImages = responseBody.images
+                Log.i(TAG, "response images count: ${perplexityResponse.images.size}, results: ${perplexityResponse.results.size}")
+                val allImages = perplexityResponse.images
                     .mapNotNull { it.imageUrl }
                     .distinct()
                     .take(5)
                 Log.i(TAG, "allImages (${allImages.size}): ${allImages.take(2)}")
 
-                val rawItems = responseBody.results
+                val rawItems = perplexityResponse.results
                     .filter { !it.title.isNullOrBlank() && !it.url.isNullOrBlank() }
                     .take(commonOptions.resultSize)
 
@@ -132,12 +133,12 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
 
                 return@withContext Result.success(
                     SearchResult(
-                        answer = responseBody.answer,
+                        answer = perplexityResponse.answer,
                         items = items
                     )
                 )
             } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
+                error("response failed #${response.status.value}: ${response.bodyAsText()}")
             }
         }
     }

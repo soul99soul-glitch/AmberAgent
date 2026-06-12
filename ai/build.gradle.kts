@@ -53,6 +53,7 @@ android {
 
 dependencies {
     implementation(project(":common"))
+    api(project(":ai-core"))
 
     // Compose
     implementation(libs.androidx.core.ktx)
@@ -61,8 +62,11 @@ dependencies {
 
     // okhttp
     api(libs.okhttp)
-    api(libs.okhttp.sse)
     api(libs.okhttp.logging)
+
+    // ktor client (SSE via sseFlow; SSE plugin bundled in ktor-client-core)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
 
     // kotlinx
     api(libs.kotlinx.serialization.json)

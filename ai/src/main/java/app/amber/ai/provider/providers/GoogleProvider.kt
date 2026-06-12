@@ -3,9 +3,8 @@ package app.amber.ai.provider.providers
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
@@ -53,18 +52,24 @@ import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.removeElements
 import app.amber.ai.util.stringSafe
 import app.amber.ai.util.toHeaders
+import app.amber.common.http.SseEvent
 import app.amber.common.http.await
 import app.amber.common.http.jsonPrimitiveOrNull
+import app.amber.common.http.sseFlow
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.header
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import org.apache.commons.text.StringEscapeUtils
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
@@ -72,6 +77,7 @@ import kotlin.uuid.Uuid
 private const val TAG = "GoogleProvider"
 
 class GoogleProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
+    private val sseClient by lazy { HttpClient(OkHttp) { install(SSE) } }
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val serviceAccountTokenProvider by lazy {
         ServiceAccountTokenProvider(client)
@@ -267,157 +273,158 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         providerSetting: ProviderSetting.Google,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): Flow<MessageChunk> = callbackFlow {
-        // OAuth path: cloudcode-pa.googleapis.com/v1internal:streamGenerateContent. The
-        // standard Gemini request body is wrapped in {model, project, request}; the
-        // server's SSE chunks come back wrapped in {"response": {...standard chunk...}}.
-        // Auth is `Authorization: Bearer <access_token>` instead of `x-goog-api-key`.
+    ): Flow<MessageChunk> {
         val isOAuth = isCodeAssistOAuthMode(providerSetting)
         val requestBody = buildCompletionRequestBody(messages, params, isCodeAssistOAuth = isOAuth)
-        val request = if (isOAuth) {
+
+        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+
+        // Build SSE URL, headers, and body
+        val sseUrl: String
+        val sseBody: String
+        val sseHeaders: Map<String, String>
+
+        if (isOAuth) {
             val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
-            geminiOAuthClient!!
+            // Build OkHttp request to extract URL and headers (reuses OAuth header logic
+            // including the private User-Agent / Client-Metadata headers)
+            val okhttpRequest = geminiOAuthClient!!
                 .streamGenerateContent(accessToken, params.model.modelId, projectId, requestBody)
                 .newBuilder()
                 .apply {
-                    // CRITICAL: use addHeader, not headers(). The latter REPLACES the
-                    // entire header set including the Authorization Bearer we just put
-                    // in streamGenerateContent — server then returns
-                    // "Request is missing required authentication credential".
                     params.customHeaders.forEach { (k, v) -> addHeader(k, v) }
                 }
                 .build()
+            sseUrl = okhttpRequest.url.toString()
+            sseHeaders = okhttpRequest.headers.toMap()
+            // Build body wrapper (same structure as buildCloudCodeAssistRequest)
+            val wrapper = buildJsonObject {
+                put("model", params.model.modelId)
+                put("project", projectId)
+                put("user_prompt_id", Uuid.random().toString())
+                put("request", requestBody)
+            }
+            sseBody = wrapper.toString()
         } else {
-            val url = buildUrl(
+            val baseHttpUrl = buildUrl(
                 providerSetting = providerSetting,
                 path = if (providerSetting.vertexAI) {
                     "publishers/google/models/${params.model.modelId}:streamGenerateContent"
                 } else {
                     "models/${params.model.modelId}:streamGenerateContent"
                 }
-            ).newBuilder().addQueryParameter("alt", "sse").build()
-            transformRequest(
-                providerSetting = providerSetting,
-                request = Request.Builder()
-                    .url(url)
-                    .headers(params.customHeaders.toHeaders())
-                    .post(
-                        json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
-                    )
-                    .configureReferHeaders(providerSetting.baseUrl)
-                    .build()
             )
-        }
+            val urlBuilder = baseHttpUrl.newBuilder().addQueryParameter("alt", "sse")
+            sseBody = json.encodeToString(requestBody)
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+            val headers = mutableMapOf<String, String>()
 
-        val listener = object : EventSourceListener() {
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                Log.i(TAG, "onEvent: $data")
-
-                try {
-                    val rawJson = json.parseToJsonElement(data).jsonObject
-                    // cloudcode-pa wraps each SSE chunk as `{"response": {...standard...}}`.
-                    // Public generativelanguage emits the standard payload at the top level.
-                    // Detect by inner `response` presence so both wire formats reuse the
-                    // rest of the parser unchanged.
-                    val jsonData = rawJson["response"]?.jsonObject ?: rawJson
-                    val reason =
-                        jsonData["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
-                    if (reason != null) {
-                        close(RuntimeException("Prompt feedback: $reason"))
-                    }
-                    val candidates = jsonData["candidates"]?.jsonArray ?: return
-                    if (candidates.isEmpty()) return
-                    val usage = parseUsageMeta(jsonData["usageMetadata"] as? JsonObject)
-                    val messageChunk = MessageChunk(
-                        id = Uuid.random().toString(),
-                        model = params.model.modelId,
-                        choices = candidates.mapIndexed { index, candidate ->
-                            val candidateObj = candidate.jsonObject
-                            val content = candidateObj["content"]?.jsonObject
-                            val groundingMetadata = candidateObj["groundingMetadata"]?.jsonObject
-                            val finishReason =
-                                candidateObj["finishReason"]?.jsonPrimitive?.contentOrNull
-
-                            val message = content?.let {
-                                parseMessage(buildJsonObject {
-                                    put("role", JsonPrimitive("model"))
-                                    put("content", it)
-                                    groundingMetadata?.let { groundingMetadata ->
-                                        put("groundingMetadata", groundingMetadata)
-                                    }
-                                })
-                            }
-
-                            UIMessageChoice(
-                                index = index,
-                                delta = message,
-                                message = null,
-                                finishReason = finishReason
-                            )
-                        },
-                        usage = usage
-                    )
-
-                    trySend(messageChunk)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    println("[onEvent] 解析错误: $data")
+            if (providerSetting.vertexAI && providerSetting.useServiceAccount) {
+                val accessToken = serviceAccountTokenProvider.fetchAccessToken(
+                    serviceAccountEmail = providerSetting.serviceAccountEmail.trim(),
+                    privateKeyPem = StringEscapeUtils.unescapeJson(providerSetting.privateKey.trim()),
+                )
+                headers["Authorization"] = "Bearer $accessToken"
+            } else {
+                val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+                if (providerSetting.vertexAI) {
+                    urlBuilder.addQueryParameter("key", key)
+                } else {
+                    headers["x-goog-api-key"] = key
                 }
             }
 
-            override fun onFailure(
-                eventSource: EventSource,
-                t: Throwable?,
-                response: Response?
-            ) {
-                var exception = t
+            // Custom headers
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                headers[it.name] = it.value
+            }
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.message}")
+            // Refer headers
+            val baseHost = runCatching { providerSetting.baseUrl.toHttpUrl().host }.getOrNull()
+            when (baseHost) {
+                "aihubmix.com" -> headers["APP-Code"] = "DKHA9468"
+                "openrouter.ai" -> {
+                    headers["X-Title"] = "AmberAgent"
+                    headers["HTTP-Referer"] = "https://github.com"
+                }
+            }
 
-                try {
-                    if (t == null && response != null) {
-                        val bodyStr = response.body.stringSafe()
-                        if (!bodyStr.isNullOrEmpty()) {
-                            val bodyElement = json.parseToJsonElement(bodyStr)
-                            println(bodyElement)
-                            if (bodyElement is JsonObject) {
-                                exception = Exception(
-                                    bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
-                                        ?: "unknown"
-                                )
-                            }
-                        } else {
-                            exception = Exception("Unknown error: ${response.code}")
+            sseUrl = urlBuilder.build().toString()
+            sseHeaders = headers
+        }
+
+        return sseClient.sseFlow(sseUrl) {
+            method = HttpMethod.Post
+            contentType(ContentType.Application.Json)
+            sseHeaders.forEach { (k, v) -> header(k, v) }
+            setBody(sseBody)
+        }.mapNotNull { sseEvent ->
+            when (sseEvent) {
+                is SseEvent.Event -> {
+                    val data = sseEvent.data
+                    Log.i(TAG, "onEvent: $data")
+
+                    try {
+                        val rawJson = json.parseToJsonElement(data).jsonObject
+                        // cloudcode-pa wraps each SSE chunk as `{"response": {...standard...}}`.
+                        // Public generativelanguage emits the standard payload at the top level.
+                        val jsonData = rawJson["response"]?.jsonObject ?: rawJson
+                        val reason =
+                            jsonData["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
+                        if (reason != null) {
+                            throw RuntimeException("Prompt feedback: $reason")
                         }
+                        val candidates = jsonData["candidates"]?.jsonArray ?: return@mapNotNull null
+                        if (candidates.isEmpty()) return@mapNotNull null
+                        val usage = parseUsageMeta(jsonData["usageMetadata"] as? JsonObject)
+                        val messageChunk = MessageChunk(
+                            id = Uuid.random().toString(),
+                            model = params.model.modelId,
+                            choices = candidates.mapIndexed { index, candidate ->
+                                val candidateObj = candidate.jsonObject
+                                val content = candidateObj["content"]?.jsonObject
+                                val groundingMetadata = candidateObj["groundingMetadata"]?.jsonObject
+                                val finishReason =
+                                    candidateObj["finishReason"]?.jsonPrimitive?.contentOrNull
+
+                                val message = content?.let {
+                                    parseMessage(buildJsonObject {
+                                        put("role", JsonPrimitive("model"))
+                                        put("content", it)
+                                        groundingMetadata?.let { groundingMetadata ->
+                                            put("groundingMetadata", groundingMetadata)
+                                        }
+                                    })
+                                }
+
+                                UIMessageChoice(
+                                    index = index,
+                                    delta = message,
+                                    message = null,
+                                    finishReason = finishReason
+                                )
+                            },
+                            usage = usage
+                        )
+
+                        messageChunk
+                    } catch (e: Exception) {
+                        if (e is RuntimeException) throw e
+                        e.printStackTrace()
+                        println("[onEvent] 解析错误: $data")
+                        null
                     }
-                } catch (e: Throwable) {
-                    e.printStackTrace()
-                    exception = e
-                } finally {
-                    close(exception ?: Exception("Stream failed"))
                 }
+
+                is SseEvent.Failure -> {
+                    val exception = sseEvent.throwable
+                    exception?.printStackTrace()
+                    println("[onFailure] 发生错误: ${exception?.message}")
+                    throw exception ?: Exception("Stream failed")
+                }
+
+                is SseEvent.Closed, is SseEvent.Open -> null
             }
-
-            override fun onClosed(eventSource: EventSource) {
-                println("[onClosed] 连接已关闭")
-                close()
-            }
-        }
-
-        val eventSource = EventSources.createFactory(client)
-                .newEventSource(request, listener)
-
-        awaitClose {
-            println("[awaitClose] 关闭eventSource")
-            eventSource.cancel()
         }
     }
 

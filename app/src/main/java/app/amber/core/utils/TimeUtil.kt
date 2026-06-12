@@ -1,6 +1,6 @@
 package app.amber.core.utils
 
-import java.time.Instant
+import kotlin.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -13,7 +13,7 @@ import java.util.Locale
 
 fun Instant.toLocalDate(): String {
     val zoneId = ZoneId.systemDefault()
-    val localDateTime = this.atZone(zoneId).toLocalDateTime()
+    val localDateTime = java.time.Instant.ofEpochMilli(this.toEpochMilliseconds()).atZone(zoneId).toLocalDateTime()
 
     return DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
         .withLocale(Locale.getDefault())
@@ -22,7 +22,7 @@ fun Instant.toLocalDate(): String {
 
 fun Instant.toLocalDateTime(): String {
     val zoneId = ZoneId.systemDefault()
-    val localDateTime = this.atZone(zoneId).toLocalDateTime()
+    val localDateTime = java.time.Instant.ofEpochMilli(this.toEpochMilliseconds()).atZone(zoneId).toLocalDateTime()
 
     return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
         .withLocale(Locale.getDefault())
@@ -31,7 +31,7 @@ fun Instant.toLocalDateTime(): String {
 
 fun Instant.toLocalTime(): String {
     val zoneId = ZoneId.systemDefault()
-    val localDateTime = this.atZone(zoneId).toLocalDateTime()
+    val localDateTime = java.time.Instant.ofEpochMilli(this.toEpochMilliseconds()).atZone(zoneId).toLocalDateTime()
 
     return DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM)
         .withLocale(Locale.getDefault())

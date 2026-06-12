@@ -53,7 +53,7 @@ import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
 import app.amber.core.utils.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
-import java.time.Instant
+import kotlin.time.Instant
 
 @Composable
 fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
@@ -255,7 +255,7 @@ private fun FavoriteCard(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    val dateText = Instant.ofEpochMilli(item.createdAt).toLocalDateTime()
+    val dateText = Instant.fromEpochMilliseconds(item.createdAt).toLocalDateTime()
 
     Surface(
         onClick = onClick,

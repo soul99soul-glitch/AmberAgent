@@ -19,9 +19,13 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
     override val name: String = "Bocha"
@@ -65,16 +69,14 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                 put("count", JsonPrimitive(commonOptions.resultSize))
             }
 
-            val request = Request.Builder()
-                .url("https://api.bochaai.com/v1/web-search")
-                .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val bodyRaw = response.body.string()
+            val response = httpClient.post("https://api.bochaai.com/v1/web-search") {
+                setBody(json.encodeToString(body))
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer ${serviceOptions.apiKey}")
+                header("Content-Type", "application/json")
+            }
+            if (response.status.isSuccess()) {
+                val bodyRaw = response.bodyAsText()
                 val bochaResponse = runCatching {
                     json.decodeFromString<BochaResponse>(bodyRaw)
                 }.onFailure {
@@ -99,8 +101,8 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                     )
                 )
             } else {
-                println(response.body.string())
-                error("response failed #${response.code}")
+                println(response.bodyAsText())
+                error("response failed #${response.status.value}")
             }
         }
     }
