@@ -13,10 +13,6 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.serialization.json)
         }
-        val jvmMain by getting
-        val nativeMain by creating { }
-        val iosArm64Main by getting { dependsOn(nativeMain) }
-        val iosSimulatorArm64Main by getting { dependsOn(nativeMain) }
         jvmTest.dependencies {
             implementation(libs.junit)
             implementation(libs.kotlinx.coroutines.test)

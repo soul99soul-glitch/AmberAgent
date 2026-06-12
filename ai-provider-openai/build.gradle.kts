@@ -23,5 +23,17 @@ kotlin {
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
         }
+
+        jvmMain.dependencies {
+            implementation(libs.ktor.client.okhttp)
+        }
+
+        iosArm64Main.dependencies {
+            implementation(libs.ktor.client.darwin)
+        }
+
+        iosSimulatorArm64Main.dependencies {
+            implementation(libs.ktor.client.darwin)
+        }
     }
 }

@@ -1,6 +1,20 @@
 import Foundation
 @preconcurrency import Shared
 
+// MARK: - Flow Collector Helper
+
+private class ChunkCollector: NSObject, Kotlinx_coroutines_coreFlowCollector {
+    let onChunk: (MessageChunk) -> Void
+    init(onChunk: @escaping (MessageChunk) -> Void) { self.onChunk = onChunk }
+    func emit(value: Any?, completionHandler: @escaping (Error?) -> Void) {
+        if let chunk = value as? MessageChunk { onChunk(chunk) }
+        completionHandler(nil)
+    }
+}
+
+// MARK: - ChatViewModel
+
+@MainActor
 @Observable
 final class ChatViewModel {
 
@@ -48,6 +62,9 @@ final class ChatViewModel {
 
         let providerSetting = makeProviderSetting()
         let params = makeTextGenerationParams()
+        let runId = UUID().uuidString
+        let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
+        let inputSnapshot = inputText
 
         streamingTask = Task { @MainActor in
             // Create a placeholder assistant message
@@ -65,54 +82,143 @@ final class ChatViewModel {
                 translation: nil
             )
             self.messages.append(placeholder)
+            var accumulatedText = ""
 
-            self.provider.generateText(
-                providerSetting: providerSetting,
-                messages: Array(self.messages.dropLast()),
-                params: params
-            ) { [weak self] chunk, error in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if let chunk {
-                        let assistantText = chunk.choices.first?.delta?.toText()
-                            ?? chunk.choices.first?.message?.toText()
-                            ?? ""
-                        let updatedPlaceholder = UIMessage(
-                            id: placeholderId,
-                            role: MessageRole.assistant,
-                            parts: [UIMessagePart.Text(text: assistantText, metadata: nil)],
-                            annotations: [],
-                            createdAt: localDt,
-                            finishedAt: self.nowLocalDateTime(),
-                            modelId: nil,
-                            usage: chunk.usage,
-                            translation: nil
-                        )
-                        if let lastIndex = self.messages.indices.last {
-                            self.messages[lastIndex] = updatedPlaceholder
+            do {
+                // Step 1: Obtain the Flow from streamText
+                let flow = try await withCheckedThrowingContinuation {
+                    (cont: CheckedContinuation<any Kotlinx_coroutines_coreFlow, Error>) in
+                    self.provider.streamText(
+                        providerSetting: providerSetting,
+                        messages: Array(self.messages.dropLast()),
+                        params: params
+                    ) { flow, error in
+                        if let flow { cont.resume(returning: flow) }
+                        else if let error { cont.resume(throwing: error) }
+                    }
+                }
+
+                // Step 2: Collect the flow — each emission is an incremental MessageChunk
+                try await withCheckedThrowingContinuation {
+                    (cont: CheckedContinuation<Void, Error>) in
+                    let collector = ChunkCollector { [weak self] chunk in
+                        guard let self else { return }
+                        // Extract the text delta from the first choice's delta message
+                        if let delta = chunk.choices.first?.delta {
+                            for part in delta.parts {
+                                if let textPart = part as? UIMessagePart.Text {
+                                    accumulatedText += textPart.text
+                                }
+                            }
                         }
-                    } else if let error {
-                        let errorPlaceholder = UIMessage(
-                            id: placeholderId,
-                            role: MessageRole.assistant,
-                            parts: [UIMessagePart.Text(
-                                text: "Error: \(error.localizedDescription)",
-                                metadata: nil
-                            )],
-                            annotations: [],
-                            createdAt: localDt,
-                            finishedAt: self.nowLocalDateTime(),
-                            modelId: nil,
-                            usage: nil,
-                            translation: nil
-                        )
-                        if let lastIndex = self.messages.indices.last {
-                            self.messages[lastIndex] = errorPlaceholder
+
+                        // Update the placeholder on main actor
+                        Task { @MainActor [weak self] in
+                            guard let self else { return }
+                            let updated = UIMessage(
+                                id: placeholderId,
+                                role: MessageRole.assistant,
+                                parts: [UIMessagePart.Text(text: accumulatedText, metadata: nil)],
+                                annotations: [],
+                                createdAt: localDt,
+                                finishedAt: self.nowLocalDateTime(),
+                                modelId: nil,
+                                usage: chunk.usage,
+                                translation: nil
+                            )
+                            if let idx = self.messages.indices.last {
+                                self.messages[idx] = updated
+                            }
                         }
                     }
-                    self.isLoading = false
+                    flow.collect(collector: collector) { error in
+                        if let error { cont.resume(throwing: error) }
+                        else { cont.resume() }
+                    }
+                }
+
+                // Step 3: Record successful run to Room
+                await self.recordRun(
+                    runId: runId,
+                    startedAt: startedAt,
+                    status: "completed",
+                    inputDigest: inputSnapshot
+                )
+            } catch is CancellationError {
+                // Cancelled — record as interrupted
+                await self.recordRun(
+                    runId: runId,
+                    startedAt: startedAt,
+                    status: "interrupted",
+                    inputDigest: inputSnapshot
+                )
+            } catch {
+                // Error — replace placeholder with error message
+                let errMsg = UIMessage(
+                    id: placeholderId,
+                    role: MessageRole.assistant,
+                    parts: [UIMessagePart.Text(text: "Error: \(error.localizedDescription)", metadata: nil)],
+                    annotations: [],
+                    createdAt: localDt,
+                    finishedAt: nowLocalDateTime(),
+                    modelId: nil,
+                    usage: nil,
+                    translation: nil
+                )
+                if let idx = messages.indices.last { messages[idx] = errMsg }
+
+                await self.recordRun(
+                    runId: runId,
+                    startedAt: startedAt,
+                    status: "failed",
+                    inputDigest: inputSnapshot
+                )
+            }
+
+            isLoading = false
+        }
+    }
+
+    private func recordRun(
+        runId: String,
+        startedAt: Int64,
+        status: String,
+        inputDigest: String
+    ) async {
+        let db = AgentRuntimeDatabaseConstructor.shared.initialize()
+        let dao = db.agentRuntimeDao()
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let finishedAtValue: KotlinLong? = KotlinLong(value: now)
+        let interruptedReason: String? = status == "interrupted" ? "user_cancelled" : nil
+
+        let run = AgentRunEntity(
+            runId: runId,
+            parentRunId: nil,
+            agentDescriptorId: "chat",
+            agentVersion: "1",
+            conversationId: nil,
+            messageNodeId: nil,
+            producesMessageId: nil,
+            assistantId: nil,
+            status: status,
+            inputDigest: inputDigest,
+            inputSnapshotRef: nil,
+            inputSchemaVersion: 1,
+            startedAt: startedAt,
+            finishedAt: finishedAtValue,
+            interruptedReason: interruptedReason
+        )
+
+        do {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                dao.insertRun(run: run) { error in
+                    if let error { cont.resume(throwing: error) }
+                    else { cont.resume() }
                 }
             }
+        } catch {
+            print("[Room] Failed to insert agent_run: \(error)")
         }
     }
 
