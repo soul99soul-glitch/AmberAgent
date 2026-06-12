@@ -206,3 +206,31 @@ so any stage reverts in one step.
   pulldown-cmark fix or a CJK-aware delimiter pass. It is the PRIMARY flag-flip
   blocker for CJK-heavy usage and is tracked as parity class B-CJK (sample 24,
   `MarkdownTreeParityTest`).
+
+### Final parity state — TD.Rust.1a engagement complete (2026-06-12)
+
+**20/32 hard parity, 12 documented parser-level divergences** (verified by
+`MarkdownTreeParityTest` 1163 tests / 0 failures / 12 skipped).
+
+Resolved: all renderer-shape classes — BUG #1 (native-heading-drop), BUG #2
+(native-inline-code-backtick), class A (heading trim-space), class B
+(backslash-escape resolution), class C (list-item inline-run grouping), class F
+(ordered-list start number), class G (task-list `[x]` marker text). Three
+production JVM rendering defects fixed as side effects: heading interior spaces
+(3711352b), backslash escapes (dd7da17c), linkify destination corruption
+(41081caf, Rust twin also fixed).
+
+Remaining 12 are all parser-fidelity differences in the renderer's INPUT (the
+tree), not renderer-shape concerns:
+- **[D]** link / autolink / footnote / reference structures — 7 samples (04, 05,
+  06, 22, 28, 29, 32)
+- **[E]** soft-break continuation leading-space — 2 samples (16, 27); native is
+  CommonMark-correct (no word-jam — native break leaf self-carries `\n`)
+- **[B-tilde]** single-tilde strikethrough delimiter — 1 sample (23)
+- **[B-CJK]** CJK-flanked strong emphasis — 1 sample (24); primary flip blocker
+  for CJK users; upstream pulldown-cmark
+- **[C-para]** paragraph inline-run grouping around MathBlock (per-child path,
+  not covered by the list-item [C] fix) — 1 sample (19)
+
+`markdownAst` flag remains default false. Flip requires resolving [B-CJK] for
+CJK-heavy usage, plus [D] / [E] / [C-para] + device dogfood.
