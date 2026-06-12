@@ -24,17 +24,20 @@ targets:
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"
-        FRAMEWORK_SEARCH_PATHS:
-          - "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework"
+        FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]:
           - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/debugFramework"
-          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework"
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        OTHER_LDFLAGS:
+          - "-lamber_ffi"
+        HEADER_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim/Headers"
+        HEADER_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64/Headers"
     dependencies:
-      # Shared KMP framework (built by ./gradlew :shared:linkDebugFrameworkIosArm64)
-      - framework: ../shared/build/bin/iosArm64/debugFramework/Shared.framework
-        embed: false
-      # AmberNative XCFramework (Rust FFI)
-      - framework: ../native/AmberNative.xcframework/ios-arm64/AmberNative.framework
+      - framework: Shared.framework
         embed: false
     scheme:
       configVariants:

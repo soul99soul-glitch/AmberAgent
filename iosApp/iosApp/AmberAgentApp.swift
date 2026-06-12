@@ -4,7 +4,7 @@ import SwiftUI
 struct AmberAgentApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ChatView()
         }
     }
 }
