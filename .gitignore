@@ -28,7 +28,14 @@ tts/build/
 highlight/build/
 document/build/
 web/build/
+shared/build/
+iosApp/build/
 native/target/
+shared/build/
+iosApp/**/*.xcodeproj/
+iosApp/**/*.xcworkspace/
+iosApp/**/DerivedData/
+iosApp/**/build/
 
 # Design handoff reference (large binaries; keep the .md/.css/.jsx specs tracked)
 /amberagent-handoff.zip
