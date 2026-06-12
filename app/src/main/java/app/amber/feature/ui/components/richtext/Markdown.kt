@@ -908,8 +908,7 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
                     // deliberately excluding inline HTML — equivalent to the JVM
                     // containsHtmlBlocks() which only recurses for MdNodeType.HtmlBlock
                     // (JetBrains HTML_BLOCK). Verified parity (tree_builder.rs / packed_ast.rs).
-                    val result = MarkdownParseResult(preprocessed, root, reader.hasHtmlBlocks)
-                    return if (result.hasHtmlBlocks) result else result.withStableTopLevelBlocks(preprocessed)
+                    return MarkdownParseResult(preprocessed, root, reader.hasHtmlBlocks)
                 }
             }
             // Blob present but rejected (invalid header / failed bounds-walk / null root):
@@ -926,8 +925,7 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
     // Rule 1: the ONLY place a JetBrains type crosses into the MdNode model.
     // Everything downstream consumes the parser-agnostic interface.
     val tree = JvmMdNode(astTree, preprocessed, null)
-    val result = MarkdownParseResult(preprocessed, tree, tree.containsHtmlBlocks())
-    return if (result.hasHtmlBlocks) result else result.withStableTopLevelBlocks(preprocessed)
+    return MarkdownParseResult(preprocessed, tree, tree.containsHtmlBlocks())
 }
 
 /**
@@ -949,14 +947,18 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
  * (`"$type:$absoluteOffset:$length:$hashCode"`) so Compose matches the old and
  * new nodes by the same identity. Since this is a complete parse, every top-level
  * block is "stable" (no still-growing tail).
+ *
+ * Only called at the top-level parse site in the MarkdownBlock LaunchedEffect,
+ * never from [parsePreprocessedMarkdownUncached] — sub-block parsing via
+ * [MarkdownParseCache.getOrParsePreprocessed] does NOT re-enter this function,
+ * preventing infinite recursion.
  */
-private fun MarkdownParseResult.withStableTopLevelBlocks(
-    preprocessed: String,
-): MarkdownParseResult {
+private fun MarkdownParseResult.withStableTopLevelBlocks(): MarkdownParseResult {
     val children = tree.children
-    if (children.isEmpty()) return this
+    if (children.size <= 1) return this
+    val content = preprocessed
     val blocks = children.map { child ->
-        val blockContent = preprocessed.substring(child.startOffset, child.endOffset)
+        val blockContent = content.substring(child.startOffset, child.endOffset)
         MarkdownTopLevelBlockSnapshot(
             key = "${child.type}:${child.startOffset}:${blockContent.length}:${blockContent.hashCode()}",
             parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
@@ -1350,6 +1352,7 @@ internal fun MarkdownBlockLegacy(
                         } else {
                             streamingParseCache.reset()
                             MarkdownParseCache.getOrParse(latestContent)
+                                .withStableTopLevelBlocks()
                         }
                     }
                     lastParsedContent = latestContent
