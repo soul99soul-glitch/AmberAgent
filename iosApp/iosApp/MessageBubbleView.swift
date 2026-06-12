@@ -8,7 +8,7 @@ struct MessageBubbleView: View {
     @State private var isReasoningExpanded = false
 
     private var isUser: Bool {
-        message.role == MessageRole.USER
+        message.role == MessageRole.user
     }
 
     var body: some View {
