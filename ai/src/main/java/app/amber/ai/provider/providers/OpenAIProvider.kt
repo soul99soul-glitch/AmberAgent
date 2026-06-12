@@ -29,10 +29,10 @@ import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.openai.ChatCompletionsAPI
 import app.amber.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
 import app.amber.ai.provider.providers.openai.OPENAI_CODEX_CLIENT_VERSION
+import app.amber.ai.provider.providers.openai.OPENAI_CODEX_ORIGINATOR
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexOAuthClient
 import app.amber.ai.provider.providers.openai.ResponseAPI
-import app.amber.ai.provider.providers.openai.addOpenAICodexBackendHeaders
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.ImageAspectRatio
 import app.amber.ai.ui.ImageGenerationItem
@@ -44,34 +44,41 @@ import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
-import app.amber.ai.util.toHeaders
-import app.amber.common.http.await
+import app.amber.common.http.SseEvent
 import app.amber.common.http.getByKey
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import app.amber.common.http.sseFlow
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 private const val TAG = "OpenAIProvider"
 
 class OpenAIProvider(
-    private val client: OkHttpClient,
     context: Context? = null
 ) : Provider<ProviderSetting.OpenAI> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
-    private val oauthClient = context?.let { OpenAICodexOAuthClient(client, OpenAICodexAuthStore(it)) }
+    private val oauthClient = context?.let { OpenAICodexOAuthClient(OpenAICodexAuthStore(it)) }
 
     private val chatCompletionsAPI = ChatCompletionsAPI(
-        client = client,
         keyRoulette = keyRoulette,
         bearerResolver = ::resolveBearerToken
     )
     private val responseAPI = ResponseAPI(
-        client = client,
         keyRoulette = keyRoulette,
         bearerResolver = ::resolveBearerToken
     )
 
+    private val httpClient by lazy { HttpClient(OkHttp) }
+    private val sseClient by lazy { HttpClient(OkHttp) { install(SSE) } }
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
         withContext(Dispatchers.IO) {
@@ -80,18 +87,12 @@ class OpenAIProvider(
             }
 
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
-            val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/models")
-                .addHeader("Authorization", "Bearer $key")
-                .get()
-                .build()
+            val url = "${providerSetting.baseUrl}/models"
 
-            val response = client.newCall(request).await()
-            if (!response.isSuccessful) {
-                error("Failed to get models: ${response.code} ${response.body?.string()}")
-            }
+            val bodyStr = httpClient.get(url) {
+                header("Authorization", "Bearer $key")
+            }.bodyAsText()
 
-            val bodyStr = response.body?.string() ?: ""
             val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
             val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
 
@@ -123,17 +124,11 @@ class OpenAIProvider(
         } else {
             "${providerSetting.baseUrl}${providerSetting.balanceOption.apiPath}"
         }
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("Authorization", "Bearer $key")
-            .get()
-            .build()
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to get balance: ${response.code} ${response.body?.string()}")
-        }
 
-        val bodyStr = response.body.string()
+        val bodyStr = httpClient.get(url) {
+            header("Authorization", "Bearer $key")
+        }.bodyAsText()
+
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val value = bodyJson.getByKey(providerSetting.balanceOption.resultPath)
         val digitalValue = value.toFloatOrNull()
@@ -400,20 +395,16 @@ class OpenAIProvider(
             }.mergeCustomBody(params.customBody)
         )
 
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/embeddings")
-            .headers(params.customHeaders.toHeaders())
-            .addHeader("Authorization", "Bearer $key")
-            .addHeader("Content-Type", "application/json")
-            .post(requestBody.toRequestBody("application/json".toMediaType()))
-            .build()
+        val url = "${providerSetting.baseUrl}/embeddings"
+        val bodyStr = httpClient.post(url) {
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                header(it.name, it.value)
+            }
+            header("Authorization", "Bearer $key")
+            contentType(ContentType.Application.Json)
+            setBody(requestBody)
+        }.bodyAsText()
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
-        }
-
-        val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val data = bodyJson["data"]?.jsonArray ?: error("No data in response")
         val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
@@ -470,20 +461,16 @@ class OpenAIProvider(
             }.mergeCustomBody(params.customBody)
         )
 
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/images/generations")
-            .headers(params.customHeaders.toHeaders())
-            .addHeader("Authorization", "Bearer $key")
-            .addHeader("Content-Type", "application/json")
-            .post(requestBody.toRequestBody("application/json".toMediaType()))
-            .build()
+        val url = "${providerSetting.baseUrl}/images/generations"
+        val bodyStr = httpClient.post(url) {
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                header(it.name, it.value)
+            }
+            header("Authorization", "Bearer $key")
+            contentType(ContentType.Application.Json)
+            setBody(requestBody)
+        }.bodyAsText()
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to generate image: ${response.code} ${response.body?.string()}")
-        }
-
-        val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val data = bodyJson["data"]?.jsonArray ?: error("No data in response")
 
@@ -568,79 +555,61 @@ class OpenAIProvider(
             }
         }.mergeCustomBody(params.customBody)
 
-        // [Review fix] Build a fresh request after any token refresh so the
-        // ChatGPT-Account-Id header reflects the post-refresh tokens. The
-        // initial request gets the current snapshot; on 401 we rebuild
-        // from scratch with whatever oauthClient has after forceRefresh.
-        // Also use `.header(name, ...)` (replaces) instead of `.addHeader`
-        // for Accept because `addOpenAICodexBackendHeaders` already sets
-        // Accept: application/json — without replacing, OkHttp would emit
-        // both Accept headers and the server may pick the wrong one.
-        fun buildRequest(token: String): Request {
+        val url = "$OPENAI_CODEX_BACKEND_BASE_URL/responses"
+
+        var captured: ImageGenerationItem? = null
+
+        val collectEvents: suspend (String) -> Unit = { token ->
             val tokens = oauthClient?.getCached(providerSetting.id)
-            return Request.Builder()
-                .url("$OPENAI_CODEX_BACKEND_BASE_URL/responses")
-                .headers(params.customHeaders.toHeaders())
-                .addHeader("Authorization", "Bearer $token")
-                .addOpenAICodexBackendHeaders(tokens)
-                .header("Accept", "text/event-stream")
-                .header("OpenAI-Beta", "responses=experimental")
-                .header("Content-Type", "application/json")
-                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-                .build()
-        }
-
-        var response = client.newCall(buildRequest(resolveBearerToken(providerSetting, false))).await()
-        if (response.code == 401) {
-            response.close()
-            val retryToken = resolveBearerToken(providerSetting, forceRefresh = true)
-            response = client.newCall(buildRequest(retryToken)).await()
-        }
-        if (!response.isSuccessful) {
-            error("Codex image generation failed: ${response.code} ${response.body?.string()}")
-        }
-
-        response.use { activeResponse ->
-            val source = activeResponse.body.source()
-            var eventType: String? = null
-            val dataLines = mutableListOf<String>()
-            var captured: ImageGenerationItem? = null
-
-            fun drainEvent() {
-                if (dataLines.isEmpty()) return
-                val data = dataLines.joinToString("\n").also { dataLines.clear() }
-                if (data == "[DONE]") return
-                val eventJson = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return
-                if (eventType == "response.output_item.done") {
-                    val item = eventJson["item"]?.jsonObject ?: return
-                    if (item["type"]?.jsonPrimitive?.contentOrNull == "image_generation_call") {
-                        val result = item["result"]?.jsonPrimitive?.contentOrNull
-                        if (!result.isNullOrBlank() && captured == null) {
-                            captured = ImageGenerationItem(data = result, mimeType = "image/png")
+            sseClient.sseFlow(url) {
+                method = HttpMethod.Post
+                contentType(ContentType.Application.Json)
+                params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                    header(it.name, it.value)
+                }
+                header("Authorization", "Bearer $token")
+                header("Accept", "text/event-stream")
+                header("OpenAI-Beta", "responses=experimental")
+                header("originator", OPENAI_CODEX_ORIGINATOR)
+                if (!tokens?.accountId.isNullOrBlank()) {
+                    header("ChatGPT-Account-Id", tokens.accountId)
+                }
+                setBody(json.encodeToString(requestBody))
+            }.collect { sseEvent ->
+                when (sseEvent) {
+                    is SseEvent.Open -> { /* connection opened */ }
+                    is SseEvent.Event -> {
+                        val data = sseEvent.data
+                        if (data.isBlank() || data == "[DONE]") return@collect
+                        val eventJson = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return@collect
+                        if (sseEvent.type == "response.output_item.done") {
+                            val item = eventJson["item"]?.jsonObject ?: return@collect
+                            if (item["type"]?.jsonPrimitive?.contentOrNull == "image_generation_call") {
+                                val result = item["result"]?.jsonPrimitive?.contentOrNull
+                                if (!result.isNullOrBlank() && captured == null) {
+                                    captured = ImageGenerationItem(data = result, mimeType = "image/png")
+                                }
+                            }
                         }
+                        if (sseEvent.type == "response.completed") return@collect
                     }
+                    is SseEvent.Closed -> { /* stream completed normally */ }
+                    is SseEvent.Failure -> throw sseEvent.throwable ?: Exception("SSE connection failed")
                 }
             }
-
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                when {
-                    line.isEmpty() -> {
-                        drainEvent()
-                        if (eventType == "response.completed") break
-                        eventType = null
-                    }
-                    line.startsWith("event:") -> {
-                        eventType = line.removePrefix("event:").trim()
-                    }
-                    line.startsWith("data:") -> {
-                        dataLines += line.removePrefix("data:").trimStart()
-                    }
-                }
-            }
-            drainEvent()
-            return captured
         }
+
+        try {
+            collectEvents(resolveBearerToken(providerSetting, false))
+        } catch (e: Exception) {
+            if (e.message?.startsWith("HTTP 401") == true) {
+                collectEvents(resolveBearerToken(providerSetting, true))
+            } else {
+                throw e
+            }
+        }
+
+        return captured
     }
 
     private suspend fun resolveBearerToken(
@@ -689,27 +658,32 @@ class OpenAIProvider(
     private suspend fun fetchCodexModelsOrThrow(providerSetting: ProviderSetting.OpenAI): List<Model> {
         val token = resolveBearerToken(providerSetting, forceRefresh = false)
         val tokens = oauthClient?.getCached(providerSetting.id)
-        val request = Request.Builder()
-            .url("$OPENAI_CODEX_BACKEND_BASE_URL/models?client_version=$OPENAI_CODEX_CLIENT_VERSION")
-            .addOpenAICodexBackendHeaders(tokens)
-            .addHeader("Authorization", "Bearer $token")
-            .get()
-            .build()
+        val url = "$OPENAI_CODEX_BACKEND_BASE_URL/models?client_version=$OPENAI_CODEX_CLIENT_VERSION"
 
-        var response = client.newCall(request).await()
-        if (response.code == 401) {
-            response.close()
-            val retryToken = resolveBearerToken(providerSetting, forceRefresh = true)
-            response = request.newBuilder()
-                .header("Authorization", "Bearer $retryToken")
-                .build()
-                .let { client.newCall(it).await() }
+        var response = httpClient.get(url) {
+            header("Authorization", "Bearer $token")
+            header("Accept", "application/json")
+            header("originator", OPENAI_CODEX_ORIGINATOR)
+            if (!tokens?.accountId.isNullOrBlank()) {
+                header("ChatGPT-Account-Id", tokens.accountId)
+            }
         }
-        if (!response.isSuccessful) {
+        if (response.status.value == 401) {
+            val retryToken = resolveBearerToken(providerSetting, forceRefresh = true)
+            response = httpClient.get(url) {
+                header("Authorization", "Bearer $retryToken")
+                header("Accept", "application/json")
+                header("originator", OPENAI_CODEX_ORIGINATOR)
+                if (!tokens?.accountId.isNullOrBlank()) {
+                    header("ChatGPT-Account-Id", tokens.accountId)
+                }
+            }
+        }
+        if (!response.status.isSuccess()) {
             return defaultCodexOAuthModels()
         }
 
-        val bodyStr = response.body?.string() ?: ""
+        val bodyStr = response.bodyAsText()
         val root = runCatching { json.parseToJsonElement(bodyStr) }.getOrNull()
             ?: return defaultCodexOAuthModels()
         val data = root.findModelArray() ?: return defaultCodexOAuthModels()

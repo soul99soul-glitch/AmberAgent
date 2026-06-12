@@ -18,7 +18,6 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
@@ -31,7 +30,7 @@ class ClaudeProviderPromptCacheTest {
 
     @Before
     fun setUp() {
-        provider = ClaudeProvider(OkHttpClient())
+        provider = ClaudeProvider()
     }
 
     private fun buildRequest(

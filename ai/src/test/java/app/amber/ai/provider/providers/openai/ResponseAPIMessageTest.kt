@@ -17,7 +17,6 @@ import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.ImageEncodingException
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -40,7 +39,7 @@ class ResponseAPIMessageTest {
 
     @Before
     fun setUp() {
-        api = ResponseAPI(OkHttpClient())
+        api = ResponseAPI()
     }
 
     // Helper to invoke buildMessages method

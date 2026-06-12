@@ -34,6 +34,7 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.Provider
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.provider.providers.google.CloudCodeAssistRequest
 import app.amber.ai.provider.providers.vertex.ServiceAccountTokenProvider
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.ImageAspectRatio
@@ -45,42 +46,38 @@ import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.KeyRoulette
-import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.removeElements
-import app.amber.ai.util.stringSafe
-import app.amber.ai.util.toHeaders
 import app.amber.common.http.SseEvent
-import app.amber.common.http.await
 import app.amber.common.http.jsonPrimitiveOrNull
 import app.amber.common.http.sseFlow
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.http.isSuccess
 import org.apache.commons.text.StringEscapeUtils
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 private const val TAG = "GoogleProvider"
 
-class GoogleProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
+class GoogleProvider(context: Context? = null) : Provider<ProviderSetting.Google> {
     private val sseClient by lazy { HttpClient(OkHttp) { install(SSE) } }
+    private val ktorClient by lazy { HttpClient(OkHttp) { expectSuccess = false } }
+    private val httpClient by lazy { HttpClient(OkHttp) { expectSuccess = false } }
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val serviceAccountTokenProvider by lazy {
-        ServiceAccountTokenProvider(client)
+        ServiceAccountTokenProvider()
     }
     // Same shape as OpenAIProvider holds its codex oauthClient: lazily construct from
     // the injected Context (the DI module registers its own singleton too; they share
@@ -88,7 +85,6 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     private val geminiOAuthClient: app.amber.ai.provider.providers.google.GoogleGeminiOAuthClient? =
         context?.let {
             app.amber.ai.provider.providers.google.GoogleGeminiOAuthClient(
-                client,
                 app.amber.ai.provider.providers.google.GoogleGeminiAuthStore(it),
             )
         }
@@ -112,38 +108,60 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         return accessToken to projectId
     }
 
-    private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): HttpUrl {
+    private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): String {
         return if (!providerSetting.vertexAI) {
-            "${providerSetting.baseUrl}/$path".toHttpUrl()
+            "${providerSetting.baseUrl}/$path"
         } else if (providerSetting.useServiceAccount) {
-            "https://aiplatform.googleapis.com/v1/projects/${providerSetting.projectId}/locations/${providerSetting.location}/$path".toHttpUrl()
+            "https://aiplatform.googleapis.com/v1/projects/${providerSetting.projectId}/locations/${providerSetting.location}/$path"
         } else {
-            "https://aiplatform.googleapis.com/v1/$path".toHttpUrl()
+            "https://aiplatform.googleapis.com/v1/$path"
         }
     }
 
-    private suspend fun transformRequest(
+    /** String-based URL builder for Ktor requests. */
+    private fun buildUrlString(providerSetting: ProviderSetting.Google, path: String): String {
+        return if (!providerSetting.vertexAI) {
+            "${providerSetting.baseUrl}/$path"
+        } else if (providerSetting.useServiceAccount) {
+            "https://aiplatform.googleapis.com/v1/projects/${providerSetting.projectId}/locations/${providerSetting.location}/$path"
+        } else {
+            "https://aiplatform.googleapis.com/v1/$path"
+        }
+    }
+
+    /** Configure auth headers/query params on a Ktor request builder. */
+    private suspend fun configureKtorAuth(
         providerSetting: ProviderSetting.Google,
-        request: Request
-    ): Request {
-        return if (providerSetting.vertexAI && providerSetting.useServiceAccount) {
+        builder: io.ktor.client.request.HttpRequestBuilder,
+    ) {
+        if (providerSetting.vertexAI && providerSetting.useServiceAccount) {
             val accessToken = serviceAccountTokenProvider.fetchAccessToken(
                 serviceAccountEmail = providerSetting.serviceAccountEmail.trim(),
                 privateKeyPem = StringEscapeUtils.unescapeJson(providerSetting.privateKey.trim()),
             )
-            request.newBuilder()
-                .addHeader("Authorization", "Bearer $accessToken")
-                .build()
+            builder.header("Authorization", "Bearer $accessToken")
         } else {
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             if (providerSetting.vertexAI) {
-                request.newBuilder()
-                    .url(request.url.newBuilder().addQueryParameter("key", key).build())
-                    .build()
+                // Append ?key= to URL
+                val url = builder.url
+                url.parameters.append("key", key)
             } else {
-                request.newBuilder()
-                    .addHeader("x-goog-api-key", key)
-                    .build()
+                builder.header("x-goog-api-key", key)
+            }
+        }
+    }
+
+    /** Configure refer/affiliate headers for Ktor requests (mirrors configureReferHeaders). */
+    private fun io.ktor.client.request.HttpRequestBuilder.configureKtorReferHeaders(
+        baseUrl: String,
+    ) {
+        val host = runCatching { java.net.URL(baseUrl).host }.getOrNull()
+        when (host) {
+            "aihubmix.com" -> header("APP-Code", "DKHA9468")
+            "openrouter.ai" -> {
+                header("X-Title", "AmberAgent")
+                header("HTTP-Referer", "https://github.com")
             }
         }
     }
@@ -158,17 +176,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             if (isCodeAssistOAuthMode(providerSetting)) {
                 return@withContext app.amber.ai.provider.providers.google.defaultGeminiOAuthModelList()
             }
-            val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")
-            val request = transformRequest(
-                providerSetting = providerSetting,
-                request = Request.Builder()
-                    .url(url)
-                    .get()
-                    .build()
-            )
-            val response = client.newCall(request).await()
-            if (response.isSuccessful) {
-                val body = response.body?.string() ?: error("empty body")
+
+            val baseUrl = buildUrlString(providerSetting, "models?pageSize=100")
+            val response = httpClient.get(baseUrl) {
+                configureKtorAuth(providerSetting, this)
+            }
+            if (response.status.isSuccess()) {
+                val body = response.bodyAsText()
                 Log.d(TAG, "listModels: $body")
                 val bodyObject = json.parseToJsonElement(body).jsonObject
                 val models = bodyObject["models"]?.jsonArray ?: return@withContext emptyList()
@@ -202,17 +216,24 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     ): MessageChunk = withContext(Dispatchers.IO) {
         val isOAuth = isCodeAssistOAuthMode(providerSetting)
         val requestBody = buildCompletionRequestBody(messages, params, isCodeAssistOAuth = isOAuth)
-        val request = if (isOAuth) {
+
+        val rawBodyStr: String
+        if (isOAuth) {
             val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
-            geminiOAuthClient!!
+            val ccRequest = geminiOAuthClient!!
                 .generateContent(accessToken, params.model.modelId, projectId, requestBody)
-                .newBuilder()
-                .apply {
-                    params.customHeaders.forEach { (k, v) -> addHeader(k, v) }
-                }
-                .build()
+            val mergedHeaders = ccRequest.headers + params.customHeaders.associate { it.name to it.value }
+            val resp = ktorClient.post(ccRequest.url) {
+                mergedHeaders.forEach { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                setBody(ccRequest.body)
+            }
+            if (!resp.status.isSuccess()) {
+                throw Exception("Failed to get response: ${resp.status.value} ${resp.bodyAsText()}")
+            }
+            rawBodyStr = resp.bodyAsText()
         } else {
-            val url = buildUrl(
+            val url = buildUrlString(
                 providerSetting = providerSetting,
                 path = if (providerSetting.vertexAI) {
                     "publishers/google/models/${params.model.modelId}:generateContent"
@@ -220,25 +241,21 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     "models/${params.model.modelId}:generateContent"
                 }
             )
-            transformRequest(
-                providerSetting = providerSetting,
-                request = Request.Builder()
-                    .url(url)
-                    .headers(params.customHeaders.toHeaders())
-                    .post(
-                        json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
-                    )
-                    .configureReferHeaders(providerSetting.baseUrl)
-                    .build()
-            )
+            val response = httpClient.post(url) {
+                configureKtorAuth(providerSetting, this)
+                params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                    header(it.name, it.value)
+                }
+                configureKtorReferHeaders(providerSetting.baseUrl)
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(requestBody))
+            }
+            if (!response.status.isSuccess()) {
+                throw Exception("Failed to get response: ${response.status.value} ${response.bodyAsText()}")
+            }
+            rawBodyStr = response.bodyAsText()
         }
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
-        }
-
-        val rawBodyStr = response.body?.string() ?: ""
         // Same unwrap as the SSE path — cloudcode-pa returns {"response": {...standard payload...}}.
         val bodyStr = if (isOAuth) {
             runCatching {
@@ -286,27 +303,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         if (isOAuth) {
             val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
-            // Build OkHttp request to extract URL and headers (reuses OAuth header logic
-            // including the private User-Agent / Client-Metadata headers)
-            val okhttpRequest = geminiOAuthClient!!
+            val ccRequest = geminiOAuthClient!!
                 .streamGenerateContent(accessToken, params.model.modelId, projectId, requestBody)
-                .newBuilder()
-                .apply {
-                    params.customHeaders.forEach { (k, v) -> addHeader(k, v) }
-                }
-                .build()
-            sseUrl = okhttpRequest.url.toString()
-            sseHeaders = okhttpRequest.headers.toMap()
-            // Build body wrapper (same structure as buildCloudCodeAssistRequest)
-            val wrapper = buildJsonObject {
-                put("model", params.model.modelId)
-                put("project", projectId)
-                put("user_prompt_id", Uuid.random().toString())
-                put("request", requestBody)
-            }
-            sseBody = wrapper.toString()
+            sseUrl = ccRequest.url
+            sseHeaders = ccRequest.headers + params.customHeaders.associate { it.name to it.value }
+            sseBody = ccRequest.body
         } else {
-            val baseHttpUrl = buildUrl(
+            val basePath = buildUrl(
                 providerSetting = providerSetting,
                 path = if (providerSetting.vertexAI) {
                     "publishers/google/models/${params.model.modelId}:streamGenerateContent"
@@ -314,7 +317,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     "models/${params.model.modelId}:streamGenerateContent"
                 }
             )
-            val urlBuilder = baseHttpUrl.newBuilder().addQueryParameter("alt", "sse")
+            val urlBuilder = io.ktor.http.URLBuilder(basePath)
+            urlBuilder.parameters.append("alt", "sse")
             sseBody = json.encodeToString(requestBody)
 
             val headers = mutableMapOf<String, String>()
@@ -328,7 +332,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             } else {
                 val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
                 if (providerSetting.vertexAI) {
-                    urlBuilder.addQueryParameter("key", key)
+                    urlBuilder.parameters.append("key", key)
                 } else {
                     headers["x-goog-api-key"] = key
                 }
@@ -340,7 +344,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             // Refer headers
-            val baseHost = runCatching { providerSetting.baseUrl.toHttpUrl().host }.getOrNull()
+            val baseHost = runCatching { java.net.URL(providerSetting.baseUrl).host }.getOrNull()
             when (baseHost) {
                 "aihubmix.com" -> headers["APP-Code"] = "DKHA9468"
                 "openrouter.ai" -> {
@@ -349,7 +353,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 }
             }
 
-            sseUrl = urlBuilder.build().toString()
+            sseUrl = urlBuilder.buildString()
             sseHeaders = headers
         }
 
@@ -865,7 +869,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
         }.mergeCustomBody(params.customBody)
 
-        val url = buildUrl(
+        val url = buildUrlString(
             providerSetting = providerSetting,
             path = if (providerSetting.vertexAI) {
                 "publishers/google/models/${params.model.modelId}:predict"
@@ -874,24 +878,20 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
         )
 
-        val request = transformRequest(
-            providerSetting = providerSetting,
-            request = Request.Builder()
-                .url(url)
-                .headers(params.customHeaders.toHeaders())
-                .post(
-                    json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
-                )
-                .configureReferHeaders(providerSetting.baseUrl)
-                .build()
-        )
-
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to generate image: ${response.code} ${response.body.string()}")
+        val response = httpClient.post(url) {
+            configureKtorAuth(providerSetting, this)
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                header(it.name, it.value)
+            }
+            configureKtorReferHeaders(providerSetting.baseUrl)
+            contentType(ContentType.Application.Json)
+            setBody(json.encodeToString(requestBody))
+        }
+        if (!response.status.isSuccess()) {
+            error("Failed to generate image: ${response.status.value} ${response.bodyAsText()}")
         }
 
-        val bodyStr = response.body.string()
+        val bodyStr = response.bodyAsText()
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         val predictions = bodyJson["predictions"]?.jsonArray ?: error("No predictions in response")

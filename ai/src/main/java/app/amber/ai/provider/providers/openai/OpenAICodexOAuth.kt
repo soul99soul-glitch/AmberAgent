@@ -2,6 +2,18 @@ package app.amber.ai.provider.providers.openai
 
 import android.content.Context
 import android.util.Base64
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.request.forms.submitForm
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.Parameters
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -15,12 +27,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import app.amber.ai.util.json
-import app.amber.common.http.await
-import okhttp3.FormBody
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import kotlin.math.max
 import kotlin.uuid.Uuid
 
@@ -37,7 +43,6 @@ private const val OPENAI_CODEX_USAGE_URL = "$OPENAI_CHATGPT_BACKEND_BASE_URL/wha
 private const val REFRESH_SKEW_MS = 2 * 60 * 1000L
 private const val DEVICE_LOGIN_TIMEOUT_MS = 15 * 60 * 1000L
 private const val FALLBACK_TOKEN_LIFETIME_MS = 45 * 60 * 1000L
-private const val JSON_MEDIA_TYPE = "application/json"
 
 @Serializable
 data class OpenAICodexAuthTokens(
@@ -105,10 +110,10 @@ class OpenAICodexAuthStore(context: Context) {
 }
 
 class OpenAICodexOAuthClient(
-    private val client: OkHttpClient,
     private val authStore: OpenAICodexAuthStore,
 ) {
     private val refreshMutex = Mutex()
+    private val ktorClient by lazy { HttpClient(OkHttp) { expectSuccess = false } }
 
     fun getCached(providerId: Uuid): OpenAICodexAuthTokens? = authStore.get(providerId)
 
@@ -120,17 +125,15 @@ class OpenAICodexOAuthClient(
         val requestBody = json.encodeToString(
             UserCodeRequest(clientId = OPENAI_CODEX_AUTH_CLIENT_ID)
         )
-        val request = Request.Builder()
-            .url("$OPENAI_CODEX_AUTH_ISSUER/api/accounts/deviceauth/usercode")
-            .addCodexHeaders()
-            .addHeader("Content-Type", JSON_MEDIA_TYPE)
-            .post(requestBody.toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
-            .build()
-
-        val response = client.newCall(request).await()
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-            error("Codex OAuth device code request failed: ${response.code} ${body.toSafeOAuthError()}")
+        val response = ktorClient.post("$OPENAI_CODEX_AUTH_ISSUER/api/accounts/deviceauth/usercode") {
+            header("Accept", "application/json")
+            header("originator", OPENAI_CODEX_ORIGINATOR)
+            contentType(ContentType.Application.Json)
+            setBody(requestBody)
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            error("Codex OAuth device code request failed: ${response.status.value} ${body.toSafeOAuthError()}")
         }
 
         val result = json.decodeFromString<UserCodeResponse>(body)
@@ -156,29 +159,27 @@ class OpenAICodexOAuthClient(
                     userCode = authorization.userCode,
                 )
             )
-            val request = Request.Builder()
-                .url("$OPENAI_CODEX_AUTH_ISSUER/api/accounts/deviceauth/token")
-                .addCodexHeaders()
-                .addHeader("Content-Type", JSON_MEDIA_TYPE)
-                .post(requestBody.toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
-                .build()
-
-            val response = client.newCall(request).await()
-            val body = response.body?.string().orEmpty()
+            val response = ktorClient.post("$OPENAI_CODEX_AUTH_ISSUER/api/accounts/deviceauth/token") {
+                header("Accept", "application/json")
+                header("originator", OPENAI_CODEX_ORIGINATOR)
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }
+            val body = response.bodyAsText()
             when {
-                response.isSuccessful -> {
+                response.status.isSuccess() -> {
                     val code = json.decodeFromString<DeviceCodeSuccessResponse>(body)
                     val tokens = exchangeAuthorizationCode(code)
                     authStore.save(providerId, tokens)
                     return tokens
                 }
 
-                response.code == 403 || response.code == 404 -> {
+                response.status.value == 403 || response.status.value == 404 -> {
                     delay(authorization.intervalSeconds * 1000L)
                 }
 
                 else -> {
-                    error("Codex OAuth device polling failed: ${response.code} ${body.toSafeOAuthError()}")
+                    error("Codex OAuth device polling failed: ${response.status.value} ${body.toSafeOAuthError()}")
                 }
             }
         }
@@ -198,16 +199,37 @@ class OpenAICodexOAuthClient(
 
     suspend fun fetchUsage(providerId: Uuid): OpenAICodexUsageStatus {
         val token = getValidAccessToken(providerId, forceRefresh = false)
-        var response = client.newCall(buildUsageRequest(token, authStore.get(providerId))).await()
-        if (response.code == 401) {
-            response.close()
+        val tokens = authStore.get(providerId)
+        val headers = mutableMapOf(
+            "Authorization" to "Bearer $token",
+            "Accept" to "application/json",
+            "originator" to OPENAI_CODEX_ORIGINATOR,
+        )
+        if (!tokens?.accountId.isNullOrBlank()) {
+            headers["ChatGPT-Account-Id"] = tokens.accountId!!
+        }
+        var response = ktorClient.get(OPENAI_CODEX_USAGE_URL) {
+            headers.forEach { (k, v) -> header(k, v) }
+        }
+        if (response.status.value == 401) {
             val retryToken = getValidAccessToken(providerId, forceRefresh = true)
-            response = client.newCall(buildUsageRequest(retryToken, authStore.get(providerId))).await()
+            val retryTokens = authStore.get(providerId)
+            val retryHeaders = mutableMapOf(
+                "Authorization" to "Bearer $retryToken",
+                "Accept" to "application/json",
+                "originator" to OPENAI_CODEX_ORIGINATOR,
+            )
+            if (!retryTokens?.accountId.isNullOrBlank()) {
+                retryHeaders["ChatGPT-Account-Id"] = retryTokens.accountId!!
+            }
+            response = ktorClient.get(OPENAI_CODEX_USAGE_URL) {
+                retryHeaders.forEach { (k, v) -> header(k, v) }
+            }
         }
 
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-            error("Codex usage request failed: ${response.code} ${body.toSafeOAuthError()}")
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            error("Codex usage request failed: ${response.status.value} ${body.toSafeOAuthError()}")
         }
         return parseUsageStatus(body)
     }
@@ -219,17 +241,15 @@ class OpenAICodexOAuthClient(
         val requestBody = json.encodeToString(
             RefreshTokenRequest(refreshToken = current.refreshToken)
         )
-        val request = Request.Builder()
-            .url("$OPENAI_CODEX_AUTH_ISSUER/oauth/token")
-            .addCodexHeaders()
-            .addHeader("Content-Type", JSON_MEDIA_TYPE)
-            .post(requestBody.toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
-            .build()
-
-        val response = client.newCall(request).await()
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-            error("Codex OAuth token refresh failed: ${response.code} ${body.toSafeOAuthError()}")
+        val response = ktorClient.post("$OPENAI_CODEX_AUTH_ISSUER/oauth/token") {
+            header("Accept", "application/json")
+            header("originator", OPENAI_CODEX_ORIGINATOR)
+            contentType(ContentType.Application.Json)
+            setBody(requestBody)
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            error("Codex OAuth token refresh failed: ${response.status.value} ${body.toSafeOAuthError()}")
         }
 
         val refresh = json.decodeFromString<RefreshTokenResponse>(body)
@@ -247,24 +267,22 @@ class OpenAICodexOAuthClient(
 
     private suspend fun exchangeAuthorizationCode(code: DeviceCodeSuccessResponse): OpenAICodexAuthTokens {
         val redirectUri = "$OPENAI_CODEX_AUTH_ISSUER/deviceauth/callback"
-        val requestBody = FormBody.Builder()
-            .add("grant_type", "authorization_code")
-            .add("code", code.authorizationCode)
-            .add("redirect_uri", redirectUri)
-            .add("client_id", OPENAI_CODEX_AUTH_CLIENT_ID)
-            .add("code_verifier", code.codeVerifier)
-            .build()
-        val request = Request.Builder()
-            .url("$OPENAI_CODEX_AUTH_ISSUER/oauth/token")
-            .addCodexHeaders()
-            .addHeader("Content-Type", "application/x-www-form-urlencoded")
-            .post(requestBody)
-            .build()
-
-        val response = client.newCall(request).await()
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-            error("Codex OAuth token exchange failed: ${response.code} ${body.toSafeOAuthError()}")
+        val response = ktorClient.submitForm(
+            url = "$OPENAI_CODEX_AUTH_ISSUER/oauth/token",
+            formParameters = Parameters.build {
+                append("grant_type", "authorization_code")
+                append("code", code.authorizationCode)
+                append("redirect_uri", redirectUri)
+                append("client_id", OPENAI_CODEX_AUTH_CLIENT_ID)
+                append("code_verifier", code.codeVerifier)
+            }
+        ) {
+            header("Accept", "application/json")
+            header("originator", OPENAI_CODEX_ORIGINATOR)
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            error("Codex OAuth token exchange failed: ${response.status.value} ${body.toSafeOAuthError()}")
         }
 
         val tokenResponse = json.decodeFromString<TokenExchangeResponse>(body)
@@ -273,21 +291,6 @@ class OpenAICodexOAuthClient(
             refreshToken = tokenResponse.refreshToken,
             idToken = tokenResponse.idToken,
         )
-    }
-
-    private fun buildUsageRequest(token: String, tokens: OpenAICodexAuthTokens?): Request {
-        return Request.Builder()
-            .url(OPENAI_CODEX_USAGE_URL)
-            .addOpenAICodexBackendHeaders(tokens)
-            .addHeader("Authorization", "Bearer $token")
-            .get()
-            .build()
-    }
-
-    private fun Request.Builder.addCodexHeaders(): Request.Builder {
-        return this
-            .addHeader("Accept", "application/json")
-            .addHeader("originator", OPENAI_CODEX_ORIGINATOR)
     }
 }
 
@@ -322,15 +325,6 @@ private fun JsonObject.longOrNull(name: String): Long? =
 
 private fun JsonObject.doubleOrNull(name: String): Double? =
     this[name]?.jsonPrimitive?.doubleOrNull
-
-fun Request.Builder.addOpenAICodexBackendHeaders(tokens: OpenAICodexAuthTokens?): Request.Builder {
-    addHeader("Accept", "application/json")
-    addHeader("originator", OPENAI_CODEX_ORIGINATOR)
-    if (!tokens?.accountId.isNullOrBlank()) {
-        addHeader("ChatGPT-Account-Id", tokens.accountId!!)
-    }
-    return this
-}
 
 private fun buildTokens(
     accessToken: String,

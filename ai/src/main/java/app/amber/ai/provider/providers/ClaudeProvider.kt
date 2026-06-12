@@ -7,7 +7,9 @@ import app.amber.common.http.sseFlow
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
@@ -49,24 +51,20 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.KeyRoulette
-import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.parseErrorDetail
-import app.amber.ai.util.toHeaders
-import app.amber.common.http.await
 import app.amber.common.http.jsonPrimitiveOrNull
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.statement.bodyAsText
 import kotlin.time.Clock
 
 private const val TAG = "ClaudeProvider"
 private const val ANTHROPIC_VERSION = "2023-06-01"
 
-class ClaudeProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Claude> {
+class ClaudeProvider(
+    context: Context? = null
+) : Provider<ProviderSetting.Claude> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
 
     private val sseClient by lazy {
@@ -75,21 +73,23 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
+    private val httpClient by lazy {
+        HttpClient(OkHttp) {
+            expectSuccess = false
+        }
+    }
+
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> =
         withContext(Dispatchers.IO) {
-            val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/models")
-                .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
-                .addHeader("anthropic-version", ANTHROPIC_VERSION)
-                .get()
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                error("Failed to get models: ${response.code} ${response.body?.string()}")
+            val response = httpClient.get("${providerSetting.baseUrl}/models") {
+                header("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+                header("anthropic-version", ANTHROPIC_VERSION)
+            }
+            if (response.status.value !in 200..299) {
+                error("Failed to get models: ${response.status.value} ${response.bodyAsText()}")
             }
 
-            val bodyStr = response.body?.string() ?: ""
+            val bodyStr = response.bodyAsText()
             val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
             val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
 
@@ -118,23 +118,26 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         params: TextGenerationParams
     ): MessageChunk = withContext(Dispatchers.IO) {
         val requestBody = buildMessageRequest(providerSetting, messages, params)
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/messages")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
-            .addHeader("anthropic-version", ANTHROPIC_VERSION)
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
 
         Log.i(TAG, "generateText: model=${params.model.modelId}, messages=${messages.size}")
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+        val response = httpClient.post("${providerSetting.baseUrl}/messages") {
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                header(it.name, it.value)
+            }
+            contentType(ContentType.Application.Json)
+            header("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+            header("anthropic-version", ANTHROPIC_VERSION)
+            configureReferHeaders(providerSetting.baseUrl) { name, value ->
+                header(name, value)
+            }
+            setBody(json.encodeToString(requestBody))
+        }
+        if (response.status.value !in 200..299) {
+            throw Exception("Failed to get response: ${response.status.value} ${response.bodyAsText()}")
         }
 
-        val bodyStr = response.body?.string() ?: ""
+        val bodyStr = response.bodyAsText()
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         // 从 JsonObject 中提取必要的信息

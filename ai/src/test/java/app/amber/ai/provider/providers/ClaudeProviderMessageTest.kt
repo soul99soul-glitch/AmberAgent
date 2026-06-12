@@ -8,7 +8,6 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.ImageEncodingException
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -32,7 +31,7 @@ class ClaudeProviderMessageTest {
 
     @Before
     fun setUp() {
-        provider = ClaudeProvider(OkHttpClient())
+        provider = ClaudeProvider()
     }
 
     // Helper to invoke private buildMessages method via reflection

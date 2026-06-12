@@ -24,7 +24,6 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.hasExplicitReasoningContentField
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.ImageEncodingException
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -44,7 +43,7 @@ class ChatCompletionsAPIMessageTest {
 
     @Before
     fun setUp() {
-        api = ChatCompletionsAPI(OkHttpClient(), KeyRoulette.default())
+        api = ChatCompletionsAPI(KeyRoulette.default())
     }
 
     // Helper to invoke private buildMessages method via reflection

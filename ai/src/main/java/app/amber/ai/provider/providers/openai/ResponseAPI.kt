@@ -38,15 +38,11 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.KeyRoulette
-import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.parseErrorDetail
-import app.amber.ai.util.stringSafe
-import app.amber.ai.util.toHeaders
 import app.amber.common.http.SseEvent
-import app.amber.common.http.await
 import app.amber.common.http.jsonArrayOrNull
 import app.amber.common.http.jsonObjectOrNull
 import app.amber.common.http.jsonPrimitiveOrNull
@@ -55,28 +51,25 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.sse.SSE
 import io.ktor.client.request.header
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
+import io.ktor.http.isSuccess
 import kotlin.time.Clock
 
 private const val TAG = "ResponseAPI"
 
 class ResponseAPI(
-    private val client: OkHttpClient,
     private val keyRoulette: KeyRoulette = KeyRoulette.default(),
     private val bearerResolver: suspend (ProviderSetting.OpenAI, Boolean) -> String = { providerSetting, _ ->
         keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
     },
 ) : OpenAIImpl {
     private val sseClient by lazy { HttpClient(OkHttp) { install(SSE) } }
+    private val httpClient by lazy { HttpClient(OkHttp) { expectSuccess = false } }
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
@@ -88,33 +81,36 @@ class ResponseAPI(
             params = params,
             stream = false,
         )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${bearerResolver(providerSetting, false)}"
-            )
-            .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+        val url = "${providerSetting.baseUrl}/responses"
+        val jsonBody = json.encodeToString(requestBody)
 
         Log.i(TAG, "generateText: model=${params.model.modelId}")
 
-        var response = client.newCall(request).await()
-        if (response.code == 401) {
-            response.close()
-            val retryRequest = request.newBuilder()
-                .header("Authorization", "Bearer ${bearerResolver(providerSetting, true)}")
-                .build()
-            response = client.newCall(retryRequest).await()
+        var response = httpClient.post(url) {
+            params.customHeaders.forEach { header(it.name, it.value) }
+            header("Authorization", "Bearer ${bearerResolver(providerSetting, false)}")
+            contentType(ContentType.Application.Json)
+            configureReferHeaders(providerSetting.baseUrl) { name, value ->
+                header(name, value)
+            }
+            setBody(jsonBody)
         }
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
+        if (response.status.value == 401) {
+            response = httpClient.post(url) {
+                params.customHeaders.forEach { header(it.name, it.value) }
+                header("Authorization", "Bearer ${bearerResolver(providerSetting, true)}")
+                contentType(ContentType.Application.Json)
+                configureReferHeaders(providerSetting.baseUrl) { name, value ->
+                    header(name, value)
+                }
+                setBody(jsonBody)
+            }
+        }
+        if (!response.status.isSuccess()) {
+            throw Exception("Failed to get response: ${response.status.value} ${response.bodyAsText()}")
         }
 
-        val bodyStr = response.body?.string() ?: ""
+        val bodyStr = response.bodyAsText()
         Log.i(TAG, "generateText: response ${bodyStr.length} chars")
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val output = parseResponseOutput(bodyJson)
@@ -271,65 +267,55 @@ class ResponseAPI(
             params = params,
             stream = true,
         )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${bearerResolver(providerSetting, false)}")
-            .addHeader("Accept", "text/event-stream")
-            .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+
+        val url = "${providerSetting.baseUrl}/responses"
 
         Log.i(TAG, "streamCodexText: model=${params.model.modelId}")
 
-        var response = client.newCall(request).await()
-        if (response.code == 401) {
-            response.close()
-            val retryRequest = request.newBuilder()
-                .header("Authorization", "Bearer ${bearerResolver(providerSetting, true)}")
-                .build()
-            response = client.newCall(retryRequest).await()
-        }
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body.stringSafe()}")
-        }
-
-        response.use { activeResponse ->
-            val source = activeResponse.body.source()
-            var eventType: String? = null
-            val dataLines = mutableListOf<String>()
-
-            fun drainEvent(): MessageChunk? {
-                if (dataLines.isEmpty()) return null
-                val data = dataLines.joinToString("\n")
-                dataLines.clear()
-                if (data == "[DONE]") return null
-                val eventJson = Json.parseToJsonElement(data).jsonObjectOrNull ?: return null
-                return parseResponseDelta(eventJson)
-            }
-
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                when {
-                    line.isEmpty() -> {
-                        drainEvent()?.let { emit(it) }
-                        if (eventType == "response.completed") {
-                            return@use
+        val collectEvents: suspend (String) -> Unit = { token ->
+            sseClient.sseFlow(url) {
+                method = HttpMethod.Post
+                contentType(ContentType.Application.Json)
+                params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                    header(it.name, it.value)
+                }
+                header("Authorization", "Bearer $token")
+                configureReferHeaders(providerSetting.baseUrl) { name, value ->
+                    header(name, value)
+                }
+                setBody(json.encodeToString(requestBody))
+            }.collect { sseEvent ->
+                when (sseEvent) {
+                    is SseEvent.Open -> { /* connection opened */ }
+                    is SseEvent.Event -> {
+                        val payloads = normalizeOpenAIStreamDataLines(sseEvent.data)
+                        if (payloads.isEmpty() && sseEvent.data.contains("[DONE]")) return@collect
+                        payloads.forEach { payload ->
+                            val eventJson = json.parseToJsonElement(payload).jsonObject
+                            if (eventJson["error"] != null) {
+                                throw eventJson["error"]!!.parseErrorDetail()
+                            }
+                            val chunk = parseResponseDelta(eventJson)
+                            if (chunk != null) {
+                                emit(chunk)
+                            }
                         }
-                        eventType = null
+                        if (sseEvent.type == "response.completed") return@collect
                     }
-
-                    line.startsWith("event:") -> {
-                        eventType = line.removePrefix("event:").trim()
-                    }
-
-                    line.startsWith("data:") -> {
-                        dataLines += line.removePrefix("data:").trimStart()
-                    }
+                    is SseEvent.Closed -> { /* stream completed normally */ }
+                    is SseEvent.Failure -> throw sseEvent.throwable ?: Exception("SSE connection failed")
                 }
             }
-            drainEvent()?.let { emit(it) }
+        }
+
+        try {
+            collectEvents(bearerResolver(providerSetting, false))
+        } catch (e: Exception) {
+            if (e.message?.startsWith("HTTP 401") == true) {
+                collectEvents(bearerResolver(providerSetting, true))
+            } else {
+                throw e
+            }
         }
     }.flowOn(Dispatchers.IO)
 
@@ -339,7 +325,7 @@ class ResponseAPI(
         params: TextGenerationParams,
         stream: Boolean
     ): JsonObject {
-        val host = providerSetting.baseUrl.toHttpUrl().host
+        val host = java.net.URL(providerSetting.baseUrl).host
         val capabilities = resolveResponseProviderCapabilities(host)
         return buildJsonObject {
             put("model", params.model.modelId)

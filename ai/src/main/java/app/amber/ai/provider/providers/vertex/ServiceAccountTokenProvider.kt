@@ -1,13 +1,16 @@
 package app.amber.ai.provider.providers.vertex
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.request.forms.submitForm
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.Parameters
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.FormBody
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.security.KeyFactory
 import java.security.PrivateKey
 import java.security.Signature
@@ -18,15 +21,14 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 使用服务账号（email + private key PEM）换取 Google OAuth2 Access Token。
- * 构造时传入 OkHttpClient；调用时传 email、私钥 PEM 与 scopes。
  */
-class ServiceAccountTokenProvider(
-    private val http: OkHttpClient
-) {
+class ServiceAccountTokenProvider {
     private val json = Json { ignoreUnknownKeys = true }
 
     // Token cache to avoid frequent token requests
     private val tokenCache = ConcurrentHashMap<String, CachedToken>()
+
+    private val ktorClient by lazy { HttpClient(OkHttp) { expectSuccess = false } }
 
     @Serializable
     private data class CachedToken(
@@ -89,33 +91,26 @@ class ServiceAccountTokenProvider(
         val signature = signRs256(signingInput.toByteArray(Charsets.UTF_8), privateKey)
         val assertion = "$signingInput.${base64UrlNoPad(signature)}"
 
-        val form = FormBody.Builder()
-            .add("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
-            .add("assertion", assertion)
-            .build()
-
-        val req = Request.Builder()
-            .url("https://oauth2.googleapis.com/token")
-            .post(form)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .build()
-
-        http.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                val body = resp.body.string()
-                throw IllegalStateException("Token endpoint ${resp.code}: $body")
+        val resp = ktorClient.submitForm(
+            url = "https://oauth2.googleapis.com/token",
+            formParameters = Parameters.build {
+                append("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
+                append("assertion", assertion)
             }
-            val body = resp.body.string()
-            val tokenResp = json.decodeFromString(TokenResponse.serializer(), body)
-            val accessToken = tokenResp.accessToken ?: error("No access_token in response")
-
-            // Cache the token with expiration time
-            val expiresIn = tokenResp.expiresIn ?: 3600 // Default 1 hour if not provided
-            val expiresAt = now + expiresIn
-            tokenCache[cacheKey] = CachedToken(accessToken, expiresAt)
-
-            accessToken
+        )
+        val body = resp.bodyAsText()
+        if (!resp.status.isSuccess()) {
+            throw IllegalStateException("Token endpoint ${resp.status.value}: $body")
         }
+        val tokenResp = json.decodeFromString(TokenResponse.serializer(), body)
+        val accessToken = tokenResp.accessToken ?: error("No access_token in response")
+
+        // Cache the token with expiration time
+        val expiresIn = tokenResp.expiresIn ?: 3600 // Default 1 hour if not provided
+        val expiresAt = now + expiresIn
+        tokenCache[cacheKey] = CachedToken(accessToken, expiresAt)
+
+        accessToken
     }
 
     @Serializable

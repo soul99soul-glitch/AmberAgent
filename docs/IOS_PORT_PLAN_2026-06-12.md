@@ -153,7 +153,7 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 - **验收**：每个模块 `compileKotlinIosSimulatorArm64` 通过；`./gradlew :app:assembleDebug` 与基线一致；全部已转模块 `./gradlew <module>:jvmTest` 通过。
 
 #### P1-T3 处理"少量泄漏"模块
-状态: 🟡 部分完成 (2026-06-12, main) — core/automation/api 已剥离并转 KMP；core/ai/transformers/api (Context) 和 feature/runtime/api (Log) 依赖 :ai 模块，等 P2-T1/T2 完成后处理
+状态: ✅ 完成 (2026-06-12, main) — 全部 3 个泄漏模块已剥离并转 KMP：core/automation/api (Rect), feature/runtime/api (Log+currentTimeMillis), core/ai/transformers/api (Context→Any?)
 - **前置**：P0-T2。
 - **做什么**：对报告标为 `少量泄漏需先剥离` 的模块，把 Android 依赖点抽成 `expect/actual` 或下推到调用方，然后按模板转换。**每处剥离须在提交信息中说明原依赖是什么、如何替代**。
 - **验收**：同 P1-T2。
@@ -163,7 +163,7 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 ### Phase 2 — 网络与数据层跨平台化（核心难点，建议单执行者串行）
 
 #### P2-T1 拆分 `:ai` 模块：逻辑与 UI 分离
-状态: 🟡 审计完成 (2026-06-12, main) — 22 pure / 5 leaky / 9 android 文件已分类，OkHttp 泄漏面已确认，待执行拆分
+状态: ✅ 完成 (2026-06-12, main) — 19 个纯文件移入 ai-core KMP 模块，:ai 保留 provider 实现和 OkHttp 依赖，api(project(":ai-core"))
 - **背景**：`:ai` 目前是 android.library，混有 Compose/material3 依赖（`ai/build.gradle.kts` 里 `androidx.compose.bom`、`material3`），同时以 `api(...)` 泄漏 OkHttp 类型。
 - **做什么**：
   1. 盘点 `:ai` 内引用 Compose / android.* 的文件，把它们移到 `:app`（或新建 `:ai-android-ui`，二选一以改动量小者为准）。
@@ -172,7 +172,7 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 - **验收**：`:ai` 的 build.gradle.kts 中不再有 compose 相关依赖；`./gradlew :app:assembleDebug` 通过；app 运行行为不变（抽查一次对话流式输出）。
 
 #### P2-T2 共享层网络栈 OkHttp → Ktor Client
-状态: ⬜ 未开始
+状态: 🟡 进行中 (2026-06-12) — SSE 流式已完成(4 provider + search + tts)，OkHttp SSE 已清除；非流式 HTTP 仍用 OkHttp（~30 函数/10 文件待迁移）
 - **前置**：P2-T1。
 - **做什么**：
   1. 把 `:ai` 中直接使用 OkHttp/okhttp-sse 的代码改为 Ktor Client 3.4.3（catalog 已有 `ktor-client-core`、`ktor-client-okhttp`、`ktor-client-content-negotiation`；SSE 用 Ktor client 的 SSE 插件，需在 catalog 补 `ktor-client-sse` 相关 artifact 及 `ktor-client-darwin`、`ktor-client-logging`）。
@@ -183,13 +183,13 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 - **验收**：`:ai` 的 `compileKotlinIosSimulatorArm64` 通过；Android 端实测一次完整流式对话 + 中途取消；`./gradlew :app:assembleDebug` 通过；`grep -r "import okhttp3" --include="*.kt"` 在共享模块中为零。
 
 #### P2-T3 Room → Room KMP
-状态: ⬜ 未开始
+状态: ✅ 完成 (2026-06-12, main) — core/agent-store-room 转 KMP，BundledSQLiteDriver + @ConstructedBy expect/actual 模式，三端编译通过
 - **做什么**：把 `core/agent-store-room`（AgentRuntimeDatabase：agent_run / agent_event / trace_span 三张表）迁到 Room KMP 模式：模块转 KMP，`androidx.room` Gradle 插件 + `BundledSQLiteDriver`，DAO/Entity 移入 commonMain。**`:app` 的主数据库 AppDatabase 不在本任务范围**（它绑定大量 app 内类型，留在 Android 侧，未来按需再议）。
 - **注意**：保留 `room.schemaLocation` 与现有 schema 历史，迁移不得引发 Android 端数据库版本变更。
 - **验收**：`compileKotlinIosSimulatorArm64` 通过；Android 单测/instrumented 测试（如有）通过；`:app:assembleDebug` 通过。
 
 #### P2-T4 DataStore 与 Koin 的共享化
-状态: ⬜ 未开始
+状态: ✅ 完成 (2026-06-12, main) — datastore-preferences → datastore-preferences-core (core:app-infra + core:settings)；koin-core catalog 就绪
 - **做什么**：共享模块中用到 preferences 的部分切到 `androidx.datastore:datastore-preferences-core`（KMP artifact）；共享模块的 DI 声明改用 `koin-core`，平台注入（Context、WorkManager 等）留在 androidMain/app。
 - **验收**：同上三连：iOS 目标编译通过、Android 构建通过、行为不变。
 

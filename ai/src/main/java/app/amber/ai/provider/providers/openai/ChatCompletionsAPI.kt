@@ -43,14 +43,11 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.hasExplicitReasoningContentField
 import app.amber.ai.ui.reasoningContentPresentMetadata
 import app.amber.ai.util.KeyRoulette
-import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.parseErrorDetail
-import app.amber.ai.util.toHeaders
 import app.amber.common.http.SseEvent
-import app.amber.common.http.await
 import app.amber.common.http.jsonArrayOrNull
 import app.amber.common.http.jsonObjectOrNull
 import app.amber.common.http.jsonPrimitiveOrNull
@@ -59,16 +56,13 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.sse.SSE
 import io.ktor.client.request.header
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
+import io.ktor.http.isSuccess
 import kotlin.time.Clock
 
 private const val TAG = "ChatCompletionsAPI"
@@ -90,13 +84,14 @@ private fun String.withoutNestedSseDataPrefix(): String {
 }
 
 class ChatCompletionsAPI(
-    private val client: OkHttpClient,
     private val keyRoulette: KeyRoulette = KeyRoulette.default(),
     private val bearerResolver: suspend (ProviderSetting.OpenAI, Boolean) -> String = { providerSetting, _ ->
         keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
     },
 ) : OpenAIImpl {
     private val sseClient by lazy { HttpClient(OkHttp) { install(SSE) } }
+    private val httpClient by lazy { HttpClient(OkHttp) { expectSuccess = false } }
+
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
@@ -110,22 +105,41 @@ class ChatCompletionsAPI(
             )
 
         val token = bearerResolver(providerSetting, false)
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addOpenAICompatibleAuthHeader(providerSetting, token)
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+        val url = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}"
+        val host = java.net.URL(providerSetting.baseUrl).host
 
         Log.i(TAG, "generateText: model=${params.model.modelId}")
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+        val response = httpClient.post(url) {
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach {
+                header(it.name, it.value)
+            }
+            contentType(ContentType.Application.Json)
+            // Auth header (inlined from addOpenAICompatibleAuthHeader)
+            if (providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
+                host.startsWith("token-plan-") && host.endsWith("xiaomimimo.com")
+            ) {
+                header("api-key", token)
+            } else {
+                header("Authorization", "Bearer $token")
+            }
+            // Refer headers (inlined from configureReferHeaders)
+            when (host) {
+                "aihubmix.com" -> header("APP-Code", "DKHA9468")
+                "openrouter.ai" -> {
+                    header("X-Title", "AmberAgent")
+                    header("HTTP-Referer", "https://github.com")
+                }
+            }
+            setBody(json.encodeToString(requestBody))
         }
 
-        val bodyStr = response.body?.string() ?: ""
+        if (!response.status.isSuccess()) {
+            val errorBody = response.bodyAsText()
+            throw Exception("Failed to get response: ${response.status.value} $errorBody")
+        }
+
+        val bodyStr = response.bodyAsText()
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         // 从 JsonObject 中提取必要的信息
@@ -173,7 +187,7 @@ class ChatCompletionsAPI(
         // Build headers map for Ktor request
         val customHeaders = buildMap {
             putAll(params.customHeaders.filter { it.name.isNotBlank() }.associate { it.name to it.value })
-            val host = providerSetting.baseUrl.toHttpUrl().host
+            val host = java.net.URL(providerSetting.baseUrl).host
             if (providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
                 host.startsWith("token-plan-") && host.endsWith("xiaomimimo.com")
             ) {
@@ -270,7 +284,7 @@ class ChatCompletionsAPI(
         providerSetting: ProviderSetting.OpenAI,
         stream: Boolean = false,
     ): JsonObject {
-        val host = providerSetting.baseUrl.toHttpUrl().host
+        val host = java.net.URL(providerSetting.baseUrl).host
         val isMiMo = isMiMoProvider(providerSetting, host, params.model.modelId)
         val forceReasoningContentForToolCalls =
             shouldForceReasoningContentForToolCalls(providerSetting, host, params.model, params.reasoningLevel)
@@ -513,20 +527,6 @@ class ChatCompletionsAPI(
         return providerSetting.brand == OpenAIBrand.DEEPSEEK ||
             host == "api.deepseek.com" ||
             lowerModelId.contains("deepseek")
-    }
-
-    private fun Request.Builder.addOpenAICompatibleAuthHeader(
-        providerSetting: ProviderSetting.OpenAI,
-        token: String,
-    ): Request.Builder {
-        val host = providerSetting.baseUrl.toHttpUrl().host
-        return if (providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
-            host.startsWith("token-plan-") && host.endsWith("xiaomimimo.com")
-        ) {
-            addHeader("api-key", token)
-        } else {
-            addHeader("Authorization", "Bearer $token")
-        }
     }
 
     private fun JsonArrayBuilder.addAssistantMessages(

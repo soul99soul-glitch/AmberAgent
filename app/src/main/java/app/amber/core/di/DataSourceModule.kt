@@ -415,7 +415,7 @@ val dataSourceModule = module {
     }
 
     single {
-        ProviderManager(client = get(), context = get())
+        ProviderManager(context = get())
     }
 
     single<HttpClient> {
@@ -435,7 +435,7 @@ val dataSourceModule = module {
 
     single { OpenAICodexAuthStore(context = get()) }
     single { GoogleGeminiAuthStore(context = get()) }
-    single { GoogleGeminiOAuthClient(httpClient = get(), authStore = get()) }
+    single { GoogleGeminiOAuthClient(authStore = get()) }
 
     single {
         SyncArchiveManager(

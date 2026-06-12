@@ -801,7 +801,7 @@ private fun CodexOAuthConsole(
     val httpClient = koinInject<OkHttpClient>()
     val providerManager = koinInject<ProviderManager>()
     val authStore = remember(context) { OpenAICodexAuthStore(context) }
-    val oauthClient = remember(httpClient, authStore) { OpenAICodexOAuthClient(httpClient, authStore) }
+    val oauthClient = remember(authStore) { OpenAICodexOAuthClient(authStore) }
     var oauthTokens by remember(provider.id) { mutableStateOf(authStore.get(provider.id)) }
     var oauthBusy by remember(provider.id) { mutableStateOf(false) }
     var oauthDeviceCode by remember(provider.id) { mutableStateOf<String?>(null) }

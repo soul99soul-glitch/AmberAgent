@@ -5,6 +5,18 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.request.forms.submitForm
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.Parameters
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -16,18 +28,12 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import app.amber.ai.util.json
-import app.amber.common.http.await
 import app.amber.common.oauth.LoopbackOAuthCallbackServer
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
-import okhttp3.FormBody
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -127,6 +133,17 @@ class GoogleGeminiAuthStore(context: Context) {
 }
 
 /**
+ * Carries the URL, JSON body, and HTTP headers for a cloudcode-pa request.
+ * Used as the return type for [GoogleGeminiOAuthClient.streamGenerateContent] and
+ * [GoogleGeminiOAuthClient.generateContent] so callers can execute via any HTTP client.
+ */
+data class CloudCodeAssistRequest(
+    val url: String,
+    val body: String,
+    val headers: Map<String, String>,
+)
+
+/**
  * Orchestrates the full OAuth 2.0 Authorization Code + PKCE flow against Google's
  * accounts/oauth2 endpoints, using a [LoopbackOAuthCallbackServer] on 127.0.0.1:53682
  * for the redirect URI (gemini-cli's installed-app client only allows loopback).
@@ -136,10 +153,10 @@ class GoogleGeminiAuthStore(context: Context) {
  * the chat-completion endpoint integration.
  */
 class GoogleGeminiOAuthClient(
-    private val httpClient: OkHttpClient,
     private val authStore: GoogleGeminiAuthStore,
 ) {
     private val refreshMutex = Mutex()
+    private val ktorClient by lazy { HttpClient(OkHttp) { expectSuccess = false } }
 
     /**
      * Run the full authorization-code + PKCE flow in the foreground:
@@ -196,18 +213,18 @@ class GoogleGeminiOAuthClient(
             ?: error("没有可用的 Google OAuth token，请重新登录。")
         val refreshToken = current.refreshToken
             ?: error("Google OAuth 没有 refresh_token — 通常意味着上次登录时未带 prompt=consent，请重新登录。")
-        val body = FormBody.Builder()
-            .add("grant_type", "refresh_token")
-            .add("refresh_token", refreshToken)
-            .add("client_id", GEMINI_OAUTH_CLIENT_ID)
-            .add("client_secret", GEMINI_OAUTH_CLIENT_SECRET)
-            .build()
-        val response = httpClient.newCall(
-            Request.Builder().url(GOOGLE_OAUTH_TOKEN_ENDPOINT).post(body).build()
-        ).await()
-        val text = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-            error("Google OAuth refresh 失败：HTTP ${response.code} ${text.take(300)}")
+        val resp = ktorClient.submitForm(
+            url = GOOGLE_OAUTH_TOKEN_ENDPOINT,
+            formParameters = Parameters.build {
+                append("grant_type", "refresh_token")
+                append("refresh_token", refreshToken)
+                append("client_id", GEMINI_OAUTH_CLIENT_ID)
+                append("client_secret", GEMINI_OAUTH_CLIENT_SECRET)
+            }
+        )
+        val text = resp.bodyAsText()
+        if (!resp.status.isSuccess()) {
+            error("Google OAuth refresh 失败：HTTP ${resp.status.value} ${text.take(300)}")
         }
         val parsed = json.parseToJsonElement(text).jsonObject
         val accessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull
@@ -367,17 +384,15 @@ class GoogleGeminiOAuthClient(
     }
 
     /**
-     * Stream a chat completion through cloudcode-pa's v1internal endpoint. Returns the
-     * raw OkHttp Response so caller (GoogleProvider) can hook its existing SSE parser.
-     * Body is the v1internal wrapper `{ model, project, request: {...} }`; caller passes
-     * the inner standard Gemini-API request payload.
+     * Build a streaming chat completion request for cloudcode-pa's v1internal endpoint.
+     * Returns a [CloudCodeAssistRequest] with URL, body, and headers.
      */
     suspend fun streamGenerateContent(
         accessToken: String,
         modelId: String,
         projectId: String,
         innerRequest: JsonObject,
-    ): Request = buildCloudCodeAssistRequest(
+    ): CloudCodeAssistRequest = buildCloudCodeAssistRequest(
         accessToken = accessToken,
         path = "/v1internal:streamGenerateContent?alt=sse",
         modelId = modelId,
@@ -391,7 +406,7 @@ class GoogleGeminiOAuthClient(
         modelId: String,
         projectId: String,
         innerRequest: JsonObject,
-    ): Request = buildCloudCodeAssistRequest(
+    ): CloudCodeAssistRequest = buildCloudCodeAssistRequest(
         accessToken = accessToken,
         path = "/v1internal:generateContent",
         modelId = modelId,
@@ -405,29 +420,26 @@ class GoogleGeminiOAuthClient(
         modelId: String,
         projectId: String,
         innerRequest: JsonObject,
-    ): Request {
-        // gemini-cli's converter.ts L89-98 sends model / project / request +
-        // user_prompt_id (snake_case, used for server-side tracing). Sending it
-        // matches what the official CLI emits — keeps us indistinguishable from
-        // gemini-cli at the protocol level.
+    ): CloudCodeAssistRequest {
         val wrapper = buildJsonObject {
             put("model", modelId)
             put("project", projectId)
             put("user_prompt_id", Uuid.random().toString())
             put("request", innerRequest)
         }
-        return Request.Builder()
-            .url("$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL$path")
-            .header("Authorization", "Bearer $accessToken")
-            .header("Content-Type", "application/json")
-            .header("User-Agent", CLOUDCODE_PA_USER_AGENT)
-            .header(
-                "Client-Metadata",
-                "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
-            )
-            .header("x-activity-request-id", Uuid.random().toString())
-            .post(wrapper.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        val url = "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL$path"
+        val headers = buildMap {
+            put("Authorization", "Bearer $accessToken")
+            put("Content-Type", "application/json")
+            put("User-Agent", CLOUDCODE_PA_USER_AGENT)
+            put("Client-Metadata", "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI")
+            put("x-activity-request-id", Uuid.random().toString())
+        }
+        return CloudCodeAssistRequest(
+            url = url,
+            body = wrapper.toString(),
+            headers = headers,
+        )
     }
 
     private suspend fun postCloudCodeAssistJson(
@@ -436,31 +448,20 @@ class GoogleGeminiOAuthClient(
         body: JsonObject,
     ): JsonObject {
         val url = "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal$method"
-        // Two cosmetic headers a couple of mature wrappers ship that the canonical
-        // gemini-cli also sends: Client-Metadata (echoes the JSON metadata block as a
-        // single comma-joined header value — KashifKhn/gemini-proxy constants.ts:22-23)
-        // and x-activity-request-id (per-call UUID, both opencode-gemini-auth and
-        // KashifKhn ship it). Neither flips a ghost-project user out of standard-tier
-        // (issue #22648 et al. confirm this is server-side), but at least keeps us
-        // wire-format indistinguishable from those projects.
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer $accessToken")
-            .header("Content-Type", "application/json")
-            .header("User-Agent", CLOUDCODE_PA_USER_AGENT)
-            .header(
-                "Client-Metadata",
-                "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
-            )
-            .header("x-activity-request-id", Uuid.random().toString())
-            .post(body.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        val activityId = Uuid.random().toString()
         Log.i(TAG, "cloudcode-pa $method request: $body")
-        val response = httpClient.newCall(request).await()
-        val text = response.body?.string().orEmpty()
-        Log.i(TAG, "cloudcode-pa $method response (${response.code}): ${text.take(2000)}")
-        if (!response.isSuccessful) {
-            error("cloudcode-pa $method 失败：HTTP ${response.code} ${text.take(300)}")
+        val resp = ktorClient.post(url) {
+            header("Authorization", "Bearer $accessToken")
+            header("Content-Type", "application/json")
+            header("User-Agent", CLOUDCODE_PA_USER_AGENT)
+            header("Client-Metadata", "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI")
+            header("x-activity-request-id", activityId)
+            setBody(body.toString())
+        }
+        val text = resp.bodyAsText()
+        Log.i(TAG, "cloudcode-pa $method response (${resp.status.value}): ${text.take(2000)}")
+        if (!resp.status.isSuccess()) {
+            error("cloudcode-pa $method 失败：HTTP ${resp.status.value} ${text.take(300)}")
         }
         return runCatching { json.parseToJsonElement(text).jsonObject }
             .getOrElse { error("cloudcode-pa $method 响应不是 JSON：${text.take(300)}") }
@@ -475,16 +476,13 @@ class GoogleGeminiOAuthClient(
         operationName: String,
     ): JsonObject {
         val url = "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal/$operationName"
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer $accessToken")
-            .header("User-Agent", CLOUDCODE_PA_USER_AGENT)
-            .get()
-            .build()
-        val response = httpClient.newCall(request).await()
-        val text = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-            error("cloudcode-pa LRO poll 失败：HTTP ${response.code} ${text.take(300)}")
+        val resp = ktorClient.get(url) {
+            header("Authorization", "Bearer $accessToken")
+            header("User-Agent", CLOUDCODE_PA_USER_AGENT)
+        }
+        val text = resp.bodyAsText()
+        if (!resp.status.isSuccess()) {
+            error("cloudcode-pa LRO poll 失败：HTTP ${resp.status.value} ${text.take(300)}")
         }
         return runCatching { json.parseToJsonElement(text).jsonObject }
             .getOrElse { error("cloudcode-pa LRO poll 响应不是 JSON：${text.take(300)}") }
@@ -523,20 +521,20 @@ class GoogleGeminiOAuthClient(
         codeVerifier: String,
         redirectUri: String,
     ): GoogleGeminiAuthTokens {
-        val body = FormBody.Builder()
-            .add("grant_type", "authorization_code")
-            .add("code", code)
-            .add("code_verifier", codeVerifier)
-            .add("redirect_uri", redirectUri)
-            .add("client_id", GEMINI_OAUTH_CLIENT_ID)
-            .add("client_secret", GEMINI_OAUTH_CLIENT_SECRET)
-            .build()
-        val response = httpClient.newCall(
-            Request.Builder().url(GOOGLE_OAUTH_TOKEN_ENDPOINT).post(body).build()
-        ).await()
-        val text = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-            error("Google OAuth token 交换失败：HTTP ${response.code} ${text.take(300)}")
+        val resp = ktorClient.submitForm(
+            url = GOOGLE_OAUTH_TOKEN_ENDPOINT,
+            formParameters = Parameters.build {
+                append("grant_type", "authorization_code")
+                append("code", code)
+                append("code_verifier", codeVerifier)
+                append("redirect_uri", redirectUri)
+                append("client_id", GEMINI_OAUTH_CLIENT_ID)
+                append("client_secret", GEMINI_OAUTH_CLIENT_SECRET)
+            }
+        )
+        val text = resp.bodyAsText()
+        if (!resp.status.isSuccess()) {
+            error("Google OAuth token 交换失败：HTTP ${resp.status.value} ${text.take(300)}")
         }
         val parsed = json.parseToJsonElement(text).jsonObject
         val accessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull

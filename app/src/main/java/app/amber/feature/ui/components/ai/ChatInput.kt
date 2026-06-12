@@ -311,8 +311,8 @@ fun ChatInput(
     val context = LocalContext.current
     val filesManager: FilesManager = koinInject()
     val httpClient: OkHttpClient = koinInject()
-    val usageClient = remember(context, httpClient) {
-        OpenAICodexOAuthClient(httpClient, OpenAICodexAuthStore(context))
+    val usageClient = remember(context) {
+        OpenAICodexOAuthClient(OpenAICodexAuthStore(context))
     }
     val providerUsageClient = remember(httpClient) {
         ProviderUsageClient(httpClient)
