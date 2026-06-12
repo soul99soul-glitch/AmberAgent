@@ -438,6 +438,7 @@ val dataSourceModule = module {
             filesManager = get(),
             webMountOAuthTokenStore = get(),
             openAICodexAuthStore = get(),
+            googleGeminiAuthStore = get(),
             json = get(),
             nativePathPrefs = get(),
         )

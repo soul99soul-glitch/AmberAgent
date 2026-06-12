@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import app.amber.ai.util.json
+import app.amber.ai.provider.providers.OAuthTokenSecureStore
 import app.amber.common.http.await
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
@@ -70,37 +72,32 @@ data class OpenAICodexUsageWindow(
 )
 
 class OpenAICodexAuthStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    private val store = OAuthTokenSecureStore(
+        context = context,
+        prefName = PREF_NAME,
+        keyAlias = "amberagent_openai_codex_oauth",
+    )
 
     fun get(providerId: Uuid): OpenAICodexAuthTokens? {
-        val raw = prefs.getString(providerId.toString(), null) ?: return null
+        val raw = store.get(providerId.toString()) ?: return null
         return runCatching { json.decodeFromString<OpenAICodexAuthTokens>(raw) }.getOrNull()
     }
 
     fun save(providerId: Uuid, tokens: OpenAICodexAuthTokens) {
-        prefs.edit().putString(providerId.toString(), json.encodeToString(tokens)).apply()
+        store.put(providerId.toString(), json.encodeToString(tokens))
     }
 
     fun clear(providerId: Uuid) {
-        prefs.edit().remove(providerId.toString()).apply()
+        store.remove(providerId.toString())
     }
 
     fun exportRawJsonForSync(): String {
-        val values = prefs.all.mapNotNull { (key, value) ->
-            val raw = value as? String ?: return@mapNotNull null
-            key to raw
-        }.toMap()
-        return json.encodeToString(values)
+        return json.encodeToString(store.exportPlainValues())
     }
 
     fun restoreRawJsonFromSync(raw: String) {
         val values = runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrNull() ?: return
-        prefs.edit().apply {
-            clear()
-            values.forEach { (key, value) ->
-                putString(key, value)
-            }
-        }.apply()
+        store.replacePlainValues(values)
     }
 }
 

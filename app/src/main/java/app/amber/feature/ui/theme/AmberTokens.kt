@@ -103,6 +103,13 @@ fun accentInkFor(accent: Color): Color = when (accent) {
     else -> Color(0xFFFFFFFF)
 }
 
-/** Build the active token set: a neutral [base] with the user-chosen [accent] injected. */
+/**
+ * Build the active token set: a neutral [base] with the user-chosen [accent] injected.
+ *
+ * `signal` is aliased to the accent (2026-06-10 decision): status/liveness indicators —
+ * LiveDot, completed ticks, board/provider status dots — render in the accent instead of
+ * the per-base green. The per-base `signal` greens above are kept as the design's original
+ * values should the dual-color semantics ever return.
+ */
 fun buildAmberTokens(base: AmberBase, accent: Color): AmberTokens =
-    baseTokens(base).copy(accent = accent, accentInk = accentInkFor(accent))
+    baseTokens(base).copy(accent = accent, accentInk = accentInkFor(accent), signal = accent)

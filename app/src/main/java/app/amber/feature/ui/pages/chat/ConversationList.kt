@@ -82,12 +82,16 @@ fun ColumnScope.ConversationList(
     conversationJobs: Collection<Uuid>,
     listState: LazyListState,
     modifier: Modifier = Modifier,
+    // 抽屉顶部内容（wordmark/搜索/导航行等）作为列表第 0 项随会话一起滚出视野，
+    // 而不是固定占位 —— 见 ChatDrawerContent。
+    header: (@Composable () -> Unit)? = null,
     onClick: (Conversation) -> Unit = {},
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
     onPin: (Conversation) -> Unit = {},
 ) {
     var hasScrolledToCurrent by remember(current.id) { mutableStateOf(false) }
+    val headerOffset = if (header != null) 1 else 0
 
     LaunchedEffect(current.id, conversations.itemCount, hasScrolledToCurrent) {
         if (hasScrolledToCurrent) return@LaunchedEffect
@@ -95,9 +99,10 @@ fun ColumnScope.ConversationList(
             (it as? ConversationListItem.Item)?.conversation?.id == current.id
         }
         if (currentIndex >= 0) {
-            val isVisible = listState.layoutInfo.visibleItemsInfo.any { it.index == currentIndex }
+            val targetIndex = currentIndex + headerOffset
+            val isVisible = listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex }
             if (!isVisible) {
-                listState.scrollToItem(currentIndex)
+                listState.scrollToItem(targetIndex)
             }
             hasScrolledToCurrent = true
         }
@@ -108,6 +113,12 @@ fun ColumnScope.ConversationList(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        if (header != null) {
+            item(key = "drawer_header", contentType = "drawer_header") {
+                header()
+            }
+        }
+
         if (conversations.itemCount == 0) {
             item {
                 EmptyConversationList()

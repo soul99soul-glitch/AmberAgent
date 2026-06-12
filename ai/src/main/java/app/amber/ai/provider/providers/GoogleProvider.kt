@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
@@ -45,6 +46,7 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.withStreamToolIndex
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
@@ -243,8 +245,23 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
-        val candidates = bodyJson["candidates"]!!.jsonArray
-        val usage = bodyJson["usageMetadata"]!!.jsonObject
+        val blockReason = bodyJson["promptFeedback"]
+            ?.jsonObject
+            ?.get("blockReason")
+            ?.jsonPrimitiveOrNull
+            ?.contentOrNull
+        require(blockReason == null) { "Google blocked the prompt: $blockReason" }
+        val candidates = bodyJson["candidates"]?.jsonArray
+            ?.takeIf { it.isNotEmpty() }
+            ?: error("Google returned no response candidates")
+        candidates.forEach { candidate ->
+            val candidateObj = candidate.jsonObject
+            val finishReason = candidateObj["finishReason"]?.jsonPrimitive?.contentOrNull
+            if (candidateObj["content"] == null && finishReason != null) {
+                error("Google returned no content for candidate with finishReason=$finishReason")
+            }
+        }
+        val usage = bodyJson["usageMetadata"] as? JsonObject
 
         val messageChunk = MessageChunk(
             id = Uuid.random().toString(),
@@ -309,7 +326,27 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             )
         }
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: model=${params.model.modelId}")
+
+        // Google functionCall 不携带 id; parseMessagePart 的随机 UUID 每个 chunk 都不同,
+        // merge 层无法识别同一 tool。这里在 stream scope 内分配单调递增的确定性 id +
+        // stream index, 保证同一流内 tool 标识稳定且并行 tool 不串线。
+        val streamToolIdPrefix = "google-fc-${Uuid.random().toString().take(8)}"
+        var nextToolCallOrdinal = 0
+        fun UIMessage.withStableToolCallIds(): UIMessage {
+            if (parts.none { it is UIMessagePart.Tool }) return this
+            return copy(
+                parts = parts.map { part ->
+                    if (part is UIMessagePart.Tool) {
+                        val ordinal = nextToolCallOrdinal++
+                        part.copy(toolCallId = "$streamToolIdPrefix-$ordinal")
+                            .withStreamToolIndex(ordinal)
+                    } else {
+                        part
+                    }
+                }
+            )
+        }
 
         val listener = object : EventSourceListener() {
             override fun onEvent(
@@ -318,7 +355,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.i(TAG, "onEvent: $data")
+                Log.d(TAG, "onEvent: type=$type chars=${data.length}")
 
                 try {
                     val rawJson = json.parseToJsonElement(data).jsonObject
@@ -353,7 +390,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                         put("groundingMetadata", groundingMetadata)
                                     }
                                 })
-                            }
+                            }?.withStableToolCallIds()
 
                             UIMessageChoice(
                                 index = index,
@@ -365,10 +402,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         usage = usage
                     )
 
-                    trySend(messageChunk)
+                    // 阻塞式发送形成背压, 避免 buffer 满时静默丢 token
+                    trySendBlocking(messageChunk)
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                    println("[onEvent] 解析错误: $data")
+                    // malformed event 不能只打日志吞掉: 否则表现为 silent empty assistant
+                    // 或流卡死, 用户看不到任何错误
+                    Log.w(TAG, "onEvent: failed to parse event chars=${data.length}", e)
+                    eventSource.cancel()
+                    close(e)
                 }
             }
 
@@ -769,9 +810,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         is UIMessagePart.Video -> {
             encodeBase64(false).getOrNull()?.let { base64Data ->
+                val mediaType = mime.takeIf { it.startsWith("video/") } ?: "video/mp4"
                 buildJsonObject {
                     put("inlineData", buildJsonObject {
-                        put("mimeType", "video/mp4")
+                        put("mimeType", mediaType)
                         put("data", base64Data)
                     })
                 }
@@ -780,9 +822,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         is UIMessagePart.Audio -> {
             encodeBase64(false).getOrNull()?.let { base64Data ->
+                val mediaType = mime.takeIf { it.startsWith("audio/") } ?: "audio/mpeg"
                 buildJsonObject {
                     put("inlineData", buildJsonObject {
-                        put("mimeType", "audio/mp3")
+                        put("mimeType", mediaType)
                         put("data", base64Data)
                     })
                 }

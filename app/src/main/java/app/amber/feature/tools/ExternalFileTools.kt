@@ -85,14 +85,23 @@ class ExternalFileTools(
                 withContext(Dispatchers.IO) {
                     val file = resolveAllowed(input.requiredString("path"))
                     require(file.isFile) { "path is not a file: ${file.path}" }
-                    val content = file.readText(Charsets.UTF_8)
                     val maxChars = (input.int("max_chars") ?: EXTERNAL_READ_DEFAULT_MAX_CHARS)
                         .coerceIn(1, EXTERNAL_READ_HARD_MAX_CHARS)
+                    val content = file.bufferedReader(Charsets.UTF_8).use { reader ->
+                        val buffer = CharArray(maxChars + 1)
+                        var total = 0
+                        while (total < buffer.size) {
+                            val read = reader.read(buffer, total, buffer.size - total)
+                            if (read < 0) break
+                            total += read
+                        }
+                        String(buffer, 0, total)
+                    }
                     textJson {
                         put("path", file.path)
                         put("content", content.take(maxChars))
-                        put("total_size_chars", content.length)
                         put("truncated", content.length > maxChars)
+                        put("total_size_chars", if (content.length > maxChars) maxChars + 1 else content.length)
                         put("max_chars", maxChars)
                     }
                 }

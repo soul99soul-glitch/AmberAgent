@@ -2,7 +2,47 @@
 
 日期：2026-06-11  
 范围：当前根目录 `/Users/arquiel/Downloads/AI/amberagent` 的活跃 Gradle 工程。  
-状态：本文件只记录已确认风险、疑似风险和复核结论；生成本文档时未修改 Kotlin/Gradle 源码。
+状态：本文件保留原始审计证据，并追加风险修复批次状态；生成本文档时未修改 Kotlin/Gradle 源码。
+
+## 2026-06-11 修复状态快照
+
+### 第一批：已修
+
+- `APP-LOG-001`, `MCP-002`, `AI-CLAUDE-001`：日志 redaction 与 provider logging hygiene 已修。
+- `APP-APPROVAL-001`, `MCP-001`, `TOOL-HTTP-001`：高风险工具审批与 MCP 默认审批策略已修。
+- `APP-SHARE-001`, `APP-SHORTCUT-001`, `WEBVIEW-001`, `APP-IMAGE-001`, `WORKSPACE-001`, `TERMINAL-001`, `COMMON-HTTP-001`：对应功能 bug 已修。
+- `AI-STREAM-001`：并行 tool-call delta merge 已按 stream index 修复。
+
+### 第二批：已修
+
+- `APP-DATA-001`, `APP-FAVORITE-001`, `APP-WORK-001`, `AI-OPENAI-001`, `SETTINGS-001`, `DEEPREAD-001`, `MINIAPP-001`：第二批提交 `b378872d` 已修。
+
+### 第三批：本次已修
+
+- GPT-5.5 Pro 复核提出的合并前 P1 项已追加收敛：AI provider / TTS / Search / MCP SSE / tool dispatcher 原始 payload 日志改为状态、长度或 key 列表；sync payload `files/` restore 增加单文件、总展开、文件数上限；S3/WebDAV 远端备份下载增加 `Content-Length` 预检、streaming hard cap 与 partial 清理；Chat attachment 从外部 URI/byte array 入库前增加 128MiB hard cap。
+
+- `APP-TOOL-001`：`download_file` 和 zip `archive_extract` 超限改为 fail-closed，不再静默写入截断文件。
+- `AI-GOOGLE-001`：Google 非流式 safety block 与空 candidates 改为明确错误。
+- `AI-FILE-001`：`UIMessagePart.Video/Audio` 增加 MIME 字段，Google 多模态编码使用实际 MIME，旧消息保留默认值。
+- `DOC-001`：PDF MuPDF document/page/structured text 显式释放；文档 prompt inline 增加输入/输出 hard cap 与截断标记。
+- `TOOL-READ-001`：workspace/external/Feishu office 文本读取改用 capped reader；archive list/extract 与 XLSX XML entry 增加硬上限；iCloud file/JSON response 改为 Ktor channel bounded read。
+- `SYNC-001`：sync manifest/settings/secrets/table JSONL/encrypted payload、skill zip/本地 skill 文件、本地导入、Google Drive 下载和旧 S3/WebDAV restore entry copy 增加硬上限。
+- `OAUTH-001`：OpenAI Codex OAuth 与 Google Gemini OAuth token 存储改用 Android Keystore AES-GCM 加密，初始化时迁移旧明文值；加密封装解密失败时 fail-closed，批量替换先完成全部加密后原子提交；两者均纳入 Sync secrets，Sync export 仍导出明文给既有加密归档层。
+- `RUNTIME-001`：app 启动时接入 `ChatEventProjector.replayUnfinished()`，持久化 unfinished runs 会标记 interrupted。
+- `RUNTIME-002`：`InProcessAgentRunner` 完成后清理 jobs，并只保留有限终态 snapshots。
+- `TTS-001`：通用 TTS synthesizer 拒绝零字节音频结果。
+- `SYNC-OLD-001`：旧 S3/WebDAV restore 先 stage/parse settings，DB/files 成功后最后应用 settings。
+- `BUILD-002`：embedded terminal runtime 远端下载固定 SHA-256，已有缓存也校验，不匹配会删除重下并校验。
+- `DEBUG-001`：debug smoke receiver 改为 `exported=false`，阻止其他 app 直接广播触发。
+- `APP-FILE-001`：`deleteChatFiles()` 删除边界收紧为 canonical `filesDir/upload`，workspace mirror 和外部路径跳过。
+- `PERM-001`, `PERM-002`：SMS read 只以 `READ_SMS` 为准；calendar create 同时要求 READ/WRITE calendar。
+- `TTS-002`：System TTS 初始化回调遇到理论空实例时走失败 continuation，不再从回调线程抛错。
+
+### 仍待修 / 产品决策
+
+- `SYNC-TEST-001`：仍是测试覆盖缺口；当前 DB v4→v5 仅加列，不构成当前数据丢失 bug。
+- `BUILD-001`：release Firebase client 缺失是私有配置/发布流程问题，按产品/发布环境决策处理。
+- `HIGHLIGHT-001`, `APP-MSG-001`, `TOOL-HTTP-001` 审批后的残余私网能力等未列入第三批本次代码修复范围。
 
 ## 0. 边界与口径
 

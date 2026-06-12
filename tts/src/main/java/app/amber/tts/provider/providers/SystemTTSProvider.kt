@@ -30,7 +30,13 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
             var tts: TextToSpeech? = null
             val listener = TextToSpeech.OnInitListener { status ->
                 if (status == TextToSpeech.SUCCESS) {
-                    val ttsInstance = tts ?: error("TextToSpeech instance is null")
+                    val ttsInstance = tts
+                    if (ttsInstance == null) {
+                        if (continuation.isActive) continuation.resumeWithException(
+                            Exception("TextToSpeech initialized before instance assignment")
+                        )
+                        return@OnInitListener
+                    }
 
                 // Set language
                 val locale = Locale.getDefault()

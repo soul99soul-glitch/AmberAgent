@@ -79,7 +79,7 @@ private suspend fun cacheWorkspaceFileForSharing(
     workspaceManager: WorkspaceManager,
     path: String,
 ): File {
-    val bytes = workspaceManager.readBytes(path)
+    val bytes = workspaceManager.readBytesCapped(path, MAX_SHARE_FILE_BYTES)
     val safeName = path.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "shared.bin" }
     val dir = File(context.cacheDir, "agent-share").apply { mkdirs() }
     return File(dir, safeName).apply { writeBytes(bytes) }
@@ -89,3 +89,5 @@ private fun mimeFromExtension(extension: String): String =
     MimeTypeMap.getSingleton()
         .getMimeTypeFromExtension(extension.lowercase())
         ?: "application/octet-stream"
+
+private const val MAX_SHARE_FILE_BYTES = 128 * 1024 * 1024

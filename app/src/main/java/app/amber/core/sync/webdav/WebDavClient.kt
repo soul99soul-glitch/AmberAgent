@@ -14,6 +14,7 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentLength
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import io.ktor.utils.io.readAvailable
@@ -164,16 +165,29 @@ class WebDavClient(
                     Log.e(TAG, "downloadToFile failed: ${response.status} - $errorBody")
                     throw WebDavException("Failed to download: ${response.status}", response.status.value, errorBody)
                 }
+                response.contentLength()?.let { length ->
+                    require(length <= MAX_DOWNLOAD_BYTES) { "WebDAV object exceeds $MAX_DOWNLOAD_BYTES byte download limit" }
+                }
 
                 val channel = response.bodyAsChannel()
-                targetFile.outputStream().use { outputStream ->
-                    val buffer = ByteArray(8192)
-                    while (!channel.isClosedForRead) {
-                        val bytesRead = channel.readAvailable(buffer)
-                        if (bytesRead > 0) {
-                            outputStream.write(buffer, 0, bytesRead)
+                try {
+                    targetFile.outputStream().use { outputStream ->
+                        val buffer = ByteArray(8192)
+                        var total = 0L
+                        while (!channel.isClosedForRead) {
+                            val bytesRead = channel.readAvailable(buffer)
+                            if (bytesRead > 0) {
+                                require(total <= MAX_DOWNLOAD_BYTES - bytesRead) {
+                                    "WebDAV object exceeds $MAX_DOWNLOAD_BYTES byte download limit"
+                                }
+                                outputStream.write(buffer, 0, bytesRead)
+                                total += bytesRead
+                            }
                         }
                     }
+                } catch (error: Throwable) {
+                    targetFile.delete()
+                    throw error
                 }
                 Log.d(TAG, "downloadToFile success: downloaded ${targetFile.length()} bytes")
             }
@@ -420,6 +434,8 @@ class WebDavClient(
         }
     }
 }
+
+private const val MAX_DOWNLOAD_BYTES = 1024L * 1024 * 1024
 
 data class WebDavResourceInfo(
     val href: String,

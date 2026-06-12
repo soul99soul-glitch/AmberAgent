@@ -95,20 +95,26 @@ class ChatInputState {
         messageContent = newMessage
     }
 
-    fun addVideos(uris: List<Uri>) {
+    fun addVideos(uris: List<Uri>, mimeTypes: List<String?> = emptyList()) {
         val newMessage = messageContent.toMutableList()
-        uris.forEach { uri ->
-            newMessage.add(UIMessagePart.Video(uri.toString()))
+        uris.forEachIndexed { index, uri ->
+            newMessage.add(UIMessagePart.Video(uri.toString(), mime = mimeTypes.getOrNull(index) ?: "video/mp4"))
         }
         messageContent = newMessage
     }
 
-    fun addAudios(uris: List<Uri>, fileNames: List<String> = emptyList()) {
+    fun addAudios(uris: List<Uri>, fileNames: List<String> = emptyList(), mimeTypes: List<String?> = emptyList()) {
         val newMessage = messageContent.toMutableList()
         uris.forEachIndexed { index, uri ->
             val name = fileNames.getOrNull(index)?.takeIf { it.isNotBlank() }
                 ?: uri.lastPathSegment.orEmpty()
-            newMessage.add(UIMessagePart.Audio(url = uri.toString(), fileName = name))
+            newMessage.add(
+                UIMessagePart.Audio(
+                    url = uri.toString(),
+                    fileName = name,
+                    mime = mimeTypes.getOrNull(index) ?: "audio/mpeg",
+                )
+            )
         }
         messageContent = newMessage
     }

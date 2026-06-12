@@ -257,12 +257,13 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     if (type?.startsWith("image/") == true) {
                         add(UIMessagePart.Image(url = file.toString()))
                     } else if (type?.startsWith("video/") == true) {
-                        add(UIMessagePart.Video(url = file.toString()))
+                        add(UIMessagePart.Video(url = file.toString(), mime = type))
                     } else if (type?.startsWith("audio/") == true) {
                         add(
                             UIMessagePart.Audio(
                                 url = file.toString(),
                                 fileName = fileName,
+                                mime = type,
                             )
                         )
                     } else {

@@ -11,9 +11,11 @@ import app.amber.core.files.SkillPaths
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.agent.data.db.AppDatabase
+import app.amber.core.sync.copyToBackupEntryWithinLimit
 import app.amber.core.sync.s3.S3Client
 import app.amber.core.sync.s3.S3Config
 import app.amber.core.utils.fileSizeToString
+import app.amber.core.sync.readZipEntryTextWithinLimit
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -203,6 +205,7 @@ class S3Sync(
         }
 
         try {
+            var stagedSettings: Settings? = null
             ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
                 var entry: ZipEntry?
                 while (zipIn.nextEntry.also { entry = it } != null) {
@@ -216,13 +219,10 @@ class S3Sync(
 
                     when (zipEntry.name) {
                         "settings.json" -> {
-                            val settingsJson = zipIn.readBytes().toString(Charsets.UTF_8)
-                            Log.i(TAG, "restoreFromBackupFile: Restoring settings")
+                            val settingsJson = readZipEntryTextWithinLimit(zipIn)
                             try {
-                                val migratedJson = settingsJson
-                                val settings = json.decodeFromString<Settings>(migratedJson)
-                                settingsStore.update(settings)
-                                Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")
+                                stagedSettings = json.decodeFromString<Settings>(settingsJson)
+                                Log.i(TAG, "restoreFromBackupFile: Settings staged successfully")
                             } catch (e: Exception) {
                                 Log.e(TAG, "restoreFromBackupFile: Failed to restore settings", e)
                                 throw Exception("Failed to restore settings: ${e.message}")
@@ -297,6 +297,10 @@ class S3Sync(
                 )
                 Log.i(TAG, "restoreFromBackupFile: Database restored; app restart is required")
             }
+            stagedSettings?.let { settings ->
+                settingsStore.update(settings)
+                Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")
+            }
         } finally {
             databaseRestoreDir?.deleteRecursively()
         }
@@ -357,7 +361,7 @@ class S3Sync(
 
         try {
             FileOutputStream(targetFile).use { outputStream ->
-                zipIn.copyTo(outputStream)
+                zipIn.copyToBackupEntryWithinLimit(outputStream)
             }
             Log.i(TAG, "restoreFromBackupFile: Restored skill file $entryName (${targetFile.length()} bytes)")
         } catch (e: Exception) {

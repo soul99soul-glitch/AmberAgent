@@ -8,8 +8,11 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.TokenUsage
 import app.amber.ai.provider.Model
@@ -19,6 +22,7 @@ import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 internal const val STREAM_TOOL_INDEX_METADATA_KEY = "stream_tool_index"
+internal const val STREAM_TOOL_ARGS_REPLACE_METADATA_KEY = "stream_tool_args_replace"
 
 // 公共消息抽象, 具体的Provider实现会转换为API接口需要的DTO
 //
@@ -106,39 +110,12 @@ data class UIMessage(
                     }
 
                     is UIMessagePart.Tool -> {
-                        val streamIndex = deltaPart.streamToolIndex()
-                        val existingByStreamIndex = streamIndex?.let { index ->
-                            acc.find { it is UIMessagePart.Tool && it.streamToolIndex() == index }
-                                as? UIMessagePart.Tool
-                        }
-                        if (deltaPart.toolCallId.isBlank()) {
-                            // No ID yet - OpenAI-compatible streams identify parallel tool deltas by index.
-                            val targetTool = existingByStreamIndex
-                                ?: if (streamIndex == null) {
-                                    acc.lastOrNull { it is UIMessagePart.Tool } as? UIMessagePart.Tool
-                                } else {
-                                    null
-                                }
-                            if (targetTool != null) {
-                                acc.map { part ->
-                                    if (part === targetTool) part.merge(deltaPart) else part
-                                }
-                            } else {
-                                acc + deltaPart.copy()
-                            }
+                        val target = deltaPart.findToolMergeTarget(acc.filterIsInstance<UIMessagePart.Tool>())
+                        if (target == null) {
+                            acc + deltaPart.withoutStreamArgsReplace()
                         } else {
-                            // Has ID - find and update by ID, or insert new
-                            val existsPart = (acc.find {
-                                it is UIMessagePart.Tool && it.toolCallId == deltaPart.toolCallId
-                            } as? UIMessagePart.Tool) ?: existingByStreamIndex
-                            if (existsPart == null) {
-                                acc + deltaPart.copy()
-                            } else {
-                                acc.map { part ->
-                                    if (part is UIMessagePart.Tool && part.toolCallId == deltaPart.toolCallId) {
-                                        part.merge(deltaPart)
-                                    } else part
-                                }
+                            acc.map { part ->
+                                if (part === target) target.merge(deltaPart) else part
                             }
                         }
                     }
@@ -161,9 +138,12 @@ data class UIMessage(
                     } else part
                 }
             }
-            // Handle annotations
-            val newAnnotations = delta.annotations.ifEmpty {
+            // Handle annotations: append + dedupe, 不整体替换
+            // (Google grounding / OpenAI citation 可能分多个 chunk 增量到达或重发全量)
+            val newAnnotations = if (delta.annotations.isEmpty()) {
                 annotations
+            } else {
+                (annotations + delta.annotations).distinct()
             }
             copy(
                 parts = newParts,
@@ -405,6 +385,7 @@ sealed class UIMessagePart {
     @SerialName("video")
     data class Video(
         val url: String,
+        val mime: String = "video/mp4",
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 
@@ -412,12 +393,8 @@ sealed class UIMessagePart {
     @SerialName("audio")
     data class Audio(
         val url: String,
-        // Default so old persisted JSON without this field still deserializes. Render
-        // layer falls back to the URL's last path segment when fileName is blank.
-        // (mime intentionally not stored — every audio encoder downstream hard-codes
-        // `audio/mp3` today, so plumbing a per-file mime would be a half-wired
-        // feature. Add it when an encoder actually starts honouring it.)
         val fileName: String = "",
+        val mime: String = "audio/mpeg",
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 
@@ -478,20 +455,98 @@ sealed class UIMessagePart {
         }.getOrElse { JsonObject(emptyMap()) }
 
         fun merge(other: Tool): Tool {
+            // replace 语义 (arguments.done / final message 的完整 tool args): 整体替换
+            // 而不是流式 append, 否则 delta 累积 + done 全量会重复拼接 input
+            val replaceArgs = other.isStreamArgsReplace()
+            val incoming = if (replaceArgs) other.withoutStreamArgsReplace() else other
             return Tool(
-                toolCallId = toolCallId,
-                toolName = toolName + other.toolName,
-                input = input + other.input,
-                output = output + other.output,
+                // OpenAI 流式 tool delta 的真实 id 可能晚于首个 (blank id) delta 到达,
+                // 必须采纳后到的非空 id, 否则下游按 toolCallId 回填执行结果会失败
+                toolCallId = toolCallId.ifBlank { incoming.toolCallId },
+                toolName = if (replaceArgs) incoming.toolName.ifBlank { toolName } else toolName + incoming.toolName,
+                input = when {
+                    !replaceArgs -> input + incoming.input
+                    // replace 不允许空内容抹掉已累积参数 (异常 provider 兜底)
+                    incoming.input.isNotBlank() -> incoming.input
+                    else -> input
+                },
+                output = output + incoming.output,
                 approvalState = approvalState,
-                metadata = if (other.metadata != null) other.metadata else metadata,
+                metadata = if (incoming.metadata != null) incoming.metadata else metadata,
             )
         }
     }
 }
 
-internal fun UIMessagePart.Tool.streamToolIndex(): Int? =
+// public: UI 层用它做 tool 卡片的稳定 Compose key (toolCallId 为空时的回退)
+fun UIMessagePart.Tool.streamToolIndex(): Int? =
     metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
+
+/**
+ * 给 Tool part 附加流式 stream index 元数据 (合并入已有 metadata)。
+ * provider parser 用它标记并行 tool delta 的归属，merge 层按此索引聚合。
+ */
+internal fun UIMessagePart.Tool.withStreamToolIndex(index: Int): UIMessagePart.Tool {
+    val mergedMetadata = buildJsonObject {
+        metadata?.forEach { (key, value) -> put(key, value) }
+        put(STREAM_TOOL_INDEX_METADATA_KEY, index)
+    }
+    return copy(metadata = mergedMetadata)
+}
+
+/**
+ * 标记该 Tool delta 的 input 为 replace 语义 (整体替换累积参数), 用于
+ * OpenAI Responses 的 function_call_arguments.done / final message 全量 args。
+ * 不带此标记的 delta 保持 append 语义 (arguments.delta 流式片段)。
+ */
+internal fun UIMessagePart.Tool.withStreamArgsReplace(): UIMessagePart.Tool {
+    val mergedMetadata = buildJsonObject {
+        metadata?.forEach { (key, value) -> put(key, value) }
+        put(STREAM_TOOL_ARGS_REPLACE_METADATA_KEY, true)
+    }
+    return copy(metadata = mergedMetadata)
+}
+
+internal fun UIMessagePart.Tool.isStreamArgsReplace(): Boolean =
+    metadata?.get(STREAM_TOOL_ARGS_REPLACE_METADATA_KEY)?.jsonPrimitive?.booleanOrNull == true
+
+/**
+ * 剥离 replace 控制标记 (返回防御性 copy)。merge 结果与新建 part 都不应携带
+ * 流式控制元数据, 避免随消息持久化。
+ */
+internal fun UIMessagePart.Tool.withoutStreamArgsReplace(): UIMessagePart.Tool {
+    val current = metadata ?: return copy()
+    if (STREAM_TOOL_ARGS_REPLACE_METADATA_KEY !in current) return copy()
+    val cleaned = JsonObject(current.filterKeys { it != STREAM_TOOL_ARGS_REPLACE_METADATA_KEY })
+    return copy(metadata = cleaned.takeIf { it.isNotEmpty() })
+}
+
+/**
+ * 流式 tool delta 的统一合并目标查找 (所有 merge 路径共享, 语义保持一致):
+ *
+ * 1. delta 带非空 toolCallId: 先按 id 匹配, 失败再按 streamToolIndex 匹配
+ *    (覆盖 "先 index 后 id" 的 OpenAI 流式时序);
+ * 2. delta 是 blank id: 只按 streamToolIndex 匹配;
+ * 3. delta 既无 id 也无 index: 回退到最后一个 Tool (单 tool 流的兼容分支);
+ * 4. blank id 且带 index 但找不到匹配: 返回 null, 新建 part, 避免串到别的 tool。
+ */
+internal fun UIMessagePart.Tool.findToolMergeTarget(
+    tools: List<UIMessagePart.Tool>
+): UIMessagePart.Tool? {
+    // 已执行 (有 output) 的 tool 已封口, 不能再作为合并目标: 多轮 tool 循环
+    // 共用同一条 assistant 消息, 第二轮的 stream index 从 0 重新计数, 不排除
+    // 已执行项会把新一轮 delta 串进上一轮同 index/末尾的 tool。
+    val candidates = tools.filter { !it.isExecuted }
+    val streamIndex = streamToolIndex()
+    val byStreamIndex = streamIndex?.let { index ->
+        candidates.firstOrNull { it.streamToolIndex() == index }
+    }
+    return if (toolCallId.isBlank()) {
+        byStreamIndex ?: if (streamIndex == null) candidates.lastOrNull() else null
+    } else {
+        candidates.firstOrNull { it.toolCallId == toolCallId } ?: byStreamIndex
+    }
+}
 
 fun UIMessage.finishReasoning(): UIMessage {
     return copy(
@@ -541,6 +596,19 @@ sealed class UIMessageAnnotation {
     data class UrlCitation(
         val title: String,
         val url: String
+    ) : UIMessageAnnotation()
+
+    /**
+     * Marks an assistant message whose generation was cut off by a process
+     * death (or other non-graceful stop) and later recovered from a stream
+     * checkpoint. `reason` carries the interruption source, with a
+     * ":stale_tail" suffix when the persisted content is known to lag the
+     * last checkpoint (i.e. the streamed tail was partially lost).
+     */
+    @Serializable
+    @SerialName("generation_interrupted")
+    data class GenerationInterrupted(
+        val reason: String = "",
     ) : UIMessageAnnotation()
 }
 

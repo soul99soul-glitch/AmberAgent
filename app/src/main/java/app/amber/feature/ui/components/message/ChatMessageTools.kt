@@ -389,8 +389,10 @@ internal fun AgentToolCallCapsule(
                 } else {
                     Modifier
                 }
-            )
-            .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
+            ),
+        // 不在胶囊上再加 animateContentSize: 外层 ChatMessageToolStep Column 已有
+        // 一层 (input 流式增长/审批切换/output 回填时两层弹簧并行会弹跳)。
+        // 见 ChatMessage.kt 中关于 message 渲染路径禁止叠加 animateContentSize 的注释。
         shape = shape,
         color = theme.toolPillBg,
         contentColor = workspace.ink,
@@ -483,8 +485,8 @@ private fun V3ToolStatusBadge(
     modifier: Modifier = Modifier,
 ) {
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    // §6.2: a completed tool call uses signal-green (liveness/"just-finished"),
-    // independent of the accent-derived toolDoneBg.
+    // §6.2 amended (2026-06-10): `signal` is aliased to the user accent in buildAmberTokens,
+    // so the completed badge renders in the accent — same family as the failed cross.
     val signal = app.amber.feature.ui.theme.LocalAmberTokens.current.signal
     val (bg, ink) = when (status) {
         AgentToolStatus.SUCCEEDED -> signal to theme.toolDoneBadgeInk
@@ -497,7 +499,7 @@ private fun V3ToolStatusBadge(
         AgentToolStatus.CANCELLED -> Color.Transparent to theme.accent
     }
     if (status == AgentToolStatus.RUNNING) {
-        // §6.2 ToolCall row: running → signal-green breathing live dot.
+        // §6.2 ToolCall row: running → breathing live dot (signal = accent alias).
         Box(modifier.requiredSize(16.dp), contentAlignment = Alignment.Center) {
             app.amber.feature.ui.components.ds.LiveDot()
         }

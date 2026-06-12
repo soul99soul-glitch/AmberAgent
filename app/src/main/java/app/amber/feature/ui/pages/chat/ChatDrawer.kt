@@ -165,7 +165,7 @@ fun ChatDrawerContent(
                     .padding(top = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                // (1) Amber wordmark
+                // (1) Amber wordmark —— 与 (2) 搜索框一起固定在顶部，不随列表滚动
                 Text(
                     text = "Amber",
                     fontSize = 32.sp,
@@ -206,93 +206,8 @@ fun ChatDrawerContent(
                     )
                 }
 
-                // (3) Primary nav rows: 新聊天 / 今日看板 / 小应用
-                V3NavRow(
-                    icon = HugeIcons.MessageAdd01,
-                    label = "新聊天",
-                    accent = true,
-                    chatTheme = chatTheme,
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                        navigateToChatPage(navController)
-                    },
-                )
-                // V3 设计稿 4 套主题中 "今日看板" 永远显示（不绑 todayBoardEnabled flag），
-                // 点开后用户没启用时由 TodayBoard 页面自己引导启用
-                V3NavRow(
-                    icon = HugeIcons.News01,
-                    label = "今日看板",
-                    accent = false,
-                    chatTheme = chatTheme,
-                    onClick = { navController.navigate(Screen.TodayBoard) },
-                )
-                V3NavRow(
-                    icon = HugeIcons.DashboardSquare01,
-                    label = "小应用",
-                    accent = false,
-                    chatTheme = chatTheme,
-                    onClick = { navController.navigate(Screen.MiniAppList) },
-                )
-
-                // (4) QuickRow: 3 icon-only buttons (Workspace 文件 / 伴随智能 / 聊天热力图统计)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    V3QuickBtn(
-                        icon = HugeIcons.Folder01,
-                        contentDescription = "Workspace 文件",
-                        chatTheme = chatTheme,
-                        onClick = onOpenWorkspace,
-                    )
-                    V3QuickBtn(
-                        icon = HugeIcons.Sparkles,
-                        contentDescription = "伴随智能",
-                        chatTheme = chatTheme,
-                        onClick = onOpenFavoritesLive,
-                    )
-                    V3QuickBtn(
-                        icon = HugeIcons.ChartColumn,
-                        contentDescription = "聊天热力图统计",
-                        chatTheme = chatTheme,
-                        onClick = { navController.navigate(Screen.Stats) },
-                    )
-                }
-
-                // (5) Divider
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 6.dp, vertical = 12.dp)
-                        .height(1.dp)
-                        .background(chatTheme.hair),
-                )
-
-                // (6) 最近 section label: 跟"新聊天"(V3NavRow accent=true) 同款 — accent 色 + Medium
-                Row(
-                    modifier = Modifier
-                        .padding(horizontal = 6.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Time02,
-                        contentDescription = null,
-                        modifier = Modifier.size(19.dp),
-                        tint = chatTheme.accent,
-                    )
-                    Text(
-                        text = "最近",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.2.sp,
-                        color = chatTheme.accent,
-                    )
-                }
-
-                // (7) ConversationList — 历史会话（active 项已自动 accentSoft pill 高亮）
+                // (3)-(6)（导航行/快捷钮/分隔线/最近标签）在 ConversationList 的 header 项里：
+                // 上滑时随会话列表一起被推出视野，给 session 列表让出空间；footer 仍固定。
                 ConversationList(
                     current = current,
                     conversations = conversations,
@@ -301,6 +216,15 @@ fun ChatDrawerContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
+                    header = {
+                        V3DrawerHeader(
+                            navController = navController,
+                            drawerState = drawerState,
+                            chatTheme = chatTheme,
+                            onOpenWorkspace = onOpenWorkspace,
+                            onOpenFavoritesLive = onOpenFavoritesLive,
+                        )
+                    },
                     onClick = {
                         scope.launch {
                             if (it.id != current.id) {
@@ -520,6 +444,109 @@ private fun DrawerAction(
             Box(contentAlignment = Alignment.Center) {
                 Box(modifier = Modifier.size(22.dp)) { icon() }
             }
+        }
+    }
+}
+
+/**
+ * 抽屉滚动头 (3)-(6)：主导航行 → 快捷钮 → 分隔线 → 最近标签。
+ * 作为 ConversationList 的 header 项渲染（LazyColumn 第 0 项），随会话列表一起滚动；
+ * (1) wordmark 与 (2) 搜索框固定在 ChatDrawerContent 顶部，不在此列。
+ */
+@Composable
+private fun V3DrawerHeader(
+    navController: Navigator,
+    drawerState: DrawerState,
+    chatTheme: ChatTheme,
+    onOpenWorkspace: () -> Unit,
+    onOpenFavoritesLive: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        // (3) Primary nav rows: 新聊天 / 今日看板 / 小应用
+        V3NavRow(
+            icon = HugeIcons.MessageAdd01,
+            label = "新聊天",
+            accent = true,
+            chatTheme = chatTheme,
+            onClick = {
+                scope.launch { drawerState.close() }
+                navigateToChatPage(navController)
+            },
+        )
+        // V3 设计稿 4 套主题中 "今日看板" 永远显示（不绑 todayBoardEnabled flag），
+        // 点开后用户没启用时由 TodayBoard 页面自己引导启用
+        V3NavRow(
+            icon = HugeIcons.News01,
+            label = "今日看板",
+            accent = false,
+            chatTheme = chatTheme,
+            onClick = { navController.navigate(Screen.TodayBoard) },
+        )
+        V3NavRow(
+            icon = HugeIcons.DashboardSquare01,
+            label = "小应用",
+            accent = false,
+            chatTheme = chatTheme,
+            onClick = { navController.navigate(Screen.MiniAppList) },
+        )
+
+        // (4) QuickRow: 3 icon-only buttons (Workspace 文件 / 伴随智能 / 聊天热力图统计)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            V3QuickBtn(
+                icon = HugeIcons.Folder01,
+                contentDescription = "Workspace 文件",
+                chatTheme = chatTheme,
+                onClick = onOpenWorkspace,
+            )
+            V3QuickBtn(
+                icon = HugeIcons.Sparkles,
+                contentDescription = "伴随智能",
+                chatTheme = chatTheme,
+                onClick = onOpenFavoritesLive,
+            )
+            V3QuickBtn(
+                icon = HugeIcons.ChartColumn,
+                contentDescription = "聊天热力图统计",
+                chatTheme = chatTheme,
+                onClick = { navController.navigate(Screen.Stats) },
+            )
+        }
+
+        // (5) Divider
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 12.dp)
+                .height(1.dp)
+                .background(chatTheme.hair),
+        )
+
+        // (6) 最近 section label: 跟"新聊天"(V3NavRow accent=true) 同款 — accent 色 + Medium
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 6.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(
+                imageVector = HugeIcons.Time02,
+                contentDescription = null,
+                modifier = Modifier.size(19.dp),
+                tint = chatTheme.accent,
+            )
+            Text(
+                text = "最近",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.2.sp,
+                color = chatTheme.accent,
+            )
         }
     }
 }

@@ -2,12 +2,19 @@ package app.amber.core.automation
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import app.amber.feature.live.LiveScreenSnapshot
 import app.amber.feature.live.LiveUiTreeProcessor
@@ -15,7 +22,22 @@ import app.amber.feature.live.LiveWindowCandidate
 import kotlin.coroutines.resume
 
 class AmberAccessibilityService : AccessibilityService(), AccessibilityController {
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val e = event ?: return
+        when (e.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            -> _screenEvents.tryEmit(
+                ScreenEvent(
+                    packageName = e.packageName?.toString().orEmpty(),
+                    eventType = e.eventType,
+                    atMillis = System.currentTimeMillis(),
+                )
+            )
+        }
+    }
+
+    data class ScreenEvent(val packageName: String, val eventType: Int, val atMillis: Long)
 
     override fun onInterrupt() = Unit
 
@@ -58,6 +80,68 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    /**
+     * 在指定包名的窗口里填入文本：优先该窗口的输入焦点节点，否则深度优先找第一个
+     * 可编辑节点。供 Live 伴随"只填不发"使用 —— 点击 Amber 自己的按钮时活动窗口
+     * 是 Amber，rootInActiveWindow 拿不到对方输入框，必须按包名扫 windows。
+     */
+    fun setTextInPackage(packageName: String, text: String): Boolean {
+        if (packageName.isBlank()) return false
+        for (window in windows.orEmpty()) {
+            val root = window.root ?: continue
+            if (root.packageName?.toString() != packageName) continue
+            val target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+                ?: findFirstEditable(root, depth = 0)
+                ?: continue
+            val arguments = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            if (target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)) return true
+        }
+        return false
+    }
+
+    private fun findFirstEditable(node: AccessibilityNodeInfo, depth: Int): AccessibilityNodeInfo? {
+        if (depth > 80) return null
+        if (node.isEditable && node.isVisibleToUser) return node
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            findFirstEditable(child, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * API 30+ 截当前屏为软件 Bitmap；低版本或失败返回 null（调用方降级保守模式）。
+     */
+    @Suppress("NewApi")
+    suspend fun takeScreenshotBitmap(): Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return suspendCancellableCoroutine { cont ->
+            // takeScreenshot 在服务未声明 canTakeScreenshot、或被系统限流时会同步抛异常；
+            // 吞掉并 resume(null)，让调用方降级保守模式，而不是把整次分析炸成失败。
+            val launched = runCatching {
+                takeScreenshot(
+                    Display.DEFAULT_DISPLAY,
+                    mainExecutor,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(result: ScreenshotResult) {
+                            val bitmap = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                                ?.copy(Bitmap.Config.ARGB_8888, false)
+                            result.hardwareBuffer.close()
+                            if (cont.isActive) cont.resume(bitmap)
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    },
+                )
+            }.isSuccess
+            if (!launched && cont.isActive) cont.resume(null)
+        }
     }
 
     fun activePackageName(): String? =
@@ -331,6 +415,14 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
         private var activeService: AmberAccessibilityService? = null
 
         fun getActiveService(): AmberAccessibilityService? = activeService
+
+        private val _screenEvents = MutableSharedFlow<ScreenEvent>(
+            extraBufferCapacity = 64,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+
+        /** 屏幕变化事件（窗口切换/内容变化），LiveModeManager 据此驱动分析。 */
+        val screenEvents: SharedFlow<ScreenEvent> = _screenEvents.asSharedFlow()
 
         private val systemWindowPackages = setOf(
             "android",

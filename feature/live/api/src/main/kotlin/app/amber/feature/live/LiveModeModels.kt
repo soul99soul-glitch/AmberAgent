@@ -1,6 +1,18 @@
 package app.amber.feature.live
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+@Serializable
+enum class LiveAnalysisMode {
+    /** 保守：只读无障碍 UI 树文字 */
+    @SerialName("conservative")
+    CONSERVATIVE,
+
+    /** 激进：截屏喂视觉模型，UI 树作辅助 */
+    @SerialName("aggressive")
+    AGGRESSIVE,
+}
 
 @Serializable
 data class LiveModeSetting(
@@ -11,6 +23,11 @@ data class LiveModeSetting(
     val minAnalysisIntervalMs: Long = 10_000L,
     val maxNodes: Int = 180,
     val voiceInputEnabled: Boolean = true,
+    val analysisMode: LiveAnalysisMode = LiveAnalysisMode.CONSERVATIVE,
+    /** 伴随模型 Uuid 字符串；null = 跟随当前聊天模型 */
+    val companionModelId: String? = null,
+    /** 伴随期间显示悬浮气泡（无障碍 overlay，零额外权限） */
+    val bubbleEnabled: Boolean = true,
 )
 
 data class LiveScreenSnapshot(

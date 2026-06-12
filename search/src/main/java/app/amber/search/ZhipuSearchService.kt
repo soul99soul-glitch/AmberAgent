@@ -77,9 +77,7 @@ object ZhipuSearchService : SearchService<SearchServiceOptions.ZhipuOptions> {
                 val response = runCatching {
                     json.decodeFromString<ZhipuDto>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
-                    error("Failed to decode response: $bodyRaw")
+                    error("Failed to decode Zhipu response (${bodyRaw.length} chars): ${it.message}")
                 }.getOrThrow()
 
                 return@withContext Result.success(
@@ -93,8 +91,7 @@ object ZhipuSearchService : SearchService<SearchServiceOptions.ZhipuOptions> {
                         }
                     ))
             } else {
-                println(response.body?.string())
-                error("response failed #${response.code}")
+                error("Zhipu response failed #${response.code}")
             }
         }
     }

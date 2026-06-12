@@ -59,12 +59,21 @@ class InProcessAgentRunnerTest {
         }
 
         override suspend fun appendEvent(event: AgentEventRecord) {
-            events += event
+            if (events.none { it.runId == event.runId && it.seq == event.seq }) {
+                events += event
+            }
         }
 
         override suspend fun appendSpan(span: TraceSpanRecord) {}
 
         override fun observeRun(runId: AgentRunId): Flow<AgentRunSnapshot> = emptyFlow()
+
+        override suspend fun listEvents(runId: AgentRunId): List<AgentEventRecord> =
+            events.filter { it.runId == runId.value }.sortedBy { it.seq }
+
+        override suspend fun deleteEventsByType(runId: AgentRunId, type: String) {
+            events.removeAll { it.runId == runId.value && it.type == type }
+        }
 
         override suspend fun listUnfinishedRuns(): List<AgentRunRecord> =
             runs.filter { it.status == "running" }
@@ -177,5 +186,28 @@ class InProcessAgentRunnerTest {
         assertEquals(handle.runId, snapshot.runId)
         // Status should be RUNNING or COMPLETED depending on timing
         assertTrue(snapshot.status in setOf(AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED))
+    }
+
+    @Test
+    fun `completed runs are not reported as unfinished after cleanup`() = runBlocking {
+        val store = RecordingEventStore()
+        val registry = InMemoryAgentRegistry().apply {
+            register(
+                descriptor = FakeAgent().descriptor,
+                inputClass = FakeInput::class,
+                inputSerializer = FakeInput.serializer(),
+                artifactSerializer = FakeArtifact.serializer(),
+                factory = { FakeAgent() },
+            )
+        }
+        val runner = InProcessAgentRunner(registry, store)
+
+        runner.launch(AgentDescriptorId("fake"), FakeInput("done")).getOrThrow()
+        repeat(20) {
+            if (store.runs.lastOrNull()?.status == "completed") return@repeat
+            delay(50)
+        }
+
+        assertEquals(emptyList<AgentRunSnapshot>(), runner.listUnfinishedRuns())
     }
 }

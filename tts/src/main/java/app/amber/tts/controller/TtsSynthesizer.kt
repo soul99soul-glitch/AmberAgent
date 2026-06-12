@@ -35,6 +35,7 @@ class TtsSynthesizer(
             if (sampleRate == null) sampleRate = chunk.sampleRate
             output.write(chunk.data)
         }
+        check(output.size() > 0) { "TTS provider returned no audio data" }
         return TTSResponse(
             audioData = output.toByteArray(),
             format = format ?: AudioFormat.MP3,
@@ -42,4 +43,3 @@ class TtsSynthesizer(
         )
     }
 }
-

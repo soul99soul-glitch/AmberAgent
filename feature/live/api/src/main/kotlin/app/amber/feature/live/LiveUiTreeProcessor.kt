@@ -144,6 +144,7 @@ object LiveUiTreeProcessor {
         return digest.joinToString("") { "%02x".format(it) }.take(16)
     }
 
+    @Deprecated("由 LiveEngine 取代，仅留作参考")
     fun shouldAnalyze(
         previousHash: String?,
         nextHash: String?,
