@@ -50,8 +50,7 @@ struct MessageBubbleView: View {
                         .background(.tint)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 } else {
-                    Text(textPart.text)
-                        .font(.body)
+                    MarkdownView(markdown: textPart.text)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(.ultraThinMaterial)
