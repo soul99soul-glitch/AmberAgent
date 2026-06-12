@@ -1,5 +1,6 @@
 package app.amber.feature.ui.components.message
 
+import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -71,6 +72,7 @@ private const val REASONING_EXPANDED_FINAL_CHAR_LIMIT = 18_000
 
 // 自动折叠相对"生成结束"的延迟: 错开结束瞬间的虚拟化切换/footer 显隐等布局变化
 private const val REASONING_AUTO_COLLAPSE_DELAY_MS = 300L
+private const val SCROLL_TAG = "AmberChatScroll"
 
 enum class ReasoningCardState(val expanded: Boolean) {
     Collapsed(false),
@@ -85,6 +87,7 @@ private class ReasoningState(
 ) {
     var expandState by mutableStateOf(ReasoningCardState.Collapsed)
     var duration by mutableStateOf(initialDuration)
+    var sawStreamingMessage by mutableStateOf(false)
 
     fun onExpandedChange(nextExpanded: Boolean, loading: Boolean) {
         expandState = if (loading) {
@@ -116,18 +119,27 @@ private fun rememberReasoningState(
         )
     }
 
-    LaunchedEffect(loading) {
-        if (loading) {
+    LaunchedEffect(loading, messageLoading) {
+        if (messageLoading) {
+            state.sawStreamingMessage = true
             if (!state.expandState.expanded && settings.displaySetting.showThinkingContent)
                 state.expandState = ReasoningCardState.Preview
         } else {
-            if (state.expandState.expanded) {
+            if (state.sawStreamingMessage) {
+                // Collapsing the reasoning card while the answer is streaming, or
+                // immediately after it finishes, removes a large block above the
+                // tail content and makes LazyColumn restore around the message top.
+                // Keep streamed reasoning stable; users can still collapse it manually.
+                Log.d(SCROLL_TAG, "[reasoning] auto-collapse skipped for streamed message")
+            } else if (state.expandState.expanded) {
                 if (settings.displaySetting.autoCloseThinking) {
                     // 生成结束的同一帧里还会发生: 消息从整条 item 切换成虚拟化多
                     // item、ActionFooter 由占位转可见、流式/非流式渲染分支切换。
                     // 把自动折叠错开一拍, 让这些布局变化先落定, 避免叠加成一次
                     // 大跳变。loading 重新变 true (重新生成) 时此协程被取消。
+                    Log.d(SCROLL_TAG, "[reasoning] auto-collapse will fire in ${REASONING_AUTO_COLLAPSE_DELAY_MS}ms")
                     delay(REASONING_AUTO_COLLAPSE_DELAY_MS)
+                    Log.d(SCROLL_TAG, "[reasoning] auto-collapse COMMITTED → Collapsed")
                     state.expandState = ReasoningCardState.Collapsed
                 } else {
                     state.expandState = ReasoningCardState.Expanded

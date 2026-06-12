@@ -109,6 +109,7 @@ import org.intellij.markdown.parser.MarkdownParser
 import app.amber.feature.ui.components.richtext.tree.JvmMdNode
 import app.amber.feature.ui.components.richtext.tree.MdNode
 import app.amber.feature.ui.components.richtext.tree.MdNodeType
+import app.amber.feature.ui.components.richtext.tree.TableAlign
 import app.amber.feature.ui.components.richtext.tree.nativeMdTreeOrNull
 import app.amber.feature.ui.components.richtext.tree.textIn
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
@@ -420,6 +421,37 @@ internal data class MarkdownTopLevelBlockSnapshot(
     val parseResult: MarkdownParseResult,
     val preserveParagraphBottomPadding: Boolean,
 )
+
+private class EmptyMarkdownRootNode(
+    override val endOffset: Int,
+) : MdNode {
+    override val type: MdNodeType = MdNodeType.Root
+    override val startOffset: Int = 0
+    override val children: List<MdNode> = emptyList()
+    override val parent: MdNode? = null
+    override val headingLevel: Int? = null
+    override val codeLang: String? = null
+    override val linkHref: String? = null
+    override val linkTitle: String? = null
+    override val imageSrc: String? = null
+    override val taskChecked: Boolean? = null
+    override val listStart: Long? = null
+    override val tableAlignments: List<TableAlign>? = null
+    override val isFencedCode: Boolean = false
+    override val codeFenceEndOffset: Int? = null
+    override val codeFenceContentRange: IntRange? = null
+    override val contentChildren: List<MdNode> = emptyList()
+    override val isAutolink: Boolean = false
+    override val linkLabel: String? = null
+    override val linkInnerText: String? = null
+    override val isBlockquoteMarker: Boolean = false
+
+    override fun nextSibling(): MdNode? = null
+
+    override fun findChildOfTypeRecursive(vararg types: MdNodeType): MdNode? {
+        return if (type in types) this else null
+    }
+}
 
 internal data class StreamingRepairResult(
     val text: String,
@@ -928,48 +960,6 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
     return MarkdownParseResult(preprocessed, tree, tree.containsHtmlBlocks())
 }
 
-/**
- * Populate [stableTopLevelBlocks] for a non-streaming (complete) parse result.
- *
- * When streaming ends, the Markdown composable transitions from the streaming
- * parse cache to [MarkdownParseCache.getOrParse]. Without stable blocks, the
- * render path switches from the keyed-block structure (each stable block wrapped
- * in `key(block.key)`) to an un-keyed positional loop. Compose then disposes the
- * entire keyed subtree and rebuilds every node cold — complex nodes (code blocks,
- * tables) measure at minimal height for 1-2 frames, and LazyColumn clamps the
- * scroll offset to the item top, causing a visible "jump to the beginning".
- *
- * By populating stable blocks for the complete content, the render path stays in
- * the keyed branch and Compose reuses the warm node compositions — no cold
- * remeasure, no height collapse, no viewport jump.
- *
- * The key format matches [StreamingMarkdownParseCache]'s format exactly
- * (`"$type:$absoluteOffset:$length:$hashCode"`) so Compose matches the old and
- * new nodes by the same identity. Since this is a complete parse, every top-level
- * block is "stable" (no still-growing tail).
- *
- * Only called at the top-level parse site in the MarkdownBlock LaunchedEffect,
- * never from [parsePreprocessedMarkdownUncached] — sub-block parsing via
- * [MarkdownParseCache.getOrParsePreprocessed] does NOT re-enter this function,
- * preventing infinite recursion.
- */
-private fun MarkdownParseResult.withStableTopLevelBlocks(): MarkdownParseResult {
-    val children = tree.children
-    if (children.size <= 1) return this
-    val content = preprocessed
-    val blocks = children.map { child ->
-        val blockContent = content.substring(child.startOffset, child.endOffset)
-        MarkdownTopLevelBlockSnapshot(
-            key = "${child.type}:${child.startOffset}:${blockContent.length}:${blockContent.hashCode()}",
-            parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
-            preserveParagraphBottomPadding = child.type == MdNodeType.Paragraph &&
-                child.nextSibling() != null &&
-                child.findChildOfTypeRecursive(MdNodeType.Image, MdNodeType.MathBlock) == null,
-        )
-    }
-    return copy(stableTopLevelBlocks = blocks)
-}
-
 private fun parseMarkdownUncached(content: String): MarkdownParseResult {
     return parsePreprocessedMarkdownUncached(preProcess(content))
 }
@@ -997,6 +987,104 @@ internal class StreamingMarkdownParseCache {
                 syntheticSuffixStart = activeBaseOffset + repairedTail.syntheticSuffixStart,
             )
     }
+
+    fun finalizeComplete(content: String): MarkdownParseResult =
+        traceMarkdown("Amber Markdown parse finalize streaming") {
+            val (prefix, blocks) = synchronized(lock) {
+                if (stableRawPrefix.isNotEmpty() && content.startsWith(stableRawPrefix)) {
+                    stableRawPrefix to stableBlocks
+                } else {
+                    "" to emptyList()
+                }
+            }
+            val parsed = MarkdownParseCache.getOrParse(content)
+            if (
+                blocks.isEmpty() ||
+                parsed.hasHtmlBlocks ||
+                parsed.preprocessed != content
+            ) {
+                reset()
+                return@traceMarkdown parsed
+            }
+
+            val tail = content.substring(prefix.length)
+            val tailParse = parsePreprocessedMarkdownUncached(tail)
+            if (tailParse.hasHtmlBlocks) {
+                reset()
+                return@traceMarkdown parsed
+            }
+
+            val finalizedTailBlocks = tailParse.tree.children.mapIndexed { index, child ->
+                val blockContent = tail.substring(child.startOffset, child.endOffset)
+                MarkdownTopLevelBlockSnapshot(
+                    key = "active:${child.type}:${prefix.length + child.startOffset}:$index",
+                    parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
+                    preserveParagraphBottomPadding = child.type == MdNodeType.Paragraph &&
+                        child.nextSibling() != null &&
+                        child.findChildOfTypeRecursive(MdNodeType.Image, MdNodeType.MathBlock) == null,
+                )
+            }
+            reset()
+            parsed.copy(
+                tree = EmptyMarkdownRootNode(parsed.preprocessed.length),
+                stableTopLevelBlocks = blocks + finalizedTailBlocks,
+                activeBaseOffset = parsed.preprocessed.length,
+                syntheticSuffixStart = Int.MAX_VALUE,
+            )
+        }
+
+    /**
+     * Freeze the current streaming split and return a final parse result whose
+     * Compose keys are byte-identical to the last streaming frame.
+     *
+     * Unlike [parse], this does NOT promote any active-tail block into
+     * [stableTopLevelBlocks]. The active children stay with their
+     * `"active:type:offset:idx"` keys, which match the final streaming frame,
+     * so Compose reuses the warm compositions instead of cold-rebuilding them.
+     * No subtree destruction → no height collapse → no viewport jump.
+     *
+     * Falls back to a plain full parse when [preProcess] would modify the
+     * content (in that case the streaming cache had already reset mid-stream,
+     * so [stableTopLevelBlocks] was already empty and the else-branch
+     * keying handles stable key matching).
+     */
+    fun finalParse(content: String): MarkdownParseResult =
+        traceMarkdown("Amber Markdown finalize streaming (freeze)") {
+            val (prefix, blocks) = synchronized(lock) {
+                stableRawPrefix to stableBlocks
+            }
+            reset()
+            val activeRaw = content.substring(prefix.length)
+            val activePreprocessed = preProcess(activeRaw)
+            if (activePreprocessed != activeRaw) {
+                // preProcess modifies the tail (e.g. bare-URL rewrite, LaTeX) —
+                // the streaming cache had no stable blocks for this suffix anyway
+                // (it resets on preProcess mismatch). Plain parse; the else-branch
+                // keyed render will match.
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d(
+                        "AmberChatScroll",
+                        "[md.finalize] branch=preprocess_reset prefix=${prefix.length} " +
+                            "stableBlocks=${blocks.size} contentLen=${content.length}"
+                    )
+                }
+                return@traceMarkdown parseMarkdownUncached(content)
+            }
+            // Existing stable blocks + full active tail, without promoting
+            // any active child to stable → active-tail keys stay "active:…"
+            if (BuildConfig.DEBUG) {
+                android.util.Log.d(
+                    "AmberChatScroll",
+                    "[md.finalize] branch=freeze prefix=${prefix.length} " +
+                        "stableBlocks=${blocks.size} contentLen=${content.length}"
+                )
+            }
+            parseRepairedTail(
+                tail = activePreprocessed,
+                activeBaseOffset = prefix.length,
+                blocks = blocks,
+            )
+        }
 
     fun parse(
         content: String,
@@ -1350,9 +1438,20 @@ internal fun MarkdownBlockLegacy(
                         if (parseAsStreaming) {
                             streamingParseCache.parse(content = latestContent)
                         } else {
-                            streamingParseCache.reset()
-                            MarkdownParseCache.getOrParse(latestContent)
-                                .withStableTopLevelBlocks()
+                            // finalParse preserves the streaming-phase key structure
+                            // (stable blocks unchanged, active tail keys stay "active:…")
+                            // so Compose reuses warm compositions — no rebuild, no
+                            // height collapse, no viewport jump.
+                            val result = streamingParseCache.finalParse(latestContent)
+                            if (BuildConfig.DEBUG) {
+                                android.util.Log.d(
+                                    "AmberChatScroll",
+                                    "[md.finalize] stableBlocks=${result.stableTopLevelBlocks.size} " +
+                                        "keyed=${result.stableTopLevelBlocks.isNotEmpty()} " +
+                                        "contentLen=${latestContent.length}"
+                                )
+                            }
+                            result
                         }
                     }
                     lastParsedContent = latestContent
@@ -1443,36 +1542,44 @@ internal fun MarkdownBlockLegacy(
                             }
                         }
                     } else {
+                        // Same structure as the keyed branch above, but without
+                        // stableTopLevelBlocks splitting — all children render
+                        // directly with keyed composition. Using the same key
+                        // format ("type:offset:index") so Compose maintains warm
+                        // compositions when stableTopLevelBlocks transitions from
+                        // non-empty to empty (streaming → complete).
                         val activeLastIndex = children.lastIndex
                         children.fastForEachIndexed { index, child ->
-                            val childStreamingTailActive = if (index == children.lastIndex) {
-                                streamingTailActive
-                            } else {
-                                null
-                            }
-                            val childLiveSuffix = if (index == activeLastIndex) {
-                                streamingLiveSuffix
-                            } else {
-                                EMPTY_STREAMING_LIVE_SUFFIX
-                            }
-                            CompositionLocalProvider(
-                                LocalStreamingTailActive provides childStreamingTailActive,
-                                LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
-                                LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
-                                LocalStreamingMarkdownMotionScope provides if (childStreamingTailActive != null) {
-                                    streamingMotionScope
+                            key("${child.type}:${child.startOffset}:$index") {
+                                val childStreamingTailActive = if (index == activeLastIndex) {
+                                    streamingTailActive
                                 } else {
                                     null
-                                },
-                            ) {
-                                MarkdownNode(
-                                    node = child,
-                                    content = data.preprocessed,
-                                    modifier = nodeModifier,
-                                    onClickCitation = onClickCitation,
-                                    liveSuffix = childLiveSuffix.text,
-                                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
-                                )
+                                }
+                                val childLiveSuffix = if (index == activeLastIndex) {
+                                    streamingLiveSuffix
+                                } else {
+                                    EMPTY_STREAMING_LIVE_SUFFIX
+                                }
+                                CompositionLocalProvider(
+                                    LocalStreamingTailActive provides childStreamingTailActive,
+                                    LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
+                                    LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
+                                    LocalStreamingMarkdownMotionScope provides if (childStreamingTailActive != null) {
+                                        streamingMotionScope
+                                    } else {
+                                        null
+                                    },
+                                ) {
+                                    MarkdownNode(
+                                        node = child,
+                                        content = data.preprocessed,
+                                        modifier = nodeModifier,
+                                        onClickCitation = onClickCitation,
+                                        liveSuffix = childLiveSuffix.text,
+                                        liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
+                                    )
+                                }
                             }
                         }
                     }

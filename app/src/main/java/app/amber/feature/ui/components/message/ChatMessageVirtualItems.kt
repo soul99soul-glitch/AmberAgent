@@ -52,9 +52,9 @@ internal sealed interface ChatMessageVirtualItem {
 
     data class Thinking(
         val block: MessagePartBlock.ThinkingBlock,
-        val index: Int,
+        val keyBase: String,
     ) : ChatMessageVirtualItem {
-        override val keySuffix: String = "thinking-$index"
+        override val keySuffix: String = keyBase
     }
 
     data class ThinkingStepItem(
@@ -74,9 +74,9 @@ internal sealed interface ChatMessageVirtualItem {
 
     data class Content(
         val block: MessagePartBlock.ContentBlock,
-        val index: Int,
+        val keyBase: String,
     ) : ChatMessageVirtualItem {
-        override val keySuffix: String = "content-$index"
+        override val keySuffix: String = keyBase
     }
 
     /** Standalone subagent task card — survives ChainOfThought collapse, always visible. */
@@ -98,10 +98,11 @@ internal sealed interface ChatMessageVirtualItem {
         val content: String,
         val parseResult: MarkdownParseResult,
         val blockIndex: Int,
+        val keyBase: String,
         val attachments: List<BlockAttachment> = emptyList(),
     ) : ChatMessageVirtualItem {
         override val keySuffix: String =
-            "content-${block.index}-markdown-$blockIndex-${parseResult.topLevelBlockKey(blockIndex)}"
+            "$keyBase-markdown-$blockIndex-${parseResult.topLevelBlockKey(blockIndex)}"
     }
 
     data object Footer : ChatMessageVirtualItem {
@@ -147,9 +148,10 @@ internal fun buildChatMessageVirtualItems(
     showAssistantBubble: Boolean,
     loading: Boolean,
     lastMessage: Boolean,
+    forceSingleItem: Boolean = false,
 ): List<ChatMessageVirtualItem>? {
     val message = node.currentMessage
-    if (message.role != MessageRole.ASSISTANT || (loading && lastMessage)) {
+    if (message.role != MessageRole.ASSISTANT || forceSingleItem || (loading && lastMessage)) {
         return null
     }
 
@@ -162,14 +164,28 @@ internal fun buildChatMessageVirtualItems(
         null
     }
     var hasVirtualMarkdown = false
+    val contentKeyCounters = HashMap<String, Int>()
+    val thinkingKeyCounters = HashMap<String, Int>()
+    fun nextContentKey(part: UIMessagePart): String {
+        val type = part::class.simpleName ?: "part"
+        val ordinal = contentKeyCounters.merge(type, 1, Int::plus)!! - 1
+        return "content-$type-$ordinal"
+    }
+
+    fun nextThinkingKey(): String {
+        val ordinal = thinkingKeyCounters.merge("thinking", 1, Int::plus)!! - 1
+        return "thinking-$ordinal"
+    }
+
     val bodyItems = buildList {
         groupedParts.fastForEachIndexed { index, block ->
             when (block) {
                 is MessagePartBlock.ThinkingBlock -> {
-                    add(ChatMessageVirtualItem.Thinking(block, index))
+                    add(ChatMessageVirtualItem.Thinking(block, nextThinkingKey()))
                 }
                 is MessagePartBlock.ContentBlock -> {
                     val part = block.part
+                    val keyBase = nextContentKey(part)
                     if (part is UIMessagePart.Text) {
                         val content = MessageRenderCache.visualRegexText(
                             text = part.text,
@@ -177,7 +193,7 @@ internal fun buildChatMessageVirtualItems(
                             scope = AssistantAffectScope.ASSISTANT,
                         )
                         if (GenerativeWidgetParser.containsWidgetFence(content)) {
-                            add(ChatMessageVirtualItem.Content(block, index))
+                            add(ChatMessageVirtualItem.Content(block, keyBase))
                             return@fastForEachIndexed
                         }
                         val shouldVirtualize = shouldVirtualizeMarkdownContent(content)
@@ -206,15 +222,16 @@ internal fun buildChatMessageVirtualItems(
                                         content = content,
                                         parseResult = parseResult,
                                         blockIndex = blockIndex,
+                                        keyBase = keyBase,
                                         attachments = attachments,
                                     )
                                 )
                             }
                         } else {
-                            add(ChatMessageVirtualItem.Content(block, index))
+                            add(ChatMessageVirtualItem.Content(block, keyBase))
                         }
                     } else {
-                        add(ChatMessageVirtualItem.Content(block, index))
+                        add(ChatMessageVirtualItem.Content(block, keyBase))
                     }
                 }
 

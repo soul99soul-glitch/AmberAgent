@@ -196,6 +196,8 @@ internal fun ChatListNormal(
     val conversationId = conversation.id.toString()
     val postSendState = chatTimelinePlan.postSendState
     val timelineLoading = chatTimelinePlan.timelineLoading
+    var previousTimelineLoading by remember(conversation.id) { mutableStateOf(timelineLoading) }
+    var timelineEndGuardArmed by remember(conversation.id) { mutableStateOf(false) }
     val timelineBottomPadding = TimelineBottomSafetyPadding +
         if (postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
     var retainedTailIndicatorMessageId by remember(conversation.id) {
@@ -240,13 +242,17 @@ internal fun ChatListNormal(
     // logging after the root cause is fixed.
     fun logScroll(event: String, extra: String = "") {
         if (!BuildConfig.DEBUG) return
+        val firstItem = state.layoutInfo.visibleItemsInfo.firstOrNull()
+        val dist = state.distanceToTimelineBottomPx()
         Log.d(
             SCROLL_TAG,
             "[$event] follow=$followMode prog=$programmaticScrollInProgress " +
                 "token=$programmaticScrollToken activeGen=$activeGenerationState " +
                 "scrollInProgress=${state.isScrollInProgress} " +
-                "canScrollFwd=${state.canScrollForward}" +
-                if (extra.isNotEmpty()) " | $extra" else ""
+                "canScrollFwd=${state.canScrollForward} " +
+                "firstItem=${firstItem?.let { "${it.index}@${it.offset}" }} " +
+                "distToBottom=$dist " +
+                if (extra.isNotEmpty()) "| $extra" else ""
         )
     }
 
@@ -646,6 +652,46 @@ internal fun ChatListNormal(
     )
 
     LaunchedEffect(
+        conversation.id,
+        timelineLoading,
+        followMode,
+    ) {
+        if (timelineLoading) {
+            timelineEndGuardArmed = followMode == TimelineFollowMode.FollowingBottom ||
+                state.isAtTimelineBottom(bottomFollowBufferPx) ||
+                state.isNearListEnd(bufferItems = 4)
+            previousTimelineLoading = true
+            logScroll(
+                "TL_loading_arm",
+                "armed=$timelineEndGuardArmed follow=$followMode enableAS=${settings.displaySetting.enableAutoScroll}"
+            )
+            return@LaunchedEffect
+        }
+        val endedTimelineLoading = previousTimelineLoading && !timelineLoading
+        val shouldGuard = endedTimelineLoading && timelineEndGuardArmed
+        previousTimelineLoading = timelineLoading
+        timelineEndGuardArmed = false
+        logScroll(
+            "TL_loading_effect",
+            "ended=$endedTimelineLoading shouldGuard=$shouldGuard enableAS=${settings.displaySetting.enableAutoScroll}"
+        )
+        if (!shouldGuard) return@LaunchedEffect
+        logScroll("TL_loading_end", "→ per-frame guard for finalize (~18 frames)")
+        // Per-frame re-pin for ~300ms (18 frames @ 60fps) covering Markdown
+        // finalize (~260ms after loading=false). Correction applied inside
+        // withFrameNanos so no displaced frame is ever painted.
+        repeat(18) { frame ->
+            withFrameNanos { }
+            val d = state.distanceToTimelineBottomPx()
+            if (d == null || d > bottomFollowBufferPx) {
+                logScroll("TL_loading_end.snap", "frame=$frame dist=$d")
+                scrollToTimelineBottom("timelineLoadingEnd", smoothLargeMove = false)
+            }
+        }
+        logScroll("TL_loading_end.done")
+    }
+
+    LaunchedEffect(
         settings.displaySetting.enableAutoScroll,
         activeGeneration,
         conversation.id,
@@ -670,6 +716,20 @@ internal fun ChatListNormal(
                 "autoScrollOff"
             }
             logScroll("LE_init.branch", "→ enterIdleFollowMode ($idleReason)")
+            // Per-frame re-pin for ~300ms (18 frames @ 60fps): Markdown finalize
+            // and reasoning collapse both land after settleAfterGenerationEnd
+            // exits. Pinning inside withFrameNanos corrects height displacement
+            // in the same frame it occurs — no displaced frame is painted.
+            if (effectPlan.runEndSettleBeforeIdle) {
+                repeat(18) { frame ->
+                    withFrameNanos { }
+                    val d = state.distanceToTimelineBottomPx()
+                    if (d == null || d > bottomFollowBufferPx) {
+                        logScroll("postSettle.snap", "frame=$frame dist=$d")
+                        scrollToTimelineBottom("postSettle", smoothLargeMove = false)
+                    }
+                }
+            }
             enterIdleFollowMode()
         } else if (
             followMode == TimelineFollowMode.Idle &&

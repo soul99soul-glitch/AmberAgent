@@ -45,7 +45,7 @@ class ChatTimelinePlanTest {
     }
 
     @Test
-    fun planKeepsHiddenAssistantAsWaitingItemWithoutAddingDuplicatePlaceholder() {
+    fun planKeepsProtectedHiddenTailAssistantAsMessageWithoutAddingDuplicatePlaceholder() {
         val conversation = conversationOf(
             message("u1", MessageRole.USER),
             message("", MessageRole.ASSISTANT),
@@ -68,7 +68,8 @@ class ChatTimelinePlanTest {
         )
 
         assertTrue(plan.entries[0] is ChatTimelineEntry.Message)
-        assertTrue(plan.entries[1] is ChatTimelineEntry.PostSendHiddenAssistant)
+        assertTrue(plan.entries[1] is ChatTimelineEntry.Message)
+        assertTrue(plan.entries.none { it is ChatTimelineEntry.PostSendHiddenAssistant })
         assertTrue(plan.entries.none { it is ChatTimelineEntry.PostSendWaitingAssistant })
     }
 
@@ -76,7 +77,9 @@ class ChatTimelinePlanTest {
     fun virtualItemCacheReusesStableNodePlans() {
         val conversation = conversationOf(
             message("u1", MessageRole.USER),
-            message("a1", MessageRole.ASSISTANT),
+            message(longMarkdown("older"), MessageRole.ASSISTANT),
+            message("middle", MessageRole.ASSISTANT),
+            message("tail", MessageRole.ASSISTANT),
         )
         val cache = ChatVirtualItemCache()
         repeat(2) {
@@ -98,17 +101,53 @@ class ChatTimelinePlanTest {
             )
         }
 
-        assertEquals(2, cache.misses)
-        assertEquals(2, cache.hits)
+        assertEquals(4, cache.misses)
+        assertEquals(4, cache.hits)
+    }
+
+    @Test
+    fun planKeepsTwoTailAssistantMessagesAsSingleItems() {
+        val conversation = conversationOf(
+            message("u1", MessageRole.USER),
+            message(longMarkdown("older"), MessageRole.ASSISTANT),
+            message(longMarkdown("middle"), MessageRole.ASSISTANT),
+            message(longMarkdown("tail"), MessageRole.ASSISTANT),
+        )
+        val plan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = false,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = PostSendTimelineState(
+                sentUserMessageId = null,
+                sentUserMessageIndex = null,
+                assistantMessageIndex = null,
+                hiddenAssistantMessageIndex = null,
+                waitingForAssistantContent = false,
+            ),
+            virtualItemCache = ChatVirtualItemCache(),
+        )
+
+        assertTrue(plan.entries.any { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 1 })
+        assertTrue(plan.entries.any { it is ChatTimelineEntry.Message && it.messageIndex == 2 })
+        assertTrue(plan.entries.any { it is ChatTimelineEntry.Message && it.messageIndex == 3 })
+        assertTrue(plan.entries.none { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 2 })
+        assertTrue(plan.entries.none { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 3 })
     }
 
     @Test
     fun virtualItemCacheEvictsMarkdownPlansByContentBudget() {
         val firstMarkdown = longMarkdown("first")
         val secondMarkdown = longMarkdown("second")
+        val thirdMarkdown = longMarkdown("third")
+        val fourthMarkdown = longMarkdown("fourth")
         val conversation = conversationOf(
             message(firstMarkdown, MessageRole.ASSISTANT),
             message(secondMarkdown, MessageRole.ASSISTANT),
+            message(thirdMarkdown, MessageRole.ASSISTANT),
+            message(fourthMarkdown, MessageRole.ASSISTANT),
         )
         val cache = ChatVirtualItemCache(maxMarkdownChars = firstMarkdown.length + 100)
         repeat(2) {
@@ -130,7 +169,7 @@ class ChatTimelinePlanTest {
             )
         }
 
-        assertEquals(4, cache.misses)
+        assertEquals(8, cache.misses)
         assertEquals(0, cache.hits)
     }
 

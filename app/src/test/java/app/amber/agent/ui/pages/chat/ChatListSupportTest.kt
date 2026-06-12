@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.chat
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
@@ -40,10 +41,10 @@ class ChatListSupportTest {
             ),
         )
 
-        assertEquals(
-            "${conversation.messageNodes.size}:${selected.id}:${selected.parts.size}:text:8:selected",
-            conversation.latestRenderToken(),
-        )
+        val token = conversation.latestRenderToken()
+
+        assertTrue(token.startsWith("${conversation.messageNodes.size}:${selected.id}:${selected.parts.size}:0:"))
+        assertTrue(token.contains("text:8:selected:${"selected".hashCode()}"))
     }
 
     @Test
@@ -65,20 +66,94 @@ class ChatListSupportTest {
             ),
         )
 
-        assertEquals(
-            "1:${textMessage.id}:1:text:20:5678901234567890",
-            Conversation(
-                assistantId = Uuid.random(),
-                messageNodes = listOf(MessageNode.of(textMessage)),
-            ).latestRenderToken(),
+        val textToken = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(textMessage)),
+        ).latestRenderToken()
+        val toolToken = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(toolMessage)),
+        ).latestRenderToken()
+
+        assertTrue(textToken.contains("text:20:5678901234567890:${"12345678901234567890".hashCode()}"))
+        assertTrue(toolToken.contains("tool:call-1:search:2:{}:${"{}".hashCode()}:true:approved:1:"))
+    }
+
+    @Test
+    fun `latest render token changes when non trailing tool input changes`() {
+        val first = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "call-1",
+                    toolName = "search",
+                    input = "{\"q\":\"a\"}",
+                ),
+                UIMessagePart.Text("tail"),
+            ),
         )
-        assertEquals(
-            "1:${toolMessage.id}:1:tool:call-1:search:true:approved:1:text:4:done",
-            Conversation(
-                assistantId = Uuid.random(),
-                messageNodes = listOf(MessageNode.of(toolMessage)),
-            ).latestRenderToken(),
+        val second = first.copy(
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "call-1",
+                    toolName = "search",
+                    input = "{\"q\":\"amber\"}",
+                ),
+                UIMessagePart.Text("tail"),
+            ),
         )
+
+        val firstToken = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(first)),
+        ).latestRenderToken()
+        val secondToken = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(second)),
+        ).latestRenderToken()
+
+        assertTrue(firstToken.contains("tool:call-1:search:9:"))
+        assertTrue(secondToken.contains("tool:call-1:search:13:"))
+        assertTrue(firstToken != secondToken)
+    }
+
+    @Test
+    fun `latest render token changes when same shape text content changes`() {
+        val first = UIMessage.assistant("A1234567890123456")
+        val second = first.copy(parts = listOf(UIMessagePart.Text("B1234567890123456")))
+
+        val firstToken = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(first)),
+        ).latestRenderToken()
+        val secondToken = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(second)),
+        ).latestRenderToken()
+
+        assertTrue(firstToken != secondToken)
+    }
+
+    @Test
+    fun `latest render token changes when same count annotations change`() {
+        val first = UIMessage.assistant("answer").copy(
+            annotations = listOf(UIMessageAnnotation.UrlCitation(title = "old", url = "https://old.example")),
+        )
+        val second = first.copy(
+            annotations = listOf(UIMessageAnnotation.UrlCitation(title = "new", url = "https://new.example")),
+        )
+
+        val firstToken = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(first)),
+        ).latestRenderToken()
+        val secondToken = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(second)),
+        ).latestRenderToken()
+
+        assertTrue(firstToken != secondToken)
     }
 
     @Test
@@ -194,7 +269,8 @@ class ChatListSupportTest {
         assertTrue(source.contains(".pointerInput(conversation.id)"))
         assertFalse(source.contains(".pointerInput(activeGeneration, settings.displaySetting.enableAutoScroll, conversation.id)"))
         assertTrue(source.contains("requestStreamingBottomFollow(\"chunk\")"))
-        assertFalse(source.contains("requestTimelineBottom(\"chunk\")"))
+        assertFalse(source.contains("processingStatus,\n                pendingUserMessages.size"))
+        assertFalse(source.contains("requestTimelineBottom(\"stream-"))
         assertTrue(source.contains("streamingVisibleEvents.conflate()"))
     }
 

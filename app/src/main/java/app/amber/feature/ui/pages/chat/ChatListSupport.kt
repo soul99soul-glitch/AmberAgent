@@ -20,6 +20,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.ToolApprovalState
+import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.BuildConfig
 import app.amber.core.model.Assistant
@@ -35,6 +36,7 @@ import kotlin.uuid.Uuid
 
 private const val CHAT_TIMELINE_PLAN_CACHE_MAX_ENTRIES = 2048
 private const val CHAT_TIMELINE_PLAN_CACHE_MAX_MARKDOWN_CHARS = 1_200_000
+private const val CHAT_TIMELINE_TAIL_ASSISTANT_MESSAGE_PROTECT_COUNT = 2
 private const val CHAT_PERF_TAG = "AmberChatPerf"
 
 /**
@@ -82,7 +84,6 @@ internal fun LazyListState.isAtTimelineBottom(bufferPx: Int = 0): Boolean {
 
 internal fun Conversation.latestRenderToken(): String {
     val message = messageNodes.lastOrNull()?.currentMessage ?: return "${messageNodes.size}:empty"
-    val part = message.parts.lastOrNull()
     return buildString {
         append(messageNodes.size)
         append(':')
@@ -90,16 +91,19 @@ internal fun Conversation.latestRenderToken(): String {
         append(':')
         append(message.parts.size)
         append(':')
-        append(part?.compactRenderToken().orEmpty())
+        append(message.annotations.compactRenderToken())
+        append(':')
+        append(message.parts.joinToString(separator = "|") { it.compactRenderToken() })
     }
 }
 
 private fun UIMessagePart.compactRenderToken(): String = when (this) {
-    is UIMessagePart.Text -> "text:${text.length}:${text.takeLast(16)}"
-    is UIMessagePart.Reasoning -> "reasoning:${reasoning.length}:${finishedAt != null}"
+    is UIMessagePart.Text -> "text:${text.length}:${text.takeLast(16)}:${text.hashCode()}"
+    is UIMessagePart.Reasoning -> "reasoning:${reasoning.length}:${reasoning.takeLast(16)}:${reasoning.hashCode()}:${finishedAt != null}"
     is UIMessagePart.Tool -> {
-        val outputToken = output.lastOrNull()?.compactRenderToken().orEmpty()
-        "tool:$toolCallId:$toolName:$isExecuted:${approvalState.compactRenderToken()}:${output.size}:$outputToken"
+        val outputToken = output.joinToString(separator = ",") { it.compactRenderToken() }.hashCode()
+        "tool:$toolCallId:$toolName:${input.length}:${input.takeLast(16)}:${input.hashCode()}:" +
+            "$isExecuted:${approvalState.compactRenderToken()}:${output.size}:$outputToken"
     }
 
     is UIMessagePart.Image -> "image:${url.length}:${metadata.hashCode()}"
@@ -115,6 +119,17 @@ private fun ToolApprovalState.compactRenderToken(): String = when (this) {
     ToolApprovalState.Approved -> "approved"
     is ToolApprovalState.Denied -> "denied:${reason.length}"
     is ToolApprovalState.Answered -> "answered:${answer.length}:${answer.takeLast(16)}"
+}
+
+private fun List<UIMessageAnnotation>.compactRenderToken(): String {
+    if (isEmpty()) return "0"
+    val annotationToken = joinToString(separator = "|") { annotation ->
+        when (annotation) {
+            is UIMessageAnnotation.UrlCitation -> "url:${annotation.title}:${annotation.url}"
+            is UIMessageAnnotation.GenerationInterrupted -> "interrupted:${annotation.reason}"
+        }
+    }.hashCode()
+    return "$size:$annotationToken"
 }
 
 internal fun LazyListState.markdownPrewarmTexts(
@@ -327,6 +342,7 @@ internal class ChatVirtualItemCache(
         showAssistantBubble: Boolean,
         loading: Boolean,
         lastMessage: Boolean,
+        forceSingleItem: Boolean = false,
     ): List<ChatMessageVirtualItem>? {
         val key = ChatVirtualItemCacheKey.of(
             node = node,
@@ -334,6 +350,7 @@ internal class ChatVirtualItemCache(
             showAssistantBubble = showAssistantBubble,
             loading = loading,
             lastMessage = lastMessage,
+            forceSingleItem = forceSingleItem,
         )
         if (entries.containsKey(key)) {
             hits++
@@ -346,6 +363,7 @@ internal class ChatVirtualItemCache(
             showAssistantBubble = showAssistantBubble,
             loading = loading,
             lastMessage = lastMessage,
+            forceSingleItem = forceSingleItem,
         )
         val markdownChars = value.markdownCharCost()
         if (markdownChars > maxMarkdownChars) {
@@ -392,6 +410,7 @@ private data class ChatVirtualItemCacheKey(
     val showAssistantBubble: Boolean,
     val loading: Boolean,
     val lastMessage: Boolean,
+    val forceSingleItem: Boolean,
 ) {
     companion object {
         fun of(
@@ -400,6 +419,7 @@ private data class ChatVirtualItemCacheKey(
             showAssistantBubble: Boolean,
             loading: Boolean,
             lastMessage: Boolean,
+            forceSingleItem: Boolean,
         ): ChatVirtualItemCacheKey {
             val message = node.currentMessage
             return ChatVirtualItemCacheKey(
@@ -411,6 +431,7 @@ private data class ChatVirtualItemCacheKey(
                 showAssistantBubble = showAssistantBubble,
                 loading = loading,
                 lastMessage = lastMessage,
+                forceSingleItem = forceSingleItem,
             )
         }
     }
@@ -440,10 +461,12 @@ internal fun buildChatTimelinePlan(
     postSendState: PostSendTimelineState,
     virtualItemCache: ChatVirtualItemCache,
 ): ChatTimelinePlan {
+    val protectedAssistantMessageIndexes = conversation.messageNodes.tailAssistantMessageIndexes()
     val entries = buildList {
         if (hasHistoryLoadingItem) add(ChatTimelineEntry.HistoryLoading)
         conversation.messageNodes.forEachIndexed { index, node ->
-            if (index == postSendState.hiddenAssistantMessageIndex) {
+            val keepAsSingleItem = index in protectedAssistantMessageIndexes
+            if (index == postSendState.hiddenAssistantMessageIndex && !keepAsSingleItem) {
                 add(ChatTimelineEntry.PostSendHiddenAssistant(index, node))
                 return@forEachIndexed
             }
@@ -455,6 +478,7 @@ internal fun buildChatTimelinePlan(
                 showAssistantBubble = showAssistantBubble,
                 loading = isLoadingMessage,
                 lastMessage = isLastMessage,
+                forceSingleItem = keepAsSingleItem,
             )
             if (virtualItems == null) {
                 add(ChatTimelineEntry.Message(index, node))
@@ -489,6 +513,26 @@ internal fun buildChatTimelinePlan(
             }
         }
     }
+    if (BuildConfig.DEBUG) {
+        val tail = entries.takeLast(6).joinToString("|") { e ->
+            when (e) {
+                is ChatTimelineEntry.Message ->
+                    "Msg(${e.node.currentMessage.role.name.take(4)}:${e.node.id.toString().take(8)})"
+                is ChatTimelineEntry.VirtualMessage ->
+                    "VM(${e.node.id.toString().take(8)}:${e.item.keySuffix.take(16)})"
+                ChatTimelineEntry.Loading -> "Loading"
+                ChatTimelineEntry.ScrollBottom -> "ScrollBottom"
+                ChatTimelineEntry.HistoryLoading -> "HistoryLoading"
+                ChatTimelineEntry.PostSendWaitingAssistant -> "Waiting"
+                is ChatTimelineEntry.PostSendHiddenAssistant -> "Hidden"
+                is ChatTimelineEntry.Pending -> "Pending"
+            }
+        }
+        android.util.Log.d(
+            "AmberChatScroll",
+            "[plan] tl=$timelineLoading entries=${entries.size} tail6=[$tail] protected=$protectedAssistantMessageIndexes"
+        )
+    }
     return ChatTimelinePlan(
         entries = entries,
         lazyItemMessageIndexes = lazyItemMessageIndexes,
@@ -496,6 +540,20 @@ internal fun buildChatTimelinePlan(
         postSendState = postSendState,
         timelineLoading = timelineLoading,
     )
+}
+
+private fun List<MessageNode>.tailAssistantMessageIndexes(
+    count: Int = CHAT_TIMELINE_TAIL_ASSISTANT_MESSAGE_PROTECT_COUNT,
+): Set<Int> {
+    if (count <= 0 || isEmpty()) return emptySet()
+    val indexes = LinkedHashSet<Int>(count)
+    for (index in indices.reversed()) {
+        if (this[index].currentMessage.role == MessageRole.ASSISTANT) {
+            indexes.add(index)
+            if (indexes.size >= count) break
+        }
+    }
+    return indexes
 }
 
 private inline fun measureChatTimelinePlan(
@@ -529,6 +587,7 @@ internal fun buildLazyItemMessageIndexMap(
     hasPostSendWaitingPlaceholder: Boolean = false,
 ): List<Int?> = buildList {
     if (hasHistoryLoadingItem) add(null)
+    val protectedAssistantMessageIndexes = messageNodes.tailAssistantMessageIndexes()
     messageNodes.forEachIndexed { index, node ->
         val itemCount = buildChatMessageVirtualItems(
             node = node,
@@ -536,6 +595,7 @@ internal fun buildLazyItemMessageIndexMap(
             showAssistantBubble = showAssistantBubble,
             loading = loading && index == messageNodes.lastIndex,
             lastMessage = index == messageNodes.lastIndex,
+            forceSingleItem = index in protectedAssistantMessageIndexes,
         )?.size ?: 1
         repeat(itemCount) { add(index) }
     }

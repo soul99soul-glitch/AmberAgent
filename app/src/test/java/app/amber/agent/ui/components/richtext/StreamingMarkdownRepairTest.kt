@@ -1,5 +1,6 @@
 package app.amber.feature.ui.components.richtext
 
+import app.amber.feature.ui.components.richtext.tree.MdNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -175,5 +176,37 @@ class StreamingMarkdownRepairTest {
         // single still-growing block: nothing finalized yet
         val single = StreamingMarkdownParseCache().parse("alpha")
         assertTrue(single.stableTopLevelBlocks.isEmpty())
+    }
+
+    @Test
+    fun `finalize complete keeps stable branch and empties active tail`() {
+        val content = "alpha\n\nbravo\n\ncharlie"
+        val cache = StreamingMarkdownParseCache()
+        val streaming = cache.parse(content)
+        val streamingStableKeys = streaming.stableTopLevelBlocks.map { it.key }
+        val activeTail = streaming.tree.children.single()
+        val activeTailKey = "active:${activeTail.type}:${streaming.activeBaseOffset + activeTail.startOffset}:0"
+
+        val finalized = cache.finalizeComplete(content)
+
+        assertEquals(emptyList<MdNode>(), finalized.tree.children)
+        assertEquals(
+            streamingStableKeys,
+            finalized.stableTopLevelBlocks.take(streamingStableKeys.size).map { it.key },
+        )
+        assertEquals(activeTailKey, finalized.stableTopLevelBlocks.last().key)
+        assertEquals(streaming.stableTopLevelBlocks.size + 1, finalized.stableTopLevelBlocks.size)
+    }
+
+    @Test
+    fun `finalize complete falls back when no stable branch was active`() {
+        val content = "alpha"
+        val cache = StreamingMarkdownParseCache()
+        cache.parse(content)
+
+        val finalized = cache.finalizeComplete(content)
+
+        assertTrue(finalized.stableTopLevelBlocks.isEmpty())
+        assertTrue(finalized.tree.children.isNotEmpty())
     }
 }

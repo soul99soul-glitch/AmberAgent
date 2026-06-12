@@ -39,7 +39,7 @@ private const val TAG = "ChatList"
 // M0.1 diagnostic: trace timeline follow / scroll state machine to find why
 // auto-scroll occasionally misses the tail of streaming responses. Remove
 // after root cause identified.
-internal const val SCROLL_TAG = "ChatScroll"
+internal const val SCROLL_TAG = "AmberChatScroll"
 internal const val LoadingIndicatorKey = "LoadingIndicator"
 internal const val HistoryLoadingItemKey = "timeline-history-loading"
 internal const val ScrollBottomKey = "ScrollBottomKey"

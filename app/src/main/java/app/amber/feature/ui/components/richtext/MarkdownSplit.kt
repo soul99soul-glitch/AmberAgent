@@ -8,7 +8,7 @@ import androidx.compose.material3.LocalTextStyle
 /**
  * **T-C perf-layer scaffold** for `PerfFlags.USE_SPLIT_MARKDOWN`.
  *
- * Until block-level renderers land, delegate to the production [MarkdownBlock]
+ * Until block-level renderers land, delegate to [MarkdownBlockLegacy]
  * so streaming tail markers, batch reveal, and parse throttle stay intact.
  */
 @Composable
@@ -22,7 +22,7 @@ fun MarkdownBlockSplit(
     onStreamingVisibleFrame: (() -> Unit)? = null,
     onClickCitation: (String) -> Unit = {},
 ) {
-    MarkdownBlock(
+    MarkdownBlockLegacy(
         content = content,
         modifier = modifier,
         style = style,
