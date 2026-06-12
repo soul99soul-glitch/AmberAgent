@@ -47,6 +47,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
+import app.amber.ai.ui.UIMessagePart
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -82,7 +84,6 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Tick01
 import app.amber.agent.BuildConfig
-import app.amber.agent.PerfFlags
 import app.amber.agent.R
 import app.amber.core.context.ActiveCompactBoundary
 import app.amber.core.context.CompactLifecycleState
@@ -396,15 +397,6 @@ internal fun ChatListNormal(
         }
     }
 
-    fun requestTimelineBottom(reason: String) {
-        val totalItems = state.layoutInfo.totalItemsCount
-        if (totalItems <= 0) return
-        val token = beginProgrammaticScroll()
-        logScroll("requestTimelineBottom", "reason=$reason token=$token totalItems=$totalItems")
-        state.requestScrollToItem(totalItems - 1)
-        endProgrammaticScroll(token)
-    }
-
     suspend fun waitForGenerationEndSettleGate(): Boolean {
         repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) {
             if (
@@ -452,9 +444,31 @@ internal fun ChatListNormal(
             return
         }
         var stableBottomFrames = 0
+        var lastContentBottom: Int? = state.lastItemContentBottom()
+        val minSettleFrames = TimelineFollowEndSettlePolicy.MinSettleFrames
         repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) { frame ->
             val distanceBefore = state.distanceToTimelineBottomPx()
+            val currentContentBottom = state.lastItemContentBottom()
+            // Detect bottom-item height change (Markdown re-parse, action row
+            // appearance, etc.). A change resets the stable counter so the loop
+            // keeps running through the layout displacement, regardless of how
+            // many frames the re-parse takes to land. This makes the settle
+            // self-adjusting rather than relying solely on a fixed frame count.
+            val contentBottomChanged = lastContentBottom != null &&
+                currentContentBottom != null &&
+                currentContentBottom != lastContentBottom
+            if (contentBottomChanged) {
+                stableBottomFrames = 0
+                logScroll(
+                    "generationEndSettle.contentBottomChanged",
+                    "frame=$frame last=$lastContentBottom current=$currentContentBottom",
+                )
+            }
+            lastContentBottom = currentContentBottom
+            val pastMinSettle = frame >= minSettleFrames
             if (
+                pastMinSettle &&
+                !contentBottomChanged &&
                 TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
                     distancePx = distanceBefore,
                     bottomBufferPx = bottomFollowBufferPx,
@@ -495,6 +509,7 @@ internal fun ChatListNormal(
                 "frame=$frame before=$distanceBefore after=$distanceAfter stable=$stableBottomFrames",
             )
             if (
+                pastMinSettle &&
                 TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
                     distancePx = distanceAfter,
                     bottomBufferPx = bottomFollowBufferPx,
@@ -883,7 +898,6 @@ internal fun ChatListNormal(
     )
     val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
     val latestRenderToken = conversation.latestRenderToken()
-    val showBottomFollowAnimationState by rememberUpdatedState(showBottomFollowAnimation)
     val tailIndicatorReserveVisible = showBottomFollowAnimation &&
         (
             timelineLoading ||
@@ -922,31 +936,21 @@ internal fun ChatListNormal(
                         followMode == TimelineFollowMode.FollowingBottom &&
                         !userScrollInTimeline
                     if (stillFollowing) {
-                        val animateBottomFollow = showBottomFollowAnimationState
-                        if (
-                            animateBottomFollow ||
-                            PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW ||
-                            PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL
-                        ) {
-                            scrollToTimelineBottom(
-                                reason = "stream-$reason",
-                                // 问题②(圆点抖):逐批流式增长用立即贴底,而非分帧
-                                // 平滑追赶。分帧追赶(8帧×18dp)是为"一次大跳跃"设计
-                                // 的,套在逐批小增长上会与内容增高产生相位差 —— 每批
-                                // 先把末尾圆点推出视口、再分帧拉回,圆点就一直抖。snap
-                                // 让每批内容一落地就贴底,圆点稳定锚定在底部。
-                                smoothLargeMove = false,
-                            )
-                        } else {
-                            requestTimelineBottom("stream-$reason")
-                        }
+                        scrollToTimelineBottom(
+                            reason = "stream-$reason",
+                            // 问题②(圆点抖):逐批流式增长用立即贴底,而非分帧
+                            // 平滑追赶。分帧追赶(8帧×18dp)是为"一次大跳跃"设计
+                            // 的,套在逐批小增长上会与内容增高产生相位差 —— 每批
+                            // 先把末尾圆点推出视口、再分帧拉回,圆点就一直抖。snap
+                            // 让每批内容一落地就贴底,圆点稳定锚定在底部。
+                            smoothLargeMove = false,
+                        )
                     }
                 }
             }
             LaunchedEffect(
                 latestRenderToken,
                 conversation.id,
-                processingStatus,
                 pendingUserMessages.size,
                 loading,
             ) {
@@ -1118,6 +1122,20 @@ internal fun ChatListNormal(
                                                 null
                                             }
                                     }
+                                    // Temporary stream-freeze probe (M0.2): logs the text length this
+                                    // LazyColumn item lambda actually composed with, to bisect which
+                                    // layer stops seeing content growth mid-stream. Remove with fix.
+                                    if (BuildConfig.DEBUG && isLoadingMessage) {
+                                        val itemTextLen = node.currentMessage.parts
+                                            .sumOf { part -> (part as? UIMessagePart.Text)?.text?.length ?: 0 }
+                                        val lastLoggedItemLen = remember(node.id) { intArrayOf(-1) }
+                                        SideEffect {
+                                            if (lastLoggedItemLen[0] != itemTextLen) {
+                                                lastLoggedItemLen[0] = itemTextLen
+                                                Log.d("AmberStreamFreeze", "listItem node=${node.id} textLen=$itemTextLen")
+                                            }
+                                        }
+                                    }
                                     ChatMessage(
                                         node = node,
                                         model = messageModel,
@@ -1182,11 +1200,7 @@ internal fun ChatListNormal(
                             virtualItem.isAdjacentMarkdownChild(nextVirtualItem) -> 0.dp
                             else -> TimelineMessageInnerSpacing
                         }
-                        val virtualItemKey = if (virtualItem is ChatMessageVirtualItem.Header) {
-                            node.id
-                        } else {
-                            "${node.id}:${virtualItem.keySuffix}"
-                        }
+                        val virtualItemKey = "${node.id}:${virtualItem.keySuffix}"
                         item(
                             key = virtualItemKey,
                             contentType = "message-${node.currentMessage.role}-virtual-${virtualItem.keySuffix.substringBefore('-')}",
@@ -1574,6 +1588,20 @@ private fun LazyListState.distanceToTimelineBottomPx(): Int? {
         ?: return null
     val contentBottom = bottomItem.offset + bottomItem.size + layoutInfo.afterContentPadding
     return (contentBottom - layoutInfo.viewportEndOffset).coerceAtLeast(0)
+}
+
+/**
+ * Snapshot of the last visible item's content bottom edge (offset + size).
+ * Used by the settle loop to detect when Markdown re-parse or other
+ * deferred layout changes alter the bottom item's height — resetting the
+ * stable-frame counter so the loop keeps running through the displacement.
+ */
+private fun LazyListState.lastItemContentBottom(): Int? {
+    val totalItems = layoutInfo.totalItemsCount
+    if (totalItems == 0) return null
+    val bottomItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == totalItems - 1 }
+        ?: return null
+    return bottomItem.offset + bottomItem.size
 }
 
 /**
