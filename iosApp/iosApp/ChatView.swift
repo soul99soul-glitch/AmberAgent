@@ -3,8 +3,14 @@ import Shared
 
 struct ChatView: View {
 
-    @State private var viewModel = ChatViewModel()
+    let settingsStore: SettingsStore
+    @State private var viewModel: ChatViewModel
     @FocusState private var isInputFocused: Bool
+
+    init(settingsStore: SettingsStore) {
+        self.settingsStore = settingsStore
+        self._viewModel = State(initialValue: ChatViewModel(settingsStore: settingsStore))
+    }
 
     var body: some View {
         NavigationStack {
@@ -52,14 +58,24 @@ struct ChatView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .focused($isInputFocused)
 
-            Button {
-                viewModel.sendMessage()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .symbolRenderingMode(.hierarchical)
+            if viewModel.isLoading {
+                Button {
+                    viewModel.cancelGeneration()
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.title2)
+                        .symbolRenderingMode(.hierarchical)
+                }
+            } else {
+                Button {
+                    viewModel.sendMessage()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .disabled(viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .disabled(viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isLoading)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

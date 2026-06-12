@@ -1,5 +1,5 @@
 import Foundation
-import Shared
+@preconcurrency import Shared
 
 @Observable
 final class ChatViewModel {
@@ -12,25 +12,14 @@ final class ChatViewModel {
 
     // MARK: - Private
 
-    private var conversation: Conversation?
+    private let settingsStore: SettingsStore
+    private let provider = OpenAIKmpProvider()
+    private var streamingTask: Task<Void, Never>?
 
     // MARK: - Init
 
-    init() {
-        let systemMsg = UIMessage.companion.system(prompt: "You are a helpful assistant.")
-        let systemNode = MessageNode.companion.of(message: systemMsg)
-
-        let conversationId = KotlinUuid.companion.random()
-        let assistantId = KotlinUuid.companion.random()
-
-        conversation = Conversation.companion.ofId(
-            id: conversationId,
-            assistantId: assistantId,
-            messages: [systemNode],
-            newConversation: true
-        )
-
-        messages = conversation?.currentMessages as? [UIMessage] ?? []
+    init(settingsStore: SettingsStore) {
+        self.settingsStore = settingsStore
     }
 
     // MARK: - Actions
@@ -40,34 +29,136 @@ final class ChatViewModel {
         guard !text.isEmpty else { return }
 
         let userMsg = UIMessage.companion.user(prompt: text)
-        appendMessage(userMsg)
+        messages.append(userMsg)
         inputText = ""
+        generateResponse()
+    }
 
-        // Demonstrate AmberNativeBridge — Rust FFI markdown rendering
-        let html = AmberNativeBridge.shared.markdownToHtml(text: text) ?? text
-
-        // Simulate an assistant response (real AI provider wired in later milestone)
-        isLoading = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            guard let self else { return }
-            let response = self.mockResponse(for: text, html: html)
-            self.appendMessage(response)
-            self.isLoading = false
-        }
+    func cancelGeneration() {
+        streamingTask?.cancel()
+        streamingTask = nil
+        isLoading = false
     }
 
     // MARK: - Private
 
-    private func appendMessage(_ message: UIMessage) {
-        messages.append(message)
-        if let conv = conversation {
-            conversation = conv.updateCurrentMessages(messages: messages)
+    private func generateResponse() {
+        streamingTask?.cancel()
+        isLoading = true
+
+        let providerSetting = makeProviderSetting()
+        let params = makeTextGenerationParams()
+
+        streamingTask = Task { @MainActor in
+            // Create a placeholder assistant message
+            let placeholderId = KotlinUuid.companion.random()
+            let localDt = nowLocalDateTime()
+            let placeholder = UIMessage(
+                id: placeholderId,
+                role: MessageRole.assistant,
+                parts: [UIMessagePart.Text(text: "", metadata: nil)],
+                annotations: [],
+                createdAt: localDt,
+                finishedAt: nil,
+                modelId: nil,
+                usage: nil,
+                translation: nil
+            )
+            self.messages.append(placeholder)
+
+            self.provider.generateText(
+                providerSetting: providerSetting,
+                messages: Array(self.messages.dropLast()),
+                params: params
+            ) { [weak self] chunk, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if let chunk {
+                        let assistantText = chunk.choices.first?.delta?.toText()
+                            ?? chunk.choices.first?.message?.toText()
+                            ?? ""
+                        let updatedPlaceholder = UIMessage(
+                            id: placeholderId,
+                            role: MessageRole.assistant,
+                            parts: [UIMessagePart.Text(text: assistantText, metadata: nil)],
+                            annotations: [],
+                            createdAt: localDt,
+                            finishedAt: self.nowLocalDateTime(),
+                            modelId: nil,
+                            usage: chunk.usage,
+                            translation: nil
+                        )
+                        if let lastIndex = self.messages.indices.last {
+                            self.messages[lastIndex] = updatedPlaceholder
+                        }
+                    } else if let error {
+                        let errorPlaceholder = UIMessage(
+                            id: placeholderId,
+                            role: MessageRole.assistant,
+                            parts: [UIMessagePart.Text(
+                                text: "Error: \(error.localizedDescription)",
+                                metadata: nil
+                            )],
+                            annotations: [],
+                            createdAt: localDt,
+                            finishedAt: self.nowLocalDateTime(),
+                            modelId: nil,
+                            usage: nil,
+                            translation: nil
+                        )
+                        if let lastIndex = self.messages.indices.last {
+                            self.messages[lastIndex] = errorPlaceholder
+                        }
+                    }
+                    self.isLoading = false
+                }
+            }
         }
     }
 
-    private func nowInstant() -> KotlinInstant {
-        KotlinInstant.companion.fromEpochMilliseconds(
-            epochMilliseconds: Int64(Date().timeIntervalSince1970 * 1000)
+    private func makeProviderSetting() -> ProviderSetting.OpenAI {
+        ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "OpenAI",
+            models: [],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: settingsStore.apiKey,
+            baseUrl: settingsStore.baseUrl,
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+    }
+
+    private func makeTextGenerationParams() -> TextGenerationParams {
+        let model = Model(
+            modelId: settingsStore.modelId,
+            displayName: settingsStore.modelId,
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        return TextGenerationParams(
+            model: model,
+            temperature: KotlinFloat(value: 0.7),
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: ReasoningLevel.off,
+            customHeaders: [],
+            customBody: []
         )
     }
 
@@ -82,35 +173,6 @@ final class ChatViewModel {
             minute: Int32(cal.component(.minute, from: now)),
             second: Int32(cal.component(.second, from: now)),
             nanosecond: Int32(cal.component(.nanosecond, from: now))
-        )
-    }
-
-    private func mockResponse(for userText: String, html: String) -> UIMessage {
-        let instant = nowInstant()
-        let localDt = nowLocalDateTime()
-
-        let reasoning = UIMessagePart.Reasoning(
-            reasoning: "User said: \(userText)",
-            createdAt: instant,
-            finishedAt: instant,
-            metadata: nil
-        )
-
-        let textPart = UIMessagePart.Text(
-            text: "**Echo (HTML):** \(html)\n\n> This is a mock response. Real AI integration comes next.",
-            metadata: nil
-        )
-
-        return UIMessage(
-            id: KotlinUuid.companion.random(),
-            role: MessageRole.assistant,
-            parts: [reasoning, textPart],
-            annotations: [],
-            createdAt: localDt,
-            finishedAt: localDt,
-            modelId: nil,
-            usage: nil,
-            translation: nil
         )
     }
 }

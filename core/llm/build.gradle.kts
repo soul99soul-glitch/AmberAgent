@@ -11,7 +11,7 @@ kotlin {
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
         }
-        val nativeMain by creating { dependsOn(commonMain.get()) }
+        val nativeMain by creating { }
         nativeMain.dependencies {
             implementation(project(":core:native"))
         }

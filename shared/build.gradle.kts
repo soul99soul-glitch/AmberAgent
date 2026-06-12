@@ -16,6 +16,7 @@ kotlin {
     // Shared KMP modules — referenced by both framework export and commonMain
     val sharedProjects = listOf(
         ":ai-core",
+        ":ai-provider-openai",
         ":core:types",
         ":core:ai:api",
         ":core:ai:generation:api",

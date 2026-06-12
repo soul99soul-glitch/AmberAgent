@@ -349,9 +349,8 @@ unsafe fn cstr_array_to_vec(arr: *const *const c_char) -> Vec<String> {
     let mut ptr = arr;
     unsafe {
         while !(*ptr).is_null() {
-            if let Ok(s) = CStr::from_ptr(*ptr).to_str() {
-                result.push(s.to_string());
-            }
+            let s = CStr::from_ptr(*ptr).to_string_lossy();
+            result.push(s.into_owned());
             ptr = ptr.add(1);
         }
     }

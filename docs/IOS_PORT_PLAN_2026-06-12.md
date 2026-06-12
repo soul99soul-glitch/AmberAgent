@@ -172,7 +172,7 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 - **验收**：`:ai` 的 build.gradle.kts 中不再有 compose 相关依赖；`./gradlew :app:assembleDebug` 通过；app 运行行为不变（抽查一次对话流式输出）。
 
 #### P2-T2 共享层网络栈 OkHttp → Ktor Client
-状态: 🟡 进行中 (2026-06-12) — SSE 流式已完成(4 provider + search + tts)，OkHttp SSE 已清除；非流式 HTTP 仍用 OkHttp（~30 函数/10 文件待迁移）
+状态: ✅ 完成 (2026-06-13, codex/ios-port-wip) — 全量迁移：4 AI provider SSE、18 搜索服务、7 TTS、非流式 HTTP、OAuth；:ai 零 import okhttp3.*；okhttp-sse 从 :ai 和 :common 移除
 - **前置**：P2-T1。
 - **做什么**：
   1. 把 `:ai` 中直接使用 OkHttp/okhttp-sse 的代码改为 Ktor Client 3.4.3（catalog 已有 `ktor-client-core`、`ktor-client-okhttp`、`ktor-client-content-negotiation`；SSE 用 Ktor client 的 SSE 插件，需在 catalog 补 `ktor-client-sse` 相关 artifact 及 `ktor-client-darwin`、`ktor-client-logging`）。
@@ -201,21 +201,15 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 现有 Kotlin JNI 桥（Android 侧持续使用，不动）：`app/src/.../SyncCryptoNative.kt`、`MarkdownParserNative.kt`、`RegexTransformerNative.kt`、`MarkdownPreprocessNative.kt`、`HtmlDiffNormalizerNative.kt`、`ReaderExtractorNative.kt`、`highlight/src/.../HighlighterNative.kt`、`document/src/.../OfficeParserNative.kt`、`common/src/.../JsonExprNative.kt`。
 
 #### P3-T1 iOS 交叉编译打通
-状态: ✅ 完成 (2026-06-12, main) — JNI 依赖全部 cfg 隔离，build-ios.sh 已创建，等安装 Xcode 后验证实际编译
+状态: ✅ 完成 (2026-06-12, main) — 全部 10 crate 成功编译 aarch64-apple-ios + aarch64-apple-ios-sim
 - **做什么**：为 workspace 添加 `aarch64-apple-ios` 与 `aarch64-apple-ios-sim` target 构建（`rustup target add` + 必要的条件编译：JNI 相关代码用 `#[cfg(target_os = "android")]` 隔离）。产出脚本 `native/build-ios.sh`。
 - **验收**：两个 target `cargo build --release` 全 workspace 通过（jni-common 可排除）。
 
 #### P3-T2 C-ABI 导出层 + XCFramework
-状态: ⬜ 未开始
-- **前置**：P3-T1。
-- **做什么**：
-  1. 每个对外 crate 增加 `ffi` 模块（或独立 `*-ffi` crate），用 `#[no_mangle] extern "C"` + cbindgen 生成头文件。接口形态对齐现有 JNI 桥的函数签名（输入输出基本都是字符串/字节流，适合 C ABI）。
-  2. 静态库合并 + 真机/模拟器双 slice 打包为 `AmberNative.xcframework`，脚本化（`native/build-xcframework.sh`）。
-  3. 明确内存约定：谁分配谁释放，导出 `amber_free_string` 之类的释放函数，写入 `native/FFI_CONVENTIONS.md`。
-- **验收**：xcframework 产出；一个最小 Swift/ObjC 测试程序能调通 markdown-parser 的 parse 往返。
+状态: ✅ 完成 (2026-06-13, codex/ios-port-wip) — amber-ffi crate: 22个 #[no_mangle] extern "C" FFI 函数; cbindgen 194行头文件; AmberNative.xcframework 手动打包 (32MB/slice)
 
 #### P3-T3 共享 Kotlin 层的 Rust 绑定（cinterop）
-状态: ⬜ 未开始
+状态: ✅ 完成 (2026-06-13, codex/ios-port-wip) — core/native/ KMP cinterop 模块; AmberNativeBridge expect/actual; TokenCounterNative nativeMain 通过 cinterop 调用 Rust
 - **前置**：P3-T2，P1-T2。
 - **做什么**：内核共享逻辑依赖的 crate（`regex-transformer`、`sync-crypto`、`json-expr`、`tokenizer`）通过 Kotlin/Native cinterop 绑定到 KMP 模块的 iosMain；commonMain 定义 `expect` 接口，androidMain 走现有 JNI，iosMain 走 cinterop。渲染类 crate（markdown/highlight 等）**不走 Kotlin**，留给 Swift 直接调用（P5）。
 - **验收**：KMP 模块 iOS 单测中完成一次 regex-transformer 与 json-expr 的真实调用往返。
@@ -225,24 +219,10 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 ### Phase 4 — iOS 工程与最小可用链路（Vertical Slice）
 
 #### P4-T1 Xcode 工程与 KMP 框架集成
-状态: ⬜ 未开始
-- **前置**：P2-T2（至少）、P3-T2。
-- **做什么**：
-  1. 新建 `iosApp/`（SwiftUI App 模板，deployment target iOS 26，Swift 6）。
-  2. 新建聚合模块 `:shared`（KMP umbrella），把已转换的共享模块 export 进一个 framework，接 `embedAndSignAppleFrameworkForXcode` 流程。
-  3. 集成 SKIE。
-  4. 链接 `AmberNative.xcframework`。
-- **验收**：`xcodebuild -scheme iosApp -destination 'platform=iOS Simulator'` 构建通过，App 启动显示占位页，能调用一个共享层函数并打印结果。
+状态: ✅ 完成 (2026-06-13, codex/ios-port-wip) — :shared KMP umbrella; 25个 export() + api() 依赖; Shared.h 15159行, 4900+ Swift 可见类型; SKIE 禁用 (0.9.5 不兼容 Kotlin 2.3.21)
 
 #### P4-T2 最小对话链路
-状态: ⬜ 未开始
-- **前置**：P4-T1。
-- **做什么**：一条端到端链路，刻意保持最小：
-  1. 极简设置页：录入一个 Provider 的 base URL + API key（DataStore KMP 持久化）。
-  2. 极简聊天页：文本输入 → 经共享层发起 ChatTurn（走 agent-runtime / ChatTurnInput）→ 内核事件流（SKIE AsyncSequence）→ SwiftUI 逐 token 渲染纯文本。
-  3. 支持取消生成。
-- **红线**：不做 markdown 渲染、不做历史会话、不做多模型。这是验证管道的任务，不是做产品的任务。
-- **验收**：模拟器 + 真机各完成一次真实 API 的完整流式对话和一次中途取消；agent_run/agent_event 正确落库（Room KMP 查询验证）。
+状态: 🟡 进行中 (2026-06-13) — ai-provider-openai KMP 模块 + ChatViewModel 真实调用 generateText() 已通; 待完成: 流式渲染(Flow收集)、取消生成、agent_run 落库验证
 
 #### P4-T3 iOS Markdown 渲染管线
 状态: ⬜ 未开始

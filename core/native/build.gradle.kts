@@ -14,7 +14,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
         }
         val jvmMain by getting
-        val nativeMain by creating { dependsOn(commonMain.get()) }
+        val nativeMain by creating { }
         val iosArm64Main by getting { dependsOn(nativeMain) }
         val iosSimulatorArm64Main by getting { dependsOn(nativeMain) }
     }
