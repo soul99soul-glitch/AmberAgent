@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalFloatingToolbar
@@ -47,8 +46,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.SideEffect
-import app.amber.ai.ui.UIMessagePart
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -458,7 +455,6 @@ internal fun ChatListNormal(
                 currentContentBottom != null &&
                 currentContentBottom != lastContentBottom
             if (contentBottomChanged) {
-                stableBottomFrames = 0
                 logScroll(
                     "generationEndSettle.contentBottomChanged",
                     "frame=$frame last=$lastContentBottom current=$currentContentBottom",
@@ -550,14 +546,6 @@ internal fun ChatListNormal(
         onDispose {
             activity?.volumeKeyListeners?.remove(listener)
         }
-    }
-
-    fun List<LazyListItemInfo>.isBottomAnchorVisible(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
-        val lastPos = lastItem.offset + lastItem.size
-        val inputPos = state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt()
-        return lastPos <= inputPos - 8
     }
 
     // 聊天选择
@@ -782,11 +770,11 @@ internal fun ChatListNormal(
             ) {
                 // 2026-05-16: relaxed the bottom check from `!canScrollForward`
                 // (must be at the absolute scroll-max, no wiggle room) to
-                // `isAtTimelineBottom(bottomFollowBufferPx)` (within 48dp of
+                // `isAtTimelineBottom(bottomFollowBufferPx)` (within 24dp of
                 // the bottom). User feedback: the strict version felt
                 // unforgiving — had to scrub every last pixel before follow
                 // re-armed. Trade-off the M0.3 guard above mostly defeats:
-                // a short user scroll ending within 48dp could re-arm follow
+                // a short user scroll ending within 24dp could re-arm follow
                 // and the next chunk yanks back. If that resurfaces, lower
                 // bottomFollowBufferPx or add a brief user-input cooldown.
                 if (state.isAtTimelineBottom(bottomFollowBufferPx)) {
@@ -1121,20 +1109,6 @@ internal fun ChatListNormal(
                                             } else {
                                                 null
                                             }
-                                    }
-                                    // Temporary stream-freeze probe (M0.2): logs the text length this
-                                    // LazyColumn item lambda actually composed with, to bisect which
-                                    // layer stops seeing content growth mid-stream. Remove with fix.
-                                    if (BuildConfig.DEBUG && isLoadingMessage) {
-                                        val itemTextLen = node.currentMessage.parts
-                                            .sumOf { part -> (part as? UIMessagePart.Text)?.text?.length ?: 0 }
-                                        val lastLoggedItemLen = remember(node.id) { intArrayOf(-1) }
-                                        SideEffect {
-                                            if (lastLoggedItemLen[0] != itemTextLen) {
-                                                lastLoggedItemLen[0] = itemTextLen
-                                                Log.d("AmberStreamFreeze", "listItem node=${node.id} textLen=$itemTextLen")
-                                            }
-                                        }
                                     }
                                     ChatMessage(
                                         node = node,
