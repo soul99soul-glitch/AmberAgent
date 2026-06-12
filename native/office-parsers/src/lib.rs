@@ -9,11 +9,11 @@
 //! mirroring JVM behavior — the Kotlin adapter inspects this prefix when
 //! deciding whether to fall back to the JVM parser.
 
-mod docx;
-mod pptx;
-mod epub;
-mod xlsx;
-mod error;
+pub mod docx;
+pub mod pptx;
+pub mod epub;
+pub mod xlsx;
+pub mod error;
 
 // ---------------------------------------------------------------------------
 // Android JNI entry points

@@ -18,6 +18,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "amber-ffi"
+version = "0.1.0"
+dependencies = [
+ "highlight-parser",
+ "html-diff-normalizer",
+ "json-expr",
+ "log",
+ "markdown-parser",
+ "markdown-preprocess",
+ "office-parsers",
+ "reader-extractor",
+ "regex-transformer",
+ "sync-crypto",
+ "tokenizer",
+]
+
+[[package]]
 name = "android_log-sys"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,26 @@
+[package]
+name = "amber-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "amber_ffi"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+# All 10 component crates
+markdown-parser = { path = "../markdown-parser" }
+markdown-preprocess = { path = "../markdown-preprocess" }
+highlight-parser = { path = "../highlight-parser" }
+html-diff-normalizer = { path = "../html-diff-normalizer" }
+reader-extractor = { path = "../reader-extractor" }
+office-parsers = { path = "../office-parsers" }
+regex-transformer = { path = "../regex-transformer" }
+sync-crypto = { path = "../sync-crypto" }
+json-expr = { path = "../json-expr" }
+tokenizer = { path = "../tokenizer" }
+
+log.workspace = true
