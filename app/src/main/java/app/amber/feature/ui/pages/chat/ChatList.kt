@@ -40,9 +40,8 @@ private const val TAG = "ChatList"
 // auto-scroll occasionally misses the tail of streaming responses. Remove
 // after root cause identified.
 internal const val SCROLL_TAG = "AmberChatScroll"
-internal const val LoadingIndicatorKey = "LoadingIndicator"
 internal const val HistoryLoadingItemKey = "timeline-history-loading"
-internal const val ScrollBottomKey = "ScrollBottomKey"
+internal const val TimelineTailKey = "TimelineTail"
 internal val TimelineHorizontalPadding = 16.dp
 internal val SendTransitionSlideDistance = 8.dp
 // iMessage-style send entrance: the just-sent user bubble springs up from the

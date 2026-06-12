@@ -2,8 +2,10 @@ package app.amber.feature.ui.components.richtext
 
 import app.amber.feature.ui.components.richtext.tree.MdNode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class StreamingMarkdownRepairTest {
     @Test
@@ -208,5 +210,76 @@ class StreamingMarkdownRepairTest {
 
         assertTrue(finalized.stableTopLevelBlocks.isEmpty())
         assertTrue(finalized.tree.children.isNotEmpty())
+    }
+
+    @Test
+    fun `streaming parse throttle does not sample single value flows`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt").readText()
+
+        assertTrue(source.contains(".transform { triple ->"))
+        assertTrue(source.contains("SystemClock.uptimeMillis()"))
+        assertFalse(source.contains("flowOf(triple).sample"))
+        assertFalse(source.contains(".flatMapLatest { triple ->"))
+    }
+
+    @Test
+    fun `presentation gate keeps new visible text out of semantic parse until motion delay`() {
+        val gate = StreamingMarkdownPresentationGate(initialContent = "", commitDelayNanos = 100)
+
+        val initial = gate.update("hello", inputActive = true, nowNanos = 0)
+        val beforeDelay = gate.update("hello", inputActive = true, nowNanos = 99)
+        val afterDelay = gate.update("hello", inputActive = true, nowNanos = 100)
+
+        assertEquals("", initial.semanticContent)
+        assertTrue(initial.motionActive)
+        assertEquals("", beforeDelay.semanticContent)
+        assertTrue(beforeDelay.motionActive)
+        assertEquals("hello", afterDelay.semanticContent)
+        assertFalse(afterDelay.motionActive)
+    }
+
+    @Test
+    fun `presentation gate drains pending motion before final semantic commit`() {
+        val gate = StreamingMarkdownPresentationGate(initialContent = "", commitDelayNanos = 100)
+
+        gate.update("hello", inputActive = true, nowNanos = 0)
+        val endedBeforeDelay = gate.update("hello", inputActive = false, nowNanos = 50)
+        val endedAfterDelay = gate.update("hello", inputActive = false, nowNanos = 100)
+
+        assertEquals("", endedBeforeDelay.semanticContent)
+        assertTrue(endedBeforeDelay.motionActive)
+        assertEquals("hello", endedAfterDelay.semanticContent)
+        assertFalse(endedAfterDelay.motionActive)
+    }
+
+    @Test
+    fun `presentation gate commits non streaming replacements immediately`() {
+        val gate = StreamingMarkdownPresentationGate(initialContent = "hello", commitDelayNanos = 100)
+
+        val replaced = gate.update("goodbye", inputActive = false, nowNanos = 0)
+
+        assertEquals("goodbye", replaced.semanticContent)
+        assertFalse(replaced.motionActive)
+    }
+
+    @Test
+    fun `streaming markdown reveal keeps vertical motion out of block containers`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt").readText()
+
+        assertTrue(source.contains("BaselineShift"))
+        assertTrue(source.contains("STREAMING_CHAR_REVEAL_LIFT_EM"))
+        assertFalse(source.contains("STREAMING_BLOCK_REVEAL_OFFSET_DP"))
+        assertFalse(source.contains("translationY"))
+    }
+
+    private fun repoFile(pathInAppModule: String): File {
+        val userDir = System.getProperty("user.dir") ?: "."
+        var dir = File(userDir).absoluteFile
+        repeat(8) {
+            val candidate = File(dir, "app/$pathInAppModule")
+            if (candidate.exists()) return candidate
+            dir = dir.parentFile ?: dir
+        }
+        return File(userDir, "app/$pathInAppModule")
     }
 }

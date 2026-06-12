@@ -308,11 +308,7 @@ internal sealed interface ChatTimelineEntry {
         override val messageIndex: Int? = null
     }
 
-    data object Loading : ChatTimelineEntry {
-        override val messageIndex: Int? = null
-    }
-
-    data object ScrollBottom : ChatTimelineEntry {
+    data object TimelineTail : ChatTimelineEntry {
         override val messageIndex: Int? = null
     }
 }
@@ -502,8 +498,7 @@ internal fun buildChatTimelinePlan(
         repeat(pendingMessageCount) { index ->
             add(ChatTimelineEntry.Pending(index))
         }
-        if (timelineLoading) add(ChatTimelineEntry.Loading)
-        add(ChatTimelineEntry.ScrollBottom)
+        add(ChatTimelineEntry.TimelineTail)
     }
     val lazyItemMessageIndexes = entries.map { entry -> entry.messageIndex }
     val firstLazyIndexByMessageIndex = buildMap {
@@ -520,8 +515,7 @@ internal fun buildChatTimelinePlan(
                     "Msg(${e.node.currentMessage.role.name.take(4)}:${e.node.id.toString().take(8)})"
                 is ChatTimelineEntry.VirtualMessage ->
                     "VM(${e.node.id.toString().take(8)}:${e.item.keySuffix.take(16)})"
-                ChatTimelineEntry.Loading -> "Loading"
-                ChatTimelineEntry.ScrollBottom -> "ScrollBottom"
+                ChatTimelineEntry.TimelineTail -> "TimelineTail"
                 ChatTimelineEntry.HistoryLoading -> "HistoryLoading"
                 ChatTimelineEntry.PostSendWaitingAssistant -> "Waiting"
                 is ChatTimelineEntry.PostSendHiddenAssistant -> "Hidden"

@@ -1,5 +1,6 @@
 package app.amber.feature.ui.components.richtext
 
+import android.os.SystemClock
 import android.os.Trace
 import android.util.Log
 import androidx.compose.foundation.background
@@ -35,6 +36,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -64,12 +66,12 @@ import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
@@ -85,12 +87,9 @@ import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
@@ -463,6 +462,77 @@ internal data class StreamingLiveSuffix(
     val sourceOffset: Int,
 )
 
+internal data class StreamingMarkdownPresentationSnapshot(
+    val semanticContent: String,
+    val motionActive: Boolean,
+)
+
+private data class PendingMotionCommit(
+    val endOffset: Int,
+    val firstVisibleAtNanos: Long,
+)
+
+internal class StreamingMarkdownPresentationGate(
+    initialContent: String = "",
+    private val commitDelayNanos: Long = STREAMING_MOTION_COMMIT_DELAY_MS * 1_000_000L,
+) {
+    private var lastContent: String = initialContent
+    private var semanticEnd: Int = initialContent.length
+    private var pendingCommits: List<PendingMotionCommit> = emptyList()
+
+    fun update(
+        content: String,
+        inputActive: Boolean,
+        nowNanos: Long,
+    ): StreamingMarkdownPresentationSnapshot {
+        if (content != lastContent) {
+            when {
+                content.length < lastContent.length || !content.startsWith(lastContent) -> {
+                    pendingCommits = emptyList()
+                    semanticEnd = content.length
+                }
+
+                content.length > lastContent.length && inputActive -> {
+                    pendingCommits = pendingCommits + PendingMotionCommit(
+                        endOffset = content.length,
+                        firstVisibleAtNanos = nowNanos,
+                    )
+                }
+
+                else -> {
+                    pendingCommits = emptyList()
+                    semanticEnd = content.length
+                }
+            }
+            lastContent = content
+            semanticEnd = semanticEnd.coerceIn(0, content.length)
+        }
+
+        val readyEnd = pendingCommits
+            .asSequence()
+            .filter { nowNanos - it.firstVisibleAtNanos >= commitDelayNanos }
+            .maxOfOrNull { it.endOffset }
+        if (readyEnd != null) {
+            semanticEnd = maxOf(semanticEnd, readyEnd).coerceAtMost(content.length)
+        }
+        pendingCommits = pendingCommits.filter { commit ->
+            commit.endOffset > semanticEnd && commit.endOffset <= content.length
+        }
+        if (!inputActive && pendingCommits.isEmpty()) {
+            semanticEnd = content.length
+        }
+        return snapshot(content)
+    }
+
+    private fun snapshot(content: String): StreamingMarkdownPresentationSnapshot {
+        val safeSemanticEnd = semanticEnd.coerceIn(0, content.length)
+        return StreamingMarkdownPresentationSnapshot(
+            semanticContent = content.substring(0, safeSemanticEnd),
+            motionActive = pendingCommits.isNotEmpty() || safeSemanticEnd < content.length,
+        )
+    }
+}
+
 internal data class StreamingMarkdownMotionKey(
     val type: String,
     val absoluteStartOffset: Int,
@@ -707,7 +777,7 @@ private const val MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L
 
 /**
  * Codex-style per-character reveal. Each suffix character runs its own
- * fade+lift curve anchored to the moment IT first became visible (see
+ * fade curve anchored to the moment IT first became visible (see
  * [StreamingCharRevealClock]), instead of a curve shared by the whole parse
  * batch — batch anchoring made late-arriving characters start most of the way
  * through the shared curve and pop in nearly opaque.
@@ -723,9 +793,9 @@ private const val STREAMING_CHAR_REVEAL_STAGGER_MS = 9
 private const val STREAMING_CHAR_REVEAL_MAX_CASCADE_MS = 140
 private const val STREAMING_CHAR_REVEAL_MAX_PENDING = 220
 private const val STREAMING_CHAR_REVEAL_START_ALPHA = 0f
-// Per-glyph baseline lift for the streaming tail. baselineShift only moves the
-// glyph baseline, so it does NOT reflow the line or push the block below.
 private const val STREAMING_CHAR_REVEAL_LIFT_EM = 0.28f
+private const val STREAMING_MOTION_COMMIT_DELAY_MS =
+    STREAMING_CHAR_REVEAL_FADE_MS + STREAMING_CHAR_REVEAL_MAX_CASCADE_MS + 16
 private const val STREAMING_SETTLED_CATCHUP_FADE_MS = 120
 private const val STREAMING_SETTLED_CATCHUP_START_ALPHA = 0.72f
 // Only the newest tail of an absorbed range was mid-fade; older characters
@@ -734,8 +804,6 @@ private const val STREAMING_SETTLED_CATCHUP_START_ALPHA = 0.72f
 private const val STREAMING_SETTLED_CATCHUP_MAX_CODEPOINTS = 32
 private const val STREAMING_BLOCK_REVEAL_MS = 190
 private const val STREAMING_BLOCK_REVEAL_START_ALPHA = 0.86f
-// Whole-block translationY rise on first settle, complementing the per-glyph tail lift.
-private const val STREAMING_BLOCK_REVEAL_OFFSET_DP = 9
 private const val STREAMING_TABLE_CELL_REVEAL_MS = 150
 private const val STREAMING_TABLE_CELL_REVEAL_START_ALPHA = 0.72f
 private const val STREAMING_TABLE_CELL_REVEAL_MAX_CELLS = 48
@@ -1271,6 +1339,7 @@ fun MarkdownBlock(
     streaming: Boolean = false,
     deferStreamingParse: Boolean = false,
     onStreamingVisibleFrame: (() -> Unit)? = null,
+    onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
     onClickCitation: (String) -> Unit = {}
 ) {
     // T-C perf-layer dispatch — see PerfFlags + docs/visual-sanity-check.md.
@@ -1283,6 +1352,7 @@ fun MarkdownBlock(
             streaming = streaming,
             deferStreamingParse = deferStreamingParse,
             onStreamingVisibleFrame = onStreamingVisibleFrame,
+            onStreamingVisualActiveChange = onStreamingVisualActiveChange,
             onClickCitation = onClickCitation,
         )
         return
@@ -1295,6 +1365,7 @@ fun MarkdownBlock(
         streaming = streaming,
         deferStreamingParse = deferStreamingParse,
         onStreamingVisibleFrame = onStreamingVisibleFrame,
+        onStreamingVisualActiveChange = onStreamingVisualActiveChange,
         onClickCitation = onClickCitation,
     )
 }
@@ -1308,6 +1379,7 @@ internal fun MarkdownBlockLegacy(
     streaming: Boolean = false,
     deferStreamingParse: Boolean = false,
     onStreamingVisibleFrame: (() -> Unit)? = null,
+    onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
     onClickCitation: (String) -> Unit = {}
 ) {
     // Temporary stream-freeze probe (M0.2): logs the raw content length this
@@ -1333,16 +1405,27 @@ internal fun MarkdownBlockLegacy(
     val displayDrainingAfterStream = !streaming &&
         renderContent != content &&
         content.startsWith(renderContent)
+    val presentationInputActive = streaming || displayDrainingAfterStream
+    val presentation = rememberStreamingMarkdownPresentation(
+        content = renderContent,
+        inputActive = presentationInputActive,
+    )
+    val semanticContent = presentation.semanticContent
+    val parseAsStreamingState = presentationInputActive || presentation.motionActive
+    ReportStreamingVisualActive(
+        active = parseAsStreamingState,
+        onActiveChange = onStreamingVisualActiveChange,
+    )
     val streamingParseCache = remember {
         StreamingMarkdownParseCache()
     }
     var (data, setData) = remember {
         mutableStateOf(
-            if (streaming) {
-                streamingParseCache.parse(renderContent)
+            if (parseAsStreamingState) {
+                streamingParseCache.parse(semanticContent)
             } else {
                 streamingParseCache.reset()
-                MarkdownParseCache.getOrParse(renderContent)
+                MarkdownParseCache.getOrParse(semanticContent)
             }
         )
     }
@@ -1351,19 +1434,18 @@ internal fun MarkdownBlockLegacy(
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
     //
     // TD.Rust.1+ streaming parse throttle (review #8): on streaming content,
-    // sample the flow at MARKDOWN_STREAMING_PARSE_THROTTLE_MS so that bursts
-    // of token arrivals only trigger a re-parse every ~200ms. The visible
-    // text already updates continuously via rememberStreamingDisplayText
-    // (renderContent vs raw content); the AST re-parse is the expensive
-    // step we're cutting.
-    val updatedContent by rememberUpdatedState(renderContent)
-    val updatedStreaming by rememberUpdatedState(streaming)
-    val updatedDraining by rememberUpdatedState(displayDrainingAfterStream)
+    // allow one AST refresh roughly every MARKDOWN_STREAMING_PARSE_THROTTLE_MS
+    // so token bursts do not re-parse on every frame. The visible text still
+    // advances continuously via rememberStreamingDisplayText; only the AST
+    // refresh rate is capped.
+    val updatedContent by rememberUpdatedState(semanticContent)
+    val updatedParseAsStreaming by rememberUpdatedState(parseAsStreamingState)
     val updatedDeferStreamingParse by rememberUpdatedState(deferStreamingParse)
+    val updatedOnStreamingVisibleFrame by rememberUpdatedState(onStreamingVisibleFrame)
     val streamingTailActive = streamingTailActiveWhen(
-        streaming = streaming || displayDrainingAfterStream,
+        streaming = parseAsStreamingState,
     )
-    val streamingMotionActive = streaming || displayDrainingAfterStream
+    val streamingMotionActive = parseAsStreamingState
     val streamingMotionScope = remember {
         StreamingMarkdownMotionScope()
     }
@@ -1390,32 +1472,41 @@ internal fun MarkdownBlockLegacy(
         activeBaseOffset = data.activeBaseOffset,
         parsedPreprocessed = data.preprocessed,
         syntheticSuffixStart = data.syntheticSuffixStart,
-        streaming = streaming,
+        streaming = parseAsStreamingState,
     )
     SideEffect {
         StreamingRenderProbe.liveSuffixLength = streamingLiveSuffix.text.length
-        if (!streaming && !displayDrainingAfterStream) {
+        if (!parseAsStreamingState) {
             StreamingRenderProbe.resetStreamingDiagnostics()
         }
     }
     LaunchedEffect(Unit) {
-        var lastParsedContent = renderContent
-        var lastParsedStreaming = streaming
+        var lastParsedContent = semanticContent
+        var lastParsedStreaming = parseAsStreamingState
         var lastDeferred = deferStreamingParse
-        @OptIn(FlowPreview::class)
+        var lastStreamingParseAtMs = 0L
         snapshotFlow {
             Triple(
                 updatedContent,
-                updatedStreaming || updatedDraining,
+                updatedParseAsStreaming,
                 updatedDeferStreamingParse,
             )
         }
             .distinctUntilChanged()
-            .flatMapLatest { triple ->
-                if (triple.second) {
-                    flowOf(triple).sample(MARKDOWN_STREAMING_PARSE_THROTTLE_MS)
-                } else {
-                    flowOf(triple)
+            .transform { triple ->
+                val parseAsStreaming = triple.second
+                if (!parseAsStreaming) {
+                    lastStreamingParseAtMs = 0L
+                    emit(triple)
+                    return@transform
+                }
+                val nowMs = SystemClock.uptimeMillis()
+                if (
+                    lastStreamingParseAtMs == 0L ||
+                    nowMs - lastStreamingParseAtMs >= MARKDOWN_STREAMING_PARSE_THROTTLE_MS
+                ) {
+                    lastStreamingParseAtMs = nowMs
+                    emit(triple)
                 }
             }
             .collectLatest { (latestContent, parseAsStreaming, latestDeferStreamingParse) ->
@@ -1458,6 +1549,9 @@ internal fun MarkdownBlockLegacy(
                     lastParsedStreaming = parseAsStreaming
                     lastDeferred = latestDeferStreamingParse
                     setData(parsed)
+                    if (!parseAsStreaming) {
+                        updatedOnStreamingVisibleFrame?.invoke()
+                    }
                     if (parseAsStreaming) {
                         StreamingRenderProbe.parseTickCount++
                     }
@@ -1590,6 +1684,70 @@ internal fun MarkdownBlockLegacy(
     }
 }
 
+@Composable
+private fun rememberStreamingMarkdownPresentation(
+    content: String,
+    inputActive: Boolean,
+): StreamingMarkdownPresentationSnapshot {
+    val gate = remember { StreamingMarkdownPresentationGate(initialContent = content) }
+    var snapshot by remember {
+        mutableStateOf(
+            StreamingMarkdownPresentationSnapshot(
+                semanticContent = content,
+                motionActive = false,
+            )
+        )
+    }
+    val updatedContent by rememberUpdatedState(content)
+    val updatedInputActive by rememberUpdatedState(inputActive)
+
+    LaunchedEffect(content, inputActive) {
+        snapshot = gate.update(
+            content = content,
+            inputActive = inputActive,
+            nowNanos = System.nanoTime(),
+        )
+    }
+    LaunchedEffect(inputActive, snapshot.motionActive) {
+        if (!inputActive && !snapshot.motionActive) return@LaunchedEffect
+        while (true) {
+            val next = withFrameNanos { nowNanos ->
+                gate.update(
+                    content = updatedContent,
+                    inputActive = updatedInputActive,
+                    nowNanos = nowNanos,
+                )
+            }
+            snapshot = next
+            if (!updatedInputActive && !next.motionActive) break
+        }
+    }
+
+    return snapshot
+}
+
+@Composable
+private fun ReportStreamingVisualActive(
+    active: Boolean,
+    onActiveChange: ((Boolean) -> Unit)?,
+) {
+    val updatedOnActiveChange by rememberUpdatedState(onActiveChange)
+    var reportedActive by remember { mutableStateOf(false) }
+    SideEffect {
+        if (reportedActive != active) {
+            reportedActive = active
+            updatedOnActiveChange?.invoke(active)
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            if (reportedActive) {
+                updatedOnActiveChange?.invoke(false)
+            }
+        }
+    }
+}
+
 private fun String.shouldBypassStreamingDisplayBuffer(): Boolean {
     val lower = lowercase()
     return lower.contains("```html") ||
@@ -1642,7 +1800,6 @@ private fun StreamingBlockReveal(
     delayMillis: Int = 0,
     durationMillis: Int = STREAMING_BLOCK_REVEAL_MS,
     startAlpha: Float = STREAMING_BLOCK_REVEAL_START_ALPHA,
-    offsetYDp: Int = STREAMING_BLOCK_REVEAL_OFFSET_DP,
     content: @Composable (Modifier) -> Unit,
 ) {
     val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
@@ -1661,7 +1818,6 @@ private fun StreamingBlockReveal(
                 delayMillis = delayMillis,
                 durationMillis = durationMillis,
                 startAlpha = startAlpha,
-                offsetYDp = offsetYDp,
             )
         )
     )
@@ -1674,7 +1830,6 @@ private fun streamingRevealModifier(
     delayMillis: Int = 0,
     durationMillis: Int = STREAMING_BLOCK_REVEAL_MS,
     startAlpha: Float = STREAMING_BLOCK_REVEAL_START_ALPHA,
-    offsetYDp: Int = STREAMING_BLOCK_REVEAL_OFFSET_DP,
 ): Modifier {
     val scope = LocalStreamingMarkdownMotionScope.current
     val revealActive = enabled && LocalStreamingTailActive.current != null
@@ -1704,11 +1859,9 @@ private fun streamingRevealModifier(
             ),
         )
     }
-    val offsetPx = with(LocalDensity.current) { offsetYDp.dp.toPx() }
     return Modifier.graphicsLayer {
         val eased = codexStreamingAlphaProgress(anim.value)
         alpha = startAlpha + (1f - startAlpha) * eased
-        translationY = offsetPx * (1f - eased)
     }
 }
 
@@ -2904,7 +3057,6 @@ private fun TableNode(
                             (liveSuffix.isEmpty() || rowIndex >= firstLiveRowIndex),
                         durationMillis = STREAMING_TABLE_CELL_REVEAL_MS,
                         startAlpha = STREAMING_TABLE_CELL_REVEAL_START_ALPHA,
-                        offsetYDp = 0,
                     )
                 },
             )
@@ -3412,7 +3564,6 @@ internal fun applyStreamingCharReveal(
                     style = streamingRevealSpanStyle(
                         baseColor = baseColor,
                         localProgress = progress,
-                        eased = easeStreamingReveal(progress),
                     ),
                     start = offset,
                     end = nextOffset,
@@ -3444,20 +3595,14 @@ internal fun applyStreamingCharRevealPlain(
 private fun streamingRevealSpanStyle(
     baseColor: Color,
     localProgress: Float,
-    eased: Float,
 ): SpanStyle {
     val alphaProgress = codexStreamingAlphaProgress(localProgress)
     val alpha = STREAMING_CHAR_REVEAL_START_ALPHA +
         (1f - STREAMING_CHAR_REVEAL_START_ALPHA) * alphaProgress
     return SpanStyle(
         color = baseColor.copy(alpha = alpha),
-        baselineShift = BaselineShift(-STREAMING_CHAR_REVEAL_LIFT_EM * (1f - eased)),
+        baselineShift = BaselineShift(-STREAMING_CHAR_REVEAL_LIFT_EM * (1f - alphaProgress)),
     )
-}
-
-private fun easeStreamingReveal(progress: Float): Float {
-    val inverse = 1f - progress.coerceIn(0f, 1f)
-    return 1f - inverse * inverse * inverse
 }
 
 private fun codexStreamingAlphaProgress(progress: Float): Float {

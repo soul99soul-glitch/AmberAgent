@@ -20,6 +20,7 @@ fun MarkdownBlockSplit(
     streaming: Boolean = false,
     deferStreamingParse: Boolean = false,
     onStreamingVisibleFrame: (() -> Unit)? = null,
+    onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
     onClickCitation: (String) -> Unit = {},
 ) {
     MarkdownBlockLegacy(
@@ -30,6 +31,7 @@ fun MarkdownBlockSplit(
         streaming = streaming,
         deferStreamingParse = deferStreamingParse,
         onStreamingVisibleFrame = onStreamingVisibleFrame,
+        onStreamingVisualActiveChange = onStreamingVisualActiveChange,
         onClickCitation = onClickCitation,
     )
 }

@@ -12,7 +12,7 @@ import kotlin.uuid.Uuid
 
 class ChatTimelinePlanTest {
     @Test
-    fun planMapsHistoryMessagesPendingLoadingAndBottom() {
+    fun planMapsHistoryMessagesPendingAndStableTail() {
         val conversation = conversationOf(
             message("u1", MessageRole.USER),
             message("a1", MessageRole.ASSISTANT),
@@ -39,9 +39,43 @@ class ChatTimelinePlanTest {
         assertEquals(2, plan.firstLazyIndexForMessage(1))
         assertTrue(plan.entries[3] is ChatTimelineEntry.Pending)
         assertTrue(plan.entries[4] is ChatTimelineEntry.Pending)
-        assertTrue(plan.entries[5] is ChatTimelineEntry.Loading)
-        assertTrue(plan.entries.last() is ChatTimelineEntry.ScrollBottom)
-        assertEquals(listOf(null, 0, 1, null, null, null, null), plan.lazyItemMessageIndexes)
+        assertTrue(plan.entries[5] is ChatTimelineEntry.TimelineTail)
+        assertEquals(listOf(null, 0, 1, null, null, null), plan.lazyItemMessageIndexes)
+    }
+
+    @Test
+    fun planKeepsSameTailEntryShapeWhenLoadingEnds() {
+        val conversation = conversationOf(
+            message("u1", MessageRole.USER),
+            message("a1", MessageRole.ASSISTANT),
+        )
+        val cache = ChatVirtualItemCache()
+
+        val loadingPlan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = true,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = emptyPostSendState(),
+            virtualItemCache = cache,
+        )
+        val completedPlan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = false,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = emptyPostSendState(),
+            virtualItemCache = cache,
+        )
+
+        assertEquals(loadingPlan.entries.size, completedPlan.entries.size)
+        assertTrue(loadingPlan.entries.last() is ChatTimelineEntry.TimelineTail)
+        assertTrue(completedPlan.entries.last() is ChatTimelineEntry.TimelineTail)
+        assertEquals(loadingPlan.lazyItemMessageIndexes, completedPlan.lazyItemMessageIndexes)
     }
 
     @Test
@@ -177,6 +211,14 @@ class ChatTimelinePlanTest {
         id = Uuid.random(),
         assistantId = Uuid.random(),
         messageNodes = messages.map { it.toMessageNode() },
+    )
+
+    private fun emptyPostSendState() = PostSendTimelineState(
+        sentUserMessageId = null,
+        sentUserMessageIndex = null,
+        assistantMessageIndex = null,
+        hiddenAssistantMessageIndex = null,
+        waitingForAssistantContent = false,
     )
 
     private fun message(text: String, role: MessageRole) = UIMessage(
