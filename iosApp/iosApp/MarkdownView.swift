@@ -3,15 +3,35 @@ import SwiftUI
 struct MarkdownView: View {
     let markdown: String
 
+    /// Cache the parsed AST to avoid re-parsing on every SwiftUI body evaluation.
+    /// Only re-parses when `markdown` content changes.
+    @State private var cachedMarkdown: String = ""
+    @State private var cachedChildren: [PackedAstNode] = []
+    @State private var cachedSource: String = ""
+
     var body: some View {
+        let children = resolveChildren()
+        if children.isEmpty {
+            Text(markdown)
+                .font(.body)
+        } else {
+            blockStack(children, source: markdown)
+        }
+    }
+
+    private func resolveChildren() -> [PackedAstNode] {
+        if markdown == cachedMarkdown {
+            return cachedChildren
+        }
         if let data = MarkdownBridge.parse(markdown),
            let reader = PackedAstReader(data: data),
            let root = reader.root() {
-            blockStack(root.children, source: markdown)
-        } else {
-            Text(markdown)
-                .font(.body)
+            cachedMarkdown = markdown
+            cachedChildren = root.children
+            cachedSource = markdown
+            return root.children
         }
+        return []
     }
 
     // MARK: - Block Rendering
@@ -158,60 +178,80 @@ struct MarkdownView: View {
 
     // MARK: - Inline Text Concatenation
 
-    /// Build a SwiftUI `Text` by concatenating inline children with modifiers.
+    /// Build a SwiftUI `Text` by constructing an AttributedString from inline children.
+    /// Avoids the deprecated `Text + Text` operator (deprecated in iOS 26).
     private func buildInlineText(_ nodes: [PackedAstNode], source: String) -> Text {
-        var parts = [Text]()
+        var attrStr = AttributedString()
         for node in nodes {
-            if let t = renderInline(node, source: source) {
-                parts.append(t)
+            if let part = renderInlineAttr(node, source: source) {
+                attrStr.append(part)
             }
         }
-        if parts.isEmpty { return Text("") }
-        return parts.dropFirst().reduce(parts[0]) { $0 + $1 }
+        return Text(attrStr)
     }
 
-    /// Render a single inline node into a SwiftUI `Text`, or nil if empty.
-    private func renderInline(_ node: PackedAstNode, source: String) -> Text? {
+    /// Render a single inline node into an AttributedString fragment.
+    private func renderInlineAttr(_ node: PackedAstNode, source: String) -> AttributedString? {
         switch node.type {
         case .text:
             let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
             guard !raw.isEmpty else { return nil }
-            return Text(raw)
+            return AttributedString(raw)
 
         case .softBreak, .hardBreak:
-            return Text("\n")
+            return AttributedString("\n")
 
         case .emphasis:
-            return buildInlineText(node.children, source: source).italic()
+            var result = buildInlineAttrString(node.children, source: source)
+            result.font = .body.italic()
+            return result
 
         case .strong:
-            return buildInlineText(node.children, source: source).bold()
+            var result = buildInlineAttrString(node.children, source: source)
+            result.font = .body.bold()
+            return result
 
         case .strikethrough:
-            return buildInlineText(node.children, source: source).strikethrough()
+            var result = buildInlineAttrString(node.children, source: source)
+            result.strikethroughStyle = .single
+            return result
 
         case .inlineCode:
             let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
             guard !raw.isEmpty else { return nil }
-            return Text(raw).font(.system(.body, design: .monospaced))
+            var result = AttributedString(raw)
+            result.font = .system(.body, design: .monospaced)
+            return result
 
         case .link:
-            return buildInlineText(node.children, source: source)
-                .foregroundColor(.blue)
-                .underline(true)
+            var result = buildInlineAttrString(node.children, source: source)
+            result.foregroundColor = .blue
+            result.underlineStyle = .single
+            return result
 
         case .image:
             let alt = sliceSource(source, start: node.startOffset, end: node.endOffset)
-            return Text("[\(alt)]")
+            return AttributedString("[\(alt)]")
 
         default:
             if !node.children.isEmpty {
-                return buildInlineText(node.children, source: source)
+                return buildInlineAttrString(node.children, source: source)
             }
             let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
             guard !raw.isEmpty else { return nil }
-            return Text(raw)
+            return AttributedString(raw)
         }
+    }
+
+    /// Build a plain AttributedString by concatenating inline children (no style).
+    private func buildInlineAttrString(_ nodes: [PackedAstNode], source: String) -> AttributedString {
+        var attrStr = AttributedString()
+        for node in nodes {
+            if let part = renderInlineAttr(node, source: source) {
+                attrStr.append(part)
+            }
+        }
+        return attrStr
     }
 
     // MARK: - Source Slicing
