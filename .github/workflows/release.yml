@@ -27,7 +27,7 @@ jobs:
         # Action ref pinned to the version tag rather than @master — the
         # action implementation itself has changed input names mid-cycle
         # before (round 2 review R2-P2-3).
-        uses: dtolnay/rust-toolchain@1.82.0
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: aarch64-linux-android
 
