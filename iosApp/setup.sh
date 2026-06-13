@@ -11,14 +11,14 @@ echo ""
 
 # Step 1: Build the shared Kotlin framework
 echo "[1/3] Building :shared Kotlin framework for iOS..."
-./gradlew :shared:compileKotlinIosSimulatorArm64 || {
+./gradlew :shared:linkDebugFrameworkIosSimulatorArm64 || {
     echo "ERROR: Shared framework compilation failed."
     echo "Fix the errors above and re-run this script."
     exit 1
 }
 
 # Copy the built framework to a known location
-FRAMEWORK_OUTPUT="$SHARED_DIR/build/apple"
+FRAMEWORK_OUTPUT="$SHARED_DIR/build/bin/iosSimulatorArm64/debugFramework"
 mkdir -p "$FRAMEWORK_OUTPUT"
 echo "   Framework outputs will be at: $FRAMEWORK_OUTPUT"
 echo ""

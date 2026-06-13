@@ -83,7 +83,7 @@ class PackedAstReader {
 
     /// Root node, or nil if isValid is false / blob truncated.
     func root() -> PackedAstNode? {
-        if !isValid || blob.count < 9 { return nil }
+        guard validate() else { return nil }
         return PackedAstNode(blob: blob, offset: 8, parent: nil, indexInParent: -1)
     }
 
@@ -249,6 +249,7 @@ class PackedAstNode: Identifiable {
         var shift = 0
         var cursor = start
         while true {
+            guard cursor < blob.count else { return (value: 0, next: -1) }
             let byte = Int(blob[cursor])
             value |= UInt64(byte & 0x7F) << shift
             cursor += 1

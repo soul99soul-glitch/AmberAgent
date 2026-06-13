@@ -1,16 +1,6 @@
 import Foundation
+import CryptoKit
 @preconcurrency import Shared
-
-// MARK: - Flow Collector Helper
-
-private class ChunkCollector: NSObject, Kotlinx_coroutines_coreFlowCollector {
-    let onChunk: (MessageChunk) -> Void
-    init(onChunk: @escaping (MessageChunk) -> Void) { self.onChunk = onChunk }
-    func emit(value: Any?, completionHandler: @escaping (Error?) -> Void) {
-        if let chunk = value as? MessageChunk { onChunk(chunk) }
-        completionHandler(nil)
-    }
-}
 
 // MARK: - ChatViewModel
 
@@ -28,8 +18,13 @@ final class ChatViewModel {
 
     private let settingsStore: SettingsStore
     private let provider = OpenAIKmpProvider()
-    private let db: AgentRuntimeDatabase = AgentRuntimeDatabaseConstructor.shared.initialize()
-    private var streamingTask: Task<Void, Never>?
+    private let db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
+    private var streamJob: Kotlinx_coroutines_coreJob?
+
+    // Run tracking — stored so cancelGeneration() can record an interrupted run.
+    private var currentRunId: String?
+    private var currentStartedAt: Int64?
+    private var currentInputDigest: String?
 
     // MARK: - Init
 
@@ -43,23 +38,41 @@ final class ChatViewModel {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        let inputSnapshot = text
+        let digest = Self.inputDigest(for: text)
         let userMsg = UIMessage.companion.user(prompt: text)
         messages.append(userMsg)
         inputText = ""
-        generateResponse(inputSnapshot: inputSnapshot)
+        generateResponse(inputDigest: digest)
     }
 
     func cancelGeneration() {
-        streamingTask?.cancel()
-        streamingTask = nil
+        // Capture run info before clearing state so we can record the interruption.
+        let runId = currentRunId
+        let startedAt = currentStartedAt
+        let digest = currentInputDigest
+
+        streamJob?.cancel()
+        streamJob = nil
+        currentRunId = nil
+        currentStartedAt = nil
+        currentInputDigest = nil
         isLoading = false
+
+        guard let runId, let startedAt, let digest else { return }
+        Task { @MainActor in
+            await self.recordRun(
+                runId: runId,
+                startedAt: startedAt,
+                status: "interrupted",
+                inputDigest: digest
+            )
+        }
     }
 
     // MARK: - Private
 
-    private func generateResponse(inputSnapshot: String) {
-        streamingTask?.cancel()
+    private func generateResponse(inputDigest: String) {
+        streamJob?.cancel()
         isLoading = true
 
         let providerSetting = makeProviderSetting()
@@ -67,84 +80,80 @@ final class ChatViewModel {
         let runId = UUID().uuidString
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
 
-        streamingTask = Task { @MainActor in
-            let accumulator = MessageStreamAccumulator(
-                initialMessages: self.messages,
-                model: params.model
-            )
+        currentRunId = runId
+        currentStartedAt = startedAt
+        currentInputDigest = inputDigest
 
-            do {
-                // Step 1: Obtain the Flow from streamText
-                let flow = try await withCheckedThrowingContinuation {
-                    (cont: CheckedContinuation<any Kotlinx_coroutines_coreFlow, Error>) in
-                    self.provider.streamText(
-                        providerSetting: providerSetting,
-                        messages: self.messages,
-                        params: params
-                    ) { flow, error in
-                        if let flow { cont.resume(returning: flow) }
-                        else if let error { cont.resume(throwing: error) }
-                    }
+        let accumulator = MessageStreamAccumulator(
+            initialMessages: messages,
+            model: params.model
+        )
+
+        streamJob = provider.streamTextCancellable(
+            providerSetting: providerSetting,
+            messages: messages,
+            params: params,
+            onChunk: { chunk in
+                // Called sequentially from Dispatchers.Default.
+                accumulator.append(chunk: chunk)
+                let snapshot = accumulator.snapshot()
+                Task { @MainActor [weak self] in
+                    self?.messages = snapshot
                 }
-
-                // Step 2: Collect the flow — each emission is an incremental MessageChunk
-                try await withCheckedThrowingContinuation {
-                    (cont: CheckedContinuation<Void, Error>) in
-                    let collector = ChunkCollector { [weak self] chunk in
-                        guard let self else { return }
-                        accumulator.append(chunk: chunk)
-                        let snapshot = accumulator.snapshot()
-                        Task { @MainActor [weak self] in
-                            guard let self else { return }
-                            self.messages = snapshot
-                        }
-                    }
-                    flow.collect(collector: collector) { error in
-                        if let error { cont.resume(throwing: error) }
-                        else { cont.resume() }
-                    }
+            },
+            onComplete: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await self.recordRun(
+                        runId: runId,
+                        startedAt: startedAt,
+                        status: "completed",
+                        inputDigest: inputDigest
+                    )
+                    self.finishStreaming()
                 }
-
-                // Step 3: Record successful run to Room
-                await self.recordRun(
-                    runId: runId,
-                    startedAt: startedAt,
-                    status: "completed",
-                    inputDigest: inputSnapshot
-                )
-            } catch is CancellationError {
-                // Cancelled — record as interrupted
-                await self.recordRun(
-                    runId: runId,
-                    startedAt: startedAt,
-                    status: "interrupted",
-                    inputDigest: inputSnapshot
-                )
-            } catch {
-                // Error — append error message
-                let errMsg = UIMessage(
-                    id: KotlinUuid.companion.random(),
-                    role: MessageRole.assistant,
-                    parts: [UIMessagePart.Text(text: "Error: \(error.localizedDescription)", metadata: nil)],
-                    annotations: [],
-                    createdAt: self.nowLocalDateTime(),
-                    finishedAt: self.nowLocalDateTime(),
-                    modelId: nil,
-                    usage: nil,
-                    translation: nil
-                )
-                self.messages.append(errMsg)
-
-                await self.recordRun(
-                    runId: runId,
-                    startedAt: startedAt,
-                    status: "failed",
-                    inputDigest: inputSnapshot
-                )
+            },
+            onError: { [weak self] error in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let errMsg = UIMessage(
+                        id: KotlinUuid.companion.random(),
+                        role: MessageRole.assistant,
+                        parts: [UIMessagePart.Text(text: "Error: \(error.localizedDescription)", metadata: nil)],
+                        annotations: [],
+                        createdAt: self.nowLocalDateTime(),
+                        finishedAt: self.nowLocalDateTime(),
+                        modelId: nil,
+                        usage: nil,
+                        translation: nil
+                    )
+                    self.messages.append(errMsg)
+                    await self.recordRun(
+                        runId: runId,
+                        startedAt: startedAt,
+                        status: "failed",
+                        inputDigest: inputDigest
+                    )
+                    self.finishStreaming()
+                }
             }
+        )
+    }
 
-            isLoading = false
-        }
+    private func finishStreaming() {
+        currentRunId = nil
+        currentStartedAt = nil
+        currentInputDigest = nil
+        streamJob = nil
+        isLoading = false
+    }
+
+    /// Stable SHA-256 hex digest of the input text.
+    /// Unlike the previous raw-text approach, this does not leak conversation content
+    /// into the run record's `inputDigest` field.
+    private static func inputDigest(for text: String) -> String {
+        let hash = SHA256.hash(data: Data(text.utf8))
+        return hash.map { String(format: "%02x", $0) }.joined()
     }
 
     private func recordRun(

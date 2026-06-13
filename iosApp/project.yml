@@ -38,7 +38,7 @@ targets:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64/Headers"
     dependencies:
       - framework: Shared.framework
-        embed: false
+        embed: true
     scheme:
       configVariants:
         - Debug

@@ -46,14 +46,35 @@ kotlin {
         ":core:native",
     )
 
-    // Produce static Apple framework for iOS consumption
+    // Produce dynamic Apple framework for iOS consumption.
     // export() causes Kotlin/Native to generate ObjC headers for all transitively
     // visible types from these modules — api() alone does NOT do this.
+    //
+    // isStatic = false is REQUIRED: bundled SQLite native symbols (e.g.
+    // _sqlite3_mutex_held, _sqlite3_unlock_notify) are compiled into the framework
+    // via androidx.sqlite:sqlite-bundled. A static framework does not propagate
+    // these linker symbols to the final app binary, causing unresolved-symbol link
+    // errors. A dynamic framework embeds them correctly.
+    //
+    // Linker opts for core:native cinterop (AmberNative / libamber_ffi) must be
+    // repeated here — they are scoped to :core:native binaries and do not
+    // propagate automatically through export(). Mirrors core/native/build.gradle.kts:25-30.
+    val amberNativeXcfDir = "${rootProject.projectDir}/native/AmberNative.xcframework"
+
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
+        val slice = if (target.name.contains("Simulator")) "ios-arm64-sim" else "ios-arm64"
+
         target.binaries.framework {
             baseName = "Shared"
-            isStatic = true
+            isStatic = false
             sharedProjects.forEach { export(project(it)) }
+        }
+
+        target.binaries.forEach { binary ->
+            binary.linkerOpts(
+                "-L$amberNativeXcfDir/$slice",
+                "-lamber_ffi",
+            )
         }
     }
 

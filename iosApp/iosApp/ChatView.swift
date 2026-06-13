@@ -13,14 +13,12 @@ struct ChatView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                messageList
-                inputBar
-            }
-            .navigationTitle("AmberAgent")
-            .background(Color(.systemGroupedBackground))
+        VStack(spacing: 0) {
+            messageList
+            inputBar
         }
+        .navigationTitle("AmberAgent")
+        .background(Color(.systemGroupedBackground))
     }
 
     // MARK: - Message List
@@ -29,17 +27,20 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(Array(viewModel.messages.enumerated()), id: \.offset) { index, message in
+                    ForEach(viewModel.messages, id: \.id) { message in
                         MessageBubbleView(message: message)
-                            .id(index)
+                            .id(message.id)
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .onChange(of: viewModel.messages.count) { _, _ in
+            .onChange(of: viewModel.messages.count) { _, newCount in
+                guard newCount > 0 else { return }
                 withAnimation {
-                    proxy.scrollTo(viewModel.messages.count - 1, anchor: .bottom)
+                    if let lastId = viewModel.messages.last?.id {
+                        proxy.scrollTo(lastId, anchor: .bottom)
+                    }
                 }
             }
         }

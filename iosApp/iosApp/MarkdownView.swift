@@ -8,30 +8,39 @@ struct MarkdownView: View {
     @State private var cachedMarkdown: String = ""
     @State private var cachedChildren: [PackedAstNode] = []
     @State private var cachedSource: String = ""
+    @State private var parseFailed: Bool = false
 
     var body: some View {
-        let children = resolveChildren()
-        if children.isEmpty {
-            Text(markdown)
-                .font(.body)
-        } else {
-            blockStack(children, source: markdown)
+        Group {
+            if parseFailed || cachedChildren.isEmpty {
+                Text(markdown)
+                    .font(.body)
+            } else {
+                blockStack(cachedChildren, source: markdown)
+            }
+        }
+        .onChange(of: markdown) { _, newMarkdown in
+            parseMarkdown(newMarkdown)
+        }
+        .onAppear {
+            parseMarkdown(markdown)
         }
     }
 
-    private func resolveChildren() -> [PackedAstNode] {
-        if markdown == cachedMarkdown {
-            return cachedChildren
-        }
-        if let data = MarkdownBridge.parse(markdown),
+    private func parseMarkdown(_ md: String) {
+        guard md != cachedMarkdown else { return }
+        cachedMarkdown = md
+        if let data = MarkdownBridge.parse(md),
            let reader = PackedAstReader(data: data),
            let root = reader.root() {
-            cachedMarkdown = markdown
             cachedChildren = root.children
-            cachedSource = markdown
-            return root.children
+            cachedSource = md
+            parseFailed = false
+        } else {
+            cachedChildren = []
+            cachedSource = md
+            parseFailed = true
         }
-        return []
     }
 
     // MARK: - Block Rendering
@@ -227,6 +236,9 @@ struct MarkdownView: View {
             var result = buildInlineAttrString(node.children, source: source)
             result.foregroundColor = .blue
             result.underlineStyle = .single
+            if let urlString = node.linkHref(), let url = URL(string: urlString) {
+                result.link = url
+            }
             return result
 
         case .image:

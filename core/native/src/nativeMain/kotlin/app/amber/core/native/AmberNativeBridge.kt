@@ -53,7 +53,7 @@ actual object AmberNativeBridge {
         val result = salt.usePinned { pinnedSalt ->
             amber_pbkdf2_hmac_sha256(
                 passphrase,
-                pinnedSalt.addressOf(0).reinterpret(),
+                if (salt.isEmpty()) null else pinnedSalt.addressOf(0).reinterpret(),
                 salt.size.toULong(),
                 iterations.toUInt(),
                 keySizeBytes.toULong(),
@@ -70,11 +70,11 @@ actual object AmberNativeBridge {
                 key.usePinned { keyPin ->
                     iv.usePinned { ivPin ->
                         amber_aes_gcm_encrypt(
-                            ptPin.addressOf(0).reinterpret(),
+                            if (plaintext.isEmpty()) null else ptPin.addressOf(0).reinterpret(),
                             plaintext.size.toULong(),
-                            keyPin.addressOf(0).reinterpret(),
+                            if (key.isEmpty()) null else keyPin.addressOf(0).reinterpret(),
                             key.size.toULong(),
-                            ivPin.addressOf(0).reinterpret(),
+                            if (iv.isEmpty()) null else ivPin.addressOf(0).reinterpret(),
                             iv.size.toULong(),
                             outLen.ptr,
                         )
@@ -91,11 +91,11 @@ actual object AmberNativeBridge {
                 key.usePinned { keyPin ->
                     iv.usePinned { ivPin ->
                         amber_aes_gcm_decrypt(
-                            ctPin.addressOf(0).reinterpret(),
+                            if (ciphertext.isEmpty()) null else ctPin.addressOf(0).reinterpret(),
                             ciphertext.size.toULong(),
-                            keyPin.addressOf(0).reinterpret(),
+                            if (key.isEmpty()) null else keyPin.addressOf(0).reinterpret(),
                             key.size.toULong(),
-                            ivPin.addressOf(0).reinterpret(),
+                            if (iv.isEmpty()) null else ivPin.addressOf(0).reinterpret(),
                             iv.size.toULong(),
                             outLen.ptr,
                         )
@@ -109,7 +109,7 @@ actual object AmberNativeBridge {
         val outLen = alloc<ULongVar>()
         val result = data.usePinned { pinned ->
             amber_sha256(
-                pinned.addressOf(0).reinterpret(),
+                if (data.isEmpty()) null else pinned.addressOf(0).reinterpret(),
                 data.size.toULong(),
                 outLen.ptr,
             )
@@ -122,9 +122,9 @@ actual object AmberNativeBridge {
         val result = key.usePinned { keyPin ->
             message.usePinned { msgPin ->
                 amber_hmac_sha256(
-                    keyPin.addressOf(0).reinterpret(),
+                    if (key.isEmpty()) null else keyPin.addressOf(0).reinterpret(),
                     key.size.toULong(),
-                    msgPin.addressOf(0).reinterpret(),
+                    if (message.isEmpty()) null else msgPin.addressOf(0).reinterpret(),
                     message.size.toULong(),
                     outLen.ptr,
                 )

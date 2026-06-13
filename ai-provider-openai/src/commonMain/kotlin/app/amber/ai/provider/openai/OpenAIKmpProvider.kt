@@ -30,8 +30,13 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
@@ -68,9 +73,14 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> {
         val url = "${providerSetting.baseUrl}/models"
-        val bodyStr = httpClient.get(url) {
+        val response = httpClient.get(url) {
             header("Authorization", "Bearer ${providerSetting.apiKey}")
-        }.bodyAsText()
+        }
+        if (!response.status.isSuccess()) {
+            val errorBody = response.bodyAsText()
+            throw Exception("OpenAI listModels failed: ${response.status.value} $errorBody")
+        }
+        val bodyStr = response.bodyAsText()
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val data = bodyJson["data"]?.arr() ?: return emptyList()
         return data.mapNotNull { modelJson ->
@@ -148,6 +158,45 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         providerSetting: ProviderSetting,
         params: ImageGenerationParams,
     ): ImageGenerationResult = error("Image generation is not supported by OpenAIKmpProvider")
+
+    /**
+     * Swift-friendly streaming entry point that returns a cancellable [Job].
+     *
+     * Swift holds the returned [Job] and calls `job.cancel()` when the user stops
+     * generation. This properly propagates cancellation through the Kotlin
+     * coroutine → Flow → Ktor SSE → HTTP connection, unlike the
+     * `Flow.collect(collector:)` bridge which does not propagate Swift Task
+     * cancellation to the Kotlin side.
+     *
+     * [onChunk] is called sequentially from a background dispatcher.
+     * [onComplete] is called on normal stream completion.
+     * [onError] is called if [streamText] or collection throws a non-cancellation error.
+     * Neither [onComplete] nor [onError] is called on cancellation — Swift initiated
+     * the cancel and should handle state transition itself.
+     */
+    fun streamTextCancellable(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        onChunk: (MessageChunk) -> Unit,
+        onComplete: () -> Unit,
+        onError: (Throwable) -> Unit,
+    ): Job {
+        val scope = CoroutineScope(Dispatchers.Default)
+        return scope.launch {
+            try {
+                val flow = streamText(providerSetting, messages, params)
+                flow.collect { chunk ->
+                    onChunk(chunk)
+                }
+                onComplete()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                onError(e)
+            }
+        }
+    }
 
     // ---- request building ----
 

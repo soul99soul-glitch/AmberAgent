@@ -22,14 +22,18 @@ class MessageStreamAccumulator(
     private var active = MutableMessage.from(initialMessages.last())
 
     fun append(chunk: MessageChunk) {
+        // Process usage FIRST, before the empty-choices early return.
+        // OpenAI's final usage-only chunk has empty choices WITH populated usage,
+        // so merging here ensures token usage is never silently lost.
+        chunk.usage?.let { usage ->
+            active.usage = active.usage.merge(usage)
+        }
+
         val choice = chunk.choices.getOrNull(0) ?: return
         val finalMessage = choice.message
         if (choice.delta == null && finalMessage != null) {
             replaceActive(finalMessage)
-            chunk.usage?.let { usage ->
-                active.usage = active.usage.merge(usage)
-            }
-            return
+            return  // usage already merged above
         }
         val delta = choice.delta ?: choice.message ?: return
 
@@ -45,9 +49,6 @@ class MessageStreamAccumulator(
         }
 
         active.append(delta)
-        chunk.usage?.let { usage ->
-            active.usage = active.usage.merge(usage)
-        }
     }
 
     fun snapshot(): List<UIMessage> = prefix + active.snapshot()

@@ -58,6 +58,11 @@ fi
 
 # ── Step 1: Build for iOS device ───────────────────────────────────────────
 
+# Pin deployment target so device & simulator slices match the app target.
+# Without this, Rust may pick up a different SDK minimum, producing link warnings
+# like "object file was built for newer iOS simulator version than target".
+export IPHONEOS_DEPLOYMENT_TARGET=26.0
+
 info "Building $FFI_CRATE for $DEVICE_TARGET..."
 cargo build --package "$FFI_CRATE" --target "$DEVICE_TARGET" --release
 
