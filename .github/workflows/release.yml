@@ -36,15 +36,15 @@ jobs:
 
       - name: Set up Android NDK
         id: setup-ndk
-        # Pinned to the full version triple to match local dev exactly
-        # (document/build.gradle.kts defaults to `27.0.12077973`).
-        # Mismatched NDK micro versions can change R8/ProGuard interactions
-        # with native code; lock to one (review P2-4).
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: 27.0.12077973
-          add-to-path: true
-          local-cache: true
+        # Pinned to the full version triple to match local dev exactly.
+        # Install through the Android SDK manager instead of a third-party
+        # downloader so the workflow follows Google's package index.
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;27.0.12077973"
+          NDK_PATH="${ANDROID_HOME}/ndk/27.0.12077973"
+          echo "ndk-path=${NDK_PATH}" >> "$GITHUB_OUTPUT"
+          echo "${NDK_PATH}" >> "$GITHUB_PATH"
 
       - name: Gradle cache
         uses: actions/cache@v4
