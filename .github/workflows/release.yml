@@ -85,7 +85,7 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease -PuploadCrashlyticsMapping=false
 
       - name: Verify native .so files present in release APK
         # Phase 2 HARD GATE assertion (SPIKE_PLAN §8.3): if the release APK
