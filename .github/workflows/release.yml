@@ -41,8 +41,14 @@ jobs:
         # downloader so the workflow follows Google's package index.
         run: |
           set -euo pipefail
-          sdkmanager --install "ndk;27.0.12077973"
-          NDK_PATH="${ANDROID_HOME}/ndk/27.0.12077973"
+          ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="${ANDROID_SDK}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_SDK}" -path '*/cmdline-tools/*/bin/sdkmanager' -type f | sort -r | head -n 1)"
+          fi
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --install "ndk;27.0.12077973"
+          NDK_PATH="${ANDROID_SDK}/ndk/27.0.12077973"
           echo "ndk-path=${NDK_PATH}" >> "$GITHUB_OUTPUT"
           echo "${NDK_PATH}" >> "$GITHUB_PATH"
 
