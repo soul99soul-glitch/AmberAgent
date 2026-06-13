@@ -65,7 +65,6 @@ val cargoBuildOfficeParsers = tasks.register<Exec>("cargoBuildOfficeParsers") {
         "-t", "arm64-v8a",
         "-o", file("${layout.buildDirectory.get()}/rustJniLibs/android").absolutePath,
         "build", "--release",
-        "--manifest-path", file("../native/office-parsers/Cargo.toml").absolutePath,
     )
     isIgnoreExitValue = false
     onlyIf {
