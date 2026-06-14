@@ -44,3 +44,8 @@
 
 - **疑问**：执行 `python3 render_screen.py convStorage` 返回 `✗ renders/convStorage.png`，脚本没有产出截图；当前表现与多个设置二级页一致。
 - **默认做法**：继续按 `index.html` 中 `#convStorage` section 与 CD-14 实现对话存储 UI；清理缓存、清理旧对话、删除全部对话先保留确认入口，不接入真实删除，避免在未明确 iOS 存储服务前破坏数据。
+
+## Q-10 · syncBackup · Google Drive 授权与原型基准图
+
+- **疑问**：执行 `python3 render_screen.py syncBackup` 返回 `✗ renders/syncBackup.png`，脚本没有产出截图；真实 Google Drive 同步还需要 OAuth client、用户授权、云端快照服务和本地加密/恢复事务。
+- **默认做法**：继续按 `index.html` 中 `#syncBackup` section 与 CD-12 实现同步与备份 UI；不请求账号授权、不发起网络请求、不读写备份文件，所有上传/下载/导入/导出/口令入口先弹出未接线提示。
