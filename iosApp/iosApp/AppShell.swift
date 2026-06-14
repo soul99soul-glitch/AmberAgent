@@ -171,6 +171,7 @@ enum Route: Hashable {
     case conversation(id: String)
     case assistant(id: String)
     case workspaceItem(id: String)
+    case settingsPlaceholder(title: String, subtitle: String, systemImage: String)
     case providerSettings
     case toolPermissions
 }
@@ -200,7 +201,7 @@ private extension View {
             case .chat:
                 ChatView(settingsStore: settingsStore, localToolExecutor: localToolExecutor)
             case .settings:
-                SettingsView(settingsStore: settingsStore)
+                SettingsHomeView(settingsStore: settingsStore)
             case .board:
                 PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:
@@ -217,8 +218,10 @@ private extension View {
                 PlaceholderDetailView(title: "Assistant", subtitle: id, systemImage: "person.crop.circle")
             case .workspaceItem(let id):
                 PlaceholderDetailView(title: "Workspace Item", subtitle: id, systemImage: "folder")
+            case .settingsPlaceholder(let title, let subtitle, let systemImage):
+                PlaceholderDetailView(title: title, subtitle: subtitle, systemImage: systemImage)
             case .providerSettings:
-                PlaceholderDetailView(title: "Provider Settings", subtitle: "OpenAI, Google, Anthropic, and custom endpoints", systemImage: "server.rack")
+                SettingsView(settingsStore: settingsStore)
             case .toolPermissions:
                 ToolPermissionsView(
                     permissionStore: permissionStore,

@@ -416,6 +416,139 @@ private struct AmberConversationRow: View {
     }
 }
 
+struct SettingsHomeView: View {
+    let settingsStore: SettingsStore
+
+    @Environment(RouterPath.self) private var router
+    @Environment(\.dismiss) private var dismiss
+
+    private var generalRows: [SettingsHomeRow] {
+        [
+            .init(title: "外观", subtitle: nil, value: "浅色", systemImage: "circle.lefthalf.filled", color: AmberTheme.accent, route: placeholder("外观", "外观模式、强调色和背景色调", "circle.lefthalf.filled")),
+            .init(title: "显示与字体", subtitle: "字号 中等 · 跟随系统", value: nil, systemImage: "slider.horizontal.3", color: AmberTheme.accentAmber, route: placeholder("显示与字体", "字号、消息显示、代码块和交互偏好", "slider.horizontal.3"))
+        ]
+    }
+
+    private var runtimeRows: [SettingsHomeRow] {
+        [
+            .init(title: "核心记忆", subtitle: "5 条 · 跨助手共享", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
+            .init(title: "技能", subtitle: "已安装 5 个 · 已启用 4 个", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: placeholder("技能", "工具技能、任务技能和 MCP 扩展", "hexagon")),
+            .init(title: "执行与任务", subtitle: "工具循环上限 · 灵动岛 · 生成稳定性", value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: placeholder("执行与任务", "工具循环、ActivityKit 和生成稳定性", "waveform.path.ecg")),
+            .init(title: "工具权限", subtitle: "系统权限 · 批准策略", value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions),
+            .init(title: "运行环境", subtitle: "工作区 · 小应用沙箱", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentIndigo, route: placeholder("运行环境", "Remote SSH exec runner 与运行时能力", "terminal"))
+        ]
+    }
+
+    private var providerRows: [SettingsHomeRow] {
+        [
+            .init(title: "服务商", subtitle: "小米 MiMo · MiniMax · DeepSeek · Kimi...", value: "10 个", systemImage: "server.rack", color: AmberTheme.accent, route: .providerSettings),
+            .init(title: "默认模型", subtitle: nil, value: settingsStore.modelId.isEmpty ? "MiMo V2.5 Pro" : settingsStore.modelId, systemImage: "cpu", color: AmberTheme.accentAmber, route: placeholder("默认模型", "全局默认聊天模型和辅助任务模型", "cpu")),
+            .init(title: "搜索服务", subtitle: nil, value: "4 个源", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: placeholder("搜索服务", "Agent 网络搜索源和通用选项", "magnifyingglass")),
+            .init(title: "语音 TTS", subtitle: nil, value: "MiniMax", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: placeholder("语音 TTS", "语音引擎、参数和试听", "speaker.wave.2"))
+        ]
+    }
+
+    private var dataRows: [SettingsHomeRow] {
+        [
+            .init(title: "同步与备份", subtitle: "Google 云备份 · 本地加密", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: placeholder("同步与备份", "Google Drive、本地备份和加密恢复", "icloud")),
+            .init(title: "对话存储", subtitle: nil, value: "128 个 · 24 MB", systemImage: "tray.full", color: AmberTheme.accent, route: placeholder("对话存储", "存储用量、清理和删除全部对话", "tray.full"))
+        ]
+    }
+
+    private var experimentalRows: [SettingsHomeRow] {
+        [
+            .init(title: "今日看板", subtitle: "Agent 每日信号梳理", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
+            .init(title: "模型议会", subtitle: "多模型并行评审 / 辩论", value: nil, systemImage: "person.3", color: AmberTheme.accent, route: .council),
+            .init(title: "SubAgent", subtitle: "@explorer · @oracle · @writer...", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: placeholder("SubAgent", "子代理角色和运行限制", "person.2")),
+            .init(title: "小应用", subtitle: "生成可执行的 HTML 工具", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
+            .init(title: "WebMount", subtitle: "挂载已登录的网页服务", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: placeholder("WebMount", "挂载已登录网页服务", "globe"))
+        ]
+    }
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    header
+                    settingsSection("通用", rows: generalRows)
+                    settingsSection("Agent 运行时", rows: runtimeRows)
+                    settingsSection("模型与服务", rows: providerRows)
+                    settingsSection("数据", rows: dataRows)
+                    settingsSection("实验性", rows: experimentalRows)
+                }
+                .padding(.bottom, 36)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var header: some View {
+        HStack {
+            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
+                dismiss()
+            }
+
+            Spacer()
+
+            Text("设置")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AmberTheme.foreground)
+
+            Spacer()
+
+            Color.clear
+                .frame(width: 44, height: 44)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 22)
+    }
+
+    private func settingsSection(_ title: String, rows: [SettingsHomeRow]) -> some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: title)
+            AmberFormGroup {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    AmberFormRow(
+                        systemImage: row.systemImage,
+                        iconColor: row.color,
+                        title: row.title,
+                        subtitle: row.subtitle,
+                        trailing: row.value,
+                        showsChevron: true
+                    ) {
+                        router.navigate(to: row.route)
+                    }
+
+                    if index < rows.count - 1 {
+                        Divider()
+                            .overlay(AmberTheme.borderSoft)
+                            .padding(.leading, 58)
+                    }
+                }
+            }
+        }
+    }
+
+    private func placeholder(_ title: String, _ subtitle: String, _ systemImage: String) -> Route {
+        .settingsPlaceholder(title: title, subtitle: subtitle, systemImage: systemImage)
+    }
+}
+
+private struct SettingsHomeRow: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String?
+    let value: String?
+    let systemImage: String
+    let color: Color
+    let route: Route
+}
+
 struct WorkspaceView: View {
     var body: some View {
         PlaceholderListView(
