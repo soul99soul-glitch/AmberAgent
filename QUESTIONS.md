@@ -79,3 +79,8 @@
 
 - **疑问**：执行 `python3 render_screen.py skill-detail` 返回 `✗ renders/skill-detail.png`，脚本没有产出截图；iOS 端尚未接入真实 Skill 文件浏览、SKILL.md 编辑校验、allowed-tools 编辑或删除事务。
 - **默认做法**：先按 `index.html` 中 `#skill-detail` section 实现技能详情页，并从技能列表进入；启用开关只维护本地页面状态，编辑/文件/允许工具/删除入口只提示未接线，不读写 Skill 文件。
+
+## Q-17 · execution · 原型基准图与 ActivityKit 接线
+
+- **疑问**：执行 `python3 render_screen.py execution` 返回 `✗ renders/execution.png`，脚本没有产出截图；真实灵动岛实时活动、后台通知保活、工具循环上限和生成重试需要接入运行时配置与 ActivityKit/通知实现。
+- **默认做法**：先按 `index.html` 中 `#execution` section 与 CD-6 实现执行与任务设置 UI；操作预览、循环上限、生成式 UI、灵动岛、隐藏敏感内容、重试上限等都只保存本地偏好，不启动 Live Activity、不注册通知、不改变工具执行逻辑。

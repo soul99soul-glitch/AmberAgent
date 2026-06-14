@@ -174,6 +174,7 @@ enum Route: Hashable {
     case skills
     case mcpServers
     case skillDetail(name: String)
+    case execution
     case board
     case miniApps
     case workspace
@@ -241,6 +242,8 @@ private extension View {
                 McpServersView()
             case .skillDetail(let name):
                 SkillDetailView(skillName: name)
+            case .execution:
+                ExecutionSettingsView()
             case .board:
                 PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:
