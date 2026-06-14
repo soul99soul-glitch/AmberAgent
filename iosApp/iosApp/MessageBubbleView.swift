@@ -12,30 +12,29 @@ struct MessageBubbleView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if !isUser { roleIcon }
+        HStack {
+            if isUser { Spacer(minLength: 48) }
 
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 7) {
+                if !isUser {
+                    Text("Amber")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                }
+
                 // Reasoning blocks (collapsible)
                 reasoningBlocks
 
                 // Text content
                 textBubbles
             }
+            .frame(maxWidth: 320, alignment: isUser ? .trailing : .leading)
 
-            if isUser { roleIcon }
+            if !isUser { Spacer(minLength: 48) }
         }
     }
 
     // MARK: - Subviews
-
-    private var roleIcon: some View {
-        Image(systemName: isUser ? "person.fill" : "sparkles")
-            .font(.title3)
-            .foregroundStyle(.secondary)
-            .frame(width: 28, height: 28)
-            .background(.ultraThinMaterial, in: Circle())
-    }
 
     @ViewBuilder
     private var textBubbles: some View {
@@ -47,14 +46,12 @@ struct MessageBubbleView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(.tint)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(AmberTheme.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 } else {
                     MarkdownView(markdown: textPart.text)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
             }
         }
@@ -84,13 +81,14 @@ struct MessageBubbleView: View {
                     if isReasoningExpanded {
                         Text(reasoning.reasoning)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AmberTheme.muted)
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.thinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
+                .padding(10)
+                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
