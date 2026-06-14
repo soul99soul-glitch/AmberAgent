@@ -1,8 +1,17 @@
 import Foundation
 import CryptoKit
+import Observation
 @preconcurrency import Shared
 
 // MARK: - ChatViewModel
+
+private final class StreamJobBox {
+    var job: Kotlinx_coroutines_coreJob?
+
+    deinit {
+        job?.cancel(cause: nil)
+    }
+}
 
 @MainActor
 @Observable
@@ -13,13 +22,25 @@ final class ChatViewModel {
     var messages: [UIMessage] = []
     var inputText: String = ""
     var isLoading: Bool = false
+    var isAttachingSelectedFile: Bool = false
+    var pendingSelectedFilePreview: SelectedDocumentReadResult?
+    var selectedFileContextError: String?
 
     // MARK: - Private
 
     private let settingsStore: SettingsStore
-    private let provider = OpenAIKmpProvider()
-    private let db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
-    private var streamJob: Kotlinx_coroutines_coreJob?
+    private let localToolExecutor: IOSLocalToolExecutor?
+    private let autoGenerateResponses: Bool
+    private let liveActivityController: AgentLiveActivityController
+    @ObservationIgnored private lazy var provider = OpenAIKmpProvider()
+    @ObservationIgnored private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
+    @ObservationIgnored private let streamJobBox = StreamJobBox()
+    private var attachRequestId: UUID?
+
+    private var streamJob: Kotlinx_coroutines_coreJob? {
+        get { streamJobBox.job }
+        set { streamJobBox.job = newValue }
+    }
 
     // Run tracking — stored so cancelGeneration() can record an interrupted run.
     private var currentRunId: String?
@@ -28,21 +49,100 @@ final class ChatViewModel {
 
     // MARK: - Init
 
-    init(settingsStore: SettingsStore) {
+    init(
+        settingsStore: SettingsStore,
+        localToolExecutor: IOSLocalToolExecutor? = nil,
+        autoGenerateResponses: Bool = true,
+        liveActivityController: AgentLiveActivityController? = nil
+    ) {
         self.settingsStore = settingsStore
+        self.localToolExecutor = localToolExecutor
+        self.autoGenerateResponses = autoGenerateResponses
+        self.liveActivityController = liveActivityController ?? .shared
     }
 
     // MARK: - Actions
 
     func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !isAttachingSelectedFile else { return }
 
-        let digest = Self.inputDigest(for: text)
-        let userMsg = UIMessage.companion.user(prompt: text)
+        let prompt = Self.promptText(userText: text, selectedFilePreview: pendingSelectedFilePreview)
+        let digest = Self.inputDigest(for: prompt)
+        let userMsg = UIMessage.companion.user(prompt: prompt)
         messages.append(userMsg)
         inputText = ""
+        pendingSelectedFilePreview = nil
+        selectedFileContextError = nil
+        guard autoGenerateResponses else { return }
         generateResponse(inputDigest: digest)
+    }
+
+    func attachSelectedFilePreviewToNextMessage() async {
+        guard !isAttachingSelectedFile else { return }
+        guard let localToolExecutor else {
+            selectedFileContextError = "Local iOS tool executor is unavailable."
+            return
+        }
+
+        let requestId = UUID()
+        attachRequestId = requestId
+        isAttachingSelectedFile = true
+        let activityRunId = "tool-\(requestId.uuidString)"
+        liveActivityController.start(runId: activityRunId, presentation: .readingSelectedFile)
+        defer {
+            if attachRequestId == requestId {
+                isAttachingSelectedFile = false
+                attachRequestId = nil
+            }
+        }
+
+        let request = localToolExecutor.requestForCurrentSelectedFile(isUserInitiated: true)
+        let output = await localToolExecutor.execute(request)
+        guard attachRequestId == requestId else { return }
+        switch output {
+        case .selectedFilePreview(let result):
+            pendingSelectedFilePreview = result
+            selectedFileContextError = nil
+            await liveActivityController.end(
+                runId: activityRunId,
+                presentation: .selectedFileReadCompleted,
+                dismissalDelay: 4
+            )
+        case .needsUserAction(let reason):
+            selectedFileContextError = reason
+            await liveActivityController.end(
+                runId: activityRunId,
+                presentation: .selectedFileReadWaitingForUser,
+                dismissalDelay: 6
+            )
+        case .denied(let reason):
+            selectedFileContextError = reason
+            await liveActivityController.end(
+                runId: activityRunId,
+                presentation: .selectedFileReadFailed,
+                dismissalDelay: 6
+            )
+        case .failed(let message):
+            selectedFileContextError = message
+            await liveActivityController.end(
+                runId: activityRunId,
+                presentation: .selectedFileReadFailed,
+                dismissalDelay: 6
+            )
+        case .permissionsStatus:
+            selectedFileContextError = "permissions_status cannot be attached to a chat message."
+            await liveActivityController.end(
+                runId: activityRunId,
+                presentation: .selectedFileReadFailed,
+                dismissalDelay: 6
+            )
+        }
+    }
+
+    func clearPendingSelectedFilePreview() {
+        pendingSelectedFilePreview = nil
+        selectedFileContextError = nil
     }
 
     func cancelGeneration() {
@@ -51,7 +151,7 @@ final class ChatViewModel {
         let startedAt = currentStartedAt
         let digest = currentInputDigest
 
-        streamJob?.cancel()
+        streamJob?.cancel(cause: nil)
         streamJob = nil
         currentRunId = nil
         currentStartedAt = nil
@@ -60,6 +160,10 @@ final class ChatViewModel {
 
         guard let runId, let startedAt, let digest else { return }
         Task { @MainActor in
+            await self.liveActivityController.end(
+                runId: runId,
+                presentation: .cancelled()
+            )
             await self.recordRun(
                 runId: runId,
                 startedAt: startedAt,
@@ -72,7 +176,9 @@ final class ChatViewModel {
     // MARK: - Private
 
     private func generateResponse(inputDigest: String) {
-        streamJob?.cancel()
+        if streamJob != nil {
+            cancelGeneration()
+        }
         isLoading = true
 
         let providerSetting = makeProviderSetting()
@@ -83,6 +189,10 @@ final class ChatViewModel {
         currentRunId = runId
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
+        liveActivityController.start(
+            runId: runId,
+            presentation: .generatingResponse(modelName: settingsStore.modelId)
+        )
 
         let accumulator = MessageStreamAccumulator(
             initialMessages: messages,
@@ -98,28 +208,33 @@ final class ChatViewModel {
                 accumulator.append(chunk: chunk)
                 let snapshot = accumulator.snapshot()
                 Task { @MainActor [weak self] in
-                    self?.messages = snapshot
+                    guard let self, self.currentRunId == runId else { return }
+                    self.messages = snapshot
                 }
             },
             onComplete: { [weak self] in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.currentRunId == runId else { return }
                     await self.recordRun(
                         runId: runId,
                         startedAt: startedAt,
                         status: "completed",
                         inputDigest: inputDigest
                     )
+                    await self.liveActivityController.end(
+                        runId: runId,
+                        presentation: .completed()
+                    )
                     self.finishStreaming()
                 }
             },
             onError: { [weak self] error in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.currentRunId == runId else { return }
                     let errMsg = UIMessage(
                         id: KotlinUuid.companion.random(),
                         role: MessageRole.assistant,
-                        parts: [UIMessagePart.Text(text: "Error: \(error.localizedDescription)", metadata: nil)],
+                        parts: [UIMessagePart.Text(text: "Error: \(error.message ?? String(describing: error))", metadata: nil)],
                         annotations: [],
                         createdAt: self.nowLocalDateTime(),
                         finishedAt: self.nowLocalDateTime(),
@@ -133,6 +248,10 @@ final class ChatViewModel {
                         startedAt: startedAt,
                         status: "failed",
                         inputDigest: inputDigest
+                    )
+                    await self.liveActivityController.end(
+                        runId: runId,
+                        presentation: .failed()
                     )
                     self.finishStreaming()
                 }
@@ -154,6 +273,19 @@ final class ChatViewModel {
     private static func inputDigest(for text: String) -> String {
         let hash = SHA256.hash(data: Data(text.utf8))
         return hash.map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func promptText(
+        userText: String,
+        selectedFilePreview: SelectedDocumentReadResult?
+    ) -> String {
+        guard let selectedFilePreview else { return userText }
+        return """
+        \(userText)
+
+        [Selected file preview: \(selectedFilePreview.fileName), \(selectedFilePreview.bytesRead) bytes]
+        \(selectedFilePreview.preview)
+        """
     }
 
     private func recordRun(
