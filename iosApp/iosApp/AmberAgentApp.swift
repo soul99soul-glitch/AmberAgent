@@ -6,14 +6,7 @@ struct AmberAgentApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TabView {
-                Tab("Chat", systemImage: "bubble.left.and.bubble.right") {
-                    ChatView(settingsStore: settingsStore)
-                }
-                Tab("Settings", systemImage: "gearshape") {
-                    SettingsView(settingsStore: settingsStore)
-                }
-            }
+            AppShell(settingsStore: settingsStore)
         }
     }
 }

@@ -29,10 +29,16 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+    preBuildScripts:
+      - name: Validate Entitlement Diagnostics
+        basedOnDependencyAnalysis: false
+        script: |
+          /bin/sh "${SRCROOT}/scripts/validate-entitlement-diagnostics.sh" "${SRCROOT}/iosApp/AmberAgent.entitlements" "${SRCROOT}/iosApp/Info.plist"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios
         INFOPLIST_FILE: iosApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: iosApp/AmberAgent.entitlements
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -136,10 +142,16 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+    preBuildScripts:
+      - name: Validate Entitlement Diagnostics
+        basedOnDependencyAnalysis: false
+        script: |
+          /bin/sh "${SRCROOT}/scripts/validate-entitlement-diagnostics.sh" "${SRCROOT}/iosApp/AmberAgent.entitlements" "${SRCROOT}/iosApp/Info.plist"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.experimental-gpl
         INFOPLIST_FILE: iosApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: iosApp/AmberAgent.entitlements
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"
