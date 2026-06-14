@@ -59,3 +59,8 @@
 
 - **疑问**：执行 `python3 render_screen.py agentsMd` 返回 `✗ renders/agentsMd.png`，脚本没有产出截图；iOS 端尚未有 Android `buildAgentSoulPrompt()` / prompt config repository 的等价接线。
 - **默认做法**：先按 `index.html` 中 `#agentsMd` section 实现 agents.md 编辑屏，并把内容保存为本地 draft；暂不注入真实 System Prompt，等 iOS prompt 配置服务明确后再接入。
+
+## Q-13 · memEdit · 原型基准图与真实记忆写入
+
+- **疑问**：执行 `python3 render_screen.py memEdit` 返回 `✗ renders/memEdit.png`，脚本没有产出截图；iOS 端尚未接入真实记忆库写入/更新/删除事务。
+- **默认做法**：先按 `index.html` 中 `#memEdit` section 实现记忆编辑页，并从总览新增/条目点击进入；编辑内容、层级、置顶只维护本地页面状态，完成/删除不会写入或删除真实记忆。

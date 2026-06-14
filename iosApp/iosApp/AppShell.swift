@@ -170,6 +170,7 @@ enum Route: Hashable {
     case syncBackup
     case capabilities
     case agentsMd
+    case memoryEdit(text: String, scope: String, pinned: Bool)
     case board
     case miniApps
     case workspace
@@ -229,6 +230,8 @@ private extension View {
                 )
             case .agentsMd:
                 AgentsMarkdownView()
+            case .memoryEdit(let text, let scope, let pinned):
+                MemoryEditView(initialText: text, initialScope: scope, initialPinned: pinned)
             case .board:
                 PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:

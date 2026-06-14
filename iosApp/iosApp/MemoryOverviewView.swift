@@ -11,8 +11,6 @@ struct MemoryOverviewView: View {
     @AppStorage("app.amber.ios.memory.timeReminder") private var timeReminder = false
     @AppStorage("app.amber.ios.memory.autoCompaction") private var autoCompaction = true
 
-    @State private var pendingAlert: MemoryAlert?
-
     private let records: [MemoryRecord] = [
         .init(scope: .core, text: "称呼我「光」，语气可以随意一点。", pinned: true),
         .init(scope: .core, text: "回答先给结论，再展开理由。", pinned: true),
@@ -40,13 +38,6 @@ struct MemoryOverviewView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert(item: $pendingAlert) { alert in
-            Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
-                dismissButton: .default(Text("知道了"))
-            )
-        }
     }
 
     private var header: some View {
@@ -64,7 +55,7 @@ struct MemoryOverviewView: View {
             Spacer()
 
             AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "新增记忆", size: 44, symbolSize: 20) {
-                pendingAlert = .add
+                router.navigate(to: .memoryEdit(text: "", scope: MemoryScope.core.title, pinned: false))
             }
         }
         .padding(.horizontal, 16)
@@ -215,7 +206,13 @@ struct MemoryOverviewView: View {
             VStack(spacing: 8) {
                 ForEach(records) { record in
                     MemoryCard(record: record) {
-                        pendingAlert = .record(record.text)
+                        router.navigate(
+                            to: .memoryEdit(
+                                text: record.text,
+                                scope: record.scope.title,
+                                pinned: record.pinned
+                            )
+                        )
                     }
                 }
             }
@@ -384,33 +381,5 @@ private struct MemoryNote: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 7)
-    }
-}
-
-private enum MemoryAlert: Identifiable {
-    case add
-    case record(String)
-
-    var id: String {
-        switch self {
-        case .add: "add"
-        case .record(let text): "record-\(text)"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .add: "新增记忆"
-        case .record: "编辑记忆"
-        }
-    }
-
-    var message: String {
-        switch self {
-        case .add:
-            "新增记忆需要接入 iOS 记忆库写入流程；当前只保留入口。"
-        case .record(let text):
-            "将继续用独立的 memEdit 屏接入编辑流程；当前选中的记忆是：\(text)"
-        }
     }
 }
