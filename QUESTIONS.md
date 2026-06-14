@@ -74,3 +74,8 @@
 
 - **疑问**：执行 `python3 render_screen.py mcpServers` 返回 `✗ renders/mcpServers.png`，脚本没有产出截图；iOS 端尚未接入真实 MCP 配置、连接状态、导入 JSON、手动添加、同步全部和删除流程。
 - **默认做法**：先按 `index.html` 中 `#mcpServers` section 与 CD-9 实现技能页二级 MCP 服务器列表；三台服务器和状态为样例，本地开关只持久化 UI 状态，导入/添加不读取剪贴板、不连接外部服务器、不写设置。
+
+## Q-16 · skill-detail · 原型基准图与真实 Skill 文件编辑
+
+- **疑问**：执行 `python3 render_screen.py skill-detail` 返回 `✗ renders/skill-detail.png`，脚本没有产出截图；iOS 端尚未接入真实 Skill 文件浏览、SKILL.md 编辑校验、allowed-tools 编辑或删除事务。
+- **默认做法**：先按 `index.html` 中 `#skill-detail` section 实现技能详情页，并从技能列表进入；启用开关只维护本地页面状态，编辑/文件/允许工具/删除入口只提示未接线，不读写 Skill 文件。

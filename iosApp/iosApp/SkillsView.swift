@@ -70,7 +70,7 @@ struct SkillsView: View {
             AmberFormGroup {
                 ForEach(Array(installedSkills.enumerated()), id: \.element.id) { index, skill in
                     SkillRow(skill: skill) {
-                        pendingAlert = .detail(skill.name)
+                        router.navigate(to: .skillDetail(name: skill.name))
                     }
 
                     if index != installedSkills.indices.last {
@@ -314,14 +314,12 @@ private struct SkillsFooter: View {
 
 private enum SkillsAlert: Identifiable {
     case add
-    case detail(String)
     case importSkill
     case rescan
 
     var id: String {
         switch self {
         case .add: "add"
-        case .detail(let name): "detail-\(name)"
         case .importSkill: "import-skill"
         case .rescan: "rescan"
         }
@@ -330,7 +328,6 @@ private enum SkillsAlert: Identifiable {
     var title: String {
         switch self {
         case .add: "添加技能"
-        case .detail: "技能详情"
         case .importSkill: "导入技能"
         case .rescan: "全量规整"
         }
@@ -340,8 +337,6 @@ private enum SkillsAlert: Identifiable {
         switch self {
         case .add:
             "添加技能需要接入安装流程；当前只保留入口。"
-        case .detail(let name):
-            "将继续用 skill-detail 独立屏实现 \(name) 的启用、文件和工具权限。"
         case .importSkill:
             "导入技能需要 URL/文件选择、校验和安装事务；当前不会读取或写入文件。"
         case .rescan:
