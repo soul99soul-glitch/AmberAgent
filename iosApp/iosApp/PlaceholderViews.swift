@@ -1,5 +1,421 @@
 import SwiftUI
 
+enum AmberTheme {
+    static let background = Color(hex: 0xFBF7F1)
+    static let surface = Color(hex: 0xF2EADE)
+    static let surface2 = Color(hex: 0xE7DBCB)
+    static let foreground = Color(hex: 0x2A2320)
+    static let foreground2 = Color(hex: 0x4A4039)
+    static let muted = Color(hex: 0x6E6254)
+    static let muted2 = Color(hex: 0xA89A88)
+    static let border = Color(hex: 0xDBCEBC)
+    static let borderSoft = Color(hex: 0xECE3D6)
+    static let accent = Color(hex: 0xB5532C)
+    static let accentTint = Color(hex: 0xB5532C, alpha: 0.12)
+    static let accentIndigo = Color(hex: 0x5856D6)
+    static let accentAmber = Color(hex: 0xD98324)
+    static let accentGreen = Color(hex: 0x3DA35D)
+    static let accentCyan = Color(hex: 0x2AA0BC)
+    static let accentRed = Color(hex: 0xC8402F)
+    static let glass = Color(hex: 0xFBF7F1, alpha: 0.72)
+    static let glassStrong = Color(hex: 0xFBF7F1, alpha: 0.85)
+
+    static let radiusSmall: CGFloat = 6
+    static let radiusMedium: CGFloat = 8
+    static let radiusLarge: CGFloat = 12
+    static let radiusXLarge: CGFloat = 18
+    static let radiusPill: CGFloat = 980
+}
+
+extension Color {
+    init(hex: UInt32, alpha: Double = 1.0) {
+        self.init(
+            red: Double((hex >> 16) & 0xff) / 255.0,
+            green: Double((hex >> 8) & 0xff) / 255.0,
+            blue: Double(hex & 0xff) / 255.0,
+            opacity: alpha
+        )
+    }
+}
+
+private struct AmberGlassModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let interactive: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        if #available(iOS 26.0, *) {
+            if interactive {
+                content
+                    .background(AmberTheme.glass.opacity(0.35), in: shape)
+                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+            } else {
+                content
+                    .background(AmberTheme.glass.opacity(0.35), in: shape)
+                    .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+            }
+        } else {
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .overlay {
+                    shape
+                        .stroke(.white.opacity(0.65), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.10), radius: 12, y: 2)
+        }
+    }
+}
+
+extension View {
+    func amberGlass(cornerRadius: CGFloat, interactive: Bool = true) -> some View {
+        modifier(AmberGlassModifier(cornerRadius: cornerRadius, interactive: interactive))
+    }
+}
+
+struct AmberGlassCircleButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    var size: CGFloat = 44
+    var symbolSize: CGFloat = 17
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: symbolSize, weight: .semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .amberGlass(cornerRadius: size / 2)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+struct AmberSectionLabel: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(AmberTheme.muted)
+            .textCase(.uppercase)
+            .tracking(0.4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
+            .padding(.bottom, 7)
+    }
+}
+
+struct AmberFormGroup<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+        }
+        .background(AmberTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
+struct AmberFormRow: View {
+    let systemImage: String?
+    let iconColor: Color
+    let title: String
+    let subtitle: String?
+    let trailing: String?
+    let showsChevron: Bool
+    let action: (() -> Void)?
+
+    init(
+        systemImage: String? = nil,
+        iconColor: Color = AmberTheme.accent,
+        title: String,
+        subtitle: String? = nil,
+        trailing: String? = nil,
+        showsChevron: Bool = false,
+        action: (() -> Void)? = nil
+    ) {
+        self.systemImage = systemImage
+        self.iconColor = iconColor
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing
+        self.showsChevron = showsChevron
+        self.action = action
+    }
+
+    var body: some View {
+        Button {
+            action?()
+        } label: {
+            HStack(spacing: 12) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(iconColor)
+                        .frame(width: 28, height: 28)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let trailing {
+                    Text(trailing)
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(1)
+                }
+
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.muted2)
+                }
+            }
+            .frame(minHeight: 52)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+    }
+}
+
+struct ConversationsView: View {
+    @Environment(RouterPath.self) private var router
+
+    private let shortcuts: [ConversationShortcut] = [
+        .init(title: "今日看板", systemImage: "rectangle.grid.1x2", color: AmberTheme.accentAmber, route: .board),
+        .init(title: "小应用", systemImage: "square.grid.2x2", color: AmberTheme.accent, route: .miniApps),
+        .init(title: "工作区", systemImage: "folder", color: AmberTheme.accentGreen, route: .workspace),
+        .init(title: "核心记忆", systemImage: "brain", color: AmberTheme.accentCyan, route: .memory),
+        .init(title: "模型议会", systemImage: "person.3", color: AmberTheme.accentIndigo, route: .council)
+    ]
+
+    private let recentRows: [ConversationRowModel] = [
+        .init(initial: "I", title: "iOS 液态玻璃设计应用推荐", preview: "以下是几款适配 iOS 26 液态玻璃风格的设计参考应用...", time: "刚刚", color: AmberTheme.accent),
+        .init(initial: "威", title: "威尔史密斯子女", preview: "威尔·史密斯有两个儿子和一个女儿，分别是...", time: "昨天", color: AmberTheme.accentAmber),
+        .init(initial: "贪", title: "贪吃蛇应用生成", preview: "好的，我来帮您用原生 Canvas 实现一个贪吃蛇小游戏...", time: "周二", color: AmberTheme.accentGreen),
+        .init(initial: "从", title: "从头再来", preview: "明白，我们从零开始重新规划这个项目...", time: "周一", color: AmberTheme.surface2, textColor: AmberTheme.foreground2),
+        .init(initial: "流", title: "流式输出测试", preview: "流式输出已完成，首字节延迟约 120ms，整体表现正常", time: "上周五", color: AmberTheme.accentCyan)
+    ]
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            AmberTheme.background.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    searchField
+                    shortcutStrip
+                    AmberSectionLabel(text: "最近")
+                    Text("今天")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.muted)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 2)
+                    conversationRows(recentRows)
+                }
+                .padding(.bottom, 120)
+            }
+            .scrollIndicators(.hidden)
+
+            Button {
+                router.navigate(to: .chat)
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 56, height: 56)
+            }
+            .buttonStyle(.plain)
+            .background(AmberTheme.accent, in: Circle())
+            .shadow(color: AmberTheme.accent.opacity(0.38), radius: 20, y: 4)
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+            .accessibilityLabel("新建聊天")
+            .padding(.trailing, 20)
+            .padding(.bottom, 32)
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center) {
+            Text("Amber")
+                .font(.system(size: 34, weight: .bold, design: .default))
+                .foregroundStyle(AmberTheme.foreground)
+                .tracking(-0.7)
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "设置", size: 34, symbolSize: 16) {
+                    router.navigate(to: .settings)
+                }
+
+                Button {
+                    router.navigate(to: .assistant(id: "account"))
+                } label: {
+                    Text("A")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .frame(width: 34, height: 34)
+                        .background(AmberTheme.surface2, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("我的账户")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+    }
+
+    private var searchField: some View {
+        Button {
+            router.navigate(to: .conversation(id: "search"))
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(AmberTheme.muted2)
+                Text("搜索任何内容")
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.muted)
+                Spacer()
+            }
+            .frame(height: 38)
+            .padding(.horizontal, 14)
+            .background(AmberTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var shortcutStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(shortcuts) { shortcut in
+                    Button {
+                        router.navigate(to: shortcut.route)
+                    } label: {
+                        VStack(alignment: .center, spacing: 7) {
+                            Image(systemName: shortcut.systemImage)
+                                .font(.system(size: 24, weight: .medium))
+                                .foregroundStyle(shortcut.color)
+                                .frame(width: 54, height: 54)
+                                .background(shortcut.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                            Text(shortcut.title)
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .lineLimit(1)
+                        }
+                        .frame(minWidth: 62)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .scrollIndicators(.hidden)
+        .padding(.top, 2)
+        .padding(.bottom, 16)
+    }
+
+    private func conversationRows(_ rows: [ConversationRowModel]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(rows) { row in
+                AmberConversationRow(row: row) {
+                    router.navigate(to: row.title.hasPrefix("iOS") ? .chat : .conversation(id: row.id.uuidString))
+                }
+            }
+        }
+    }
+}
+
+private struct ConversationShortcut: Identifiable {
+    let id = UUID()
+    let title: String
+    let systemImage: String
+    let color: Color
+    let route: Route
+}
+
+private struct ConversationRowModel: Identifiable {
+    let id = UUID()
+    let initial: String
+    let title: String
+    let preview: String
+    let time: String
+    let color: Color
+    var textColor: Color? = nil
+}
+
+private struct AmberConversationRow: View {
+    let row: ConversationRowModel
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Text(row.initial)
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(row.textColor ?? row.color)
+                    .frame(width: 40, height: 40)
+                    .background(row.textColor == nil ? row.color.opacity(0.14) : row.color, in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(1)
+                    Text(row.preview)
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(row.time)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+            .frame(minHeight: 58)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct WorkspaceView: View {
     var body: some View {
         PlaceholderListView(

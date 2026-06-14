@@ -11,6 +11,7 @@ struct AppShell: View {
     @State private var documentAccessStore: DocumentAccessStore
     @State private var systemPermissionCoordinator: IOSSystemPermissionCoordinator
     @State private var localToolExecutor: IOSLocalToolExecutor
+    @State private var rootRouter = RouterPath()
 
     init(settingsStore: SettingsStore) {
         let permissionStore = IOSPermissionStore()
@@ -30,28 +31,21 @@ struct AppShell: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            ForEach(AppTab.allCases) { tab in
-                NavigationStack(path: tabRouter.binding(for: tab)) {
-                    tab.rootView(
-                        settingsStore: settingsStore,
-                        localToolExecutor: localToolExecutor
-                    )
-                        .withAppDestinations(
-                            permissionStore: permissionStore,
-                            documentStore: documentAccessStore,
-                            systemPermissionCoordinator: systemPermissionCoordinator,
-                            localToolExecutor: localToolExecutor
-                        )
-                }
-                .sheet(item: tabRouter.sheetBinding(for: tab)) { sheet in
-                    sheetView(sheet)
-                }
-                .environment(tabRouter.router(for: tab))
-                .tabItem { tab.label }
-                .tag(tab)
-            }
+        NavigationStack(path: Binding(get: { rootRouter.path }, set: { rootRouter.path = $0 })) {
+            ConversationsView()
+                .withAppDestinations(
+                    settingsStore: settingsStore,
+                    permissionStore: permissionStore,
+                    documentStore: documentAccessStore,
+                    systemPermissionCoordinator: systemPermissionCoordinator,
+                    localToolExecutor: localToolExecutor
+                )
         }
+        .sheet(item: Binding(get: { rootRouter.presentedSheet }, set: { rootRouter.presentedSheet = $0 })) { sheet in
+            sheetView(sheet)
+        }
+        .environment(rootRouter)
+        .tint(AmberTheme.accent)
     }
 
     @ViewBuilder
@@ -167,6 +161,13 @@ final class RouterPath {
 }
 
 enum Route: Hashable {
+    case chat
+    case settings
+    case board
+    case miniApps
+    case workspace
+    case memory
+    case council
     case conversation(id: String)
     case assistant(id: String)
     case workspaceItem(id: String)
@@ -188,6 +189,7 @@ enum SheetDestination: Identifiable, Hashable {
 
 private extension View {
     func withAppDestinations(
+        settingsStore: SettingsStore,
         permissionStore: IOSPermissionStore,
         documentStore: DocumentAccessStore,
         systemPermissionCoordinator: IOSSystemPermissionCoordinator,
@@ -195,6 +197,20 @@ private extension View {
     ) -> some View {
         navigationDestination(for: Route.self) { route in
             switch route {
+            case .chat:
+                ChatView(settingsStore: settingsStore, localToolExecutor: localToolExecutor)
+            case .settings:
+                SettingsView(settingsStore: settingsStore)
+            case .board:
+                PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.1x2")
+            case .miniApps:
+                PlaceholderDetailView(title: "小应用", subtitle: "生成可执行的 HTML 工具", systemImage: "square.grid.2x2")
+            case .workspace:
+                WorkspaceView()
+            case .memory:
+                PlaceholderDetailView(title: "核心记忆", subtitle: "跨助手共享的长期上下文", systemImage: "brain")
+            case .council:
+                PlaceholderDetailView(title: "模型议会", subtitle: "多模型并行评审 / 辩论", systemImage: "person.3")
             case .conversation(let id):
                 PlaceholderDetailView(title: "Conversation", subtitle: id, systemImage: "text.bubble")
             case .assistant(let id):

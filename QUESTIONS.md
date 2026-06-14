@@ -1,0 +1,11 @@
+# AmberAgent iOS Autonomous Questions
+
+## Q-1 · conversations · 会话数据接入时机
+
+- **疑问**：`conversations` 首页的真实会话数据源/Repository 在当前 iOS 骨架里尚未接到此屏；原型基准要求先还原视觉和信息层级。
+- **默认做法**：先使用 `index.html` 里的样例会话内容实现像素方向和导航骨架，不重写或猜测业务数据层；真实会话列表接入放到 Phase 3。
+
+## Q-2 · 验证环境 · iOS simulator/runtime 缺失
+
+- **疑问**：当前机器 `xcrun simctl list runtimes` / `devices` 为空，`xcodebuild -showdestinations` 只返回不可用目的地，完整 build/simulator screenshot 无法完成。
+- **默认做法**：不下载/安装 Xcode platform，不杀 Chrome，不阻塞；当前屏先用 `swift -frontend -parse` 和原型 `renders/conversations.png` 进行静态/视觉方向验证，等本机 runtime 可用后补完整构建与截图比对。
