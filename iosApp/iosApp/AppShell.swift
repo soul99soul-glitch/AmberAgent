@@ -164,6 +164,7 @@ enum Route: Hashable {
     case chat
     case search
     case settings
+    case capabilities
     case board
     case miniApps
     case workspace
@@ -205,6 +206,13 @@ private extension View {
                 SearchView()
             case .settings:
                 SettingsHomeView(settingsStore: settingsStore)
+            case .capabilities:
+                ToolPermissionsView(
+                    permissionStore: permissionStore,
+                    documentStore: documentStore,
+                    systemPermissionCoordinator: systemPermissionCoordinator,
+                    localToolExecutor: localToolExecutor
+                )
             case .board:
                 PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:
@@ -226,12 +234,7 @@ private extension View {
             case .providerSettings:
                 SettingsView(settingsStore: settingsStore)
             case .toolPermissions:
-                ToolPermissionsView(
-                    permissionStore: permissionStore,
-                    documentStore: documentStore,
-                    systemPermissionCoordinator: systemPermissionCoordinator,
-                    localToolExecutor: localToolExecutor
-                )
+                PermissionsApprovalView()
             }
         }
     }

@@ -14,3 +14,8 @@
 
 - **疑问**：执行 `python3 render_screen.py search` 返回 `✗ renders/search.png`，脚本没有产出截图；原因需后续打开脚本或 Chrome 输出进一步排查。
 - **默认做法**：继续按 `index.html` 中 `#search` section 的源码结构实现搜索覆盖层，先不阻塞；等渲染脚本可产出该屏后补视觉基准比对。
+
+## Q-4 · permissions · 原型基准图未生成
+
+- **疑问**：执行 `python3 render_screen.py permissions` 返回 `✗ renders/permissions.png`，脚本没有产出截图；当前没有进一步 Chrome 输出可定位原因。
+- **默认做法**：继续按 `index.html` 中 `#permissions` section 的源码结构实现「权限与批准」入口屏，先用 Swift parse 与 diff check 验证；等渲染脚本可产出该屏后补视觉基准比对。
