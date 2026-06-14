@@ -768,7 +768,7 @@ struct SettingsHomeView: View {
     private var generalRows: [SettingsHomeRow] {
         [
             .init(title: "外观", subtitle: nil, value: "浅色", systemImage: "circle.lefthalf.filled", color: AmberTheme.accent, route: .appearance),
-            .init(title: "显示与字体", subtitle: "字号 中等 · 跟随系统", value: nil, systemImage: "slider.horizontal.3", color: AmberTheme.accentAmber, route: placeholder("显示与字体", "字号、消息显示、代码块和交互偏好", "slider.horizontal.3"))
+            .init(title: "显示与字体", subtitle: "字号 中等 · 跟随系统", value: nil, systemImage: "slider.horizontal.3", color: AmberTheme.accentAmber, route: .displayFont)
         ]
     }
 

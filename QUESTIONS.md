@@ -34,3 +34,8 @@
 
 - **疑问**：执行 `python3 render_screen.py appearance` 返回 `✗ renders/appearance.png`，脚本没有产出截图；当前表现与多个二级设置页一致。
 - **默认做法**：继续按 `index.html` 中 `#appearance` section 实现外观模式、强调色、背景色调选择 UI；暂时只持久化选择，不将其应用到全局主题，等 theme store 定义后再接入。
+
+## Q-8 · displayFont · 原型基准图未生成
+
+- **疑问**：执行 `python3 render_screen.py displayFont` 返回 `✗ renders/displayFont.png`，脚本没有产出截图；当前表现与 `appearance`、`sandbox` 等二级设置页一致。
+- **默认做法**：继续按 `index.html` 中 `#displayFont` section 实现显示与字体设置 UI，先持久化本地偏好，不改全局聊天渲染与消息模型；等渲染脚本可产出该屏后补视觉基准比对。
