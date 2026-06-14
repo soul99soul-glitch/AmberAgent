@@ -95,9 +95,58 @@ class TerminalRuntimeModelsTest {
     }
 
     @Test
+    fun installPlannerRejectsIosStableLocalToolsInstall() {
+        val plan = TerminalInstallPlanner.build(
+            packages = listOf("ffmpeg"),
+            runtime = TerminalRuntimeKind.LOCAL_IOS_TOOLS,
+        )
+
+        assertTrue(plan.command.contains("Package installation is not available in local_ios_tools runtime"))
+        assertTrue(plan.command.contains("exit 64"))
+    }
+
+    @Test
+    fun capabilityMatrixMarksIosRuntimeBoundaries() {
+        val ssh = TerminalRuntimeCapabilities.forRuntime(TerminalRuntimeKind.REMOTE_SSH)
+        assertEquals(TerminalRuntimeTier.STABLE, ssh.tier)
+        assertTrue(ssh.appStoreSafeByDefault)
+        assertFalse(ssh.supportsExternalCliByDefault)
+        assertFalse(ssh.supportsPty)
+        assertFalse(ssh.supportsPackageInstall)
+        assertFalse(ssh.supportsInteractiveLogin)
+        assertFalse(ssh.supportsFileSync)
+
+        val localTools = TerminalRuntimeCapabilities.forRuntime(TerminalRuntimeKind.LOCAL_IOS_TOOLS)
+        assertEquals(TerminalRuntimeTier.STABLE, localTools.tier)
+        assertTrue(localTools.appStoreSafeByDefault)
+        assertFalse(localTools.supportsPackageInstall)
+        assertFalse(localTools.supportsExternalCliByDefault)
+        assertFalse(TerminalRuntimeCapabilities.supportsAndroidExternalCli(TerminalRuntimeKind.LOCAL_IOS_TOOLS))
+        assertEquals(
+            TerminalRuntimeKind.BUILTIN_ALPINE,
+            TerminalRuntimeCapabilities.androidDefaultOrFallback(TerminalRuntimeKind.LOCAL_IOS_TOOLS),
+        )
+
+        val mosh = TerminalRuntimeCapabilities.forRuntime(TerminalRuntimeKind.REMOTE_MOSH)
+        assertEquals(TerminalRuntimeTier.EXPERIMENTAL, mosh.tier)
+        assertFalse(mosh.appStoreSafeByDefault)
+        assertFalse(mosh.supportsExternalCliByDefault)
+        assertEquals(TerminalRuntimeLicenseClass.GPL_REVIEW_REQUIRED, mosh.licenseClass)
+
+        val ish = TerminalRuntimeCapabilities.forRuntime(TerminalRuntimeKind.ISH_EXPERIMENTAL)
+        assertEquals(TerminalRuntimeTier.EXPERIMENTAL, ish.tier)
+        assertFalse(ish.appStoreSafeByDefault)
+        assertEquals(TerminalRuntimeLicenseClass.GPL_REVIEW_REQUIRED, ish.licenseClass)
+    }
+
+    @Test
     fun runtimeAndStatusWireValuesAreStable() {
         assertEquals(TerminalRuntimeKind.BUILTIN_ALPINE, TerminalRuntimeKind.fromWire("builtin_alpine"))
         assertEquals(TerminalRuntimeKind.TERMUX_EXTERNAL, TerminalRuntimeKind.fromWire("TERMUX_EXTERNAL"))
+        assertEquals(TerminalRuntimeKind.REMOTE_SSH, TerminalRuntimeKind.fromWire("remote_ssh"))
+        assertEquals(TerminalRuntimeKind.LOCAL_IOS_TOOLS, TerminalRuntimeKind.fromWire("LOCAL_IOS_TOOLS"))
+        assertEquals(TerminalRuntimeKind.REMOTE_MOSH, TerminalRuntimeKind.fromWire("remote_mosh"))
+        assertEquals(TerminalRuntimeKind.ISH_EXPERIMENTAL, TerminalRuntimeKind.fromWire("ish_experimental"))
         assertTrue(TerminalJobStatus.QUEUED.running)
         assertTrue(TerminalJobStatus.RUNNING.running)
         assertFalse(TerminalJobStatus.COMPLETED.running)

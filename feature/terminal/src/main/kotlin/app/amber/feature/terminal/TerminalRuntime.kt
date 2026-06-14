@@ -105,7 +105,12 @@ class TerminalRuntime(
         flushWorkspace: Boolean = false,
         outputCallback: ((String) -> Unit)? = null,
     ): TerminalJobSnapshot = withContext(Dispatchers.IO) {
-        val selectedRuntime = runtime ?: settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
+        val configuredRuntime = runtime ?: settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
+        val selectedRuntime = if (runtime == null) {
+            TerminalRuntimeCapabilities.androidDefaultOrFallback(configuredRuntime)
+        } else {
+            configuredRuntime
+        }
         val maxJobs = settingsStore.settingsFlow.value.agentRuntime.terminalMaxConcurrentJobs.coerceIn(1, MAX_CONCURRENT_JOBS)
         val runningJobs = jobs.values.count { it.status.get().running }
         if (runningJobs >= maxJobs) {
@@ -156,6 +161,19 @@ class TerminalRuntime(
 
             TerminalRuntimeKind.TERMUX_EXTERNAL -> {
                 startTermuxJob(job)
+            }
+
+            TerminalRuntimeKind.REMOTE_SSH,
+            TerminalRuntimeKind.LOCAL_IOS_TOOLS,
+            TerminalRuntimeKind.REMOTE_MOSH,
+            TerminalRuntimeKind.ISH_EXPERIMENTAL -> {
+                appendJobOutput(job, "${selectedRuntime.wireName} is an iOS-only terminal runtime and cannot run in the Android process.\n")
+                finishJob(
+                    job = job,
+                    status = TerminalJobStatus.FAILED,
+                    exitCode = null,
+                    error = "${selectedRuntime.wireName} is not available on Android.",
+                )
             }
         }
 

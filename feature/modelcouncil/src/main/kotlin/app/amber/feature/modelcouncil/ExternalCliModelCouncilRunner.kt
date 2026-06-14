@@ -5,6 +5,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import app.amber.feature.terminal.TerminalRuntime
+import app.amber.feature.terminal.TerminalRuntimeCapabilities
 import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.core.settings.prefs.SettingsAggregator
 
@@ -35,7 +36,12 @@ class ExternalCliModelCouncilRunner(
         var terminalJobId: String? = null
         try {
             val runtime = TerminalRuntimeKind.fromWire(seat.externalRuntime)
-                ?: settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
+                ?: TerminalRuntimeCapabilities.androidDefaultOrFallback(
+                    settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
+                )
+            require(TerminalRuntimeCapabilities.supportsAndroidExternalCli(runtime)) {
+                "External CLI runtime is not available on Android: ${runtime.wireName}"
+            }
             val command = ModelCouncilExternalCliCommandBuilder.build(
                 seat = seat,
                 prompt = buildExternalCliPrompt(systemPrompt, userPrompt),

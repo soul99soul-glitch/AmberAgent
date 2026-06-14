@@ -12,6 +12,7 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
 import app.amber.feature.terminal.TerminalRuntimeKind
+import app.amber.feature.terminal.TerminalRuntimeCapabilities
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import java.util.Locale
@@ -85,8 +86,12 @@ object ModelCouncilValidator {
                         "Unsafe external_model for seat ${seat.name}: ${seat.externalModel}"
                     }
                     if (seat.externalRuntime.isNotBlank()) {
-                        require(TerminalRuntimeKind.fromWire(seat.externalRuntime) != null) {
+                        val runtime = TerminalRuntimeKind.fromWire(seat.externalRuntime)
+                        require(runtime != null) {
                             "Unsupported external_runtime for seat ${seat.name}: ${seat.externalRuntime}"
+                        }
+                        require(TerminalRuntimeCapabilities.supportsAndroidExternalCli(runtime)) {
+                            "external_runtime for seat ${seat.name} is not available for Android external CLI: ${seat.externalRuntime}"
                         }
                     }
                 }

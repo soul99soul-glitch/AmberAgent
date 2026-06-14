@@ -17,10 +17,10 @@ object TerminalInstallPlanner {
         }
 
         val verifyCommands = verifyCommandsFor(normalized)
-        if (runtime == TerminalRuntimeKind.ANDROID_SHELL) {
+        if (runtime == TerminalRuntimeKind.ANDROID_SHELL || TerminalRuntimeCapabilities.isIosRuntime(runtime)) {
             return TerminalInstallPlan(
                 packages = normalized,
-                command = "echo 'Package installation is not available in android_shell runtime.' >&2; exit 64",
+                command = "echo 'Package installation is not available in ${runtime.wireName} runtime.' >&2; exit 64",
                 verifyCommand = verifyCommands.joinToString(" && "),
             )
         }
@@ -149,7 +149,11 @@ object TerminalInstallPlanner {
                     }
                 }
 
-                TerminalRuntimeKind.ANDROID_SHELL -> Unit
+                TerminalRuntimeKind.ANDROID_SHELL,
+                TerminalRuntimeKind.REMOTE_SSH,
+                TerminalRuntimeKind.LOCAL_IOS_TOOLS,
+                TerminalRuntimeKind.REMOTE_MOSH,
+                TerminalRuntimeKind.ISH_EXPERIMENTAL -> Unit
             }
             append(verifyCommands.joinToString("\n"))
         }
