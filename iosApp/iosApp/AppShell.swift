@@ -162,6 +162,7 @@ final class RouterPath {
 
 enum Route: Hashable {
     case chat
+    case search
     case settings
     case board
     case miniApps
@@ -200,6 +201,8 @@ private extension View {
             switch route {
             case .chat:
                 ChatView(settingsStore: settingsStore, localToolExecutor: localToolExecutor)
+            case .search:
+                SearchView()
             case .settings:
                 SettingsHomeView(settingsStore: settingsStore)
             case .board:

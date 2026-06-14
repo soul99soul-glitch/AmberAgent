@@ -297,7 +297,7 @@ struct ConversationsView: View {
 
     private var searchField: some View {
         Button {
-            router.navigate(to: .conversation(id: "search"))
+            router.navigate(to: .search)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
@@ -355,6 +355,349 @@ struct ConversationsView: View {
                     router.navigate(to: row.title.hasPrefix("iOS") ? .chat : .conversation(id: row.id.uuidString))
                 }
             }
+        }
+    }
+}
+
+struct SearchView: View {
+    @Environment(RouterPath.self) private var router
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var query = ""
+    @State private var selectedFilter: SearchFilter = .all
+    @FocusState private var searchFocused: Bool
+
+    private let recentSearches = [
+        "iOS 液态玻璃设计",
+        "贪吃蛇应用",
+        "流式输出测试",
+        "威尔史密斯子女"
+    ]
+
+    private let results: [SearchResultRowModel] = [
+        .init(
+            filter: .conversation,
+            group: "会话",
+            initial: "I",
+            title: "iOS 液态玻璃设计应用推荐",
+            preview: "以下是几款适配 iOS 26 液态玻璃风格的设计参考应用...",
+            highlight: "iOS",
+            time: "刚刚",
+            color: AmberTheme.accent
+        ),
+        .init(
+            filter: .message,
+            group: "消息",
+            initial: "流",
+            title: "流式输出测试",
+            preview: "首字节延迟约 120ms，整体表现正常",
+            highlight: "120ms",
+            time: "上周五",
+            color: AmberTheme.accentCyan
+        )
+    ]
+
+    private var visibleResults: [SearchResultRowModel] {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return []
+        }
+        return results.filter { row in
+            selectedFilter.includes(row.filter)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                searchNavigation
+                filterStrip
+
+                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    recentSearchList
+                } else {
+                    resultList
+                }
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .task {
+            searchFocused = true
+        }
+    }
+
+    private var searchNavigation: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AmberTheme.muted)
+
+                TextField("搜索任何内容...", text: $query)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .tint(AmberTheme.accent)
+                    .focused($searchFocused)
+                    .submitLabel(.search)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 18, height: 18)
+                        .background(AmberTheme.muted2, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .opacity(query.isEmpty ? 0 : 1)
+                .accessibilityLabel("清空搜索")
+            }
+            .frame(height: 38)
+            .padding(.horizontal, 12)
+            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+            }
+            .shadow(color: .white.opacity(0.55), radius: 0, y: -1)
+
+            Button("取消") {
+                dismiss()
+            }
+            .font(.body)
+            .foregroundStyle(AmberTheme.accent)
+            .buttonStyle(.plain)
+            .accessibilityLabel("取消搜索")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+    }
+
+    private var filterStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(SearchFilter.allCases) { filter in
+                    Button {
+                        selectedFilter = filter
+                    } label: {
+                        Text(filter.title)
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(selectedFilter == filter ? .white : AmberTheme.foreground2)
+                            .frame(height: 30)
+                            .padding(.horizontal, 13)
+                            .background(
+                                selectedFilter == filter ? AmberTheme.accent : AmberTheme.surface,
+                                in: Capsule()
+                            )
+                            .overlay {
+                                Capsule()
+                                    .stroke(selectedFilter == filter ? .clear : AmberTheme.borderSoft, lineWidth: 0.5)
+                            }
+                            .shadow(
+                                color: selectedFilter == filter ? AmberTheme.accent.opacity(0.28) : .black.opacity(0.04),
+                                radius: selectedFilter == filter ? 6 : 2,
+                                y: selectedFilter == filter ? 2 : 1
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .scrollIndicators(.hidden)
+        .padding(.bottom, 10)
+    }
+
+    private var recentSearchList: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                AmberSectionLabel(text: "最近搜索")
+                    .padding(.top, -8)
+
+                ForEach(recentSearches, id: \.self) { term in
+                    Button {
+                        query = term
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(AmberTheme.muted2)
+                                .frame(width: 16)
+
+                            Text(term)
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(minHeight: 42)
+                        .padding(.horizontal, 16)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.bottom, 36)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var resultList: some View {
+        ScrollView {
+            if visibleResults.isEmpty {
+                ContentUnavailableView("没有结果", systemImage: "magnifyingglass", description: Text("换个关键词或筛选范围再试一次"))
+                    .foregroundStyle(AmberTheme.muted)
+                    .padding(.top, 72)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(groupedResults, id: \.group) { group in
+                        SearchResultGroup(title: group.group, rows: group.rows) { _ in
+                            router.navigate(to: .chat)
+                        }
+                    }
+                }
+                .padding(.bottom, 36)
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var groupedResults: [(group: String, rows: [SearchResultRowModel])] {
+        let orderedGroups = ["会话", "消息", "文件"]
+        return orderedGroups.compactMap { group in
+            let rows = visibleResults.filter { $0.group == group }
+            return rows.isEmpty ? nil : (group, rows)
+        }
+    }
+}
+
+private enum SearchFilter: String, CaseIterable, Identifiable {
+    case all
+    case conversation
+    case message
+    case file
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .conversation: "会话"
+        case .message: "消息"
+        case .file: "文件"
+        }
+    }
+
+    func includes(_ rowFilter: SearchFilter) -> Bool {
+        self == .all || self == rowFilter
+    }
+}
+
+private struct SearchResultRowModel: Identifiable {
+    let id = UUID()
+    let filter: SearchFilter
+    let group: String
+    let initial: String
+    let title: String
+    let preview: String
+    let highlight: String
+    let time: String
+    let color: Color
+}
+
+private struct SearchResultGroup: View {
+    let title: String
+    let rows: [SearchResultRowModel]
+    let action: (SearchResultRowModel) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: title)
+                .padding(.top, -8)
+
+            AmberFormGroup {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    SearchResultRow(row: row) {
+                        action(row)
+                    }
+
+                    if index < rows.count - 1 {
+                        Divider()
+                            .overlay(AmberTheme.borderSoft)
+                            .padding(.leading, 66)
+                    }
+                }
+            }
+        }
+        .padding(.bottom, 4)
+    }
+}
+
+private struct SearchResultRow: View {
+    let row: SearchResultRowModel
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Text(row.initial)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(row.color)
+                    .frame(width: 40, height: 40)
+                    .background(row.color.opacity(0.14), in: Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(1)
+
+                    HighlightedPreview(text: row.preview, highlight: row.highlight)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(row.time)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+                    .padding(.top, 1)
+            }
+            .frame(minHeight: 58)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct HighlightedPreview: View {
+    let text: String
+    let highlight: String
+
+    var body: some View {
+        if let range = text.range(of: highlight), !highlight.isEmpty {
+            HStack(spacing: 0) {
+                Text(String(text[..<range.lowerBound]))
+                Text(highlight)
+                    .foregroundStyle(AmberTheme.accent)
+                    .padding(.horizontal, 2)
+                    .background(AmberTheme.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
+                Text(String(text[range.upperBound...]))
+            }
+            .font(.subheadline)
+            .foregroundStyle(AmberTheme.muted)
+            .lineLimit(1)
+        } else {
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(1)
         }
     }
 }

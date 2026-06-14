@@ -9,3 +9,8 @@
 
 - **疑问**：当前机器 `xcrun simctl list runtimes` / `devices` 为空，`xcodebuild -showdestinations` 只返回不可用目的地；`xcodebuild -showsdks` 能看到 iOS/iOS Simulator 26.5 SDK，但 scheme 仍提示无 destination，完整 build/simulator screenshot 无法完成。
 - **默认做法**：不下载/安装 Xcode platform，不杀 Chrome，不阻塞；当前屏先用 `swift -frontend -parse`、scoped Swift checks 和原型 `renders/conversations.png` 进行静态/视觉方向验证，等本机 runtime/destination 可用后补完整构建与截图比对。
+
+## Q-3 · search · 原型基准图未生成
+
+- **疑问**：执行 `python3 render_screen.py search` 返回 `✗ renders/search.png`，脚本没有产出截图；原因需后续打开脚本或 Chrome 输出进一步排查。
+- **默认做法**：继续按 `index.html` 中 `#search` section 的源码结构实现搜索覆盖层，先不阻塞；等渲染脚本可产出该屏后补视觉基准比对。
