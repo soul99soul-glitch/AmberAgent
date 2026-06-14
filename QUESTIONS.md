@@ -29,3 +29,8 @@
 
 - **疑问**：执行 `python3 render_screen.py sandbox` 返回 `✗ renders/sandbox.png`，脚本没有产出截图；当前表现与多个二级设置页一致。
 - **默认做法**：继续按 `index.html` 中 `#sandbox` section 与 CD-8 的 Remote SSH exec runner 信息架构实现运行环境页，复用现有 `SettingsStore` / `IOSTerminalRuntime` / SSH Keychain 逻辑；等渲染脚本可产出该屏后补视觉基准比对。
+
+## Q-7 · appearance · 原型基准图未生成
+
+- **疑问**：执行 `python3 render_screen.py appearance` 返回 `✗ renders/appearance.png`，脚本没有产出截图；当前表现与多个二级设置页一致。
+- **默认做法**：继续按 `index.html` 中 `#appearance` section 实现外观模式、强调色、背景色调选择 UI；暂时只持久化选择，不将其应用到全局主题，等 theme store 定义后再接入。
