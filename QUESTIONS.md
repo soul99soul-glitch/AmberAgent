@@ -64,3 +64,8 @@
 
 - **疑问**：执行 `python3 render_screen.py memEdit` 返回 `✗ renders/memEdit.png`，脚本没有产出截图；iOS 端尚未接入真实记忆库写入/更新/删除事务。
 - **默认做法**：先按 `index.html` 中 `#memEdit` section 实现记忆编辑页，并从总览新增/条目点击进入；编辑内容、层级、置顶只维护本地页面状态，完成/删除不会写入或删除真实记忆。
+
+## Q-14 · skills · 原型基准图与真实技能索引
+
+- **疑问**：执行 `python3 render_screen.py skills` 返回 `✗ renders/skills.png`，脚本没有产出截图；iOS 端尚未接入真实 Skill 扫描、安装、详情和索引修复流程。
+- **默认做法**：先按 `index.html` 中 `#skills` section 实现技能总览，只列工具技能/任务技能和 MCP 入口，不列 subagent；添加、详情、导入、全量规整与 MCP 服务器入口先提示未接线，不读写本地 Skill 文件。
