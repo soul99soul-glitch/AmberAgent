@@ -166,6 +166,7 @@ enum Route: Hashable {
     case settings
     case appearance
     case displayFont
+    case conversationStorage
     case capabilities
     case board
     case miniApps
@@ -213,6 +214,8 @@ private extension View {
                 AppearanceSettingsView()
             case .displayFont:
                 DisplayFontSettingsView()
+            case .conversationStorage:
+                ConversationStorageView()
             case .capabilities:
                 ToolPermissionsView(
                     permissionStore: permissionStore,

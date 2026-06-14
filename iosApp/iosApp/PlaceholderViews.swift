@@ -794,7 +794,7 @@ struct SettingsHomeView: View {
     private var dataRows: [SettingsHomeRow] {
         [
             .init(title: "同步与备份", subtitle: "Google 云备份 · 本地加密", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: placeholder("同步与备份", "Google Drive、本地备份和加密恢复", "icloud")),
-            .init(title: "对话存储", subtitle: nil, value: "128 个 · 24 MB", systemImage: "tray.full", color: AmberTheme.accent, route: placeholder("对话存储", "存储用量、清理和删除全部对话", "tray.full"))
+            .init(title: "对话存储", subtitle: nil, value: "128 个 · 24 MB", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
         ]
     }
 

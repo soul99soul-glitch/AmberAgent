@@ -39,3 +39,8 @@
 
 - **疑问**：执行 `python3 render_screen.py displayFont` 返回 `✗ renders/displayFont.png`，脚本没有产出截图；当前表现与 `appearance`、`sandbox` 等二级设置页一致。
 - **默认做法**：继续按 `index.html` 中 `#displayFont` section 实现显示与字体设置 UI，先持久化本地偏好，不改全局聊天渲染与消息模型；等渲染脚本可产出该屏后补视觉基准比对。
+
+## Q-9 · convStorage · 原型基准图未生成
+
+- **疑问**：执行 `python3 render_screen.py convStorage` 返回 `✗ renders/convStorage.png`，脚本没有产出截图；当前表现与多个设置二级页一致。
+- **默认做法**：继续按 `index.html` 中 `#convStorage` section 与 CD-14 实现对话存储 UI；清理缓存、清理旧对话、删除全部对话先保留确认入口，不接入真实删除，避免在未明确 iOS 存储服务前破坏数据。
