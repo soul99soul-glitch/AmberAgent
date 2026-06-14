@@ -172,6 +172,7 @@ enum Route: Hashable {
     case agentsMd
     case memoryEdit(text: String, scope: String, pinned: Bool)
     case skills
+    case mcpServers
     case board
     case miniApps
     case workspace
@@ -235,6 +236,8 @@ private extension View {
                 MemoryEditView(initialText: text, initialScope: scope, initialPinned: pinned)
             case .skills:
                 SkillsView()
+            case .mcpServers:
+                McpServersView()
             case .board:
                 PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:
