@@ -202,13 +202,13 @@ private extension View {
             case .settings:
                 SettingsView(settingsStore: settingsStore)
             case .board:
-                PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.1x2")
+                PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:
                 PlaceholderDetailView(title: "小应用", subtitle: "生成可执行的 HTML 工具", systemImage: "square.grid.2x2")
             case .workspace:
                 WorkspaceView()
             case .memory:
-                PlaceholderDetailView(title: "核心记忆", subtitle: "跨助手共享的长期上下文", systemImage: "brain")
+                PlaceholderDetailView(title: "核心记忆", subtitle: "跨助手共享的长期上下文", systemImage: "brain.head.profile")
             case .council:
                 PlaceholderDetailView(title: "模型议会", subtitle: "多模型并行评审 / 辩论", systemImage: "person.3")
             case .conversation(let id):

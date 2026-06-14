@@ -206,10 +206,10 @@ struct ConversationsView: View {
     @Environment(RouterPath.self) private var router
 
     private let shortcuts: [ConversationShortcut] = [
-        .init(title: "今日看板", systemImage: "rectangle.grid.1x2", color: AmberTheme.accentAmber, route: .board),
+        .init(title: "今日看板", systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
         .init(title: "小应用", systemImage: "square.grid.2x2", color: AmberTheme.accent, route: .miniApps),
         .init(title: "工作区", systemImage: "folder", color: AmberTheme.accentGreen, route: .workspace),
-        .init(title: "核心记忆", systemImage: "brain", color: AmberTheme.accentCyan, route: .memory),
+        .init(title: "核心记忆", systemImage: "brain.head.profile", color: AmberTheme.accentCyan, route: .memory),
         .init(title: "模型议会", systemImage: "person.3", color: AmberTheme.accentIndigo, route: .council)
     ]
 
