@@ -24,3 +24,8 @@
 
 - **疑问**：执行 `python3 render_screen.py capabilities` 返回 `✗ renders/capabilities.png`，脚本没有产出截图；当前表现与 `search` / `permissions` 一致。
 - **默认做法**：继续按 `index.html` 中 `#capabilities` section 与 CD-7 的最终能力模型实现能力门控页，保留现有 Swift 业务逻辑；等渲染脚本可产出该屏后补视觉基准比对。
+
+## Q-6 · sandbox · 原型基准图未生成
+
+- **疑问**：执行 `python3 render_screen.py sandbox` 返回 `✗ renders/sandbox.png`，脚本没有产出截图；当前表现与多个二级设置页一致。
+- **默认做法**：继续按 `index.html` 中 `#sandbox` section 与 CD-8 的 Remote SSH exec runner 信息架构实现运行环境页，复用现有 `SettingsStore` / `IOSTerminalRuntime` / SSH Keychain 逻辑；等渲染脚本可产出该屏后补视觉基准比对。

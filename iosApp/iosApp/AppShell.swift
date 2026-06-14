@@ -170,6 +170,7 @@ enum Route: Hashable {
     case workspace
     case memory
     case council
+    case sandbox
     case conversation(id: String)
     case assistant(id: String)
     case workspaceItem(id: String)
@@ -223,6 +224,8 @@ private extension View {
                 PlaceholderDetailView(title: "核心记忆", subtitle: "跨助手共享的长期上下文", systemImage: "brain.head.profile")
             case .council:
                 PlaceholderDetailView(title: "模型议会", subtitle: "多模型并行评审 / 辩论", systemImage: "person.3")
+            case .sandbox:
+                RuntimeEnvironmentView(settingsStore: settingsStore)
             case .conversation(let id):
                 PlaceholderDetailView(title: "Conversation", subtitle: id, systemImage: "text.bubble")
             case .assistant(let id):
