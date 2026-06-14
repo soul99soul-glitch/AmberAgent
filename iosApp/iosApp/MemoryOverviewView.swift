@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MemoryOverviewView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(RouterPath.self) private var router
 
     @AppStorage("app.amber.ios.memory.core") private var coreMemory = true
     @AppStorage("app.amber.ios.memory.shortTerm") private var shortTermMemory = true
@@ -86,7 +87,7 @@ struct MemoryOverviewView: View {
             AmberSectionLabel(text: "灵魂 · agents.md")
 
             Button {
-                pendingAlert = .agentsMd
+                router.navigate(to: .agentsMd)
             } label: {
                 VStack(alignment: .leading, spacing: 11) {
                     HStack(spacing: 9) {
@@ -388,13 +389,11 @@ private struct MemoryNote: View {
 
 private enum MemoryAlert: Identifiable {
     case add
-    case agentsMd
     case record(String)
 
     var id: String {
         switch self {
         case .add: "add"
-        case .agentsMd: "agents-md"
         case .record(let text): "record-\(text)"
         }
     }
@@ -402,7 +401,6 @@ private enum MemoryAlert: Identifiable {
     var title: String {
         switch self {
         case .add: "新增记忆"
-        case .agentsMd: "agents.md"
         case .record: "编辑记忆"
         }
     }
@@ -411,8 +409,6 @@ private enum MemoryAlert: Identifiable {
         switch self {
         case .add:
             "新增记忆需要接入 iOS 记忆库写入流程；当前只保留入口。"
-        case .agentsMd:
-            "agents.md 编辑页会作为独立屏继续实现；当前不会修改应用级提示词。"
         case .record(let text):
             "将继续用独立的 memEdit 屏接入编辑流程；当前选中的记忆是：\(text)"
         }

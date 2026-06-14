@@ -54,3 +54,8 @@
 
 - **疑问**：执行 `python3 render_screen.py memory` 返回 `✗ renders/memory.png`，脚本没有产出截图；iOS 端当前没有 Android `SettingAgentMemoryVM` / `MemoryRepository` 等价接线，也未实现 `agentsMd` / `memEdit` 子屏。
 - **默认做法**：先按 `index.html` 中 `#memory` section 实现核心记忆总览、agents.md 预览、记忆配置开关与样例条目；开关用本地偏好持久化，新增/编辑/删除/agents.md 入口先提示未接线，子屏后续按一屏一提交继续做。
+
+## Q-12 · agentsMd · 原型基准图与真实 prompt 注入
+
+- **疑问**：执行 `python3 render_screen.py agentsMd` 返回 `✗ renders/agentsMd.png`，脚本没有产出截图；iOS 端尚未有 Android `buildAgentSoulPrompt()` / prompt config repository 的等价接线。
+- **默认做法**：先按 `index.html` 中 `#agentsMd` section 实现 agents.md 编辑屏，并把内容保存为本地 draft；暂不注入真实 System Prompt，等 iOS prompt 配置服务明确后再接入。

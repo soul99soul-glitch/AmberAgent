@@ -169,6 +169,7 @@ enum Route: Hashable {
     case conversationStorage
     case syncBackup
     case capabilities
+    case agentsMd
     case board
     case miniApps
     case workspace
@@ -226,6 +227,8 @@ private extension View {
                     systemPermissionCoordinator: systemPermissionCoordinator,
                     localToolExecutor: localToolExecutor
                 )
+            case .agentsMd:
+                AgentsMarkdownView()
             case .board:
                 PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:
