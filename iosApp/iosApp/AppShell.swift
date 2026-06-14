@@ -233,7 +233,7 @@ private extension View {
             case .workspace:
                 WorkspaceView()
             case .memory:
-                PlaceholderDetailView(title: "核心记忆", subtitle: "跨助手共享的长期上下文", systemImage: "brain.head.profile")
+                MemoryOverviewView()
             case .council:
                 PlaceholderDetailView(title: "模型议会", subtitle: "多模型并行评审 / 辩论", systemImage: "person.3")
             case .sandbox:

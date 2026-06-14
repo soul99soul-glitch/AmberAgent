@@ -49,3 +49,8 @@
 
 - **疑问**：执行 `python3 render_screen.py syncBackup` 返回 `✗ renders/syncBackup.png`，脚本没有产出截图；真实 Google Drive 同步还需要 OAuth client、用户授权、云端快照服务和本地加密/恢复事务。
 - **默认做法**：继续按 `index.html` 中 `#syncBackup` section 与 CD-12 实现同步与备份 UI；不请求账号授权、不发起网络请求、不读写备份文件，所有上传/下载/导入/导出/口令入口先弹出未接线提示。
+
+## Q-11 · memory · 原型基准图与 iOS 记忆服务接线
+
+- **疑问**：执行 `python3 render_screen.py memory` 返回 `✗ renders/memory.png`，脚本没有产出截图；iOS 端当前没有 Android `SettingAgentMemoryVM` / `MemoryRepository` 等价接线，也未实现 `agentsMd` / `memEdit` 子屏。
+- **默认做法**：先按 `index.html` 中 `#memory` section 实现核心记忆总览、agents.md 预览、记忆配置开关与样例条目；开关用本地偏好持久化，新增/编辑/删除/agents.md 入口先提示未接线，子屏后续按一屏一提交继续做。
