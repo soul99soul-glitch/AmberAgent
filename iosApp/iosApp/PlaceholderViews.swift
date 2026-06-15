@@ -208,7 +208,7 @@ struct ConversationsView: View {
     private let shortcuts: [ConversationShortcut] = [
         .init(title: "今日看板", systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
         .init(title: "小应用", systemImage: "square.grid.2x2", color: AmberTheme.accent, route: .miniApps),
-        .init(title: "工作区", systemImage: "folder", color: AmberTheme.accentGreen, route: .workspace),
+        .init(title: "工作区", systemImage: "folder", color: AmberTheme.accentGreen, route: .sandbox),
         .init(title: "核心记忆", systemImage: "brain.head.profile", color: AmberTheme.accentCyan, route: .memory),
         .init(title: "模型议会", systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accentIndigo, route: .council)
     ]
