@@ -88,4 +88,9 @@
 ## Q-18 · providers · 原型基准渲染与真实服务商注册表
 
 - **疑问**：`providers` 原型截图最初未产出；修正 `render_screen.py` 的 flatten CSS 后，`python3 render_screen.py providers` 已生成 `renders/providers.png`。iOS 端当前仍没有完整服务商注册表、OAuth flow、模型列表同步和按服务商拆分的详情配置页。
-- **默认做法**：按 `index.html` 中 `#providers` section 实现服务商列表视觉与设置入口；列表项继续进入现有 `SettingsView` 配置页以复用已有 API/Base URL 逻辑，不创建凭据、不发起 OAuth、不请求网络。
+- **默认做法**：按 `index.html` 中 `#providers` section 实现服务商列表视觉与设置入口；列表项进入新的 `provider-detail` 二级页，详情页里的名称/API 地址继续进入现有 `SettingsView` 配置页以复用已有 API/Base URL 逻辑，不创建凭据、不发起 OAuth、不请求网络。
+
+## Q-19 · provider-detail · 原型基准图未生成
+
+- **疑问**：执行 `python3 render_screen.py provider-detail` 返回 `✗ renders/provider-detail.png`；随后复测 `providers` 时 Chrome 子进程被系统以 137 结束。当前不能改用其它截图工具，因为项目约束要求原型截图只用 `render_screen.py`。
+- **默认做法**：继续按 `index.html` 中 `#provider-detail` 源码段落实现服务商详情页，并用 iOS Simulator screenshot + runtime snapshot 检查配置/模型两个 tab；等 `render_screen.py` 对该屏恢复产图后补基准并排比对。

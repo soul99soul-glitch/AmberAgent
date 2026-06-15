@@ -177,6 +177,8 @@ enum Route: Hashable {
     case skillDetail(name: String)
     case execution
     case providers
+    case providerDetail(name: String, endpoint: String)
+    case modelEdit
     case board
     case miniApps
     case workspace
@@ -248,6 +250,10 @@ private extension View {
                 ExecutionSettingsView()
             case .providers:
                 ProvidersView()
+            case .providerDetail(let name, let endpoint):
+                ProviderDetailView(providerName: name, endpoint: endpoint)
+            case .modelEdit:
+                PlaceholderDetailView(title: "编辑模型", subtitle: "模型能力、模态与上下文设置", systemImage: "cpu")
             case .board:
                 PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:

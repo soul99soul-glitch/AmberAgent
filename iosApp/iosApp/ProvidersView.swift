@@ -120,7 +120,7 @@ struct ProvidersView: View {
             AmberFormGroup {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, provider in
                     ProviderRow(provider: provider) {
-                        router.navigate(to: .providerSettings)
+                        router.navigate(to: .providerDetail(name: provider.name, endpoint: provider.endpoint))
                     }
 
                     if index < rows.count - 1 {
