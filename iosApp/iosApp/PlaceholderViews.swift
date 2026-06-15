@@ -776,8 +776,7 @@ struct SettingsHomeView: View {
     @AppStorage("app.amber.ios.appearance.mode") private var appearanceMode = "light"
     @AppStorage("app.amber.ios.display.fontScale") private var displayFontScale = 1.0
     @AppStorage("app.amber.ios.display.chatFont") private var displayChatFont = "default"
-    @AppStorage("app.amber.ios.execution.toolLoopLimit") private var executionToolLoopLimit = 25
-    @AppStorage("app.amber.ios.execution.liveActivity") private var executionLiveActivity = true
+    @AppStorage(IOSExecutionPreferenceKeys.liveActivity) private var executionLiveActivity = true
 
     private var generalRows: [SettingsHomeRow] {
         [
@@ -852,7 +851,7 @@ struct SettingsHomeView: View {
     }
 
     private var executionSummary: String {
-        "本机设置 \(executionToolLoopLimit) 步 · 灵动岛 \(executionLiveActivity ? "开" : "关")"
+        "灵动岛 \(executionLiveActivity ? "开" : "关") · 运行控制未接线"
     }
 
     private var runtimeSummary: String {

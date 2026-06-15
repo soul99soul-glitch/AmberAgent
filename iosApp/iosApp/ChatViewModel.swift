@@ -74,6 +74,12 @@ final class ChatViewModel {
         ModelRegistry.shared.MODEL_ABILITIES.getData(modelId: currentModelId) as? [ModelAbility] ?? []
     }
 
+    private var liveActivityPreferenceEnabled: Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: IOSExecutionPreferenceKeys.liveActivity) != nil else { return true }
+        return defaults.bool(forKey: IOSExecutionPreferenceKeys.liveActivity)
+    }
+
     // Run tracking — stored so cancelGeneration() can record an interrupted run.
     private var currentRunId: String?
     private var currentStartedAt: Int64?
@@ -121,7 +127,7 @@ final class ChatViewModel {
         attachRequestId = requestId
         isAttachingSelectedFile = true
         let activityRunId = "tool-\(requestId.uuidString)"
-        liveActivityController.start(runId: activityRunId, presentation: .readingSelectedFile)
+        startLiveActivity(runId: activityRunId, presentation: .readingSelectedFile)
         defer {
             if attachRequestId == requestId {
                 isAttachingSelectedFile = false
@@ -221,7 +227,7 @@ final class ChatViewModel {
         currentRunId = runId
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
-        liveActivityController.start(
+        startLiveActivity(
             runId: runId,
             presentation: .generatingResponse(modelName: params.model.modelId)
         )
@@ -297,6 +303,11 @@ final class ChatViewModel {
         currentInputDigest = nil
         streamJob = nil
         isLoading = false
+    }
+
+    private func startLiveActivity(runId: String, presentation: AgentActivityPresentation) {
+        guard liveActivityPreferenceEnabled else { return }
+        liveActivityController.start(runId: runId, presentation: presentation)
     }
 
     /// Stable SHA-256 hex digest of the input text.

@@ -1,6 +1,10 @@
 @preconcurrency import ActivityKit
 import Foundation
 
+enum IOSExecutionPreferenceKeys {
+    static let liveActivity = "app.amber.ios.execution.liveActivity"
+}
+
 @MainActor
 final class AgentLiveActivityController {
     static let shared = AgentLiveActivityController()
@@ -73,6 +77,30 @@ final class AgentLiveActivityController {
         currentRunId = nil
 
         await Self.end(activity: activity, presentation: presentation, dismissalDelay: dismissalDelay)
+    }
+
+    func stopCurrent(dismissalDelay: TimeInterval = 1) async {
+        var activitiesToEnd = Activity<AgentActivityAttributes>.activities
+        if let activity,
+           !activitiesToEnd.contains(where: { $0.id == activity.id }) {
+            activitiesToEnd.append(activity)
+        }
+
+        let cancelledPresentation = AgentActivityPresentation.cancelled(
+            toolTitle: lastPresentation?.toolTitle ?? "生成回复"
+        )
+        lastPresentation = cancelledPresentation
+        lastUpdateAt = Date()
+        self.activity = nil
+        currentRunId = nil
+
+        for activity in activitiesToEnd {
+            await Self.end(
+                activity: activity,
+                presentation: cancelledPresentation,
+                dismissalDelay: dismissalDelay
+            )
+        }
     }
 
     private func requestActivity(runId: String, presentation: AgentActivityPresentation) {
