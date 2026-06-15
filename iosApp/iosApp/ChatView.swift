@@ -14,7 +14,6 @@ struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @State private var activeComposerPanel: ComposerPanel?
     @State private var isModelSheetPresented = false
-    @State private var selectedThinkingLevel = "关闭"
     @FocusState private var isInputFocused: Bool
     @Environment(\.dismiss) private var dismiss
 
@@ -86,7 +85,7 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     if viewModel.messages.isEmpty {
-                        OpenDesignChatSample()
+                        ChatEmptyState()
                     } else {
                         ForEach(viewModel.messages, id: \.id) { message in
                             MessageBubbleView(message: message)
@@ -230,18 +229,20 @@ struct ChatView: View {
                             ) {
                                 toggleComposerPanel(.thinking)
                             }
+                            .accessibilityValue(reasoningAccessibilityValue)
                             .popover(isPresented: popoverBinding(for: .thinking), arrowEdge: .bottom) {
-                                ComposerThinkingPanel(selectedLevel: $selectedThinkingLevel) {
-                                    activeComposerPanel = nil
-                                }
+                                ComposerThinkingPanel(
+                                    selectedOption: selectedReasoningBinding,
+                                    isAvailable: viewModel.currentModelSupportsReasoning
+                                ) { _ in activeComposerPanel = nil }
                                 .presentationCompactAdaptation(.popover)
                             }
 
-                            ContextRingButton {
+                            ContextRingButton(snapshot: viewModel.contextSnapshot) {
                                 toggleComposerPanel(.context)
                             }
                             .popover(isPresented: popoverBinding(for: .context), arrowEdge: .bottom) {
-                                ComposerContextPanel()
+                                ComposerContextPanel(snapshot: viewModel.contextSnapshot)
                                     .presentationCompactAdaptation(.popover)
                             }
                         }
@@ -278,7 +279,23 @@ struct ChatView: View {
     }
 
     private var composerModelLabel: String {
-        settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId
+        let trimmed = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "gpt-4o" : trimmed
+    }
+
+    private var selectedReasoningOption: ComposerReasoningOption {
+        ComposerReasoningOption(reasoningLevel: viewModel.reasoningLevel)
+    }
+
+    private var selectedReasoningBinding: Binding<ComposerReasoningOption> {
+        Binding(
+            get: { selectedReasoningOption },
+            set: { viewModel.reasoningLevel = $0.reasoningLevel }
+        )
+    }
+
+    private var reasoningAccessibilityValue: String {
+        viewModel.currentModelSupportsReasoning ? selectedReasoningOption.title : "当前模型未标记 Reasoning"
     }
 
     private func toggleComposerPanel(_ panel: ComposerPanel) {
@@ -300,6 +317,7 @@ struct ChatView: View {
 }
 
 private struct ContextRingButton: View {
+    let snapshot: ChatContextSnapshot
     let action: () -> Void
 
     var body: some View {
@@ -307,10 +325,9 @@ private struct ContextRingButton: View {
             ZStack {
                 Circle()
                     .stroke(AmberTheme.surface2, lineWidth: 3)
-                Circle()
-                    .trim(from: 0, to: 0.023)
-                    .stroke(AmberTheme.accentAmber, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+                Image(systemName: "chart.pie")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AmberTheme.muted)
             }
             .frame(width: 20, height: 20)
             .frame(width: 34, height: 34)
@@ -318,7 +335,8 @@ private struct ContextRingButton: View {
         }
         .buttonStyle(.plain)
         .amberGlass(cornerRadius: 17)
-        .accessibilityLabel("上下文用量 2.3%")
+        .accessibilityLabel("上下文统计尚未接线")
+        .accessibilityValue("\(snapshot.messageCount) 条消息")
     }
 }
 
@@ -585,47 +603,110 @@ private struct ComposerModelOption: Identifiable, Hashable {
     }
 }
 
-private struct ComposerThinkingPanel: View {
-    @Binding var selectedLevel: String
-    let onPick: () -> Void
+private enum ComposerReasoningOption: String, CaseIterable, Identifiable {
+    case off
+    case auto
+    case low
+    case medium
+    case high
+    case xhigh
+    case max
 
-    private let levels = ["关闭", "Low", "Medium", "High", "X High"]
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: "关闭"
+        case .auto: "Auto"
+        case .low: "Low"
+        case .medium: "Medium"
+        case .high: "High"
+        case .xhigh: "X High"
+        case .max: "Max"
+        }
+    }
+
+    var reasoningLevel: ReasoningLevel {
+        switch self {
+        case .off: .off
+        case .auto: .auto_
+        case .low: .low
+        case .medium: .medium
+        case .high: .high
+        case .xhigh: .xhigh
+        case .max: .max
+        }
+    }
+
+    init(reasoningLevel: ReasoningLevel) {
+        switch reasoningLevel.name.lowercased() {
+        case "auto": self = .auto
+        case "low": self = .low
+        case "medium": self = .medium
+        case "high": self = .high
+        case "xhigh": self = .xhigh
+        case "max": self = .max
+        default: self = .off
+        }
+    }
+}
+
+private struct ComposerThinkingPanel: View {
+    @Binding var selectedOption: ComposerReasoningOption
+    let isAvailable: Bool
+    let onPick: (ComposerReasoningOption) -> Void
 
     var body: some View {
         ComposerPopoverSurface(width: 180) {
-            VStack(spacing: 0) {
-                ForEach(Array(levels.enumerated()), id: \.element) { index, level in
-                    ComposerPopoverDivider(index: index)
+            if isAvailable {
+                VStack(spacing: 0) {
+                    ForEach(Array(ComposerReasoningOption.allCases.enumerated()), id: \.element.id) { index, option in
+                        ComposerPopoverDivider(index: index)
 
-                    Button {
-                        selectedLevel = level
-                        onPick()
-                    } label: {
-                        HStack {
-                            Text(level)
-                                .font(.subheadline.weight(level == selectedLevel ? .semibold : .regular))
-                                .foregroundStyle(level == selectedLevel ? AmberTheme.accent : AmberTheme.foreground)
+                        Button {
+                            selectedOption = option
+                            onPick(option)
+                        } label: {
+                            HStack {
+                                Text(option.title)
+                                    .font(.subheadline.weight(option == selectedOption ? .semibold : .regular))
+                                    .foregroundStyle(option == selectedOption ? AmberTheme.accent : AmberTheme.foreground)
 
-                            Spacer()
+                                Spacer()
 
-                            if level == selectedLevel {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(AmberTheme.accent)
+                                if option == selectedOption {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(AmberTheme.accent)
+                                }
                             }
+                            .padding(.horizontal, 16)
+                            .frame(height: 44)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.horizontal, 16)
-                        .frame(height: 44)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Reasoning 未启用")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+
+                    Text("当前模型未在 KMP ModelRegistry 标记 Reasoning 能力")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(14)
             }
         }
     }
 }
 
 private struct ComposerContextPanel: View {
+    let snapshot: ChatContextSnapshot
+
     var body: some View {
         ComposerPopoverSurface(width: 232) {
             VStack(spacing: 0) {
@@ -634,18 +715,22 @@ private struct ComposerContextPanel: View {
                         Circle()
                             .stroke(AmberTheme.surface2, lineWidth: 5)
                         Circle()
-                            .trim(from: 0, to: 0.023)
+                            .trim(from: 0, to: 0)
                             .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                             .rotationEffect(.degrees(-90))
 
-                        Text("2.3%")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(AmberTheme.foreground)
+                        Image(systemName: "chart.pie")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(AmberTheme.muted)
                     }
                     .frame(width: 60, height: 60)
 
-                    Text("23,450 / 1,000,000 tokens")
-                        .font(.caption2.monospacedDigit())
+                    Text("Token 统计未接线")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+
+                    Text("当前仅显示 ViewModel 可验证状态")
+                        .font(.caption2)
                         .foregroundStyle(AmberTheme.muted)
                 }
                 .frame(maxWidth: .infinity)
@@ -657,13 +742,26 @@ private struct ComposerContextPanel: View {
                     .overlay(AmberTheme.borderSoft)
 
                 VStack(spacing: 0) {
-                    ComposerContextStatRow(label: "本轮 Session", value: "18,200 tok")
-                    ComposerContextStatRow(label: "Cache 命中率", value: "68%")
-                    ComposerContextStatRow(label: "生成速度", value: "45 tok/s")
+                    ComposerContextStatRow(label: "当前消息", value: "\(snapshot.messageCount) 条")
+                    ComposerContextStatRow(label: "当前模型", value: snapshot.modelId)
+                    ComposerContextStatRow(label: "Reasoning", value: snapshot.supportsReasoning ? "可用" : "未标记")
+                    ComposerContextStatRow(label: "待附加文件", value: pendingFileValue)
                 }
                 .padding(.vertical, 4)
             }
         }
+    }
+
+    private var pendingFileValue: String {
+        guard let fileName = snapshot.pendingSelectedFileName else {
+            return "无"
+        }
+
+        if let bytes = snapshot.pendingSelectedFileBytesText {
+            return "\(fileName) · \(bytes)"
+        }
+
+        return fileName
     }
 }
 
@@ -682,6 +780,8 @@ private struct ComposerContextStatRow: View {
             Text(value)
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .foregroundStyle(AmberTheme.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
         }
         .padding(.horizontal, 14)
         .frame(height: 32)
@@ -1020,6 +1120,27 @@ struct ChatToolTimeline: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
+    }
+}
+
+private struct ChatEmptyState: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(AmberTheme.accent)
+
+            Text("Amber")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground)
+
+            Text("准备好了")
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 96)
+        .padding(.bottom, 180)
     }
 }
 

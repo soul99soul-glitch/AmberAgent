@@ -8,6 +8,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 
 - App root wiring: `AmberAgentApp` owns one `SettingsStore`; `AppShell` injects `SettingsStore`, `IOSPermissionStore`, `DocumentAccessStore`, `IOSSystemPermissionCoordinator`, and `IOSLocalToolExecutor` into routed pages.
 - Core OpenAI-compatible chat: `ChatViewModel` reads `SettingsStore.baseUrl`, `SettingsStore.apiKey`, and `SettingsStore.modelId`, builds `ProviderSetting.OpenAI`, calls `OpenAIKmpProvider.streamTextCancellable`, streams into `MessageStreamAccumulator`, supports cancellation, and records agent runs through `AgentRuntimeDatabase`.
+- Chat reasoning parameter and model ability gate: `ChatViewModel` resolves the current model id once, hydrates `Model.abilities` from KMP `ModelRegistry.MODEL_ABILITIES`, and only passes a non-off `TextGenerationParams.reasoningLevel` when that real registry marks the model with `ModelAbility.REASONING`. Empty Chat no longer renders Open Design sample tool calls as if they were real history.
 - Chat selected-file context: `ToolPermissionsView` uses SwiftUI `fileImporter`; `DocumentAccessStore` creates an in-memory one-file grant; `IOSLocalToolExecutor` routes `file_read_selected` through `IOSToolRuntime`; `ChatViewModel.attachSelectedFilePreviewToNextMessage()` appends a real bounded file preview to the next prompt.
 - iOS permissions/capabilities: `ToolPermissionsView` reads `IOSCapabilityRegistry`, `IOSSystemPermissionCoordinator.cachedStatus`, and requests/refreshes permissions through the coordinator instead of fabricating status. Unsupported/non-requestable capabilities are represented by capability metadata.
 - Permission policy/status substrate: `IOSPermissionStore` persists policies in `UserDefaults`; `IOSLocalToolExecutor.permissionsStatus()` exposes a real read-only status snapshot.
@@ -23,7 +24,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 
 - Provider add/model edit/custom headers/body pages are draft-only. The Provider list can display KMP default templates, but iOS still does not read or persist the full mutable `Settings.providers` / `ProviderSetting` list, provider-specific API keys, provider models, custom headers/body, balances, or auth modes.
 - Chat model picker is now a scalar `SettingsStore.modelId` editor, not a full provider/model registry. It still cannot switch `SettingsStore.baseUrl`, API key, auth mode, custom headers/body, or provider-specific model metadata.
-- Chat thinking/context controls are presentation-only. `selectedThinkingLevel` does not feed `TextGenerationParams.reasoningLevel`; context ring/token stats are hardcoded.
+- Chat context usage is still not a real token/window estimator. The context popover now avoids precise fake token/cache/speed numbers and only shows ViewModel/KMP-verifiable state: message count, current model id, KMP reasoning ability marker, and pending selected-file preview.
 - TTS settings are still not wired to an iOS `TTSProviderSetting` store or real `TTSManager` execution path. The page has been downgraded to real default status plus draft-only cloud fields.
 - Skills page is not wired to the real Android/KMP `SkillManager` / `SkillsVM` scanning/import/editing path. It has been downgraded to an explicit not-wired status with draft-only add/import/rescan flows.
 - MCP server page is not wired to `Settings.mcpServers`, `McpServerConfig`, `McpManager`, or `McpImportParser`. The previous hardcoded connected-server list and isolated `@AppStorage` toggles have been removed; import/add remain draft-only, and import uses only rough text preview rather than real parser-backed validation.
@@ -34,6 +35,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 
 - Provider "Add", Model "Done", Model custom Headers/Body "Done": safe as drafts only until a real iOS provider settings store exists. They must not claim to save.
 - Provider preset templates: safe to show because Android/KMP ships `DEFAULT_PROVIDERS`, but they must not be labeled as configured accounts. Templates must not prefill API keys, fetch models, refresh balance, or imply multiple ProviderSettings are persisted on iOS.
+- Chat empty-state sample messages/tool timeline/reasoning: should not be shown as default history. Real tool calls should appear only from `UIMessagePart.Tool` emitted through the message model.
 - TTS cloud engine save/delete/preview: must remain disabled/draft or be wired to verified secure storage and real TTS providers. Do not run network preview as validation.
 - MCP import/add "Done": replaced with `关闭`; must not show import success unless parsed and persisted through a real settings path.
 - Skills import/rescan: must not claim success until local scan/import implementation is available on iOS; current copy explicitly says no download, no file picker, no filesystem mutation.
@@ -78,7 +80,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Chat | send/cancel streaming | `ChatView.swift`, `ChatViewModel.swift` | Yes | `OpenAIKmpProvider`, `MessageStreamAccumulator` | wired for single OpenAI-compatible provider | P0 done/needs hardening |
 | Chat | attach selected file | `ChatView.swift`, `ChatViewModel.swift` | Yes | `IOSLocalToolExecutor` + `DocumentAccessStore` | wired; requires prior picker grant | P0 done |
 | Chat | model picker | `ChatView.swift` | Partial | `SettingsStore.modelId`; later selected real provider/model from settings | writes the scalar model id used by generation; multi-provider switching intentionally not exposed until provider identity exists | P0 done/P1 provider registry |
-| Chat | thinking/context controls | `ChatView.swift` | Partial KMP params exist | `TextGenerationParams.reasoningLevel`, real usage stats | local/hardcoded only | P1 |
+| Chat | thinking/context controls | `ChatView.swift`, `ChatViewModel.swift` | Partial KMP params and model registry exist | `ModelRegistry.MODEL_ABILITIES`, `TextGenerationParams.reasoningLevel`, real usage stats | reasoning picker is gated by real model ability and writes generation params only for reasoning-capable models; context token/window stats downgraded to verifiable state only | P1 partial |
 | Permissions | selected file | `ToolPermissionsView.swift` | Yes | `DocumentAccessStore` + `fileImporter` | wired | P0 done |
 | Permissions | system permissions | `ToolPermissionsView.swift` | Yes | `IOSSystemPermissionCoordinator` | wired for listed capabilities | P0 done |
 | Permissions | approval/policy page | `PermissionsApprovalView.swift` and `Route.toolPermissions` | Yes for `file_read_selected` | `IOSPermissionStore` policy consumed by `IOSToolRuntime.resolve()` | only exposes implemented selected-file tool policy; store normalizes run-scoped policy to ask-every-time because no true run scope exists | P0 done |
@@ -107,7 +109,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 1. Settings home subtitles/trailing values: runtime, skills, providers, search, TTS, conversation storage, SubAgent/Council counts.
 2. Chat and ModelDefaults need a real provider/model registry bridge before exposing multiple provider choices; current iOS generation only has a single OpenAI-compatible scalar config.
 3. ModelDefaults auxiliary model/thinking/context controls: local-only state should either persist to real settings or be marked unavailable.
-4. Chat thinking level and context popover should reflect real params/usage or avoid exact token/cost/speed numbers.
+4. Done in Slice 6: Chat thinking level now hydrates `Model.abilities` from KMP `ModelRegistry` and writes `TextGenerationParams.reasoningLevel` only for reasoning-capable models; context popover no longer shows exact fake token/cache/speed numbers.
 5. Account and storage exact statistics should be wired to measured sources or replaced with unavailable/draft copy.
 6. Runtime page subtitle/home value should reflect selected runtime/default SSH profile from `SettingsStore`.
 7. Add policy editing for additional capabilities only after a matching iOS Agent executor exists; system-only permissions should stay in the capability status/request page.
@@ -129,6 +131,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 4. Destructive conversation cleanup/delete: requires a safe iOS storage transaction and backup decision path.
 5. MCP live connection testing: external network side effect; do not perform without explicit approval.
 6. Provider model fetching/balance refresh/network connection tests: external side effects; do not perform without explicit credentials and approval.
+7. Real Chat context-window/token accounting: no inspected iOS usage estimator is wired to the composer context panel yet.
 
 ## 4. Phase Review Log
 
@@ -225,6 +228,24 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Subagent review: completed by `Galileo`; no P0/P1 findings. P2 fixes applied: Provider list now says `API Key 已/未填写` rather than claiming Keychain persistence status, current Provider footer no longer implies Keychain write success confirmation, Base URL validation now requires `http`/`https` and a non-empty host, and template type routing uses explicit `ProviderRouteKind` instead of provider-name string checks.
 - Remaining risk: iOS still lacks full `Settings.providers` persistence, provider-specific Keychain accounts, Gemini/Claude provider type switching, xAI Response API persistence, custom headers/body, model list fetch/save, balance refresh, and provider-specific model metadata.
 
+### Slice 6 - Chat reasoning and context honesty
+
+- Scope: `ChatView` thinking picker now uses KMP-backed reasoning levels, but it is gated by `ChatViewModel.currentModelSupportsReasoning`. `ChatViewModel.makeTextGenerationParams()` hydrates `Model.abilities` from KMP `ModelRegistry.MODEL_ABILITIES` and only passes a non-off `TextGenerationParams.reasoningLevel` when the registry marks the model with `ModelAbility.REASONING`. The context popover no longer shows hardcoded percent/token/cache/speed figures and instead shows only `ChatContextSnapshot` values from the ViewModel/KMP registry. Empty Chat now shows a neutral empty state rather than Open Design sample messages/tool timeline/reasoning.
+- Verification:
+  - `mcp__xcodebuildmcp.session_show_defaults` confirmed project `/Users/arquiel/Downloads/AI/amberagent-ios/iosApp/AmberAgent.xcodeproj`, scheme `iosApp`, simulator `iPhone 17`.
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded for `iosApp` on iPhone 17 / iOS 26.5 after the Chat edits, and again after the subagent-discovered ModelAbility gate fix.
+  - UI snapshot path: New Chat showed `Amber / 准备好了`, not sample messages or sample tool timeline.
+  - UI snapshot path: focusing the composer showed model `gpt-4o`, thinking value `关闭`, and context accessibility value `0 条消息`.
+  - UI snapshot path before the ability-gate fix showed the raw reasoning enum options. Subagent review caught that this overclaimed for models whose `Model.abilities` did not include `REASONING`.
+  - UI snapshot path after the fix: default `gpt-4o` shows composer accessibility value `当前模型未标记 Reasoning` and the thinking popover shows `Reasoning 未启用`, because KMP `ModelRegistry` does not mark it as a reasoning model.
+  - UI snapshot path after the fix: context popover showed `Token 统计未接线`, `当前消息 0 条`, `当前模型 gpt-4o`, `Reasoning 未标记`, and `待附加文件 无`; no send action or provider request was triggered.
+- Screenshot paths:
+  - Chat empty state: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_3c1ab3cc-749f-4d47-9138-5cba8e965423.jpg`
+  - Reasoning blocked for default `gpt-4o`: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_61d677a7-5627-4060-849e-989c13abfc0c.jpg`
+  - Context panel with KMP reasoning marker: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_fe700017-e5e3-449c-a678-20bfe72522df.jpg`
+- Subagent review: completed by `Dewey`; P1 finding applied. Initial code passed `reasoningLevel` into `TextGenerationParams`, but the constructed `Model` had `abilities: []`, and KMP request builders only emit reasoning params for `ModelAbility.REASONING`. Fix: hydrate abilities from KMP `ModelRegistry.MODEL_ABILITIES`, gate non-off reasoning by that real ability, make UI unavailable when the current model is not marked reasoning-capable, and use one normalized model id for snapshot + params. Follow-up review found no P0/P1; its P2 model-name consistency finding was fixed by starting Live Activity with `params.model.modelId`.
+- Remaining risk: reasoning is current ChatView state only; no inspected iOS settings/assistant bridge persists a default reasoning policy. Context token/window/cost/speed accounting remains unavailable until a real estimator or usage source is wired. Positive-path UI validation for a reasoning-capable model is not yet captured in this slice; the code path is gated by KMP registry and covered by build plus reviewer inspection.
+
 ## 5. Commit Log
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
@@ -232,4 +253,5 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | `1cb4699d8` | Permission approval policy wiring; Chat default model scalar wiring | `test_sim` blocked by existing test target Info.plist issue; `build_run_sim` succeeded before/after reviewer fixes | see Slice 1 and Slice 2 screenshot paths | no provider/model registry bridge yet; enum retains `allowOncePerRun` for old-value compatibility, but store normalizes it to `askEveryTime` |
 | `bf9eea664` | TTS default/status downgrade | `build_run_sim` succeeded | see Slice 3 screenshot paths | no iOS TTS settings bridge or synthesis executor yet |
 | `a5dd008f6` | Skill/MCP not-wired state downgrade | `build_run_sim` succeeded before and after subagent P2 copy fixes | see Slice 4 screenshot paths | no iOS Skill/MCP settings bridge yet |
-| Pending | Provider current config, no-key default templates, and model draft downgrade | `build_run_sim` succeeded before/after explicit route-kind and subagent P2 fixes | see Slice 5 screenshot paths | no full iOS provider registry, provider-specific Keychain schema, Response API persistence, or model metadata bridge yet |
+| `c77cc4b20` | Provider current config, no-key default templates, and model draft downgrade | `build_run_sim` succeeded before/after explicit route-kind and subagent P2 fixes | see Slice 5 screenshot paths | no full iOS provider registry, provider-specific Keychain schema, Response API persistence, or model metadata bridge yet |
+| Pending | Chat reasoning parameter wiring with KMP model ability gate, context-stat downgrade, and no-fake empty state | `build_run_sim` succeeded before and after subagent P1/P2 fixes | see Slice 6 screenshot paths | no persisted reasoning default; no real context token/window estimator |

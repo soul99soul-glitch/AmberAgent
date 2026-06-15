@@ -13,6 +13,14 @@ private final class StreamJobBox {
     }
 }
 
+struct ChatContextSnapshot {
+    let messageCount: Int
+    let modelId: String
+    let supportsReasoning: Bool
+    let pendingSelectedFileName: String?
+    let pendingSelectedFileBytesText: String?
+}
+
 @MainActor
 @Observable
 final class ChatViewModel {
@@ -25,6 +33,21 @@ final class ChatViewModel {
     var isAttachingSelectedFile: Bool = false
     var pendingSelectedFilePreview: SelectedDocumentReadResult?
     var selectedFileContextError: String?
+    var reasoningLevel: ReasoningLevel = .off
+
+    var contextSnapshot: ChatContextSnapshot {
+        ChatContextSnapshot(
+            messageCount: messages.count,
+            modelId: currentModelId,
+            supportsReasoning: currentModelSupportsReasoning,
+            pendingSelectedFileName: pendingSelectedFilePreview?.fileName,
+            pendingSelectedFileBytesText: pendingSelectedFilePreview.map { "\($0.bytesRead) bytes" }
+        )
+    }
+
+    var currentModelSupportsReasoning: Bool {
+        currentModelAbilities.contains(.reasoning)
+    }
 
     // MARK: - Private
 
@@ -40,6 +63,15 @@ final class ChatViewModel {
     private var streamJob: Kotlinx_coroutines_coreJob? {
         get { streamJobBox.job }
         set { streamJobBox.job = newValue }
+    }
+
+    private var currentModelId: String {
+        let trimmed = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "gpt-4o" : trimmed
+    }
+
+    private var currentModelAbilities: [ModelAbility] {
+        ModelRegistry.shared.MODEL_ABILITIES.getData(modelId: currentModelId) as? [ModelAbility] ?? []
     }
 
     // Run tracking — stored so cancelGeneration() can record an interrupted run.
@@ -191,7 +223,7 @@ final class ChatViewModel {
         currentInputDigest = inputDigest
         liveActivityController.start(
             runId: runId,
-            presentation: .generatingResponse(modelName: settingsStore.modelId)
+            presentation: .generatingResponse(modelName: params.model.modelId)
         )
 
         let accumulator = MessageStreamAccumulator(
@@ -350,16 +382,18 @@ final class ChatViewModel {
     }
 
     private func makeTextGenerationParams() -> TextGenerationParams {
+        let modelId = currentModelId
+        let modelAbilities = currentModelAbilities
         let model = Model(
-            modelId: settingsStore.modelId,
-            displayName: settingsStore.modelId,
+            modelId: modelId,
+            displayName: modelId,
             id: KotlinUuid.companion.random(),
             type: ModelType.chat,
             customHeaders: [],
             customBodies: [],
             inputModalities: [],
             outputModalities: [],
-            abilities: [],
+            abilities: modelAbilities,
             tools: Set<BuiltInTools>(),
             contextWindowTokens: nil,
             providerOverwrite: nil
@@ -370,7 +404,7 @@ final class ChatViewModel {
             topP: nil,
             maxTokens: nil,
             tools: [],
-            reasoningLevel: ReasoningLevel.off,
+            reasoningLevel: modelAbilities.contains(.reasoning) ? reasoningLevel : .off,
             customHeaders: [],
             customBody: []
         )
