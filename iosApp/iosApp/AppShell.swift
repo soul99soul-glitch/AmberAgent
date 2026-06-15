@@ -280,7 +280,7 @@ private extension View {
             case .miniApps:
                 MiniAppListView()
             case .miniAppSettings:
-                PlaceholderDetailView(title: "小应用设置", subtitle: "全局能力与权限", systemImage: "gearshape")
+                MiniAppSettingsView()
             case .miniAppRunner(let title):
                 PlaceholderDetailView(title: title, subtitle: "小应用运行器", systemImage: "play.rectangle")
             case .workspace:
