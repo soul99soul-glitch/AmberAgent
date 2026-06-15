@@ -5,6 +5,7 @@ struct SkillsView: View {
     @Environment(RouterPath.self) private var router
 
     @State private var pendingAlert: SkillsAlert?
+    @State private var importOptionsPresented = false
 
     private let installedSkills: [SkillRowModel] = [
         .init(name: "skill-creator", summary: "Use when the user wants to create a new AmberAgent skill, update an...", state: .enabled),
@@ -38,6 +39,19 @@ struct SkillsView: View {
                 dismissButton: .default(Text("知道了"))
             )
         }
+        .confirmationDialog("导入技能", isPresented: $importOptionsPresented, titleVisibility: .visible) {
+            Button("从 URL 导入") {
+                pendingAlert = .importFromURL
+            }
+
+            Button("从文件导入") {
+                pendingAlert = .importFromFile
+            }
+
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("选择 Skill 的来源")
+        }
     }
 
     private var header: some View {
@@ -55,7 +69,7 @@ struct SkillsView: View {
             Spacer()
 
             AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加技能", size: 44, symbolSize: 20) {
-                pendingAlert = .add
+                router.navigate(to: .skillAdd)
             }
             .foregroundStyle(AmberTheme.accent)
         }
@@ -110,9 +124,9 @@ struct SkillsView: View {
                     systemImage: "square.and.arrow.down",
                     iconColor: AmberTheme.accentCyan,
                     title: "导入技能",
-                    subtitle: "从 URL 或文件包安装新 Skill"
+                    subtitle: "从 URL 或本地文件导入 Skill"
                 ) {
-                    pendingAlert = .importSkill
+                    importOptionsPresented = true
                 }
 
                 SkillDivider()
@@ -313,32 +327,32 @@ private struct SkillsFooter: View {
 }
 
 private enum SkillsAlert: Identifiable {
-    case add
-    case importSkill
+    case importFromURL
+    case importFromFile
     case rescan
 
     var id: String {
         switch self {
-        case .add: "add"
-        case .importSkill: "import-skill"
+        case .importFromURL: "importFromURL"
+        case .importFromFile: "importFromFile"
         case .rescan: "rescan"
         }
     }
 
     var title: String {
         switch self {
-        case .add: "添加技能"
-        case .importSkill: "导入技能"
+        case .importFromURL: "从 URL 导入"
+        case .importFromFile: "从文件导入"
         case .rescan: "全量规整"
         }
     }
 
     var message: String {
         switch self {
-        case .add:
-            "添加技能需要接入安装流程；当前只保留入口。"
-        case .importSkill:
-            "导入技能需要 URL/文件选择、校验和安装事务；当前不会读取或写入文件。"
+        case .importFromURL:
+            "真实导入前需要填写 Skill 包地址；当前只保留入口，不会发起网络请求。"
+        case .importFromFile:
+            "真实导入时会打开本地文件选择器；当前只保留入口，不会打开文件选择器或复制文件。"
         case .rescan:
             "全量规整需要扫描本地 Skill 目录并修复索引；当前不会修改文件系统。"
         }

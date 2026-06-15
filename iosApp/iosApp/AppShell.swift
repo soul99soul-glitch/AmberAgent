@@ -174,6 +174,7 @@ enum Route: Hashable {
     case agentsMd
     case memoryEdit(text: String, scope: String, pinned: Bool)
     case skills
+    case skillAdd
     case mcpServers
     case mcpImport
     case mcpAdd
@@ -264,6 +265,8 @@ private extension View {
                 MemoryEditView(initialText: text, initialScope: scope, initialPinned: pinned)
             case .skills:
                 SkillsView()
+            case .skillAdd:
+                SkillAddView()
             case .mcpServers:
                 McpServersView()
             case .mcpImport:
