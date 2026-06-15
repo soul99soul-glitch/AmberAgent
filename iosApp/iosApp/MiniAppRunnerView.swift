@@ -5,13 +5,59 @@ struct MiniAppRunnerView: View {
 
     let title: String
 
-    @State private var isMenuPresented = false
-    @State private var isRunning = false
-    @State private var remainingSeconds = 25 * 60
-    @State private var completedCount = 0
+    private let evidenceRows: [MiniAppCapabilityRow] = [
+        .init(
+            title: "MiniAppRunnerPage(appId)",
+            subtitle: "Android receives a real appId, loads MiniAppEntity from MiniAppRepository, marks run count, and handles missing/error states.",
+            status: "Android 存在",
+            tint: AmberTheme.accent
+        ),
+        .init(
+            title: "MiniAppShell + miniapp_bridge.js",
+            subtitle: "Android injects a session token and native bridge into validated HTML before loading it into WebView.",
+            status: "Android 存在",
+            tint: .blue
+        ),
+        .init(
+            title: "MiniAppBridge",
+            subtitle: "Android handles storage, toast, theme, network, search, AI, host writes, shared store, event bus, launch, location, sensor, and clipboard calls.",
+            status: "Android 存在",
+            tint: .purple
+        ),
+        .init(
+            title: "iOS runner",
+            subtitle: "SwiftUI route currently receives only a display title, not a persisted appId, and has no repository, WebView, bridge, sandbox, or grant store.",
+            status: "未接线",
+            tint: AmberTheme.accentAmber
+        )
+    ]
 
-    private let totalSeconds = 25 * 60
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let blockedRows: [MiniAppCapabilityRow] = [
+        .init(
+            title: "HTML 渲染",
+            subtitle: "不加载任何 generated HTML，也不创建 WebView 或注入 AmberNative bridge。",
+            status: "禁用",
+            tint: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "桥接能力调用",
+            subtitle: "Amber.fetch/search/ai/host/sharedStore/eventBus/location/sensor/clipboard 在 iOS 没有 MiniAppBridge executor。",
+            status: "未接线",
+            tint: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "菜单操作",
+            subtitle: "不提供打开、置顶、版本历史、导出、重命名或删除，因为没有 iOS MiniAppRepository 事务。",
+            status: "未接线",
+            tint: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "本地示例",
+            subtitle: "已移除 SwiftUI 番茄钟计时器，避免把本地 demo 当作真实 MiniApp runner。",
+            status: "已移除",
+            tint: .gray
+        )
+    ]
 
     var body: some View {
         ZStack {
@@ -22,11 +68,11 @@ struct MiniAppRunnerView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        if title == "番茄钟" {
-                            pomodoroStage
-                        } else {
-                            emptyStage
-                        }
+                        intro
+                        evidenceSection
+                        blockedSection
+                        MiniAppCapabilityNote("启用真实 Runner 前，需要先定义 iOS MiniAppEntity 存储、HTML validator/output parser、Chat transformer、WebView shell、native bridge、permission grant、shared store、system bridge 和审计日志链路。")
+                            .padding(.top, 14)
                     }
                     .padding(.bottom, 36)
                 }
@@ -35,32 +81,6 @@ struct MiniAppRunnerView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .confirmationDialog(title, isPresented: $isMenuPresented, titleVisibility: .visible) {
-            Button("打开小应用") {
-                isMenuPresented = false
-            }
-            Button("置顶") {
-                isMenuPresented = false
-            }
-            Button("版本历史") {
-                isMenuPresented = false
-            }
-            Button("导出 HTML") {
-                isMenuPresented = false
-            }
-            Button("重命名") {
-                isMenuPresented = false
-            }
-            Button("删除", role: .destructive) {
-                isMenuPresented = false
-            }
-            Button("取消", role: .cancel) {
-                isMenuPresented = false
-            }
-        }
-        .onReceive(timer) { _ in
-            tick()
-        }
     }
 
     private var header: some View {
@@ -71,183 +91,70 @@ struct MiniAppRunnerView: View {
 
             Spacer()
 
-            Text(title)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(AmberTheme.foreground)
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                Text("Runner 未接线")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(AmberTheme.muted)
+            }
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "ellipsis", accessibilityLabel: "更多操作", size: 44, symbolSize: 18) {
-                isMenuPresented = true
-            }
-            .foregroundStyle(AmberTheme.accent)
+            Color.clear
+                .frame(width: 44, height: 44)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 10)
     }
 
-    private var pomodoroStage: some View {
-        MiniAppStage {
-            VStack(spacing: 22) {
-                Text("专注 · 番茄钟")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AmberTheme.muted)
-
-                ZStack {
-                    Circle()
-                        .stroke(AmberTheme.surface2, lineWidth: 12)
-                        .frame(width: 210, height: 210)
-
-                    Circle()
-                        .trim(from: 0, to: ringProgress)
-                        .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 12, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 210, height: 210)
-                        .animation(.snappy(duration: 0.25), value: remainingSeconds)
-
-                    VStack(spacing: 7) {
-                        Text(timeText)
-                            .font(.system(size: 46, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text(statusText)
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    Button(primaryButtonTitle) {
-                        toggleTimer()
-                    }
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(AmberTheme.accent, in: Capsule())
-                    .buttonStyle(.plain)
-
-                    Button("重置") {
-                        resetTimer()
-                    }
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(AmberTheme.accent)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(AmberTheme.surface2, in: Capsule())
-                    .buttonStyle(.plain)
-                }
-
-                Text("今日已完成 \(completedCount) 个番茄")
-                    .font(.footnote)
-                    .foregroundStyle(AmberTheme.muted)
-            }
-            .padding(.horizontal, 26)
-            .padding(.vertical, 30)
-        }
-    }
-
-    private var emptyStage: some View {
-        MiniAppStage {
-            VStack(spacing: 12) {
-                Text(String(title.prefix(1)))
-                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(AmberTheme.muted)
-                    .frame(width: 48, height: 48)
-                    .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-                Text(title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AmberTheme.foreground)
-
-                Text("这个小应用还没有生成内容。让 Amber 帮你做一遍，内容会保存在这里。")
-                    .font(.system(size: 13.5))
-                    .lineSpacing(4)
-                    .foregroundStyle(AmberTheme.muted)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 260)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 28)
-            .padding(.vertical, 56)
-        }
-    }
-
-    private var ringProgress: CGFloat {
-        max(0.02, CGFloat(Double(remainingSeconds) / Double(totalSeconds)))
-    }
-
-    private var timeText: String {
-        let minutes = remainingSeconds / 60
-        let seconds = remainingSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    private var statusText: String {
-        if remainingSeconds == 0 {
-            return "完成 · 休息一下"
-        }
-        if isRunning {
-            return "专注中"
-        }
-        if remainingSeconds < totalSeconds {
-            return "已暂停"
-        }
-        return "准备开始"
-    }
-
-    private var primaryButtonTitle: String {
-        if isRunning {
-            return "暂停"
-        }
-        if remainingSeconds < totalSeconds && remainingSeconds > 0 {
-            return "继续"
-        }
-        return "开始"
-    }
-
-    private func toggleTimer() {
-        if remainingSeconds == 0 {
-            resetTimer()
-        }
-        isRunning.toggle()
-    }
-
-    private func resetTimer() {
-        isRunning = false
-        remainingSeconds = totalSeconds
-    }
-
-    private func tick() {
-        guard isRunning else { return }
-        if remainingSeconds > 1 {
-            remainingSeconds -= 1
-        } else {
-            remainingSeconds = 0
-            isRunning = false
-            completedCount += 1
-        }
-    }
-}
-
-private struct MiniAppStage<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        content
-            .background(Color.white, in: RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
-                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-            }
+    private var intro: some View {
+        Text("这个 iOS 路由保留用于未来接入真实 MiniApp runner，但当前没有 appId、MiniAppRepository、WebView shell 或 native bridge。为避免伪造可运行小应用，本页只展示 Android/KMP 运行链路和 iOS 缺失项。")
+            .font(.footnote)
+            .lineSpacing(3)
+            .foregroundStyle(AmberTheme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 4)
+            .padding(.bottom, 16)
+    }
+
+    private var evidenceSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "真实 Runner 证据")
+            AmberFormGroup {
+                ForEach(Array(evidenceRows.enumerated()), id: \.element.id) { index, row in
+                    MiniAppCapabilityStatusRow(row: row)
+                    if index < evidenceRows.count - 1 {
+                        MiniAppCapabilityDivider()
+                    }
+                }
+            }
+        }
+    }
+
+    private var blockedSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "iOS 当前处理")
+            AmberFormGroup {
+                ForEach(Array(blockedRows.enumerated()), id: \.element.id) { index, row in
+                    MiniAppCapabilityStatusRow(row: row)
+                    if index < blockedRows.count - 1 {
+                        MiniAppCapabilityDivider()
+                    }
+                }
+            }
+        }
     }
 }
 
 #Preview {
     NavigationStack {
-        MiniAppRunnerView(title: "番茄钟")
+        MiniAppRunnerView(title: "MiniApp")
     }
 }

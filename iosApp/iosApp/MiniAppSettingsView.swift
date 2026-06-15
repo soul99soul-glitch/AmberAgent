@@ -3,23 +3,80 @@ import SwiftUI
 struct MiniAppSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var appEnabled = true
-    @State private var network = true
-    @State private var externalImages = true
-    @State private var search = true
-    @State private var clipboardCopy = true
-    @State private var amberAI = true
-    @State private var minimalContext = true
-    @State private var hostWrite = true
-    @State private var boardSummary = true
-    @State private var sharedStore = false
-    @State private var eventBus = false
-    @State private var launch = false
-    @State private var sensors = false
-    @State private var location = false
-    @State private var clipboardRead = false
-    @State private var sourceButton = false
-    @State private var webViewDebug = false
+    private let coreRows: [MiniAppCapabilityRow] = [
+        .init(
+            title: "enabled",
+            subtitle: "Android/KMP gate for MiniApp prompt/output transformers, saved app list, runner, and sandbox permission checks.",
+            status: "未接线",
+            tint: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "network / externalImages / search / clipboard.copy",
+            subtitle: "Android MiniAppSandbox gates Amber.fetch, image proxy, Amber.search, and clipboard writes against these global settings.",
+            status: "KMP 存在",
+            tint: AmberTheme.accent
+        ),
+        .init(
+            title: "ai.generate / host.context / host.write",
+            subtitle: "Android bridge can call current chat model, read bounded context, send draft text, and create artifacts after user confirmation.",
+            status: "Android 存在",
+            tint: .purple
+        ),
+        .init(
+            title: "host.updateBoardSummary",
+            subtitle: "Android bridge writes a MiniApp board summary through MiniAppRepository.updateBoardSummary().",
+            status: "Android 存在",
+            tint: .green
+        )
+    ]
+
+    private let advancedRows: [MiniAppCapabilityRow] = [
+        .init(
+            title: "sharedStore / eventBus",
+            subtitle: "Android persists shared KV data in mini_app_shared_data and keeps event subscriptions inside the runner lifecycle.",
+            status: "Android 存在",
+            tint: AmberTheme.accent
+        ),
+        .init(
+            title: "launch",
+            subtitle: "Android resolves target apps through MiniAppRepository and navigates to MiniAppRunner(appId).",
+            status: "Android 存在",
+            tint: .blue
+        ),
+        .init(
+            title: "sensor / location / clipboard.read",
+            subtitle: "Android routes device-sensitive reads through MiniAppSystemBridge and per-call confirmation/permission checks.",
+            status: "Android 存在",
+            tint: .orange
+        ),
+        .init(
+            title: "showSourceButton / webViewDebug",
+            subtitle: "Android settings control source visibility and WebView debugging for the native runner.",
+            status: "Android 存在",
+            tint: .gray
+        )
+    ]
+
+    private let persistenceRows: [MiniAppCapabilityRow] = [
+        .init(
+            title: "Settings.agentRuntime.miniApp",
+            subtitle: "iOS SettingsStore has no MiniAppSetting fields, no SettingsAggregator bridge, and no save path for these toggles.",
+            status: "未接线",
+            tint: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "MiniApp grants",
+            subtitle: "iOS has no MiniAppGrantDAO or per-app permission decision store; this page cannot grant or deny declared permissions.",
+            status: "未接线",
+            tint: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "Runner consumption",
+            subtitle: "iOS has no WebView runner or MiniAppSandbox, so setting fields would not be consumed even if local UI state existed.",
+            status: "未接线",
+            tint: AmberTheme.accentAmber
+        )
+    ]
 
     var body: some View {
         ZStack {
@@ -31,10 +88,11 @@ struct MiniAppSettingsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
-                        masterSection
-                        commonSection
-                        hostAISection
+                        coreSection
                         advancedSection
+                        persistenceSection
+                        MiniAppCapabilityNote("本页不写 UserDefaults、SettingsStore、Keychain、数据库，也不会启用 MiniAppPromptTransformer、MiniAppOutputTransformer、MiniAppRepository 或 WebView runner。")
+                            .padding(.top, 14)
                     }
                     .padding(.bottom, 36)
                 }
@@ -53,9 +111,14 @@ struct MiniAppSettingsView: View {
 
             Spacer()
 
-            Text("小应用设置")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(AmberTheme.foreground)
+            VStack(spacing: 2) {
+                Text("小应用设置")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Text("字段映射 · 不保存")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(AmberTheme.muted)
+            }
 
             Spacer()
 
@@ -68,7 +131,7 @@ struct MiniAppSettingsView: View {
     }
 
     private var intro: some View {
-        Text("允许 Amber 生成、保存并运行轻量 HTML 小工具。每个都在隔离沙箱里运行，按需申请下面这些能力——高权限的每次使用还会再确认。")
+        Text("Android 设置页会直接写 Settings.agentRuntime.miniApp，并由生成 transformers、MiniAppSandbox 和 Runner WebView 消费。iOS 当前没有对应 Settings bridge、repository 或 runner，因此这里不显示开关、分组跳转或保存按钮。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -78,159 +141,46 @@ struct MiniAppSettingsView: View {
             .padding(.bottom, 16)
     }
 
-    private var masterSection: some View {
-        AmberFormGroup {
-            MiniAppSettingToggleRow(
-                systemImage: "square.grid.2x2",
-                iconColor: AmberTheme.accent,
-                title: "启用小应用",
-                subtitle: "生成、保存并运行轻量 HTML 工具",
-                isOn: $appEnabled
-            )
-        }
-    }
-
-    private var commonSection: some View {
+    private var coreSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "常用能力")
+            AmberSectionLabel(text: "MiniAppSetting 核心字段")
             AmberFormGroup {
-                MiniAppSettingToggleRow(title: "网络请求", subtitle: "通过 Amber.fetch 访问 HTTPS", isOn: $network, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "外链图片", subtitle: "经 Native 代理加载 HTTPS 外链图片", isOn: $externalImages, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "搜索", subtitle: "通过 Amber.search 获取结构化结果", isOn: $search, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "复制到剪贴板", subtitle: "允许小应用写入剪贴板", isOn: $clipboardCopy, isEnabled: appEnabled)
+                ForEach(Array(coreRows.enumerated()), id: \.element.id) { index, row in
+                    MiniAppCapabilityStatusRow(row: row)
+                    if index < coreRows.count - 1 {
+                        MiniAppCapabilityDivider()
+                    }
+                }
             }
-        }
-    }
-
-    private var hostAISection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "宿主与 AI")
-            AmberFormGroup {
-                MiniAppSettingToggleRow(title: "Amber.ai", subtitle: "确认后调用当前聊天模型生成内容", isOn: $amberAI, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "读取最小上下文", subtitle: "确认后读取最小化的会话上下文", isOn: $minimalContext, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "写回宿主", subtitle: "确认后写回对话 / 生成 artifact", isOn: $hostWrite, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "更新看板摘要", subtitle: "更新自己在看板的摘要字段", isOn: $boardSummary, isEnabled: appEnabled)
-            }
-            MiniAppSettingFootnote(text: "这些涉及模型调用与写回宿主，属于高权限——每次使用仍会单独确认。")
         }
     }
 
     private var advancedSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "高级与调试")
+            AmberSectionLabel(text: "高级与调试字段")
             AmberFormGroup {
-                MiniAppSettingToggleRow(title: "共享存储", subtitle: "访问隔离 namespace 的 KV 存储", isOn: $sharedStore, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "事件总线", subtitle: "同 namespace 内收发临时事件", isOn: $eventBus, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "小应用跳转", subtitle: "确认后打开其它已保存的小应用", isOn: $launch, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "传感器", subtitle: "确认后订阅加速度 / 陀螺仪 / 光照", isOn: $sensors, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "定位", subtitle: "确认后读取位置", isOn: $location, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "读取剪贴板", subtitle: "确认后读取剪贴板文本", isOn: $clipboardRead, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "显示源码入口", subtitle: "在 Runner 菜单显示只读源码查看", isOn: $sourceButton, isEnabled: appEnabled)
-                MiniAppSettingDivider()
-                MiniAppSettingToggleRow(title: "WebView 调试", subtitle: "仅调试用，允许系统 WebView 检查小应用", isOn: $webViewDebug, isEnabled: appEnabled)
+                ForEach(Array(advancedRows.enumerated()), id: \.element.id) { index, row in
+                    MiniAppCapabilityStatusRow(row: row)
+                    if index < advancedRows.count - 1 {
+                        MiniAppCapabilityDivider()
+                    }
+                }
             }
-            MiniAppSettingFootnote(text: "更偏开发者与实验能力，默认建议谨慎开启。")
         }
     }
-}
 
-private struct MiniAppSettingToggleRow: View {
-    var systemImage: String?
-    var iconColor = AmberTheme.accent
-    let title: String
-    let subtitle: String
-    @Binding var isOn: Bool
-    var isEnabled = true
-
-    var body: some View {
-        Button {
-            guard isEnabled else { return }
-            isOn.toggle()
-        } label: {
-            HStack(spacing: 12) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(iconColor.opacity(isEnabled ? 1 : 0.5))
-                        .frame(width: 32, height: 32)
-                        .background(iconColor.opacity(isEnabled ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    private var persistenceSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "iOS 持久化与消费")
+            AmberFormGroup {
+                ForEach(Array(persistenceRows.enumerated()), id: \.element.id) { index, row in
+                    MiniAppCapabilityStatusRow(row: row)
+                    if index < persistenceRows.count - 1 {
+                        MiniAppCapabilityDivider()
+                    }
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body)
-                        .foregroundStyle(isEnabled ? AmberTheme.foreground : AmberTheme.muted)
-                    Text(subtitle)
-                        .font(.caption)
-                        .lineLimit(2)
-                        .foregroundStyle(AmberTheme.muted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                MiniAppSettingSwitch(isOn: isOn, isEnabled: isEnabled)
             }
-            .frame(minHeight: subtitle.count > 24 ? 64 : 56)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityValue(isOn ? "开启" : "关闭")
-    }
-}
-
-private struct MiniAppSettingSwitch: View {
-    let isOn: Bool
-    var isEnabled = true
-
-    var body: some View {
-        Capsule()
-            .fill(isOn ? AmberTheme.accent : AmberTheme.surface2)
-            .opacity(isEnabled ? 1 : 0.55)
-            .frame(width: 48, height: 28)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 24, height: 24)
-                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
-                    .padding(2)
-            }
-            .animation(.snappy(duration: 0.18), value: isOn)
-    }
-}
-
-private struct MiniAppSettingDivider: View {
-    var body: some View {
-        Divider()
-            .overlay(AmberTheme.borderSoft)
-            .padding(.leading, 14)
-    }
-}
-
-private struct MiniAppSettingFootnote: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.caption)
-            .lineSpacing(3)
-            .foregroundStyle(AmberTheme.muted2)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 16)
-            .padding(.top, 7)
     }
 }
 
