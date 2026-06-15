@@ -398,6 +398,23 @@ private struct PermissionRequestStatus {
 
     let text: String
     let tone: Tone
+
+    var systemImage: String {
+        switch tone {
+        case .ready:
+            "plus.circle.fill"
+        case .allowed:
+            "checkmark.circle.fill"
+        case .warning:
+            "exclamationmark.circle.fill"
+        case .denied:
+            "xmark.circle.fill"
+        case .neutral:
+            "minus.circle.fill"
+        case .working:
+            "clock.fill"
+        }
+    }
 }
 
 private struct PermissionRequestRow: View {
@@ -431,10 +448,11 @@ private struct PermissionRequestRow: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Text(status.text)
-                        .font(.subheadline.weight(.semibold))
+                    Image(systemName: status.systemImage)
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(status.tone.color)
-                        .lineLimit(1)
+                        .frame(width: 22, height: 22)
+                        .accessibilityHidden(true)
                 }
 
                 Image(systemName: "chevron.right")
