@@ -186,6 +186,8 @@ enum Route: Hashable {
     case board
     case boardSettings
     case miniApps
+    case miniAppSettings
+    case miniAppRunner(title: String)
     case workspace
     case memory
     case council
@@ -276,7 +278,11 @@ private extension View {
             case .boardSettings:
                 BoardSettingsView()
             case .miniApps:
-                PlaceholderDetailView(title: "小应用", subtitle: "生成可执行的 HTML 工具", systemImage: "square.grid.2x2")
+                MiniAppListView()
+            case .miniAppSettings:
+                PlaceholderDetailView(title: "小应用设置", subtitle: "全局能力与权限", systemImage: "gearshape")
+            case .miniAppRunner(let title):
+                PlaceholderDetailView(title: title, subtitle: "小应用运行器", systemImage: "play.rectangle")
             case .workspace:
                 WorkspaceView()
             case .memory:
