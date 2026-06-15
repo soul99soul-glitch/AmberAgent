@@ -3,20 +3,10 @@ import SwiftUI
 struct AppearanceSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("app.amber.ios.appearance.mode") private var appearanceMode = AppearanceMode.light.rawValue
-    @AppStorage("app.amber.ios.appearance.accent") private var accentTheme = AccentTheme.terracotta.rawValue
-    @AppStorage("app.amber.ios.appearance.background") private var backgroundTheme = BackgroundTheme.warm.rawValue
+    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.light.rawValue
 
-    private var selectedMode: AppearanceMode {
-        AppearanceMode(rawValue: appearanceMode) ?? .light
-    }
-
-    private var selectedAccent: AccentTheme {
-        AccentTheme(rawValue: accentTheme) ?? .terracotta
-    }
-
-    private var selectedBackground: BackgroundTheme {
-        BackgroundTheme(rawValue: backgroundTheme) ?? .warm
+    private var selectedMode: IOSAppearanceMode {
+        IOSAppearanceMode(rawValue: appearanceMode) ?? .light
     }
 
     var body: some View {
@@ -65,7 +55,7 @@ struct AppearanceSettingsView: View {
             AmberSectionLabel(text: "外观模式")
             AmberFormGroup {
                 AppearanceSegmentedControl(
-                    modes: AppearanceMode.allCases,
+                    modes: IOSAppearanceMode.allCases,
                     selected: selectedMode
                 ) { mode in
                     appearanceMode = mode.rawValue
@@ -80,31 +70,12 @@ struct AppearanceSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "强调色")
             AmberFormGroup {
-                HStack(spacing: 10) {
-                    ForEach(AccentTheme.allCases) { theme in
-                        Button {
-                            accentTheme = theme.rawValue
-                        } label: {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(theme.color)
-                                    .frame(width: 36, height: 36)
-
-                                if selectedAccent == theme {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundStyle(.white)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(theme.title)
-                    }
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 14)
+                AppearanceStatusRow(
+                    systemImage: "paintpalette",
+                    title: "强调色 Token",
+                    subtitle: "当前 iOS AmberTheme 仍是静态 token；动态强调色桥未接线",
+                    value: "未接线"
+                )
             }
         }
     }
@@ -113,102 +84,21 @@ struct AppearanceSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "背景色调")
             AmberFormGroup {
-                HStack(spacing: 12) {
-                    ForEach(BackgroundTheme.allCases) { theme in
-                        Button {
-                            backgroundTheme = theme.rawValue
-                        } label: {
-                            BackgroundSwatch(theme: theme, isSelected: selectedBackground == theme)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(theme.title)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 14)
+                AppearanceStatusRow(
+                    systemImage: "rectangle.fill",
+                    title: "背景色调 Token",
+                    subtitle: "背景/表面色仍来自静态 AmberTheme；动态背景桥未接线",
+                    value: "未接线"
+                )
             }
         }
     }
 }
 
-private enum AppearanceMode: String, CaseIterable, Identifiable {
-    case light
-    case dark
-    case system
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .light: "浅色"
-        case .dark: "深色"
-        case .system: "跟随系统"
-        }
-    }
-}
-
-private enum AccentTheme: String, CaseIterable, Identifiable {
-    case terracotta
-    case sage
-    case blue
-    case lavender
-    case rose
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .terracotta: "Terracotta"
-        case .sage: "Sage"
-        case .blue: "Blue"
-        case .lavender: "Lavender"
-        case .rose: "Rose"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .terracotta: Color(hex: 0xB5532C)
-        case .sage: Color(hex: 0x4E7C5F)
-        case .blue: Color(hex: 0x4A79BE)
-        case .lavender: Color(hex: 0x7A6FC0)
-        case .rose: Color(hex: 0xB85D74)
-        }
-    }
-}
-
-private enum BackgroundTheme: String, CaseIterable, Identifiable {
-    case warm
-    case neutral
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .warm: "温暖陶土"
-        case .neutral: "纯净白"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .warm: Color(hex: 0xFBF7F1)
-        case .neutral: .white
-        }
-    }
-
-    var border: Color {
-        switch self {
-        case .warm: AmberTheme.border
-        case .neutral: Color(hex: 0xD1D1D6)
-        }
-    }
-}
-
 private struct AppearanceSegmentedControl: View {
-    let modes: [AppearanceMode]
-    let selected: AppearanceMode
-    let onSelect: (AppearanceMode) -> Void
+    let modes: [IOSAppearanceMode]
+    let selected: IOSAppearanceMode
+    let onSelect: (IOSAppearanceMode) -> Void
 
     var body: some View {
         HStack(spacing: 2) {
@@ -235,38 +125,39 @@ private struct AppearanceSegmentedControl: View {
     }
 }
 
-private struct BackgroundSwatch: View {
-    let theme: BackgroundTheme
-    let isSelected: Bool
+private struct AppearanceStatusRow: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+    let value: String
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(theme.color)
-                .overlay(alignment: .bottom) {
-                    Text(theme.title)
-                        .font(.caption2.weight(isSelected ? .semibold : .medium))
-                        .foregroundStyle(isSelected ? AmberTheme.accent : AmberTheme.muted)
-                        .padding(.bottom, 8)
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(isSelected ? AmberTheme.accent : theme.border, lineWidth: isSelected ? 2 : 1)
-                }
-                .frame(height: 68)
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(AmberTheme.foreground2)
+                .frame(width: 28, height: 28)
 
-            if isSelected {
-                Circle()
-                    .fill(AmberTheme.accent)
-                    .frame(width: 16, height: 16)
-                    .overlay {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(AmberTheme.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .frame(maxWidth: .infinity)
+        .frame(minHeight: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
     }
 }

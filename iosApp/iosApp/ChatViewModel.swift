@@ -34,6 +34,7 @@ final class ChatViewModel {
     var pendingSelectedFilePreview: SelectedDocumentReadResult?
     var selectedFileContextError: String?
     var reasoningLevel: ReasoningLevel = .off
+    var messageRevision: Int = 0
 
     var contextSnapshot: ChatContextSnapshot {
         ChatContextSnapshot(
@@ -109,6 +110,7 @@ final class ChatViewModel {
         let digest = Self.inputDigest(for: prompt)
         let userMsg = UIMessage.companion.user(prompt: prompt)
         messages.append(userMsg)
+        messageRevision &+= 1
         inputText = ""
         pendingSelectedFilePreview = nil
         selectedFileContextError = nil
@@ -248,6 +250,7 @@ final class ChatViewModel {
                 Task { @MainActor [weak self] in
                     guard let self, self.currentRunId == runId else { return }
                     self.messages = snapshot
+                    self.messageRevision &+= 1
                 }
             },
             onComplete: { [weak self] in
@@ -281,6 +284,7 @@ final class ChatViewModel {
                         translation: nil
                     )
                     self.messages.append(errMsg)
+                    self.messageRevision &+= 1
                     await self.recordRun(
                         runId: runId,
                         startedAt: startedAt,

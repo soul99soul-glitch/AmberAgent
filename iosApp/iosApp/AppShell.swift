@@ -12,6 +12,7 @@ struct AppShell: View {
     @State private var systemPermissionCoordinator: IOSSystemPermissionCoordinator
     @State private var localToolExecutor: IOSLocalToolExecutor
     @State private var rootRouter = RouterPath()
+    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = "light"
 
     init(settingsStore: SettingsStore) {
         let permissionStore = IOSPermissionStore()
@@ -46,6 +47,11 @@ struct AppShell: View {
         }
         .environment(rootRouter)
         .tint(AmberTheme.accent)
+        .preferredColorScheme(preferredColorScheme)
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        (IOSAppearanceMode(rawValue: appearanceMode) ?? .light).colorScheme
     }
 
     @ViewBuilder

@@ -16,6 +16,7 @@ struct ChatView: View {
     @State private var isModelSheetPresented = false
     @FocusState private var isInputFocused: Bool
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
 
     init(settingsStore: SettingsStore, localToolExecutor: IOSLocalToolExecutor? = nil) {
         self.settingsStore = settingsStore
@@ -70,6 +71,7 @@ struct ChatView: View {
             AmberGlassCircleButton(systemImage: "square.and.pencil", accessibilityLabel: "新建对话", size: 38, symbolSize: 16) {
                 viewModel.cancelGeneration()
                 viewModel.messages.removeAll()
+                viewModel.messageRevision &+= 1
                 viewModel.inputText = ""
             }
         }
@@ -97,8 +99,8 @@ struct ChatView: View {
                 .padding(.vertical, 12)
                 .padding(.bottom, 18)
             }
-            .onChange(of: viewModel.messages.count) { _, newCount in
-                guard newCount > 0 else { return }
+            .onChange(of: viewModel.messageRevision) { _, _ in
+                guard followGeneration, !viewModel.messages.isEmpty else { return }
                 withAnimation {
                     if let lastId = viewModel.messages.last?.id {
                         proxy.scrollTo(lastId, anchor: .bottom)
@@ -864,10 +866,14 @@ struct ChatAssistantStack<Content: View>: View {
 }
 
 struct ChatAgentName: View {
+    @AppStorage(IOSDisplayPreferenceKeys.agentName) private var agentName = true
+
     var body: some View {
-        Text("Amber")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(AmberTheme.muted)
+        if agentName {
+            Text("Amber")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+        }
     }
 }
 
@@ -885,12 +891,22 @@ struct ChatMetaLine: View {
 
 struct ChatUserBubble: View {
     let text: String
+    @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
+    @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
+
+    private var boundedScale: Double {
+        min(max(fontScale, 0.88), 1.25)
+    }
+
+    private var selectedFont: IOSChatFont {
+        IOSChatFont(rawValue: chatFont) ?? .default
+    }
 
     var body: some View {
         Text(text)
-            .font(.body)
+            .font(.system(size: 17 * boundedScale, design: selectedFont.design))
             .foregroundStyle(.white)
-            .lineSpacing(3)
+            .lineSpacing(3 * boundedScale)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(
@@ -909,16 +925,26 @@ struct ChatUserBubble: View {
 
 struct ChatAssistantText<Content: View>: View {
     let content: Content
+    @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
+    @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
 
+    private var boundedScale: Double {
+        min(max(fontScale, 0.88), 1.25)
+    }
+
+    private var selectedFont: IOSChatFont {
+        IOSChatFont(rawValue: chatFont) ?? .default
+    }
+
     var body: some View {
         content
-            .font(.body)
+            .font(.system(size: 17 * boundedScale, design: selectedFont.design))
             .foregroundStyle(AmberTheme.foreground)
-            .lineSpacing(4)
+            .lineSpacing(4 * boundedScale)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -42,7 +42,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - MCP server page is not wired to `Settings.mcpServers`, `McpServerConfig`, `McpManager`, or `McpImportParser`. The previous hardcoded connected-server list and isolated `@AppStorage` toggles have been removed; import/add remain draft-only, and import uses only rough text preview rather than real parser-backed validation.
 - Account profile is still local preview only, with no inspected persistent account/profile store.
 - Conversation storage cleanup/delete is still draft-only: the page only explains the missing iOS storage bridge and does not execute cache cleanup, age-based cleanup, or delete-all.
-- Settings home no longer shows precise fake Memory/Council/SubAgent status or capability-complete Sync/Board/MiniApp/WebMount copy; the Execution, Memory, Model Council, SubAgent, Sync/Backup, Board, MiniApp, and WebMount child pages have now been downgraded to real-wired-or-not-wired status.
+- Settings home no longer shows precise fake Memory/Council/SubAgent status or capability-complete Sync/Board/MiniApp/WebMount copy; the Appearance, Display, Execution, Memory, Model Council, SubAgent, Sync/Backup, Board, MiniApp, and WebMount child pages have now been downgraded to real-wired-or-not-wired status.
 
 ### 不应接线的孤儿入口 / 不应误导的入口
 
@@ -68,15 +68,15 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Secret storage split: the single OpenAI API key is in Keychain, but general provider/TTS API keys are not yet modeled in iOS. Avoid expanding secret handling without a clear schema.
 - Provider/model identity: current iOS chat creates a fresh `ProviderSetting.OpenAI` and fresh `Model` from three scalar settings. It cannot represent multiple providers, custom headers/body, OAuth/coding-plan auth modes, provider-specific models, Gemini's `ProviderSetting.Google`, or xAI's default `useResponseApi=true` template state.
 - Permission approval scope: `Route.toolPermissions` routes to the approval-policy page and its "权限与能力" row routes to `ToolPermissionsView`; `SheetDestination.toolPermissions` still opens the full capability page directly. The approval page intentionally exposes only the implemented `file_read_selected` tool policy; photos/location/camera/notifications remain system-permission status/request entries until real Agent executors exist.
-- Hardcoded precise numbers/status: Settings home has been reduced to real current scalar/default/local state or explicit not-wired copy for Provider, TTS, Skill/MCP, Account, ConversationStorage, Appearance, Display, Execution, Runtime, Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Execution, Search services, Memory, Model Council, SubAgent, Sync/Backup, Board, MiniApp, and WebMount have now been downgraded as child pages too.
+- Hardcoded precise numbers/status: Settings home has been reduced to real current scalar/default/local state or explicit not-wired copy for Provider, TTS, Skill/MCP, Account, ConversationStorage, Appearance, Display, Execution, Runtime, Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Appearance, Display, Execution, Search services, Memory, Model Council, SubAgent, Sync/Backup, Board, MiniApp, and WebMount have now been downgraded as child pages too.
 - External effects: Provider connection test in legacy `SettingsView` calls `listModels`. Do not use it as routine validation unless the user explicitly supplies credentials/approves network use.
 
 ## 2. UI Entry Map
 
 | 屏幕 | UI 入口 | 当前文件 | 真实能力是否存在 | 应接到哪里 | 当前处理 | 优先级 |
 |---|---|---|---|---|---|---|
-| Settings home | 外观 | `iosApp/iosApp/PlaceholderViews.swift` -> `.appearance` | Partial: local `@AppStorage` preference exists | `app.amber.ios.appearance.mode` | value reads the same local setting as the Appearance page | P2 done/home |
-| Settings home | 显示与字体 | `PlaceholderViews.swift` -> `.displayFont` | Partial: local `@AppStorage` preferences exist | `app.amber.ios.display.fontScale`, `app.amber.ios.display.chatFont` | subtitle reads stored font scale and chat font instead of hardcoded copy | P1 done/home |
+| Settings home | 外观 | `iosApp/iosApp/PlaceholderViews.swift` -> `.appearance` | Partial: local mode preference exists and can be consumed by SwiftUI root color scheme; dynamic AmberTheme tokens missing | `IOSAppearancePreferenceKeys.mode` -> `AppShell.preferredColorScheme`; dynamic token bridge later | mode is wired to root preferred color scheme; accent/background token pickers downgraded to read-only not-wired rows | P2 done/page |
+| Settings home | 显示与字体 | `PlaceholderViews.swift` -> `.displayFont` | Partial: local font/name/scroll preferences exist and can be consumed by Chat; many display options lack renderers | `IOSDisplayPreferenceKeys.fontScale/chatFont/agentName/followGeneration` -> `ChatView` / message views | chat font scale/font, Agent name, and auto-scroll are wired; other display/code/interaction rows are read-only not-wired | P1 done/page |
 | Settings home | 核心记忆 | `PlaceholderViews.swift` -> `.memory` | Android/KMP memory exists; iOS bridge missing | real memory store/page | home subtitle downgraded to `本机草稿 · 记忆库未接线`; child pages now also show explicit not-wired/draft state | P1 done/home; P1 bridge |
 | Settings home | 技能 | `PlaceholderViews.swift` -> `.skills` | Yes on Android: `SkillManager`, `SkillsVM` | iOS local skill scanning/import layer or shared bridge | subtitle downgraded to `Skill/MCP 配置桥尚未接线`; no installed/enabled count | P0 done/P1 bridge |
 | Settings home | 执行与任务 | `PlaceholderViews.swift` -> `.execution` | Partial: ActivityKit controller exists; Android/KMP `agentRuntime` execution fields exist; iOS lacks most runtime consumers | `ChatViewModel` -> `AgentLiveActivityController` for `app.amber.ios.execution.liveActivity`; future `agentRuntime` bridge for tool loop/retry/generative UI/preview | home subtitle now shows only the real Live Activity setting and marks run control unbridged; child page exposes one wired toggle plus read-only not-wired field map | P1 done/page; P1 bridge |
@@ -167,7 +167,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 ### P2 - 可改善但不阻塞
 
 1. Account display name persistence if product wants local-only profile.
-2. Appearance/display preference persistence.
+2. Done in Slice 20: Appearance mode is wired to `AppShell.preferredColorScheme`; Display font scale/font, Agent name, and generation-follow scroll are wired to Chat. Accent/background tokens and unsupported display/code/interaction controls are downgraded to read-only not-wired rows.
 3. Clean up/deprecate legacy `SettingsView` if no longer reachable, after confirming no route depends on it.
 
 ### Blocked - 仓库缺少可验证 iOS 能力，不接
@@ -187,6 +187,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 13. Real iOS MiniApp generation, persistence, and execution: common/Android has the implementation, but iOS lacks `Settings.agentRuntime.miniApp`, MiniAppRepository/DAO equivalents, prompt/output transformers, output parser, HTML validator, `UIMessagePart.MiniApp` rendering, appId-based runner routing, WebView shell/native bridge, per-app permission grant store, shared store, audit log, system bridge, and safe export/delete/version transactions.
 14. Real iOS WebMount execution and settings persistence: Android has the implementation, but iOS lacks WebMountManager/global/eval flag persistence, UserSiteRegistry, cookie capture/provider, OAuth client/token store, login WebView, WebViewPool/session bridge, bridge.js equivalent, ProfileBridge/signed fetch, primitive browser tool executors, site adapters, permission gating, slash command installation, and safe add/delete/restore/test transactions.
 15. Real iOS execution runtime settings beyond Live Activity: Android/KMP has `operationPreviewMode`, `generativeUi`, `maxToolLoopSteps`, `generationRetry`, and `keepGenerationAliveInBackground`, but iOS lacks an equivalent `agentRuntime` settings bridge, tool-loop dispatcher, operation-preview timeline, generative widget prompt/render path, retry wrapper, and foreground-notification keepalive implementation.
+16. Real iOS dynamic theme/display settings beyond the wired subset: iOS lacks a dynamic `AmberTheme` token bridge for accent/background colors, assistant bubble renderer, message-date/status-dot policy, code-block wrapping/collapse/line-number renderer, LaTeX renderer, hardware-key submit policy, paste-as-file pipeline, and startup-route preference.
 
 ## 4. Phase Review Log
 
@@ -522,7 +523,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification:
   - `git diff --check -- iosApp/iosApp/BoardView.swift iosApp/iosApp/BoardSettingsView.swift docs/ios-port/IOS_CAPABILITY_WIRING_AUDIT_2026-06-15.md` passed.
   - Targeted `rg` check found no remaining positive local-only Board controls or fake feed data in `BoardView` / `BoardSettingsView`; remaining matches for refresh/settings/provider/source terms are negative explanatory or audit-history copy.
-  - `mcp__xcodebuildmcp.build_run_sim` succeeded with no warnings/errors.
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded with no warnings/errors before subagent review and again after the `messageRevision` / shared appearance-mode fixes.
   - UI snapshot: Settings -> Board shows Settings home value `数据源桥尚未接线`; the page shows `TodayBoardSetting`, `BoardViewModel`, `BoardRepository / DAOs`, `BoardScheduler / BoardWorker`, `BoardAgent`, and `iOS 数据源桥` value `未接线`.
   - UI snapshot after scrolling shows fake feed replacement rows: `看板内容` as `未接线`, `刷新` as `禁用`, `任务流 / 机会` as `未接线`, `深度阅读` as `未接线`, and all signal sources as `未接线`.
   - UI snapshot: Board settings shows `字段映射 · 不保存`, Android fields for `enabled`, `boardModelId`, `triggerHours / backgroundStrategy`, `enabledSources`, `hotList*`, and `deepRead* / reading font`, with no toggle, provider picker, local strategy radio, or save button.
@@ -615,6 +616,31 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Open Design record: CD-86 should record the Execution settings Live Activity wiring plus not-wired runtime-field downgrade, but direct `REDESIGN_DELTAS.md` write outside the repo remains blocked by the current approval/usage system after the Slice 11 rejection. No workaround was attempted.
 - Remaining risk: iOS still lacks the real `agentRuntime` settings bridge and execution runtime consumers for operation preview, max tool loop steps, generative UI, retry policy, foreground keepalive, and any richer live-status privacy modes. Those controls should stay read-only/not-wired until the runtime layer exists.
 
+### Slice 20 - Appearance and Display preference consumption
+
+- Scope: Appearance/Display pages no longer save local-only visual controls that are not consumed anywhere. `AppearanceSettingsView` keeps only the mode picker as a mutable control and wires it through `IOSAppearancePreferenceKeys.mode` to `AppShell.preferredColorScheme`; accent/background token controls are read-only not-wired rows. `DisplayFontSettingsView` keeps only the preferences that are consumed by Chat: font scale, chat font, Agent name, and generation-follow scrolling. `ChatView`, `ChatAgentName`, `ChatUserBubble`, and `ChatAssistantText` now read the same shared display keys. Unsupported assistant bubble/date/status-dot/thinking policy, code-block, LaTeX, Enter-send, paste-as-file, and launch-entry controls are read-only not-wired rows.
+- Evidence:
+  - Before this slice, Appearance mode, accent, background, Display font, and many display/interaction toggles were written only by their settings pages and Settings home summaries.
+  - `AppShell` is the real iOS root view and can consume `preferredColorScheme`.
+  - `ChatView` owns the ScrollViewReader auto-scroll behavior; `ChatAgentName`, `ChatUserBubble`, and `ChatAssistantText` own the relevant visible chat text rendering.
+  - iOS currently has no dynamic `AmberTheme` token bridge, assistant bubble renderer, date/status-dot renderer, code-block preference renderer, LaTeX renderer, hardware-key submit strategy, paste-as-file pipeline, or launch-entry router.
+- Verification:
+  - `git diff --check -- iosApp/iosApp/AppearanceSettingsView.swift iosApp/iosApp/DisplayFontSettingsView.swift iosApp/iosApp/ChatView.swift iosApp/iosApp/AppShell.swift iosApp/iosApp/PlaceholderViews.swift docs/ios-port/IOS_CAPABILITY_WIRING_AUDIT_2026-06-15.md` passed.
+  - Targeted `rg` check found no remaining writes for removed orphan keys such as appearance accent/background, assistant bubble, nickname/date, status dot, thinking collapse, code wrap/collapse/line numbers, LaTeX, send-on-enter, paste-as-file, or launch entry in the touched iOS files.
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded with no warnings/errors.
+  - UI snapshot: Settings home shows Appearance as `浅色` and Display as `字号 标准 · 默认字体`.
+  - UI snapshot: Appearance page shows the mutable mode segmented control plus `强调色 Token` and `背景色调 Token` as `未接线`; no accent/background swatches or write actions remain.
+  - UI snapshot: Display page shows chat font/scale controls, Agent name toggle, and follow-generation toggle as mutable; message bubble/date/status/thinking, code, LaTeX, Enter-send, paste-as-file, and launch-entry rows are read-only `未接线`.
+  - UI snapshot: existing conversation opens successfully and shows `Amber` through the real `ChatAgentName` rendering path.
+- Screenshot paths:
+  - Appearance mode and token not-wired rows: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_2c2574b6-708f-4ae9-b85d-16ec04d6fda0.jpg`
+  - Display font/message rows: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_86c3ecaa-7c15-4f62-a714-4b0d5fc66845.jpg`
+  - Display code/interaction not-wired rows: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_f6383190-99b6-4906-ac9e-00cda5be13aa.jpg`
+  - Chat consumption path: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_70c0b18b-ec59-489f-b04f-ba6d81de3f1a.jpg`
+- Subagent review: completed by `Bernoulli`; no P0 findings. P1 finding fixed before commit: `followGeneration` now listens to `ChatViewModel.messageRevision`, which increments on user messages, streaming chunk updates, error messages, and local chat clearing, rather than only listening to message count. P2 finding fixed before commit: appearance mode raw values/title/color-scheme mapping now use shared `IOSAppearanceMode` across Settings, Settings home, and `AppShell`.
+- Open Design record: CD-87 should record the Appearance/Display wired-subset plus not-wired-control downgrade, but direct `REDESIGN_DELTAS.md` write outside the repo remains blocked by the current approval/usage system after the Slice 11 rejection. No workaround was attempted.
+- Remaining risk: Appearance mode uses SwiftUI `preferredColorScheme`, but the Amber palette is still mostly fixed static tokens; a real dynamic theme layer is needed before re-enabling accent/background pickers. Display settings beyond font/name/scroll require renderer/interactor implementations before becoming mutable.
+
 ## 5. Commit Log
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
@@ -636,3 +662,4 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | `4dd2cb61a` | Board overview/settings pages downgraded from fake news feed/status/counts, local settings controls, hardcoded providers, and no-op board actions to common/Android evidence plus iOS not-wired disabled state | `diff --check` passed; `build_run_sim` succeeded; subagent review completed by `Mill` with no P0/P1 | see Slice 16 screenshot paths | no iOS TodayBoardSetting/repository/collector/scheduler/model generation/hot-list/deep-read/task bridge |
 | `b7a356d05` | MiniApp list/settings/runner pages downgraded from hardcoded sample apps, local-only toggles, fake runner/menu actions, and SwiftUI demo timer to Android/KMP evidence plus iOS not-wired disabled state | `diff --check` passed; `build_run_sim` succeeded; subagent review completed by `Cicero` with no P0/P1 | see Slice 17 screenshot paths | no iOS MiniAppSetting/repository/transformer/parser/WebView bridge/permission grant/shared store/system bridge |
 | `829b2ce14` | WebMount overview/detail pages downgraded from local toggles, hardcoded signed/public/limited site rows, fake login/test/add/delete actions, and wm_* promises to Android evidence plus iOS not-wired disabled state | `diff --check` passed; `build_run_sim` retried after transient `xcrun EAGAIN` and succeeded; subagent review completed by `Tesla` with no P0/P1 | see Slice 18 screenshot paths | no iOS WebMountManager/UserSiteRegistry/cookie/OAuth/WebView bridge/tool adapter/permission gate |
+| `78cb8dcc4` | Execution settings Live Activity toggle wired into Chat selected-file/generation start gates; stale ActivityKit activities are stopped when disabled; unconsumed execution runtime controls downgraded to read-only not-wired field rows | `diff --check` passed; targeted `rg` passed; `build_sim` and `build_run_sim` succeeded; subagent review completed by `Bacon` with P1/P2 fixes applied | see Slice 19 screenshot paths | no iOS agentRuntime bridge for operation preview, tool-loop max steps, generative UI, retry policy, keepalive, or richer live-status privacy modes |

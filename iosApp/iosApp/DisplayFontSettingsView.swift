@@ -3,28 +3,13 @@ import SwiftUI
 struct DisplayFontSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("app.amber.ios.display.fontScale") private var fontScale = 1.0
-    @AppStorage("app.amber.ios.display.chatFont") private var chatFont = ChatFont.default.rawValue
-    @AppStorage("app.amber.ios.display.assistantBubble") private var assistantBubble = true
-    @AppStorage("app.amber.ios.display.agentName") private var agentName = true
-    @AppStorage("app.amber.ios.display.nicknameDate") private var nicknameDate = false
-    @AppStorage("app.amber.ios.display.assistantStatusDot") private var assistantStatusDot = true
-    @AppStorage("app.amber.ios.display.autoCollapseThinking") private var autoCollapseThinking = true
-    @AppStorage("app.amber.ios.display.codeWrap") private var codeWrap = false
-    @AppStorage("app.amber.ios.display.codeCollapse") private var codeCollapse = true
-    @AppStorage("app.amber.ios.display.codeLineNumbers") private var codeLineNumbers = true
-    @AppStorage("app.amber.ios.display.latex") private var latex = true
-    @AppStorage("app.amber.ios.display.followGeneration") private var followGeneration = true
-    @AppStorage("app.amber.ios.display.sendOnEnter") private var sendOnEnter = false
-    @AppStorage("app.amber.ios.display.pasteLongAsFile") private var pasteLongAsFile = true
-    @AppStorage("app.amber.ios.display.launchEntry") private var launchEntry = LaunchEntry.home.rawValue
+    @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
+    @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
+    @AppStorage(IOSDisplayPreferenceKeys.agentName) private var agentName = true
+    @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
 
-    private var selectedFont: ChatFont {
-        ChatFont(rawValue: chatFont) ?? .default
-    }
-
-    private var selectedLaunchEntry: LaunchEntry {
-        LaunchEntry(rawValue: launchEntry) ?? .home
+    private var selectedFont: IOSChatFont {
+        IOSChatFont(rawValue: chatFont) ?? .default
     }
 
     private var fontScaleLabel: String {
@@ -110,7 +95,7 @@ struct DisplayFontSettingsView: View {
                 DisplayDivider()
 
                 Menu {
-                    ForEach(ChatFont.allCases) { font in
+                    ForEach(IOSChatFont.allCases) { font in
                         Button(font.title) {
                             chatFont = font.rawValue
                         }
@@ -136,15 +121,25 @@ struct DisplayFontSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "消息显示")
             AmberFormGroup {
-                DisplayToggleRow(title: "显示助手消息气泡", isOn: assistantBubble) { assistantBubble.toggle() }
-                DisplayDivider()
                 DisplayToggleRow(title: "显示 Agent 名字", isOn: agentName) { agentName.toggle() }
                 DisplayDivider()
-                DisplayToggleRow(title: "昵称下方显示日期", isOn: nicknameDate) { nicknameDate.toggle() }
+                DisplayStatusRow(
+                    title: "显示助手消息气泡",
+                    subtitle: "当前 Chat 渲染器没有助手气泡模式",
+                    value: "未接线"
+                )
                 DisplayDivider()
-                DisplayToggleRow(title: "助手状态点", subtitle: "在消息旁显示在线 / 生成状态小圆点", isOn: assistantStatusDot) { assistantStatusDot.toggle() }
+                DisplayStatusRow(
+                    title: "昵称下方显示日期",
+                    subtitle: "消息模型/时间格式桥尚未接线",
+                    value: "未接线"
+                )
                 DisplayDivider()
-                DisplayToggleRow(title: "自动折叠思考", subtitle: "生成结束后自动收起推理过程", isOn: autoCollapseThinking) { autoCollapseThinking.toggle() }
+                DisplayStatusRow(
+                    title: "助手状态点 / 思考折叠",
+                    subtitle: "状态点与生成结束折叠策略尚未接到 Chat 状态机",
+                    value: "未接线"
+                )
             }
         }
     }
@@ -153,11 +148,23 @@ struct DisplayFontSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "代码块")
             AmberFormGroup {
-                DisplayToggleRow(title: "自动换行", isOn: codeWrap) { codeWrap.toggle() }
+                DisplayStatusRow(
+                    title: "自动换行",
+                    subtitle: "Markdown 代码块 renderer 尚未接偏好",
+                    value: "未接线"
+                )
                 DisplayDivider()
-                DisplayToggleRow(title: "自动折叠", subtitle: "较长代码块默认折叠", isOn: codeCollapse) { codeCollapse.toggle() }
+                DisplayStatusRow(
+                    title: "自动折叠",
+                    subtitle: "代码块折叠状态尚未接线",
+                    value: "未接线"
+                )
                 DisplayDivider()
-                DisplayToggleRow(title: "显示行号", isOn: codeLineNumbers) { codeLineNumbers.toggle() }
+                DisplayStatusRow(
+                    title: "显示行号",
+                    subtitle: "当前 iOS Markdown renderer 不生成行号",
+                    value: "未接线"
+                )
             }
         }
     }
@@ -166,23 +173,31 @@ struct DisplayFontSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "渲染与交互")
             AmberFormGroup {
-                DisplayToggleRow(title: "启用 LaTeX 渲染", isOn: latex) { latex.toggle() }
+                DisplayStatusRow(
+                    title: "启用 LaTeX 渲染",
+                    subtitle: "LaTeX renderer 尚未接线",
+                    value: "未接线"
+                )
                 DisplayDivider()
                 DisplayToggleRow(title: "生成时跟随滚动", isOn: followGeneration) { followGeneration.toggle() }
                 DisplayDivider()
-                DisplayToggleRow(title: "按 Enter 发送", isOn: sendOnEnter) { sendOnEnter.toggle() }
+                DisplayStatusRow(
+                    title: "按 Enter 发送",
+                    subtitle: "移动端输入器未接硬件键盘提交策略",
+                    value: "未接线"
+                )
                 DisplayDivider()
-                DisplayToggleRow(title: "粘贴长文本为文件", isOn: pasteLongAsFile) { pasteLongAsFile.toggle() }
+                DisplayStatusRow(
+                    title: "粘贴长文本为文件",
+                    subtitle: "粘贴拦截与文件化管线尚未接线",
+                    value: "未接线"
+                )
                 DisplayDivider()
-                Menu {
-                    ForEach(LaunchEntry.allCases) { entry in
-                        Button(entry.title) {
-                            launchEntry = entry.rawValue
-                        }
-                    }
-                } label: {
-                    DisplayValueRow(title: "启动入口", value: selectedLaunchEntry.title)
-                }
+                DisplayStatusRow(
+                    title: "启动入口",
+                    subtitle: "App 启动路由目前固定进入 Home",
+                    value: "未接线"
+                )
             }
         }
     }
@@ -197,50 +212,8 @@ private struct DisplayDivider: View {
     }
 }
 
-private enum ChatFont: String, CaseIterable, Identifiable {
-    case `default`
-    case serif
-    case monospace
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .default: "默认"
-        case .serif: "衬线体"
-        case .monospace: "等宽字体"
-        }
-    }
-
-    var design: Font.Design {
-        switch self {
-        case .default: .default
-        case .serif: .serif
-        case .monospace: .monospaced
-        }
-    }
-}
-
-private enum LaunchEntry: String, CaseIterable, Identifiable {
-    case home
-    case lastConversation
-    case newChat
-    case automatic
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .home: "主页"
-        case .lastConversation: "上次会话"
-        case .newChat: "新建对话"
-        case .automatic: "自动"
-        }
-    }
-}
-
 private struct FontPreviewCard: View {
-    let font: ChatFont
+    let font: IOSChatFont
     let scale: Double
 
     var body: some View {
@@ -279,6 +252,37 @@ private struct DisplayValueRow: View {
                 .foregroundStyle(AmberTheme.muted2)
         }
         .frame(minHeight: 52)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+    }
+}
+
+private struct DisplayStatusRow: View {
+    let title: String
+    let subtitle: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(AmberTheme.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .frame(minHeight: 64)
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
     }

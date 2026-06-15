@@ -27,6 +27,65 @@ enum AmberTheme {
     static let radiusPill: CGFloat = 980
 }
 
+enum IOSAppearancePreferenceKeys {
+    static let mode = "app.amber.ios.appearance.mode"
+}
+
+enum IOSAppearanceMode: String, CaseIterable, Identifiable {
+    case light
+    case dark
+    case system
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .light: "浅色"
+        case .dark: "深色"
+        case .system: "跟随系统"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .light: .light
+        case .dark: .dark
+        case .system: nil
+        }
+    }
+}
+
+enum IOSDisplayPreferenceKeys {
+    static let fontScale = "app.amber.ios.display.fontScale"
+    static let chatFont = "app.amber.ios.display.chatFont"
+    static let agentName = "app.amber.ios.display.agentName"
+    static let followGeneration = "app.amber.ios.display.followGeneration"
+}
+
+enum IOSChatFont: String, CaseIterable, Identifiable {
+    case `default`
+    case serif
+    case monospace
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .default: "默认"
+        case .serif: "衬线体"
+        case .monospace: "等宽字体"
+        }
+    }
+
+    var design: Font.Design {
+        switch self {
+        case .default: .default
+        case .serif: .serif
+        case .monospace: .monospaced
+        }
+    }
+}
+
 extension Color {
     init(hex: UInt32, alpha: Double = 1.0) {
         self.init(
@@ -773,9 +832,9 @@ struct SettingsHomeView: View {
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("app.amber.ios.appearance.mode") private var appearanceMode = "light"
-    @AppStorage("app.amber.ios.display.fontScale") private var displayFontScale = 1.0
-    @AppStorage("app.amber.ios.display.chatFont") private var displayChatFont = "default"
+    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = "light"
+    @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var displayFontScale = 1.0
+    @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var displayChatFont = "default"
     @AppStorage(IOSExecutionPreferenceKeys.liveActivity) private var executionLiveActivity = true
 
     private var generalRows: [SettingsHomeRow] {
@@ -822,11 +881,7 @@ struct SettingsHomeView: View {
     }
 
     private var appearanceModeTitle: String {
-        switch appearanceMode {
-        case "dark": "深色"
-        case "system": "跟随系统"
-        default: "浅色"
-        }
+        (IOSAppearanceMode(rawValue: appearanceMode) ?? .light).title
     }
 
     private var displayFontSummary: String {
