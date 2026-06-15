@@ -4,20 +4,9 @@ struct ModelDefaultsView: View {
     @Bindable var settingsStore: SettingsStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var imageModel = "未设置"
-    @State private var titleModel = "跟随聊天模型"
-    @State private var suggestionModel = "跟随聊天模型"
-    @State private var ocrModel = "跟随聊天模型"
-    @State private var compressModel = "跟随聊天模型"
-    @State private var thinkingBudget = "自动"
-    @State private var contextMessages = "无限制"
     @State private var alert: ModelDefaultsAlert?
 
     private let chatModelIDs = ["gpt-4o"]
-    private let imageModels = ["未设置", "GPT-Image-1", "FLUX.1 Kontext", "Seedream 4.0"]
-    private let auxiliaryModels = ["跟随聊天模型", "MiMo V2.5 Flash", "DeepSeek V4 Flash", "gpt-4o-mini"]
-    private let thinkingOptions = ["关闭", "自动", "低", "中等", "高", "超高", "最大"]
-    private let contextOptions = ["无限制", "10 条", "20 条", "40 条", "80 条"]
 
     var body: some View {
         ZStack {
@@ -72,7 +61,7 @@ struct ModelDefaultsView: View {
     }
 
     private var intro: some View {
-        Text("设定全局默认聊天模型，以及标题、建议、识图、压缩等辅助任务用哪个模型。辅助任务默认跟随聊天模型，也可单独指定更快、更省的模型。")
+        Text("当前 iOS 只接入全局默认聊天模型；标题、建议、识图、压缩、生图、默认思考和上下文策略尚未暴露真实设置桥。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -102,19 +91,13 @@ struct ModelDefaultsView: View {
 
                 ModelDefaultsDivider()
 
-                ModelDefaultMenuRow(
+                ModelDefaultStaticRow(
                     systemImage: "photo",
                     iconColor: AmberTheme.accentAmber,
                     title: "生图模型",
-                    subtitle: "用于在聊天中生成图片",
-                    value: imageModel
-                ) {
-                    ForEach(imageModels, id: \.self) { model in
-                        Button(model) {
-                            imageModel = model
-                        }
-                    }
-                }
+                    subtitle: "Android 有 imageGenerationModelId；iOS 未接入生成工具默认值",
+                    value: "未接线"
+                )
             }
         }
     }
@@ -126,9 +109,8 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "text.alignleft",
                     title: "标题总结模型",
-                    subtitle: "用于自动生成会话标题",
-                    value: titleModel,
-                    selection: $titleModel
+                    subtitle: "Android titleModelId/titlePrompt 尚未桥接到 iOS",
+                    value: "未接线"
                 )
 
                 ModelDefaultsDivider()
@@ -136,9 +118,8 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "lightbulb",
                     title: "聊天建议模型",
-                    subtitle: "生成对话建议，推荐快速、便宜的模型",
-                    value: suggestionModel,
-                    selection: $suggestionModel
+                    subtitle: "Android suggestionModelId/suggestionPrompt 尚未桥接到 iOS",
+                    value: "未接线"
                 )
 
                 ModelDefaultsDivider()
@@ -146,9 +127,8 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "eye",
                     title: "视觉识别模型",
-                    subtitle: "聊天模型不能读图时用它理解图片",
-                    value: ocrModel,
-                    selection: $ocrModel
+                    subtitle: "Android ocrModelId/OCR prompt 尚未桥接到 iOS",
+                    value: "未接线"
                 )
 
                 ModelDefaultsDivider()
@@ -156,13 +136,12 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "arrow.down.left.and.arrow.up.right",
                     title: "压缩模型",
-                    subtitle: "压缩较长的对话历史",
-                    value: compressModel,
-                    selection: $compressModel
+                    subtitle: "Android compressModelId/compressPrompt 尚未桥接到 iOS",
+                    value: "未接线"
                 )
             }
 
-            ModelDefaultsNote("辅助任务默认跟随当前聊天模型；选「跟随聊天模型」即随主模型变化，也可固定到更快或更省的模型。每个辅助模型还可单独配置提示词与参数。")
+            ModelDefaultsNote("这些辅助任务在 Android/KMP 中有真实设置和调用路径；当前 iOS 没有对应 SettingsStore 字段或执行入口，因此不会保存草稿选择。")
         }
     }
 
@@ -170,35 +149,23 @@ struct ModelDefaultsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "高级")
             AmberFormGroup {
-                ModelDefaultMenuRow(
+                ModelDefaultStaticRow(
                     systemImage: "clock",
                     iconColor: AmberTheme.accent,
                     title: "思考预算",
-                    subtitle: "控制推理强度",
-                    value: thinkingBudget
-                ) {
-                    ForEach(thinkingOptions, id: \.self) { option in
-                        Button(option) {
-                            thinkingBudget = option
-                        }
-                    }
-                }
+                    subtitle: "默认推理强度尚未持久化；Chat composer 使用当前会话状态",
+                    value: "未接线"
+                )
 
                 ModelDefaultsDivider()
 
-                ModelDefaultMenuRow(
+                ModelDefaultStaticRow(
                     systemImage: "bubble.left",
                     iconColor: AmberTheme.accentCyan,
                     title: "上下文消息数量",
-                    subtitle: "单次请求携带的历史消息条数",
-                    value: contextMessages
-                ) {
-                    ForEach(contextOptions, id: \.self) { option in
-                        Button(option) {
-                            contextMessages = option
-                        }
-                    }
-                }
+                    subtitle: "真实上下文窗口/消息数策略尚未接到 iOS 请求构造",
+                    value: "未接线"
+                )
 
                 ModelDefaultsDivider()
 
@@ -209,8 +176,8 @@ struct ModelDefaultsView: View {
                         systemImage: "point.3.connected.trianglepath.dotted",
                         iconColor: AmberTheme.accentGreen,
                         title: "模型组默认规则",
-                        subtitle: "新会话的模型组合默认规则",
-                        value: nil
+                        subtitle: "Android modelGroupSessionDefaults 尚未桥接到 iOS",
+                        value: "未接线"
                     )
                 }
                 .buttonStyle(.plain)
@@ -223,25 +190,21 @@ struct ModelDefaultsView: View {
         title: String,
         subtitle: String,
         value: String,
-        selection: Binding<String>
+        valueStyle: Color = AmberTheme.muted
     ) -> some View {
-        ModelDefaultMenuRow(
+        ModelDefaultStaticRow(
             systemImage: systemImage,
             iconColor: AmberTheme.accentIndigo,
             title: title,
             subtitle: subtitle,
-            value: value
-        ) {
-            ForEach(auxiliaryModels, id: \.self) { model in
-                Button(model) {
-                    selection.wrappedValue = model
-                }
-            }
-        }
+            value: value,
+            valueStyle: valueStyle
+        )
     }
 
     private var currentChatModel: String {
-        settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId
+        let trimmed = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "gpt-4o" : trimmed
     }
 
     private var chatModelOptions: [String] {
@@ -261,7 +224,7 @@ private enum ModelDefaultsAlert: Identifiable {
     var title: String { "模型组默认规则尚未接线" }
 
     var message: String {
-        "当前先还原默认模型原型；模型组 Session Defaults 会在真实模型选择器和参数表迁移后接入。"
+        "Android/KMP 有 modelGroupSessionDefaults；当前 iOS 未暴露对应设置桥，因此这里不会保存或应用模型组默认规则。"
     }
 }
 
@@ -271,6 +234,7 @@ private struct ModelDefaultMenuRow<MenuContent: View>: View {
     let title: String
     let subtitle: String
     let value: String
+    var showsChevron = true
     @ViewBuilder let menuContent: MenuContent
 
     var body: some View {
@@ -282,9 +246,31 @@ private struct ModelDefaultMenuRow<MenuContent: View>: View {
                 iconColor: iconColor,
                 title: title,
                 subtitle: subtitle,
-                value: value
+                value: value,
+                showsChevron: showsChevron
             )
         }
+    }
+}
+
+private struct ModelDefaultStaticRow: View {
+    let systemImage: String
+    let iconColor: Color
+    let title: String
+    let subtitle: String
+    let value: String
+    var valueStyle: Color = AmberTheme.muted
+
+    var body: some View {
+        ModelDefaultRowContent(
+            systemImage: systemImage,
+            iconColor: iconColor,
+            title: title,
+            subtitle: subtitle,
+            value: value,
+            valueStyle: valueStyle,
+            showsChevron: false
+        )
     }
 }
 
@@ -294,6 +280,8 @@ private struct ModelDefaultRowContent: View {
     let title: String
     let subtitle: String
     let value: String?
+    var valueStyle: Color = AmberTheme.muted
+    var showsChevron = true
 
     var body: some View {
         HStack(spacing: 12) {
@@ -317,14 +305,16 @@ private struct ModelDefaultRowContent: View {
             if let value {
                 Text(value)
                     .font(.subheadline)
-                    .foregroundStyle(AmberTheme.muted)
+                    .foregroundStyle(valueStyle)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted2)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
         }
         .frame(minHeight: 58)
         .padding(.horizontal, 14)
