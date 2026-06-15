@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TTSSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(RouterPath.self) private var router
 
     @State private var selectedEngine: TTSEngine = .miniMax
     @State private var isPreviewing = false
@@ -74,7 +75,7 @@ struct TTSSettingsView: View {
             Spacer()
 
             AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加 TTS 提供商", size: 44, symbolSize: 17) {
-                alert = .add
+                router.navigate(to: .ttsAdd)
             }
             .foregroundStyle(AmberTheme.accent)
         }
@@ -228,6 +229,215 @@ struct TTSSettingsView: View {
     }
 }
 
+struct TTSAddView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var providerType: TTSProviderDraftType = .miniMax
+    @State private var name = TTSProviderDraftType.miniMax.defaultName
+    @State private var apiKey = ""
+    @State private var baseURL = ""
+    @State private var model = TTSProviderDraftType.miniMax.defaultModel
+    @State private var voice = TTSProviderDraftType.miniMax.defaultVoice
+    @State private var emotion: TTSEmotion = .calm
+    @State private var speed: TTSSpeed = .normal
+    @State private var speechRate: TTSSpeed = .normal
+    @State private var pitch: TTSSpeed = .normal
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                header
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        intro
+                        typeSection
+                        configurationSection
+                        previewSection
+                    }
+                    .padding(.bottom, 36)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var header: some View {
+        HStack {
+            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回语音合成", size: 44, symbolSize: 20) {
+                dismiss()
+            }
+
+            Spacer()
+
+            Text("添加引擎")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AmberTheme.foreground)
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Text("完成")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(height: 36)
+                    .padding(.horizontal, 14)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .amberGlass(cornerRadius: AmberTheme.radiusPill)
+            .accessibilityLabel("完成")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+    }
+
+    private var intro: some View {
+        Text("先填写 TTS Provider 草稿。当前页面不会保存引擎、不会写入 Keychain，也不会发起试听请求。")
+            .font(.footnote)
+            .foregroundStyle(AmberTheme.muted)
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 2)
+    }
+
+    private var typeSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "类型")
+            AmberFormGroup {
+                TTSMenuRow(title: "服务类型", value: providerType.title) {
+                    ForEach(TTSProviderDraftType.allCases) { type in
+                        Button(type.title) {
+                            applyProviderType(type)
+                        }
+                    }
+                }
+            }
+
+            TTSSettingsNote(providerType.note)
+        }
+    }
+
+    @ViewBuilder
+    private var configurationSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "\(providerType.title) 设置")
+            AmberFormGroup {
+                TTSTextFieldRow(title: "名称", text: $name, placeholder: providerType.defaultName)
+
+                if providerType.requiresAPIKey {
+                    TTSSettingsDivider()
+                    TTSTextFieldRow(title: "API Key", text: $apiKey, placeholder: "粘贴 API Key", monospace: true, isSecure: true)
+                    TTSSettingsDivider()
+                    TTSTextFieldRow(title: "Base URL", text: $baseURL, placeholder: "可选", monospace: true)
+                }
+
+                if providerType.usesModel {
+                    TTSSettingsDivider()
+                    TTSTextFieldRow(title: "模型", text: $model, placeholder: providerType.defaultModel, monospace: true)
+                }
+
+                if providerType.usesVoice {
+                    TTSSettingsDivider()
+                    TTSTextFieldRow(title: providerType.voiceLabel, text: $voice, placeholder: providerType.defaultVoice, monospace: true)
+                }
+
+                switch providerType {
+                case .system:
+                    TTSSettingsDivider()
+                    TTSMenuRow(title: "语速", value: speechRate.title) {
+                        ForEach(TTSSpeed.allCases) { value in
+                            Button(value.title) { speechRate = value }
+                        }
+                    }
+                    TTSSettingsDivider()
+                    TTSMenuRow(title: "音调", value: pitch.title) {
+                        ForEach(TTSSpeed.allCases) { value in
+                            Button(value.title) { pitch = value }
+                        }
+                    }
+                case .miniMax:
+                    TTSSettingsDivider()
+                    TTSMenuRow(title: "情感", value: emotion.title) {
+                        ForEach(TTSEmotion.allCases) { value in
+                            Button(value.title) { emotion = value }
+                        }
+                    }
+                    TTSSettingsDivider()
+                    TTSMenuRow(title: "语速", value: speed.title) {
+                        ForEach(TTSSpeed.allCases) { value in
+                            Button(value.title) { speed = value }
+                        }
+                    }
+                case .openAI, .gemini, .qwen, .groq:
+                    EmptyView()
+                }
+            }
+
+            TTSSettingsNote(validationNote)
+        }
+    }
+
+    private var previewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "预览")
+            AmberFormGroup {
+                TTSPreviewLine(label: "类型", value: providerType.title)
+                TTSSettingsDivider()
+                TTSPreviewLine(label: "名称", value: name.trimmedForTTS.isEmpty ? "未命名" : name.trimmedForTTS)
+                TTSSettingsDivider()
+                TTSPreviewLine(label: "模型", value: providerType.usesModel ? draftModel : "系统离线")
+                TTSSettingsDivider()
+                TTSPreviewLine(label: "凭据", value: providerType.requiresAPIKey ? credentialPreview : "无需 Key")
+                TTSSettingsDivider()
+                TTSPreviewLine(label: "保存方式", value: "本地草稿")
+            }
+        }
+    }
+
+    private var draftModel: String {
+        model.trimmedForTTS.isEmpty ? providerType.defaultModel : model.trimmedForTTS
+    }
+
+    private var credentialPreview: String {
+        apiKey.trimmedForTTS.isEmpty ? "待填写" : "已填写，未保存"
+    }
+
+    private var validationNote: String {
+        if name.trimmedForTTS.isEmpty {
+            return "名称为空；真实保存前需要一个显示名称。"
+        }
+
+        if providerType.requiresAPIKey, apiKey.trimmedForTTS.isEmpty {
+            return "API Key 为空；当前仍可预览草稿，不会写入 Keychain。"
+        }
+
+        return "草稿结构完整；当前不会写入真实 TTS 配置。"
+    }
+
+    private func applyProviderType(_ type: TTSProviderDraftType) {
+        providerType = type
+        name = type.defaultName
+        model = type.defaultModel
+        voice = type.defaultVoice
+        apiKey = ""
+        baseURL = ""
+        emotion = .calm
+        speed = .normal
+        speechRate = .normal
+        pitch = .normal
+    }
+}
+
 private enum TTSEngine: String, CaseIterable, Identifiable {
     case system
     case miniMax
@@ -307,13 +517,11 @@ private enum TTSSpeed: String, CaseIterable, Identifiable {
 }
 
 private enum TTSSettingsAlert: Identifiable {
-    case add
     case delete
     case deleteSystem
 
     var id: String {
         switch self {
-        case .add: "add"
         case .delete: "delete"
         case .deleteSystem: "delete-system"
         }
@@ -321,7 +529,6 @@ private enum TTSSettingsAlert: Identifiable {
 
     var title: String {
         switch self {
-        case .add: "添加引擎尚未接线"
         case .delete: "删除引擎尚未接线"
         case .deleteSystem: "系统 TTS 不可删除"
         }
@@ -329,12 +536,102 @@ private enum TTSSettingsAlert: Identifiable {
 
     var message: String {
         switch self {
-        case .add:
-            "当前先还原语音合成设置原型；新增引擎会在 TTS Provider 写入与 Keychain 接通后补上。"
         case .delete:
             "当前页面不会删除真实 TTS 配置，避免迁移期间误改已有语音引擎。"
         case .deleteSystem:
             "Android 端默认系统 TTS 也不可删除；iOS 端保留同样的兜底策略。"
+        }
+    }
+}
+
+private enum TTSProviderDraftType: String, CaseIterable, Identifiable {
+    case system
+    case miniMax
+    case openAI
+    case gemini
+    case qwen
+    case groq
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: "系统 TTS"
+        case .miniMax: "MiniMax"
+        case .openAI: "OpenAI"
+        case .gemini: "Gemini"
+        case .qwen: "Qwen"
+        case .groq: "Groq"
+        }
+    }
+
+    var defaultName: String {
+        switch self {
+        case .system: "系统 TTS"
+        case .miniMax: "MiniMax TTS"
+        case .openAI: "OpenAI TTS"
+        case .gemini: "Gemini TTS"
+        case .qwen: "Qwen TTS"
+        case .groq: "Groq TTS"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .system: ""
+        case .miniMax: "speech-2.6-turbo"
+        case .openAI: "gpt-4o-mini-tts"
+        case .gemini: "2.5-flash-tts"
+        case .qwen: "qwen-tts"
+        case .groq: "playai-tts"
+        }
+    }
+
+    var defaultVoice: String {
+        switch self {
+        case .system: ""
+        case .miniMax: "female-shaonv"
+        case .openAI: "alloy"
+        case .gemini: "Kore"
+        case .qwen: "Cherry"
+        case .groq: "Aaliyah-PlayAI"
+        }
+    }
+
+    var voiceLabel: String {
+        switch self {
+        case .miniMax: "语音 ID"
+        case .gemini: "语音名称"
+        case .system, .openAI, .qwen, .groq: "语音"
+        }
+    }
+
+    var requiresAPIKey: Bool {
+        self != .system
+    }
+
+    var usesModel: Bool {
+        self != .system
+    }
+
+    var usesVoice: Bool {
+        self != .system
+    }
+
+    var note: String {
+        switch self {
+        case .system:
+            "系统 TTS 离线可用，不需要 API Key。"
+        case .miniMax:
+            "MiniMax 支持语音 ID、情感和语速参数。"
+        case .openAI:
+            "OpenAI 使用 voice 字段选择音色。"
+        case .gemini:
+            "Gemini 使用 voiceName 风格的语音名称。"
+        case .qwen:
+            "Qwen 可配置模型、语音和语言相关参数，当前先保留核心字段。"
+        case .groq:
+            "Groq TTS 与 OpenAI 风格相近，当前先保留模型和 voice 字段。"
         }
     }
 }
@@ -467,8 +764,43 @@ private struct TTSSettingsNote: View {
     }
 }
 
+private struct TTSPreviewLine: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(minHeight: 52)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+    }
+}
+
+private extension String {
+    var trimmedForTTS: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 #Preview {
     NavigationStack {
         TTSSettingsView()
+    }
+}
+
+#Preview("TTS Add") {
+    NavigationStack {
+        TTSAddView()
     }
 }

@@ -191,6 +191,7 @@ enum Route: Hashable {
     case searchServices
     case searchProvider
     case ttsSettings
+    case ttsAdd
     case board
     case boardSettings
     case miniApps
@@ -299,6 +300,8 @@ private extension View {
                 SearchProviderView()
             case .ttsSettings:
                 TTSSettingsView()
+            case .ttsAdd:
+                TTSAddView()
             case .board:
                 BoardView()
             case .boardSettings:
