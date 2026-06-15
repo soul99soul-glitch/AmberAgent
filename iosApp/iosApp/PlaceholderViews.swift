@@ -278,7 +278,7 @@ struct ConversationsView: View {
                 }
 
                 Button {
-                    router.navigate(to: .assistant(id: "account"))
+                    router.navigate(to: .account)
                 } label: {
                     Text("A")
                         .font(.system(size: 13, weight: .bold, design: .rounded))

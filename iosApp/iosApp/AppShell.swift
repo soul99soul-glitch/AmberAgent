@@ -164,6 +164,7 @@ final class RouterPath {
 enum Route: Hashable {
     case chat
     case search
+    case account
     case settings
     case appearance
     case displayFont
@@ -232,6 +233,8 @@ private extension View {
                 ChatView(settingsStore: settingsStore, localToolExecutor: localToolExecutor)
             case .search:
                 SearchView()
+            case .account:
+                AccountView()
             case .settings:
                 SettingsHomeView(settingsStore: settingsStore)
             case .appearance:
