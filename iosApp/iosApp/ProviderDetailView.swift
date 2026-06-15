@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 
 struct ProviderDetailView: View {
     @Bindable var settingsStore: SettingsStore
@@ -125,31 +126,71 @@ struct ProviderDetailView: View {
         .scrollIndicators(.hidden)
     }
 
+    @ViewBuilder
     private var modelsPanel: some View {
         ScrollView {
             VStack(spacing: 0) {
-                AmberFormGroup {
-                    ProviderModelRow(
-                        systemImage: "cpu",
-                        name: currentModelID,
-                        badge: isCurrentProvider ? "当前聊天模型" : "当前模型 ID",
-                        summary: "SettingsStore.modelId · 模板不保存模型列表"
-                    ) {
-                        router.navigate(to: .modelDefaults)
+                if isCurrentProvider {
+                    AmberFormGroup {
+                        ProviderModelRow(
+                            systemImage: "cpu",
+                            name: currentModelID,
+                            badge: "当前聊天模型",
+                            summary: "SettingsStore.modelId · 当前唯一接入的模型"
+                        ) {
+                            router.navigate(to: .modelDefaults)
+                        }
                     }
-                }
 
-                Text("当前只接入一个模型 ID 字符串。KMP Model 列表、能力、模态、上下文、custom headers/body 尚未桥接到 iOS；预置 Provider 不会自动创建模型配置。")
-                    .font(.footnote)
-                    .foregroundStyle(AmberTheme.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 10)
+                    Text("当前只接入一个模型 ID 字符串。KMP Model 列表、能力、模态、上下文、custom headers/body 尚未桥接到 iOS。")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                } else {
+                    AmberFormGroup {
+                        if presetSeededModels.isEmpty {
+                            ProviderStaticRow(
+                                title: "种子模型",
+                                subtitle: "Android/KMP DEFAULT_PROVIDERS 中此预置不含种子模型",
+                                value: "无"
+                            )
+                        } else {
+                            ForEach(Array(presetSeededModels.enumerated()), id: \.offset) { index, model in
+                                ProviderStaticRow(
+                                    title: model.displayName,
+                                    subtitle: "Android/KMP 预置种子模型 · 只读",
+                                    value: model.modelId,
+                                    valueStyle: .mono
+                                )
+                                if index < presetSeededModels.count - 1 {
+                                    ProviderDetailDivider()
+                                }
+                            }
+                        }
+                    }
+
+                    Text("这些是 Android/KMP 在该预置 Provider 上的种子模型，仅只读展示。iOS 当前不持久化模型列表、不创建模型配置、不拉取模型；预置不影响当前聊天模型。")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                }
             }
             .padding(.top, 10)
             .padding(.bottom, 36)
         }
         .scrollIndicators(.hidden)
+    }
+
+    // Real seeded models the matched Android/KMP DEFAULT_PROVIDERS entry ships
+    // for this preset (read-only; iOS does not persist a model list). Matched by
+    // name — DEFAULT_PROVIDERS names are unique, and the "current" config row uses
+    // a different name so it never reaches this preset-only path.
+    private var presetSeededModels: [Model] {
+        DefaultProvidersKt.DEFAULT_PROVIDERS.first { $0.name == providerName }?.models ?? []
     }
 
     private var apiKeyRow: some View {
