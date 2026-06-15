@@ -248,7 +248,7 @@ private struct AccountHeatmapBlock: View {
 
             AccountHeatmap()
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 16)
         .padding(.vertical, 16)
     }
 }
@@ -256,7 +256,7 @@ private struct AccountHeatmapBlock: View {
 private struct AccountHeatmap: View {
     private let weeks = 21
     private let rows = 7
-    private let cellSize: CGFloat = 11.5
+    private let cellSize: CGFloat = 12.3
     private let cellGap: CGFloat = 3.5
     private let monthLabels: [(label: String, week: Int)] = [
         ("2月", 0),

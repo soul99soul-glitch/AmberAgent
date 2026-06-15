@@ -319,31 +319,29 @@ struct ConversationsView: View {
     }
 
     private var shortcutStrip: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(shortcuts) { shortcut in
-                    Button {
-                        router.navigate(to: shortcut.route)
-                    } label: {
-                        VStack(alignment: .center, spacing: 7) {
-                            Image(systemName: shortcut.systemImage)
-                                .font(.system(size: 24, weight: .medium))
-                                .foregroundStyle(shortcut.color)
-                                .frame(width: 54, height: 54)
-                                .background(shortcut.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                            Text(shortcut.title)
-                                .font(.caption)
-                                .foregroundStyle(AmberTheme.muted)
-                                .lineLimit(1)
-                        }
-                        .frame(minWidth: 62)
+        HStack(spacing: 8) {
+            ForEach(shortcuts) { shortcut in
+                Button {
+                    router.navigate(to: shortcut.route)
+                } label: {
+                    VStack(alignment: .center, spacing: 7) {
+                        Image(systemName: shortcut.systemImage)
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundStyle(shortcut.color)
+                            .frame(width: 54, height: 54)
+                            .background(shortcut.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        Text(shortcut.title)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.9)
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 16)
         }
-        .scrollIndicators(.hidden)
+        .padding(.horizontal, 16)
         .padding(.top, 2)
         .padding(.bottom, 16)
     }
@@ -784,7 +782,7 @@ struct SettingsHomeView: View {
 
     private var providerRows: [SettingsHomeRow] {
         [
-            .init(title: "服务商", subtitle: "小米 MiMo · MiniMax · DeepSeek · Kimi...", value: "10 个", systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
+            .init(title: "服务商", subtitle: nil, value: "10 个", systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
             .init(title: "默认模型", subtitle: nil, value: settingsStore.modelId.isEmpty ? "MiMo V2.5 Pro" : settingsStore.modelId, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
             .init(title: "搜索服务", subtitle: nil, value: "4 个源", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
             .init(title: "语音 TTS", subtitle: nil, value: "MiniMax", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
