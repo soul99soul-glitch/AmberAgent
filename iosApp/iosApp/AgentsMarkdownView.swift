@@ -3,14 +3,7 @@ import SwiftUI
 struct AgentsMarkdownView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("app.amber.ios.agentsMd.draft") private var content = """
-    # 行为准则
-
-    - 称呼用户「光」，语气随意
-    - 回答先结论后展开
-    - 不说「好问题」这类客套
-    - 中文优先，代码标识符保留原文
-    """
+    @State private var content = ""
 
     var body: some View {
         ZStack {
@@ -20,12 +13,12 @@ struct AgentsMarkdownView: View {
                 VStack(spacing: 0) {
                     header
 
-                    AgentsNote("这段应用级 Markdown 行为准则会在每次对话前注入到 System Prompt。")
+                    AgentsNote("Android/KMP 有 Settings.agentRuntime.agentSoulMarkdown，并由 GenerationPrompts 注入；iOS 当前没有把该设置接入 ChatViewModel。")
                         .padding(.bottom, 10)
 
                     editor
 
-                    AgentsNote("改动会在下一次对话开始时生效。")
+                    AgentsNote("当前内容只保留在本页草稿状态；关闭页面会丢弃，不会写入 UserDefaults、SettingsStore 或下一次对话请求。")
                         .padding(.top, 7)
                 }
                 .padding(.bottom, 36)
@@ -44,13 +37,13 @@ struct AgentsMarkdownView: View {
 
             Spacer()
 
-            Text("agents.md")
+            Text("agents.md 草稿")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
             Spacer()
 
-            AgentsDoneButton {
+            AgentsCloseButton {
                 dismiss()
             }
         }
@@ -60,29 +53,40 @@ struct AgentsMarkdownView: View {
     }
 
     private var editor: some View {
-        TextEditor(text: $content)
-            .font(.system(.body, design: .monospaced))
-            .foregroundStyle(AmberTheme.foreground2)
-            .lineSpacing(3)
-            .scrollContentBackground(.hidden)
-            .padding(12)
-            .frame(minHeight: 340)
-            .background(AmberTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
-                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $content)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(AmberTheme.foreground2)
+                .lineSpacing(3)
+                .scrollContentBackground(.hidden)
+                .padding(12)
+                .frame(minHeight: 340)
+
+            if content.isEmpty {
+                Text("草稿 Markdown；当前不会注入 System Prompt")
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.muted2)
+                    .padding(.horizontal, 17)
+                    .padding(.vertical, 20)
+                    .allowsHitTesting(false)
             }
-            .padding(.horizontal, 16)
+        }
+        .background(AmberTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
+        .padding(.horizontal, 16)
     }
 }
 
-private struct AgentsDoneButton: View {
+private struct AgentsCloseButton: View {
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text("完成")
+            Text("关闭")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(height: 36)
@@ -91,7 +95,7 @@ private struct AgentsDoneButton: View {
         }
         .buttonStyle(.plain)
         .amberGlass(cornerRadius: AmberTheme.radiusPill)
-        .accessibilityLabel("完成")
+        .accessibilityLabel("关闭")
     }
 }
 

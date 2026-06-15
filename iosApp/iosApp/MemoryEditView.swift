@@ -6,7 +6,7 @@ struct MemoryEditView: View {
     @State private var text: String
     @State private var scope: MemoryEditScope
     @State private var pinned: Bool
-    @State private var showDeleteAlert = false
+    @State private var showDeleteInfo = false
 
     init(initialText: String, initialScope: String, initialPinned: Bool) {
         self._text = State(initialValue: initialText)
@@ -21,8 +21,10 @@ struct MemoryEditView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     header
+                    noticeSection
                     contentSection
                     classificationSection
+                    previewSection
                     deleteSection
                 }
                 .padding(.bottom, 36)
@@ -31,13 +33,10 @@ struct MemoryEditView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert("删除这条记忆", isPresented: $showDeleteAlert) {
-            Button("保留", role: .cancel) { }
-            Button("删除", role: .destructive) {
-                dismiss()
-            }
+        .alert("删除尚未接线", isPresented: $showDeleteInfo) {
+            Button("知道了", role: .cancel) { }
         } message: {
-            Text("当前编辑页尚未接入真实记忆库；不会删除本地数据。")
+            Text("当前 iOS 编辑页没有读取真实 MemoryRepository，因此不会删除任何记忆记录。")
         }
     }
 
@@ -49,13 +48,13 @@ struct MemoryEditView: View {
 
             Spacer()
 
-            Text("编辑记忆")
+            Text("记忆草稿")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
             Spacer()
 
-            MemoryDoneButton {
+            MemoryDraftCloseButton {
                 dismiss()
             }
         }
@@ -64,9 +63,14 @@ struct MemoryEditView: View {
         .padding(.bottom, 18)
     }
 
+    private var noticeSection: some View {
+        MemoryEditNote("Android/KMP 已有 MemoryRepository.addMemory/updateContent/deleteMemory；iOS 当前没有 repository/settings/tool bridge。本页只保留草稿预览，关闭后不会保存。")
+            .padding(.bottom, 10)
+    }
+
     private var contentSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "内容")
+            AmberSectionLabel(text: "内容草稿")
 
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
@@ -78,7 +82,7 @@ struct MemoryEditView: View {
                     .frame(minHeight: 176)
 
                 if text.isEmpty {
-                    Text("记一条值得长期留存的信息...")
+                    Text("记一条草稿；当前不会写入真实记忆库")
                         .font(.body)
                         .foregroundStyle(AmberTheme.muted2)
                         .padding(.horizontal, 17)
@@ -98,7 +102,7 @@ struct MemoryEditView: View {
 
     private var classificationSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "归类")
+            AmberSectionLabel(text: "归类草稿")
             AmberFormGroup {
                 Menu {
                     ForEach(MemoryEditScope.allCases) { option in
@@ -109,7 +113,7 @@ struct MemoryEditView: View {
                 } label: {
                     MemoryValueRow(
                         title: "记忆层级",
-                        subtitle: "核心几乎总注入 · 长期稳定保留 · 短期会过期",
+                        subtitle: "仅影响本页草稿；不会写入 MemoryScope。",
                         value: scope.title
                     )
                 }
@@ -124,7 +128,7 @@ struct MemoryEditView: View {
                             Text("置顶")
                                 .font(.body)
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("置顶后召回优先级最高、几乎每次对话都会注入")
+                            Text("仅影响本页草稿；不会改变真实召回优先级。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -141,19 +145,32 @@ struct MemoryEditView: View {
                 .buttonStyle(.plain)
             }
 
-            MemoryEditNote(text.isEmpty ? "-" : "本地草稿 · \(scope.title) · \(pinned ? "已置顶" : "未置顶")")
+            MemoryEditNote(text.isEmpty ? "本地草稿 · 空内容" : "本地草稿 · \(scope.title) · \(pinned ? "已置顶" : "未置顶")")
                 .padding(.top, 2)
+        }
+    }
+
+    private var previewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "处理方式")
+            AmberFormGroup {
+                MemoryPreviewLine(label: "保存", value: "未接线")
+                MemoryEditDivider()
+                MemoryPreviewLine(label: "写入位置", value: "本页草稿")
+                MemoryEditDivider()
+                MemoryPreviewLine(label: "真实后端", value: "MemoryRepository 未桥接")
+            }
         }
     }
 
     private var deleteSection: some View {
         AmberFormGroup {
             Button {
-                showDeleteAlert = true
+                showDeleteInfo = true
             } label: {
-                Text("删除这条记忆")
+                Text("删除记忆尚未接线")
                     .font(.body.weight(.medium))
-                    .foregroundStyle(AmberTheme.accentRed)
+                    .foregroundStyle(AmberTheme.muted)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 52)
                     .contentShape(Rectangle())
@@ -241,6 +258,29 @@ private struct MemoryEditSwitch: View {
     }
 }
 
+private struct MemoryPreviewLine: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.foreground)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minHeight: 46)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 6)
+    }
+}
+
 private struct MemoryEditDivider: View {
     var body: some View {
         Rectangle()
@@ -261,17 +301,18 @@ private struct MemoryEditNote: View {
         Text(text)
             .font(.caption)
             .foregroundStyle(AmberTheme.muted2)
+            .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
     }
 }
 
-private struct MemoryDoneButton: View {
+private struct MemoryDraftCloseButton: View {
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text("完成")
+            Text("关闭")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(height: 36)
@@ -280,6 +321,6 @@ private struct MemoryDoneButton: View {
         }
         .buttonStyle(.plain)
         .amberGlass(cornerRadius: AmberTheme.radiusPill)
-        .accessibilityLabel("完成")
+        .accessibilityLabel("关闭")
     }
 }

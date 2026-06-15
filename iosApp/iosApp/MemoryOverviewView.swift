@@ -4,20 +4,52 @@ struct MemoryOverviewView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
 
-    @AppStorage("app.amber.ios.memory.core") private var coreMemory = true
-    @AppStorage("app.amber.ios.memory.shortTerm") private var shortTermMemory = true
-    @AppStorage("app.amber.ios.memory.longTerm") private var longTermMemory = true
-    @AppStorage("app.amber.ios.memory.recentConversations") private var recentConversations = true
-    @AppStorage("app.amber.ios.memory.timeReminder") private var timeReminder = false
-    @AppStorage("app.amber.ios.memory.autoCompaction") private var autoCompaction = true
+    private let memoryEvidence: [MemoryCapabilityEvidence] = [
+        .init(
+            title: "MemoryRepository",
+            subtitle: "Android/KMP 通过 MemoryDAO、MemoryCandidateDAO、MemoryEventDAO 读写真正记忆库。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "记忆召回",
+            subtitle: "MemoryRecallStore 按 enableCoreMemory / enableShortTermMemory / enableLongTermMemory 选择记录并构造提示词。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "memory_tool",
+            subtitle: "ChatService 可创建、编辑、删除核心 / 短期 / 长期记忆。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "iOS 记忆桥",
+            subtitle: "当前 SwiftUI 没有 MemoryRepository、Settings.agentRuntime 或 memory_tool executor bridge。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        )
+    ]
 
-    private let records: [MemoryRecord] = [
-        .init(scope: .core, text: "称呼我「光」，语气可以随意一点。", pinned: true),
-        .init(scope: .core, text: "回答先给结论，再展开理由。", pinned: true),
-        .init(scope: .core, text: "不喜欢被夸「好问题」这类客套。"),
-        .init(scope: .longTerm, text: "在上海工作，做产品设计。"),
-        .init(scope: .longTerm, text: "在学吉他，偏好指弹。"),
-        .init(scope: .shortTerm, text: "正在做的项目：iOS Liquid Glass 原型，议会聊天那块。")
+    private let settingsRows: [MemoryCapabilityEvidence] = [
+        .init(
+            title: "核心 / 短期 / 长期记忆开关",
+            subtitle: "Android Settings.agentRuntime 已有真实开关；iOS 当前不读写这些字段。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "最近会话参考 / 时间提醒",
+            subtitle: "Android Settings.agentRuntime 有 enableRecentChatsReference 和 enableTimeReminder。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "选择性召回 / 自动整理 / 上下文压缩",
+            subtitle: "Android 有 memoryRecall、memoryWorker、contextCompaction；iOS 当前没有设置桥。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        )
     ]
 
     var body: some View {
@@ -29,6 +61,7 @@ struct MemoryOverviewView: View {
                     header
                     intro
                     soulSection
+                    evidenceSection
                     configurationSection
                     recordsSection
                 }
@@ -54,8 +87,8 @@ struct MemoryOverviewView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "新增记忆", size: 44, symbolSize: 20) {
-                router.navigate(to: .memoryEdit(text: "", scope: MemoryScope.core.title, pinned: false))
+            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "新增记忆草稿", size: 44, symbolSize: 20) {
+                router.navigate(to: .memoryEdit(text: "", scope: "核心", pinned: false))
             }
         }
         .padding(.horizontal, 16)
@@ -64,7 +97,7 @@ struct MemoryOverviewView: View {
     }
 
     private var intro: some View {
-        Text("AmberAgent 在会话之间保存和复用长期知识，并按核心 / 短期 / 长期三个层级召回。")
+        Text("Android/KMP 已有真实记忆库、召回、自动整理和 memory_tool；iOS 当前还没有把这些能力接进 SettingsStore、ChatViewModel 或本地工具执行器。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -75,7 +108,7 @@ struct MemoryOverviewView: View {
 
     private var soulSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "灵魂 · agents.md")
+            AmberSectionLabel(text: "agents.md")
 
             Button {
                 router.navigate(to: .agentsMd)
@@ -88,16 +121,16 @@ struct MemoryOverviewView: View {
                             .frame(width: 30, height: 30)
                             .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                        Text("agents.md")
+                        Text("agents.md 草稿")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
-                        Text("每次对话注入")
+                        Text("iOS 未接线")
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(AmberTheme.muted)
+                            .foregroundStyle(AmberTheme.accentAmber)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
-                            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .background(AmberTheme.accentAmber.opacity(0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                         Spacer(minLength: 8)
 
@@ -106,23 +139,17 @@ struct MemoryOverviewView: View {
                             .foregroundStyle(AmberTheme.muted2)
                     }
 
-                    Text("""
-                    # 行为准则
-                    - 称呼用户「光」，语气随意
-                    - 回答先结论后展开
-                    - 不说「好问题」这类客套
-                    - 中文优先，代码标识符保留原文
-                    """)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .lineSpacing(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(11)
-                    .background(AmberTheme.background, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
-                            .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-                    }
+                    Text("Android/KMP Settings.agentRuntime.agentSoulMarkdown 会通过 GenerationPrompts 注入；iOS 当前页面只保留草稿入口，不会影响 ChatViewModel 请求。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .lineSpacing(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(11)
+                        .background(AmberTheme.background, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
+                                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                        }
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -139,180 +166,99 @@ struct MemoryOverviewView: View {
         }
     }
 
+    private var evidenceSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "能力证据")
+            AmberFormGroup {
+                ForEach(Array(memoryEvidence.enumerated()), id: \.element.id) { index, row in
+                    MemoryStatusRow(row: row)
+                    if index < memoryEvidence.count - 1 {
+                        MemoryDivider()
+                    }
+                }
+            }
+        }
+    }
+
     private var configurationSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "记忆配置")
             AmberFormGroup {
-                MemoryToggleRow(
-                    systemImage: "cylinder.split.1x2",
-                    iconColor: AmberTheme.accent,
-                    title: "启用核心记忆",
-                    subtitle: "在会话之间保存和复用长期知识",
-                    isOn: coreMemory
-                ) { coreMemory.toggle() }
-
-                MemoryDivider()
-
-                MemoryToggleRow(
-                    systemImage: "clock",
-                    title: "短期记忆",
-                    subtitle: "保存近期任务 / 活跃项目的简短总结",
-                    isOn: shortTermMemory
-                ) { shortTermMemory.toggle() }
-
-                MemoryDivider()
-
-                MemoryToggleRow(
-                    systemImage: "chart.line.uptrend.xyaxis",
-                    title: "长期记忆",
-                    subtitle: "稳定偏好、长期关注点、计划与事实",
-                    isOn: longTermMemory
-                ) { longTermMemory.toggle() }
-
-                MemoryDivider()
-
-                MemoryToggleRow(
-                    systemImage: "bubble.left.and.text.bubble.right",
-                    title: "参考最近会话",
-                    subtitle: "参考最近会话标题，保持任务连续性",
-                    isOn: recentConversations
-                ) { recentConversations.toggle() }
-
-                MemoryDivider()
-
-                MemoryToggleRow(
-                    systemImage: "timer",
-                    title: "时间提醒",
-                    subtitle: "对话间隔较长时注入时间提醒",
-                    isOn: timeReminder
-                ) { timeReminder.toggle() }
-
-                MemoryDivider()
-
-                MemoryToggleRow(
-                    systemImage: "arrow.down.right.and.arrow.up.left",
-                    title: "自动上下文压缩",
-                    subtitle: "上下文超长时自动摘要压缩",
-                    isOn: autoCompaction
-                ) { autoCompaction.toggle() }
+                ForEach(Array(settingsRows.enumerated()), id: \.element.id) { index, row in
+                    MemoryStatusRow(row: row)
+                    if index < settingsRows.count - 1 {
+                        MemoryDivider()
+                    }
+                }
             }
+
+            MemoryNote("这些行对应 Android/KMP 的真实设置字段；iOS 没有桥接前不会写入本地假开关。")
         }
     }
 
     private var recordsSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "记忆条目 · 6 条")
-
-            VStack(spacing: 8) {
-                ForEach(records) { record in
-                    MemoryCard(record: record) {
-                        router.navigate(
-                            to: .memoryEdit(
-                                text: record.text,
-                                scope: record.scope.title,
-                                pinned: record.pinned
-                            )
-                        )
-                    }
-                }
+            AmberSectionLabel(text: "记忆库")
+            AmberFormGroup {
+                MemoryStatusRow(
+                    row: .init(
+                        title: "核心 / 短期 / 长期条目",
+                        subtitle: "Android/KMP 通过 MemoryRepository 读取；iOS 当前没有 DAO/repository bridge，因此不显示样例记忆条数。",
+                        value: "未接线",
+                        color: AmberTheme.accentAmber
+                    )
+                )
+                MemoryDivider()
+                MemoryStatusRow(
+                    row: .init(
+                        title: "新增 / 编辑 / 删除",
+                        subtitle: "右上角 + 和详情页只保留草稿预览；不会创建、更新或删除真实记忆。",
+                        value: "草稿",
+                        color: AmberTheme.muted
+                    )
+                )
             }
-            .padding(.horizontal, 16)
 
-            MemoryNote("点任意一条进入编辑；向左滑动可删除。核心记忆几乎总会注入，短期记忆过期会淡化。")
+            MemoryNote("Android/KMP 的记忆库能力真实存在；本页当前只记录 iOS bridge 缺口。")
         }
     }
 }
 
-private struct MemoryRecord: Identifiable {
+private struct MemoryCapabilityEvidence: Identifiable {
     let id = UUID()
-    let scope: MemoryScope
-    let text: String
-    var pinned = false
-}
-
-private enum MemoryScope {
-    case core
-    case longTerm
-    case shortTerm
-
-    var title: String {
-        switch self {
-        case .core: "核心"
-        case .longTerm: "长期"
-        case .shortTerm: "短期"
-        }
-    }
-
-    var foreground: Color {
-        switch self {
-        case .core: AmberTheme.accent
-        case .longTerm: AmberTheme.accentCyan
-        case .shortTerm: AmberTheme.accentAmber
-        }
-    }
-
-    var background: Color {
-        switch self {
-        case .core: AmberTheme.accentTint
-        case .longTerm: AmberTheme.accentCyan.opacity(0.12)
-        case .shortTerm: AmberTheme.accentAmber.opacity(0.13)
-        }
-    }
-}
-
-private struct MemoryToggleRow: View {
-    let systemImage: String
-    var iconColor: Color = AmberTheme.foreground2
     let title: String
     let subtitle: String
-    let isOn: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 28, height: 28)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body)
-                        .foregroundStyle(AmberTheme.foreground)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                MemorySwitch(isOn: isOn)
-            }
-            .frame(minHeight: 58)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
+    let value: String
+    let color: Color
 }
 
-private struct MemorySwitch: View {
-    let isOn: Bool
+private struct MemoryStatusRow: View {
+    let row: MemoryCapabilityEvidence
 
     var body: some View {
-        Capsule()
-            .fill(isOn ? AmberTheme.accent : AmberTheme.surface2)
-            .frame(width: 48, height: 28)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 24, height: 24)
-                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
-                    .padding(2)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(row.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .animation(.snappy(duration: 0.18), value: isOn)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(row.value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(row.color)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
     }
 }
 
@@ -321,48 +267,7 @@ private struct MemoryDivider: View {
         Rectangle()
             .fill(AmberTheme.borderSoft)
             .frame(height: 0.5)
-            .padding(.leading, 54)
-    }
-}
-
-private struct MemoryCard: View {
-    let record: MemoryRecord
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .center, spacing: 8) {
-                Text(record.scope.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(record.scope.foreground)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(record.scope.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-                Text(record.text)
-                    .font(.subheadline)
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if record.pinned {
-                    Image(systemName: "pin")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AmberTheme.accent)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AmberTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
-                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
-        }
-        .buttonStyle(.plain)
+            .padding(.leading, 14)
     }
 }
 
