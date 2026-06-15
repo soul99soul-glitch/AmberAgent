@@ -11,6 +11,7 @@ struct SeatEditorView: View {
     @State private var cliTool = "Codex"
     @State private var cliModel = ""
     @State private var prompt = ""
+    @State private var showRemoveInfo = false
 
     var body: some View {
         ZStack {
@@ -21,9 +22,11 @@ struct SeatEditorView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
+                        noticeSection
                         identitySection
                         runnerSection
                         promptSection
+                        previewSection
                         deleteSection
                     }
                     .padding(.bottom, 36)
@@ -33,6 +36,11 @@ struct SeatEditorView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .alert("移除尚未接线", isPresented: $showRemoveInfo) {
+            Button("知道了", role: .cancel) { }
+        } message: {
+            Text("当前 iOS 页面没有读取真实 defaultSeats，因此不会删除任何模型议会席位。")
+        }
     }
 
     private var header: some View {
@@ -43,17 +51,17 @@ struct SeatEditorView: View {
 
             Spacer()
 
-            Text("编辑席位")
+            Text("席位草稿")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
             Spacer()
 
-            Button("完成") {
+            Button("关闭") {
                 dismiss()
             }
             .font(.system(size: 14.5, weight: .semibold))
-            .foregroundStyle(AmberTheme.accent)
+            .foregroundStyle(AmberTheme.foreground2)
             .frame(height: 30)
             .padding(.horizontal, 13)
             .amberGlass(cornerRadius: AmberTheme.radiusPill)
@@ -64,9 +72,14 @@ struct SeatEditorView: View {
         .padding(.bottom, 10)
     }
 
+    private var noticeSection: some View {
+        SeatEditorFootnote(text: "Android/KMP 通过 ModelCouncilRuntimeSetting.defaultSeats 和 AgentPromptConfigRepository 保存席位与 prompt；iOS 当前没有这条设置/文件桥。本页只保留草稿预览，关闭后不会保存。")
+            .padding(.bottom, 10)
+    }
+
     private var identitySection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "席位")
+            AmberSectionLabel(text: "席位草稿")
             AmberFormGroup {
                 HStack(spacing: 12) {
                     Text("名称")
@@ -106,13 +119,13 @@ struct SeatEditorView: View {
                 }
                 .buttonStyle(.plain)
             }
-            SeatEditorFootnote(text: "核心三席（支持者 / 反对者 / 裁判）由系统自动加入，这里配的是领域视角。")
+            SeatEditorFootnote(text: "这些字段只影响本页草稿；不会写入 Android/KMP 的 ModelCouncilSeat。")
         }
     }
 
     private var runnerSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行方式")
+            AmberSectionLabel(text: "运行方式草稿")
 
             HStack(spacing: 4) {
                 ForEach(SeatRunnerType.allCases) { type in
@@ -140,7 +153,7 @@ struct SeatEditorView: View {
                 cliRunnerGroup
             }
 
-            SeatEditorFootnote(text: "议会席位只做纯文本生成，不继承工具、记忆或聊天记录。")
+            SeatEditorFootnote(text: "Android/KMP 支持 provider_model 和 external_cli；iOS 当前不会保存 runnerType、modelId、externalTool 或 reasoningLevel。")
         }
     }
 
@@ -220,7 +233,7 @@ struct SeatEditorView: View {
 
     private var promptSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "席位提示词")
+            AmberSectionLabel(text: "席位提示词草稿")
             AmberFormGroup {
                 TextEditor(text: $prompt)
                     .font(.system(size: 14))
@@ -241,18 +254,31 @@ struct SeatEditorView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
             }
-            SeatEditorFootnote(text: "填写后将覆盖角色预设的默认提示词，只对这位席位生效。")
+            SeatEditorFootnote(text: "填写内容只留在本页草稿；不会写入 AgentPromptConfigRepository 的 modelCouncilPromptFile。")
+        }
+    }
+
+    private var previewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "处理方式")
+            AmberFormGroup {
+                SeatEditorStatusLine(label: "保存", value: "未接线")
+                SeatEditorDivider()
+                SeatEditorStatusLine(label: "写入位置", value: "本页草稿")
+                SeatEditorDivider()
+                SeatEditorStatusLine(label: "真实后端", value: "defaultSeats 未桥接")
+            }
         }
     }
 
     private var deleteSection: some View {
         AmberFormGroup {
             Button {
-                dismiss()
+                showRemoveInfo = true
             } label: {
-                Text("移除此席位")
+                Text("移除席位尚未接线")
                     .font(.body)
-                    .foregroundStyle(AmberTheme.accentRed)
+                    .foregroundStyle(AmberTheme.muted)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 54)
                     .contentShape(Rectangle())
@@ -260,6 +286,29 @@ struct SeatEditorView: View {
             .buttonStyle(.plain)
         }
         .padding(.top, 20)
+    }
+}
+
+private struct SeatEditorStatusLine: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.foreground)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minHeight: 46)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 }
 

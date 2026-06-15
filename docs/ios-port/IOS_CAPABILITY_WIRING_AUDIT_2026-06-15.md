@@ -25,6 +25,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Settings home status honesty: `SettingsHomeView` now reads existing local `@AppStorage` appearance/display/execution preferences and `SettingsStore.terminalDefaultRuntime` / `sshProfiles` for runtime state. Memory, Search, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount rows no longer show precise fake counts, cloud backup promises, source totals, executable-tool promises, or role examples; they explicitly mark missing iOS bridges instead.
 - Search services honesty: `SearchServicesView` and `SearchProviderView` now present Android/KMP `SearchServiceOptions`, `SettingSearchPage`, `SearchPrefs`, `SearchTools`, and `SearchOrchestrator` as real capability evidence while making the iOS bridge gap explicit. The pages no longer show fake enabled counts, fake configured Serper/Tavily rows, masked API keys, local-only toggles, or "Done" saves; provider details are draft-only with empty API key fields, no Keychain write, no settings write, no delete, and no network test.
 - Memory pages honesty: `MemoryOverviewView`, `MemoryEditView`, and `AgentsMarkdownView` now present Android/KMP `MemoryRepository`, `MemoryRecallStore`, `memory_tool`, `Settings.agentRuntime`, and `GenerationPrompts.buildAgentSoulPrompt()` as real capability evidence while making the missing iOS bridge explicit. Fake memory records, local `@AppStorage` toggles, fake agents.md persistence, "Done" saves, and destructive delete UI were removed; add/edit/agents.md pages are draft-only and do not write `UserDefaults`, `SettingsStore`, a memory repository, or a chat request.
+- Model Council pages honesty: `CouncilView`, `CouncilSettingsView`, and `SeatEditorView` now present Android/KMP `ModelCouncilRuntimeSetting`, `ModelCouncilManager`, `ModelCouncilTools`, `ModelCouncilRolePresets`, `AgentPromptConfigRepository`, and the ChatService tool-injection gate as real capability evidence while making the missing iOS bridge explicit. The fake council chat transcript, fake live member states, mode menu, composer, local toggle/menu/stepper settings, fake configured seats, "Done" save, and destructive remove action were removed or downgraded to draft-only UI.
 
 ### 仍是草稿/占位
 
@@ -36,7 +37,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - MCP server page is not wired to `Settings.mcpServers`, `McpServerConfig`, `McpManager`, or `McpImportParser`. The previous hardcoded connected-server list and isolated `@AppStorage` toggles have been removed; import/add remain draft-only, and import uses only rough text preview rather than real parser-backed validation.
 - Account profile is still local preview only, with no inspected persistent account/profile store.
 - Conversation storage cleanup/delete is still draft-only: the page only explains the missing iOS storage bridge and does not execute cache cleanup, age-based cleanup, or delete-all.
-- Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount child pages need separate verification before any values or actions can be treated as real. Settings home no longer shows precise fake Memory/Council/SubAgent status or capability-complete Sync/Board/MiniApp/WebMount copy; the Memory child pages have now been downgraded to draft/not-wired status.
+- Sync/Backup, Board, SubAgent, MiniApp, and WebMount child pages need separate verification before any values or actions can be treated as real. Settings home no longer shows precise fake Memory/Council/SubAgent status or capability-complete Sync/Board/MiniApp/WebMount copy; the Memory and Model Council child pages have now been downgraded to draft/not-wired status.
 
 ### 不应接线的孤儿入口 / 不应误导的入口
 
@@ -50,13 +51,14 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Account exact usage stats and heatmap: downgraded in Slice 7; do not reintroduce precise values until a real iOS stats bridge exists.
 - Conversation storage cleanup/delete: downgraded in Slice 8; do not add destructive cleanup/delete behavior until a real iOS storage transaction and backup/attachment policy exist.
 - Memory add/edit/delete and agents.md injection: downgraded in Slice 12; do not save local-only memory drafts, persist agents.md, or inject agents.md into Chat until a real iOS `Settings.agentRuntime` / memory repository / chat request bridge exists.
+- Model Council chat/settings/seat editor: downgraded in Slice 13; do not show fake live council transcripts, fake active members, local-only enabled toggles, local-only seat settings, model_council tool execution, report writing, or destructive seat removal until a real iOS `Settings.agentRuntime.modelCouncil` / `ModelCouncilManager` / tool executor bridge exists.
 
 ### 高风险区域
 
 - Secret storage split: the single OpenAI API key is in Keychain, but general provider/TTS API keys are not yet modeled in iOS. Avoid expanding secret handling without a clear schema.
 - Provider/model identity: current iOS chat creates a fresh `ProviderSetting.OpenAI` and fresh `Model` from three scalar settings. It cannot represent multiple providers, custom headers/body, OAuth/coding-plan auth modes, provider-specific models, Gemini's `ProviderSetting.Google`, or xAI's default `useResponseApi=true` template state.
 - Permission approval scope: `Route.toolPermissions` routes to the approval-policy page and its "权限与能力" row routes to `ToolPermissionsView`; `SheetDestination.toolPermissions` still opens the full capability page directly. The approval page intentionally exposes only the implemented `file_read_selected` tool policy; photos/location/camera/notifications remain system-permission status/request entries until real Agent executors exist.
-- Hardcoded precise numbers/status: Settings home has been reduced to real current scalar/default/local state or explicit not-wired copy for Provider, TTS, Skill/MCP, Account, ConversationStorage, Appearance, Display, Execution, Runtime, Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Search services and Memory have now been downgraded as child pages too; destination pages such as Council, SubAgent, Sync/Backup, Board, MiniApp, and WebMount still require separate audits because several remain prototype-only.
+- Hardcoded precise numbers/status: Settings home has been reduced to real current scalar/default/local state or explicit not-wired copy for Provider, TTS, Skill/MCP, Account, ConversationStorage, Appearance, Display, Execution, Runtime, Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Search services, Memory, and Model Council have now been downgraded as child pages too; destination pages such as SubAgent, Sync/Backup, Board, MiniApp, and WebMount still require separate audits because several remain prototype-only.
 - External effects: Provider connection test in legacy `SettingsView` calls `listModels`. Do not use it as routine validation unless the user explicitly supplies credentials/approves network use.
 
 ## 2. UI Entry Map
@@ -77,7 +79,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Settings home | 同步与备份 | `PlaceholderViews.swift` -> `.syncBackup` | Android sync exists; iOS bridge not inspected | iOS sync/backup implementation | home subtitle downgraded to `iOS 同步桥尚未接线`; child page still needs separate audit | P1 done/home; Blocked/P2 page |
 | Settings home | 对话存储 | `PlaceholderViews.swift` -> `.conversationStorage` | Android `FilesManager.countChatFiles()` exists for uploaded chat files; iOS bridge not exposed | real conversation/storage stats + safe cleanup | value downgraded to `未接线` | P1 done/P1 bridge |
 | Settings home | 今日看板 | `PlaceholderViews.swift` -> `.board` | Android feature exists; iOS bridge not inspected | board runtime/store | home subtitle downgraded to `数据源桥尚未接线`; child page still needs separate audit | P1 done/home; P2 page |
-| Settings home | 模型议会 | `PlaceholderViews.swift` -> `.council` | Android/KMP council exists | real council settings/runtime | home subtitle downgraded to `iOS 运行桥尚未接线`; child page still needs separate audit | P1 done/home; P1 page |
+| Settings home | 模型议会 | `PlaceholderViews.swift` -> `.council` | Android/KMP council exists; iOS bridge missing | real council settings/runtime | home subtitle downgraded to `iOS 运行桥尚未接线`; child pages now also show explicit not-wired/draft state | P1 done/home; P1 bridge |
 | Settings home | SubAgent | `PlaceholderViews.swift` -> `.subagents` | Android/KMP subagent exists | real subagent settings/runtime | home subtitle downgraded to `iOS SubAgent 配置桥尚未接线`; child page still needs separate audit | P1 done/home; P1 page |
 | Settings home | 小应用 | `PlaceholderViews.swift` -> `.miniApps` | Android miniapp exists; iOS bridge not inspected | miniapp store/runtime | home subtitle downgraded to `iOS 小应用运行桥尚未接线`; child page still needs separate audit | P1 done/home; P2 page |
 | Settings home | WebMount | `PlaceholderViews.swift` -> `.webMount` | Android WebMount exists; iOS bridge not inspected | real webmount profile store | home subtitle downgraded to `iOS WebMount 桥尚未接线`; child page still needs separate audit | P1 done/home; P2 page |
@@ -89,6 +91,9 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Memory overview | evidence/config/records | `MemoryOverviewView.swift` | Yes in Android/KMP: `MemoryRepository`, `MemoryRecallStore`, `memory_tool`, `Settings.agentRuntime` | iOS memory repository/settings/tool bridge + chat injection path | removed fake records and local `@AppStorage` toggles; shows evidence plus explicit `未接线` rows | P1 done/page; P1 bridge |
 | Memory edit | add/edit/delete memory | `MemoryEditView.swift` | Yes in Android/KMP repository methods and `memory_tool` | real memory repository transaction and settings/tool bridge | draft-only editor; no save button, no destructive delete, no repository write | P1 done/page; P1 bridge |
 | agents.md | app soul markdown | `AgentsMarkdownView.swift` | Yes in Android/KMP: `Settings.agentRuntime.agentSoulMarkdown` + `GenerationPrompts` | iOS `Settings.agentRuntime` bridge + `ChatViewModel` prompt construction | draft-only editor; no UserDefaults/SettingsStore write and no chat request injection | P1 done/page; P1 bridge |
+| Model Council overview | evidence/runtime status | `CouncilView.swift` | Yes in Android/KMP: `ModelCouncilRuntimeSetting`, `ModelCouncilManager`, `ModelCouncilTools`, ChatService tool gate | iOS `Settings.agentRuntime.modelCouncil` + `ModelCouncilManager`/tool executor + ChatViewModel bridge | fake live transcript/composer/member status removed; page shows evidence plus iOS not-wired status | P1 done/page; P1 bridge |
+| Model Council settings | runtime fields/role presets/limits | `CouncilSettingsView.swift` | Yes in Android/KMP settings page and runtime models | real `Settings.agentRuntime.modelCouncil` persistence + prompt file sync | local toggles/menus/stepper/fake configured seats removed; page shows field mapping and draft seat entry | P1 done/page; P1 bridge |
+| Model Council seat editor | add/edit/remove seat draft | `SeatEditorView.swift` | Yes in Android/KMP: `defaultSeats`, `ModelCouncilSeat`, `AgentPromptConfigRepository` | real settings update + prompt file write | draft-only editor; no save button, no destructive remove, no settings/prompt write | P1 done/page; P1 bridge |
 | Model defaults | chat model | `ModelDefaultsView.swift` | Partial | `SettingsStore.modelId` | reads/writes scalar setting | P1 |
 | Model defaults | image/aux/thinking/context/group defaults | `ModelDefaultsView.swift` | Android/KMP settings have richer defaults: `imageGenerationModelId`, `titleModelId`, `suggestionModelId`, `ocrModelId`, `compressModelId`, prompts, `modelGroupSessionDefaults`, reasoning/session defaults | real iOS settings bridge + execution paths | local-only menus removed; rows now display `未接线` and do not save draft selections | P1 done/home; P1 bridge |
 | Chat | send/cancel streaming | `ChatView.swift`, `ChatViewModel.swift` | Yes | `OpenAIKmpProvider`, `MessageStreamAccumulator` | wired for single OpenAI-compatible provider | P0 done/needs hardening |
@@ -120,7 +125,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 
 ### P1 - 已有能力但只是硬编码状态
 
-1. Done in Slice 9 for home rows: Settings home subtitles/trailing values now read real local settings where available or show explicit not-wired copy for Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Search and Memory destination pages have also been handled in Slice 11 and Slice 12; remaining destination pages still need separate audits/wiring.
+1. Done in Slice 9 for home rows: Settings home subtitles/trailing values now read real local settings where available or show explicit not-wired copy for Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Search, Memory, and Model Council destination pages have also been handled in Slice 11, Slice 12, and Slice 13; remaining destination pages still need separate audits/wiring.
 2. Chat and ModelDefaults need a real provider/model registry bridge before exposing multiple provider choices; current iOS generation only has a single OpenAI-compatible scalar config.
 3. Done in Slice 10: ModelDefaults auxiliary model/thinking/context/group controls are marked unavailable instead of persisting local-only draft state. Real Android/KMP model-default bridge remains P1.
 4. Done in Slice 6: Chat thinking level now hydrates `Model.abilities` from KMP `ModelRegistry` and writes `TextGenerationParams.reasoningLevel` only for reasoning-capable models; context popover no longer shows exact fake token/cache/speed numbers.
@@ -131,6 +136,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 9. Wire full iOS Provider registry to `Settings.providers`, including provider-specific Keychain schema, auth mode, Response API, model list, custom headers/body, and balance settings before exposing multi-provider save/fetch behavior.
 10. Done in Slice 11: Search services and add/edit provider pages no longer expose local-only toggles, fake configured provider rows, masked API keys, result-size menus, delete, or save actions. Real iOS search settings/executor bridge remains P1.
 11. Done in Slice 12: Memory overview/edit/agents.md pages no longer expose local-only memory toggles, fake memory records, fake agents.md persistence, destructive delete, or save actions. Real iOS memory repository/settings/tool/chat bridge remains P1.
+12. Done in Slice 13: Model Council overview/settings/seat editor no longer expose a fake live council transcript, active member states, local-only settings toggles/menus, fake configured seats, "Done" save, destructive remove, or model_council tool execution. Real iOS model-council settings/runtime/tool bridge remains P1.
 
 ### P2 - 可改善但不阻塞
 
@@ -149,6 +155,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 6. Provider model fetching/balance refresh/network connection tests: external side effects; do not perform without explicit credentials and approval.
 7. Real Chat context-window/token accounting: no inspected iOS usage estimator is wired to the composer context panel yet.
 8. Real iOS memory persistence/recall/agents.md injection: Android/KMP has the implementation, but iOS lacks `Settings.agentRuntime`, memory repository/DAO bridge, `memory_tool` executor bridge, and `ChatViewModel` prompt injection path.
+9. Real iOS Model Council execution and settings persistence: Android/KMP has the implementation, but iOS lacks `Settings.agentRuntime.modelCouncil`, `ModelCouncilManager`, `model_council_*` tool execution, transcript/live-flow state, `AgentTaskStore` bridge, and prompt file sync.
 
 ## 4. Phase Review Log
 
@@ -304,7 +311,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
   - `DisplayFontSettingsView` persists `app.amber.ios.display.fontScale` and `app.amber.ios.display.chatFont`.
   - `ExecutionSettingsView` persists `app.amber.ios.execution.toolLoopLimit` and `app.amber.ios.execution.liveActivity`; this is treated as local settings state, not proof that every execution runtime consumes it.
   - `RuntimeEnvironmentView` and `SettingsStore` expose `terminalDefaultRuntime`, `sshProfiles`, SSH profile persistence, Keychain password storage, and runtime smoke tests.
-  - `SearchServicesView`, `MemoryOverviewView`, `CouncilSettingsView`, `SubAgentsView`, `SyncBackupView`, Board, MiniApp, and WebMount routes still contain local/hardcoded draft state or lack an inspected iOS bridge, so Settings home now marks their status as unavailable instead of precise or capability-complete.
+  - `SearchServicesView`, `MemoryOverviewView`, `CouncilView`, `CouncilSettingsView`, `SubAgentsView`, `SyncBackupView`, Board, MiniApp, and WebMount routes still contained local/hardcoded draft state or lacked an inspected iOS bridge at the time of Slice 9, so Settings home marked their status as unavailable instead of precise or capability-complete.
 - Verification:
   - `mcp__xcodebuildmcp.session_show_defaults` confirmed project `/Users/arquiel/Downloads/AI/amberagent-ios/iosApp/AmberAgent.xcodeproj`, scheme `iosApp`, simulator `iPhone 17`.
   - `mcp__xcodebuildmcp.build_run_sim` succeeded after the Settings home edits and again after the Sync/Board/MiniApp/WebMount copy correction.
@@ -314,7 +321,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
   - Settings home top: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_dd0ab3d8-099f-4c37-b51c-65d24de8bf19.jpg`
   - Settings home lower rows: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_b0e832ec-e6df-407f-8ddf-6d9748c0e662.jpg`
 - Subagent review: completed by `Einstein`; no P0/P1 findings. P2 audit wording fix applied: Provider/TTS home values are described as current scalar/default status rather than implying every row has an `@AppStorage` / `SettingsStore` storage path.
-- Remaining risk: Appearance/Display/Execution are real local preferences, but this slice does not prove each preference is globally consumed by all UI/runtime paths. Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount destination pages still need separate passes to remove or wire their internal prototype state. Search services was handled separately in Slice 11, and Memory was handled separately in Slice 12.
+- Remaining risk: Appearance/Display/Execution are real local preferences, but this slice does not prove each preference is globally consumed by all UI/runtime paths. Sync/Backup, Board, SubAgent, MiniApp, and WebMount destination pages still need separate passes to remove or wire their internal prototype state. Search services was handled separately in Slice 11, Memory was handled separately in Slice 12, and Model Council was handled separately in Slice 13.
 
 ### Slice 10 - Model defaults auxiliary controls downgrade
 
@@ -388,6 +395,33 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Open Design record: CD-79 should record the Memory not-wired downgrade, but direct `REDESIGN_DELTAS.md` write outside the repo remains blocked by the current approval/usage system after the Slice 11 rejection. No workaround was attempted.
 - Remaining risk: iOS still lacks the real memory settings/repository/tool/chat bridge. Real implementation must define how iOS persists `Settings.agentRuntime`, reads/writes memory records, wires `memory_tool` into the local tool executor, and injects agents.md into `ChatViewModel` prompts before enabling saves or chat effects.
 
+### Slice 13 - Model Council pages not-wired downgrade
+
+- Scope: `CouncilView`, `CouncilSettingsView`, and `SeatEditorView` no longer present local prototype state as a running Model Council. The overview page keeps Android/KMP council runtime/tool capabilities visible as real evidence, but removes the fake council transcript, fake active member states, mode menu, live streaming caret, composer, stop button, and synthetic detail sheet. The settings page removes local-only enabled toggles, synthesis-model menus, hardcoded configured seat rows, steppers, and local limit selectors. The seat editor is a draft preview only: no "Done" save, no destructive remove, no settings write, and no prompt-file write.
+- Evidence:
+  - `ModelCouncilRuntimeSetting` defines the real Android/KMP settings fields: `enabled`, `defaultSeats`, `synthesisModelId`, `maxSeats`, `defaultRounds`, timeouts, output budget, and `showSeatOutputs`.
+  - `ModelCouncilManager` starts/reads/waits/cancels council runs, records transcripts, publishes per-seat live text flows, and registers AgentTask state.
+  - `ModelCouncilTools` exposes real `model_council_status`, `model_council_start`, `model_council_read`, `model_council_wait`, `model_council_cancel`, and report-writing tools.
+  - Android `SettingExperimentalModelCouncilPage` reads/writes `settings.agentRuntime.modelCouncil`, model selectors, seat lists, role presets, runner types, limits, and prompt-file sync through `AgentPromptConfigRepository`.
+  - Android/KMP `ChatService` injects `ModelCouncilTools` only when `settings.agentRuntime.modelCouncil.enabled` is true.
+  - iOS `SettingsStore`, `ChatViewModel`, and `IOSLocalToolExecutor` currently expose no `Settings.agentRuntime.modelCouncil`, `ModelCouncilManager`, `model_council_*` executor bridge, transcript/live-flow state, `AgentTaskStore` bridge, or prompt-file sync.
+- Verification:
+  - `git diff --check -- iosApp/iosApp/CouncilView.swift iosApp/iosApp/CouncilSettingsView.swift iosApp/iosApp/SeatEditorView.swift` passed.
+  - Targeted `rg` check found no remaining fake council chat/composer/live/member-state/save/delete/toggle components in the three Council pages; remaining matches are Android/KMP field names or negative copy.
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded after the Model Council page edits.
+  - UI snapshot: Home sidebar -> 模型议会 shows Android/KMP evidence rows for `ModelCouncilRuntimeSetting`, `ModelCouncilManager`, and `model_council_* 工具`, plus `iOS 运行桥` value `未接线`; no fake transcript, composer, live member status, or stop button appears.
+  - UI snapshot: Model Council -> 成员设置草稿 shows Settings field mapping and `未接线`, no local enabled toggle, synthesis model menu, fake configured seats, or steppers.
+  - UI snapshot: add seat opens `席位草稿`, states it will not save, shows `保存 未接线` and `defaultSeats 未桥接`, and the remove action opens a single-button informational alert rather than deleting.
+- Screenshot paths:
+  - Model Council evidence page: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_62edda9d-5a6a-48d3-836b-1414da687ac9.jpg`
+  - Model Council settings field map: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_c0fa1f02-579e-4059-a6e6-155b2eaec79a.jpg`
+  - Seat editor draft top: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_ffd1306b-ab89-4d5e-b21d-5ce1da825e04.jpg`
+  - Seat editor draft handling rows: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_7092cbcd-2304-4e8d-8a37-6e02258f4379.jpg`
+  - Seat remove informational alert: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_236f1eff-e487-4fe8-a74e-88be75d491e5.jpg`
+- Subagent review: completed by `Ramanujan`; no P0/P1 findings. P2 fix applied before commit: Slice 13 and Commit Log review status no longer say pending.
+- Open Design record: CD-80 should record the Model Council not-wired downgrade, but direct `REDESIGN_DELTAS.md` write outside the repo remains blocked by the current approval/usage system after the Slice 11 rejection. No workaround was attempted.
+- Remaining risk: iOS still lacks the real Model Council settings/runtime/tool bridge. Real implementation must define how iOS persists `Settings.agentRuntime.modelCouncil`, resolves provider/CLI seats, starts and observes model_council runs, exposes transcript/live-flow state, integrates AgentTask status, and syncs prompt files before enabling execution or saves.
+
 ## 5. Commit Log
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
@@ -402,4 +436,5 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | `8b21e96a3` | Settings home status honesty for Appearance, Display, Memory, Execution, Runtime, Search, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount | `build_run_sim` succeeded after edits and after Sync/Board/MiniApp/WebMount correction; subagent review completed with no P0/P1 | see Slice 9 screenshot paths | child pages still need separate audits; Appearance/Display/Execution consumption outside their local settings pages remains partially unverified |
 | `0877ec9c9` | Model defaults auxiliary controls downgraded from local-only selections to not-wired status; chat model remains wired to `SettingsStore.modelId` | `build_run_sim` succeeded before and after subagent P2 fix; subagent review completed with no P0/P1 | see Slice 10 screenshot paths | no iOS bridge for Android/KMP image/task model defaults, prompts, reasoning/session defaults, context policy, or model group defaults |
 | `b1a245da4` | Search services and provider draft pages downgraded from local-only enabled/configured state to Android/KMP evidence plus iOS not-wired status | `build_run_sim` succeeded after edits and after local P2 static-row fix; subagent review completed by `Carver` with no P0/P1 | see Slice 11 screenshot paths | no iOS search settings bridge, search credential storage, or search/scrape executor |
-| `Pending` | Memory overview/edit/agents.md pages downgraded from local-only toggles, fake records, fake agents.md persistence, and destructive delete to Android/KMP evidence plus iOS not-wired draft state | `diff --check` passed; `build_run_sim` succeeded; subagent review completed by `Meitner` with no P0/P1 | see Slice 12 screenshot paths | no iOS memory settings/repository/tool/chat bridge or agents.md prompt injection |
+| `abfaf73f5` | Memory overview/edit/agents.md pages downgraded from local-only toggles, fake records, fake agents.md persistence, and destructive delete to Android/KMP evidence plus iOS not-wired draft state | `diff --check` passed; `build_run_sim` succeeded; subagent review completed by `Meitner` with no P0/P1 | see Slice 12 screenshot paths | no iOS memory settings/repository/tool/chat bridge or agents.md prompt injection |
+| `Pending` | Model Council overview/settings/seat editor downgraded from fake live transcript, active member states, local settings toggles, fake configured seats, save/remove actions, and tool execution to Android/KMP evidence plus iOS not-wired draft state | `diff --check` passed; `build_run_sim` succeeded; subagent review completed by `Ramanujan` with no P0/P1 | see Slice 13 screenshot paths | no iOS Model Council settings/runtime/tool bridge, transcript/live-flow state, AgentTask bridge, or prompt-file sync |
