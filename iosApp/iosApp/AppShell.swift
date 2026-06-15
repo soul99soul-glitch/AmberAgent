@@ -175,6 +175,8 @@ enum Route: Hashable {
     case memoryEdit(text: String, scope: String, pinned: Bool)
     case skills
     case mcpServers
+    case mcpImport
+    case mcpAdd
     case skillDetail(name: String)
     case execution
     case providers
@@ -264,6 +266,10 @@ private extension View {
                 SkillsView()
             case .mcpServers:
                 McpServersView()
+            case .mcpImport:
+                McpImportView()
+            case .mcpAdd:
+                McpAddView()
             case .skillDetail(let name):
                 SkillDetailView(skillName: name)
             case .execution:

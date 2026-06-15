@@ -1,12 +1,12 @@
 import SwiftUI
 
 struct McpServersView: View {
+    @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage("app.amber.ios.mcp.amap.enabled") private var amapEnabled = true
     @AppStorage("app.amber.ios.mcp.feishu.enabled") private var feishuEnabled = true
     @AppStorage("app.amber.ios.mcp.github.enabled") private var githubEnabled = false
-    @State private var pendingAlert: McpAlert?
 
     var body: some View {
         ZStack {
@@ -25,13 +25,6 @@ struct McpServersView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert(item: $pendingAlert) { alert in
-            Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
-                dismissButton: .default(Text("知道了"))
-            )
-        }
     }
 
     private var header: some View {
@@ -50,10 +43,10 @@ struct McpServersView: View {
 
             HStack(spacing: 8) {
                 AmberGlassCircleButton(systemImage: "square.and.arrow.down", accessibilityLabel: "导入服务器", size: 38, symbolSize: 16) {
-                    pendingAlert = .importServer
+                    router.navigate(to: .mcpImport)
                 }
                 AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加服务器", size: 38, symbolSize: 17) {
-                    pendingAlert = .addServer
+                    router.navigate(to: .mcpAdd)
                 }
             }
         }
@@ -130,7 +123,7 @@ struct McpServersView: View {
                     title: "导入服务器",
                     subtitle: "粘贴标准 mcpServers JSON 配置"
                 ) {
-                    pendingAlert = .importServer
+                    router.navigate(to: .mcpImport)
                 }
 
                 McpDivider()
@@ -141,12 +134,277 @@ struct McpServersView: View {
                     title: "手动添加",
                     subtitle: "填写传输类型、服务器地址与请求头"
                 ) {
-                    pendingAlert = .addServer
+                    router.navigate(to: .mcpAdd)
                 }
             }
 
             McpNote("支持 SSE 与 Streamable HTTP 两种传输；可为每台服务器设置自定义请求头与工具审批。")
         }
+    }
+}
+
+struct McpImportView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var jsonText = """
+    {
+      "mcpServers": {
+        "context7": {
+          "transport": "streamableHttp",
+          "url": "https://mcp.context7.com/mcp"
+        }
+      }
+    }
+    """
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                McpDraftHeader(title: "导入服务器", doneTitle: "完成") {
+                    dismiss()
+                }
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        introSection
+                        jsonSection
+                        previewSection
+                    }
+                    .padding(.bottom, 36)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var introSection: some View {
+        VStack(spacing: 0) {
+            AmberFormGroup {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accentCyan)
+                        .frame(width: 34, height: 34)
+                        .background(AmberTheme.accentCyan.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("标准 mcpServers JSON")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(AmberTheme.foreground)
+
+                        Text("粘贴 Claude / Codex 常见的 mcpServers 配置。当前只做本地草稿校验，不读取剪贴板、不写入设置。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private var jsonSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "JSON")
+            AmberFormGroup {
+                TextEditor(text: $jsonText)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 220)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(AmberTheme.surface2.opacity(0.42), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+            }
+
+            McpValidationNote(text: validationText, isWarning: hasWarnings)
+        }
+    }
+
+    private var previewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "预览")
+            AmberFormGroup {
+                McpPreviewRow(title: "配置根", value: jsonText.contains("\"mcpServers\"") ? "mcpServers" : "未检测到")
+                McpDivider()
+                McpPreviewRow(title: "疑似服务器数", value: "\(estimatedServerCount)")
+                McpDivider()
+                McpPreviewRow(title: "导入方式", value: "本地草稿")
+            }
+        }
+    }
+
+    private var hasWarnings: Bool {
+        !jsonText.contains("\"mcpServers\"") || estimatedServerCount == 0
+    }
+
+    private var validationText: String {
+        if !jsonText.contains("\"mcpServers\"") {
+            return "未检测到 mcpServers 根字段；当前不会写入真实配置。"
+        }
+
+        if estimatedServerCount == 0 {
+            return "已检测到 mcpServers，但还没有可识别的服务器条目。"
+        }
+
+        return "检测到 \(estimatedServerCount) 个疑似服务器条目；当前只保留本地草稿。"
+    }
+
+    private var estimatedServerCount: Int {
+        let lines = jsonText
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        return lines.filter { line in
+            line.hasPrefix("\"") &&
+                line.contains("\":") &&
+                !line.contains("\"mcpServers\"") &&
+                !line.contains("\"transport\"") &&
+                !line.contains("\"url\"") &&
+                !line.contains("\"headers\"")
+        }.count
+    }
+}
+
+struct McpAddView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = "context7"
+    @State private var transport: McpTransportOption = .streamableHTTP
+    @State private var serverURL = "https://mcp.context7.com/mcp"
+    @State private var needsApproval = true
+    @State private var headers: [McpHeaderDraft] = [
+        .init(name: "X-Client", value: "AmberAgent")
+    ]
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                McpDraftHeader(title: "手动添加", doneTitle: "完成") {
+                    dismiss()
+                }
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        connectionSection
+                        headersSection
+                        toolsSection
+                    }
+                    .padding(.bottom, 36)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var connectionSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "连接")
+            AmberFormGroup {
+                McpDraftTextFieldRow(title: "名称", text: $name, placeholder: "例如 context7")
+                McpDivider()
+                Menu {
+                    ForEach(McpTransportOption.allCases) { option in
+                        Button(option.title) {
+                            transport = option
+                            serverURL = option.defaultURL
+                        }
+                    }
+                } label: {
+                    McpDraftPickerRow(title: "传输类型", value: transport.title)
+                }
+                McpDivider()
+                McpDraftTextFieldRow(title: "服务器 URL", text: $serverURL, placeholder: transport.defaultURL, monospace: true)
+            }
+
+            McpNote("当前不会连接服务器，也不会保存到 MCP 配置。真实接入时再绑定 McpManager / SettingsStore。")
+        }
+    }
+
+    private var headersSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "请求头")
+            AmberFormGroup {
+                ForEach(headers.indices, id: \.self) { index in
+                    McpHeaderDraftRow(header: $headers[index]) {
+                        headers.remove(at: index)
+                    }
+
+                    if index < headers.count - 1 {
+                        McpDivider()
+                    }
+                }
+
+                if !headers.isEmpty {
+                    McpDivider()
+                }
+
+                Button {
+                    headers.append(.init(name: "", value: ""))
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accent)
+
+                        Text("添加请求头")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(AmberTheme.accent)
+
+                        Spacer()
+                    }
+                    .frame(minHeight: 52)
+                    .padding(.horizontal, 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            McpValidationNote(text: headerValidationText, isWarning: hasHeaderWarnings)
+        }
+    }
+
+    private var toolsSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "工具审批")
+            AmberFormGroup {
+                McpDraftToggleRow(
+                    title: "工具默认需要批准",
+                    subtitle: "未知工具调用先询问，避免静默执行外部动作。",
+                    isOn: needsApproval
+                ) {
+                    needsApproval.toggle()
+                }
+            }
+        }
+    }
+
+    private var validHeaders: [McpHeaderDraft] {
+        headers.filter { !$0.name.trimmed.isEmpty && !$0.value.trimmed.isEmpty }
+    }
+
+    private var hasHeaderWarnings: Bool {
+        headers.contains { $0.name.trimmed.isEmpty || $0.value.trimmed.isEmpty }
+    }
+
+    private var headerValidationText: String {
+        if hasHeaderWarnings {
+            return "空名称或空值会在真实写入前被拦截；当前先保留本地草稿。"
+        }
+        return "\(validHeaders.count) 个请求头已准备好；当前不会保存。"
     }
 }
 
@@ -317,30 +575,248 @@ private struct McpNote: View {
     }
 }
 
-private enum McpAlert: Identifiable {
-    case importServer
-    case addServer
+private struct McpDraftHeader: View {
+    let title: String
+    let doneTitle: String
+    let dismiss: () -> Void
 
-    var id: String {
-        switch self {
-        case .importServer: "import-server"
-        case .addServer: "add-server"
+    var body: some View {
+        HStack {
+            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回 MCP 服务器", size: 44, symbolSize: 20) {
+                dismiss()
+            }
+
+            Spacer()
+
+            Text(title)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AmberTheme.foreground)
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Text(doneTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(height: 36)
+                    .padding(.horizontal, 14)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .amberGlass(cornerRadius: AmberTheme.radiusPill)
+            .accessibilityLabel(doneTitle)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
     }
+}
+
+private enum McpTransportOption: String, CaseIterable, Identifiable {
+    case streamableHTTP
+    case sse
+
+    var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .importServer: "导入服务器"
-        case .addServer: "手动添加"
+        case .streamableHTTP: "Streamable HTTP"
+        case .sse: "SSE"
         }
     }
 
-    var message: String {
+    var defaultURL: String {
         switch self {
-        case .importServer:
-            "导入需要解析 mcpServers JSON 并写入设置；当前不会读取剪贴板或修改配置。"
-        case .addServer:
-            "手动添加需要传输类型、服务器地址、请求头和工具审批编辑表单；当前只保留入口。"
+        case .streamableHTTP: "https://mcp.context7.com/mcp"
+        case .sse: "https://example.com/sse"
         }
+    }
+}
+
+private struct McpHeaderDraft: Identifiable, Hashable {
+    let id = UUID()
+    var name: String
+    var value: String
+}
+
+private struct McpDraftTextFieldRow: View {
+    let title: String
+    @Binding var text: String
+    let placeholder: String
+    var monospace = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+
+            TextField(placeholder, text: $text)
+                .font(monospace ? .system(size: 14, weight: .regular, design: .monospaced) : .body)
+                .foregroundStyle(AmberTheme.foreground)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 58)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct McpDraftPickerRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+
+                Text(value)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.accent)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted2)
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct McpDraftToggleRow: View {
+    let title: String
+    let subtitle: String
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                McpSwitch(isOn: isOn)
+            }
+            .frame(minHeight: 58)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(isOn ? "开启" : "关闭")
+    }
+}
+
+private struct McpHeaderDraftRow: View {
+    @Binding var header: McpHeaderDraft
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10) {
+                TextField("Header", text: $header.name)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accentRed)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("删除请求头")
+            }
+
+            TextField("Value", text: $header.value)
+                .font(.system(size: 14, weight: .regular, design: .monospaced))
+                .foregroundStyle(AmberTheme.foreground)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .background(AmberTheme.surface2.opacity(0.58), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+}
+
+private struct McpPreviewRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(minHeight: 52)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+    }
+}
+
+private struct McpValidationNote: View {
+    let text: String
+    let isWarning: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: isWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isWarning ? AmberTheme.accentAmber : AmberTheme.accentGreen)
+                .padding(.top, 2)
+
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 7)
+    }
+}
+
+private extension String {
+    var trimmed: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
