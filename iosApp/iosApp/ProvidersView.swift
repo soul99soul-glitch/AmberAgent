@@ -4,8 +4,6 @@ struct ProvidersView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
-    @State private var alert: ProviderAlert?
-
     private let enabledProviders: [ProviderRowModel] = [
         .init(initial: "O", name: "opencode", endpoint: "opencode.ai/v1"),
         .init(initial: "G", name: "Gemini OAuth", endpoint: "generativelanguage.googleapis.com"),
@@ -39,13 +37,6 @@ struct ProvidersView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert(item: $alert) { alert in
-            Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
-                dismissButton: .default(Text("知道了"))
-            )
-        }
     }
 
     private var header: some View {
@@ -68,7 +59,7 @@ struct ProvidersView: View {
             Spacer()
 
             Button {
-                alert = .addProvider
+                router.navigate(to: .providerAdd)
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 17, weight: .bold))
@@ -128,32 +119,6 @@ struct ProvidersView: View {
                     }
                 }
             }
-        }
-    }
-}
-
-private enum ProviderAlert: Identifiable {
-    case addProvider
-
-    var id: String {
-        switch self {
-        case .addProvider:
-            "add-provider"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .addProvider:
-            "添加服务商尚未接线"
-        }
-    }
-
-    var message: String {
-        switch self {
-        case .addProvider:
-            "当前保留已有 API 配置页作为服务商详情入口，" +
-                "不在列表页创建凭据或启动 OAuth。"
         }
     }
 }
@@ -225,6 +190,348 @@ private struct ProviderRow: View {
         .opacity(provider.isDimmed ? 0.6 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(provider.name)，\(provider.endpoint)")
+    }
+}
+
+struct ProviderAddView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = "New Provider"
+    @State private var protocolOption: ProviderProtocolOption = .openAI
+    @State private var apiBase = "https://api.example.com/v1"
+    @State private var apiKey = ""
+    @State private var path = "/chat/completions"
+    @State private var responseAPI = false
+    @State private var balanceRefresh = false
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                header
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        introSection
+                        connectionSection
+                        credentialSection
+                        optionSection
+                    }
+                    .padding(.bottom, 36)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var header: some View {
+        HStack {
+            AmberGlassCircleButton(
+                systemImage: "chevron.left",
+                accessibilityLabel: "返回服务商",
+                size: 44,
+                symbolSize: 20
+            ) {
+                dismiss()
+            }
+
+            Spacer()
+
+            Text("添加服务商")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AmberTheme.foreground)
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Text("完成")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(height: 36)
+                    .padding(.horizontal, 14)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .amberGlass(cornerRadius: AmberTheme.radiusPill)
+            .accessibilityLabel("完成")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+    }
+
+    private var introSection: some View {
+        VStack(spacing: 0) {
+            AmberFormGroup {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(width: 34, height: 34)
+                        .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("本地草稿")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(AmberTheme.foreground)
+
+                        Text("填写新服务商的协议、API 地址和凭据。当前页面只验证表单结构，不保存配置或发起网络请求。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private var connectionSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "连接")
+            AmberFormGroup {
+                ProviderDraftTextFieldRow(
+                    title: "名称",
+                    text: $name,
+                    placeholder: "例如 DeepSeek"
+                )
+                ProviderDivider()
+                Menu {
+                    ForEach(ProviderProtocolOption.allCases) { option in
+                        Button(option.title) {
+                            protocolOption = option
+                            path = option.defaultPath
+                        }
+                    }
+                } label: {
+                    ProviderDraftPickerRow(title: "接口协议", value: protocolOption.title)
+                }
+                ProviderDivider()
+                ProviderDraftTextFieldRow(
+                    title: "API 地址",
+                    text: $apiBase,
+                    placeholder: "https://api.example.com/v1",
+                    monospace: true
+                )
+                ProviderDivider()
+                ProviderDraftTextFieldRow(
+                    title: "路径",
+                    text: $path,
+                    placeholder: protocolOption.defaultPath,
+                    monospace: true
+                )
+            }
+
+            ProviderDraftNote("API 地址不应包含具体 chat 路径；路径会按所选协议预填，可按服务商文档调整。")
+        }
+    }
+
+    private var credentialSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "凭据")
+            AmberFormGroup {
+                ProviderDraftTextFieldRow(
+                    title: "API Key",
+                    text: $apiKey,
+                    placeholder: "sk-...",
+                    isSecure: true,
+                    monospace: true
+                )
+            }
+
+            ProviderDraftNote("当前不会写入 Keychain，也不会尝试连接服务商。需要真实接入时再绑定 SettingsStore。")
+        }
+    }
+
+    private var optionSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "选项")
+            AmberFormGroup {
+                ProviderDraftToggleRow(
+                    title: "Response API",
+                    subtitle: "使用 /responses 端点（实验性）",
+                    isOn: responseAPI
+                ) {
+                    responseAPI.toggle()
+                }
+                ProviderDivider()
+                ProviderDraftToggleRow(
+                    title: "启动后刷新余额",
+                    subtitle: "服务商支持余额接口时才启用",
+                    isOn: balanceRefresh
+                ) {
+                    balanceRefresh.toggle()
+                }
+            }
+        }
+    }
+}
+
+private enum ProviderProtocolOption: String, CaseIterable, Identifiable {
+    case openAI
+    case google
+    case anthropic
+    case custom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .openAI: "OpenAI Compatible"
+        case .google: "Gemini"
+        case .anthropic: "Anthropic"
+        case .custom: "自定义"
+        }
+    }
+
+    var defaultPath: String {
+        switch self {
+        case .openAI: "/chat/completions"
+        case .google: "/models/{model}:generateContent"
+        case .anthropic: "/messages"
+        case .custom: "/chat/completions"
+        }
+    }
+}
+
+private struct ProviderDraftTextFieldRow: View {
+    let title: String
+    @Binding var text: String
+    let placeholder: String
+    var isSecure = false
+    var monospace = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+
+            Group {
+                if isSecure {
+                    SecureField(placeholder, text: $text)
+                } else {
+                    TextField(placeholder, text: $text)
+                }
+            }
+            .font(monospace ? .system(size: 14, weight: .regular, design: .monospaced) : .body)
+            .foregroundStyle(AmberTheme.foreground)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 58)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct ProviderDraftPickerRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+
+                Text(value)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted2)
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ProviderDraftToggleRow: View {
+    let title: String
+    let subtitle: String
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                ProviderDraftSwitch(isOn: isOn)
+            }
+            .frame(minHeight: 58)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(isOn ? "开启" : "关闭")
+    }
+}
+
+private struct ProviderDraftSwitch: View {
+    let isOn: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(isOn ? AmberTheme.accent : AmberTheme.border)
+            .frame(width: 48, height: 30)
+            .overlay(alignment: isOn ? .trailing : .leading) {
+                Circle()
+                    .fill(.white)
+                    .frame(width: 26, height: 26)
+                    .shadow(color: .black.opacity(0.14), radius: 3, y: 1)
+                    .padding(2)
+            }
+            .animation(.snappy(duration: 0.18), value: isOn)
+    }
+}
+
+private struct ProviderDraftNote: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.footnote)
+            .foregroundStyle(AmberTheme.muted)
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 7)
     }
 }
 

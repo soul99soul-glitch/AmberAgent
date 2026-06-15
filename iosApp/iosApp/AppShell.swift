@@ -178,6 +178,7 @@ enum Route: Hashable {
     case skillDetail(name: String)
     case execution
     case providers
+    case providerAdd
     case providerDetail(name: String, endpoint: String)
     case modelEdit
     case modelCustomHeaders
@@ -268,6 +269,8 @@ private extension View {
                 ExecutionSettingsView()
             case .providers:
                 ProvidersView()
+            case .providerAdd:
+                ProviderAddView()
             case .providerDetail(let name, let endpoint):
                 ProviderDetailView(providerName: name, endpoint: endpoint)
             case .modelEdit:
