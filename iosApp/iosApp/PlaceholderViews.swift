@@ -328,6 +328,7 @@ struct ConversationsView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .padding(.top, 2)
         .padding(.bottom, 16)
