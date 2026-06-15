@@ -784,7 +784,7 @@ struct SettingsHomeView: View {
 
     private var providerRows: [SettingsHomeRow] {
         [
-            .init(title: "服务商", subtitle: "小米 MiMo · MiniMax · DeepSeek · Kimi...", value: "10 个", systemImage: "server.rack", color: AmberTheme.accent, route: .providerSettings),
+            .init(title: "服务商", subtitle: "小米 MiMo · MiniMax · DeepSeek · Kimi...", value: "10 个", systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
             .init(title: "默认模型", subtitle: nil, value: settingsStore.modelId.isEmpty ? "MiMo V2.5 Pro" : settingsStore.modelId, systemImage: "cpu", color: AmberTheme.accentAmber, route: placeholder("默认模型", "全局默认聊天模型和辅助任务模型", "cpu")),
             .init(title: "搜索服务", subtitle: nil, value: "4 个源", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: placeholder("搜索服务", "Agent 网络搜索源和通用选项", "magnifyingglass")),
             .init(title: "语音 TTS", subtitle: nil, value: "MiniMax", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: placeholder("语音 TTS", "语音引擎、参数和试听", "speaker.wave.2"))

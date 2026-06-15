@@ -84,3 +84,8 @@
 
 - **疑问**：执行 `python3 render_screen.py execution` 返回 `✗ renders/execution.png`，脚本没有产出截图；真实灵动岛实时活动、后台通知保活、工具循环上限和生成重试需要接入运行时配置与 ActivityKit/通知实现。
 - **默认做法**：先按 `index.html` 中 `#execution` section 与 CD-6 实现执行与任务设置 UI；操作预览、循环上限、生成式 UI、灵动岛、隐藏敏感内容、重试上限等都只保存本地偏好，不启动 Live Activity、不注册通知、不改变工具执行逻辑。
+
+## Q-18 · providers · 原型基准渲染与真实服务商注册表
+
+- **疑问**：`providers` 原型截图最初未产出；修正 `render_screen.py` 的 flatten CSS 后，`python3 render_screen.py providers` 已生成 `renders/providers.png`。iOS 端当前仍没有完整服务商注册表、OAuth flow、模型列表同步和按服务商拆分的详情配置页。
+- **默认做法**：按 `index.html` 中 `#providers` section 实现服务商列表视觉与设置入口；列表项继续进入现有 `SettingsView` 配置页以复用已有 API/Base URL 逻辑，不创建凭据、不发起 OAuth、不请求网络。
