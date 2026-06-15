@@ -282,7 +282,7 @@ private extension View {
             case .miniAppSettings:
                 MiniAppSettingsView()
             case .miniAppRunner(let title):
-                PlaceholderDetailView(title: title, subtitle: "小应用运行器", systemImage: "play.rectangle")
+                MiniAppRunnerView(title: title)
             case .workspace:
                 WorkspaceView()
             case .memory:
