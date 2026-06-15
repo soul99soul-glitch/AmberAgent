@@ -803,7 +803,7 @@ struct SettingsHomeView: View {
     private var dataRows: [SettingsHomeRow] {
         [
             .init(title: "同步与备份", subtitle: "Google 云备份 · 本地加密", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
-            .init(title: "对话存储", subtitle: nil, value: "128 个 · 24 MB", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
+            .init(title: "对话存储", subtitle: nil, value: "未接线", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
         ]
     }
 

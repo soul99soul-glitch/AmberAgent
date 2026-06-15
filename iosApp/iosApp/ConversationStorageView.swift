@@ -6,10 +6,10 @@ struct ConversationStorageView: View {
     @State private var pendingAlert: StorageAlert?
 
     private let usageItems: [StorageUsageItem] = [
-        .init(title: "对话记录", detail: "12.0 MB · 128 个", fraction: 0.50, color: AmberTheme.accent),
-        .init(title: "生成图片", detail: "6.0 MB", fraction: 0.25, color: AmberTheme.accentAmber),
-        .init(title: "附件文件", detail: "4.0 MB", fraction: 0.17, color: AmberTheme.accentCyan),
-        .init(title: "缓存", detail: "2.0 MB", fraction: 0.08, color: AmberTheme.muted2)
+        .init(title: "聊天附件文件", detail: "统计未接线", color: AmberTheme.accent),
+        .init(title: "历史对话", detail: "存储桥未接线", color: AmberTheme.accentAmber),
+        .init(title: "生成图片", detail: "目录统计未接线", color: AmberTheme.accentCyan),
+        .init(title: "缓存", detail: "清理服务未接线", color: AmberTheme.muted2)
     ]
 
     var body: some View {
@@ -34,10 +34,7 @@ struct ConversationStorageView: View {
             Alert(
                 title: Text(alert.title),
                 message: Text(alert.message),
-                primaryButton: alert.role == .destructive
-                    ? .destructive(Text(alert.primaryTitle)) { }
-                    : .default(Text(alert.primaryTitle)) { },
-                secondaryButton: .cancel(Text("取消"))
+                dismissButton: .default(Text(alert.primaryTitle)) { }
             )
         }
     }
@@ -65,7 +62,7 @@ struct ConversationStorageView: View {
     }
 
     private var intro: some View {
-        Text("App 占用 24 MB 本地空间。下方按类别拆分，可清理缓存或删除历史对话以释放空间。")
+        Text("iOS 端尚未接入真实对话、附件和缓存用量统计。此页先标出需要接线的范围，不会清理或删除本地数据。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -79,7 +76,7 @@ struct ConversationStorageView: View {
             AmberSectionLabel(text: "用量")
             AmberFormGroup {
                 VStack(spacing: 0) {
-                    StorageUsageBar(items: usageItems)
+                    StorageUsageBar()
                         .padding(.horizontal, 15)
                         .padding(.top, 14)
                         .padding(.bottom, 12)
@@ -102,9 +99,8 @@ struct ConversationStorageView: View {
             AmberFormGroup {
                 StorageActionRow(
                     systemImage: "arrow.clockwise",
-                    title: "清除缓存",
-                    subtitle: "不影响对话与文件，仅清理临时数据",
-                    trailing: "2.0 MB"
+                    title: "清除缓存尚未接线",
+                    subtitle: "需要真实缓存统计与清理服务"
                 ) {
                     pendingAlert = .cache
                 }
@@ -113,15 +109,14 @@ struct ConversationStorageView: View {
 
                 StorageActionRow(
                     systemImage: "calendar.badge.clock",
-                    title: "清理 30 天前对话",
-                    subtitle: "删除一个月前未置顶的历史对话",
-                    showsChevron: true
+                    title: "按时间清理尚未接线",
+                    subtitle: "需要对话存储层、置顶规则与备份检查"
                 ) {
                     pendingAlert = .oldConversations
                 }
             }
 
-            StorageNote("清理操作不可撤销；置顶与已备份的对话不受影响。")
+            StorageNote("当前清理入口只显示接线缺口；不会执行文件或数据库操作。")
         }
     }
 
@@ -131,9 +126,9 @@ struct ConversationStorageView: View {
                 Button {
                     pendingAlert = .deleteAll
                 } label: {
-                    Text("删除全部对话")
+                    Text("删除全部对话尚未接线")
                         .font(.body.weight(.medium))
-                        .foregroundStyle(AmberTheme.accentRed)
+                        .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 52)
                         .contentShape(Rectangle())
@@ -142,7 +137,7 @@ struct ConversationStorageView: View {
             }
             .padding(.top, 18)
 
-            StorageNote("将永久删除全部 128 条对话；建议先在「同步与备份」中备份。")
+            StorageNote("真实删除需要安全的对话存储事务、附件清理和备份决策；当前不会删除任何本地数据。")
         }
     }
 }
@@ -151,26 +146,39 @@ private struct StorageUsageItem: Identifiable {
     let id = UUID()
     let title: String
     let detail: String
-    let fraction: CGFloat
     let color: Color
 }
 
 private struct StorageUsageBar: View {
-    let items: [StorageUsageItem]
-
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                ForEach(items) { item in
-                    item.color
-                        .frame(width: max(geometry.size.width * item.fraction, 1))
+        ZStack {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(AmberTheme.surface2)
+
+            Canvas { context, size in
+                let stripeWidth: CGFloat = 16
+                var x: CGFloat = -size.height
+                while x < size.width {
+                    var path = Path()
+                    path.move(to: CGPoint(x: x, y: size.height))
+                    path.addLine(to: CGPoint(x: x + stripeWidth, y: 0))
+                    path.addLine(to: CGPoint(x: x + stripeWidth + 5, y: 0))
+                    path.addLine(to: CGPoint(x: x + 5, y: size.height))
+                    path.closeSubpath()
+                    context.fill(path, with: .color(AmberTheme.borderSoft.opacity(0.8)))
+                    x += stripeWidth
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .background(AmberTheme.surface2)
-            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+            Label("用量统计未接线", systemImage: "externaldrive.badge.questionmark")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(AmberTheme.surface.opacity(0.9), in: Capsule())
         }
-        .frame(height: 9)
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .frame(height: 44)
     }
 }
 
@@ -287,9 +295,9 @@ private enum StorageAlert: Identifiable {
 
     var title: String {
         switch self {
-        case .cache: "清除缓存"
-        case .oldConversations: "清理 30 天前对话"
-        case .deleteAll: "删除全部对话"
+        case .cache: "清除缓存尚未接线"
+        case .oldConversations: "按时间清理尚未接线"
+        case .deleteAll: "删除全部对话尚未接线"
         }
     }
 
@@ -307,20 +315,9 @@ private enum StorageAlert: Identifiable {
     var primaryTitle: String {
         switch self {
         case .cache: "知道了"
-        case .oldConversations: "继续占位"
-        case .deleteAll: "保留数据"
+        case .oldConversations: "知道了"
+        case .deleteAll: "知道了"
         }
     }
 
-    var role: StorageAlertRole {
-        switch self {
-        case .deleteAll: .destructive
-        case .cache, .oldConversations: .default
-        }
-    }
-}
-
-private enum StorageAlertRole {
-    case `default`
-    case destructive
 }
