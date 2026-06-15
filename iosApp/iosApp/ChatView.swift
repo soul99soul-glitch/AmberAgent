@@ -2,7 +2,6 @@ import SwiftUI
 import Shared
 
 private enum ComposerPanel: String, Identifiable {
-    case provider
     case thinking
     case context
 
@@ -14,6 +13,7 @@ struct ChatView: View {
     let settingsStore: SettingsStore
     @State private var viewModel: ChatViewModel
     @State private var activeComposerPanel: ComposerPanel?
+    @State private var isModelSheetPresented = false
     @State private var previewModel: String?
     @State private var selectedThinkingLevel = "关闭"
     @FocusState private var isInputFocused: Bool
@@ -40,6 +40,16 @@ struct ChatView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inputBar
+        }
+        .sheet(isPresented: $isModelSheetPresented) {
+            ComposerModelSheet(currentModel: composerModelLabel) { model in
+                previewModel = model.name
+                isModelSheetPresented = false
+            }
+            .presentationDetents([.fraction(0.72), .large])
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(28)
+            .presentationBackground(AmberTheme.glassStrong)
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -196,7 +206,8 @@ struct ChatView: View {
                 if showsComposerMeta {
                     HStack {
                         Button {
-                            toggleComposerPanel(.provider)
+                            activeComposerPanel = nil
+                            isModelSheetPresented = true
                         } label: {
                             Text(composerModelLabel)
                                 .font(.caption.weight(.semibold))
@@ -207,15 +218,7 @@ struct ChatView: View {
                         }
                         .buttonStyle(.plain)
                         .amberGlass(cornerRadius: 15)
-                        .popover(isPresented: popoverBinding(for: .provider), arrowEdge: .bottom) {
-                            ComposerProviderPanel(
-                                currentModel: composerModelLabel
-                            ) { model in
-                                previewModel = model
-                                activeComposerPanel = nil
-                            }
-                            .presentationCompactAdaptation(.popover)
-                        }
+                        .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
 
                         Spacer()
 
@@ -271,7 +274,8 @@ struct ChatView: View {
 
     private var showsComposerMeta: Bool {
         isInputFocused ||
-            activeComposerPanel != nil
+            activeComposerPanel != nil ||
+            isModelSheetPresented
     }
 
     private var composerModelLabel: String {
@@ -319,55 +323,290 @@ private struct ContextRingButton: View {
     }
 }
 
-private struct ComposerProviderPanel: View {
-    let currentModel: String
-    let onPick: (String) -> Void
+private struct ComposerModelSheet: View {
+    @Environment(\.dismiss) private var dismiss
 
-    private let models: [(title: String, subtitle: String)] = [
-        ("gpt-4o", "OpenAI · 当前会话"),
-        ("MiMo V2.5 Pro", "小米 MiMo · 快速"),
-        ("DeepSeek V4 Flash", "DeepSeek · 长上下文")
-    ]
+    let currentModel: String
+    let onPick: (ComposerModelOption) -> Void
+
+    @State private var expandedProviderIDs: Set<String>
+
+    private var providers: [ComposerProviderGroup] {
+        ComposerProviderGroup.defaults
+    }
+
+    init(currentModel: String, onPick: @escaping (ComposerModelOption) -> Void) {
+        self.currentModel = currentModel
+        self.onPick = onPick
+        let selectedProviderID = Self.selectedProviderID(for: currentModel)
+        self._expandedProviderIDs = State(initialValue: Set([selectedProviderID]))
+    }
 
     var body: some View {
-        ComposerPopoverSurface(width: 248) {
-            VStack(spacing: 0) {
-                ComposerPopoverHeader(title: "切换模型", subtitle: "仅更新本地预览标签")
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(AmberTheme.border)
+                .frame(width: 36, height: 5)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
 
-                ForEach(Array(models.enumerated()), id: \.element.title) { index, model in
-                    ComposerPopoverDivider(index: index)
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("选择模型")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(AmberTheme.foreground)
 
-                    Button {
-                        onPick(model.title)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: model.title == currentModel ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(model.title == currentModel ? AmberTheme.accent : AmberTheme.muted2)
-                                .frame(width: 20)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(model.title)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(AmberTheme.foreground)
-                                    .lineLimit(1)
-
-                                Text(model.subtitle)
-                                    .font(.caption2)
-                                    .foregroundStyle(AmberTheme.muted)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer(minLength: 8)
-                        }
-                        .padding(.horizontal, 14)
-                        .frame(height: 48)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    Text("按服务商选择本次对话使用的模型")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
                 }
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .frame(width: 34, height: 34)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .amberGlass(cornerRadius: 17)
+                .accessibilityLabel("关闭模型选择")
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 14)
+
+            Divider()
+                .overlay(AmberTheme.borderSoft)
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                        ComposerProviderGroupView(
+                            provider: provider,
+                            currentModel: currentModel,
+                            isExpanded: expandedProviderIDs.contains(provider.id),
+                            onToggle: {
+                                toggleProvider(provider.id)
+                            },
+                            onPick: { model in
+                                onPick(model)
+                            }
+                        )
+
+                        if index < providers.count - 1 {
+                            Divider()
+                                .overlay(AmberTheme.borderSoft)
+                        }
+                    }
+                }
+                .background(AmberTheme.background.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 28)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(AmberTheme.background)
+        .onAppear {
+            expandedProviderIDs = Set([Self.selectedProviderID(for: currentModel)])
+        }
+    }
+
+    private func toggleProvider(_ id: String) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if expandedProviderIDs.contains(id) {
+                expandedProviderIDs.remove(id)
+            } else {
+                expandedProviderIDs.insert(id)
             }
         }
+    }
+
+    private static func selectedProviderID(for currentModel: String) -> String {
+        ComposerProviderGroup.defaults.first { provider in
+            provider.models.contains { $0.matches(currentModel) }
+        }?.id ?? ComposerProviderGroup.defaults.first?.id ?? "mimo"
+    }
+}
+
+private struct ComposerProviderGroupView: View {
+    let provider: ComposerProviderGroup
+    let currentModel: String
+    let isExpanded: Bool
+    let onToggle: () -> Void
+    let onPick: (ComposerModelOption) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: onToggle) {
+                HStack(spacing: 10) {
+                    Text(provider.name)
+                        .font(.subheadline.weight(providerContainsSelection ? .semibold : .regular))
+                        .foregroundStyle(providerContainsSelection ? AmberTheme.accent : AmberTheme.foreground)
+
+                    Spacer()
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 50)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(provider.name) 模型分组")
+            .accessibilityValue(isExpanded ? "已展开" : "已收起")
+
+            if isExpanded {
+                VStack(spacing: 0) {
+                    ForEach(Array(provider.models.enumerated()), id: \.element.id) { index, model in
+                        if index > 0 {
+                            Divider()
+                                .overlay(AmberTheme.borderSoft)
+                                .padding(.leading, 36)
+                        }
+
+                        ComposerModelRow(
+                            model: model,
+                            isSelected: model.matches(currentModel)
+                        ) {
+                            onPick(model)
+                        }
+                    }
+                }
+                .padding(.bottom, 6)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var providerContainsSelection: Bool {
+        provider.models.contains { $0.matches(currentModel) }
+    }
+}
+
+private struct ComposerModelRow: View {
+    let model: ComposerModelOption
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Text(model.name)
+                    .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let context = model.context {
+                    Text(context)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(AmberTheme.muted)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(AmberTheme.surface2.opacity(0.72), in: Capsule())
+                }
+
+                Image(systemName: "checkmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(width: 18)
+                    .opacity(isSelected ? 1 : 0)
+            }
+            .padding(.leading, 36)
+            .padding(.trailing, 16)
+            .frame(minHeight: 46)
+            .background(isSelected ? AmberTheme.accentTint : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("选择模型 \(model.name)")
+        .accessibilityValue(isSelected ? "已选" : "未选")
+    }
+}
+
+private struct ComposerProviderGroup: Identifiable {
+    let id: String
+    let name: String
+    let models: [ComposerModelOption]
+
+    static let defaults: [ComposerProviderGroup] = [
+        ComposerProviderGroup(
+            id: "mimo",
+            name: "小米 MiMo",
+            models: [
+                ComposerModelOption(id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro", context: "1M"),
+                ComposerModelOption(id: "mimo-v2.5", name: "MiMo V2.5", context: "1M")
+            ]
+        ),
+        ComposerProviderGroup(
+            id: "minimax",
+            name: "MiniMax",
+            models: [
+                ComposerModelOption(id: "MiniMax-M1", name: "MiniMax M1", context: nil)
+            ]
+        ),
+        ComposerProviderGroup(
+            id: "openai",
+            name: "OpenAI",
+            models: [
+                ComposerModelOption(id: "gpt-4o", name: "gpt-4o", context: "128K"),
+                ComposerModelOption(id: "gpt-5-codex", name: "GPT-5 Codex", context: nil)
+            ]
+        ),
+        ComposerProviderGroup(
+            id: "deepseek",
+            name: "DeepSeek",
+            models: [
+                ComposerModelOption(id: "deepseek-reasoner", name: "DeepSeek R1", context: nil),
+                ComposerModelOption(id: "deepseek-chat", name: "DeepSeek V3", context: nil),
+                ComposerModelOption(id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", context: "1M")
+            ]
+        ),
+        ComposerProviderGroup(
+            id: "kimi",
+            name: "月之暗面（Kimi）",
+            models: [
+                ComposerModelOption(id: "kimi-k2", name: "Kimi K2", context: nil)
+            ]
+        ),
+        ComposerProviderGroup(
+            id: "glm",
+            name: "智谱 GLM",
+            models: [
+                ComposerModelOption(id: "glm-4.6", name: "GLM 4.6", context: nil)
+            ]
+        )
+    ]
+}
+
+private struct ComposerModelOption: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let context: String?
+
+    func matches(_ value: String) -> Bool {
+        let normalizedValue = Self.normalize(value)
+        return Self.normalize(id) == normalizedValue || Self.normalize(name) == normalizedValue
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 }
 
