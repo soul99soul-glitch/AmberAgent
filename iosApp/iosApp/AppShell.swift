@@ -184,6 +184,7 @@ enum Route: Hashable {
     case searchProvider
     case ttsSettings
     case board
+    case boardSettings
     case miniApps
     case workspace
     case memory
@@ -267,7 +268,9 @@ private extension View {
             case .ttsSettings:
                 TTSSettingsView()
             case .board:
-                PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
+                BoardView()
+            case .boardSettings:
+                PlaceholderDetailView(title: "看板设置", subtitle: "模型、热榜源、刷新策略", systemImage: "gearshape")
             case .miniApps:
                 PlaceholderDetailView(title: "小应用", subtitle: "生成可执行的 HTML 工具", systemImage: "square.grid.2x2")
             case .workspace:
