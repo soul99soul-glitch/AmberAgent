@@ -3,35 +3,133 @@ import SwiftUI
 struct SyncBackupView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("app.amber.ios.syncBackup.autoSync") private var autoSync = true
-    @State private var pendingAlert: SyncBackupAlert?
+    private let evidenceRows: [SyncBackupRow] = [
+        .init(
+            title: "SyncSettings",
+            subtitle: "commonMain model 保存 Google 账号、mode、autoSync、deviceId、lastUpload/download/export、remoteRevision 和 lastError。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "BackupVM",
+            subtitle: "Android ViewModel 处理 Google 授权、上传、下载、冲突、导出、导入和恢复确认。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "SyncArchiveManager",
+            subtitle: "Android 生成加密归档，写入 Settings、secrets、Room 表和文件树，并支持校验/恢复。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "GoogleDriveSyncRepository",
+            subtitle: "Android 通过 Google Identity + Drive AppData 管理云端快照，最多保留 5 份。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "LocalBackupRepository",
+            subtitle: "Android 使用系统文档 URI 导出、检查和恢复 .amberbackup 文件。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "iOS 同步桥",
+            subtitle: "当前 SwiftUI 没有 SettingsStore.syncSettings、SyncArchiveManager、Google Drive OAuth 或本地备份 repository。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        )
+    ]
+
+    private let currentRows: [SyncBackupRow] = [
+        .init(
+            title: "Google 账号",
+            subtitle: "不读取 GoogleDriveAuthSession，也不恢复 Android syncSettings.googleAccountEmail。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "备份状态",
+            subtitle: "不读取 lastBackupVersionName、lastUploadAt、lastDownloadAt 或 lastLocalExportAt。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "上传 / 下载",
+            subtitle: "没有 Google OAuth、Drive AppData client、云端快照列表、冲突确认或恢复预览。",
+            value: "禁用",
+            color: AmberTheme.muted
+        ),
+        .init(
+            title: "自动同步",
+            subtitle: "不再写本地 @AppStorage；真实字段应来自 SyncSettings.autoSyncEnabled。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "加密口令",
+            subtitle: "Android 归档用 PBKDF2WithHmacSHA256 + AES/GCM；iOS 没有口令存储或归档服务。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "本地导出 / 导入",
+            subtitle: "没有 iOS 文件导出、文件选择、归档格式检查、恢复确认或覆盖事务。",
+            value: "禁用",
+            color: AmberTheme.muted
+        )
+    ]
+
+    private let archiveRows: [SyncBackupRow] = [
+        .init(
+            title: "Settings + secrets",
+            subtitle: "归档 Settings；STANDARD 会遮蔽敏感字段，FULL 会包含 WebMount OAuth 和 OpenAI Codex OAuth raw JSON。",
+            value: "Android 实现",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "Room tables",
+            subtitle: "同步 conversations、messages、memory、files、board、mini_app、daily_review、hot_list_source 等表。",
+            value: "Android 实现",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "File roots",
+            subtitle: "同步 upload、skills、images、chat_images；恢复时校验安全相对路径。",
+            value: "Android 实现",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "RestoreScope",
+            subtitle: "支持 CONFIG_ONLY / EVERYTHING，并可保留本机 conversations 与 generated media。",
+            value: "Android 实现",
+            color: AmberTheme.accentGreen
+        )
+    ]
 
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 0) {
-                    header
-                    intro
-                    googleDriveSection
-                    autoSyncSection
-                    encryptionSection
-                    localBackupSection
+            VStack(spacing: 0) {
+                header
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        intro
+                        evidenceSection
+                        currentHandlingSection
+                        archiveScopeSection
+                        blockedSection
+                    }
+                    .padding(.bottom, 36)
                 }
-                .padding(.bottom, 36)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert(item: $pendingAlert) { alert in
-            Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
-                dismissButton: .default(Text("知道了"))
-            )
-        }
     }
 
     private var header: some View {
@@ -42,9 +140,17 @@ struct SyncBackupView: View {
 
             Spacer()
 
-            Text("同步与备份")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(AmberTheme.foreground)
+            VStack(spacing: 2) {
+                Text("同步与备份")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+
+                Text("Android/KMP 已实现 · iOS 备份桥未接线")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
 
             Spacer()
 
@@ -53,260 +159,128 @@ struct SyncBackupView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
-        .padding(.bottom, 18)
+        .padding(.bottom, 10)
     }
 
     private var intro: some View {
-        Text("把 Provider 配置、助手、记忆、对话与文件加密备份到 Google Drive，或导出为本地文件。备份始终在设备上加密后再上传。")
-            .font(.subheadline)
+        Text("Android/KMP 已有真实同步与备份能力：Settings、数据库、文件树和部分 OAuth secrets 会被打包成加密归档，可上传到 Google Drive AppData 或导出到本地文件。iOS 当前没有这条 repository / OAuth / 归档 / 恢复链路，本页只展示能力证据和缺口，不连接账号、不上传下载、不写 Keychain、不覆盖本机数据。")
+            .font(.footnote)
+            .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
-            .lineSpacing(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16)
-            .padding(.bottom, 3)
+            .padding(.top, 4)
+            .padding(.bottom, 16)
     }
 
-    private var googleDriveSection: some View {
+    private var evidenceSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Google Drive")
+            AmberSectionLabel(text: "能力证据")
             AmberFormGroup {
-                SyncInfoRow(
-                    systemImage: "person",
-                    iconColor: AmberTheme.accentGreen,
-                    title: "Google 账号",
-                    subtitle: "已连接 · g·····l@gmail.com",
-                    trailing: "已连接",
-                    trailingColor: AmberTheme.accentGreen
-                )
-
-                SyncDivider()
-
-                SyncInfoRow(
-                    systemImage: "checkmark.circle",
-                    title: "备份状态",
-                    subtitle: "最近成功：上传 2 小时前 · 下载 3 天前"
-                )
-
-                SyncDivider()
-
-                SyncActionRow(
-                    systemImage: "square.and.arrow.up",
-                    title: "上传备份",
-                    subtitle: "把当前数据保存到 Google Drive",
-                    accent: true
-                ) {
-                    pendingAlert = .upload
-                }
-
-                SyncDivider()
-
-                SyncActionRow(
-                    systemImage: "square.and.arrow.down",
-                    title: "下载恢复",
-                    subtitle: "从 Google Drive 恢复到这台设备",
-                    accent: true
-                ) {
-                    pendingAlert = .download
-                }
-            }
-        }
-    }
-
-    private var autoSyncSection: some View {
-        AmberFormGroup {
-            Button {
-                autoSync.toggle()
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("自动同步")
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text("数据变动后在后台自动上传到 Drive")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                ForEach(Array(evidenceRows.enumerated()), id: \.element.id) { index, row in
+                    SyncBackupStatusRow(row: row)
+                    if index < evidenceRows.count - 1 {
+                        SyncBackupDivider()
                     }
+                }
+            }
+        }
+    }
+
+    private var currentHandlingSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "iOS 当前处理")
+            AmberFormGroup {
+                ForEach(Array(currentRows.enumerated()), id: \.element.id) { index, row in
+                    SyncBackupStatusRow(row: row)
+                    if index < currentRows.count - 1 {
+                        SyncBackupDivider()
+                    }
+                }
+            }
+        }
+    }
+
+    private var archiveScopeSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "归档范围")
+            AmberFormGroup {
+                ForEach(Array(archiveRows.enumerated()), id: \.element.id) { index, row in
+                    SyncBackupStatusRow(row: row)
+                    if index < archiveRows.count - 1 {
+                        SyncBackupDivider()
+                    }
+                }
+            }
+
+            SyncBackupNote("Android BackupVM 在成功后写回 SyncSettings 的时间戳、版本、设备名和 lastError；iOS 当前没有读取或写回这些字段。")
+        }
+    }
+
+    private var blockedSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "启用前需要")
+            AmberFormGroup {
+                Text("需要先定义 iOS 侧 SyncSettings 持久化、Keychain/secret redaction 策略、Google Drive OAuth AppData client、本地文件导入导出、归档格式兼容校验、恢复事务与回滚策略。没有这些链路前，按钮会让用户误以为备份真的发生。")
+                    .font(.caption)
+                    .lineSpacing(4)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                    BackupSwitch(isOn: autoSync)
-                }
-                .frame(minHeight: 58)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
-                .contentShape(Rectangle())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
             }
-            .buttonStyle(.plain)
-        }
-        .padding(.top, 18)
-    }
-
-    private var encryptionSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "加密")
-            AmberFormGroup {
-                SyncActionRow(
-                    systemImage: nil,
-                    title: "加密口令",
-                    subtitle: "用于加密备份内容，请牢记",
-                    trailing: "已设置",
-                    showsChevron: true
-                ) {
-                    pendingAlert = .passphrase
-                }
-            }
-
-            SyncNote("口令仅保存在本机 Keychain，不随备份上传；遗失后将无法解密云端或本地备份。")
-        }
-    }
-
-    private var localBackupSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "本地备份")
-            AmberFormGroup {
-                SyncActionRow(
-                    systemImage: "doc.badge.arrow.down",
-                    title: "导出到文件",
-                    subtitle: "把当前数据导出为加密备份文件",
-                    showsChevron: true
-                ) {
-                    pendingAlert = .export
-                }
-
-                SyncDivider()
-
-                SyncActionRow(
-                    systemImage: "doc.badge.arrow.up",
-                    title: "从文件导入",
-                    subtitle: "从本地备份文件恢复到这台设备",
-                    showsChevron: true
-                ) {
-                    pendingAlert = .importFile
-                }
-            }
-
-            SyncNote("恢复会覆盖本机的 Provider 配置、助手、记忆与文件；对话与生成图片默认不覆盖，恢复时可单独勾选。")
         }
     }
 }
 
-private struct SyncInfoRow: View {
-    let systemImage: String
-    var iconColor: Color = AmberTheme.accent
+private struct SyncBackupRow: Identifiable {
+    let id = UUID()
     let title: String
     let subtitle: String
-    var trailing: String?
-    var trailingColor: Color = AmberTheme.muted
+    let value: String
+    let color: Color
+}
+
+private struct SyncBackupStatusRow: View {
+    let row: SyncBackupRow
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 28, height: 28)
-
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(row.title)
                     .font(.body)
                     .foregroundStyle(AmberTheme.foreground)
-                Text(subtitle)
+                Text(row.subtitle)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(2)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let trailing {
-                Text(trailing)
-                    .font(.subheadline)
-                    .foregroundStyle(trailingColor)
-            }
+            Text(row.value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(row.color)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(minHeight: 56)
+        .frame(minHeight: 58)
         .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
     }
 }
 
-private struct SyncActionRow: View {
-    let systemImage: String?
-    let title: String
-    let subtitle: String
-    var trailing: String?
-    var showsChevron = false
-    var accent = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(accent ? AmberTheme.accent : AmberTheme.foreground2)
-                        .frame(width: 28, height: 28)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body)
-                        .foregroundStyle(accent ? AmberTheme.accent : AmberTheme.foreground)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let trailing {
-                    Text(trailing)
-                        .font(.subheadline)
-                        .foregroundStyle(AmberTheme.muted)
-                }
-
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AmberTheme.muted2)
-                }
-            }
-            .frame(minHeight: 56)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct SyncDivider: View {
+private struct SyncBackupDivider: View {
     var body: some View {
         Rectangle()
             .fill(AmberTheme.borderSoft)
             .frame(height: 0.5)
-            .padding(.leading, 54)
+            .padding(.leading, 14)
     }
 }
 
-private struct BackupSwitch: View {
-    let isOn: Bool
-
-    var body: some View {
-        Capsule()
-            .fill(isOn ? AmberTheme.accent : AmberTheme.surface2)
-            .frame(width: 48, height: 28)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 24, height: 24)
-                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
-                    .padding(2)
-            }
-            .animation(.snappy(duration: 0.18), value: isOn)
-    }
-}
-
-private struct SyncNote: View {
+private struct SyncBackupNote: View {
     let text: String
 
     init(_ text: String) {
@@ -318,51 +292,9 @@ private struct SyncNote: View {
             .font(.caption)
             .foregroundStyle(AmberTheme.muted2)
             .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 7)
-    }
-}
-
-private enum SyncBackupAlert: Identifiable {
-    case upload
-    case download
-    case passphrase
-    case export
-    case importFile
-
-    var id: String {
-        switch self {
-        case .upload: "upload"
-        case .download: "download"
-        case .passphrase: "passphrase"
-        case .export: "export"
-        case .importFile: "import-file"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .upload: "上传备份"
-        case .download: "下载恢复"
-        case .passphrase: "加密口令"
-        case .export: "导出到文件"
-        case .importFile: "从文件导入"
-        }
-    }
-
-    var message: String {
-        switch self {
-        case .upload:
-            "Google Drive 上传需要 OAuth 授权、加密归档和云端快照服务接线；当前不会发起网络请求。"
-        case .download:
-            "下载恢复需要 Google Drive 授权、冲突检查和恢复选项；当前不会覆盖本机数据。"
-        case .passphrase:
-            "加密口令需要接入 Keychain 与备份加密服务；当前只保留设置入口。"
-        case .export:
-            "本地导出需要生成加密备份文件并打开系统文件保存面板；当前不会写出文件。"
-        case .importFile:
-            "本地导入需要文件选择、格式校验和恢复确认；当前不会读取或覆盖本机数据。"
-        }
     }
 }
