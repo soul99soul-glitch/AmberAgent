@@ -4,10 +4,6 @@ struct McpServersView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("app.amber.ios.mcp.amap.enabled") private var amapEnabled = true
-    @AppStorage("app.amber.ios.mcp.feishu.enabled") private var feishuEnabled = true
-    @AppStorage("app.amber.ios.mcp.github.enabled") private var githubEnabled = false
-
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
@@ -56,7 +52,7 @@ struct McpServersView: View {
     }
 
     private var intro: some View {
-        Text("MCP（Model Context Protocol）服务器为 Agent 接入外部工具。已连接服务器的工具会并入技能列表，可在对话中调用。")
+        Text("Android/KMP 已有 MCP 配置、连接和工具调用链路；iOS 当前尚未接入 Settings.mcpServers / McpManager，因此不会显示连接状态或工具列表。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -67,49 +63,16 @@ struct McpServersView: View {
 
     private var connectedSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已连接")
+            AmberSectionLabel(text: "配置状态")
             AmberFormGroup {
-                McpServerRow(
-                    name: "高德地图",
-                    pills: [
-                        .init(text: "Streamable HTTP", kind: .network),
-                        .init(text: "已连接", kind: .connected),
-                        .init(text: "12 个工具", kind: .idle)
-                    ],
-                    isOn: amapEnabled
-                ) {
-                    amapEnabled.toggle()
-                }
-
-                McpDivider()
-
-                McpServerRow(
-                    name: "飞书 feishu",
-                    pills: [
-                        .init(text: "SSE", kind: .network),
-                        .init(text: "已连接", kind: .connected),
-                        .init(text: "8 个工具", kind: .idle)
-                    ],
-                    isOn: feishuEnabled
-                ) {
-                    feishuEnabled.toggle()
-                }
-
-                McpDivider()
-
-                McpServerRow(
-                    name: "GitHub",
-                    pills: [
-                        .init(text: "Streamable HTTP", kind: .network),
-                        .init(text: "未连接", kind: .idle)
-                    ],
-                    isOn: githubEnabled
-                ) {
-                    githubEnabled.toggle()
-                }
+                McpStatusRow(
+                    title: "MCP 配置桥尚未接线",
+                    subtitle: "没有读取 Settings.mcpServers，也没有订阅 McpManager.syncingStatus。",
+                    badge: "未接线"
+                )
             }
 
-            McpNote("关闭后该服务器的工具不再加载。左滑删除，下拉可重新连接全部服务器。")
+            McpNote("当前页面不会连接服务器、同步工具、切换启用状态或删除配置。")
         }
     }
 
@@ -121,7 +84,7 @@ struct McpServersView: View {
                     systemImage: "square.and.arrow.down",
                     iconColor: AmberTheme.accentCyan,
                     title: "导入服务器",
-                    subtitle: "粘贴标准 mcpServers JSON 配置"
+                    subtitle: "粘贴标准 mcpServers JSON，仅做粗略文本预览"
                 ) {
                     router.navigate(to: .mcpImport)
                 }
@@ -132,13 +95,13 @@ struct McpServersView: View {
                     systemImage: "plus",
                     iconColor: AmberTheme.accent,
                     title: "手动添加",
-                    subtitle: "填写传输类型、服务器地址与请求头"
+                    subtitle: "填写传输类型、服务器地址与请求头草稿"
                 ) {
                     router.navigate(to: .mcpAdd)
                 }
             }
 
-            McpNote("支持 SSE 与 Streamable HTTP 两种传输；可为每台服务器设置自定义请求头与工具审批。")
+            McpNote("导入和手动添加页面当前不写入设置、不保存请求头、不发起 MCP 连接。")
         }
     }
 }
@@ -162,7 +125,7 @@ struct McpImportView: View {
             AmberTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                McpDraftHeader(title: "导入服务器", doneTitle: "完成") {
+                McpDraftHeader(title: "导入服务器", doneTitle: "关闭") {
                     dismiss()
                 }
 
@@ -196,7 +159,7 @@ struct McpImportView: View {
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
-                        Text("粘贴 Claude / Codex 常见的 mcpServers 配置。当前只做本地草稿校验，不读取剪贴板、不写入设置。")
+                        Text("粘贴 Claude / Codex 常见的 mcpServers 配置。当前只做粗略文本预览，不读取剪贴板、不写入设置。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                             .lineSpacing(2)
@@ -227,19 +190,19 @@ struct McpImportView: View {
                     .padding(.vertical, 12)
             }
 
-            McpValidationNote(text: validationText, isWarning: hasWarnings)
+            McpValidationNote(text: validationText, isWarning: true)
         }
     }
 
     private var previewSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "预览")
+            AmberSectionLabel(text: "文本预览")
             AmberFormGroup {
-                McpPreviewRow(title: "配置根", value: jsonText.contains("\"mcpServers\"") ? "mcpServers" : "未检测到")
+                McpPreviewRow(title: "根字段文本", value: jsonText.contains("\"mcpServers\"") ? "mcpServers" : "未检测到")
                 McpDivider()
-                McpPreviewRow(title: "疑似服务器数", value: "\(estimatedServerCount)")
+                McpPreviewRow(title: "粗略条目数", value: "\(estimatedServerCount)")
                 McpDivider()
-                McpPreviewRow(title: "导入方式", value: "本地草稿")
+                McpPreviewRow(title: "处理方式", value: "本地草稿")
             }
         }
     }
@@ -250,14 +213,14 @@ struct McpImportView: View {
 
     private var validationText: String {
         if !jsonText.contains("\"mcpServers\"") {
-            return "未检测到 mcpServers 根字段；当前不会写入真实配置。"
+            return "未检测到 mcpServers 文本；当前不会写入真实配置。"
         }
 
         if estimatedServerCount == 0 {
-            return "已检测到 mcpServers，但还没有可识别的服务器条目。"
+            return "文本包含 mcpServers，但粗略预览没有识别到服务器条目。"
         }
 
-        return "检测到 \(estimatedServerCount) 个疑似服务器条目；当前只保留本地草稿。"
+        return "粗略识别到 \(estimatedServerCount) 个疑似服务器条目；当前未使用真实 McpImportParser，只保留本地草稿。"
     }
 
     private var estimatedServerCount: Int {
@@ -291,7 +254,7 @@ struct McpAddView: View {
             AmberTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                McpDraftHeader(title: "手动添加", doneTitle: "完成") {
+                McpDraftHeader(title: "手动添加", doneTitle: "关闭") {
                     dismiss()
                 }
 
@@ -382,8 +345,8 @@ struct McpAddView: View {
             AmberSectionLabel(text: "工具审批")
             AmberFormGroup {
                 McpDraftToggleRow(
-                    title: "工具默认需要批准",
-                    subtitle: "未知工具调用先询问，避免静默执行外部动作。",
+                    title: "草稿工具默认需要批准",
+                    subtitle: "仅影响本页草稿；当前没有写入 MCP 工具审批配置。",
                     isOn: needsApproval
                 ) {
                     needsApproval.toggle()
@@ -405,6 +368,44 @@ struct McpAddView: View {
             return "空名称或空值会在真实写入前被拦截；当前先保留本地草稿。"
         }
         return "\(validHeaders.count) 个请求头已准备好；当前不会保存。"
+    }
+}
+
+private struct McpStatusRow: View {
+    let title: String
+    let subtitle: String
+    let badge: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("{ }")
+                .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                .foregroundStyle(AmberTheme.accentCyan)
+                .frame(width: 32, height: 32)
+                .background(AmberTheme.accentCyan.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(badge)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 72)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 }
 

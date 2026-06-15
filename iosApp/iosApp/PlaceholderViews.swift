@@ -784,7 +784,7 @@ struct SettingsHomeView: View {
     private var runtimeRows: [SettingsHomeRow] {
         [
             .init(title: "核心记忆", subtitle: "5 条 · 跨助手共享", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
-            .init(title: "技能", subtitle: "已安装 5 个 · 已启用 4 个", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
+            .init(title: "技能", subtitle: "Skill/MCP 配置桥尚未接线", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
             .init(title: "执行与任务", subtitle: "工具循环上限 · 灵动岛 · 生成稳定性", value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
             .init(title: "工具权限", subtitle: "系统权限 · 批准策略", value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions),
             .init(title: "运行环境", subtitle: "工作区 · 小应用沙箱", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentIndigo, route: .sandbox)

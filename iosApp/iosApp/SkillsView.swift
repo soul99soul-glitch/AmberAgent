@@ -7,14 +7,6 @@ struct SkillsView: View {
     @State private var pendingAlert: SkillsAlert?
     @State private var importOptionsPresented = false
 
-    private let installedSkills: [SkillRowModel] = [
-        .init(name: "skill-creator", summary: "Use when the user wants to create a new AmberAgent skill, update an...", state: .enabled),
-        .init(name: "deep-read-fact-check", summary: "Use when verifying a long article, news analysis, social-media clai...", state: .disabled),
-        .init(name: "ssh-mac-mini", summary: "通过 SSH 远程操作 Mac mini，常用于离线视频转码、文件整理与备份。", state: .enabled),
-        .init(name: "feishu-doc-reader", summary: "读取飞书文档、知识库与多维表格，回答内部检索类问题。", state: .enabled),
-        .init(name: "amap-mcp", summary: "高德地图 MCP，地点搜索 / 路线规划 / 公交查询。", state: .mcp)
-    ]
-
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
@@ -80,20 +72,18 @@ struct SkillsView: View {
 
     private var installedSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已安装")
+            AmberSectionLabel(text: "本机 Skill 库")
             AmberFormGroup {
-                ForEach(Array(installedSkills.enumerated()), id: \.element.id) { index, skill in
-                    SkillRow(skill: skill) {
-                        router.navigate(to: .skillDetail(name: skill.name))
-                    }
-
-                    if index != installedSkills.indices.last {
-                        SkillDivider()
-                    }
-                }
+                SkillStatusRow(
+                    systemImage: "wrench.and.screwdriver",
+                    iconColor: AmberTheme.accentAmber,
+                    title: "Skill 扫描尚未接线",
+                    subtitle: "Android/KMP 已有 SkillManager；iOS 还没有本地目录扫描、启用状态或文件读写桥。",
+                    badge: "未接线"
+                )
             }
 
-            SkillsFooter("Agent 会在每次运行前重新扫描已安装 Skill。已启用 4 个，未启用 1 个。")
+            SkillsFooter("当前页面不会读取、启用、禁用或删除本地 Skill。添加和导入入口仅保留草稿预览。")
         }
     }
 
@@ -105,14 +95,14 @@ struct SkillsView: View {
                     systemImage: "point.3.connected.trianglepath.dotted",
                     iconColor: AmberTheme.accentCyan,
                     title: "MCP 服务器",
-                    subtitle: "外部工具服务器 · 工具会并入技能列表",
-                    trailing: "3 个"
+                    subtitle: "配置列表尚未接入 iOS SettingsStore / McpManager",
+                    trailing: "未接线"
                 ) {
                     router.navigate(to: .mcpServers)
                 }
             }
 
-            SkillsFooter("通过 MCP（Model Context Protocol）接入第三方工具服务器。")
+            SkillsFooter("Android/KMP 已有 MCP 配置与连接管理；iOS 当前只展示草稿入口，不连接服务器。")
         }
     }
 
@@ -123,8 +113,8 @@ struct SkillsView: View {
                 SkillUtilityRow(
                     systemImage: "square.and.arrow.down",
                     iconColor: AmberTheme.accentCyan,
-                    title: "导入技能",
-                    subtitle: "从 URL 或本地文件导入 Skill"
+                    title: "导入技能草稿",
+                    subtitle: "只说明导入方式，不下载、不打开文件、不写入 Skill 目录"
                 ) {
                     importOptionsPresented = true
                 }
@@ -134,13 +124,48 @@ struct SkillsView: View {
                 SkillUtilityRow(
                     systemImage: "arrow.triangle.2.circlepath",
                     iconColor: AmberTheme.accent,
-                    title: "全量规整",
-                    subtitle: "重新扫描并修复所有 Skill 索引"
+                    title: "重新扫描尚未接线",
+                    subtitle: "需要 iOS SkillManager bridge 后才能扫描和修复索引"
                 ) {
                     pendingAlert = .rescan
                 }
             }
         }
+    }
+}
+
+private struct SkillStatusRow: View {
+    let systemImage: String
+    let iconColor: Color
+    let title: String
+    let subtitle: String
+    let badge: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 32, height: 32)
+                .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                SkillBadge(text: badge, color: AmberTheme.muted, background: AmberTheme.surface2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 72)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 }
 

@@ -16,7 +16,7 @@ struct SkillAddView: View {
             AmberTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                SkillDraftHeader(title: "添加技能", doneTitle: "完成") {
+                SkillDraftHeader(title: "添加技能", doneTitle: "关闭") {
                     dismiss()
                 }
 
@@ -92,8 +92,8 @@ struct SkillAddView: View {
             AmberSectionLabel(text: "权限")
             AmberFormGroup {
                 SkillDraftToggleRow(
-                    title: "添加后启用",
-                    subtitle: "启用后 Agent 会在运行前扫描并考虑该技能。",
+                    title: "草稿启用标记",
+                    subtitle: "仅影响下方预览；当前不会写入 assistant.enabledSkills。",
                     isOn: enabled
                 ) {
                     enabled.toggle()
@@ -116,7 +116,7 @@ struct SkillAddView: View {
                 SkillDraftDivider()
                 SkillPreviewLine(label: "文件", value: fileName.trimmed.isEmpty ? "SKILL.md" : fileName.trimmed)
                 SkillDraftDivider()
-                SkillPreviewLine(label: "状态", value: enabled ? "启用" : "停用")
+                SkillPreviewLine(label: "状态", value: enabled ? "草稿启用" : "草稿停用")
                 SkillDraftDivider()
                 SkillPreviewBlock(text: previewMarkdown)
             }

@@ -16,6 +16,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Runtime safety boundary: stable iOS runtime selection is constrained by `IOSTerminalBuildPolicy`; Remote SSH host mismatch is a hard failure before password save/command execution.
 - Default model value: `SettingsHomeView`, `ModelDefaultsView`, and `ChatView` read/write `SettingsStore.modelId` for the single current OpenAI-compatible chat configuration. The composer picker no longer presents fake provider switching; it only writes the model id that `ChatViewModel.makeTextGenerationParams()` actually sends.
 - TTS default status: Settings home now shows the real KMP default `系统 TTS`, and the TTS page defaults to System TTS while marking cloud engine fields, preview, delete, and add flows as drafts with no save, no Keychain write, and no TTS request.
+- Skill/MCP status honesty: Settings home, `SkillsView`, `SkillDetailView`, `SkillAddView`, and `McpServersView` no longer claim installed skill counts, enabled skill counts, connected MCP servers, tool counts, or toggle persistence. Android/KMP real capabilities remain documented, but iOS now presents this line as not yet bridged instead of fabricating state.
 
 ### 仍是草稿/占位
 
@@ -23,8 +24,8 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Chat model picker is now a scalar `SettingsStore.modelId` editor, not a full provider/model registry. It still cannot switch `SettingsStore.baseUrl`, API key, auth mode, custom headers/body, or provider-specific model metadata.
 - Chat thinking/context controls are presentation-only. `selectedThinkingLevel` does not feed `TextGenerationParams.reasoningLevel`; context ring/token stats are hardcoded.
 - TTS settings are still not wired to an iOS `TTSProviderSetting` store or real `TTSManager` execution path. The page has been downgraded to real default status plus draft-only cloud fields.
-- Skills page is hardcoded. It does not use the real Android/KMP `SkillManager` / `SkillsVM` scanning/import/editing path.
-- MCP server page is hardcoded and uses isolated `@AppStorage` toggles. It does not read/write `Settings.mcpServers`, `McpServerConfig`, `McpManager`, or `McpImportParser`.
+- Skills page is not wired to the real Android/KMP `SkillManager` / `SkillsVM` scanning/import/editing path. It has been downgraded to an explicit not-wired status with draft-only add/import/rescan flows.
+- MCP server page is not wired to `Settings.mcpServers`, `McpServerConfig`, `McpManager`, or `McpImportParser`. The previous hardcoded connected-server list and isolated `@AppStorage` toggles have been removed; import/add remain draft-only, and import uses only rough text preview rather than real parser-backed validation.
 - Account statistics and conversation storage show precise prototype numbers. No inspected iOS source currently proves these values come from DB, token usage, cache size, or conversation DAO.
 - Search services, Sync/Backup, Memory, Board, Council, SubAgent, MiniApp, and WebMount pages need separate verification before any values or actions can be treated as real.
 
@@ -32,8 +33,8 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 
 - Provider "Add", Provider "Save", Model "Done", Model custom Headers/Body "Done": safe as drafts only until a real iOS provider settings store exists. They must not claim to save.
 - TTS cloud engine save/delete/preview: must remain disabled/draft or be wired to verified secure storage and real TTS providers. Do not run network preview as validation.
-- MCP import/add "Done": must not show import success unless parsed and persisted through a real settings path.
-- Skills import/rescan: must not claim success until local scan/import implementation is available on iOS.
+- MCP import/add "Done": replaced with `关闭`; must not show import success unless parsed and persisted through a real settings path.
+- Skills import/rescan: must not claim success until local scan/import implementation is available on iOS; current copy explicitly says no download, no file picker, no filesystem mutation.
 - Account exact usage stats and heatmap: must either be wired to real stats or explicitly presented as unavailable/placeholder.
 - Conversation storage cleanup/delete: current alerts correctly do not delete data; exact storage values should not remain as if measured.
 
@@ -42,7 +43,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Secret storage split: the single OpenAI API key is in Keychain, but general provider/TTS API keys are not yet modeled in iOS. Avoid expanding secret handling without a clear schema.
 - Provider/model identity: current iOS chat creates a fresh `ProviderSetting.OpenAI` and fresh `Model` from three scalar settings. It cannot represent multiple providers, custom headers/body, OAuth/coding-plan auth modes, or provider-specific models.
 - Permission approval scope: `Route.toolPermissions` routes to the approval-policy page and its "权限与能力" row routes to `ToolPermissionsView`; `SheetDestination.toolPermissions` still opens the full capability page directly. The approval page intentionally exposes only the implemented `file_read_selected` tool policy; photos/location/camera/notifications remain system-permission status/request entries until real Agent executors exist.
-- Hardcoded precise numbers/status: Settings home, Account stats, ConversationStorage, Skills, MCP, and Providers still display exact counts/status that look real but are not backed by inspected iOS data. TTS default status is now corrected to System TTS, but its config screen remains draft-only.
+- Hardcoded precise numbers/status: Settings home, Account stats, ConversationStorage, and Providers still display exact counts/status that look real but are not backed by inspected iOS data. TTS default status is now corrected to System TTS, and Skill/MCP precise installed/connected counts have been removed, but their config screens remain draft-only.
 - External effects: Provider connection test in legacy `SettingsView` calls `listModels`. Do not use it as routine validation unless the user explicitly supplies credentials/approves network use.
 
 ## 2. UI Entry Map
@@ -52,7 +53,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Settings home | 外观 | `iosApp/iosApp/PlaceholderViews.swift` -> `.appearance` | Partial | local appearance settings if present | route exists; state mostly local in child page | P2 |
 | Settings home | 显示与字体 | `PlaceholderViews.swift` -> `.displayFont` | Partial/unknown | display preferences store equivalent | hardcoded subtitle | P1 |
 | Settings home | 核心记忆 | `PlaceholderViews.swift` -> `.memory` | Android/KMP memory exists; iOS wiring unknown | real memory store/page | route exists; needs separate audit | P1 |
-| Settings home | 技能 | `PlaceholderViews.swift` -> `.skills` | Yes on Android: `SkillManager`, `SkillsVM` | iOS local skill scanning/import layer or shared bridge | hardcoded installed list/count | P0 |
+| Settings home | 技能 | `PlaceholderViews.swift` -> `.skills` | Yes on Android: `SkillManager`, `SkillsVM` | iOS local skill scanning/import layer or shared bridge | subtitle downgraded to `Skill/MCP 配置桥尚未接线`; no installed/enabled count | P0 done/P1 bridge |
 | Settings home | 执行与任务 | `PlaceholderViews.swift` -> `.execution` | Partial: Live Activity controller exists | `AgentLiveActivityController`, execution settings store | route exists; needs audit | P1 |
 | Settings home | 工具权限 | `PlaceholderViews.swift` -> `.toolPermissions` | Yes | `PermissionsApprovalView(permissionStore:)` -> `.capabilities` -> `ToolPermissionsView(...)` | approval page edits the real `file_read_selected` policy; capability page is reachable for system permissions | P0 done |
 | Settings home | 运行环境 | `PlaceholderViews.swift` -> `.sandbox` | Yes | `SettingsStore` + `IOSTerminalRuntime` + SSH Keychain | mostly wired; subtitle is generic/hardcoded | P1 |
@@ -83,10 +84,10 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Runtime | SSH profile/password/fingerprint | `RuntimeEnvironmentView.swift`, `SettingsStore.swift` | Yes | UserDefaults + Keychain + SSH trust | wired | P0 done |
 | TTS | engine list/config | `TTSSettingsView.swift` | Yes in KMP | `TTSProviderSetting`, selected provider id, secure key storage | default status corrected to System TTS; cloud configs are explicitly draft/no-save/no-Keychain/no-request | P0 done/P1 store |
 | TTS | add engine | `TTSSettingsView.swift` | Partial model-type evidence in KMP | real settings write + Keychain | explicitly draft, no save; not a complete KMP type bridge | P1 |
-| Skills | installed list | `SkillsView.swift` | Yes Android `SkillManager` | iOS skill scanner/import bridge | hardcoded list/count | P0 |
-| Skills | import/rescan | `SkillsView.swift` | Yes Android path | real local file scan/import | alerts only, no filesystem mutation | P1 |
-| MCP | server list/toggles | `McpServersView.swift` | Yes Android/KMP `McpManager`/`McpServerConfig` | real `Settings.mcpServers` bridge | hardcoded + isolated `@AppStorage` toggles | P0 |
-| MCP | import/add | `McpServersView.swift` | Yes `McpImportParser` | parse + persist `McpServerConfig` | local draft validation only | P1 |
+| Skills | installed list | `SkillsView.swift` | Yes Android `SkillManager` | iOS skill scanner/import bridge | hardcoded rows removed; shows explicit `Skill 扫描尚未接线` status | P0 done/P1 bridge |
+| Skills | detail/add/import/rescan | `SkillDetailView.swift`, `SkillDraftViews.swift`, `SkillsView.swift` | Yes Android path | real local file scan/import/edit + `assistant.enabledSkills` | detail cannot claim version/source/enabled/files; add/import/rescan are draft/no-write | P1 |
+| MCP | server list/toggles | `McpServersView.swift` | Yes Android/KMP `McpManager`/`McpServerConfig` | real `Settings.mcpServers` bridge | hardcoded connected list and isolated toggles removed; shows explicit not-wired status | P0 done/P1 bridge |
+| MCP | import/add | `McpServersView.swift` | Yes `McpImportParser` | parse + persist `McpServerConfig` | rough text preview only; close button, no save/connect/header persistence | P1 |
 | Account | profile name/avatar | `AccountView.swift` | No inspected persistent account store | local profile preference if added | local-only `@State` | P2 |
 | Account | stats/heatmap | `AccountView.swift` | Android DAOs exist; iOS stats bridge unclear | conversation/message/token usage stats | hardcoded precise values | P1 |
 | Conversation storage | usage/cleanup/delete | `ConversationStorageView.swift` | likely DB/cache sources exist; iOS service unclear | measured storage + safe transactions | hardcoded values; actions are no-op alerts | P1 |
@@ -96,8 +97,8 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 ### P0 - 已有能力但 UI 未接，影响核心使用
 
 1. Replace Provider list/home values with real KMP default/provider metadata where safely available, or downgrade precise counts until a mutable iOS provider store exists.
-2. Replace Skills hardcoded list/count with either real local scan or clearly disabled/unavailable state.
-3. Replace MCP hardcoded connected servers and isolated toggles with real `mcpServers` bridge, or mark as draft without connected/tool counts.
+2. Done in Slice 4: Replace Skills hardcoded list/count with clearly unavailable iOS bridge state until a real local scan/import layer exists.
+3. Done in Slice 4: Replace MCP hardcoded connected servers and isolated toggles with explicit not-wired state until a real `mcpServers` bridge exists.
 
 ### P1 - 已有能力但只是硬编码状态
 
@@ -177,9 +178,29 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Subagent review: completed; no P0 findings. P1 copy fixes were applied so Add TTS uses `关闭`, delete reads `删除尚未接线`, and System TTS draft copy no longer claims an iOS synthesis executor is available.
 - Remaining risk: no iOS TTS settings bridge or synthesis executor exists yet; cloud provider save/delete/preview must stay draft until secure provider-specific storage and execution are implemented.
 
+### Slice 4 - Skill/MCP not-wired state downgrade
+
+- Scope: Settings home and the Skill/MCP SwiftUI pages no longer expose hardcoded installed skill rows, enabled counts, connected MCP servers, tool counts, or isolated `@AppStorage` MCP toggles. The pages now name the missing iOS bridge explicitly and keep add/import/rescan/detail controls draft-only with no download, no file picker, no filesystem mutation, no settings write, no server connection, and no header/tool-approval persistence.
+- Verification:
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded for `iosApp` on iPhone 17 / iOS 26.5 after the Skill/MCP edits, and again after subagent P2 copy fixes.
+  - UI snapshot path: Settings home -> 技能 showed `Skill/MCP 配置桥尚未接线`, not installed/enabled counts.
+  - UI snapshot path: Skills page showed `Skill 扫描尚未接线`, `MCP 服务器 ... 未接线`, and draft-only import/rescan rows.
+  - UI snapshot path: MCP page showed `MCP 配置桥尚未接线`, no hardcoded connected servers, no tool counts, and no toggles.
+  - UI snapshot path: MCP import/add pages showed `关闭`, rough text preview or local draft state only, no settings write, no server connection, no header persistence, and no tool-approval persistence.
+  - UI snapshot path: Skill add page showed `关闭`, draft enable marker only, no `assistant.enabledSkills` write, and no file creation.
+- Screenshot paths:
+  - Skills page: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_8a8edbe9-4cbe-4744-b93e-9466812bd4d0.jpg`
+  - MCP page: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_28127385-a371-4189-9bad-d0dc84ee8d2b.jpg`
+  - MCP import draft: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_7f5a8ebe-bcfd-4bf9-8bbc-36a7ca6d75d4.jpg`
+  - MCP add draft: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_22d1d550-5b7f-4587-93f5-2c122e2ae111.jpg`
+  - Skill add draft: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_8062fef7-0eef-4ce8-89e2-784a5b7f7a4f.jpg`
+- Subagent review: completed by `Volta`; no P0/P1 findings. P2 copy risks were fixed: MCP status badge now says `未接线` instead of `未连接`, Skill detail trigger footer no longer implies Agent uses placeholder trigger text, and MCP import copy now says rough text preview without real `McpImportParser` validation.
+- Remaining risk: Android/KMP has real `SkillManager`, `SkillsVM`, `SkillDetailVM`, `McpManager`, `McpManagementTools`, and `McpImportParser`, but no inspected iOS `SettingsStore` fields or bridge currently expose `enabledSkills`, `mcpServers`, MCP status, or local Skill filesystem access. These pages are honest placeholders until that bridge exists.
+
 ## 5. Commit Log
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|
 | `1cb4699d8` | Permission approval policy wiring; Chat default model scalar wiring | `test_sim` blocked by existing test target Info.plist issue; `build_run_sim` succeeded before/after reviewer fixes | see Slice 1 and Slice 2 screenshot paths | no provider/model registry bridge yet; enum retains `allowOncePerRun` for old-value compatibility, but store normalizes it to `askEveryTime` |
-| pending | TTS default/status downgrade | `build_run_sim` succeeded | see Slice 3 screenshot paths | no iOS TTS settings bridge or synthesis executor yet |
+| `bf9eea664` | TTS default/status downgrade | `build_run_sim` succeeded | see Slice 3 screenshot paths | no iOS TTS settings bridge or synthesis executor yet |
+| Pending | Skill/MCP not-wired state downgrade | `build_run_sim` succeeded | see Slice 4 screenshot paths | no iOS Skill/MCP settings bridge yet |

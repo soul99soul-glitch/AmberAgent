@@ -4,12 +4,10 @@ struct SkillDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     let skillName: String
-    @State private var enabled: Bool
     @State private var pendingAlert: SkillDetailAlert?
 
     init(skillName: String) {
         self.skillName = skillName
-        self._enabled = State(initialValue: skillName != "deep-read-fact-check")
     }
 
     var body: some View {
@@ -82,9 +80,9 @@ struct SkillDetailView: View {
 
             HStack(spacing: 6) {
                 Circle()
-                    .fill(enabled ? AmberTheme.accentGreen : AmberTheme.muted2)
+                    .fill(AmberTheme.muted2)
                     .frame(width: 7, height: 7)
-                Text("\(enabled ? "已启用" : "未启用") · v2.0.0 · 内置")
+                Text("未接线 · 未读取 SKILL.md")
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -97,26 +95,22 @@ struct SkillDetailView: View {
     private var enableSection: some View {
         VStack(spacing: 0) {
             AmberFormGroup {
-                Button {
-                    enabled.toggle()
-                } label: {
-                    HStack {
-                        Text("启用此技能")
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.foreground)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 12) {
+                    Text("启用状态")
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                        SkillDetailSwitch(isOn: enabled)
-                    }
-                    .frame(minHeight: 52)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
+                    Text("未接线")
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.muted)
                 }
-                .buttonStyle(.plain)
+                .frame(minHeight: 52)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 4)
             }
 
-            SkillDetailFooter("关闭后 Agent 不会在每次运行前加载此技能。")
+            SkillDetailFooter("iOS 尚未接入 SkillManager 和 assistant.enabledSkills；当前不会修改启用状态。")
         }
     }
 
@@ -136,7 +130,7 @@ struct SkillDetailView: View {
                 }
                 .padding(.horizontal, 16)
 
-            SkillDetailFooter("Agent 依据此描述自动判断何时调用该技能。")
+            SkillDetailFooter("真实触发条件需要读取 SKILL.md；iOS 详情页尚未接线。")
         }
     }
 
@@ -144,12 +138,12 @@ struct SkillDetailView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "工具与权限")
             AmberFormGroup {
-                SkillDetailValueRow(title: "允许的工具", value: "未限制", monospace: false) {
+                SkillDetailValueRow(title: "允许的工具", value: "未读取", monospace: false) {
                     pendingAlert = .allowedTools
                 }
             }
 
-            SkillDetailFooter("未声明 allowed-tools，技能可使用全部已授权工具。")
+            SkillDetailFooter("需要读取真实 SKILL.md frontmatter 后才能展示 allowed-tools。")
         }
     }
 
@@ -157,16 +151,16 @@ struct SkillDetailView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "信息")
             AmberFormGroup {
-                SkillStaticValueRow(title: "版本", value: "2.0.0", monospace: true)
+                SkillStaticValueRow(title: "版本", value: "未知", monospace: true)
                 SkillDetailDivider()
-                SkillStaticValueRow(title: "来源", value: "内置技能")
+                SkillStaticValueRow(title: "来源", value: "未接线")
                 SkillDetailDivider()
                 SkillDetailValueRow(title: "文件", value: "SKILL.md", monospace: true) {
                     pendingAlert = .file
                 }
             }
 
-            SkillDetailFooter("1 个文件 · ~/skills/\(skillName)")
+            SkillDetailFooter("当前不会读取本地 Skill 目录或文件树。")
         }
     }
 
@@ -176,7 +170,7 @@ struct SkillDetailView: View {
                 Button {
                     pendingAlert = .delete
                 } label: {
-                    Text("删除技能")
+                    Text("删除尚未接线")
                         .font(.body.weight(.medium))
                         .foregroundStyle(AmberTheme.accentRed)
                         .frame(maxWidth: .infinity)
@@ -187,16 +181,12 @@ struct SkillDetailView: View {
             }
             .padding(.top, 20)
 
-            SkillDetailFooter("删除后需重新导入，或从内置库恢复。")
+            SkillDetailFooter("删除需要真实 Skill 文件系统桥和确认流程；当前不会删除任何文件。")
         }
     }
 
     private var triggerText: String {
-        if skillName == "skill-creator" {
-            "Use when the user wants to create a new AmberAgent skill, update an existing skill, package reusable instructions, or add specialized workflows, file handling, or tool-integration guidance."
-        } else {
-            "Use when Agent needs this installed skill's specialized workflow, file handling, or tool-integration guidance."
-        }
+        "iOS 详情页尚未接入 SkillManager，无法读取 \(skillName) 的真实触发说明。"
     }
 }
 
@@ -345,7 +335,7 @@ private enum SkillDetailAlert: Identifiable {
         case .edit:
             "编辑 SKILL.md 需要接入文件编辑和校验流程；当前不会修改技能文件。"
         case .allowedTools:
-            "工具权限编辑会在 skill-detail 后续子流程接入；当前保持未限制展示。"
+            "工具权限需要读取真实 SKILL.md 的 allowed-tools 声明；当前不会展示或修改权限。"
         case .file:
             "文件查看需要接入 Skill 文件浏览器；当前不会读取本地文件。"
         case .delete:
