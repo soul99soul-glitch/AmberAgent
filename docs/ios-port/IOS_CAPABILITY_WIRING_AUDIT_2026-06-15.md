@@ -19,6 +19,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Provider current config and presets: Settings home and `ProvidersView` now read the real current `SettingsStore` OpenAI-compatible config and expose Android/KMP `DEFAULT_PROVIDERS` as no-key preset templates. OpenAI-compatible templates can only write `SettingsStore.baseUrl`; Gemini, xAI, and Xiaomi MiMo templates are visible but blocked from one-click apply where the current iOS chain cannot faithfully represent their ProviderSetting/Response API/endpoint state.
 - TTS default status: Settings home now shows the real KMP default `系统 TTS`, and the TTS page defaults to System TTS while marking cloud engine fields, preview, delete, and add flows as drafts with no save, no Keychain write, and no TTS request.
 - Skill/MCP status honesty: Settings home, `SkillsView`, `SkillDetailView`, `SkillAddView`, and `McpServersView` no longer claim installed skill counts, enabled skill counts, connected MCP servers, tool counts, or toggle persistence. Android/KMP real capabilities remain documented, but iOS now presents this line as not yet bridged instead of fabricating state.
+- Account stats honesty: `AccountView` no longer shows fake total conversations/messages/tokens/cache savings/launch counts or generated heatmap activity. It keeps the design shell but marks statistics as not wired until iOS exposes the Android `StatsVM`/DAO equivalents.
 
 ### 仍是草稿/占位
 
@@ -28,7 +29,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - TTS settings are still not wired to an iOS `TTSProviderSetting` store or real `TTSManager` execution path. The page has been downgraded to real default status plus draft-only cloud fields.
 - Skills page is not wired to the real Android/KMP `SkillManager` / `SkillsVM` scanning/import/editing path. It has been downgraded to an explicit not-wired status with draft-only add/import/rescan flows.
 - MCP server page is not wired to `Settings.mcpServers`, `McpServerConfig`, `McpManager`, or `McpImportParser`. The previous hardcoded connected-server list and isolated `@AppStorage` toggles have been removed; import/add remain draft-only, and import uses only rough text preview rather than real parser-backed validation.
-- Account statistics and conversation storage show precise prototype numbers. No inspected iOS source currently proves these values come from DB, token usage, cache size, or conversation DAO.
+- Account profile is still local preview only, with no inspected persistent account/profile store. Conversation storage still shows precise prototype usage/count values and needs a separate pass.
 - Search services, Sync/Backup, Memory, Board, Council, SubAgent, MiniApp, and WebMount pages need separate verification before any values or actions can be treated as real.
 
 ### 不应接线的孤儿入口 / 不应误导的入口
@@ -39,7 +40,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - TTS cloud engine save/delete/preview: must remain disabled/draft or be wired to verified secure storage and real TTS providers. Do not run network preview as validation.
 - MCP import/add "Done": replaced with `关闭`; must not show import success unless parsed and persisted through a real settings path.
 - Skills import/rescan: must not claim success until local scan/import implementation is available on iOS; current copy explicitly says no download, no file picker, no filesystem mutation.
-- Account exact usage stats and heatmap: must either be wired to real stats or explicitly presented as unavailable/placeholder.
+- Account exact usage stats and heatmap: downgraded in Slice 7; do not reintroduce precise values until a real iOS stats bridge exists.
 - Conversation storage cleanup/delete: current alerts correctly do not delete data; exact storage values should not remain as if measured.
 
 ### 高风险区域
@@ -47,7 +48,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Secret storage split: the single OpenAI API key is in Keychain, but general provider/TTS API keys are not yet modeled in iOS. Avoid expanding secret handling without a clear schema.
 - Provider/model identity: current iOS chat creates a fresh `ProviderSetting.OpenAI` and fresh `Model` from three scalar settings. It cannot represent multiple providers, custom headers/body, OAuth/coding-plan auth modes, provider-specific models, Gemini's `ProviderSetting.Google`, or xAI's default `useResponseApi=true` template state.
 - Permission approval scope: `Route.toolPermissions` routes to the approval-policy page and its "权限与能力" row routes to `ToolPermissionsView`; `SheetDestination.toolPermissions` still opens the full capability page directly. The approval page intentionally exposes only the implemented `file_read_selected` tool policy; photos/location/camera/notifications remain system-permission status/request entries until real Agent executors exist.
-- Hardcoded precise numbers/status: Settings home, Account stats, and ConversationStorage still display exact counts/status that look real but are not backed by inspected iOS data. Provider count has been replaced by the current scalar config plus no-key KMP templates; TTS default status is now corrected to System TTS; Skill/MCP precise installed/connected counts have been removed, but their config screens remain draft-only.
+- Hardcoded precise numbers/status: Settings home and ConversationStorage still display exact counts/status that look real but are not backed by inspected iOS data. Provider count has been replaced by the current scalar config plus no-key KMP templates; TTS default status is now corrected to System TTS; Skill/MCP precise installed/connected counts have been removed; Account stats now show unavailable state instead of fake exact values.
 - External effects: Provider connection test in legacy `SettingsView` calls `listModels`. Do not use it as routine validation unless the user explicitly supplies credentials/approves network use.
 
 ## 2. UI Entry Map
@@ -92,8 +93,8 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Skills | detail/add/import/rescan | `SkillDetailView.swift`, `SkillDraftViews.swift`, `SkillsView.swift` | Yes Android path | real local file scan/import/edit + `assistant.enabledSkills` | detail cannot claim version/source/enabled/files; add/import/rescan are draft/no-write | P1 |
 | MCP | server list/toggles | `McpServersView.swift` | Yes Android/KMP `McpManager`/`McpServerConfig` | real `Settings.mcpServers` bridge | hardcoded connected list and isolated toggles removed; shows explicit not-wired status | P0 done/P1 bridge |
 | MCP | import/add | `McpServersView.swift` | Yes `McpImportParser` | parse + persist `McpServerConfig` | rough text preview only; close button, no save/connect/header persistence | P1 |
-| Account | profile name/avatar | `AccountView.swift` | No inspected persistent account store | local profile preference if added | local-only `@State` | P2 |
-| Account | stats/heatmap | `AccountView.swift` | Android DAOs exist; iOS stats bridge unclear | conversation/message/token usage stats | hardcoded precise values | P1 |
+| Account | profile name/avatar | `AccountView.swift` | No inspected persistent account store | local profile preference if added | local preview only; copy states no account storage is wired | P2 |
+| Account | stats/heatmap | `AccountView.swift` | Android has `StatsVM`, `ConversationDAO`, `MessageStatsDAO`, `SettingsAggregator.launchCount`; iOS bridge not exposed | conversation/message/token usage stats | exact fake values removed; shows `未接线` and neutral heatmap | P1 done/P1 bridge |
 | Conversation storage | usage/cleanup/delete | `ConversationStorageView.swift` | likely DB/cache sources exist; iOS service unclear | measured storage + safe transactions | hardcoded values; actions are no-op alerts | P1 |
 
 ## 3. Implementation Queue
@@ -110,7 +111,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 2. Chat and ModelDefaults need a real provider/model registry bridge before exposing multiple provider choices; current iOS generation only has a single OpenAI-compatible scalar config.
 3. ModelDefaults auxiliary model/thinking/context controls: local-only state should either persist to real settings or be marked unavailable.
 4. Done in Slice 6: Chat thinking level now hydrates `Model.abilities` from KMP `ModelRegistry` and writes `TextGenerationParams.reasoningLevel` only for reasoning-capable models; context popover no longer shows exact fake token/cache/speed numbers.
-5. Account and storage exact statistics should be wired to measured sources or replaced with unavailable/draft copy.
+5. Account exact statistics replaced with unavailable copy in Slice 7; ConversationStorage still needs measured sources or unavailable/draft copy.
 6. Runtime page subtitle/home value should reflect selected runtime/default SSH profile from `SettingsStore`.
 7. Add policy editing for additional capabilities only after a matching iOS Agent executor exists; system-only permissions should stay in the capability status/request page.
 8. Wire TTS to a real iOS settings bridge before enabling cloud provider save/delete/preview or system speech preview controls.
@@ -246,6 +247,20 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Subagent review: completed by `Dewey`; P1 finding applied. Initial code passed `reasoningLevel` into `TextGenerationParams`, but the constructed `Model` had `abilities: []`, and KMP request builders only emit reasoning params for `ModelAbility.REASONING`. Fix: hydrate abilities from KMP `ModelRegistry.MODEL_ABILITIES`, gate non-off reasoning by that real ability, make UI unavailable when the current model is not marked reasoning-capable, and use one normalized model id for snapshot + params. Follow-up review found no P0/P1; its P2 model-name consistency finding was fixed by starting Live Activity with `params.model.modelId`.
 - Remaining risk: reasoning is current ChatView state only; no inspected iOS settings/assistant bridge persists a default reasoning policy. Context token/window/cost/speed accounting remains unavailable until a real estimator or usage source is wired. Positive-path UI validation for a reasoning-capable model is not yet captured in this slice; the code path is gated by KMP registry and covered by build plus reviewer inspection.
 
+### Slice 7 - Account stats honesty downgrade
+
+- Scope: `AccountView` no longer displays hardcoded exact totals for conversations, messages, token usage, cache savings, or launch count, and its heatmap no longer generates synthetic activity. The page keeps the visual structure while marking stats as `未接线`; profile name/avatar are explicitly current-page preview only. Android evidence (`StatsVM`, `ConversationDAO`, `MessageStatsDAO`, `SettingsAggregator.launchCount`) remains documented as the real logic to bridge later, but no equivalent iOS stats store/repository is currently exposed.
+- Verification:
+  - `mcp__xcodebuildmcp.session_show_defaults` confirmed project `/Users/arquiel/Downloads/AI/amberagent-ios/iosApp/AmberAgent.xcodeproj`, scheme `iosApp`, simulator `iPhone 17`.
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded for `iosApp` on iPhone 17 / iOS 26.5 after the Account edits and the reviewer-driven heatmap fix.
+  - UI snapshot: Home -> 我的账户 showed `当前页面预览`, profile storage not wired copy, `iOS 统计桥尚未接线`, `统计未接线`, and total conversation/message values as `未接线`.
+  - UI snapshot path after scrolling showed input/output token, cache savings, and launch count all as `未接线`.
+- Screenshot paths:
+  - Account stats top: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_0c932d10-5e2a-4605-a57b-3a1212170a32.jpg`
+  - Account stats detail: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_34919bbf-4cc2-4f31-b367-0b09939d6193.jpg`
+- Subagent review: completed by `Gibbs`; no P0/P1 findings. P2 fixes applied: heatmap grid now sizes from available width instead of using a fixed width, and the month axis/`少`-`多` legend were replaced by an explicit `统计未接线` unavailable overlay so the neutral grid is not misread as real low activity.
+- Remaining risk: no iOS Stats bridge or persistent profile/account store is wired. ConversationStorage still has separate hardcoded exact storage values and needs its own slice.
+
 ## 5. Commit Log
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
@@ -254,4 +269,5 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | `bf9eea664` | TTS default/status downgrade | `build_run_sim` succeeded | see Slice 3 screenshot paths | no iOS TTS settings bridge or synthesis executor yet |
 | `a5dd008f6` | Skill/MCP not-wired state downgrade | `build_run_sim` succeeded before and after subagent P2 copy fixes | see Slice 4 screenshot paths | no iOS Skill/MCP settings bridge yet |
 | `c77cc4b20` | Provider current config, no-key default templates, and model draft downgrade | `build_run_sim` succeeded before/after explicit route-kind and subagent P2 fixes | see Slice 5 screenshot paths | no full iOS provider registry, provider-specific Keychain schema, Response API persistence, or model metadata bridge yet |
-| Pending | Chat reasoning parameter wiring with KMP model ability gate, context-stat downgrade, and no-fake empty state | `build_run_sim` succeeded before and after subagent P1/P2 fixes | see Slice 6 screenshot paths | no persisted reasoning default; no real context token/window estimator |
+| `c3d22f732` | Chat reasoning parameter wiring with KMP model ability gate, context-stat downgrade, and no-fake empty state | `build_run_sim` succeeded before and after subagent P1/P2 fixes | see Slice 6 screenshot paths | no persisted reasoning default; no real context token/window estimator |
+| Pending | Account stats exact-value downgrade and profile preview honesty | `build_run_sim` succeeded before and after reviewer P2 heatmap fixes | see Slice 7 screenshot paths | no iOS Stats bridge; no persistent account/profile store; ConversationStorage still pending |

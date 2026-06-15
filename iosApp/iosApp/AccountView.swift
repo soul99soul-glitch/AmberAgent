@@ -73,7 +73,7 @@ struct AccountView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
 
-                Text("用于头像和本机显示名称")
+                Text("当前页面预览")
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -91,7 +91,7 @@ struct AccountView: View {
                 AccountTextFieldRow(title: "昵称", placeholder: "输入你的称呼", text: $displayName)
             }
 
-            Text("这里只影响本机界面的称呼和头像预览。")
+            Text("iOS 端尚未接入账户资料存储；这里仅预览本页称呼和头像。")
                 .font(.caption)
                 .lineSpacing(3)
                 .foregroundStyle(AmberTheme.muted2)
@@ -137,15 +137,15 @@ private struct AccountTextFieldRow: View {
 
 private struct AccountStatsPanel: View {
     private let overviewStats: [AccountStatItem] = [
-        .init(systemImage: "bubble.left.and.bubble.right", label: "总会话", value: "34"),
-        .init(systemImage: "message", label: "总消息", value: "182")
+        .init(systemImage: "bubble.left.and.bubble.right", label: "总会话", value: "未接线"),
+        .init(systemImage: "message", label: "总消息", value: "未接线")
     ]
 
     private let detailStats: [AccountStatItem] = [
-        .init(systemImage: "cpu", label: "输入 Token", value: "2.60M"),
-        .init(systemImage: "cpu", label: "输出 Token", value: "71.2K"),
-        .init(systemImage: "bolt", label: "缓存节省", value: "1.55M"),
-        .init(systemImage: "power", label: "启动次数", value: "74")
+        .init(systemImage: "cpu", label: "输入 Token", value: "未接线"),
+        .init(systemImage: "cpu", label: "输出 Token", value: "未接线"),
+        .init(systemImage: "bolt", label: "缓存节省", value: "未接线"),
+        .init(systemImage: "power", label: "启动次数", value: "未接线")
     ]
 
     var body: some View {
@@ -240,7 +240,7 @@ private struct AccountHeatmapBlock: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("近 5 个月的本机使用活跃度")
+                    Text("iOS 统计桥尚未接线")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -256,67 +256,40 @@ private struct AccountHeatmapBlock: View {
 private struct AccountHeatmap: View {
     private let weeks = 21
     private let rows = 7
-    private let cellSize: CGFloat = 12.3
-    private let cellGap: CGFloat = 3.5
-    private let monthLabels: [(label: String, week: Int)] = [
-        ("2月", 0),
-        ("3月", 5),
-        ("4月", 10),
-        ("5月", 15),
-        ("6月", 20)
-    ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 7) {
-                monthAxis
-                    .frame(width: gridWidth, height: monthLabelHeight, alignment: .topLeading)
+        GeometryReader { geometry in
+            let cellGap: CGFloat = 3
+            let maxCellSize: CGFloat = 12
+            let availableWidth = max(geometry.size.width, 0)
+            let cellSize = max(6, min(maxCellSize, (availableWidth - CGFloat(weeks - 1) * cellGap) / CGFloat(weeks)))
+            let gridWidth = CGFloat(weeks) * cellSize + CGFloat(weeks - 1) * cellGap
+            let gridHeight = CGFloat(rows) * cellSize + CGFloat(rows - 1) * cellGap
 
-                heatmapGrid
+            ZStack {
+                heatmapGrid(cellSize: cellSize, cellGap: cellGap)
                     .frame(width: gridWidth, height: gridHeight)
-            }
-            .frame(width: gridWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
+                    .opacity(0.42)
 
-            legend
-                .frame(width: gridWidth, alignment: .trailing)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 14)
-        }
-    }
-
-    private var monthAxis: some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(monthLabels, id: \.label) { item in
-                Text(item.label)
-                    .font(.caption2.weight(.medium))
+                Label("统计未接线", systemImage: "chart.bar.xaxis")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(AmberTheme.muted)
-                    .frame(width: 28, alignment: .leading)
-                    .offset(x: min(CGFloat(item.week) * columnPitch, gridWidth - 24), y: 0)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        AmberTheme.surface.opacity(0.92),
+                        in: Capsule()
+                    )
             }
+            .frame(maxWidth: .infinity, minHeight: gridHeight)
         }
+        .frame(height: 112)
     }
 
-    private var legend: some View {
-        HStack(spacing: 6) {
-            Text("少")
-                .font(.caption2)
-                .foregroundStyle(AmberTheme.muted2)
-
-            ForEach(0..<5, id: \.self) { level in
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(legendColor(level))
-                    .frame(width: 10, height: 10)
-            }
-
-            Text("多")
-                .font(.caption2)
-                .foregroundStyle(AmberTheme.muted2)
-        }
-    }
-
-    private var heatmapGrid: some View {
+    private func heatmapGrid(cellSize: CGFloat, cellGap: CGFloat) -> some View {
         Canvas { context, _ in
+            let columnPitch = cellSize + cellGap
+            let rowPitch = cellSize + cellGap
             for week in 0..<weeks {
                 for row in 0..<rows {
                     let rect = CGRect(
@@ -327,41 +300,11 @@ private struct AccountHeatmap: View {
                     )
                     context.fill(
                         Path(roundedRect: rect, cornerRadius: 2.6),
-                        with: .color(heatmapColor(week: week, day: row))
+                        with: .color(legendColor(0))
                     )
                 }
             }
         }
-    }
-
-    private var columnPitch: CGFloat { cellSize + cellGap }
-
-    private var rowPitch: CGFloat { cellSize + cellGap }
-
-    private var gridWidth: CGFloat {
-        CGFloat(weeks) * cellSize + CGFloat(weeks - 1) * cellGap
-    }
-
-    private var gridHeight: CGFloat {
-        CGFloat(rows) * cellSize + CGFloat(rows - 1) * cellGap
-    }
-
-    private var monthLabelHeight: CGFloat { 20 }
-
-    private func heatmapColor(week: Int, day: Int) -> Color {
-        if week < 14 {
-            let isQuiet = (week * 11 + day * 7).isMultiple(of: 17)
-            return isQuiet ? legendColor(1) : legendColor(0)
-        }
-        let recentPatterns: [[Int]] = [
-            [0, 0, 1, 0, 0, 1, 0],
-            [0, 1, 0, 2, 0, 0, 1],
-            [1, 2, 0, 3, 0, 2, 0],
-            [2, 0, 3, 4, 3, 0, 1],
-            [3, 4, 0, 4, 2, 0, 1]
-        ]
-        let recentIndex = min(max(week - 14, 0), recentPatterns.count - 1)
-        return legendColor(recentPatterns[recentIndex][day])
     }
 
     private func legendColor(_ level: Int) -> Color {
