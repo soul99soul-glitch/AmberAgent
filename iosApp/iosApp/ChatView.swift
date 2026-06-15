@@ -14,7 +14,6 @@ struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @State private var activeComposerPanel: ComposerPanel?
     @State private var isModelSheetPresented = false
-    @State private var previewModel: String?
     @State private var selectedThinkingLevel = "关闭"
     @FocusState private var isInputFocused: Bool
     @Environment(\.dismiss) private var dismiss
@@ -43,7 +42,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $isModelSheetPresented) {
             ComposerModelSheet(currentModel: composerModelLabel) { model in
-                previewModel = model.name
+                settingsStore.modelId = model.id
                 isModelSheetPresented = false
             }
             .presentationDetents([.fraction(0.72), .large])
@@ -279,7 +278,7 @@ struct ChatView: View {
     }
 
     private var composerModelLabel: String {
-        previewModel ?? (settingsStore.modelId.isEmpty ? "MiMo V2.5 Pro" : settingsStore.modelId)
+        settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId
     }
 
     private func toggleComposerPanel(_ panel: ComposerPanel) {
@@ -332,13 +331,16 @@ private struct ComposerModelSheet: View {
     @State private var expandedProviderIDs: Set<String>
 
     private var providers: [ComposerProviderGroup] {
-        ComposerProviderGroup.defaults
+        ComposerProviderGroup.currentConfiguration(currentModel: currentModel)
     }
 
     init(currentModel: String, onPick: @escaping (ComposerModelOption) -> Void) {
         self.currentModel = currentModel
         self.onPick = onPick
-        let selectedProviderID = Self.selectedProviderID(for: currentModel)
+        let selectedProviderID = Self.selectedProviderID(
+            for: currentModel,
+            providers: ComposerProviderGroup.currentConfiguration(currentModel: currentModel)
+        )
         self._expandedProviderIDs = State(initialValue: Set([selectedProviderID]))
     }
 
@@ -356,7 +358,7 @@ private struct ComposerModelSheet: View {
                         .font(.title3.weight(.bold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("按服务商选择本次对话使用的模型")
+                    Text("选择当前配置要使用的 Model ID")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -418,7 +420,7 @@ private struct ComposerModelSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(AmberTheme.background)
         .onAppear {
-            expandedProviderIDs = Set([Self.selectedProviderID(for: currentModel)])
+            expandedProviderIDs = Set([Self.selectedProviderID(for: currentModel, providers: providers)])
         }
     }
 
@@ -432,10 +434,10 @@ private struct ComposerModelSheet: View {
         }
     }
 
-    private static func selectedProviderID(for currentModel: String) -> String {
-        ComposerProviderGroup.defaults.first { provider in
+    private static func selectedProviderID(for currentModel: String, providers: [ComposerProviderGroup]) -> String {
+        providers.first { provider in
             provider.models.contains { $0.matches(currentModel) }
-        }?.id ?? ComposerProviderGroup.defaults.first?.id ?? "mimo"
+        }?.id ?? providers.first?.id ?? "current"
     }
 }
 
@@ -543,54 +545,27 @@ private struct ComposerProviderGroup: Identifiable {
     let name: String
     let models: [ComposerModelOption]
 
-    static let defaults: [ComposerProviderGroup] = [
-        ComposerProviderGroup(
-            id: "mimo",
-            name: "小米 MiMo",
-            models: [
-                ComposerModelOption(id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro", context: "1M"),
-                ComposerModelOption(id: "mimo-v2.5", name: "MiMo V2.5", context: "1M")
-            ]
-        ),
-        ComposerProviderGroup(
-            id: "minimax",
-            name: "MiniMax",
-            models: [
-                ComposerModelOption(id: "MiniMax-M1", name: "MiniMax M1", context: nil)
-            ]
-        ),
-        ComposerProviderGroup(
-            id: "openai",
-            name: "OpenAI",
-            models: [
-                ComposerModelOption(id: "gpt-4o", name: "gpt-4o", context: "128K"),
-                ComposerModelOption(id: "gpt-5-codex", name: "GPT-5 Codex", context: nil)
-            ]
-        ),
-        ComposerProviderGroup(
-            id: "deepseek",
-            name: "DeepSeek",
-            models: [
-                ComposerModelOption(id: "deepseek-reasoner", name: "DeepSeek R1", context: nil),
-                ComposerModelOption(id: "deepseek-chat", name: "DeepSeek V3", context: nil),
-                ComposerModelOption(id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", context: "1M")
-            ]
-        ),
-        ComposerProviderGroup(
-            id: "kimi",
-            name: "月之暗面（Kimi）",
-            models: [
-                ComposerModelOption(id: "kimi-k2", name: "Kimi K2", context: nil)
-            ]
-        ),
-        ComposerProviderGroup(
-            id: "glm",
-            name: "智谱 GLM",
-            models: [
-                ComposerModelOption(id: "glm-4.6", name: "GLM 4.6", context: nil)
-            ]
-        )
-    ]
+    static func currentConfiguration(currentModel: String) -> [ComposerProviderGroup] {
+        let defaultModels = [
+            ComposerModelOption(id: "gpt-4o", name: "gpt-4o", context: "128K")
+        ]
+        let trimmedCurrentModel = currentModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let models: [ComposerModelOption]
+        if trimmedCurrentModel.isEmpty || defaultModels.contains(where: { $0.matches(trimmedCurrentModel) }) {
+            models = defaultModels
+        } else {
+            models = [
+                ComposerModelOption(id: trimmedCurrentModel, name: trimmedCurrentModel, context: nil)
+            ] + defaultModels
+        }
+        return [
+            ComposerProviderGroup(
+                id: "current",
+                name: "当前 OpenAI-compatible 配置",
+                models: models
+            )
+        ]
+    }
 }
 
 private struct ComposerModelOption: Identifiable, Hashable {

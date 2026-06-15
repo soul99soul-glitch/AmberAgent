@@ -97,7 +97,7 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         let fileCapability = try XCTUnwrap(
             IOSCapabilityRegistry.capabilities.first { $0.id == "ios.files.selected_read" }
         )
-        permissionStore.setPolicy(.allowOncePerRun, for: fileCapability)
+        permissionStore.setPolicy(.askEveryTime, for: fileCapability)
         let executor = makeExecutor(permissionStore: permissionStore, documentStore: documentStore)
         let request = IOSLocalToolExecutionRequest(
             toolName: grant.toolName,

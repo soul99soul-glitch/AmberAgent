@@ -13,7 +13,7 @@ struct ModelDefaultsView: View {
     @State private var contextMessages = "无限制"
     @State private var alert: ModelDefaultsAlert?
 
-    private let chatModels = ["MiMo V2.5 Pro", "DeepSeek V4 Pro", "gpt-4o", "Kimi K2.6"]
+    private let chatModelIDs = ["gpt-4o"]
     private let imageModels = ["未设置", "GPT-Image-1", "FLUX.1 Kontext", "Seedream 4.0"]
     private let auxiliaryModels = ["跟随聊天模型", "MiMo V2.5 Flash", "DeepSeek V4 Flash", "gpt-4o-mini"]
     private let thinkingOptions = ["关闭", "自动", "低", "中等", "高", "超高", "最大"]
@@ -93,9 +93,9 @@ struct ModelDefaultsView: View {
                     subtitle: "全局默认的聊天模型",
                     value: currentChatModel
                 ) {
-                    ForEach(chatModels, id: \.self) { model in
-                        Button(model) {
-                            settingsStore.modelId = model
+                    ForEach(chatModelOptions, id: \.self) { modelID in
+                        Button(modelID) {
+                            settingsStore.modelId = modelID
                         }
                     }
                 }
@@ -241,7 +241,15 @@ struct ModelDefaultsView: View {
     }
 
     private var currentChatModel: String {
-        settingsStore.modelId.isEmpty ? "MiMo V2.5 Pro" : settingsStore.modelId
+        settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId
+    }
+
+    private var chatModelOptions: [String] {
+        ([currentChatModel] + chatModelIDs).reduce(into: [String]()) { result, modelID in
+            if !result.contains(modelID) {
+                result.append(modelID)
+            }
+        }
     }
 }
 

@@ -47,6 +47,31 @@ final class IOSToolRuntimeTests: XCTestCase {
         }
     }
 
+    func testRunScopedPolicyIsNormalizedBeforeRuntimeResolve() throws {
+        let defaults = isolatedDefaults()
+        let permissionStore = IOSPermissionStore(userDefaults: defaults)
+        let documentStore = DocumentAccessStore()
+        let capability = try XCTUnwrap(IOSCapabilityRegistry.capabilities.first { $0.id == "ios.files.selected_read" })
+        permissionStore.setPolicy(.allowOncePerRun, for: capability)
+        XCTAssertEqual(permissionStore.policy(for: capability), .askEveryTime)
+        let grant = documentStore.registerPickedFile(try makeTempFile(size: 16))
+        let runtime = IOSToolRuntime(permissionStore: permissionStore, documentStore: documentStore)
+
+        let decision = runtime.resolve(
+            request: IOSToolInvocationRequest(
+                toolName: grant.toolName,
+                operation: grant.operation,
+                scopeDigest: grant.scopeDigest,
+                payloadDigest: grant.payloadDigest,
+                isUserInitiated: false
+            )
+        )
+
+        guard case .needsUserAction = decision else {
+            return XCTFail("Expected needsUserAction, got \(decision)")
+        }
+    }
+
     func testScopeToolOrPayloadMismatchDenies() throws {
         let documentStore = DocumentAccessStore()
         let grant = documentStore.registerPickedFile(try makeTempFile(size: 16))

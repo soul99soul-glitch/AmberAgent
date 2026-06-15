@@ -1552,8 +1552,7 @@ final class IOSPermissionStore {
 
         let defaults = Dictionary(
             uniqueKeysWithValues: capabilities.map { capability in
-                let initial: IOSAgentPermissionPolicy = capability.defaultEnabled ? .askEveryTime : .disabled
-                return (capability.id, initial)
+                return (capability.id, Self.defaultPolicy(for: capability))
             }
         )
         let allowedIds = Set(capabilities.map(\.id))
@@ -1568,11 +1567,14 @@ final class IOSPermissionStore {
             }
             guard let capability = capabilities.first(where: { $0.id == id }),
                   let policy = IOSAgentPermissionPolicy(rawValue: rawPolicy),
-                  Self.availablePolicies(for: capability).contains(policy) else {
+                  let normalizedPolicy = Self.normalizedPolicy(policy, for: capability) else {
                 didDropUnknown = true
                 continue
             }
-            loaded[id] = policy
+            loaded[id] = normalizedPolicy
+            if normalizedPolicy != policy {
+                didDropUnknown = true
+            }
         }
 
         policies = loaded
@@ -1582,12 +1584,13 @@ final class IOSPermissionStore {
     }
 
     func policy(for capability: IOSPlatformCapability) -> IOSAgentPermissionPolicy {
-        policies[capability.id] ?? (capability.defaultEnabled ? .askEveryTime : .disabled)
+        let policy = policies[capability.id] ?? Self.defaultPolicy(for: capability)
+        return Self.normalizedPolicy(policy, for: capability) ?? Self.defaultPolicy(for: capability)
     }
 
     func setPolicy(_ policy: IOSAgentPermissionPolicy, for capability: IOSPlatformCapability) {
-        guard availablePolicies(for: capability).contains(policy) else { return }
-        policies[capability.id] = policy
+        guard let normalizedPolicy = Self.normalizedPolicy(policy, for: capability) else { return }
+        policies[capability.id] = normalizedPolicy
         persist()
     }
 
@@ -1602,10 +1605,28 @@ final class IOSPermissionStore {
         if capability.risk == .high || capability.gate.requiresFreshUserPresence {
             return [.disabled, .askEveryTime]
         }
-        if capability.gate.allowRunScopedReuse {
-            return [.disabled, .askEveryTime, .allowOncePerRun]
-        }
         return [.disabled, .askEveryTime]
+    }
+
+    static func defaultPolicy(for capability: IOSPlatformCapability) -> IOSAgentPermissionPolicy {
+        let preferred: IOSAgentPermissionPolicy = capability.defaultEnabled ? .askEveryTime : .disabled
+        return availablePolicies(for: capability).contains(preferred)
+            ? preferred
+            : (availablePolicies(for: capability).first ?? .disabled)
+    }
+
+    static func normalizedPolicy(
+        _ policy: IOSAgentPermissionPolicy,
+        for capability: IOSPlatformCapability
+    ) -> IOSAgentPermissionPolicy? {
+        let supportedPolicies = availablePolicies(for: capability)
+        if supportedPolicies.contains(policy) {
+            return policy
+        }
+        if policy == .allowOncePerRun, supportedPolicies.contains(.askEveryTime) {
+            return .askEveryTime
+        }
+        return nil
     }
 
     func decisionSummary(
@@ -1637,9 +1658,6 @@ final class IOSPermissionStore {
         }
         if !capability.gate.allowGlobalAutoApproval && (globalAutoApproval || highRiskAutoApproval) {
             return "Auto-approval ignored"
-        }
-        if policy == .allowOncePerRun {
-            return "Run-scoped approval only"
         }
         return "Ask before agent use"
     }

@@ -343,7 +343,7 @@ private extension View {
             case .providerSettings:
                 SettingsView(settingsStore: settingsStore)
             case .toolPermissions:
-                PermissionsApprovalView()
+                PermissionsApprovalView(permissionStore: permissionStore)
             }
         }
     }
