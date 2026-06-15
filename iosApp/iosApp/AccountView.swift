@@ -150,11 +150,11 @@ private struct AccountStatsPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AccountStatsOverview(items: overviewStats)
+            AccountHeatmapBlock()
 
             AccountDivider()
 
-            AccountHeatmapBlock()
+            AccountStatsOverview(items: overviewStats)
 
             AccountDivider()
 
@@ -204,7 +204,7 @@ private struct AccountPrimaryMetric: View {
     let item: AccountStatItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .center, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: item.systemImage)
                     .font(.system(size: 14, weight: .semibold))
@@ -221,7 +221,7 @@ private struct AccountPrimaryMetric: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
@@ -236,11 +236,11 @@ private struct AccountHeatmapBlock: View {
                     .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("聊天热力图")
+                    Text("使用热力图统计")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("近 5 个月的本机聊天活跃度")
+                    Text("近 5 个月的本机使用活跃度")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -248,7 +248,7 @@ private struct AccountHeatmapBlock: View {
 
             AccountHeatmap()
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 10)
         .padding(.vertical, 16)
     }
 }
@@ -256,8 +256,8 @@ private struct AccountHeatmapBlock: View {
 private struct AccountHeatmap: View {
     private let weeks = 21
     private let rows = 7
-    private let cellSize: CGFloat = 8
-    private let cellGap: CGFloat = 4
+    private let cellSize: CGFloat = 11.5
+    private let cellGap: CGFloat = 3.5
     private let monthLabels: [(label: String, week: Int)] = [
         ("2月", 0),
         ("3月", 5),
