@@ -30,10 +30,45 @@ targets:
     sources:
       - path: iosApp
     preBuildScripts:
+      - name: Build Shared KMP Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          case "${SDK_NAME:-}" in
+            iphonesimulator*) kotlin_target="IosSimulatorArm64" ;;
+            iphoneos*) kotlin_target="IosArm64" ;;
+            *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
+          esac
+          build_type="${CONFIGURATION:-Debug}"
+          cd "${SRCROOT}/.."
+          ./gradlew ":shared:link${build_type}Framework${kotlin_target}"
       - name: Validate Entitlement Diagnostics
         basedOnDependencyAnalysis: false
         script: |
           /bin/sh "${SRCROOT}/scripts/validate-entitlement-diagnostics.sh" "${SRCROOT}/iosApp/AmberAgent.entitlements" "${SRCROOT}/iosApp/Info.plist"
+    postBuildScripts:
+      - name: Embed Shared KMP Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          case "${SDK_NAME:-}" in
+            iphonesimulator*) kotlin_dir="iosSimulatorArm64" ;;
+            iphoneos*) kotlin_dir="iosArm64" ;;
+            *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
+          esac
+          config_dir="$(printf '%s' "${CONFIGURATION:-Debug}" | tr '[:upper:]' '[:lower:]')Framework"
+          framework_src="${SRCROOT}/../shared/build/bin/${kotlin_dir}/${config_dir}/Shared.framework"
+          framework_dst="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Shared.framework"
+          if [ ! -d "${framework_src}" ]; then
+            echo "Missing Shared.framework at ${framework_src}" >&2
+            exit 1
+          fi
+          mkdir -p "$(dirname "${framework_dst}")"
+          rm -rf "${framework_dst}"
+          ditto "${framework_src}" "${framework_dst}"
+          if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && [ "${EXPANDED_CODE_SIGN_IDENTITY:-}" != "-" ]; then
+            codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${framework_dst}"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios
@@ -51,6 +86,10 @@ targets:
         FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
           - "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
         OTHER_LDFLAGS:
           - "-lamber_ffi"
         SWIFT_ACTIVE_COMPILATION_CONDITIONS:
@@ -62,7 +101,7 @@ targets:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64/Headers"
     dependencies:
       - framework: Shared.framework
-        embed: true
+        embed: false
       - package: swift-nio
         product: NIOCore
       - package: swift-nio
@@ -93,6 +132,10 @@ targets:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
         FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
           - "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework"
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
         HEADER_SEARCH_PATHS[sdk=iphonesimulator*]:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim/Headers"
@@ -143,10 +186,45 @@ targets:
     sources:
       - path: iosApp
     preBuildScripts:
+      - name: Build Shared KMP Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          case "${SDK_NAME:-}" in
+            iphonesimulator*) kotlin_target="IosSimulatorArm64" ;;
+            iphoneos*) kotlin_target="IosArm64" ;;
+            *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
+          esac
+          build_type="${CONFIGURATION:-Debug}"
+          cd "${SRCROOT}/.."
+          ./gradlew ":shared:link${build_type}Framework${kotlin_target}"
       - name: Validate Entitlement Diagnostics
         basedOnDependencyAnalysis: false
         script: |
           /bin/sh "${SRCROOT}/scripts/validate-entitlement-diagnostics.sh" "${SRCROOT}/iosApp/AmberAgent.entitlements" "${SRCROOT}/iosApp/Info.plist"
+    postBuildScripts:
+      - name: Embed Shared KMP Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          case "${SDK_NAME:-}" in
+            iphonesimulator*) kotlin_dir="iosSimulatorArm64" ;;
+            iphoneos*) kotlin_dir="iosArm64" ;;
+            *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
+          esac
+          config_dir="$(printf '%s' "${CONFIGURATION:-Debug}" | tr '[:upper:]' '[:lower:]')Framework"
+          framework_src="${SRCROOT}/../shared/build/bin/${kotlin_dir}/${config_dir}/Shared.framework"
+          framework_dst="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Shared.framework"
+          if [ ! -d "${framework_src}" ]; then
+            echo "Missing Shared.framework at ${framework_src}" >&2
+            exit 1
+          fi
+          mkdir -p "$(dirname "${framework_dst}")"
+          rm -rf "${framework_dst}"
+          ditto "${framework_src}" "${framework_dst}"
+          if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && [ "${EXPANDED_CODE_SIGN_IDENTITY:-}" != "-" ]; then
+            codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${framework_dst}"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.experimental-gpl
@@ -164,6 +242,10 @@ targets:
         FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
           - "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
         OTHER_LDFLAGS:
           - "-lamber_ffi"
         SWIFT_ACTIVE_COMPILATION_CONDITIONS:
@@ -175,7 +257,7 @@ targets:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64/Headers"
     dependencies:
       - framework: Shared.framework
-        embed: true
+        embed: false
       - package: swift-nio
         product: NIOCore
       - package: swift-nio

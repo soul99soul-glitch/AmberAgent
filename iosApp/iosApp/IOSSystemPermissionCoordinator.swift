@@ -87,7 +87,7 @@ import VideoSubscriberAccount
 import WiFiInfrastructure
 #endif
 #if canImport(WorkoutKit)
-import WorkoutKit
+@preconcurrency import WorkoutKit
 #endif
 
 enum IOSSystemPermissionStatus: String, CaseIterable, Identifiable {
@@ -1128,12 +1128,12 @@ private extension IOSSystemPermissionCoordinator {
             return result(capability, .unavailableOnDevice, "Pedometer step counting is unavailable on this device.", now)
         }
         do {
-            let _: CMPedometerData? = try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 CMPedometer().queryPedometerData(from: Date().addingTimeInterval(-60), to: Date()) { data, error in
                     if let error {
                         continuation.resume(throwing: error)
                     } else {
-                        continuation.resume(returning: data)
+                        continuation.resume()
                     }
                 }
             }
@@ -1499,7 +1499,8 @@ private extension IOSSystemPermissionCoordinator {
 }
 
 #if canImport(CoreLocation)
-private final class IOSLocationPermissionRequester: NSObject, CLLocationManagerDelegate {
+@MainActor
+private final class IOSLocationPermissionRequester: NSObject, @preconcurrency CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var continuation: CheckedContinuation<CLAuthorizationStatus, Never>?
 
@@ -1529,7 +1530,8 @@ private final class IOSLocationPermissionRequester: NSObject, CLLocationManagerD
 #endif
 
 #if canImport(CoreBluetooth)
-private final class IOSBluetoothPermissionProbe: NSObject, CBCentralManagerDelegate {
+@MainActor
+private final class IOSBluetoothPermissionProbe: NSObject, @preconcurrency CBCentralManagerDelegate {
     private var centralManager: CBCentralManager?
     private var continuation: CheckedContinuation<CBManagerAuthorization, Never>?
 

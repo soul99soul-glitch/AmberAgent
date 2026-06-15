@@ -57,12 +57,13 @@ final class SettingsStore {
             )
             terminalExperimentalRuntimesEnabled = IOSTerminalBuildPolicy.experimentalRuntimesLinked &&
                 (decoded.terminalExperimentalRuntimesEnabled ?? false)
-            sshProfiles = decoded.sshProfiles ?? []
+            let decodedSSHProfiles = decoded.sshProfiles ?? []
+            sshProfiles = decodedSSHProfiles
             if let decodedDefault = decoded.sshDefaultProfileId,
-               sshProfiles.contains(where: { $0.id == decodedDefault }) {
+               decodedSSHProfiles.contains(where: { $0.id == decodedDefault }) {
                 sshDefaultProfileId = decodedDefault
             } else {
-                sshDefaultProfileId = sshProfiles.first?.id
+                sshDefaultProfileId = decodedSSHProfiles.first?.id
             }
         } else {
             baseUrl = "https://api.openai.com/v1"
