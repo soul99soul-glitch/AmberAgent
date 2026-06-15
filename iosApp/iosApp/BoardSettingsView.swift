@@ -3,16 +3,70 @@ import SwiftUI
 struct BoardSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var boardEnabled = true
-    @State private var selectedProvider = "小米 MiMo"
-    @State private var providerPickerExpanded = false
-    @State private var strategy: BoardBackgroundStrategy = .smart
+    private let settingRows: [BoardCapabilityRow] = [
+        .init(
+            title: "enabled",
+            subtitle: "Android 写入 Settings.agentRuntime.todayBoard.enabled，并同步 BoardScheduler；iOS 当前没有 Settings bridge。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "boardModelId",
+            subtitle: "Android 可跟随主聊天模型或选择特定 CHAT 模型；iOS 没有 Board model registry bridge。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "triggerHours / backgroundStrategy",
+            subtitle: "Android 默认 08:00、12:00、13:00、18:00、19:00，并支持 smart / wifi_only / foreground_only。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "enabledSources",
+            subtitle: "Android 支持 notification、calendar、feishu_msg、feishu_doc、chat_history、time。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "hotList*",
+            subtitle: "Android 支持热榜刷新间隔、Wi-Fi 限制、启用来源、关注词和 focus-first/filter-only 筛选。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "deepRead* / reading font",
+            subtitle: "Android 支持深度阅读模板、字体模式、字体包和字号；iOS 未接 DeepRead 模板/缓存/字体源。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        )
+    ]
 
-    private let providers: [BoardProviderOption] = [
-        .init(name: "小米 MiMo", endpoint: "api.xiaomi.com/v1"),
-        .init(name: "Anthropic", endpoint: "api.anthropic.com/v1"),
-        .init(name: "DeepSeek", endpoint: "api.deepseek.com/v1"),
-        .init(name: "OpenRouter", endpoint: "openrouter.ai/api/v1")
+    private let persistenceRows: [BoardCapabilityRow] = [
+        .init(
+            title: "关注规则",
+            subtitle: "Android 通过 BoardFocusRuleDAO 增删改关注点；iOS 当前没有 DAO 或输入保存。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "来源权重",
+            subtitle: "Android 将完成、忽略、聊天反馈写入 BoardWeightEntity，并可自动 hard-mute。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "自定义热榜源",
+            subtitle: "Android 通过 HotListRepository 写入 HotListSourceEntity 并触发 HotListScheduler.runOnce()。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "搜索服务复用",
+            subtitle: "Android 深度阅读复用 Settings.searchEnabledServiceIds；iOS 搜索服务桥也仍未完成。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        )
     ]
 
     var body: some View {
@@ -24,8 +78,10 @@ struct BoardSettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        generalSection
-                        strategySection
+                        intro
+                        settingMapSection
+                        persistenceSection
+                        blockedSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -44,9 +100,17 @@ struct BoardSettingsView: View {
 
             Spacer()
 
-            Text("通用设置")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(AmberTheme.foreground)
+            VStack(spacing: 2) {
+                Text("今日看板设置")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+
+                Text("字段映射 · 不保存")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
 
             Spacer()
 
@@ -58,229 +122,61 @@ struct BoardSettingsView: View {
         .padding(.bottom, 10)
     }
 
-    private var generalSection: some View {
+    private var intro: some View {
+        Text("Android 设置页会直接写 Settings.agentRuntime.todayBoard，并维护焦点规则、热榜源、来源权重、深度阅读模板和字体配置。iOS 当前没有这些 settings/DAO/repository bridge，因此这里不显示开关、模型选择器、单选策略或保存按钮。")
+            .font(.footnote)
+            .lineSpacing(3)
+            .foregroundStyle(AmberTheme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .padding(.bottom, 16)
+    }
+
+    private var settingMapSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "通用")
+            AmberSectionLabel(text: "TodayBoardSetting 字段")
             AmberFormGroup {
-                BoardSettingsToggleRow(
-                    systemImage: "rectangle.grid.2x2",
-                    iconColor: AmberTheme.accentAmber,
-                    title: "启用今日看板",
-                    subtitle: "Agent 每日信号梳理",
-                    isOn: $boardEnabled
-                )
-
-                BoardSettingsDivider(leading: 58)
-
-                modelPicker
+                ForEach(Array(settingRows.enumerated()), id: \.element.id) { index, row in
+                    BoardCapabilityStatusRow(row: row)
+                    if index < settingRows.count - 1 {
+                        BoardCapabilityDivider()
+                    }
+                }
             }
         }
     }
 
-    private var modelPicker: some View {
+    private var persistenceSection: some View {
         VStack(spacing: 0) {
-            Button {
-                withAnimation(.snappy(duration: 0.24)) {
-                    providerPickerExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("看板模型")
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text("用于生成摘要的服务商")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Text(selectedProvider)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(AmberTheme.accent)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AmberTheme.muted2)
-                        .rotationEffect(.degrees(providerPickerExpanded ? 180 : 0))
-                }
-                .frame(minHeight: 58)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if providerPickerExpanded {
-                VStack(spacing: 0) {
-                    ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
-                        Button {
-                            selectedProvider = provider.name
-                            withAnimation(.snappy(duration: 0.24)) {
-                                providerPickerExpanded = false
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(provider.name)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(AmberTheme.foreground)
-                                    Text(provider.endpoint)
-                                        .font(.system(size: 11.5, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(AmberTheme.muted)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                                Text(selectedProvider == provider.name ? "已选" : "使用")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(selectedProvider == provider.name ? AmberTheme.accent : AmberTheme.muted)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 11)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-
-                        if index < providers.count - 1 {
-                            BoardSettingsDivider(leading: 14)
-                        }
-                    }
-                }
-                .background(AmberTheme.surface2.opacity(0.38))
-            }
-        }
-    }
-
-    private var strategySection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "后台策略")
+            AmberSectionLabel(text: "设置页持久化")
             AmberFormGroup {
-                ForEach(Array(BoardBackgroundStrategy.allCases.enumerated()), id: \.element.id) { index, option in
-                    BoardStrategyRow(option: option, selected: strategy == option) {
-                        strategy = option
-                    }
-
-                    if index < BoardBackgroundStrategy.allCases.count - 1 {
-                        BoardSettingsDivider(leading: 46)
+                ForEach(Array(persistenceRows.enumerated()), id: \.element.id) { index, row in
+                    BoardCapabilityStatusRow(row: row)
+                    if index < persistenceRows.count - 1 {
+                        BoardCapabilityDivider()
                     }
                 }
             }
         }
     }
-}
 
-private struct BoardProviderOption: Identifiable {
-    let id = UUID()
-    let name: String
-    let endpoint: String
-}
-
-private enum BoardBackgroundStrategy: String, CaseIterable, Identifiable {
-    case smart
-    case wifi
-    case foreground
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .smart: "智能"
-        case .wifi: "仅 Wi-Fi"
-        case .foreground: "仅前台"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .smart: "按网络与电量自动调度刷新"
-        case .wifi: "仅在 Wi-Fi 环境下后台刷新"
-        case .foreground: "仅在 App 打开时刷新"
-        }
-    }
-}
-
-private struct BoardSettingsToggleRow: View {
-    let systemImage: String
-    let iconColor: Color
-    let title: String
-    let subtitle: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 32, height: 32)
-                .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                Text(subtitle)
+    private var blockedSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "启用前需要")
+            AmberFormGroup {
+                Text("需要先定义 iOS 侧 Settings.agentRuntime.todayBoard 持久化、Board DAO/Repository、信号 collector、WorkManager 等价调度、模型生成与 JSON 校验、热榜缓存、深度阅读缓存和任务流写回。没有这些链路前，任何开关或选择器都会变成只在本页生效的假设置。")
                     .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
+                    .lineSpacing(4)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .tint(AmberTheme.accent)
+            BoardCapabilityNote("本页不写 UserDefaults、SettingsStore、Keychain、数据库，也不会触发 BoardScheduler 或 HotListScheduler。")
         }
-        .frame(minHeight: 58)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
-    }
-}
-
-private struct BoardStrategyRow: View {
-    let option: BoardBackgroundStrategy
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .stroke(selected ? AmberTheme.accent : AmberTheme.border, lineWidth: 1.5)
-                        .background(selected ? AmberTheme.accent : .clear, in: Circle())
-                        .frame(width: 20, height: 20)
-
-                    Circle()
-                        .fill(selected ? .white : .clear)
-                        .frame(width: 7, height: 7)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(option.title)
-                        .font(.body)
-                        .foregroundStyle(AmberTheme.foreground)
-                    Text(option.detail)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(minHeight: 58)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct BoardSettingsDivider: View {
-    var leading: CGFloat = 14
-
-    var body: some View {
-        Divider()
-            .overlay(AmberTheme.borderSoft)
-            .padding(.leading, leading)
     }
 }
 
