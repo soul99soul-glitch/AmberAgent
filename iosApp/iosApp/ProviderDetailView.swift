@@ -1,17 +1,16 @@
 import SwiftUI
 
 struct ProviderDetailView: View {
+    @Bindable var settingsStore: SettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
     let providerName: String
     let endpoint: String
+    let providerKind: ProviderRouteKind
 
     @State private var selectedTab: ProviderDetailTab = .config
-    @State private var isEnabled = true
-    @State private var responseAPI = false
-    @State private var balanceRefresh = true
-    @State private var apiKeyVisible = false
     @State private var alert: ProviderDetailAlert?
 
     var body: some View {
@@ -61,18 +60,11 @@ struct ProviderDetailView: View {
                 Group {
                     switch selectedTab {
                     case .config:
-                        Button {
-                            alert = .save
-                        } label: {
-                            Text("保存")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(AmberTheme.accent)
-                                .frame(width: 58, height: 36)
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .amberGlass(cornerRadius: 18)
-                        .accessibilityLabel("保存")
+                        Text(isCurrentProvider ? "自动保存" : "模板")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AmberTheme.muted)
+                            .frame(width: 58, height: 36)
+                            .accessibilityLabel(isCurrentProvider ? "自动保存" : "预置模板")
                     case .models:
                         AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加模型", size: 44, symbolSize: 17) {
                             router.navigate(to: .modelAdd)
@@ -94,53 +86,38 @@ struct ProviderDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 AmberFormGroup {
-                    ProviderValueRow(title: "接口协议", value: protocolName, showsChevron: true) {
+                    ProviderValueRow(title: "接口协议", value: protocolLabel, showsChevron: true) {
                         alert = .protocolPicker
                     }
                     ProviderDetailDivider()
-                    ProviderToggleRow(title: "启用此提供商", isOn: isEnabled) {
-                        isEnabled.toggle()
-                    }
+                    ProviderStaticRow(
+                        title: "使用范围",
+                        subtitle: scopeSubtitle,
+                        value: scopeValue,
+                        valueStyle: .normal
+                    )
                 }
 
                 AmberSectionLabel(text: "连接")
                 AmberFormGroup {
-                    ProviderValueRow(title: "名称", value: providerName, showsChevron: true) {
-                        router.navigate(to: .providerSettings)
-                    }
-                    ProviderDetailDivider()
-                    apiKeyRow
-                    ProviderDetailDivider()
-                    ProviderValueRow(title: "API 地址", value: endpoint, valueStyle: .mono, showsChevron: true) {
-                        router.navigate(to: .providerSettings)
-                    }
-                    ProviderDetailDivider()
-                    ProviderStaticRow(
-                        title: "路径",
-                        subtitle: "由接口协议决定",
-                        value: "/chat/completions",
-                        valueStyle: .monoMuted
-                    )
+                    connectionRows
                 }
+
+                ProviderDetailFooter(connectionFooterText)
 
                 AmberSectionLabel(text: "选项")
                 AmberFormGroup {
-                    ProviderToggleRow(
+                    ProviderStaticRow(
                         title: "Response API",
-                        subtitle: "使用 /responses 端点（实验性）",
-                        isOn: responseAPI
-                    ) {
-                        responseAPI.toggle()
-                    }
+                        subtitle: "ChatViewModel 当前固定 useResponseApi = false；需要 Response API 的模板不会自动套用",
+                        value: responseAPIValue
+                    )
                     ProviderDetailDivider()
-                    ProviderToggleRow(
+                    ProviderStaticRow(
                         title: "账户余额",
-                        subtitle: "余额 ¥48.20 · 每次启动后刷新",
-                        isOn: balanceRefresh,
-                        highlightsSubtitle: true
-                    ) {
-                        balanceRefresh.toggle()
-                    }
+                        subtitle: "余额读取会触发外部请求，iOS 不做例行测试",
+                        value: "未接线"
+                    )
                 }
             }
             .padding(.bottom, 36)
@@ -153,25 +130,16 @@ struct ProviderDetailView: View {
             VStack(spacing: 0) {
                 AmberFormGroup {
                     ProviderModelRow(
-                        systemImage: "bolt",
-                        name: "deepseek-v4-flash",
-                        badge: "速度优先",
-                        summary: "工具 · 推理 · 1M ctx"
+                        systemImage: "cpu",
+                        name: currentModelID,
+                        badge: isCurrentProvider ? "当前聊天模型" : "当前模型 ID",
+                        summary: "SettingsStore.modelId · 模板不保存模型列表"
                     ) {
-                        router.navigate(to: .modelEdit)
-                    }
-                    ProviderDetailDivider()
-                    ProviderModelRow(
-                        systemImage: "star",
-                        name: "deepseek-v4-pro",
-                        badge: "质量优先",
-                        summary: "工具 · 推理 · 1M ctx"
-                    ) {
-                        router.navigate(to: .modelEdit)
+                        router.navigate(to: .modelDefaults)
                     }
                 }
 
-                Text("点按模型可编辑其能力、模态与上下文；右上角 + 添加新模型。")
+                Text("当前只接入一个模型 ID 字符串。KMP Model 列表、能力、模态、上下文、custom headers/body 尚未桥接到 iOS；预置 Provider 不会自动创建模型配置。")
                     .font(.footnote)
                     .foregroundStyle(AmberTheme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -185,44 +153,214 @@ struct ProviderDetailView: View {
     }
 
     private var apiKeyRow: some View {
-        HStack(spacing: 12) {
-            Text("API Key")
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 8) {
-                Text(apiKeyVisible ? "sk-cdd7f4a2e8b91c6e" : "sk-cdd·····8b91")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-
-                Button {
-                    apiKeyVisible.toggle()
-                } label: {
-                    Image(systemName: apiKeyVisible ? "eye.slash" : "eye")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(AmberTheme.muted)
-                        .frame(width: 28, height: 28)
-                        .background(AmberTheme.surface2, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(apiKeyVisible ? "隐藏 API Key" : "显示 API Key")
-            }
-        }
-        .frame(minHeight: 52)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        ProviderEditableTextFieldRow(
+            title: "API Key",
+            text: $settingsStore.apiKey,
+            placeholder: "sk-...",
+            isSecure: true,
+            monospace: true
+        )
     }
 
-    private var protocolName: String {
-        switch providerName {
-        case "Gemini", "Gemini OAuth":
-            "Gemini"
-        default:
-            "OpenAI"
+    private var currentModelID: String {
+        settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId
+    }
+
+    private var isBaseUrlValid: Bool {
+        guard
+            let components = URLComponents(string: settingsStore.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)),
+            let scheme = components.scheme?.lowercased(),
+            scheme == "http" || scheme == "https",
+            let host = components.host,
+            !host.isEmpty
+        else {
+            return false
         }
+
+        return true
+    }
+
+    private var isCurrentProvider: Bool {
+        providerKind == .current
+    }
+
+    private var requiresProviderBridge: Bool {
+        providerKind == .googleProviderPreset
+    }
+
+    private var requiresEndpointConfirmation: Bool {
+        providerKind == .endpointConfirmationPreset
+    }
+
+    private var requiresResponseAPIBridge: Bool {
+        providerKind == .responseAPIPreset
+    }
+
+    private var protocolLabel: String {
+        requiresProviderBridge ? "Google ProviderSetting" : "OpenAI-compatible"
+    }
+
+    private var scopeSubtitle: String {
+        if isCurrentProvider {
+            return "ChatViewModel.makeProviderSetting() 会读取此配置"
+        }
+
+        if requiresProviderBridge {
+            return "来自 Android/KMP DEFAULT_PROVIDERS；iOS 尚未桥接该 Provider 类型"
+        }
+
+        if requiresEndpointConfirmation {
+            return "来自 Android/KMP DEFAULT_PROVIDERS；该默认 Base URL 在源码中标记为可由用户覆盖"
+        }
+
+        if requiresResponseAPIBridge {
+            return "来自 Android/KMP DEFAULT_PROVIDERS；需要 useResponseApi=true 才能完整表达"
+        }
+
+        return "来自 Android/KMP DEFAULT_PROVIDERS；可安全套用 Base URL"
+    }
+
+    private var scopeValue: String {
+        isCurrentProvider ? "当前聊天" : "预置模板"
+    }
+
+    @ViewBuilder
+    private var connectionRows: some View {
+        ProviderStaticRow(title: "名称", subtitle: nil, value: providerName)
+        ProviderDetailDivider()
+
+        if isCurrentProvider {
+            apiKeyRow
+            ProviderDetailDivider()
+            ProviderEditableTextFieldRow(
+                title: "API 地址",
+                text: $settingsStore.baseUrl,
+                placeholder: "https://api.openai.com/v1",
+                monospace: true
+            )
+            if !isBaseUrlValid {
+                ProviderInlineWarning("URL 格式无效；ChatViewModel 会使用该值发起请求，发送前请修正。")
+            }
+            ProviderDetailDivider()
+            ProviderStaticRow(
+                title: "路径",
+                subtitle: "由接口协议决定",
+                value: "/chat/completions",
+                valueStyle: .monoMuted
+            )
+        } else {
+            ProviderStaticRow(
+                title: "API Key",
+                subtitle: "DEFAULT_PROVIDERS 不包含凭据",
+                value: "未预置"
+            )
+            ProviderDetailDivider()
+            ProviderStaticRow(
+                title: "预置 API 地址",
+                subtitle: "来自 Android/KMP DEFAULT_PROVIDERS",
+                value: endpoint,
+                valueStyle: .mono
+            )
+            ProviderDetailDivider()
+            ProviderValueRow(
+                title: "套用 API 地址",
+                value: presetApplyValue,
+                showsChevron: true
+            ) {
+                applyPresetBaseURL()
+            }
+            ProviderDetailDivider()
+            ProviderStaticRow(
+                title: "路径",
+                subtitle: presetPathSubtitle,
+                value: presetPathValue,
+                valueStyle: .monoMuted
+            )
+        }
+    }
+
+    private var presetApplyValue: String {
+        if requiresProviderBridge {
+            return "需桥接"
+        }
+
+        if requiresEndpointConfirmation {
+            return "Base 待确认"
+        }
+
+        if requiresResponseAPIBridge {
+            return "需 Response API"
+        }
+
+        return settingsStore.baseUrl == endpoint ? "已是当前地址" : "写入当前配置"
+    }
+
+    private var presetPathSubtitle: String {
+        if requiresProviderBridge {
+            return "需要 Google Provider bridge"
+        }
+
+        if requiresResponseAPIBridge {
+            return "Android 默认 useResponseApi = true；iOS 未接线"
+        }
+
+        return "当前 ChatViewModel 固定使用"
+    }
+
+    private var presetPathValue: String {
+        if requiresProviderBridge {
+            return "/models/{model}:generateContent"
+        }
+
+        if requiresResponseAPIBridge {
+            return "/responses"
+        }
+
+        return "/chat/completions"
+    }
+
+    private var responseAPIValue: String {
+        requiresResponseAPIBridge ? "模板需要" : "未接线"
+    }
+
+    private var connectionFooterText: String {
+        if isCurrentProvider {
+            return "API 地址写入 UserDefaults；API Key 字段绑定 SettingsStore.apiKey（既有 Keychain account）。当前不会创建多服务商 ProviderSetting。"
+        }
+
+        if requiresProviderBridge {
+            return "此模板只展示 Android/KMP 预置 Provider 信息；iOS 当前不会把它保存为 Google ProviderSetting，也不会写入 API Key 或发起请求。"
+        }
+
+        if requiresEndpointConfirmation {
+            return "此模板在 Android/KMP 中存在，但默认 Base URL 被源码注释标记为占位/可覆盖。iOS 当前不一键写入，避免把待确认地址当作可用配置。"
+        }
+
+        if requiresResponseAPIBridge {
+            return "此模板在 Android/KMP 中要求 useResponseApi=true；iOS 当前无法保存该开关，所以不只套用 Base URL。"
+        }
+
+        return "套用只写入 SettingsStore.baseUrl，不写入 API Key、不创建 ProviderSetting、不拉取模型、不测试连接。"
+    }
+
+    private func applyPresetBaseURL() {
+        guard !requiresProviderBridge else {
+            alert = .providerBridgeRequired(providerName)
+            return
+        }
+
+        guard !requiresEndpointConfirmation else {
+            alert = .endpointConfirmationRequired(providerName)
+            return
+        }
+
+        guard !requiresResponseAPIBridge else {
+            alert = .responseAPIRequired(providerName)
+            return
+        }
+
+        settingsStore.baseUrl = endpoint
+        alert = .presetApplied(providerName)
     }
 }
 
@@ -234,33 +372,54 @@ private enum ProviderDetailTab: String, CaseIterable, Identifiable {
 }
 
 private enum ProviderDetailAlert: Identifiable {
-    case save
     case protocolPicker
+    case presetApplied(String)
+    case providerBridgeRequired(String)
+    case endpointConfirmationRequired(String)
+    case responseAPIRequired(String)
 
     var id: String {
         switch self {
-        case .save:
-            "save"
         case .protocolPicker:
             "protocol-picker"
+        case .presetApplied(let provider):
+            "preset-applied-\(provider)"
+        case .providerBridgeRequired(let provider):
+            "provider-bridge-required-\(provider)"
+        case .endpointConfirmationRequired(let provider):
+            "endpoint-confirmation-required-\(provider)"
+        case .responseAPIRequired(let provider):
+            "response-api-required-\(provider)"
         }
     }
 
     var title: String {
         switch self {
-        case .save:
-            "服务商保存尚未接线"
         case .protocolPicker:
             "接口协议选择尚未接线"
+        case .presetApplied:
+            "API 地址已套用"
+        case .providerBridgeRequired:
+            "Provider 类型尚未桥接"
+        case .endpointConfirmationRequired:
+            "Base URL 需要确认"
+        case .responseAPIRequired:
+            "Response API 尚未接线"
         }
     }
 
     var message: String {
         switch self {
-        case .save:
-            "当前详情页先还原原型布局；真实 Base URL、API Key 和 Model ID 仍由旧配置页承接。"
         case .protocolPicker:
-            "协议选择后续会接通通用选择器，现在暂不修改真实服务商配置。"
+            "iOS 当前聊天链路只构造 ProviderSetting.OpenAI，暂不切换 Google / Claude / 其他 ProviderSetting 类型。"
+        case .presetApplied(let provider):
+            "\(provider) 的预置 Base URL 已写入当前聊天配置。API Key 仍为空或保持你已有的 Keychain 值；本操作没有发起网络请求。"
+        case .providerBridgeRequired(let provider):
+            "\(provider) 使用的 ProviderSetting 类型尚未接到 iOS 当前聊天链路；这里只展示预置模板，不会保存或请求。"
+        case .endpointConfirmationRequired(let provider):
+            "\(provider) 的 Android 默认 Base URL 在源码中标记为占位/可覆盖。iOS 当前不会把它写入真实聊天配置。"
+        case .responseAPIRequired(let provider):
+            "\(provider) 的 Android 默认 Provider 使用 Response API。iOS 当前 ChatViewModel 固定 chat/completions，不能只套用 Base URL。"
         }
     }
 }
@@ -345,6 +504,75 @@ private struct ProviderStaticRow: View {
             valueStyle: valueStyle,
             showsChevron: false
         )
+    }
+}
+
+private struct ProviderEditableTextFieldRow: View {
+    let title: String
+    @Binding var text: String
+    let placeholder: String
+    var isSecure = false
+    var monospace = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+
+            Group {
+                if isSecure {
+                    SecureField(placeholder, text: $text)
+                } else {
+                    TextField(placeholder, text: $text)
+                }
+            }
+            .font(monospace ? .system(size: 14, weight: .regular, design: .monospaced) : .body)
+            .foregroundStyle(AmberTheme.foreground)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 58)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct ProviderInlineWarning: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(AmberTheme.accentAmber)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
+    }
+}
+
+private struct ProviderDetailFooter: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.footnote)
+            .foregroundStyle(AmberTheme.muted)
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 7)
     }
 }
 
@@ -509,7 +737,12 @@ private struct ProviderModelRow: View {
 
 #Preview {
     NavigationStack {
-        ProviderDetailView(providerName: "DeepSeek", endpoint: "api.deepseek.com/v1")
+        ProviderDetailView(
+            settingsStore: SettingsStore(),
+            providerName: "OpenAI-compatible",
+            endpoint: "https://api.openai.com/v1",
+            providerKind: .current
+        )
             .environment(RouterPath())
     }
 }

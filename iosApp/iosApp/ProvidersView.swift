@@ -1,24 +1,18 @@
 import SwiftUI
 
+enum ProviderRouteKind: String, Hashable {
+    case current
+    case openAICompatiblePreset
+    case googleProviderPreset
+    case responseAPIPreset
+    case endpointConfirmationPreset
+}
+
 struct ProvidersView: View {
+    @Bindable var settingsStore: SettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
-
-    private let enabledProviders: [ProviderRowModel] = [
-        .init(initial: "O", name: "opencode", endpoint: "opencode.ai/v1"),
-        .init(initial: "G", name: "Gemini OAuth", endpoint: "generativelanguage.googleapis.com"),
-        .init(initial: "O", name: "OpenAI Codex OAuth", endpoint: "api.openai.com/v1"),
-        .init(initial: "G", name: "Gemini", endpoint: "generativelanguage.googleapis.com"),
-        .init(initial: "D", name: "DeepSeek", endpoint: "api.deepseek.com/v1"),
-        .init(initial: "K", name: "Kimi", endpoint: "api.moonshot.cn/v1"),
-        .init(initial: "G", name: "智谱 GLM", endpoint: "open.bigmodel.cn/api/paas/v4"),
-        .init(initial: "M", name: "小米 MiMo", endpoint: "api.mimo.ai/v1")
-    ]
-
-    private let disabledProviders: [ProviderRowModel] = [
-        .init(initial: "M", name: "minimax", endpoint: "已停用", isEnabled: false, isDimmed: true),
-        .init(initial: "O", name: "OpenRouter", endpoint: "未添加模型", isEnabled: false)
-    ]
 
     var body: some View {
         ZStack {
@@ -28,8 +22,10 @@ struct ProvidersView: View {
                 VStack(spacing: 0) {
                     header
                     searchPill
-                    providerSection(title: "已启用", rows: enabledProviders)
-                    providerSection(title: "停用 / 未配置", rows: disabledProviders)
+                    providerSection(title: "当前聊天配置", rows: [currentProvider])
+                    providerSection(title: "预置 Provider 模板", rows: presetProviders)
+                    ProviderDraftNote("预置模板来自 Android/KMP DEFAULT_PROVIDERS，不包含 API Key。OpenAI-compatible 模板可把 Base URL 套用到当前聊天配置；其他 Provider 类型需要后续 settings.providers bridge。")
+                    registrySection
                 }
                 .padding(.bottom, 40)
             }
@@ -82,7 +78,7 @@ struct ProvidersView: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(AmberTheme.muted.opacity(0.72))
 
-            Text("搜索")
+            Text("预置模板；搜索待 Provider registry 接线")
                 .font(.subheadline)
                 .foregroundStyle(AmberTheme.muted)
 
@@ -111,7 +107,7 @@ struct ProvidersView: View {
             AmberFormGroup {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, provider in
                     ProviderRow(provider: provider) {
-                        router.navigate(to: .providerDetail(name: provider.name, endpoint: provider.endpoint))
+                        router.navigate(to: .providerDetail(name: provider.name, endpoint: provider.endpoint, kind: provider.kind))
                     }
 
                     if index < rows.count - 1 {
@@ -121,15 +117,133 @@ struct ProvidersView: View {
             }
         }
     }
+
+    private var currentProvider: ProviderRowModel {
+        .init(
+            initial: "O",
+            name: "OpenAI-compatible",
+            endpoint: settingsStore.baseUrl,
+            status: settingsStore.apiKey.isEmpty ? "API Key 未填写" : "API Key 已填写",
+            statusColor: settingsStore.apiKey.isEmpty ? AmberTheme.muted2 : AmberTheme.accentGreen,
+            kind: .current
+        )
+    }
+
+    private var presetProviders: [ProviderRowModel] {
+        [
+            .init(
+                initial: "O",
+                name: "OpenAI",
+                endpoint: "https://api.openai.com/v1",
+                status: "预置 · 可套用",
+                statusColor: AmberTheme.accent
+            ),
+            .init(
+                initial: "D",
+                name: "DeepSeek",
+                endpoint: "https://api.deepseek.com/v1",
+                status: "预置 · 可套用",
+                statusColor: AmberTheme.accent
+            ),
+            .init(
+                initial: "R",
+                name: "OpenRouter",
+                endpoint: "https://openrouter.ai/api/v1",
+                status: "预置 · 可套用",
+                statusColor: AmberTheme.accent
+            ),
+            .init(
+                initial: "K",
+                name: "月之暗面 (Kimi)",
+                endpoint: "https://api.moonshot.cn/v1",
+                status: "预置 · 可套用",
+                statusColor: AmberTheme.accent
+            ),
+            .init(
+                initial: "Z",
+                name: "智谱 GLM",
+                endpoint: "https://open.bigmodel.cn/api/paas/v4",
+                status: "预置 · 可套用",
+                statusColor: AmberTheme.accent
+            ),
+            .init(
+                initial: "小",
+                name: "小米 MiMo",
+                endpoint: "https://api.xiaomi.com/v1",
+                status: "预置 · Base 待确认",
+                statusColor: AmberTheme.muted,
+                kind: .endpointConfirmationPreset
+            ),
+            .init(
+                initial: "M",
+                name: "MiniMax",
+                endpoint: "https://api.minimaxi.com/v1",
+                status: "预置 · 可套用",
+                statusColor: AmberTheme.accent
+            ),
+            .init(
+                initial: "X",
+                name: "xAI",
+                endpoint: "https://api.x.ai/v1",
+                status: "预置 · 待 Response API",
+                statusColor: AmberTheme.muted,
+                kind: .responseAPIPreset
+            ),
+            .init(
+                initial: "G",
+                name: "Gemini",
+                endpoint: "https://generativelanguage.googleapis.com/v1beta",
+                status: "预置 · 待桥接",
+                statusColor: AmberTheme.muted,
+                kind: .googleProviderPreset
+            )
+        ]
+    }
+
+    private var registrySection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "Provider registry")
+            AmberFormGroup {
+                ProviderStatusRow(
+                    title: "完整多服务商列表尚未接线",
+                    subtitle: "上方模板不等同于已保存的 Settings.providers。iOS 当前聊天请求仍只读取单一 OpenAI-compatible 配置。",
+                    badge: "未接线"
+                )
+            }
+
+            ProviderDraftNote("添加服务商会打开草稿页；不会创建 ProviderSetting、保存新 API Key、拉取模型列表或刷新余额。")
+        }
+    }
 }
 
 private struct ProviderRowModel: Identifiable {
-    let id = UUID()
+    let id: String
     let initial: String
     let name: String
     let endpoint: String
-    var isEnabled = true
+    var status: String
+    var statusColor: Color
+    var kind: ProviderRouteKind
     var isDimmed = false
+
+    init(
+        initial: String,
+        name: String,
+        endpoint: String,
+        status: String,
+        statusColor: Color,
+        kind: ProviderRouteKind = .openAICompatiblePreset,
+        isDimmed: Bool = false
+    ) {
+        self.id = "\(name)-\(endpoint)"
+        self.initial = initial
+        self.name = name
+        self.endpoint = endpoint
+        self.status = status
+        self.statusColor = statusColor
+        self.kind = kind
+        self.isDimmed = isDimmed
+    }
 }
 
 private struct ProviderRow: View {
@@ -152,30 +266,17 @@ private struct ProviderRow: View {
                         .lineLimit(1)
 
                     Text(provider.endpoint)
-                        .font(
-                            .system(
-                                size: provider.isEnabled ? 11 : 12,
-                                weight: .regular,
-                                design: provider.isEnabled ? .monospaced : .default
-                            )
-                        )
+                        .font(.system(size: 11.5, weight: .regular, design: .monospaced))
                         .foregroundStyle(AmberTheme.muted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                if provider.isEnabled {
-                    Circle()
-                        .fill(AmberTheme.accentGreen)
-                        .frame(width: 7, height: 7)
-                        .shadow(color: AmberTheme.accentGreen.opacity(0.22), radius: 0, x: 0, y: 0)
-                        .overlay {
-                            Circle()
-                                .stroke(AmberTheme.accentGreen.opacity(0.13), lineWidth: 4)
-                        }
-                        .padding(.trailing, 2)
-                }
+                Text(provider.status)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(provider.statusColor)
+                    .lineLimit(1)
 
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
@@ -190,6 +291,44 @@ private struct ProviderRow: View {
         .opacity(provider.isDimmed ? 0.6 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(provider.name)，\(provider.endpoint)")
+    }
+}
+
+private struct ProviderStatusRow: View {
+    let title: String
+    let subtitle: String
+    let badge: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(AmberTheme.accent)
+                .frame(width: 32, height: 32)
+                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(badge)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 78)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 }
 
@@ -249,7 +388,7 @@ struct ProviderAddView: View {
             Button {
                 dismiss()
             } label: {
-                Text("完成")
+                Text("关闭")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.accent)
                     .frame(height: 36)
@@ -258,7 +397,7 @@ struct ProviderAddView: View {
             }
             .buttonStyle(.plain)
             .amberGlass(cornerRadius: AmberTheme.radiusPill)
-            .accessibilityLabel("完成")
+            .accessibilityLabel("关闭")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -357,7 +496,7 @@ struct ProviderAddView: View {
             AmberSectionLabel(text: "选项")
             AmberFormGroup {
                 ProviderDraftToggleRow(
-                    title: "Response API",
+                    title: "草稿 Response API",
                     subtitle: "使用 /responses 端点（实验性）",
                     isOn: responseAPI
                 ) {
@@ -365,8 +504,8 @@ struct ProviderAddView: View {
                 }
                 ProviderDivider()
                 ProviderDraftToggleRow(
-                    title: "启动后刷新余额",
-                    subtitle: "服务商支持余额接口时才启用",
+                    title: "草稿余额刷新",
+                    subtitle: "仅影响本页草稿；当前不会保存余额接口或发起请求",
                     isOn: balanceRefresh
                 ) {
                     balanceRefresh.toggle()
@@ -545,7 +684,7 @@ private struct ProviderDivider: View {
 
 #Preview {
     NavigationStack {
-        ProvidersView()
+        ProvidersView(settingsStore: SettingsStore())
             .environment(RouterPath())
     }
 }

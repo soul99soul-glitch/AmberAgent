@@ -15,12 +15,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Remote SSH runtime storage and gate: `SettingsStore` persists SSH profiles in `UserDefaults`, stores SSH passwords in Keychain through `IOSSSHSecretStore`, records trusted host fingerprints, and `RuntimeEnvironmentView` runs smoke tests through `IOSTerminalRuntime`.
 - Runtime safety boundary: stable iOS runtime selection is constrained by `IOSTerminalBuildPolicy`; Remote SSH host mismatch is a hard failure before password save/command execution.
 - Default model value: `SettingsHomeView`, `ModelDefaultsView`, and `ChatView` read/write `SettingsStore.modelId` for the single current OpenAI-compatible chat configuration. The composer picker no longer presents fake provider switching; it only writes the model id that `ChatViewModel.makeTextGenerationParams()` actually sends.
+- Provider current config and presets: Settings home and `ProvidersView` now read the real current `SettingsStore` OpenAI-compatible config and expose Android/KMP `DEFAULT_PROVIDERS` as no-key preset templates. OpenAI-compatible templates can only write `SettingsStore.baseUrl`; Gemini, xAI, and Xiaomi MiMo templates are visible but blocked from one-click apply where the current iOS chain cannot faithfully represent their ProviderSetting/Response API/endpoint state.
 - TTS default status: Settings home now shows the real KMP default `系统 TTS`, and the TTS page defaults to System TTS while marking cloud engine fields, preview, delete, and add flows as drafts with no save, no Keychain write, and no TTS request.
 - Skill/MCP status honesty: Settings home, `SkillsView`, `SkillDetailView`, `SkillAddView`, and `McpServersView` no longer claim installed skill counts, enabled skill counts, connected MCP servers, tool counts, or toggle persistence. Android/KMP real capabilities remain documented, but iOS now presents this line as not yet bridged instead of fabricating state.
 
 ### 仍是草稿/占位
 
-- Provider list/detail/add/model edit pages are mostly hardcoded Open Design examples. They do not read or persist the real `Settings.providers` / `ProviderSetting` list and do not write provider/model configuration.
+- Provider add/model edit/custom headers/body pages are draft-only. The Provider list can display KMP default templates, but iOS still does not read or persist the full mutable `Settings.providers` / `ProviderSetting` list, provider-specific API keys, provider models, custom headers/body, balances, or auth modes.
 - Chat model picker is now a scalar `SettingsStore.modelId` editor, not a full provider/model registry. It still cannot switch `SettingsStore.baseUrl`, API key, auth mode, custom headers/body, or provider-specific model metadata.
 - Chat thinking/context controls are presentation-only. `selectedThinkingLevel` does not feed `TextGenerationParams.reasoningLevel`; context ring/token stats are hardcoded.
 - TTS settings are still not wired to an iOS `TTSProviderSetting` store or real `TTSManager` execution path. The page has been downgraded to real default status plus draft-only cloud fields.
@@ -31,7 +32,8 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 
 ### 不应接线的孤儿入口 / 不应误导的入口
 
-- Provider "Add", Provider "Save", Model "Done", Model custom Headers/Body "Done": safe as drafts only until a real iOS provider settings store exists. They must not claim to save.
+- Provider "Add", Model "Done", Model custom Headers/Body "Done": safe as drafts only until a real iOS provider settings store exists. They must not claim to save.
+- Provider preset templates: safe to show because Android/KMP ships `DEFAULT_PROVIDERS`, but they must not be labeled as configured accounts. Templates must not prefill API keys, fetch models, refresh balance, or imply multiple ProviderSettings are persisted on iOS.
 - TTS cloud engine save/delete/preview: must remain disabled/draft or be wired to verified secure storage and real TTS providers. Do not run network preview as validation.
 - MCP import/add "Done": replaced with `关闭`; must not show import success unless parsed and persisted through a real settings path.
 - Skills import/rescan: must not claim success until local scan/import implementation is available on iOS; current copy explicitly says no download, no file picker, no filesystem mutation.
@@ -41,9 +43,9 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 ### 高风险区域
 
 - Secret storage split: the single OpenAI API key is in Keychain, but general provider/TTS API keys are not yet modeled in iOS. Avoid expanding secret handling without a clear schema.
-- Provider/model identity: current iOS chat creates a fresh `ProviderSetting.OpenAI` and fresh `Model` from three scalar settings. It cannot represent multiple providers, custom headers/body, OAuth/coding-plan auth modes, or provider-specific models.
+- Provider/model identity: current iOS chat creates a fresh `ProviderSetting.OpenAI` and fresh `Model` from three scalar settings. It cannot represent multiple providers, custom headers/body, OAuth/coding-plan auth modes, provider-specific models, Gemini's `ProviderSetting.Google`, or xAI's default `useResponseApi=true` template state.
 - Permission approval scope: `Route.toolPermissions` routes to the approval-policy page and its "权限与能力" row routes to `ToolPermissionsView`; `SheetDestination.toolPermissions` still opens the full capability page directly. The approval page intentionally exposes only the implemented `file_read_selected` tool policy; photos/location/camera/notifications remain system-permission status/request entries until real Agent executors exist.
-- Hardcoded precise numbers/status: Settings home, Account stats, ConversationStorage, and Providers still display exact counts/status that look real but are not backed by inspected iOS data. TTS default status is now corrected to System TTS, and Skill/MCP precise installed/connected counts have been removed, but their config screens remain draft-only.
+- Hardcoded precise numbers/status: Settings home, Account stats, and ConversationStorage still display exact counts/status that look real but are not backed by inspected iOS data. Provider count has been replaced by the current scalar config plus no-key KMP templates; TTS default status is now corrected to System TTS; Skill/MCP precise installed/connected counts have been removed, but their config screens remain draft-only.
 - External effects: Provider connection test in legacy `SettingsView` calls `listModels`. Do not use it as routine validation unless the user explicitly supplies credentials/approves network use.
 
 ## 2. UI Entry Map
@@ -57,7 +59,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Settings home | 执行与任务 | `PlaceholderViews.swift` -> `.execution` | Partial: Live Activity controller exists | `AgentLiveActivityController`, execution settings store | route exists; needs audit | P1 |
 | Settings home | 工具权限 | `PlaceholderViews.swift` -> `.toolPermissions` | Yes | `PermissionsApprovalView(permissionStore:)` -> `.capabilities` -> `ToolPermissionsView(...)` | approval page edits the real `file_read_selected` policy; capability page is reachable for system permissions | P0 done |
 | Settings home | 运行环境 | `PlaceholderViews.swift` -> `.sandbox` | Yes | `SettingsStore` + `IOSTerminalRuntime` + SSH Keychain | mostly wired; subtitle is generic/hardcoded | P1 |
-| Settings home | 服务商 | `PlaceholderViews.swift` -> `.providers` | Yes in KMP: `DEFAULT_PROVIDERS`, `ProviderSetting` | provider settings bridge/store | hardcoded list/value "10 个" | P0 |
+| Settings home | 服务商 | `PlaceholderViews.swift` -> `.providers` | Yes in KMP: `DEFAULT_PROVIDERS`, `ProviderSetting`; partial iOS scalar config | `SettingsStore.baseUrl/apiKey` now; provider settings bridge/store later | value downgraded to current scalar `OpenAI-compatible`, not a fake count | P0 done/P1 bridge |
 | Settings home | 默认模型 | `PlaceholderViews.swift` -> `.modelDefaults` | Partial | `SettingsStore.modelId`; later real model registry | chat model value is real scalar; options hardcoded | P1 |
 | Settings home | 搜索服务 | `PlaceholderViews.swift` -> `.searchServices` | Android search providers exist | search settings store | value "4 个源" hardcoded | P1 |
 | Settings home | 语音 TTS | `PlaceholderViews.swift` -> `.ttsSettings` | Yes in KMP: `TTSProviderSetting`, `DEFAULT_TTS_PROVIDERS` | TTS settings store + secure key handling | home value corrected to real default `系统 TTS`; settings page is draft-only beyond default status | P0 done/P1 store |
@@ -68,9 +70,9 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Settings home | SubAgent | `PlaceholderViews.swift` -> `.subagents` | Android/KMP subagent exists | real subagent settings/runtime | prototype; not audited | P1 |
 | Settings home | 小应用 | `PlaceholderViews.swift` -> `.miniApps` | Android miniapp exists | miniapp store/runtime | prototype; not audited | P2 |
 | Settings home | WebMount | `PlaceholderViews.swift` -> `.webMount` | Android WebMount exists | real webmount profile store | prototype; not audited | P2 |
-| Providers | list rows | `iosApp/iosApp/ProvidersView.swift` | Yes in KMP | `Settings.providers` / `DEFAULT_PROVIDERS` bridge | hardcoded examples; enabled/disabled not real | P0 |
-| Provider detail | config tab | `ProviderDetailView.swift` | Yes in KMP | selected `ProviderSetting` fields | hardcoded values; save alert says not wired | P0 |
-| Provider detail | API Key row | `ProviderDetailView.swift` | secure storage exists only for single OpenAI key | provider-specific secure key storage | masked fake key string | P0 |
+| Providers | list rows | `iosApp/iosApp/ProvidersView.swift` | Yes in KMP; partial iOS scalar config | current `SettingsStore` config plus `DEFAULT_PROVIDERS`; mutable list bridge later | shows real current config and no-key preset templates; no fake enabled/disabled accounts | P0 done/P1 bridge |
+| Provider detail | config tab | `ProviderDetailView.swift` | Yes in KMP; partial iOS scalar config | current `SettingsStore` config plus selected preset template metadata | current config edits real Base URL/API Key; presets show no-key metadata and only safe apply actions | P0 done/P1 bridge |
+| Provider detail | API Key row | `ProviderDetailView.swift` | secure storage exists only for single OpenAI key | provider-specific secure key storage | current config edits real Keychain value; preset templates explicitly show `未预置` | P0 done/P1 key schema |
 | Model defaults | chat model | `ModelDefaultsView.swift` | Partial | `SettingsStore.modelId` | reads/writes scalar setting | P1 |
 | Model defaults | image/aux/thinking/context | `ModelDefaultsView.swift` | KMP settings have richer model defaults | real settings bridge | local-only state | P1 |
 | Chat | send/cancel streaming | `ChatView.swift`, `ChatViewModel.swift` | Yes | `OpenAIKmpProvider`, `MessageStreamAccumulator` | wired for single OpenAI-compatible provider | P0 done/needs hardening |
@@ -96,7 +98,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 
 ### P0 - 已有能力但 UI 未接，影响核心使用
 
-1. Replace Provider list/home values with real KMP default/provider metadata where safely available, or downgrade precise counts until a mutable iOS provider store exists.
+1. Done in Slice 5: Replace Provider list/home fake count/examples with current `SettingsStore` config plus no-key KMP default templates. Full mutable provider store remains P1.
 2. Done in Slice 4: Replace Skills hardcoded list/count with clearly unavailable iOS bridge state until a real local scan/import layer exists.
 3. Done in Slice 4: Replace MCP hardcoded connected servers and isolated toggles with explicit not-wired state until a real `mcpServers` bridge exists.
 
@@ -110,6 +112,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 6. Runtime page subtitle/home value should reflect selected runtime/default SSH profile from `SettingsStore`.
 7. Add policy editing for additional capabilities only after a matching iOS Agent executor exists; system-only permissions should stay in the capability status/request page.
 8. Wire TTS to a real iOS settings bridge before enabling cloud provider save/delete/preview or system speech preview controls.
+9. Wire full iOS Provider registry to `Settings.providers`, including provider-specific Keychain schema, auth mode, Response API, model list, custom headers/body, and balance settings before exposing multi-provider save/fetch behavior.
 
 ### P2 - 可改善但不阻塞
 
@@ -125,6 +128,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 3. Real login/subscription/account: out of scope; no inspected implementation.
 4. Destructive conversation cleanup/delete: requires a safe iOS storage transaction and backup decision path.
 5. MCP live connection testing: external network side effect; do not perform without explicit approval.
+6. Provider model fetching/balance refresh/network connection tests: external side effects; do not perform without explicit credentials and approval.
 
 ## 4. Phase Review Log
 
@@ -197,10 +201,35 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Subagent review: completed by `Volta`; no P0/P1 findings. P2 copy risks were fixed: MCP status badge now says `未接线` instead of `未连接`, Skill detail trigger footer no longer implies Agent uses placeholder trigger text, and MCP import copy now says rough text preview without real `McpImportParser` validation.
 - Remaining risk: Android/KMP has real `SkillManager`, `SkillsVM`, `SkillDetailVM`, `McpManager`, `McpManagementTools`, and `McpImportParser`, but no inspected iOS `SettingsStore` fields or bridge currently expose `enabledSkills`, `mcpServers`, MCP status, or local Skill filesystem access. These pages are honest placeholders until that bridge exists.
 
+### Slice 5 - Provider preset templates and current config wiring
+
+- Scope: `AppShell` now injects `SettingsStore` into Provider routes. Settings home shows the current scalar Provider state instead of a fake provider count. `ProvidersView` displays the real current OpenAI-compatible config plus the 9 Android/KMP `DEFAULT_PROVIDERS` as no-key preset templates. `ProviderDetailView` edits the current `SettingsStore.baseUrl` and existing Keychain-backed API key, while preset templates show no-key metadata and only safe actions. `ModelEditView` and custom headers/body pages have been downgraded to draft-only copy because KMP `Model` metadata is not bridged to iOS.
+- Verification:
+  - `mcp__xcodebuildmcp.session_show_defaults` confirmed project `/Users/arquiel/Downloads/AI/amberagent-ios/iosApp/AmberAgent.xcodeproj`, scheme `iosApp`, simulator `iPhone 17`.
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded for `iosApp` on iPhone 17 / iOS 26.5 after Provider/Model edits, again after explicit `ProviderRouteKind` routing, and again after subagent P2 copy/validation fixes.
+  - UI snapshot path: Settings home showed Provider value `OpenAI-compatible`, not a hardcoded provider count.
+  - UI snapshot path: Providers page showed current config plus all 9 KMP default templates with no API key and no fake enabled/connected state.
+  - UI snapshot path: Current Provider detail showed editable real API Key/Base URL fields and static unbridged Response API/balance rows.
+  - UI snapshot path: DeepSeek template detail showed `未预置` API Key and `写入当前配置`, with footer limiting the action to `SettingsStore.baseUrl` only; the action was not tapped during validation.
+  - UI snapshot path: xAI template detail showed `需 Response API`, `/responses`, and did not imply that current `ChatViewModel` can represent `useResponseApi=true`.
+  - UI snapshot path: Gemini template detail showed `Google ProviderSetting`, `需桥接`, and did not write the Gemini Base URL into the OpenAI-compatible chain.
+  - UI snapshot path: Provider models tab showed only the current scalar `SettingsStore.modelId`; Add Model page showed draft-only copy and `关闭`, not save.
+- Screenshot paths:
+  - Provider list: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_57757204-1e6a-4f0b-a145-8b18605b7edd.jpg`
+  - Current Provider detail: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_068cea10-be7a-4171-8fad-f203d5acbf79.jpg`
+  - DeepSeek preset detail: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_bd652fd6-e297-465f-ba7a-5b20d7270fd1.jpg`
+  - xAI preset detail: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_95c3b193-b3de-449f-ba96-409a729a04e2.jpg`
+  - Gemini preset detail: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_35015d88-5f78-4c2a-84bc-d48b9d412984.jpg`
+  - Provider model tab: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_bd7e5b54-4ef2-4c5d-952c-ff9fabe99528.jpg`
+  - Add Model draft: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_2c6ff076-8f60-4004-9da6-6928a4266392.jpg`
+- Subagent review: completed by `Galileo`; no P0/P1 findings. P2 fixes applied: Provider list now says `API Key 已/未填写` rather than claiming Keychain persistence status, current Provider footer no longer implies Keychain write success confirmation, Base URL validation now requires `http`/`https` and a non-empty host, and template type routing uses explicit `ProviderRouteKind` instead of provider-name string checks.
+- Remaining risk: iOS still lacks full `Settings.providers` persistence, provider-specific Keychain accounts, Gemini/Claude provider type switching, xAI Response API persistence, custom headers/body, model list fetch/save, balance refresh, and provider-specific model metadata.
+
 ## 5. Commit Log
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|
 | `1cb4699d8` | Permission approval policy wiring; Chat default model scalar wiring | `test_sim` blocked by existing test target Info.plist issue; `build_run_sim` succeeded before/after reviewer fixes | see Slice 1 and Slice 2 screenshot paths | no provider/model registry bridge yet; enum retains `allowOncePerRun` for old-value compatibility, but store normalizes it to `askEveryTime` |
 | `bf9eea664` | TTS default/status downgrade | `build_run_sim` succeeded | see Slice 3 screenshot paths | no iOS TTS settings bridge or synthesis executor yet |
-| Pending | Skill/MCP not-wired state downgrade | `build_run_sim` succeeded | see Slice 4 screenshot paths | no iOS Skill/MCP settings bridge yet |
+| `a5dd008f6` | Skill/MCP not-wired state downgrade | `build_run_sim` succeeded before and after subagent P2 copy fixes | see Slice 4 screenshot paths | no iOS Skill/MCP settings bridge yet |
+| Pending | Provider current config, no-key default templates, and model draft downgrade | `build_run_sim` succeeded before/after explicit route-kind and subagent P2 fixes | see Slice 5 screenshot paths | no full iOS provider registry, provider-specific Keychain schema, Response API persistence, or model metadata bridge yet |

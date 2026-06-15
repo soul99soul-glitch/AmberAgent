@@ -20,9 +20,9 @@ struct ModelEditView: View {
 
     init(isAdding: Bool = false) {
         self.isAdding = isAdding
-        _modelID = State(initialValue: isAdding ? "" : "deepseek-v4-flash")
-        _modelName = State(initialValue: isAdding ? "" : "DeepSeek V4 Flash")
-        _contextLength = State(initialValue: isAdding ? "" : "1M")
+        _modelID = State(initialValue: isAdding ? "" : "gpt-4o")
+        _modelName = State(initialValue: isAdding ? "" : "gpt-4o")
+        _contextLength = State(initialValue: "")
         _modelType = State(initialValue: .chat)
         _abilities = State(initialValue: isAdding ? [.tool] : [.tool, .reasoning])
         _inputModalities = State(initialValue: [.text])
@@ -81,7 +81,7 @@ struct ModelEditView: View {
             Button {
                 dismiss()
             } label: {
-                Text("完成")
+                Text("关闭")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.accent)
                     .frame(height: 36)
@@ -90,7 +90,7 @@ struct ModelEditView: View {
             }
             .buttonStyle(.plain)
             .amberGlass(cornerRadius: AmberTheme.radiusPill)
-            .accessibilityLabel("完成")
+            .accessibilityLabel("关闭")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -132,7 +132,7 @@ struct ModelEditView: View {
                 }
             }
 
-            ModelEditNote("模型 ID 必须与服务商 API 完全一致；名称仅用于界面显示。")
+            ModelEditNote("当前只编辑本地草稿；真实聊天请求只读取 SettingsStore.modelId。")
         }
     }
 
@@ -147,7 +147,7 @@ struct ModelEditView: View {
                 )
             }
 
-            ModelEditNote("「工具」允许模型调用函数；「推理」标记其具备思维链能力。仅聊天模型适用。")
+            ModelEditNote("能力标记尚未写入 KMP Model；ChatViewModel 当前不读取这些草稿能力。")
         }
     }
 
@@ -199,7 +199,7 @@ struct ModelEditView: View {
                 }
             }
 
-            ModelEditNote("由 API 内置、无需 App 提供，当前仅 Gemini 官方 API 支持。")
+            ModelEditNote("内置工具配置尚未写入真实 Model；当前不会改变 Provider 请求体。")
         }
     }
 
@@ -210,7 +210,7 @@ struct ModelEditView: View {
                 ModelValueRow(
                     title: "自定义 Headers",
                     subtitle: "附加到该模型的请求头",
-                    value: "2 个"
+                    value: "草稿"
                 ) {
                     router.navigate(to: .modelCustomHeaders)
                 }
@@ -218,7 +218,7 @@ struct ModelEditView: View {
                 ModelValueRow(
                     title: "自定义 Body",
                     subtitle: "合并进请求体的 JSON 字段",
-                    value: "2 个"
+                    value: "草稿"
                 ) {
                     router.navigate(to: .modelCustomBody)
                 }
@@ -229,14 +229,14 @@ struct ModelEditView: View {
     @ViewBuilder
     private var footerSection: some View {
         if isAdding {
-            ModelEditNote("当前只保留本地草稿；完成后返回模型列表，不创建真实模型配置。")
+            ModelEditNote("当前只保留本地草稿；关闭后返回模型列表，不创建真实模型配置。")
                 .padding(.top, 4)
         } else {
             AmberFormGroup {
                 Button {
                     alert = .delete
                 } label: {
-                    Text("删除此模型")
+                    Text("删除尚未接线")
                         .font(.body.weight(.medium))
                         .foregroundStyle(AmberTheme.accentRed)
                         .frame(maxWidth: .infinity)
@@ -246,6 +246,7 @@ struct ModelEditView: View {
                 .buttonStyle(.plain)
             }
             .padding(.top, 20)
+            ModelEditNote("当前不会保存或删除真实模型配置；请在默认模型页修改实际使用的模型 ID。")
         }
     }
 }
@@ -424,7 +425,7 @@ struct ModelCustomFieldsView: View {
             Button {
                 dismiss()
             } label: {
-                Text("完成")
+                Text("关闭")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.accent)
                     .frame(height: 36)
@@ -433,7 +434,7 @@ struct ModelCustomFieldsView: View {
             }
             .buttonStyle(.plain)
             .amberGlass(cornerRadius: AmberTheme.radiusPill)
-            .accessibilityLabel("完成")
+            .accessibilityLabel("关闭")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -456,7 +457,7 @@ struct ModelCustomFieldsView: View {
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
-                        Text(kind.summary)
+                        Text("\(kind.summary) 当前只做草稿预览，不写入 SettingsStore 或 ChatViewModel。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -511,13 +512,13 @@ struct ModelCustomFieldsView: View {
                 .buttonStyle(.plain)
             }
 
-            ModelCustomValidationNote(text: validationText, isWarning: hasWarnings)
+            ModelCustomValidationNote(text: validationText, isWarning: true)
         }
     }
 
     private var previewSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "预览")
+            AmberSectionLabel(text: "草稿预览")
             AmberFormGroup {
                 Text(previewText)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
@@ -546,14 +547,14 @@ struct ModelCustomFieldsView: View {
 
     private var validationText: String {
         if hasDuplicateNames {
-            return "\(kind.nameTitle) 名称重复；当前只保留本地草稿，完成后不会写入真实服务商配置。"
+            return "\(kind.nameTitle) 名称重复；当前只保留本地草稿，关闭后不会写入真实服务商配置。"
         }
 
         if fields.contains(where: { $0.name.trimmed.isEmpty || $0.value.trimmed.isEmpty }) {
             return "空名称或空值会在真实写入前被拦截；当前先保留草稿用于编辑。"
         }
 
-        return "\(validFields.count) 个字段已准备好；当前页面只保存本地草稿。"
+        return "\(validFields.count) 个字段仅用于预览；当前不会保存到真实模型配置。"
     }
 
     private var previewText: String {
