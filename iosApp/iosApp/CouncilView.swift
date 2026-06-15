@@ -681,7 +681,7 @@ private struct CouncilOverflowMenu: View {
 
             Button(action: openSettings) {
                 HStack(spacing: 11) {
-                    Image(systemName: "person.3")
+                    Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(AmberTheme.muted)
                         .frame(width: 20)

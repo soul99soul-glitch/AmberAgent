@@ -80,7 +80,7 @@ struct CouncilSettingsView: View {
         VStack(spacing: 0) {
             AmberFormGroup {
                 CouncilSettingsToggleRow(
-                    systemImage: "person.3",
+                    systemImage: "bubble.left.and.bubble.right",
                     iconColor: AmberTheme.accent,
                     title: "启用模型议会",
                     subtitle: "在对话里用「议会」发起多模型审议",

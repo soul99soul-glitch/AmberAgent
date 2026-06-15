@@ -210,7 +210,7 @@ struct ConversationsView: View {
         .init(title: "小应用", systemImage: "square.grid.2x2", color: AmberTheme.accent, route: .miniApps),
         .init(title: "工作区", systemImage: "folder", color: AmberTheme.accentGreen, route: .workspace),
         .init(title: "核心记忆", systemImage: "brain.head.profile", color: AmberTheme.accentCyan, route: .memory),
-        .init(title: "模型议会", systemImage: "person.3", color: AmberTheme.accentIndigo, route: .council)
+        .init(title: "模型议会", systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accentIndigo, route: .council)
     ]
 
     private let recentRows: [ConversationRowModel] = [
@@ -799,7 +799,7 @@ struct SettingsHomeView: View {
     private var experimentalRows: [SettingsHomeRow] {
         [
             .init(title: "今日看板", subtitle: "Agent 每日信号梳理", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
-            .init(title: "模型议会", subtitle: "多模型并行评审 / 辩论", value: nil, systemImage: "person.3", color: AmberTheme.accent, route: .council),
+            .init(title: "模型议会", subtitle: "多模型并行评审 / 辩论", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
             .init(title: "SubAgent", subtitle: "@explorer · @oracle · @writer...", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
             .init(title: "小应用", subtitle: "生成可执行的 HTML 工具", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
             .init(title: "WebMount", subtitle: "挂载已登录的网页服务", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
