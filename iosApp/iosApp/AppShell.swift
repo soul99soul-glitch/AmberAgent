@@ -284,7 +284,7 @@ private extension View {
             case .councilSettings:
                 CouncilSettingsView()
             case .seatEditor:
-                PlaceholderDetailView(title: "编辑席位", subtitle: "Provider 模型 / 外部 CLI", systemImage: "person.crop.circle.badge.gearshape")
+                SeatEditorView()
             case .sandbox:
                 RuntimeEnvironmentView(settingsStore: settingsStore)
             case .conversation(let id):
