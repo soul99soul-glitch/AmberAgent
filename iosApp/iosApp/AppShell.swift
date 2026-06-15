@@ -179,6 +179,7 @@ enum Route: Hashable {
     case providers
     case providerDetail(name: String, endpoint: String)
     case modelEdit
+    case ttsSettings
     case board
     case miniApps
     case workspace
@@ -254,6 +255,8 @@ private extension View {
                 ProviderDetailView(providerName: name, endpoint: endpoint)
             case .modelEdit:
                 ModelEditView()
+            case .ttsSettings:
+                TTSSettingsView()
             case .board:
                 PlaceholderDetailView(title: "今日看板", subtitle: "Agent 每日信号梳理", systemImage: "rectangle.grid.2x2")
             case .miniApps:
