@@ -263,11 +263,7 @@ private extension View {
             case .searchServices:
                 SearchServicesView()
             case .searchProvider:
-                PlaceholderDetailView(
-                    title: "搜索服务提供商",
-                    subtitle: "编辑能力、API Key 与启用状态",
-                    systemImage: "magnifyingglass"
-                )
+                SearchProviderView()
             case .ttsSettings:
                 TTSSettingsView()
             case .board:
