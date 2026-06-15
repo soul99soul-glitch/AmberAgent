@@ -5,16 +5,8 @@ struct SubAgentRoleView: View {
 
     private let detail: SubAgentRoleDetail
 
-    @State private var selectedModel: String
-    @State private var reasoning: String
-    @State private var prompt: String
-
     init(name: String, roleId: String) {
-        let resolved = SubAgentRoleDetail.resolve(name: name, roleId: roleId)
-        detail = resolved
-        _selectedModel = State(initialValue: resolved.model)
-        _reasoning = State(initialValue: resolved.reasoning)
-        _prompt = State(initialValue: "")
+        detail = SubAgentRoleDetail.resolve(name: name, roleId: roleId)
     }
 
     var body: some View {
@@ -27,10 +19,10 @@ struct SubAgentRoleView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         hero
-                        modelSection
-                        promptSection
+                        sourceSection
+                        settingMapSection
+                        toolsSection
                         routingSection
-                        actionSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -49,9 +41,18 @@ struct SubAgentRoleView: View {
 
             Spacer()
 
-            Text(detail.name)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(AmberTheme.foreground)
+            VStack(spacing: 2) {
+                Text(detail.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+
+                Text("@\(detail.roleId) · 字段映射")
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
 
             Spacer()
 
@@ -93,69 +94,55 @@ struct SubAgentRoleView: View {
         .padding(.bottom, 16)
     }
 
-    private var modelSection: some View {
+    private var sourceSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "模型与推理")
+            AmberSectionLabel(text: "来源")
             AmberFormGroup {
-                Menu {
-                    ForEach(SubAgentRoleDetail.modelOptions, id: \.self) { option in
-                        Button(option) { selectedModel = option }
-                    }
-                } label: {
-                    SubAgentRoleOptionRow(
-                        systemImage: "cpu",
-                        iconColor: AmberTheme.accentIndigo,
-                        title: "模型",
-                        subtitle: "该角色专用，可跟随主助手",
-                        value: selectedModel
+                SubAgentRoleStatusRow(
+                    row: .init(
+                        title: detail.isKnownBuiltIn ? "KMP SubAgentDefinitions" : "customDefinitions",
+                        subtitle: detail.isKnownBuiltIn
+                            ? "此角色来自 KMP 内置角色表；iOS 当前只展示源码证据，不读取用户 override。"
+                            : "iOS 当前没有读取 Settings.agentRuntime.subAgent.customDefinitions。",
+                        value: detail.isKnownBuiltIn ? "存在" : "未读取",
+                        color: detail.isKnownBuiltIn ? AmberTheme.accentGreen : AmberTheme.accentAmber
                     )
-                }
-                .buttonStyle(.plain)
-
-                SubAgentRoleDivider()
-
-                Menu {
-                    ForEach(SubAgentRoleDetail.reasoningOptions, id: \.self) { option in
-                        Button(option) { reasoning = option }
-                    }
-                } label: {
-                    SubAgentRoleOptionRow(
-                        systemImage: "brain.head.profile",
-                        iconColor: AmberTheme.muted,
-                        title: "推理强度",
-                        subtitle: nil,
-                        value: reasoning
-                    )
-                }
-                .buttonStyle(.plain)
+                )
             }
         }
     }
 
-    private var promptSection: some View {
+    private var settingMapSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "系统提示词")
+            AmberSectionLabel(text: "可覆盖字段")
             AmberFormGroup {
-                TextEditor(text: $prompt)
-                    .font(.system(size: 14))
-                    .foregroundStyle(AmberTheme.foreground)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                    .frame(minHeight: 112)
-                    .overlay(alignment: .topLeading) {
-                        if prompt.isEmpty {
-                            Text("留空则使用该角色的默认提示词；在此输入可覆盖…")
-                                .font(.system(size: 14))
-                                .foregroundStyle(AmberTheme.muted2)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 8)
-                                .allowsHitTesting(false)
-                        }
+                ForEach(Array(detail.settingRows.enumerated()), id: \.element.id) { index, row in
+                    SubAgentRoleStatusRow(row: row)
+                    if index < detail.settingRows.count - 1 {
+                        SubAgentRoleDivider()
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                }
             }
-            SubAgentRoleFootnote(text: "覆盖该角色的默认提示词，清空即恢复默认。")
+
+            SubAgentRoleFootnote(text: "Android/KMP 的角色页会写 SubAgentOverride 并同步 subagent markdown；iOS 当前没有 Settings.agentRuntime.subAgent bridge，因此不显示保存、恢复默认或删除操作。")
+        }
+    }
+
+    private var toolsSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "工具边界")
+            AmberFormGroup {
+                Text(detail.toolSummary)
+                    .font(.system(size: 12.5, weight: .regular, design: .monospaced))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+            }
+
+            SubAgentRoleFootnote(text: "真实运行时会从父工具集合里过滤 toolAllowlist，并禁止 subagent_* 嵌套调用；iOS 当前没有启动运行。")
         }
     }
 
@@ -174,88 +161,68 @@ struct SubAgentRoleView: View {
             }
         }
     }
+}
 
-    private var actionSection: some View {
-        VStack(spacing: 10) {
-            if detail.isCustom {
-                AmberFormGroup {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Text("删除角色")
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.accentRed)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: 54)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            } else {
-                AmberFormGroup {
-                    Button {
-                        resetDraft()
-                    } label: {
-                        Text("恢复默认")
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.accent)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: 54)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(.top, 20)
-    }
-
-    private func resetDraft() {
-        selectedModel = detail.model
-        reasoning = detail.reasoning
-        prompt = ""
-    }
+private struct SubAgentRoleStatus: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let value: String
+    let color: Color
 }
 
 private struct SubAgentRoleDetail {
     let roleId: String
     let name: String
     let description: String
-    let model: String
-    let reasoning: String
+    let toolSummary: String
     let routing: String
-    let isCustom: Bool
+    let isKnownBuiltIn: Bool
 
     var initials: String {
         String(name.prefix(1))
     }
 
-    static let modelOptions = [
-        "跟随主助手",
-        "GPT-5.2",
-        "Gemini-3-pro",
-        "GLM-4.6",
-        "Kimi K2",
-        "Claude Haiku 4.5"
-    ]
-
-    static let reasoningOptions = ["跟随", "低", "中", "高", "极高", "最高"]
+    var settingRows: [SubAgentRoleStatus] {
+        [
+            .init(
+                title: "modelId",
+                subtitle: "KMP 支持为角色覆盖聊天模型；iOS 当前没有 provider/model registry bridge。",
+                value: "未接线",
+                color: AmberTheme.accentAmber
+            ),
+            .init(
+                title: "reasoningLevel / temperature",
+                subtitle: "KMP SubAgentOverride 可覆盖推理强度和采样温度；iOS 当前不会写入。",
+                value: "未接线",
+                color: AmberTheme.accentAmber
+            ),
+            .init(
+                title: "systemPrompt",
+                subtitle: "KMP 支持角色提示词覆盖并写入 subagent markdown；iOS 当前不保存草稿。",
+                value: "未接线",
+                color: AmberTheme.accentAmber
+            ),
+            .init(
+                title: "turns / timeout / outputBudget",
+                subtitle: "KMP 可按角色覆盖最大轮数、超时和输出预算；iOS 当前不暴露保存。",
+                value: "未接线",
+                color: AmberTheme.accentAmber
+            )
+        ]
+    }
 
     static func resolve(name: String, roleId: String) -> SubAgentRoleDetail {
         if let builtIn = builtIns[roleId] {
             return builtIn
         }
-        if let custom = customRoles[roleId] {
-            return custom
-        }
         return SubAgentRoleDetail(
             roleId: roleId,
             name: name,
-            description: "自定义子代理角色。",
-            model: "跟随主助手",
-            reasoning: "跟随",
-            routing: "何时调用：由主 Agent 根据保存的角色说明判断。\n何时不要：边界不清、预算过大或需要人工确认时。",
-            isCustom: true
+            description: "自定义子代理角色。iOS 当前没有从 Settings.agentRuntime.subAgent.customDefinitions 读取真实定义。",
+            toolSummary: "customDefinitions 未桥接",
+            routing: "自定义角色需要通过 KMP SubAgentValidator 校验边界、工具白名单和预算后才能保存；iOS 当前只展示未读取状态。",
+            isKnownBuiltIn: false
         )
     }
 
@@ -264,155 +231,97 @@ private struct SubAgentRoleDetail {
             roleId: "explorer",
             name: "Explorer",
             description: "跨多源快速并行侦察，回答「在哪 / 大概有什么」，速度优先。",
-            model: "跟随主助手",
-            reasoning: "跟随",
+            toolSummary: "tools_list, search_web, scrape_web\nfile_list, file_read, file_search\nconversation_search, conversation_expand, session_search\nmcp_list, skills_list",
             routing: """
             何时调用：需要在多个来源快速并行侦察；范围广或不确定时；决策前要先摸清都有些什么。
             何时不要：你已经知道具体文件/路径只想读；一次性具体查找；即将立刻执行下一步。
-            经验：「X 大概有些什么？」→ @explorer。「读这个具体文件」→ 自己干。
             """,
-            isCustom: false
+            isKnownBuiltIn: true
         ),
         "historian": .init(
             roleId: "historian",
             name: "Historian",
-            description: "历史会话搜索 / 主题挖掘 / 跨分片综合。",
-            model: "跟随主助手",
-            reasoning: "跟随",
+            description: "历史会话搜索、主题挖掘、跨分片综合。",
+            toolSummary: "tools_list, session_search, session_read, session_expand\nconversation_search, conversation_expand",
             routing: """
             何时调用：需要回忆过去对话/决策；跨多个会话挖某个主题；合并多个分片的会话摘要。
             何时不要：当前对话已经有答案；在当前会话里查单条消息。
-            经验：「我们之前是不是聊过 X？」→ @historian。
             """,
-            isCustom: false
+            isKnownBuiltIn: true
         ),
         "oracle": .init(
             roleId: "oracle",
             name: "Oracle",
-            description: "深度推理与评审：架构决策、bug 根因、方案 review、风险。",
-            model: "GPT-5.2",
-            reasoning: "高",
+            description: "深度推理与评审：架构决策、bug 根因、方案 review、风险复议。",
+            toolSummary: "tools_list, file_list, file_read, file_search\nconversation_search, conversation_expand, session_search\npermissions_status, apps_list, apps_installed_list",
             routing: """
-            何时调用：长期影响大的决定；同一问题改了 2+ 次还没好；高风险重构；提交前复议；代码/架构 review；destructive 操作前评估风险。
-            何时不要：日常普通选择；时间紧、足够好就行；你已经很有把握；只读或常规操作。
-            经验：「这是架构层判断」→ @oracle。「重写还是打补丁？」→ @oracle。「直接打补丁」→ 自己干。
+            何时调用：长期影响大的决定；高风险重构；提交前二次复议；代码/架构 review；破坏性操作前评估风险。
+            何时不要：日常普通选择；时间紧、足够好就行；你已经很有把握。
             """,
-            isCustom: false
+            isKnownBuiltIn: true
         ),
         "designer": .init(
             roleId: "designer",
             name: "Designer",
-            description: "视觉产出：SVG / HTML PPT / widget 的版式、配色、信息密度。",
-            model: "Gemini-3-pro",
-            reasoning: "跟随",
+            description: "视觉产出专家：SVG、HTML PPT、HTML widget、VChart 的版式与视觉质量。",
+            toolSummary: "tools_list, file_read, file_search\nconversation_search, conversation_expand",
             routing: """
-            何时调用：要生成 SVG/PPT/HTML 卡片且在意视觉质量；需要配色/版式规格；评审视觉产物。
-            何时不要：随手草图；纯数据图表，不在意美感。
-            经验：「用户会看且会评判」→ @designer。
+            何时调用：要生成或评审视觉产物，且在意配色、版式、字体、信息密度。
+            何时不要：随手草图；纯数据图表且不在意美感。
             """,
-            isCustom: false
+            isKnownBuiltIn: true
         ),
         "writer": .init(
             roleId: "writer",
             name: "Writer",
-            description: "中文写作：公众号 / 小红书 / 邮件 / 文学性改写与润色。",
-            model: "GLM-4.6",
-            reasoning: "跟随",
+            description: "中文写作专家：公众号、小红书、邮件、短文、文学性改写、文案润色。",
+            toolSummary: "tools_list, file_read, file_search\nconversation_search, conversation_expand",
             routing: """
-            何时调用：中文写作 / 文案 / 故事 / 公众号 / 邮件，且对质量有要求；给现有文字润色调气质节奏。
+            何时调用：中文写作、文案、故事、邮件、润色，且对质量有要求。
             何时不要：纯事实总结；通顺翻译；只要英文输出。
-            经验：「写得打动人」→ @writer。「翻译这段公告」→ @fixer 或自己干。
             """,
-            isCustom: false
+            isKnownBuiltIn: true
         ),
         "fixer": .init(
             roleId: "fixer",
             name: "Fixer",
             description: "便宜模型做边界清晰的执行：翻译、格式转换、抽取、命名。",
-            model: "跟随主助手",
-            reasoning: "跟随",
+            toolSummary: "tools_list, file_read, file_search\nconversation_search, conversation_expand",
             routing: """
-            何时调用：边界清晰的机械变换；批量翻译 / 格式化 / 抽取；便宜模型显然能搞定。
-            何时不要：需要研究 / 决策 / 审美判断 / 强写作 / 中文文笔。
-            经验：「把这堆改成 Markdown」→ @fixer。「这段重写得更有调性」→ @writer。
+            何时调用：边界清晰的机械变换；批量翻译、格式化、抽取。
+            何时不要：需要研究、决策、审美判断、强写作或中文文笔。
             """,
-            isCustom: false
-        )
-    ]
-
-    private static let customRoles: [String: SubAgentRoleDetail] = [
-        "release-notes": .init(
-            roleId: "release-notes",
-            name: "ReleaseNotes",
-            description: "把 git 提交整理成面向用户的更新日志。",
-            model: "跟随主助手",
-            reasoning: "跟随",
-            routing: "何时调用：要从提交记录生成可读的发布说明时。\n何时不要：需要判断该不该发布 → @oracle。",
-            isCustom: true
-        ),
-        "meeting-notes": .init(
-            roleId: "meeting-notes",
-            name: "MeetingNotes",
-            description: "会议转录 → 决议 / 待办 / 一句话纪要。",
-            model: "跟随主助手",
-            reasoning: "跟随",
-            routing: "何时调用：把会议记录或转录整理成结构化纪要时。\n何时不要：要对会议内容做判断或决策 → @oracle。",
-            isCustom: true
-        ),
-        "sql-explain": .init(
-            roleId: "sql-explain",
-            name: "SqlExplain",
-            description: "逐句拆解复杂 SQL，标出代价与风险。",
-            model: "跟随主助手",
-            reasoning: "跟随",
-            routing: "何时调用：看不懂或想 review 一段复杂 SQL 时。\n何时不要：要直接改库/跑迁移 → 自己干并先评估。",
-            isCustom: true
+            isKnownBuiltIn: true
         )
     ]
 }
 
-private struct SubAgentRoleOptionRow: View {
-    let systemImage: String
-    let iconColor: Color
-    let title: String
-    let subtitle: String?
-    let value: String
+private struct SubAgentRoleStatusRow: View {
+    let row: SubAgentRoleStatus
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 32, height: 32)
-                .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(row.title)
                     .font(.body)
                     .foregroundStyle(AmberTheme.foreground)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(2)
-                }
+                Text(row.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(value)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(AmberTheme.muted)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-
-            Image(systemName: "chevron.right")
+            Text(row.value)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted2)
+                .foregroundStyle(row.color)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(minHeight: 58)
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
-        .contentShape(Rectangle())
     }
 }
 

@@ -4,27 +4,100 @@ struct SubAgentsView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
-    @State private var isEnabled = true
-    @State private var mode: SubAgentModeChoice = .roster
-    @State private var allowsDynamicRoles = true
-    @State private var maxConcurrentRuns = 2
-    @State private var maxTurns = 4
-    @State private var timeout: SubAgentTimeoutChoice = .fiveMinutes
-    @State private var outputBudget: SubAgentBudgetChoice = .standard
-
-    private let builtInRoles: [SubAgentRoleSummary] = [
-        .init(name: "Explorer", handle: "explorer", summary: "跨多源快速并行侦察，回答「在哪 / 大概有什么」", value: "跟随"),
-        .init(name: "Historian", handle: "historian", summary: "历史会话搜索 / 主题挖掘 / 跨分片综合", value: "跟随"),
-        .init(name: "Oracle", handle: "oracle", summary: "深度推理与评审：架构决策、bug 根因、方案 review、风险", value: "GPT-5.2"),
-        .init(name: "Designer", handle: "designer", summary: "视觉产出：SVG / HTML PPT / widget 的版式、配色、信息密度", value: "Gemini-3-pro"),
-        .init(name: "Writer", handle: "writer", summary: "中文写作：公众号 / 小红书 / 邮件 / 文学性改写与润色", value: "GLM-4.6"),
-        .init(name: "Fixer", handle: "fixer", summary: "便宜模型做边界清晰的执行：翻译、格式转换、抽取、命名", value: "跟随")
+    private let evidenceRows: [SubAgentEvidenceRow] = [
+        .init(
+            title: "SubAgentRuntimeSetting",
+            subtitle: "Android/KMP 通过 Settings.agentRuntime.subAgent 保存 enabled、mode、并发、超时、预算、overrides 与 customDefinitions。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "SubAgentDefinitions",
+            subtitle: "KMP 内置 explorer、historian、oracle、designer、writer、fixer 六个只读/专项角色。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "SubAgentTools",
+            subtitle: "Android ChatService 在 conversationId 存在且 subAgent.enabled 时注入 list/start/read/wait/cancel 工具。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "iOS 运行桥",
+            subtitle: "当前 SwiftUI 没有 Settings.agentRuntime.subAgent、SubAgentManager 或 subagent_* 工具执行桥。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        )
     ]
 
-    private let customRoles: [SubAgentRoleSummary] = [
-        .init(name: "ReleaseNotes", handle: "release-notes", summary: "把 git 提交整理成面向用户的更新日志", value: "跟随"),
-        .init(name: "MeetingNotes", handle: "meeting-notes", summary: "会议转录 → 决议 / 待办 / 一句话纪要", value: "跟随"),
-        .init(name: "SqlExplain", handle: "sql-explain", summary: "逐句拆解复杂 SQL，标出代价与风险", value: "跟随")
+    private let iOSRows: [SubAgentEvidenceRow] = [
+        .init(
+            title: "启用子代理",
+            subtitle: "iOS SettingsStore 没有 subAgent.enabled；ChatViewModel 生成请求也不会注入 subagent_* 工具。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "@ 角色调用",
+            subtitle: "iOS 输入框没有 SubAgentDefinitions.extractMentions 或 SubAgentTools system prompt 注入路径。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "运行结果 / 实时面板",
+            subtitle: "没有 runId、liveTextFlow、livePartsFlow、transcriptPath 或 AgentTask 状态来源。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "角色覆盖与自定义角色",
+            subtitle: "角色详情页只展示字段映射；不会写入 overrides、customDefinitions 或 prompt markdown。",
+            value: "草稿",
+            color: AmberTheme.muted
+        )
+    ]
+
+    private let settingRows: [SubAgentEvidenceRow] = [
+        .init(
+            title: "enabled / mode",
+            subtitle: "Android/KMP 支持 ROSTER 与 SMART_DYNAMIC；iOS 当前不读写这些值。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "allowDynamicSubAgents",
+            subtitle: "动态角色需要 SubAgentValidator 校验边界、工具白名单和预算；iOS 未接该校验/保存链。",
+            value: "未接线",
+            color: AmberTheme.accentAmber
+        ),
+        .init(
+            title: "maxConcurrentRuns / maxTurns",
+            subtitle: "KMP 默认并发 2、单任务 4 轮；SubAgentManager admissionLock 会按真实设置限流。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "timeout / outputBudget",
+            subtitle: "KMP 默认 5 分钟、12k 字符，并有扩展档位；iOS 当前不会保存选择。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "overrides / customDefinitions",
+            subtitle: "KMP 支持角色 prompt、modelId、temperature、reasoning、预算覆盖和自定义角色。",
+            value: "存在",
+            color: AmberTheme.accentGreen
+        )
+    ]
+
+    private let builtInRoles: [SubAgentRoleSummary] = [
+        .init(name: "Explorer", handle: "explorer", summary: "跨多源快速并行侦察，速度优先。"),
+        .init(name: "Historian", handle: "historian", summary: "历史会话搜索、主题挖掘、跨分片综合。"),
+        .init(name: "Oracle", handle: "oracle", summary: "高判断力评审、架构取舍、风险复议。"),
+        .init(name: "Designer", handle: "designer", summary: "视觉产出规格、版式、配色和信息密度审查。"),
+        .init(name: "Writer", handle: "writer", summary: "中文写作、文案润色、故事与风格改写。"),
+        .init(name: "Fixer", handle: "fixer", summary: "边界清晰的机械执行：翻译、格式转换、抽取。")
     ]
 
     var body: some View {
@@ -37,11 +110,11 @@ struct SubAgentsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
-                        masterSection
-                        runtimeSection
-                        limitsSection
+                        evidenceSection
+                        iOSStatusSection
+                        settingMapSection
                         builtInRolesSection
-                        customRolesSection
+                        customDefinitionsSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -60,9 +133,17 @@ struct SubAgentsView: View {
 
             Spacer()
 
-            Text("SubAgent")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(AmberTheme.foreground)
+            VStack(spacing: 2) {
+                Text("SubAgent")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+
+                Text("Android/KMP 已实现 · iOS 运行桥未接线")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
 
             Spacer()
 
@@ -75,7 +156,7 @@ struct SubAgentsView: View {
     }
 
     private var intro: some View {
-        Text("主 Agent 为边界清楚的子任务启动隔离子代理——各自独立的模型与上下文，互不干扰，用 @ 在对话里直接点名。")
+        Text("Android/KMP 已有真实 SubAgent 设置、内置角色、运行管理器和 subagent_* 工具；iOS 当前没有把这些能力接入 SettingsStore、ChatViewModel 或本地工具执行器。本页只展示能力证据和字段映射，不启用子代理、不启动运行、不保存角色。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -85,398 +166,177 @@ struct SubAgentsView: View {
             .padding(.bottom, 16)
     }
 
-    private var masterSection: some View {
-        AmberFormGroup {
-            SubAgentToggleRow(
-                systemImage: "person.2",
-                iconColor: AmberTheme.accentGreen,
-                title: "启用子代理",
-                subtitle: "在对话里用 @ 调用专项子代理",
-                isOn: $isEnabled
-            )
-        }
-    }
-
-    private var runtimeSection: some View {
+    private var evidenceSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行")
-
-            HStack(spacing: 4) {
-                ForEach(SubAgentModeChoice.allCases) { choice in
-                    Button {
-                        mode = choice
-                        if choice == .smart {
-                            allowsDynamicRoles = true
-                        }
-                    } label: {
-                        Text(choice.title)
-                            .font(.system(size: 14, weight: mode == choice ? .semibold : .regular))
-                            .foregroundStyle(mode == choice ? AmberTheme.accent : AmberTheme.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
-                            .background(mode == choice ? AmberTheme.background : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(3)
-            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-
+            AmberSectionLabel(text: "能力证据")
             AmberFormGroup {
-                SubAgentToggleRow(
-                    systemImage: "sparkles",
-                    iconColor: AmberTheme.accentAmber,
-                    title: "允许动态角色",
-                    subtitle: "主 Agent 可临时定义窄角色，需通过边界与预算校验",
-                    isOn: dynamicBinding,
-                    isEnabled: mode != .smart
-                )
-            }
-
-            if mode == .smart {
-                SubAgentFootnote(text: "智能模式下，普通内置角色不再暴露给主 Agent；你保存的自定义角色仍然可用。")
-            }
-        }
-    }
-
-    private var dynamicBinding: Binding<Bool> {
-        Binding(
-            get: { mode == .smart || allowsDynamicRoles },
-            set: { allowsDynamicRoles = $0 }
-        )
-    }
-
-    private var limitsSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "限制")
-            AmberFormGroup {
-                Menu {
-                    ForEach([1, 2, 3, 4, 5], id: \.self) { value in
-                        Button("\(value)") { maxConcurrentRuns = value }
-                    }
-                } label: {
-                    SubAgentOptionRow(
-                        title: "最大并发数",
-                        subtitle: "同时运行的子代理数",
-                        value: "\(maxConcurrentRuns)"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                SubAgentDivider()
-
-                Menu {
-                    ForEach([2, 4, 6, 8], id: \.self) { value in
-                        Button("\(value)") { maxTurns = value }
-                    }
-                } label: {
-                    SubAgentOptionRow(
-                        title: "单任务轮数",
-                        subtitle: "单个子代理最多来回的轮次",
-                        value: "\(maxTurns)"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                SubAgentDivider()
-
-                Menu {
-                    ForEach(SubAgentTimeoutChoice.allCases) { option in
-                        Button(option.title) { timeout = option }
-                    }
-                } label: {
-                    SubAgentOptionRow(
-                        title: "任务超时",
-                        subtitle: "超时未返回即结束",
-                        value: timeout.title
-                    )
-                }
-                .buttonStyle(.plain)
-
-                SubAgentDivider()
-
-                Menu {
-                    ForEach(SubAgentBudgetChoice.allCases) { option in
-                        Button(option.title) { outputBudget = option }
-                    }
-                } label: {
-                    SubAgentOptionRow(
-                        title: "输出上限",
-                        subtitle: "单个子代理输出的长度上限",
-                        value: outputBudget.title
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var builtInRolesSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "内置角色")
-
-            if mode == .smart {
-                AmberFormGroup {
-                    SubAgentEmptyRow(text: "智能模式会隐藏普通内置角色，由主 Agent 按任务边界临时选择或定义角色。")
-                }
-            } else {
-                SubAgentFootnote(text: "每个角色都是一个特化子代理，可单独选模型——把“快/便宜”和“强/慢”混搭着用。")
-                AmberFormGroup {
-                    ForEach(Array(builtInRoles.enumerated()), id: \.element.id) { index, role in
-                        SubAgentRoleRow(role: role) {
-                            router.navigate(to: .subAgentRole(name: role.name, roleId: role.handle))
-                        }
-
-                        if index != builtInRoles.indices.last {
-                            SubAgentDivider()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var customRolesSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "自定义角色")
-            SubAgentFootnote(text: "由主 Agent 按需智能创建并保存，在这里管理或删除。")
-
-            AmberFormGroup {
-                ForEach(Array(customRoles.enumerated()), id: \.element.id) { index, role in
-                    SubAgentRoleRow(role: role) {
-                        router.navigate(to: .subAgentRole(name: role.name, roleId: role.handle))
-                    }
-
-                    if index != customRoles.indices.last {
+                ForEach(Array(evidenceRows.enumerated()), id: \.element.id) { index, row in
+                    SubAgentStatusRow(row: row)
+                    if index < evidenceRows.count - 1 {
                         SubAgentDivider()
                     }
                 }
             }
         }
     }
-}
 
-private enum SubAgentModeChoice: CaseIterable, Identifiable {
-    case roster
-    case smart
+    private var iOSStatusSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "iOS 当前处理")
+            AmberFormGroup {
+                ForEach(Array(iOSRows.enumerated()), id: \.element.id) { index, row in
+                    SubAgentStatusRow(row: row)
+                    if index < iOSRows.count - 1 {
+                        SubAgentDivider()
+                    }
+                }
+            }
+        }
+    }
 
-    var id: Self { self }
+    private var settingMapSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "设置字段")
+            AmberFormGroup {
+                ForEach(Array(settingRows.enumerated()), id: \.element.id) { index, row in
+                    SubAgentStatusRow(row: row)
+                    if index < settingRows.count - 1 {
+                        SubAgentDivider()
+                    }
+                }
+            }
 
-    var title: String {
-        switch self {
-        case .roster: "固定角色"
-        case .smart: "智能模式"
+            SubAgentFootnote(text: "Android 设置页每次 update 都会写 settings.agentRuntime.subAgent，并通过 AgentPromptConfigRepository.writeSubAgentMarkdown 同步 prompt；iOS 当前没有这条桥。")
+        }
+    }
+
+    private var builtInRolesSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "内置角色")
+            AmberFormGroup {
+                ForEach(Array(builtInRoles.enumerated()), id: \.element.id) { index, role in
+                    Button {
+                        router.navigate(to: .subAgentRole(name: role.name, roleId: role.handle))
+                    } label: {
+                        SubAgentRoleRowContent(role: role)
+                    }
+                    .buttonStyle(.plain)
+
+                    if index < builtInRoles.count - 1 {
+                        SubAgentDivider()
+                    }
+                }
+            }
+
+            SubAgentFootnote(text: "这些角色来自 KMP SubAgentDefinitions；iOS 当前不会读取或保存 per-role 模型、推理强度、提示词覆盖。")
+        }
+    }
+
+    private var customDefinitionsSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "自定义角色")
+            AmberFormGroup {
+                SubAgentStatusRow(
+                    row: .init(
+                        title: "customDefinitions",
+                        subtitle: "KMP 支持持久化自定义角色，但必须先通过 SubAgentValidator 校验边界、工具白名单和预算。",
+                        value: "未读取",
+                        color: AmberTheme.accentAmber
+                    )
+                )
+            }
+
+            SubAgentFootnote(text: "本页不再展示 ReleaseNotes、MeetingNotes、SqlExplain 等本地假自定义角色，避免误导为已保存配置。")
         }
     }
 }
 
-private enum SubAgentTimeoutChoice: CaseIterable, Identifiable {
-    case oneMinute
-    case threeMinutes
-    case fiveMinutes
-    case tenMinutes
-    case twentyMinutes
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .oneMinute: "1 分钟"
-        case .threeMinutes: "3 分钟"
-        case .fiveMinutes: "5 分钟"
-        case .tenMinutes: "10 分钟"
-        case .twentyMinutes: "20 分钟"
-        }
-    }
-}
-
-private enum SubAgentBudgetChoice: CaseIterable, Identifiable {
-    case standard
-    case extended
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .standard: "标准"
-        case .extended: "加长"
-        }
-    }
+private struct SubAgentEvidenceRow: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let value: String
+    let color: Color
 }
 
 private struct SubAgentRoleSummary: Identifiable {
-    var id: String { handle }
+    let id = UUID()
     let name: String
     let handle: String
     let summary: String
-    let value: String
-
-    var initials: String {
-        String(name.prefix(1))
-    }
 }
 
-private struct SubAgentToggleRow: View {
-    let systemImage: String
-    let iconColor: Color
-    let title: String
-    let subtitle: String
-    @Binding var isOn: Bool
-    var isEnabled = true
-
-    var body: some View {
-        Button {
-            guard isEnabled else { return }
-            isOn.toggle()
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(iconColor.opacity(isEnabled ? 1 : 0.5))
-                    .frame(width: 32, height: 32)
-                    .background(iconColor.opacity(isEnabled ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body)
-                        .foregroundStyle(isEnabled ? AmberTheme.foreground : AmberTheme.muted)
-                    Text(subtitle)
-                        .font(.caption)
-                        .lineLimit(2)
-                        .foregroundStyle(AmberTheme.muted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                SubAgentSwitch(isOn: isOn, isEnabled: isEnabled)
-            }
-            .frame(minHeight: 58)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityValue(isOn ? "开启" : "关闭")
-    }
-}
-
-private struct SubAgentOptionRow: View {
-    let title: String
-    let subtitle: String
-    let value: String
+private struct SubAgentStatusRow: View {
+    let row: SubAgentEvidenceRow
 
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(row.title)
                     .font(.body)
                     .foregroundStyle(AmberTheme.foreground)
-                Text(subtitle)
+                Text(row.subtitle)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(value)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(AmberTheme.muted)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
+            Text(row.value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(row.color)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+    }
+}
+
+private struct SubAgentRoleRowContent: View {
+    let role: SubAgentRoleSummary
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(String(role.name.prefix(1)))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+                .frame(width: 32, height: 32)
+                .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(role.name)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(AmberTheme.foreground)
+
+                    Text("@\(role.handle)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(AmberTheme.muted2)
+                }
+
+                Text(role.summary)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("KMP 存在")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.accentGreen)
 
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AmberTheme.muted2)
         }
-        .frame(minHeight: 56)
+        .frame(minHeight: 62)
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
         .contentShape(Rectangle())
-    }
-}
-
-private struct SubAgentRoleRow: View {
-    let role: SubAgentRoleSummary
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Text(role.initials)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .frame(width: 30, height: 30)
-                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(role.name)
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text("@\(role.handle)")
-                            .font(.system(size: 11, weight: .regular, design: .monospaced))
-                            .foregroundStyle(AmberTheme.muted2)
-                    }
-
-                    Text(role.summary)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text(role.value)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted2)
-            }
-            .frame(minHeight: 58)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct SubAgentEmptyRow: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.caption)
-            .lineSpacing(3)
-            .foregroundStyle(AmberTheme.muted)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-    }
-}
-
-private struct SubAgentSwitch: View {
-    let isOn: Bool
-    var isEnabled = true
-
-    var body: some View {
-        Capsule()
-            .fill(isOn ? AmberTheme.accent : AmberTheme.surface2)
-            .opacity(isEnabled ? 1 : 0.55)
-            .frame(width: 48, height: 28)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 24, height: 24)
-                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
-                    .padding(2)
-            }
-            .animation(.snappy(duration: 0.18), value: isOn)
     }
 }
 
@@ -505,6 +365,6 @@ private struct SubAgentFootnote: View {
 #Preview {
     NavigationStack {
         SubAgentsView()
+            .environment(RouterPath())
     }
-    .environment(RouterPath())
 }

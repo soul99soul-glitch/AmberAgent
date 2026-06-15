@@ -321,7 +321,7 @@ private extension View {
             case .memory:
                 MemoryOverviewView()
             case .council:
-                CouncilView()
+                CouncilView(settingsStore: settingsStore)
             case .councilSettings:
                 CouncilSettingsView()
             case .seatEditor:

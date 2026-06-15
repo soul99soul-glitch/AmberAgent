@@ -31,6 +31,9 @@ struct CouncilView: View {
         )
     ]
 
+    init(settingsStore: SettingsStore? = nil) {
+    }
+
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
