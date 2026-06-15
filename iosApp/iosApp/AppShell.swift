@@ -270,7 +270,7 @@ private extension View {
             case .board:
                 BoardView()
             case .boardSettings:
-                PlaceholderDetailView(title: "看板设置", subtitle: "模型、热榜源、刷新策略", systemImage: "gearshape")
+                BoardSettingsView()
             case .miniApps:
                 PlaceholderDetailView(title: "小应用", subtitle: "生成可执行的 HTML 工具", systemImage: "square.grid.2x2")
             case .workspace:
