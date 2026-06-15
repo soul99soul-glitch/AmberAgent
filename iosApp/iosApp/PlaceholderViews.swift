@@ -804,7 +804,7 @@ struct SettingsHomeView: View {
             .init(title: "模型议会", subtitle: "多模型并行评审 / 辩论", value: nil, systemImage: "person.3", color: AmberTheme.accent, route: .council),
             .init(title: "SubAgent", subtitle: "@explorer · @oracle · @writer...", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
             .init(title: "小应用", subtitle: "生成可执行的 HTML 工具", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
-            .init(title: "WebMount", subtitle: "挂载已登录的网页服务", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: placeholder("WebMount", "挂载已登录网页服务", "globe"))
+            .init(title: "WebMount", subtitle: "挂载已登录的网页服务", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
         ]
     }
 

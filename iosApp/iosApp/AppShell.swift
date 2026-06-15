@@ -188,6 +188,8 @@ enum Route: Hashable {
     case miniApps
     case miniAppSettings
     case miniAppRunner(title: String)
+    case webMount
+    case webMountSite(site: WebMountSiteRoute)
     case workspace
     case memory
     case council
@@ -283,6 +285,10 @@ private extension View {
                 MiniAppSettingsView()
             case .miniAppRunner(let title):
                 MiniAppRunnerView(title: title)
+            case .webMount:
+                WebMountView()
+            case .webMountSite(let site):
+                PlaceholderDetailView(title: site.name, subtitle: site.host, systemImage: "globe")
             case .workspace:
                 WorkspaceView()
             case .memory:
