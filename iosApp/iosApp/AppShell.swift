@@ -190,6 +190,7 @@ enum Route: Hashable {
     case memory
     case council
     case councilSettings
+    case seatEditor
     case sandbox
     case conversation(id: String)
     case assistant(id: String)
@@ -281,7 +282,9 @@ private extension View {
             case .council:
                 CouncilView()
             case .councilSettings:
-                PlaceholderDetailView(title: "模型议会", subtitle: "席位 / 综合模型 / 超时", systemImage: "person.3")
+                CouncilSettingsView()
+            case .seatEditor:
+                PlaceholderDetailView(title: "编辑席位", subtitle: "Provider 模型 / 外部 CLI", systemImage: "person.crop.circle.badge.gearshape")
             case .sandbox:
                 RuntimeEnvironmentView(settingsStore: settingsStore)
             case .conversation(let id):
