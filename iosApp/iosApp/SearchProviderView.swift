@@ -3,16 +3,13 @@ import SwiftUI
 struct SearchProviderView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var providerType: SearchProviderType = .serper
-    @State private var apiKey = "········"
-    @State private var searXNGURL = "https://search.example.com"
-    @State private var searXNGEngines = "google,bing"
-    @State private var searXNGLanguage = "zh-CN"
+    @State private var providerType: SearchProviderType = .bing
+    @State private var apiKey = ""
+    @State private var searXNGURL = ""
+    @State private var searXNGEngines = ""
+    @State private var searXNGLanguage = ""
     @State private var searXNGUsername = ""
     @State private var searXNGPassword = ""
-    @State private var searchEnabled = true
-    @State private var scrapeEnabled = true
-    @State private var serviceEnabled = true
 
     var body: some View {
         ZStack {
@@ -23,9 +20,11 @@ struct SearchProviderView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
+                        draftNotice
                         providerFields
                         capabilitiesSection
                         enabledSection
+                        draftPreviewSection
                         deleteSection
                     }
                     .padding(.bottom, 36)
@@ -45,7 +44,7 @@ struct SearchProviderView: View {
 
             Spacer()
 
-            Text("编辑搜索服务")
+            Text("搜索服务草稿")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
                 .lineLimit(1)
@@ -55,7 +54,7 @@ struct SearchProviderView: View {
             Button {
                 dismiss()
             } label: {
-                Text("完成")
+                Text("关闭")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.accent)
                     .frame(height: 36)
@@ -64,11 +63,16 @@ struct SearchProviderView: View {
             }
             .buttonStyle(.plain)
             .amberGlass(cornerRadius: AmberTheme.radiusPill)
-            .accessibilityLabel("完成")
+            .accessibilityLabel("关闭")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 10)
+    }
+
+    private var draftNotice: some View {
+        SearchProviderNote("Android/KMP 已有 SearchServiceOptions 与 SettingSearchPage 保存逻辑；iOS 当前没有 searchServices、searchEnabledServiceIds、SearchCommonOptions 或 API Key 存储桥。")
+            .padding(.top, 2)
     }
 
     private var providerFields: some View {
@@ -77,14 +81,24 @@ struct SearchProviderView: View {
                 SearchProviderMenuRow(title: "服务类型", value: providerType.title) {
                     ForEach(SearchProviderType.allCases) { type in
                         Button(type.title) {
-                            providerType = type
+                            applyProviderType(type)
                         }
                     }
                 }
 
-                SearchProviderDivider()
+                if providerType.requiresAPIKey {
+                    SearchProviderDivider()
+                    SearchProviderTextFieldRow(
+                        title: "API Key",
+                        text: $apiKey,
+                        placeholder: "草稿 API Key",
+                        monospace: true,
+                        isSecure: true
+                    )
+                }
 
                 if providerType == .searXNG {
+                    SearchProviderDivider()
                     SearchProviderTextFieldRow(
                         title: "API URL",
                         text: $searXNGURL,
@@ -109,22 +123,14 @@ struct SearchProviderView: View {
                     SearchProviderTextFieldRow(
                         title: "Username",
                         text: $searXNGUsername,
-                        placeholder: "可选",
+                        placeholder: "可选草稿",
                         monospace: true
                     )
                     SearchProviderDivider()
                     SearchProviderTextFieldRow(
                         title: "Password",
                         text: $searXNGPassword,
-                        placeholder: "可选",
-                        monospace: true,
-                        isSecure: true
-                    )
-                } else {
-                    SearchProviderTextFieldRow(
-                        title: "API Key",
-                        text: $apiKey,
-                        placeholder: "粘贴 API Key",
+                        placeholder: "可选草稿",
                         monospace: true,
                         isSecure: true
                     )
@@ -138,68 +144,156 @@ struct SearchProviderView: View {
 
     private var capabilitiesSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "能力")
+            AmberSectionLabel(text: "能力链路")
             AmberFormGroup {
-                SearchProviderToggleRow(
-                    title: "搜索",
-                    subtitle: "用于 search_web 返回结果列表",
-                    isOn: $searchEnabled
+                SearchProviderStatusRow(
+                    title: "Android/KMP 服务",
+                    subtitle: "SearchService.getService(...) 能按 SearchServiceOptions 分派真实搜索实现。",
+                    value: "存在",
+                    valueColor: AmberTheme.accentGreen
                 )
                 SearchProviderDivider()
-                SearchProviderToggleRow(
-                    title: "抓取",
-                    subtitle: "用于 scrape_web 读取网页正文",
-                    isOn: $scrapeEnabled
+                SearchProviderStatusRow(
+                    title: "iOS 工具调用",
+                    subtitle: "ChatViewModel 与 IOSLocalToolExecutor 尚未接 search_web / scrape_web。",
+                    value: "未接线",
+                    valueColor: AmberTheme.accentAmber
                 )
             }
         }
     }
 
     private var enabledSection: some View {
-        AmberFormGroup {
-            SearchProviderToggleRow(
-                title: "启用此服务",
-                subtitle: nil,
-                isOn: $serviceEnabled
-            )
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "启用状态")
+            AmberFormGroup {
+                SearchProviderStatusRow(
+                    title: "服务启用",
+                    subtitle: "Android 通过 searchEnabledServiceIds 保存；iOS 当前不写入该列表。",
+                    value: "未保存",
+                    valueColor: AmberTheme.muted
+                )
+            }
         }
-        .padding(.top, 20)
+    }
+
+    private var draftPreviewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "草稿预览")
+            AmberFormGroup {
+                SearchProviderPreviewLine(label: "类型", value: providerType.title)
+                SearchProviderDivider()
+                SearchProviderPreviewLine(label: "序列化类型", value: providerType.serialName)
+                SearchProviderDivider()
+                SearchProviderPreviewLine(label: "凭据", value: credentialPreview)
+                SearchProviderDivider()
+                SearchProviderPreviewLine(label: "保存方式", value: "本页草稿")
+            }
+
+            SearchProviderNote("关闭页面会丢弃草稿；不会写入 Keychain、UserDefaults、KMP Settings 或发起网络请求。")
+        }
     }
 
     private var deleteSection: some View {
-        AmberFormGroup {
-            Button {
-                dismiss()
-            } label: {
-                Text("删除服务")
+        VStack(spacing: 0) {
+            AmberFormGroup {
+                Text("删除服务尚未接线")
                     .font(.body.weight(.medium))
-                    .foregroundStyle(AmberTheme.accentRed)
+                    .foregroundStyle(AmberTheme.muted)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 52)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .padding(.top, 20)
+
+            SearchProviderNote("没有读取到真实 iOS searchServices 列表，因此这里不会删除任何配置。")
         }
-        .padding(.top, 20)
+    }
+
+    private var credentialPreview: String {
+        if providerType == .bing {
+            return "无需 Key"
+        }
+        if providerType == .searXNG {
+            let hasURL = !searXNGURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return hasURL ? "URL 已填写，未保存" : "URL 待填写"
+        }
+        return apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "API Key 待填写" : "API Key 已填写，未保存"
+    }
+
+    private func applyProviderType(_ type: SearchProviderType) {
+        providerType = type
+        apiKey = ""
+        searXNGURL = ""
+        searXNGEngines = ""
+        searXNGLanguage = ""
+        searXNGUsername = ""
+        searXNGPassword = ""
     }
 }
 
 private enum SearchProviderType: String, CaseIterable, Identifiable {
+    case bing = "Bing HTML 兜底"
+    case amberAgent = "AmberAgent"
+    case zhipu = "智谱"
+    case tavily = "Tavily"
+    case exa = "Exa"
+    case searXNG = "SearXNG"
+    case linkUp = "LinkUp"
+    case brave = "Brave"
     case serper = "Serper"
     case serpAPI = "SerpAPI"
-    case tavily = "Tavily"
-    case brave = "Brave"
-    case searXNG = "SearXNG"
+    case metaso = "秘塔"
+    case ollama = "Ollama"
+    case perplexity = "Perplexity"
+    case firecrawl = "Firecrawl"
+    case jina = "Jina"
+    case bocha = "博查"
+    case grok = "Grok"
 
     var id: String { rawValue }
     var title: String { rawValue }
 
+    var serialName: String {
+        switch self {
+        case .bing: "bing_local"
+        case .amberAgent: "amber_agent"
+        case .zhipu: "zhipu"
+        case .tavily: "tavily"
+        case .exa: "exa"
+        case .searXNG: "searxng"
+        case .linkUp: "linkup"
+        case .brave: "brave"
+        case .serper: "serper"
+        case .serpAPI: "serpapi"
+        case .metaso: "metaso"
+        case .ollama: "ollama"
+        case .perplexity: "perplexity"
+        case .firecrawl: "firecrawl"
+        case .jina: "jina"
+        case .bocha: "bocha"
+        case .grok: "grok"
+        }
+    }
+
+    var requiresAPIKey: Bool {
+        switch self {
+        case .bing, .searXNG:
+            false
+        default:
+            true
+        }
+    }
+
     var note: String {
         switch self {
+        case .bing:
+            "Bing HTML 兜底是 Android 默认 SearchServiceOptions.DEFAULT；iOS 未接入时不会自动启用。"
         case .searXNG:
-            "SearXNG 可使用自托管实例；用户名和密码留空时按匿名实例访问。"
+            "SearXNG 在 Android/KMP 中保存 URL、引擎、语言、用户名和密码；当前字段只是草稿。"
+        case .jina:
+            "Jina 在 Android/KMP 中有 apiKey、searchUrl 和 scrapeUrl；iOS 当前不保存这些字段。"
         default:
-            "API Key 存入 Keychain；留空保存不会覆盖已存 Key。"
+            "\(title) 在仓库里有 SearchServiceOptions 类型；iOS 当前不写 API Key、不保存服务，也不测试连接。"
         }
     }
 }
@@ -268,10 +362,11 @@ private struct SearchProviderTextFieldRow: View {
     }
 }
 
-private struct SearchProviderToggleRow: View {
+private struct SearchProviderStatusRow: View {
     let title: String
     let subtitle: String?
-    @Binding var isOn: Bool
+    let value: String
+    var valueColor: Color = AmberTheme.muted
 
     var body: some View {
         HStack(spacing: 12) {
@@ -283,18 +378,44 @@ private struct SearchProviderToggleRow: View {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .tint(AmberTheme.accent)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(valueColor)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(minHeight: 58)
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
+    }
+}
+
+private struct SearchProviderPreviewLine: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.foreground)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minHeight: 46)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 6)
     }
 }
 

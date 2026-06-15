@@ -4,23 +4,23 @@ struct SearchServicesView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
-    @State private var agentSearchEnabled = true
-    @State private var resultSize = "10 条"
-    @State private var builtInSources: [SearchBuiltInSource] = [
-        .init(name: "Jina Search / Reader", badge: "免费", badgeStyle: .free, detail: "可无 Key 使用，尽量以 Markdown 搜索和读取网页", isEnabled: true),
-        .init(name: "DuckDuckGo Lite", badge: "无 Key", badgeStyle: .noKey, detail: "无需 API Key 的免费公共召回源", isEnabled: true),
-        .init(name: "Bing HTML", badge: "免费", badgeStyle: .free, detail: "免费公共兜底，遇到验证页会明确报错", isEnabled: true),
-        .init(name: "Wikipedia", badge: "无 Key", badgeStyle: .noKey, detail: "实体和背景知识源，适合百科类问题", isEnabled: true),
-        .init(name: "Hacker News", badge: "无 Key", badgeStyle: .noKey, detail: "技术、开源和 AI 工具生态讨论源", isEnabled: false),
-        .init(name: "Google WebView 兜底", badge: nil, badgeStyle: .plain, detail: "普通搜索弱或深度搜索时，打开可见搜索页兜底", isEnabled: false)
+    private let builtInSources: [SearchBuiltInSource] = [
+        .init(name: "Jina Search / Reader", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinJinaEnabled；iOS 未接 SearchPrefs/SearchTools。"),
+        .init(name: "DuckDuckGo Lite", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinDuckDuckGoEnabled；iOS 未接搜索执行链。"),
+        .init(name: "Bing HTML", badge: "默认", badgeStyle: .free, detail: "Android 默认 SearchServiceOptions.DEFAULT；iOS 未持久化 searchServices。"),
+        .init(name: "Wikipedia", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinWikipediaEnabled；iOS 未接内置源开关。"),
+        .init(name: "Hacker News", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinHackerNewsEnabled；iOS 未接内置源开关。"),
+        .init(name: "Google WebView 兜底", badge: "兜底", badgeStyle: .plain, detail: "Android 字段 searchGoogleWebViewFallbackEnabled；iOS 未接 WebView 搜索工具。")
     ]
 
-    private let configuredProviders: [SearchConfiguredProvider] = [
-        .init(name: "Serper", isEnabled: true),
-        .init(name: "Tavily", isEnabled: false)
+    private let repositorySearchTypes: [SearchConfiguredProvider] = [
+        .init(name: "Bing HTML 兜底", detail: "SearchServiceOptions.DEFAULT，可作为 Android 默认服务。", badge: "默认类型", badgeStyle: .free),
+        .init(name: "Jina", detail: "SearchServiceOptions.JinaOptions，含 Search / Reader URL。", badge: "可无 Key", badgeStyle: .noKey),
+        .init(name: "Tavily / Exa / Brave", detail: "仓库已有对应 SearchService 与 API Key 字段。", badge: "需 Key", badgeStyle: .plain),
+        .init(name: "Serper / SerpAPI", detail: "仓库已有 Google 结果服务类型与编辑器。", badge: "需 Key", badgeStyle: .plain),
+        .init(name: "SearXNG", detail: "仓库已有自托管 URL、引擎、语言、用户名和密码字段。", badge: "自托管", badgeStyle: .free),
+        .init(name: "Perplexity / Firecrawl / Grok", detail: "仓库已有服务类型；iOS 当前没有 settings/search bridge。", badge: "未桥接", badgeStyle: .plain)
     ]
-
-    private let resultSizeOptions = ["5 条", "10 条", "15 条", "20 条"]
 
     var body: some View {
         ZStack {
@@ -34,7 +34,7 @@ struct SearchServicesView: View {
                         intro
                         agentSearchSection
                         builtInSection
-                        configuredSection
+                        repositoryTypesSection
                         commonOptionsSection
                         recommendationSection
                     }
@@ -61,7 +61,7 @@ struct SearchServicesView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加搜索服务", size: 44, symbolSize: 17) {
+            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加搜索服务草稿", size: 44, symbolSize: 17) {
                 router.navigate(to: .searchProvider)
             }
         }
@@ -71,7 +71,7 @@ struct SearchServicesView: View {
     }
 
     private var intro: some View {
-        Text("Agent 联网搜索采用多源召回：内置免费源无需 Key，外部提供商可补充 Google 结果或更高质量来源。靠前的源优先召回。")
+        Text("Android/KMP 已有搜索服务、设置字段和 search_web / scrape_web 工具链路；iOS 当前还没有把这些字段接进 SettingsStore、ChatViewModel 或本地工具执行器。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -84,84 +84,57 @@ struct SearchServicesView: View {
     private var agentSearchSection: some View {
         VStack(spacing: 0) {
             AmberFormGroup {
-                SearchToggleRow(
+                SearchStatusRow(
                     systemImage: "magnifyingglass",
                     iconColor: AmberTheme.accentCyan,
                     title: "Agent 网络搜索",
-                    subtitle: "允许聊天调用 search_web 和 scrape_web，使用下方已启用的服务",
-                    isOn: $agentSearchEnabled
+                    subtitle: "Android 使用 settings.enableWebSearch 进入 SearchTools / SearchOrchestrator；iOS 生成链路未接该开关。",
+                    value: "未接线",
+                    valueColor: AmberTheme.accentAmber
                 )
             }
             .padding(.top, 18)
 
             SearchServicesNote {
-                HStack(spacing: 0) {
-                    Text("\(enabledBuiltInCount) / \(builtInSources.count)")
-                        .fontWeight(.bold)
-                    Text(" 个服务已启用 · 多源召回")
-                }
+                Text("当前页面不会启用 search_web、scrape_web，也不会修改搜索服务选择。")
             }
         }
     }
 
     private var builtInSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "内置免费源")
+            AmberSectionLabel(text: "Android 内置源")
             AmberFormGroup {
-                ForEach(Array($builtInSources.enumerated()), id: \.element.id) { index, $source in
-                    SearchSourceToggleRow(source: $source)
+                ForEach(Array(builtInSources.enumerated()), id: \.element.id) { index, source in
+                    SearchSourceStatusRow(source: source)
 
                     if index < builtInSources.count - 1 {
                         SearchServicesDivider()
                     }
                 }
             }
+
+            SearchServicesNote {
+                Text("这些来源来自 Android Settings 默认字段；iOS 没有对应持久化字段或执行器时不显示启用数量。")
+            }
         }
     }
 
-    private var configuredSection: some View {
+    private var repositoryTypesSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已配置")
+            AmberSectionLabel(text: "仓库已有服务类型")
             AmberFormGroup {
-                ForEach(Array(configuredProviders.enumerated()), id: \.element.id) { index, provider in
-                    Button {
-                        router.navigate(to: .searchProvider)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Text(provider.name)
-                                .font(.body)
-                                .foregroundStyle(AmberTheme.foreground)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                ForEach(Array(repositorySearchTypes.enumerated()), id: \.element.id) { index, provider in
+                    SearchTypeRow(provider: provider)
 
-                            Text(provider.isEnabled ? "已启用" : "已停用")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(provider.isEnabled ? AmberTheme.accentGreen : AmberTheme.muted)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    (provider.isEnabled ? AmberTheme.accentGreen : AmberTheme.surface2).opacity(provider.isEnabled ? 0.14 : 1),
-                                    in: Capsule()
-                                )
-
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(AmberTheme.muted2)
-                        }
-                        .frame(minHeight: 52)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    if index < configuredProviders.count - 1 {
+                    if index < repositorySearchTypes.count - 1 {
                         SearchServicesDivider(leading: 14)
                     }
                 }
             }
 
             SearchServicesNote {
-                Text("点开可编辑能力、API Key 与启用状态。")
+                Text("右上角 + 只会打开本页草稿；不会创建 SearchServiceOptions、写入 API Key、保存启用状态或发起网络测试。")
             }
         }
     }
@@ -170,67 +143,33 @@ struct SearchServicesView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "通用选项")
             AmberFormGroup {
-                Menu {
-                    ForEach(resultSizeOptions, id: \.self) { option in
-                        Button(option) {
-                            resultSize = option
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "list.bullet")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(AmberTheme.accent)
-                            .frame(width: 32, height: 32)
-                            .background(AmberTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("结果数量")
-                                .font(.body)
-                                .foregroundStyle(AmberTheme.foreground)
-                            Text("每次搜索最多返回的结果条数")
-                                .font(.caption)
-                                .foregroundStyle(AmberTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Text(resultSize)
-                            .font(.subheadline)
-                            .foregroundStyle(AmberTheme.muted)
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AmberTheme.muted2)
-                    }
-                    .frame(minHeight: 58)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 5)
-                    .contentShape(Rectangle())
-                }
+                SearchStatusRow(
+                    systemImage: "list.bullet",
+                    iconColor: AmberTheme.accent,
+                    title: "结果数量",
+                    subtitle: "Android SearchCommonOptions.resultSize 默认 10；iOS 尚未接设置读写。",
+                    value: "Android 默认 10",
+                    valueColor: AmberTheme.muted
+                )
             }
         }
     }
 
     private var recommendationSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "推荐组合")
+            AmberSectionLabel(text: "组合建议")
             AmberFormGroup {
-                SearchRecommendationRow(title: "零成本", detail: "Jina + DuckDuckGo + Bing")
+                SearchRecommendationRow(title: "零成本", detail: "Android 可用 Jina / DuckDuckGo / Bing 等内置路径")
                 SearchServicesDivider(leading: 14)
-                SearchRecommendationRow(title: "Google 结果", detail: "Serper / SerpAPI")
+                SearchRecommendationRow(title: "Google 结果", detail: "Android 可配置 Serper 或 SerpAPI")
                 SearchServicesDivider(leading: 14)
-                SearchRecommendationRow(title: "高质量多源", detail: "Tavily 或 Brave")
+                SearchRecommendationRow(title: "高质量多源", detail: "Android 可配置 Tavily、Exa、Brave 等服务")
             }
 
             SearchServicesNote {
-                Text("按需求挑一组：零成本无需任何 Key；要 Google 结果或更高召回质量时再接入对应外部提供商。")
+                Text("这里是产品建议，不代表 iOS 已保存或启用这些服务。")
             }
         }
-    }
-
-    private var enabledBuiltInCount: Int {
-        builtInSources.count { $0.isEnabled }
     }
 }
 
@@ -240,13 +179,14 @@ private struct SearchBuiltInSource: Identifiable {
     let badge: String?
     let badgeStyle: SearchSourceBadgeStyle
     let detail: String
-    var isEnabled: Bool
 }
 
 private struct SearchConfiguredProvider: Identifiable {
     let id = UUID()
     let name: String
-    let isEnabled: Bool
+    let detail: String
+    let badge: String
+    let badgeStyle: SearchSourceBadgeStyle
 }
 
 private enum SearchSourceBadgeStyle {
@@ -270,12 +210,13 @@ private enum SearchSourceBadgeStyle {
     }
 }
 
-private struct SearchToggleRow: View {
+private struct SearchStatusRow: View {
     let systemImage: String?
     var iconColor: Color = AmberTheme.accent
     let title: String
     let subtitle: String?
-    @Binding var isOn: Bool
+    let value: String
+    var valueColor: Color = AmberTheme.muted
 
     var body: some View {
         HStack(spacing: 12) {
@@ -295,15 +236,17 @@ private struct SearchToggleRow: View {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(3)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .tint(AmberTheme.accent)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(valueColor)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(minHeight: 58)
         .padding(.horizontal, 14)
@@ -312,8 +255,8 @@ private struct SearchToggleRow: View {
     }
 }
 
-private struct SearchSourceToggleRow: View {
-    @Binding var source: SearchBuiltInSource
+private struct SearchSourceStatusRow: View {
+    let source: SearchBuiltInSource
 
     var body: some View {
         HStack(spacing: 12) {
@@ -338,14 +281,54 @@ private struct SearchSourceToggleRow: View {
                 Text(source.detail)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Toggle("", isOn: $source.isEnabled)
-                .labelsHidden()
-                .tint(AmberTheme.accent)
+            Text("未接线")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.accentAmber)
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct SearchTypeRow: View {
+    let provider: SearchConfiguredProvider
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(provider.name)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+
+                    Text(provider.badge)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(provider.badgeStyle.foreground)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(provider.badgeStyle.background, in: Capsule())
+                }
+
+                Text(provider.detail)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("草稿")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
         }
         .frame(minHeight: 58)
         .padding(.horizontal, 14)
