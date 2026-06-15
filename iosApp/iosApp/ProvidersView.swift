@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 
 enum ProviderRouteKind: String, Hashable {
     case current
@@ -24,7 +25,7 @@ struct ProvidersView: View {
                     searchPill
                     providerSection(title: "当前聊天配置", rows: [currentProvider])
                     providerSection(title: "预置 Provider 模板", rows: presetProviders)
-                    ProviderDraftNote("预置模板来自 Android/KMP DEFAULT_PROVIDERS，不包含 API Key。OpenAI-compatible 模板可把 Base URL 套用到当前聊天配置；其他 Provider 类型需要后续 settings.providers bridge。")
+                    ProviderDraftNote("预置模板直接读取导出到 Shared 框架的 Android/KMP DEFAULT_PROVIDERS，按真实顺序与类型呈现，不包含 API Key。OpenAI-compatible 模板可把 Base URL 套用到当前聊天配置；Google / Response API 等类型需要后续 settings.providers bridge。")
                     registrySection
                 }
                 .padding(.bottom, 40)
@@ -129,75 +130,13 @@ struct ProvidersView: View {
         )
     }
 
+    // Read the real Android/KMP DEFAULT_PROVIDERS through the exported Shared
+    // framework instead of duplicating a hand-maintained Swift snapshot. Name,
+    // endpoint, and route kind are derived from each real ProviderSetting, so
+    // the list never drifts from the bundled defaults. DEFAULT_PROVIDERS always
+    // ships apiKey = "" — these stay no-key templates, not configured accounts.
     private var presetProviders: [ProviderRowModel] {
-        [
-            .init(
-                initial: "O",
-                name: "OpenAI",
-                endpoint: "https://api.openai.com/v1",
-                status: "预置 · 可套用",
-                statusColor: AmberTheme.accent
-            ),
-            .init(
-                initial: "D",
-                name: "DeepSeek",
-                endpoint: "https://api.deepseek.com/v1",
-                status: "预置 · 可套用",
-                statusColor: AmberTheme.accent
-            ),
-            .init(
-                initial: "R",
-                name: "OpenRouter",
-                endpoint: "https://openrouter.ai/api/v1",
-                status: "预置 · 可套用",
-                statusColor: AmberTheme.accent
-            ),
-            .init(
-                initial: "K",
-                name: "月之暗面 (Kimi)",
-                endpoint: "https://api.moonshot.cn/v1",
-                status: "预置 · 可套用",
-                statusColor: AmberTheme.accent
-            ),
-            .init(
-                initial: "Z",
-                name: "智谱 GLM",
-                endpoint: "https://open.bigmodel.cn/api/paas/v4",
-                status: "预置 · 可套用",
-                statusColor: AmberTheme.accent
-            ),
-            .init(
-                initial: "小",
-                name: "小米 MiMo",
-                endpoint: "https://api.xiaomi.com/v1",
-                status: "预置 · Base 待确认",
-                statusColor: AmberTheme.muted,
-                kind: .endpointConfirmationPreset
-            ),
-            .init(
-                initial: "M",
-                name: "MiniMax",
-                endpoint: "https://api.minimaxi.com/v1",
-                status: "预置 · 可套用",
-                statusColor: AmberTheme.accent
-            ),
-            .init(
-                initial: "X",
-                name: "xAI",
-                endpoint: "https://api.x.ai/v1",
-                status: "预置 · 待 Response API",
-                statusColor: AmberTheme.muted,
-                kind: .responseAPIPreset
-            ),
-            .init(
-                initial: "G",
-                name: "Gemini",
-                endpoint: "https://generativelanguage.googleapis.com/v1beta",
-                status: "预置 · 待桥接",
-                statusColor: AmberTheme.muted,
-                kind: .googleProviderPreset
-            )
-        ]
+        DefaultProvidersKt.DEFAULT_PROVIDERS.map(ProviderRowModel.init(preset:))
     }
 
     private var registrySection: some View {
@@ -243,6 +182,69 @@ private struct ProviderRowModel: Identifiable {
         self.statusColor = statusColor
         self.kind = kind
         self.isDimmed = isDimmed
+    }
+
+    // Build a no-key preset row from a real Android/KMP ProviderSetting.
+    init(preset: ProviderSetting) {
+        let providerName = preset.name
+        let providerEndpoint = Self.endpoint(for: preset)
+        let routeKind = Self.routeKind(for: preset)
+        let descriptor = Self.statusDescriptor(for: routeKind)
+        self.id = "preset-\(providerName)-\(providerEndpoint)"
+        self.initial = Self.initial(for: providerName)
+        self.name = providerName
+        self.endpoint = providerEndpoint
+        self.status = descriptor.text
+        self.statusColor = descriptor.color
+        self.kind = routeKind
+        self.isDimmed = false
+    }
+
+    private static func endpoint(for preset: ProviderSetting) -> String {
+        if let openAI = preset as? ProviderSetting.OpenAI { return openAI.baseUrl }
+        if let google = preset as? ProviderSetting.Google { return google.baseUrl }
+        if let claude = preset as? ProviderSetting.Claude { return claude.baseUrl }
+        return ""
+    }
+
+    private static func routeKind(for preset: ProviderSetting) -> ProviderRouteKind {
+        if let openAI = preset as? ProviderSetting.OpenAI {
+            if openAI.useResponseApi { return .responseAPIPreset }
+            // MiMo's bundled baseUrl is a source-marked placeholder ("user can override").
+            // Identity compare the enum singleton to avoid relying on NSObject equality.
+            if openAI.brand === OpenAIBrand.mimo { return .endpointConfirmationPreset }
+            return .openAICompatiblePreset
+        }
+        if preset is ProviderSetting.Google {
+            return .googleProviderPreset
+        }
+        // Only OpenAI and Google appear in DEFAULT_PROVIDERS today. Any other
+        // ProviderSetting type (e.g. Claude) would currently inherit the Google
+        // "待桥接" label/path, which is wrong — it must get its own route kind and
+        // ProviderDetailView label before such a default is added. Until then, fall
+        // back to the bridge-required state so it can never be presented as an
+        // applyable OpenAI-compatible template.
+        return .googleProviderPreset
+    }
+
+    private static func initial(for name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return String(trimmed.prefix(1)).uppercased()
+    }
+
+    private static func statusDescriptor(for kind: ProviderRouteKind) -> (text: String, color: Color) {
+        switch kind {
+        case .openAICompatiblePreset:
+            return ("预置 · 可套用", AmberTheme.accent)
+        case .endpointConfirmationPreset:
+            return ("预置 · Base 待确认", AmberTheme.muted)
+        case .responseAPIPreset:
+            return ("预置 · 待 Response API", AmberTheme.muted)
+        case .googleProviderPreset:
+            return ("预置 · 待桥接", AmberTheme.muted)
+        case .current:
+            return ("预置", AmberTheme.muted)
+        }
     }
 }
 
