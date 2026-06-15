@@ -319,31 +319,41 @@ struct ConversationsView: View {
     }
 
     private var shortcutStrip: some View {
-        HStack(spacing: 8) {
-            ForEach(shortcuts) { shortcut in
-                Button {
-                    router.navigate(to: shortcut.route)
-                } label: {
-                    VStack(alignment: .center, spacing: 7) {
-                        Image(systemName: shortcut.systemImage)
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundStyle(shortcut.color)
-                            .frame(width: 54, height: 54)
-                            .background(shortcut.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                        Text(shortcut.title)
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.9)
-                    }
-                    .frame(maxWidth: .infinity)
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(shortcuts.enumerated()), id: \.element.id) { index, shortcut in
+                shortcutButton(shortcut)
+
+                if index < shortcuts.count - 1 {
+                    Spacer(minLength: 8)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 2)
         .padding(.bottom, 16)
+    }
+
+    private func shortcutButton(_ shortcut: ConversationShortcut) -> some View {
+        Button {
+            router.navigate(to: shortcut.route)
+        } label: {
+            VStack(alignment: .center, spacing: 7) {
+                Image(systemName: shortcut.systemImage)
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(shortcut.color)
+                    .frame(width: 54, height: 54)
+                    .background(shortcut.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+
+                Text(shortcut.title)
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.88)
+            }
+            .frame(width: 54)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func conversationRows(_ rows: [ConversationRowModel]) -> some View {
