@@ -290,7 +290,7 @@ private extension View {
             case .subagents:
                 SubAgentsView()
             case .subAgentRole(let name, let roleId):
-                PlaceholderDetailView(title: name, subtitle: "@\(roleId)", systemImage: "person.crop.circle.badge.gearshape")
+                SubAgentRoleView(name: name, roleId: roleId)
             case .sandbox:
                 RuntimeEnvironmentView(settingsStore: settingsStore)
             case .conversation(let id):
