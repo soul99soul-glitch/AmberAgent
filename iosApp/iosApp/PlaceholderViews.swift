@@ -796,7 +796,7 @@ struct SettingsHomeView: View {
             .init(title: "服务商", subtitle: nil, value: "10 个", systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
             .init(title: "默认模型", subtitle: nil, value: settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
             .init(title: "搜索服务", subtitle: nil, value: "4 个源", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
-            .init(title: "语音 TTS", subtitle: nil, value: "MiniMax", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
+            .init(title: "语音 TTS", subtitle: nil, value: "系统 TTS", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
         ]
     }
 

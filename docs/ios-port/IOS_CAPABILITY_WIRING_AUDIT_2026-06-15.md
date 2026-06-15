@@ -15,13 +15,14 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Remote SSH runtime storage and gate: `SettingsStore` persists SSH profiles in `UserDefaults`, stores SSH passwords in Keychain through `IOSSSHSecretStore`, records trusted host fingerprints, and `RuntimeEnvironmentView` runs smoke tests through `IOSTerminalRuntime`.
 - Runtime safety boundary: stable iOS runtime selection is constrained by `IOSTerminalBuildPolicy`; Remote SSH host mismatch is a hard failure before password save/command execution.
 - Default model value: `SettingsHomeView`, `ModelDefaultsView`, and `ChatView` read/write `SettingsStore.modelId` for the single current OpenAI-compatible chat configuration. The composer picker no longer presents fake provider switching; it only writes the model id that `ChatViewModel.makeTextGenerationParams()` actually sends.
+- TTS default status: Settings home now shows the real KMP default `系统 TTS`, and the TTS page defaults to System TTS while marking cloud engine fields, preview, delete, and add flows as drafts with no save, no Keychain write, and no TTS request.
 
 ### 仍是草稿/占位
 
 - Provider list/detail/add/model edit pages are mostly hardcoded Open Design examples. They do not read or persist the real `Settings.providers` / `ProviderSetting` list and do not write provider/model configuration.
 - Chat model picker is now a scalar `SettingsStore.modelId` editor, not a full provider/model registry. It still cannot switch `SettingsStore.baseUrl`, API key, auth mode, custom headers/body, or provider-specific model metadata.
 - Chat thinking/context controls are presentation-only. `selectedThinkingLevel` does not feed `TextGenerationParams.reasoningLevel`; context ring/token stats are hardcoded.
-- TTS settings are not wired to `DEFAULT_TTS_PROVIDERS`, `TTSProviderSetting`, Keychain, or real `TTSManager`. The main page currently implies Keychain/preview behavior, but the state is local SwiftUI state.
+- TTS settings are still not wired to an iOS `TTSProviderSetting` store or real `TTSManager` execution path. The page has been downgraded to real default status plus draft-only cloud fields.
 - Skills page is hardcoded. It does not use the real Android/KMP `SkillManager` / `SkillsVM` scanning/import/editing path.
 - MCP server page is hardcoded and uses isolated `@AppStorage` toggles. It does not read/write `Settings.mcpServers`, `McpServerConfig`, `McpManager`, or `McpImportParser`.
 - Account statistics and conversation storage show precise prototype numbers. No inspected iOS source currently proves these values come from DB, token usage, cache size, or conversation DAO.
@@ -41,7 +42,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Secret storage split: the single OpenAI API key is in Keychain, but general provider/TTS API keys are not yet modeled in iOS. Avoid expanding secret handling without a clear schema.
 - Provider/model identity: current iOS chat creates a fresh `ProviderSetting.OpenAI` and fresh `Model` from three scalar settings. It cannot represent multiple providers, custom headers/body, OAuth/coding-plan auth modes, or provider-specific models.
 - Permission approval scope: `Route.toolPermissions` routes to the approval-policy page and its "权限与能力" row routes to `ToolPermissionsView`; `SheetDestination.toolPermissions` still opens the full capability page directly. The approval page intentionally exposes only the implemented `file_read_selected` tool policy; photos/location/camera/notifications remain system-permission status/request entries until real Agent executors exist.
-- Hardcoded precise numbers: Settings home, Account stats, ConversationStorage, Skills, MCP, Providers, and TTS display exact counts/status that look real but are not backed by inspected iOS data.
+- Hardcoded precise numbers/status: Settings home, Account stats, ConversationStorage, Skills, MCP, and Providers still display exact counts/status that look real but are not backed by inspected iOS data. TTS default status is now corrected to System TTS, but its config screen remains draft-only.
 - External effects: Provider connection test in legacy `SettingsView` calls `listModels`. Do not use it as routine validation unless the user explicitly supplies credentials/approves network use.
 
 ## 2. UI Entry Map
@@ -58,7 +59,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Settings home | 服务商 | `PlaceholderViews.swift` -> `.providers` | Yes in KMP: `DEFAULT_PROVIDERS`, `ProviderSetting` | provider settings bridge/store | hardcoded list/value "10 个" | P0 |
 | Settings home | 默认模型 | `PlaceholderViews.swift` -> `.modelDefaults` | Partial | `SettingsStore.modelId`; later real model registry | chat model value is real scalar; options hardcoded | P1 |
 | Settings home | 搜索服务 | `PlaceholderViews.swift` -> `.searchServices` | Android search providers exist | search settings store | value "4 个源" hardcoded | P1 |
-| Settings home | 语音 TTS | `PlaceholderViews.swift` -> `.ttsSettings` | Yes in KMP: `TTSProviderSetting`, `DEFAULT_TTS_PROVIDERS` | TTS settings store + secure key handling | hardcoded value "MiniMax", but real default is System TTS | P0 |
+| Settings home | 语音 TTS | `PlaceholderViews.swift` -> `.ttsSettings` | Yes in KMP: `TTSProviderSetting`, `DEFAULT_TTS_PROVIDERS` | TTS settings store + secure key handling | home value corrected to real default `系统 TTS`; settings page is draft-only beyond default status | P0 done/P1 store |
 | Settings home | 同步与备份 | `PlaceholderViews.swift` -> `.syncBackup` | Android sync exists | iOS sync/backup implementation | prototype page; not audited | Blocked/P2 |
 | Settings home | 对话存储 | `PlaceholderViews.swift` -> `.conversationStorage` | Conversation DB exists in KMP/Android; iOS stats unclear | real conversation/storage stats + safe cleanup | hardcoded exact usage/count | P1 |
 | Settings home | 今日看板 | `PlaceholderViews.swift` -> `.board` | Android feature exists | board runtime/store | prototype; not audited | P2 |
@@ -80,8 +81,8 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | Permissions | approval/policy page | `PermissionsApprovalView.swift` and `Route.toolPermissions` | Yes for `file_read_selected` | `IOSPermissionStore` policy consumed by `IOSToolRuntime.resolve()` | only exposes implemented selected-file tool policy; store normalizes run-scoped policy to ask-every-time because no true run scope exists | P0 done |
 | Runtime | runtime picker/smoke | `RuntimeEnvironmentView.swift` | Yes | `SettingsStore` + `IOSTerminalRuntime` | wired | P0 done |
 | Runtime | SSH profile/password/fingerprint | `RuntimeEnvironmentView.swift`, `SettingsStore.swift` | Yes | UserDefaults + Keychain + SSH trust | wired | P0 done |
-| TTS | engine list/config | `TTSSettingsView.swift` | Yes in KMP | `TTSProviderSetting`, selected provider id, secure key storage | local-only, contradictory default | P0 |
-| TTS | add engine | `TTSSettingsView.swift` | Yes model types | real settings write + Keychain | explicitly draft, no save | P1 |
+| TTS | engine list/config | `TTSSettingsView.swift` | Yes in KMP | `TTSProviderSetting`, selected provider id, secure key storage | default status corrected to System TTS; cloud configs are explicitly draft/no-save/no-Keychain/no-request | P0 done/P1 store |
+| TTS | add engine | `TTSSettingsView.swift` | Partial model-type evidence in KMP | real settings write + Keychain | explicitly draft, no save; not a complete KMP type bridge | P1 |
 | Skills | installed list | `SkillsView.swift` | Yes Android `SkillManager` | iOS skill scanner/import bridge | hardcoded list/count | P0 |
 | Skills | import/rescan | `SkillsView.swift` | Yes Android path | real local file scan/import | alerts only, no filesystem mutation | P1 |
 | MCP | server list/toggles | `McpServersView.swift` | Yes Android/KMP `McpManager`/`McpServerConfig` | real `Settings.mcpServers` bridge | hardcoded + isolated `@AppStorage` toggles | P0 |
@@ -95,9 +96,8 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 ### P0 - 已有能力但 UI 未接，影响核心使用
 
 1. Replace Provider list/home values with real KMP default/provider metadata where safely available, or downgrade precise counts until a mutable iOS provider store exists.
-2. Correct TTS default/status to the real default `SystemTTS` capability; downgrade cloud TTS save/preview claims until secure provider-specific storage exists.
-3. Replace Skills hardcoded list/count with either real local scan or clearly disabled/unavailable state.
-4. Replace MCP hardcoded connected servers and isolated toggles with real `mcpServers` bridge, or mark as draft without connected/tool counts.
+2. Replace Skills hardcoded list/count with either real local scan or clearly disabled/unavailable state.
+3. Replace MCP hardcoded connected servers and isolated toggles with real `mcpServers` bridge, or mark as draft without connected/tool counts.
 
 ### P1 - 已有能力但只是硬编码状态
 
@@ -108,6 +108,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 5. Account and storage exact statistics should be wired to measured sources or replaced with unavailable/draft copy.
 6. Runtime page subtitle/home value should reflect selected runtime/default SSH profile from `SettingsStore`.
 7. Add policy editing for additional capabilities only after a matching iOS Agent executor exists; system-only permissions should stay in the capability status/request page.
+8. Wire TTS to a real iOS settings bridge before enabling cloud provider save/delete/preview or system speech preview controls.
 
 ### P2 - 可改善但不阻塞
 
@@ -163,11 +164,22 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
   - Model defaults menu: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_673aeceb-6d2c-406f-a845-6a095a414b68.jpg`
 - Remaining risk: there is still no iOS provider/model registry bridge. Full provider switching, provider-specific model metadata, custom headers/body, auth mode, and secure per-provider key storage remain P1/P0 provider work rather than a Chat composer responsibility.
 
-## 5. Commit Log
+### Slice 3 - TTS default/status downgrade
 
-No commits yet for this audit phase.
+- Scope: Settings home and `TTSSettingsView` now reflect the real KMP default `SystemTTS` instead of implying MiniMax is configured. Cloud engines remain visible as draft fields only, with no save, no Keychain write, no delete, and no preview request.
+- Verification:
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded for `iosApp` on iPhone 17 / iOS 26.5 after the TTS edits.
+  - UI snapshot path: Settings -> 语音 TTS showed Settings home value `系统 TTS`, selected System TTS row `system · 默认`, cloud rows marked `草稿`, and `试听尚未接线`.
+  - UI snapshot path: selecting MiniMax showed empty API Key input and draft fields rather than a fake masked credential.
+- Screenshot paths:
+  - TTS System default page: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_d6260964-a52a-422c-bd29-d171530a61b6.jpg`
+  - TTS MiniMax draft page: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_b09cfe6f-53eb-4303-abcf-6fcf70f0b01a.jpg`
+- Subagent review: completed; no P0 findings. P1 copy fixes were applied so Add TTS uses `关闭`, delete reads `删除尚未接线`, and System TTS draft copy no longer claims an iOS synthesis executor is available.
+- Remaining risk: no iOS TTS settings bridge or synthesis executor exists yet; cloud provider save/delete/preview must stay draft until secure provider-specific storage and execution are implemented.
+
+## 5. Commit Log
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|
-| pending | Permission approval policy wiring | `test_sim` blocked by existing test target Info.plist issue; `build_run_sim` succeeded before/after reviewer fixes | see Slice 1 screenshot paths | enum retains `allowOncePerRun` for old-value compatibility, but store normalizes it to `askEveryTime` |
-| pending | Chat default model scalar wiring | `build_run_sim` succeeded | see Slice 2 screenshot paths | no provider/model registry bridge yet |
+| `1cb4699d8` | Permission approval policy wiring; Chat default model scalar wiring | `test_sim` blocked by existing test target Info.plist issue; `build_run_sim` succeeded before/after reviewer fixes | see Slice 1 and Slice 2 screenshot paths | no provider/model registry bridge yet; enum retains `allowOncePerRun` for old-value compatibility, but store normalizes it to `askEveryTime` |
+| pending | TTS default/status downgrade | `build_run_sim` succeeded | see Slice 3 screenshot paths | no iOS TTS settings bridge or synthesis executor yet |

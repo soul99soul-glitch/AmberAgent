@@ -4,12 +4,11 @@ struct TTSSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
 
-    @State private var selectedEngine: TTSEngine = .miniMax
-    @State private var isPreviewing = false
+    @State private var selectedEngine: TTSEngine = .system
     @State private var alert: TTSSettingsAlert?
 
     @State private var miniMaxName = "MiniMax TTS"
-    @State private var miniMaxAPIKey = "········"
+    @State private var miniMaxAPIKey = ""
     @State private var miniMaxModel = "speech-2.6-turbo"
     @State private var miniMaxVoice = "female-shaonv"
     @State private var miniMaxEmotion: TTSEmotion = .calm
@@ -85,7 +84,7 @@ struct TTSSettingsView: View {
     }
 
     private var intro: some View {
-        Text("朗读回复与语音播报使用的合成引擎。系统 TTS 离线可用、无需 Key；接入云端引擎可获得更自然的音色。")
+        Text("KMP 默认提供系统 TTS；当前 iOS 页面仅确认系统 TTS 作为真实默认。云端引擎字段保留为草稿，不会保存或请求。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -102,7 +101,6 @@ struct TTSSettingsView: View {
                 ForEach(Array(TTSEngine.allCases.enumerated()), id: \.element.id) { index, engine in
                     TTSEngineRow(engine: engine, isSelected: selectedEngine == engine) {
                         selectedEngine = engine
-                        isPreviewing = false
                     }
 
                     if index < TTSEngine.allCases.count - 1 {
@@ -111,7 +109,7 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("点按切换默认语音引擎；右上角 + 添加新引擎。")
+            TTSSettingsNote("当前 iOS 仅确认系统 TTS 为真实默认。点按云端引擎只查看草稿字段，不会切换默认、保存配置或写入 Keychain。")
         }
     }
 
@@ -174,27 +172,27 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("API Key 存入 Keychain；留空保存不会覆盖已存 Key。")
+            TTSSettingsNote(configurationNote)
         }
     }
 
     private var previewSection: some View {
         AmberFormGroup {
             Button {
-                isPreviewing.toggle()
+                alert = .previewUnavailable
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: isPreviewing ? "stop.fill" : "play.fill")
+                    Image(systemName: "speaker.slash.fill")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 30, height: 30)
-                        .background(AmberTheme.accent, in: Circle())
+                        .background(AmberTheme.muted2, in: Circle())
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(isPreviewing ? "停止试听" : "试听当前语音")
+                        Text("试听尚未接线")
                             .font(.body)
-                            .foregroundStyle(AmberTheme.accent)
-                        Text("你好，这是文字转语音测试。")
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text("不会发起本地合成或云端试听请求。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                     }
@@ -206,7 +204,7 @@ struct TTSSettingsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isPreviewing ? "停止试听" : "试听当前语音")
+            .accessibilityLabel("试听尚未接线")
         }
         .padding(.top, 20)
     }
@@ -216,7 +214,7 @@ struct TTSSettingsView: View {
             Button {
                 alert = selectedEngine == .system ? .deleteSystem : .delete
             } label: {
-                Text("删除此引擎")
+                Text("删除尚未接线")
                     .font(.body.weight(.medium))
                     .foregroundStyle(AmberTheme.accentRed)
                     .frame(maxWidth: .infinity)
@@ -226,6 +224,15 @@ struct TTSSettingsView: View {
             .buttonStyle(.plain)
         }
         .padding(.top, 20)
+    }
+
+    private var configurationNote: String {
+        switch selectedEngine {
+        case .system:
+            "系统 TTS 是 KMP 默认提供商，当前 iOS 页面只展示草稿参数；尚未接入真实 iOS TTS settings store。"
+        case .miniMax, .openAI, .gemini:
+            "云端 TTS 配置尚未接线；这些字段不会保存、不会写入 Keychain，也不会用于试听或朗读。"
+        }
     }
 }
 
@@ -283,7 +290,7 @@ struct TTSAddView: View {
             Button {
                 dismiss()
             } label: {
-                Text("完成")
+                Text("关闭")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.accent)
                     .frame(height: 36)
@@ -292,7 +299,7 @@ struct TTSAddView: View {
             }
             .buttonStyle(.plain)
             .amberGlass(cornerRadius: AmberTheme.radiusPill)
-            .accessibilityLabel("完成")
+            .accessibilityLabel("关闭")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -466,10 +473,10 @@ private enum TTSEngine: String, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
-        case .system: "system · 离线"
-        case .miniMax: "minimax · speech-2.6-turbo"
-        case .openAI: "openai · gpt-4o-mini-tts"
-        case .gemini: "gemini · 2.5-flash-tts"
+        case .system: "system · 默认"
+        case .miniMax: "minimax · 草稿"
+        case .openAI: "openai · 草稿"
+        case .gemini: "gemini · 草稿"
         }
     }
 }
@@ -519,11 +526,13 @@ private enum TTSSpeed: String, CaseIterable, Identifiable {
 private enum TTSSettingsAlert: Identifiable {
     case delete
     case deleteSystem
+    case previewUnavailable
 
     var id: String {
         switch self {
         case .delete: "delete"
         case .deleteSystem: "delete-system"
+        case .previewUnavailable: "preview-unavailable"
         }
     }
 
@@ -531,6 +540,7 @@ private enum TTSSettingsAlert: Identifiable {
         switch self {
         case .delete: "删除引擎尚未接线"
         case .deleteSystem: "系统 TTS 不可删除"
+        case .previewUnavailable: "试听尚未接线"
         }
     }
 
@@ -540,6 +550,8 @@ private enum TTSSettingsAlert: Identifiable {
             "当前页面不会删除真实 TTS 配置，避免迁移期间误改已有语音引擎。"
         case .deleteSystem:
             "Android 端默认系统 TTS 也不可删除；iOS 端保留同样的兜底策略。"
+        case .previewUnavailable:
+            "当前仓库还没有 iOS TTS 合成执行链。不会调用系统朗读，也不会向云端 TTS 服务发请求。"
         }
     }
 }
@@ -621,7 +633,7 @@ private enum TTSProviderDraftType: String, CaseIterable, Identifiable {
     var note: String {
         switch self {
         case .system:
-            "系统 TTS 离线可用，不需要 API Key。"
+            "系统 TTS 是默认类型；当前添加页仅保留草稿配置，不会创建真实提供商。"
         case .miniMax:
             "MiniMax 支持语音 ID、情感和语速参数。"
         case .openAI:
