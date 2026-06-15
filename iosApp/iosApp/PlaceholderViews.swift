@@ -773,21 +773,26 @@ struct SettingsHomeView: View {
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("app.amber.ios.appearance.mode") private var appearanceMode = "light"
+    @AppStorage("app.amber.ios.display.fontScale") private var displayFontScale = 1.0
+    @AppStorage("app.amber.ios.display.chatFont") private var displayChatFont = "default"
+    @AppStorage("app.amber.ios.execution.toolLoopLimit") private var executionToolLoopLimit = 25
+    @AppStorage("app.amber.ios.execution.liveActivity") private var executionLiveActivity = true
 
     private var generalRows: [SettingsHomeRow] {
         [
-            .init(title: "外观", subtitle: nil, value: "浅色", systemImage: "circle.lefthalf.filled", color: AmberTheme.accent, route: .appearance),
-            .init(title: "显示与字体", subtitle: "字号 中等 · 跟随系统", value: nil, systemImage: "slider.horizontal.3", color: AmberTheme.accentAmber, route: .displayFont)
+            .init(title: "外观", subtitle: nil, value: appearanceModeTitle, systemImage: "circle.lefthalf.filled", color: AmberTheme.accent, route: .appearance),
+            .init(title: "显示与字体", subtitle: displayFontSummary, value: nil, systemImage: "slider.horizontal.3", color: AmberTheme.accentAmber, route: .displayFont)
         ]
     }
 
     private var runtimeRows: [SettingsHomeRow] {
         [
-            .init(title: "核心记忆", subtitle: "5 条 · 跨助手共享", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
+            .init(title: "核心记忆", subtitle: "本机草稿 · 记忆库未接线", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
             .init(title: "技能", subtitle: "Skill/MCP 配置桥尚未接线", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
-            .init(title: "执行与任务", subtitle: "工具循环上限 · 灵动岛 · 生成稳定性", value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
+            .init(title: "执行与任务", subtitle: executionSummary, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
             .init(title: "工具权限", subtitle: "系统权限 · 批准策略", value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions),
-            .init(title: "运行环境", subtitle: "工作区 · 小应用沙箱", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentIndigo, route: .sandbox)
+            .init(title: "运行环境", subtitle: runtimeSummary, value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentIndigo, route: .sandbox)
         ]
     }
 
@@ -795,26 +800,74 @@ struct SettingsHomeView: View {
         [
             .init(title: "服务商", subtitle: nil, value: "OpenAI-compatible", systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
             .init(title: "默认模型", subtitle: nil, value: settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
-            .init(title: "搜索服务", subtitle: nil, value: "4 个源", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
+            .init(title: "搜索服务", subtitle: nil, value: "未接线", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
             .init(title: "语音 TTS", subtitle: nil, value: "系统 TTS", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
         ]
     }
 
     private var dataRows: [SettingsHomeRow] {
         [
-            .init(title: "同步与备份", subtitle: "Google 云备份 · 本地加密", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
+            .init(title: "同步与备份", subtitle: "iOS 同步桥尚未接线", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
             .init(title: "对话存储", subtitle: nil, value: "未接线", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
         ]
     }
 
     private var experimentalRows: [SettingsHomeRow] {
         [
-            .init(title: "今日看板", subtitle: "Agent 每日信号梳理", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
-            .init(title: "模型议会", subtitle: "多模型并行评审 / 辩论", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
-            .init(title: "SubAgent", subtitle: "@explorer · @oracle · @writer...", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
-            .init(title: "小应用", subtitle: "生成可执行的 HTML 工具", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
-            .init(title: "WebMount", subtitle: "挂载已登录的网页服务", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
+            .init(title: "今日看板", subtitle: "数据源桥尚未接线", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
+            .init(title: "模型议会", subtitle: "iOS 运行桥尚未接线", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
+            .init(title: "SubAgent", subtitle: "iOS SubAgent 配置桥尚未接线", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
+            .init(title: "小应用", subtitle: "iOS 小应用运行桥尚未接线", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
+            .init(title: "WebMount", subtitle: "iOS WebMount 桥尚未接线", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
         ]
+    }
+
+    private var appearanceModeTitle: String {
+        switch appearanceMode {
+        case "dark": "深色"
+        case "system": "跟随系统"
+        default: "浅色"
+        }
+    }
+
+    private var displayFontSummary: String {
+        "字号 \(displayFontScaleTitle) · \(displayChatFontTitle)"
+    }
+
+    private var displayFontScaleTitle: String {
+        switch displayFontScale {
+        case ..<0.95: "较小"
+        case 0.95..<1.08: "标准"
+        case 1.08..<1.20: "较大"
+        default: "特大"
+        }
+    }
+
+    private var displayChatFontTitle: String {
+        switch displayChatFont {
+        case "serif": "衬线体"
+        case "monospace": "等宽字体"
+        default: "默认字体"
+        }
+    }
+
+    private var executionSummary: String {
+        "本机设置 \(executionToolLoopLimit) 步 · 灵动岛 \(executionLiveActivity ? "开" : "关")"
+    }
+
+    private var runtimeSummary: String {
+        switch settingsStore.terminalDefaultRuntime {
+        case .remoteSSH:
+            if settingsStore.sshProfiles.isEmpty {
+                "Remote SSH · 未配置 Profile"
+            } else {
+                "Remote SSH · \(settingsStore.sshProfiles.count) 个 Profile"
+            }
+        case .localIOSTools:
+            "Local iOS Tools"
+        case .remoteMosh, .ishExperimental:
+            settingsStore.terminalDefaultRuntime.displayName
+        }
     }
 
     var body: some View {

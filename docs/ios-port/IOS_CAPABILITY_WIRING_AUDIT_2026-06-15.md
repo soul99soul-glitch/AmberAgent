@@ -21,6 +21,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Skill/MCP status honesty: Settings home, `SkillsView`, `SkillDetailView`, `SkillAddView`, and `McpServersView` no longer claim installed skill counts, enabled skill counts, connected MCP servers, tool counts, or toggle persistence. Android/KMP real capabilities remain documented, but iOS now presents this line as not yet bridged instead of fabricating state.
 - Account stats honesty: `AccountView` no longer shows fake total conversations/messages/tokens/cache savings/launch counts or generated heatmap activity. It keeps the design shell but marks statistics as not wired until iOS exposes the Android `StatsVM`/DAO equivalents.
 - Conversation storage honesty: Settings home and `ConversationStorageView` no longer show fake exact file/count/MB values. Android evidence for the closest real source is `FilesManager.countChatFiles()`, but iOS currently lacks a matching files/conversation storage bridge, so the page is explicitly not wired and does not delete or clean up data.
+- Settings home status honesty: `SettingsHomeView` now reads existing local `@AppStorage` appearance/display/execution preferences and `SettingsStore.terminalDefaultRuntime` / `sshProfiles` for runtime state. Memory, Search, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount rows no longer show precise fake counts, cloud backup promises, source totals, executable-tool promises, or role examples; they explicitly mark missing iOS bridges instead.
 
 ### 仍是草稿/占位
 
@@ -32,7 +33,7 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - MCP server page is not wired to `Settings.mcpServers`, `McpServerConfig`, `McpManager`, or `McpImportParser`. The previous hardcoded connected-server list and isolated `@AppStorage` toggles have been removed; import/add remain draft-only, and import uses only rough text preview rather than real parser-backed validation.
 - Account profile is still local preview only, with no inspected persistent account/profile store.
 - Conversation storage cleanup/delete is still draft-only: the page only explains the missing iOS storage bridge and does not execute cache cleanup, age-based cleanup, or delete-all.
-- Search services, Sync/Backup, Memory, Board, Council, SubAgent, MiniApp, and WebMount pages need separate verification before any values or actions can be treated as real.
+- Search services, Sync/Backup, Memory, Board, Council, SubAgent, MiniApp, and WebMount child pages need separate verification before any values or actions can be treated as real. Settings home no longer shows precise fake Search/Memory/Council/SubAgent status or capability-complete Sync/Board/MiniApp/WebMount copy, but those destination pages still need their own wiring/downgrade passes.
 
 ### 不应接线的孤儿入口 / 不应误导的入口
 
@@ -50,31 +51,31 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Secret storage split: the single OpenAI API key is in Keychain, but general provider/TTS API keys are not yet modeled in iOS. Avoid expanding secret handling without a clear schema.
 - Provider/model identity: current iOS chat creates a fresh `ProviderSetting.OpenAI` and fresh `Model` from three scalar settings. It cannot represent multiple providers, custom headers/body, OAuth/coding-plan auth modes, provider-specific models, Gemini's `ProviderSetting.Google`, or xAI's default `useResponseApi=true` template state.
 - Permission approval scope: `Route.toolPermissions` routes to the approval-policy page and its "权限与能力" row routes to `ToolPermissionsView`; `SheetDestination.toolPermissions` still opens the full capability page directly. The approval page intentionally exposes only the implemented `file_read_selected` tool policy; photos/location/camera/notifications remain system-permission status/request entries until real Agent executors exist.
-- Hardcoded precise numbers/status: Settings home still has unaudited hardcoded values in areas such as search, memory, SubAgent, and Council. Provider count has been replaced by the current scalar config plus no-key KMP templates; TTS default status is now corrected to System TTS; Skill/MCP precise installed/connected counts have been removed; Account stats and ConversationStorage now show unavailable state instead of fake exact values.
+- Hardcoded precise numbers/status: Settings home has been reduced to real current scalar/default/local state or explicit not-wired copy for Provider, TTS, Skill/MCP, Account, ConversationStorage, Appearance, Display, Execution, Runtime, Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Destination pages such as Search services, Memory, Council, SubAgent, Sync/Backup, Board, MiniApp, and WebMount still require separate audits because several remain prototype-only.
 - External effects: Provider connection test in legacy `SettingsView` calls `listModels`. Do not use it as routine validation unless the user explicitly supplies credentials/approves network use.
 
 ## 2. UI Entry Map
 
 | 屏幕 | UI 入口 | 当前文件 | 真实能力是否存在 | 应接到哪里 | 当前处理 | 优先级 |
 |---|---|---|---|---|---|---|
-| Settings home | 外观 | `iosApp/iosApp/PlaceholderViews.swift` -> `.appearance` | Partial | local appearance settings if present | route exists; state mostly local in child page | P2 |
-| Settings home | 显示与字体 | `PlaceholderViews.swift` -> `.displayFont` | Partial/unknown | display preferences store equivalent | hardcoded subtitle | P1 |
-| Settings home | 核心记忆 | `PlaceholderViews.swift` -> `.memory` | Android/KMP memory exists; iOS wiring unknown | real memory store/page | route exists; needs separate audit | P1 |
+| Settings home | 外观 | `iosApp/iosApp/PlaceholderViews.swift` -> `.appearance` | Partial: local `@AppStorage` preference exists | `app.amber.ios.appearance.mode` | value reads the same local setting as the Appearance page | P2 done/home |
+| Settings home | 显示与字体 | `PlaceholderViews.swift` -> `.displayFont` | Partial: local `@AppStorage` preferences exist | `app.amber.ios.display.fontScale`, `app.amber.ios.display.chatFont` | subtitle reads stored font scale and chat font instead of hardcoded copy | P1 done/home |
+| Settings home | 核心记忆 | `PlaceholderViews.swift` -> `.memory` | Android/KMP memory exists; iOS wiring unknown | real memory store/page | home subtitle downgraded to `本机草稿 · 记忆库未接线`; child page still needs separate audit | P1 done/home; P1 page |
 | Settings home | 技能 | `PlaceholderViews.swift` -> `.skills` | Yes on Android: `SkillManager`, `SkillsVM` | iOS local skill scanning/import layer or shared bridge | subtitle downgraded to `Skill/MCP 配置桥尚未接线`; no installed/enabled count | P0 done/P1 bridge |
-| Settings home | 执行与任务 | `PlaceholderViews.swift` -> `.execution` | Partial: Live Activity controller exists | `AgentLiveActivityController`, execution settings store | route exists; needs audit | P1 |
+| Settings home | 执行与任务 | `PlaceholderViews.swift` -> `.execution` | Partial: local execution `@AppStorage` preferences and Live Activity controller exist | `app.amber.ios.execution.toolLoopLimit`, `app.amber.ios.execution.liveActivity`; runtime consumption still needs audit | home subtitle reads stored local settings and labels them as local settings | P1 done/home; P1 page |
 | Settings home | 工具权限 | `PlaceholderViews.swift` -> `.toolPermissions` | Yes | `PermissionsApprovalView(permissionStore:)` -> `.capabilities` -> `ToolPermissionsView(...)` | approval page edits the real `file_read_selected` policy; capability page is reachable for system permissions | P0 done |
-| Settings home | 运行环境 | `PlaceholderViews.swift` -> `.sandbox` | Yes | `SettingsStore` + `IOSTerminalRuntime` + SSH Keychain | mostly wired; subtitle is generic/hardcoded | P1 |
+| Settings home | 运行环境 | `PlaceholderViews.swift` -> `.sandbox` | Yes | `SettingsStore` + `IOSTerminalRuntime` + SSH Keychain | home subtitle reads selected runtime and SSH profile count from `SettingsStore` | P1 done/home |
 | Settings home | 服务商 | `PlaceholderViews.swift` -> `.providers` | Yes in KMP: `DEFAULT_PROVIDERS`, `ProviderSetting`; partial iOS scalar config | `SettingsStore.baseUrl/apiKey` now; provider settings bridge/store later | value downgraded to current scalar `OpenAI-compatible`, not a fake count | P0 done/P1 bridge |
 | Settings home | 默认模型 | `PlaceholderViews.swift` -> `.modelDefaults` | Partial | `SettingsStore.modelId`; later real model registry | chat model value is real scalar; options hardcoded | P1 |
-| Settings home | 搜索服务 | `PlaceholderViews.swift` -> `.searchServices` | Android search providers exist | search settings store | value "4 个源" hardcoded | P1 |
+| Settings home | 搜索服务 | `PlaceholderViews.swift` -> `.searchServices` | Android search providers exist; iOS store not inspected | search settings store | home value downgraded to `未接线`; child page still uses local/hardcoded provider rows | P1 done/home; P1 page |
 | Settings home | 语音 TTS | `PlaceholderViews.swift` -> `.ttsSettings` | Yes in KMP: `TTSProviderSetting`, `DEFAULT_TTS_PROVIDERS` | TTS settings store + secure key handling | home value corrected to real default `系统 TTS`; settings page is draft-only beyond default status | P0 done/P1 store |
-| Settings home | 同步与备份 | `PlaceholderViews.swift` -> `.syncBackup` | Android sync exists | iOS sync/backup implementation | prototype page; not audited | Blocked/P2 |
+| Settings home | 同步与备份 | `PlaceholderViews.swift` -> `.syncBackup` | Android sync exists; iOS bridge not inspected | iOS sync/backup implementation | home subtitle downgraded to `iOS 同步桥尚未接线`; child page still needs separate audit | P1 done/home; Blocked/P2 page |
 | Settings home | 对话存储 | `PlaceholderViews.swift` -> `.conversationStorage` | Android `FilesManager.countChatFiles()` exists for uploaded chat files; iOS bridge not exposed | real conversation/storage stats + safe cleanup | value downgraded to `未接线` | P1 done/P1 bridge |
-| Settings home | 今日看板 | `PlaceholderViews.swift` -> `.board` | Android feature exists | board runtime/store | prototype; not audited | P2 |
-| Settings home | 模型议会 | `PlaceholderViews.swift` -> `.council` | Android/KMP council exists | real council settings/runtime | prototype; not audited | P1 |
-| Settings home | SubAgent | `PlaceholderViews.swift` -> `.subagents` | Android/KMP subagent exists | real subagent settings/runtime | prototype; not audited | P1 |
-| Settings home | 小应用 | `PlaceholderViews.swift` -> `.miniApps` | Android miniapp exists | miniapp store/runtime | prototype; not audited | P2 |
-| Settings home | WebMount | `PlaceholderViews.swift` -> `.webMount` | Android WebMount exists | real webmount profile store | prototype; not audited | P2 |
+| Settings home | 今日看板 | `PlaceholderViews.swift` -> `.board` | Android feature exists; iOS bridge not inspected | board runtime/store | home subtitle downgraded to `数据源桥尚未接线`; child page still needs separate audit | P1 done/home; P2 page |
+| Settings home | 模型议会 | `PlaceholderViews.swift` -> `.council` | Android/KMP council exists | real council settings/runtime | home subtitle downgraded to `iOS 运行桥尚未接线`; child page still needs separate audit | P1 done/home; P1 page |
+| Settings home | SubAgent | `PlaceholderViews.swift` -> `.subagents` | Android/KMP subagent exists | real subagent settings/runtime | home subtitle downgraded to `iOS SubAgent 配置桥尚未接线`; child page still needs separate audit | P1 done/home; P1 page |
+| Settings home | 小应用 | `PlaceholderViews.swift` -> `.miniApps` | Android miniapp exists; iOS bridge not inspected | miniapp store/runtime | home subtitle downgraded to `iOS 小应用运行桥尚未接线`; child page still needs separate audit | P1 done/home; P2 page |
+| Settings home | WebMount | `PlaceholderViews.swift` -> `.webMount` | Android WebMount exists; iOS bridge not inspected | real webmount profile store | home subtitle downgraded to `iOS WebMount 桥尚未接线`; child page still needs separate audit | P1 done/home; P2 page |
 | Providers | list rows | `iosApp/iosApp/ProvidersView.swift` | Yes in KMP; partial iOS scalar config | current `SettingsStore` config plus `DEFAULT_PROVIDERS`; mutable list bridge later | shows real current config and no-key preset templates; no fake enabled/disabled accounts | P0 done/P1 bridge |
 | Provider detail | config tab | `ProviderDetailView.swift` | Yes in KMP; partial iOS scalar config | current `SettingsStore` config plus selected preset template metadata | current config edits real Base URL/API Key; presets show no-key metadata and only safe apply actions | P0 done/P1 bridge |
 | Provider detail | API Key row | `ProviderDetailView.swift` | secure storage exists only for single OpenAI key | provider-specific secure key storage | current config edits real Keychain value; preset templates explicitly show `未预置` | P0 done/P1 key schema |
@@ -109,12 +110,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 
 ### P1 - 已有能力但只是硬编码状态
 
-1. Settings home subtitles/trailing values: runtime, skills, providers, search, TTS, conversation storage, SubAgent/Council counts.
+1. Done in Slice 9 for home rows: Settings home subtitles/trailing values now read real local settings where available or show explicit not-wired copy for Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Destination pages still need separate audits/wiring.
 2. Chat and ModelDefaults need a real provider/model registry bridge before exposing multiple provider choices; current iOS generation only has a single OpenAI-compatible scalar config.
 3. ModelDefaults auxiliary model/thinking/context controls: local-only state should either persist to real settings or be marked unavailable.
 4. Done in Slice 6: Chat thinking level now hydrates `Model.abilities` from KMP `ModelRegistry` and writes `TextGenerationParams.reasoningLevel` only for reasoning-capable models; context popover no longer shows exact fake token/cache/speed numbers.
 5. Account exact statistics replaced with unavailable copy in Slice 7; ConversationStorage exact file/count/MB values replaced with unavailable copy in Slice 8.
-6. Runtime page subtitle/home value should reflect selected runtime/default SSH profile from `SettingsStore`.
+6. Done in Slice 9 for home row: Runtime home subtitle reflects selected runtime/default SSH profile count from `SettingsStore`. Runtime detail page was already wired in earlier slices.
 7. Add policy editing for additional capabilities only after a matching iOS Agent executor exists; system-only permissions should stay in the capability status/request page.
 8. Wire TTS to a real iOS settings bridge before enabling cloud provider save/delete/preview or system speech preview controls.
 9. Wire full iOS Provider registry to `Settings.providers`, including provider-specific Keychain schema, auth mode, Response API, model list, custom headers/body, and balance settings before exposing multi-provider save/fetch behavior.
@@ -282,6 +283,26 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Subagent review: completed by `Feynman`; no P0/P1 findings. P2 fixes applied: audit/Open Design status no longer says review pending, and info-only alerts now use a single `知道了` dismiss button rather than a confirmation-like cancel/primary pair.
 - Remaining risk: no iOS conversation/files storage bridge or safe cleanup/delete transaction is wired. Real implementation must define how conversation rows, message nodes, managed files, generated images, favorites, backups, and undo windows are handled on iOS before enabling cleanup/delete.
 
+### Slice 9 - Settings home status honesty
+
+- Scope: Settings home rows no longer mix real routes with fake precise status for Appearance, Display, Memory, Execution, Runtime, Search, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount. Appearance, Display, and Execution rows read the same local `@AppStorage` keys as their destination pages; Runtime reads `SettingsStore.terminalDefaultRuntime` and SSH profile count; draft/unbridged feature rows are downgraded to explicit iOS bridge-not-wired copy instead of counts, cloud-backup promises, source totals, executable-tool promises, or role examples.
+- Evidence:
+  - `AppearanceSettingsView` persists `app.amber.ios.appearance.mode`.
+  - `DisplayFontSettingsView` persists `app.amber.ios.display.fontScale` and `app.amber.ios.display.chatFont`.
+  - `ExecutionSettingsView` persists `app.amber.ios.execution.toolLoopLimit` and `app.amber.ios.execution.liveActivity`; this is treated as local settings state, not proof that every execution runtime consumes it.
+  - `RuntimeEnvironmentView` and `SettingsStore` expose `terminalDefaultRuntime`, `sshProfiles`, SSH profile persistence, Keychain password storage, and runtime smoke tests.
+  - `SearchServicesView`, `MemoryOverviewView`, `CouncilSettingsView`, `SubAgentsView`, `SyncBackupView`, Board, MiniApp, and WebMount routes still contain local/hardcoded draft state or lack an inspected iOS bridge, so Settings home now marks their status as unavailable instead of precise or capability-complete.
+- Verification:
+  - `mcp__xcodebuildmcp.session_show_defaults` confirmed project `/Users/arquiel/Downloads/AI/amberagent-ios/iosApp/AmberAgent.xcodeproj`, scheme `iosApp`, simulator `iPhone 17`.
+  - `mcp__xcodebuildmcp.build_run_sim` succeeded after the Settings home edits and again after the Sync/Board/MiniApp/WebMount copy correction.
+  - UI snapshot: Settings home top showed `外观` value `浅色`, `显示与字体` as `字号 标准 · 默认字体`, `核心记忆` as `本机草稿 · 记忆库未接线`, `执行与任务` as `本机设置 25 步 · 灵动岛 开`, `运行环境` as `Remote SSH · 未配置 Profile`, and `搜索服务` as `未接线`.
+  - UI snapshot after scrolling showed `同步与备份` as `iOS 同步桥尚未接线`, `对话存储` as `未接线`, `今日看板` as `数据源桥尚未接线`, `模型议会` as `iOS 运行桥尚未接线`, `SubAgent` as `iOS SubAgent 配置桥尚未接线`, `小应用` as `iOS 小应用运行桥尚未接线`, and `WebMount` as `iOS WebMount 桥尚未接线`.
+- Screenshot paths:
+  - Settings home top: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_dd0ab3d8-099f-4c37-b51c-65d24de8bf19.jpg`
+  - Settings home lower rows: `/var/folders/m6/vf3y7_wx4yj8jp71j8h9dhyh0000gn/T/screenshot_optimized_b0e832ec-e6df-407f-8ddf-6d9748c0e662.jpg`
+- Subagent review: completed by `Einstein`; no P0/P1 findings. P2 audit wording fix applied: Provider/TTS home values are described as current scalar/default status rather than implying every row has an `@AppStorage` / `SettingsStore` storage path.
+- Remaining risk: Appearance/Display/Execution are real local preferences, but this slice does not prove each preference is globally consumed by all UI/runtime paths. Search, Memory, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount destination pages still need separate passes to remove or wire their internal prototype state.
+
 ## 5. Commit Log
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
@@ -292,4 +313,5 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 | `c77cc4b20` | Provider current config, no-key default templates, and model draft downgrade | `build_run_sim` succeeded before/after explicit route-kind and subagent P2 fixes | see Slice 5 screenshot paths | no full iOS provider registry, provider-specific Keychain schema, Response API persistence, or model metadata bridge yet |
 | `c3d22f732` | Chat reasoning parameter wiring with KMP model ability gate, context-stat downgrade, and no-fake empty state | `build_run_sim` succeeded before and after subagent P1/P2 fixes | see Slice 6 screenshot paths | no persisted reasoning default; no real context token/window estimator |
 | `34519052d` | Account stats exact-value downgrade and profile preview honesty | `build_run_sim` succeeded before and after reviewer P2 heatmap fixes | see Slice 7 screenshot paths | no iOS Stats bridge; no persistent account/profile store; ConversationStorage still pending |
-| Pending | Conversation storage exact-value downgrade and no-op cleanup/delete honesty | `build_run_sim` succeeded before and after reviewer P2 alert fix | see Slice 8 screenshot paths | no iOS conversation/files storage bridge or safe cleanup/delete transaction |
+| `d348bb113` | Conversation storage exact-value downgrade and no-op cleanup/delete honesty | `build_run_sim` succeeded before and after reviewer P2 alert fix | see Slice 8 screenshot paths | no iOS conversation/files storage bridge or safe cleanup/delete transaction |
+| `Pending` | Settings home status honesty for Appearance, Display, Memory, Execution, Runtime, Search, Sync/Backup, Board, Council, SubAgent, MiniApp, and WebMount | `build_run_sim` succeeded after edits and after Sync/Board/MiniApp/WebMount correction; subagent review completed with no P0/P1 | see Slice 9 screenshot paths | child pages still need separate audits; Appearance/Display/Execution consumption outside their local settings pages remains partially unverified |
