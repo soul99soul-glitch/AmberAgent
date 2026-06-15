@@ -4,17 +4,33 @@ struct ModelEditView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
-    @State private var modelID = "deepseek-v4-flash"
-    @State private var modelName = "DeepSeek V4 Flash"
-    @State private var contextLength = "1M"
-    @State private var modelType: ModelEditType = .chat
-    @State private var abilities: Set<ModelEditAbility> = [.tool, .reasoning]
-    @State private var inputModalities: Set<ModelEditModality> = [.text]
-    @State private var outputModalities: Set<ModelEditModality> = [.text]
-    @State private var searchEnabled = false
-    @State private var urlContextEnabled = false
-    @State private var imageGenerationEnabled = false
+    let isAdding: Bool
+
+    @State private var modelID: String
+    @State private var modelName: String
+    @State private var contextLength: String
+    @State private var modelType: ModelEditType
+    @State private var abilities: Set<ModelEditAbility>
+    @State private var inputModalities: Set<ModelEditModality>
+    @State private var outputModalities: Set<ModelEditModality>
+    @State private var searchEnabled: Bool
+    @State private var urlContextEnabled: Bool
+    @State private var imageGenerationEnabled: Bool
     @State private var alert: ModelEditAlert?
+
+    init(isAdding: Bool = false) {
+        self.isAdding = isAdding
+        _modelID = State(initialValue: isAdding ? "" : "deepseek-v4-flash")
+        _modelName = State(initialValue: isAdding ? "" : "DeepSeek V4 Flash")
+        _contextLength = State(initialValue: isAdding ? "" : "1M")
+        _modelType = State(initialValue: .chat)
+        _abilities = State(initialValue: isAdding ? [.tool] : [.tool, .reasoning])
+        _inputModalities = State(initialValue: [.text])
+        _outputModalities = State(initialValue: [.text])
+        _searchEnabled = State(initialValue: false)
+        _urlContextEnabled = State(initialValue: false)
+        _imageGenerationEnabled = State(initialValue: false)
+    }
 
     var body: some View {
         ZStack {
@@ -30,7 +46,7 @@ struct ModelEditView: View {
                         modalitiesSection
                         builtInToolsSection
                         advancedSection
-                        deleteSection
+                        footerSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -56,7 +72,7 @@ struct ModelEditView: View {
 
             Spacer()
 
-            Text("编辑模型")
+            Text(isAdding ? "添加模型" : "编辑模型")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -210,21 +226,27 @@ struct ModelEditView: View {
         }
     }
 
-    private var deleteSection: some View {
-        AmberFormGroup {
-            Button {
-                alert = .delete
-            } label: {
-                Text("删除此模型")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(AmberTheme.accentRed)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 52)
-                    .contentShape(Rectangle())
+    @ViewBuilder
+    private var footerSection: some View {
+        if isAdding {
+            ModelEditNote("当前只保留本地草稿；完成后返回模型列表，不创建真实模型配置。")
+                .padding(.top, 4)
+        } else {
+            AmberFormGroup {
+                Button {
+                    alert = .delete
+                } label: {
+                    Text("删除此模型")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(AmberTheme.accentRed)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 52)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .padding(.top, 20)
         }
-        .padding(.top, 20)
     }
 }
 

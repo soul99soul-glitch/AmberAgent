@@ -75,7 +75,7 @@ struct ProviderDetailView: View {
                         .accessibilityLabel("保存")
                     case .models:
                         AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加模型", size: 44, symbolSize: 17) {
-                            router.navigate(to: .modelEdit)
+                            router.navigate(to: .modelAdd)
                         }
                     }
                 }

@@ -180,6 +180,7 @@ enum Route: Hashable {
     case providers
     case providerAdd
     case providerDetail(name: String, endpoint: String)
+    case modelAdd
     case modelEdit
     case modelCustomHeaders
     case modelCustomBody
@@ -273,6 +274,8 @@ private extension View {
                 ProviderAddView()
             case .providerDetail(let name, let endpoint):
                 ProviderDetailView(providerName: name, endpoint: endpoint)
+            case .modelAdd:
+                ModelEditView(isAdding: true)
             case .modelEdit:
                 ModelEditView()
             case .modelCustomHeaders:
