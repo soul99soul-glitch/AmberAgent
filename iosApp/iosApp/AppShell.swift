@@ -191,6 +191,8 @@ enum Route: Hashable {
     case council
     case councilSettings
     case seatEditor
+    case subagents
+    case subAgentRole(name: String, roleId: String)
     case sandbox
     case conversation(id: String)
     case assistant(id: String)
@@ -285,6 +287,10 @@ private extension View {
                 CouncilSettingsView()
             case .seatEditor:
                 SeatEditorView()
+            case .subagents:
+                SubAgentsView()
+            case .subAgentRole(let name, let roleId):
+                PlaceholderDetailView(title: name, subtitle: "@\(roleId)", systemImage: "person.crop.circle.badge.gearshape")
             case .sandbox:
                 RuntimeEnvironmentView(settingsStore: settingsStore)
             case .conversation(let id):
