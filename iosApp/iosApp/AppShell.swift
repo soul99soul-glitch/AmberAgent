@@ -288,7 +288,7 @@ private extension View {
             case .webMount:
                 WebMountView()
             case .webMountSite(let site):
-                PlaceholderDetailView(title: site.name, subtitle: site.host, systemImage: "globe")
+                WebMountSiteView(site: site)
             case .workspace:
                 WorkspaceView()
             case .memory:

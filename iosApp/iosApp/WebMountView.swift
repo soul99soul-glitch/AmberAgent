@@ -253,6 +253,243 @@ struct WebMountView: View {
     }
 }
 
+struct WebMountSiteView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let site: WebMountSiteRoute
+
+    @State private var alert: WebMountSiteAlert?
+    @State private var isDeleteConfirmationPresented = false
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                header
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        hero
+                        statusSection
+                        hint
+                        deleteSection
+                    }
+                    .padding(.bottom, 36)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .alert(item: $alert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("好"))
+            )
+        }
+        .confirmationDialog("删除网站", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
+            Button("删除网站", role: .destructive) {
+                alert = .init(title: "删除网站", message: "本轮只验证界面，不删除真实 WebMount 配置。")
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除后 agent 将无法使用该站点工具。")
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回 WebMount", size: 44, symbolSize: 20) {
+                dismiss()
+            }
+
+            Spacer()
+
+            Text(site.name)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AmberTheme.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+
+            Spacer()
+
+            Color.clear
+                .frame(width: 44, height: 44)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+    }
+
+    private var hero: some View {
+        VStack(spacing: 0) {
+            Text(site.initial)
+                .font(.system(size: 22, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(Color(hex: site.colorHex), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(.bottom, 11)
+
+            Text(site.name)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(AmberTheme.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+
+            Text(site.host)
+                .font(.system(size: 12.5, weight: .regular, design: .monospaced))
+                .foregroundStyle(AmberTheme.muted)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.top, 6)
+        .padding(.bottom, 16)
+    }
+
+    private var statusSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "连接状态")
+            AmberFormGroup {
+                WebMountStatusRow(status: site.status)
+
+                WebMountDivider()
+
+                WebMountActionRow(title: signInTitle, subtitle: signInSubtitle) {
+                    alert = signInAlert
+                }
+
+                if site.status.showsConnectionTest {
+                    WebMountDivider()
+
+                    WebMountActionRow(title: "测试连接", subtitle: "验证 agent 能否访问该站点") {
+                        alert = .init(title: "测试连接", message: "本轮只验证界面，不向 \(site.host) 发起网络请求。")
+                    }
+                }
+            }
+        }
+    }
+
+    private var hint: some View {
+        Text(site.hint)
+            .font(.system(size: 13))
+            .lineSpacing(4)
+            .foregroundStyle(AmberTheme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 13)
+    }
+
+    private var deleteSection: some View {
+        AmberFormGroup {
+            Button {
+                isDeleteConfirmationPresented = true
+            } label: {
+                Text("删除网站")
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.accentRed)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 20)
+    }
+
+    private var signInTitle: String {
+        switch site.status {
+        case .signed: "退出登录"
+        case .publicAccess: "无需登录"
+        case .limited: "等待恢复"
+        case .off, .error: "登录"
+        }
+    }
+
+    private var signInSubtitle: String {
+        switch site.status {
+        case .signed: "清除已保存的 cookie"
+        case .publicAccess: "公开站点，agent 可直接访问"
+        case .limited: "站点限流中，稍后重试"
+        case .off, .error: "打开网页登录后捕获 cookie"
+        }
+    }
+
+    private var signInAlert: WebMountSiteAlert {
+        switch site.status {
+        case .signed:
+            .init(title: "退出登录", message: "本轮只验证界面，不清除已保存的 cookie。")
+        case .publicAccess:
+            .init(title: "无需登录", message: "\(site.name) 是公开站点，agent 可直接访问。")
+        case .limited:
+            .init(title: "等待恢复", message: "该站点当前限流中，本轮不发起恢复请求。")
+        case .off, .error:
+            .init(title: "登录", message: "本轮只验证界面，不打开网页登录或捕获 cookie。")
+        }
+    }
+}
+
+private struct WebMountSiteAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
+private struct WebMountStatusRow: View {
+    let status: WebMountStatus
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("登录态")
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            WebMountStatusBadge(status: status)
+        }
+        .frame(minHeight: 52)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+    }
+}
+
+private struct WebMountActionRow: View {
+    let title: String
+    let subtitle: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
+            .frame(minHeight: 58)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct WebMountToggleRow: View {
     let systemImage: String
     let iconColor: Color
@@ -395,6 +632,15 @@ private struct WebMountSwitch: View {
     }
 }
 
+private extension WebMountStatus {
+    var showsConnectionTest: Bool {
+        switch self {
+        case .limited: false
+        case .signed, .off, .publicAccess, .error: true
+        }
+    }
+}
+
 private struct WebMountDivider: View {
     var leading: CGFloat = 14
 
@@ -410,4 +656,20 @@ private struct WebMountDivider: View {
         WebMountView()
     }
     .environment(RouterPath())
+}
+
+#Preview("WebMount Site") {
+    NavigationStack {
+        WebMountSiteView(
+            site: .init(
+                name: "飞书文档",
+                host: "feishu.cn",
+                initial: "飞",
+                colorHex: 0x3370FF,
+                status: .signed,
+                subtitle: "文档 / 多维表格 / 知识库",
+                hint: "已登录的飞书账号，可读取云文档 / 多维表格 / 知识库内容。"
+            )
+        )
+    }
 }
