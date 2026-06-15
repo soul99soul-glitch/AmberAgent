@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ModelEditView: View {
+    @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
     @State private var modelID = "deepseek-v4-flash"
@@ -193,17 +194,17 @@ struct ModelEditView: View {
                 ModelValueRow(
                     title: "自定义 Headers",
                     subtitle: "附加到该模型的请求头",
-                    value: "0 个"
+                    value: "2 个"
                 ) {
-                    alert = .headers
+                    router.navigate(to: .modelCustomHeaders)
                 }
                 ModelEditDivider()
                 ModelValueRow(
                     title: "自定义 Body",
                     subtitle: "合并进请求体的 JSON 字段",
-                    value: "0 个"
+                    value: "2 个"
                 ) {
-                    alert = .body
+                    router.navigate(to: .modelCustomBody)
                 }
             }
         }
@@ -274,35 +275,357 @@ private enum ModelEditModality: String, CaseIterable, Identifiable, ModelChipOpt
 }
 
 private enum ModelEditAlert: Identifiable {
-    case headers
-    case body
     case delete
 
     var id: String {
         switch self {
-        case .headers: "headers"
-        case .body: "body"
         case .delete: "delete"
         }
     }
 
     var title: String {
         switch self {
-        case .headers: "自定义 Headers 尚未接线"
-        case .body: "自定义 Body 尚未接线"
         case .delete: "删除模型尚未接线"
         }
     }
 
     var message: String {
         switch self {
-        case .headers:
-            "当前先还原模型编辑原型；请求头编辑会在真实 Provider 写入接通后补上。"
-        case .body:
-            "当前先还原模型编辑原型；请求体 JSON 字段编辑会在真实 Provider 写入接通后补上。"
         case .delete:
             "当前页面不会删除真实模型配置，避免在迁移期间误改现有服务商数据。"
         }
+    }
+}
+
+enum ModelCustomFieldsKind {
+    case headers
+    case body
+
+    var title: String {
+        switch self {
+        case .headers: "自定义 Headers"
+        case .body: "自定义 Body"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .headers: "随模型请求附加的 HTTP header。"
+        case .body: "合并进请求体的额外 JSON 字段。"
+        }
+    }
+
+    var nameTitle: String {
+        switch self {
+        case .headers: "Header"
+        case .body: "字段"
+        }
+    }
+
+    var namePlaceholder: String {
+        switch self {
+        case .headers: "例如 X-Title"
+        case .body: "例如 temperature"
+        }
+    }
+
+    var valuePlaceholder: String {
+        switch self {
+        case .headers: "例如 AmberAgent"
+        case .body: "例如 0.7 / true / \"value\""
+        }
+    }
+
+    fileprivate var defaultFields: [ModelCustomFieldDraft] {
+        switch self {
+        case .headers:
+            [
+                .init(name: "X-Title", value: "AmberAgent"),
+                .init(name: "HTTP-Referer", value: "https://github.com")
+            ]
+        case .body:
+            [
+                .init(name: "temperature", value: "0.7"),
+                .init(name: "max_tokens", value: "4096")
+            ]
+        }
+    }
+}
+
+struct ModelCustomFieldsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let kind: ModelCustomFieldsKind
+    @State private var fields: [ModelCustomFieldDraft]
+
+    init(kind: ModelCustomFieldsKind) {
+        self.kind = kind
+        _fields = State(initialValue: kind.defaultFields)
+    }
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                header
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        summarySection
+                        fieldsSection
+                        previewSection
+                    }
+                    .padding(.bottom, 36)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var header: some View {
+        HStack {
+            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回编辑模型", size: 44, symbolSize: 20) {
+                dismiss()
+            }
+
+            Spacer()
+
+            Text(kind.title)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AmberTheme.foreground)
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Text("完成")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(height: 36)
+                    .padding(.horizontal, 14)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .amberGlass(cornerRadius: AmberTheme.radiusPill)
+            .accessibilityLabel("完成")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+    }
+
+    private var summarySection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "作用范围")
+            AmberFormGroup {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: kind == .headers ? "curlybraces" : "doc.badge.gearshape")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(width: 32, height: 32)
+                        .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(kind.title)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(AmberTheme.foreground)
+
+                        Text(kind.summary)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+            }
+        }
+    }
+
+    private var fieldsSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "字段")
+            AmberFormGroup {
+                ForEach(fields.indices, id: \.self) { index in
+                    ModelCustomFieldRow(
+                        kind: kind,
+                        field: $fields[index]
+                    ) {
+                        fields.remove(at: index)
+                    }
+
+                    if index < fields.count - 1 {
+                        ModelEditDivider()
+                    }
+                }
+
+                if !fields.isEmpty {
+                    ModelEditDivider()
+                }
+
+                Button {
+                    fields.append(.init(name: "", value: ""))
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accent)
+
+                        Text("添加字段")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(AmberTheme.accent)
+
+                        Spacer()
+                    }
+                    .frame(minHeight: 52)
+                    .padding(.horizontal, 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            ModelCustomValidationNote(text: validationText, isWarning: hasWarnings)
+        }
+    }
+
+    private var previewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "预览")
+            AmberFormGroup {
+                Text(previewText)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var validFields: [ModelCustomFieldDraft] {
+        fields.filter { !$0.name.trimmed.isEmpty && !$0.value.trimmed.isEmpty }
+    }
+
+    private var hasWarnings: Bool {
+        fields.contains { $0.name.trimmed.isEmpty || $0.value.trimmed.isEmpty } || hasDuplicateNames
+    }
+
+    private var hasDuplicateNames: Bool {
+        let names = validFields.map { $0.name.trimmed.lowercased() }
+        return Set(names).count != names.count
+    }
+
+    private var validationText: String {
+        if hasDuplicateNames {
+            return "\(kind.nameTitle) 名称重复；当前只保留本地草稿，完成后不会写入真实服务商配置。"
+        }
+
+        if fields.contains(where: { $0.name.trimmed.isEmpty || $0.value.trimmed.isEmpty }) {
+            return "空名称或空值会在真实写入前被拦截；当前先保留草稿用于编辑。"
+        }
+
+        return "\(validFields.count) 个字段已准备好；当前页面只保存本地草稿。"
+    }
+
+    private var previewText: String {
+        if validFields.isEmpty {
+            return kind == .headers ? "No custom headers" : "{\n  \n}"
+        }
+
+        switch kind {
+        case .headers:
+            return validFields
+                .map { "\($0.name.trimmed): \($0.value.trimmed)" }
+                .joined(separator: "\n")
+        case .body:
+            let lines = validFields.map { "  \"\($0.name.trimmed)\": \($0.value.trimmed)" }
+            return "{\n\(lines.joined(separator: ",\n"))\n}"
+        }
+    }
+}
+
+private struct ModelCustomFieldDraft: Identifiable, Hashable {
+    let id = UUID()
+    var name: String
+    var value: String
+}
+
+private struct ModelCustomFieldRow: View {
+    let kind: ModelCustomFieldsKind
+    @Binding var field: ModelCustomFieldDraft
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10) {
+                TextField(kind.namePlaceholder, text: $field.name)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accentRed)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("删除字段")
+            }
+
+            TextField(kind.valuePlaceholder, text: $field.value)
+                .font(.system(size: 14, weight: .regular, design: .monospaced))
+                .foregroundStyle(AmberTheme.foreground)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .background(AmberTheme.surface2.opacity(0.58), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+}
+
+private struct ModelCustomValidationNote: View {
+    let text: String
+    let isWarning: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: isWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isWarning ? AmberTheme.accentAmber : AmberTheme.accentGreen)
+                .padding(.top, 2)
+
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 7)
+    }
+}
+
+private extension String {
+    var trimmed: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
