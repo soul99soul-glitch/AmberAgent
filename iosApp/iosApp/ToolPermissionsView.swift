@@ -10,18 +10,134 @@ struct ToolPermissionsView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var isImportingFile = false
-    @State private var lastGateDecision: String?
-    @State private var isReadRequestInFlight = false
     @State private var requestingCapabilityId: String?
-    @State private var expandedCapabilityIds: Set<String> = ["ios.files.selected_read"]
 
     private let capabilities = IOSCapabilityRegistry.capabilities
 
-    private var capabilityGroups: [CapabilityDomainGroup] {
-        IOSCapabilityDomain.allCases.compactMap { domain in
-            let items = capabilities.filter { $0.domain == domain }
-            return items.isEmpty ? nil : CapabilityDomainGroup(domain: domain, capabilities: items)
+    private var permissionSections: [PermissionRequestSection] {
+        [
+            PermissionRequestSection(
+                title: "常用权限",
+                items: [
+                    selectedFileItem,
+                    capabilityItem(
+                        id: "ios.photos.library_read",
+                        title: "照片",
+                        subtitle: "申请访问照片和视频图库，也可以只允许部分照片",
+                        systemImage: "photo.on.rectangle",
+                        color: AmberTheme.accentAmber
+                    ),
+                    capabilityItem(
+                        id: "ios.camera.capture",
+                        title: "相机",
+                        subtitle: "用于拍照、摄像、扫描或视觉输入",
+                        systemImage: "camera",
+                        color: AmberTheme.accent
+                    ),
+                    capabilityItem(
+                        id: "ios.microphone.record",
+                        title: "麦克风",
+                        subtitle: "用于录音、语音输入或音视频采集",
+                        systemImage: "mic",
+                        color: AmberTheme.accentRed
+                    ),
+                    capabilityItem(
+                        id: "ios.location.when_in_use",
+                        title: "定位",
+                        subtitle: "仅在使用 Amber 时读取当前位置",
+                        systemImage: "location",
+                        color: AmberTheme.accentGreen
+                    ),
+                    capabilityItem(
+                        id: "ios.notifications.alerts",
+                        title: "通知",
+                        subtitle: "允许 Amber 发送提醒、声音和角标",
+                        systemImage: "bell",
+                        color: AmberTheme.accentIndigo
+                    )
+                ].compactMap { $0 }
+            ),
+            PermissionRequestSection(
+                title: "个人数据",
+                items: [
+                    capabilityItem(
+                        id: "ios.contacts.full",
+                        title: "通讯录",
+                        subtitle: "读取或更新联系人前会先申请系统授权",
+                        systemImage: "person.crop.circle.badge.checkmark",
+                        color: AmberTheme.accentCyan
+                    ),
+                    capabilityItem(
+                        id: "ios.calendar.full",
+                        title: "日历",
+                        subtitle: "读取和创建日历事件需要 EventKit 授权",
+                        systemImage: "calendar",
+                        color: AmberTheme.accentAmber
+                    ),
+                    capabilityItem(
+                        id: "ios.reminders.full",
+                        title: "提醒事项",
+                        subtitle: "读取和创建提醒事项需要系统授权",
+                        systemImage: "checklist",
+                        color: AmberTheme.accentGreen
+                    ),
+                    capabilityItem(
+                        id: "ios.speech.recognition",
+                        title: "语音识别",
+                        subtitle: "将语音转换成文字前申请 Apple Speech 授权",
+                        systemImage: "waveform",
+                        color: AmberTheme.accent
+                    ),
+                    capabilityItem(
+                        id: "ios.authentication.face_id",
+                        title: "Face ID",
+                        subtitle: "用系统生物识别完成一次本机身份验证",
+                        systemImage: "faceid",
+                        color: AmberTheme.accentIndigo
+                    )
+                ].compactMap { $0 }
+            ),
+            PermissionRequestSection(
+                title: "设备与网络",
+                items: [
+                    capabilityItem(
+                        id: "ios.bluetooth.ble",
+                        title: "蓝牙",
+                        subtitle: "扫描、连接或访问附近蓝牙设备前申请",
+                        systemImage: "dot.radiowaves.left.and.right",
+                        color: AmberTheme.accentCyan
+                    ),
+                    capabilityItem(
+                        id: "ios.network.local",
+                        title: "本地网络",
+                        subtitle: "访问局域网设备时由 iOS 弹出确认",
+                        systemImage: "network",
+                        color: AmberTheme.accentGreen
+                    )
+                ].compactMap { $0 }
+            )
+        ]
+    }
+
+    private var selectedFileItem: PermissionRequestItem {
+        PermissionRequestItem(
+            id: "selected-file",
+            title: "文件",
+            subtitle: selectedFileSubtitle,
+            systemImage: "doc",
+            color: AmberTheme.accent,
+            target: .selectedFile
+        )
+    }
+
+    private var selectedFileSubtitle: String {
+        if let error = documentStore.errorMessage {
+            return error
         }
+        if let grant = documentStore.grantSummary {
+            return "已选择 \(grant.fileName)"
+        }
+        return "打开系统文件选择器，只允许读取你选中的单个文件"
     }
 
     var body: some View {
@@ -32,8 +148,8 @@ struct ToolPermissionsView: View {
                 VStack(spacing: 0) {
                     header
                     intro
-                    selectedFileGrantSection
-                    capabilitySections
+                    permissionList
+                    footerNote
                 }
                 .padding(.bottom, 36)
             }
@@ -51,7 +167,7 @@ struct ToolPermissionsView: View {
                 guard let url = urls.first else { return }
                 documentStore.registerPickedFile(url)
             case .failure(let error):
-                documentStore.recordSelectionError("File selection failed: \(error.localizedDescription)")
+                documentStore.recordSelectionError("文件选择失败：\(error.localizedDescription)")
             }
         }
     }
@@ -79,77 +195,32 @@ struct ToolPermissionsView: View {
     }
 
     private var intro: some View {
-        Text("iOS 权限按「能力」管理。部分能力需要系统授权，部分只能由你在前台选择或确认。AmberAgent 不会静默读取文件、照片、通讯录、健康数据、定位、通知或其它 App 内容。")
+        Text("点击一项来申请系统权限或打开系统选择器。Amber 只能通过这些入口访问数据，不能绕过 iOS 授权。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+            .padding(.bottom, 12)
     }
 
-    private var selectedFileGrantSection: some View {
+    private var permissionList: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已选文件")
-            SelectedFileGrantCard(
-                grant: documentStore.grantSummary,
-                lastRead: documentStore.lastRead,
-                errorMessage: documentStore.errorMessage,
-                lastGateDecision: lastGateDecision,
-                isReading: documentStore.isReading || isReadRequestInFlight,
-                onChooseFile: { isImportingFile = true },
-                onReadOnce: readSelectedFileOnce,
-                onClear: {
-                    documentStore.clearGrant()
-                    lastGateDecision = nil
-                }
-            )
-
-            Text("只能读取你刚选择的单个文件 · 内存态授权 · 默认 10 分钟过期 · 最多 1 次 · 文件 ≤ 2MB · preview ≤ 64KB。不支持目录、持久 bookmark、后台选择或写入 / 删除。Chat 只附加你显式 attach 的 preview。")
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted2)
-                .lineSpacing(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 7)
-        }
-    }
-
-    private var capabilitySections: some View {
-        VStack(spacing: 0) {
-            ForEach(capabilityGroups) { group in
-                AmberSectionLabel(text: group.domain.title)
+            ForEach(permissionSections) { section in
+                AmberSectionLabel(text: section.title)
                 AmberFormGroup {
-                    ForEach(Array(group.capabilities.enumerated()), id: \.element.id) { index, capability in
-                        CapabilityPolicyCard(
-                            capability: capability,
-                            systemResult: systemPermissionCoordinator.cachedStatus(for: capability),
-                            selectedPolicy: Binding(
-                                get: { permissionStore.policy(for: capability) },
-                                set: { permissionStore.setPolicy($0, for: capability) }
-                            ),
-                            availablePolicies: permissionStore.availablePolicies(for: capability),
-                            decisionSummary: permissionStore.decisionSummary(for: capability),
-                            isExpanded: expandedCapabilityIds.contains(capability.id),
-                            isRequesting: requestingCapabilityId == capability.id,
-                            onToggle: {
-                                toggleCapability(capability.id)
-                            },
-                            onRequest: {
-                                requestSystemPermission(capability)
-                            },
-                            onRefresh: {
-                                refreshSystemPermission(capability)
-                            },
-                            onOpenSettings: {
-                                systemPermissionCoordinator.openAppSettings()
-                            }
+                    ForEach(Array(section.items.enumerated()), id: \.element.id) { index, item in
+                        PermissionRequestRow(
+                            item: item,
+                            status: status(for: item),
+                            isBusy: isBusy(item),
+                            action: { handleTap(item) }
                         )
 
-                        if index < group.capabilities.count - 1 {
+                        if index < section.items.count - 1 {
                             Divider()
                                 .overlay(AmberTheme.borderSoft)
-                                .padding(.leading, 15)
+                                .padding(.leading, 58)
                         }
                     }
                 }
@@ -157,40 +228,110 @@ struct ToolPermissionsView: View {
         }
     }
 
-    private func readSelectedFileOnce() {
-        guard !isReadRequestInFlight else { return }
-        guard documentStore.grantSummary != nil else {
-            lastGateDecision = "Needs user action: choose a file first"
-            return
-        }
+    private var footerNote: some View {
+        Text("如果某项权限已经被拒绝，点它会带你去系统设置重新开启。高风险工具调用仍会在使用时单独确认。")
+            .font(.caption)
+            .foregroundStyle(AmberTheme.muted2)
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+    }
 
-        isReadRequestInFlight = true
-        Task {
-            defer { isReadRequestInFlight = false }
-            guard !Task.isCancelled else { return }
-            let request = localToolExecutor.requestForCurrentSelectedFile(isUserInitiated: true)
-            let result = await localToolExecutor.execute(request)
-            guard !Task.isCancelled else { return }
-            switch result {
-            case .selectedFilePreview(let readResult):
-                lastGateDecision = "Allowed: \(readResult.bytesRead) bytes read"
-            case .needsUserAction(let reason):
-                lastGateDecision = "Needs user action: \(reason)"
-            case .denied(let reason):
-                lastGateDecision = "Denied: \(reason)"
-            case .failed(let message):
-                lastGateDecision = message
-            case .permissionsStatus:
-                lastGateDecision = "Unexpected permissions status result"
+    private func capabilityItem(
+        id: String,
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        color: Color
+    ) -> PermissionRequestItem? {
+        guard let capability = capabilities.first(where: { $0.id == id }) else {
+            return nil
+        }
+        return PermissionRequestItem(
+            id: id,
+            title: title,
+            subtitle: subtitle,
+            systemImage: systemImage,
+            color: color,
+            target: .capability(capability)
+        )
+    }
+
+    private func status(for item: PermissionRequestItem) -> PermissionRequestStatus {
+        switch item.target {
+        case .selectedFile:
+            guard let grant = documentStore.grantSummary else {
+                return .init(text: "未选择", tone: .ready)
+            }
+            if grant.usedCount >= grant.maxUses {
+                return .init(text: "已使用", tone: .neutral)
+            }
+            if grant.isExpired() {
+                return .init(text: "已过期", tone: .warning)
+            }
+            return .init(text: "已选择", tone: .allowed)
+
+        case .capability(let capability):
+            if requestingCapabilityId == capability.id {
+                return .init(text: "申请中", tone: .working)
+            }
+            let result = systemPermissionCoordinator.cachedStatus(for: capability)
+            switch result.status {
+            case .authorized:
+                return .init(text: "已允许", tone: .allowed)
+            case .limited:
+                return .init(text: "部分允许", tone: .warning)
+            case .denied:
+                return .init(text: "已拒绝", tone: .denied)
+            case .restricted:
+                return .init(text: "受限制", tone: .denied)
+            case .notDetermined:
+                return .init(text: "可申请", tone: .ready)
+            case .unknown:
+                return .init(text: unknownStatusText(for: capability), tone: .ready)
+            case .requiresSystemSettings:
+                return .init(text: "去设置", tone: .warning)
+            case .requiresEntitlement, .requiresExtensionTarget, .missingUsageDescription, .unavailableOnDevice:
+                return .init(text: "不可用", tone: .neutral)
             }
         }
     }
 
-    private func toggleCapability(_ id: String) {
-        if expandedCapabilityIds.contains(id) {
-            expandedCapabilityIds.remove(id)
-        } else {
-            expandedCapabilityIds.insert(id)
+    private func unknownStatusText(for capability: IOSPlatformCapability) -> String {
+        switch capability.requestKind {
+        case .picker:
+            "可选择"
+        case .foregroundSystemUI:
+            "可打开"
+        case .authenticationOperation:
+            "可验证"
+        default:
+            "可申请"
+        }
+    }
+
+    private func isBusy(_ item: PermissionRequestItem) -> Bool {
+        guard case .capability(let capability) = item.target else {
+            return false
+        }
+        return requestingCapabilityId == capability.id
+    }
+
+    private func handleTap(_ item: PermissionRequestItem) {
+        switch item.target {
+        case .selectedFile:
+            isImportingFile = true
+
+        case .capability(let capability):
+            let result = systemPermissionCoordinator.cachedStatus(for: capability)
+            if IOSSystemPermissionCoordinator.canRequestInApp(for: capability, systemStatus: result.status) {
+                requestSystemPermission(capability)
+            } else if capability.canOpenSettings && (result.status == .denied || result.status == .requiresSystemSettings) {
+                systemPermissionCoordinator.openAppSettings()
+            } else {
+                refreshSystemPermission(capability)
+            }
         }
     }
 
@@ -213,645 +354,99 @@ struct ToolPermissionsView: View {
     }
 }
 
-private struct CapabilityDomainGroup: Identifiable {
-    let domain: IOSCapabilityDomain
-    let capabilities: [IOSPlatformCapability]
+private struct PermissionRequestSection: Identifiable {
+    let title: String
+    let items: [PermissionRequestItem]
 
-    var id: String { domain.id }
+    var id: String { title }
 }
 
-private struct SelectedFileGrantCard: View {
-    let grant: SelectedDocumentGrantSummary?
-    let lastRead: SelectedDocumentReadResult?
-    let errorMessage: String?
-    let lastGateDecision: String?
-    let isReading: Bool
-    let onChooseFile: () -> Void
-    let onReadOnce: () -> Void
-    let onClear: () -> Void
-
-    private var canRead: Bool {
-        guard let grant else { return false }
-        return !grant.isExpired() && !isReading
+private struct PermissionRequestItem: Identifiable {
+    enum Target {
+        case selectedFile
+        case capability(IOSPlatformCapability)
     }
 
+    let id: String
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let color: Color
+    let target: Target
+}
+
+private struct PermissionRequestStatus {
+    enum Tone {
+        case ready
+        case allowed
+        case warning
+        case denied
+        case neutral
+        case working
+
+        var color: Color {
+            switch self {
+            case .ready: AmberTheme.accent
+            case .allowed: AmberTheme.accentGreen
+            case .warning: AmberTheme.accentAmber
+            case .denied: AmberTheme.accentRed
+            case .neutral: AmberTheme.muted
+            case .working: AmberTheme.accentCyan
+            }
+        }
+    }
+
+    let text: String
+    let tone: Tone
+}
+
+private struct PermissionRequestRow: View {
+    let item: PermissionRequestItem
+    let status: PermissionRequestStatus
+    let isBusy: Bool
+    let action: () -> Void
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            if let grant {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        Text(grant.fileName)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(AmberTheme.foreground)
-                            .lineLimit(2)
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: item.systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(item.color)
+                    .frame(width: 32, height: 32)
+                    .background(item.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                        FileGrantStateBadge(grant: grant)
-                    }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
 
-                    VStack(spacing: 5) {
-                        GrantMetaRow(label: "类型", value: grant.fileType)
-                        GrantMetaRow(label: "大小", value: ByteCountFormatter.string(fromByteCount: grant.fileSize, countStyle: .file))
-                        GrantMetaRow(label: "用量", value: "\(grant.usedCount)/\(grant.maxUses)")
-                        GrantMetaRow(label: "scope digest", value: String(grant.scopeDigest.prefix(12)))
-                        GrantMetaRow(label: "payload digest", value: String(grant.payloadDigest.prefix(12)))
-                    }
-
-                    if let lastRead {
-                        DisclosureGroup("最近读取：\(lastRead.bytesRead) bytes") {
-                            Text(lastRead.preview)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(AmberTheme.foreground2)
-                                .textSelection(.enabled)
-                                .lineLimit(12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 6)
-                        }
+                    Text(item.subtitle)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
-                        .tint(AmberTheme.accent)
-                    } else {
-                        Text("最近读取：—")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                    }
+                        .lineLimit(2)
                 }
-            } else {
-                Text("尚未选择文件。文件访问必须从前台选择器开始——点「选择文件」打开 iOS 系统文件选择器，选择单个文件。")
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineSpacing(2)
-            }
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.accentRed)
-            }
-
-            if let lastGateDecision {
-                Text(lastGateDecision)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-            }
-
-            HStack(spacing: 8) {
-                Button(action: onChooseFile) {
-                    Label("选择文件", systemImage: "folder")
-                }
-                .buttonStyle(FileGrantButtonStyle(kind: .filled))
-
-                Button(action: onReadOnce) {
-                    Text(isReading ? "读取中..." : "读取一次")
-                }
-                .buttonStyle(FileGrantButtonStyle(kind: .glass))
-                .disabled(!canRead)
-
-                Button(action: onClear) {
-                    Text("清除授权")
-                }
-                .buttonStyle(FileGrantButtonStyle(kind: .danger))
-                .disabled(grant == nil)
-            }
-        }
-        .padding(14)
-        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
-                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-        }
-        .padding(.horizontal, 16)
-    }
-}
-
-private struct GrantMetaRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(AmberTheme.muted2)
-                .frame(width: 92, alignment: .leading)
-
-            Text(value)
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(AmberTheme.foreground2)
-                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
 
-private struct FileGrantStateBadge: View {
-    let grant: SelectedDocumentGrantSummary
-
-    private var text: String {
-        if grant.usedCount >= grant.maxUses {
-            return "Used"
-        }
-        if grant.isExpired() {
-            return "Expired"
-        }
-        return "In memory"
-    }
-
-    private var color: Color {
-        if grant.usedCount >= grant.maxUses {
-            return AmberTheme.muted
-        }
-        if grant.isExpired() {
-            return AmberTheme.accentAmber
-        }
-        return AmberTheme.accentGreen
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-    }
-}
-
-private struct CapabilityPolicyCard: View {
-    let capability: IOSPlatformCapability
-    let systemResult: IOSSystemPermissionResult
-    @Binding var selectedPolicy: IOSAgentPermissionPolicy
-    let availablePolicies: [IOSAgentPermissionPolicy]
-    let decisionSummary: String
-    let isExpanded: Bool
-    let isRequesting: Bool
-    let onToggle: () -> Void
-    let onRequest: () -> Void
-    let onRefresh: () -> Void
-    let onOpenSettings: () -> Void
-
-    private var canRequestNow: Bool {
-        IOSSystemPermissionCoordinator.canRequestInApp(
-            for: capability,
-            systemStatus: systemResult.status
-        )
-    }
-
-    private var executableText: String {
-        capability.status == .unsupported || selectedPolicy == .disabled ? "No" : "Yes"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: onToggle) {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: 6) {
-                            Text(capability.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                                .lineLimit(2)
-
-                            StatusBadge(status: capability.status)
-                            RiskBadge(risk: capability.risk)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Text(capability.summary)
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .lineLimit(isExpanded ? nil : 2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    if !isExpanded {
-                        Text(selectedPolicy.title)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(AmberTheme.accent)
-                            .lineLimit(1)
-                    }
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AmberTheme.muted2)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .padding(.top, 3)
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text(status.text)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(status.tone.color)
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
 
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    CapabilityFlags(
-                        executable: executableText,
-                        requiresFreshPresence: capability.gate.requiresFreshUserPresence,
-                        reusable: capability.gate.allowRunScopedReuse
-                    )
-
-                    CapabilityToolRows(capability: capability)
-
-                    CapabilityRequirementRows(capability: capability, systemResult: systemResult)
-
-                    actionButtons
-
-                    policySegment
-
-                    Text(decisionSummary)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted2)
-                        .lineSpacing(2)
-                }
-                .padding(.horizontal, 15)
-                .padding(.top, 2)
-                .padding(.bottom, 14)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var actionButtons: some View {
-        HStack(spacing: 8) {
-            if canRequestNow {
-                Button {
-                    onRequest()
-                } label: {
-                    Label(isRequesting ? "Requesting..." : "Request", systemImage: "hand.tap")
-                }
-                .buttonStyle(CapabilityActionButtonStyle())
-                .disabled(isRequesting)
-            } else if capability.status != .unsupported {
-                Button {
-                    onRefresh()
-                } label: {
-                    Label(isRequesting ? "Checking..." : "Check Status", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(CapabilityActionButtonStyle())
-                .disabled(isRequesting)
-            }
-
-            if capability.canOpenSettings {
-                Button {
-                    onOpenSettings()
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .buttonStyle(CapabilityActionButtonStyle())
-            }
-        }
-    }
-
-    private var policySegment: some View {
-        HStack(spacing: 4) {
-            ForEach(IOSAgentPermissionPolicy.allCases) { policy in
-                let isAvailable = availablePolicies.contains(policy)
-                Button {
-                    guard isAvailable else { return }
-                    selectedPolicy = policy
-                } label: {
-                    Text(policy.title)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(selectedPolicy == policy ? AmberTheme.accent : AmberTheme.muted)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                        .background(
-                            selectedPolicy == policy ? AmberTheme.background : .clear,
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        )
-                        .opacity(isAvailable ? 1 : 0.45)
-                }
-                .buttonStyle(.plain)
-                .disabled(!isAvailable)
-            }
-        }
-        .padding(3)
-        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-private struct CapabilityFlags: View {
-    let executable: String
-    let requiresFreshPresence: Bool
-    let reusable: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            CapabilityFlag(label: "Executable", value: executable, isPositive: executable == "Yes")
-            CapabilityFlag(label: "Fresh user presence", value: requiresFreshPresence ? "Yes" : "No", isPositive: requiresFreshPresence)
-            CapabilityFlag(label: "Run-scoped reuse", value: reusable ? "Yes" : "No", isPositive: reusable)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct CapabilityFlag: View {
-    let label: String
-    let value: String
-    let isPositive: Bool
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(label)
-            Text(value)
-                .fontWeight(.semibold)
-                .foregroundStyle(isPositive ? AmberTheme.accentGreen : AmberTheme.muted2)
-        }
-        .font(.caption2)
-        .foregroundStyle(AmberTheme.muted)
-    }
-}
-
-private struct CapabilityToolRows: View {
-    let capability: IOSPlatformCapability
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ToolChipRow(label: "UI Actions", values: capability.uiActionNames, kind: .ui)
-            ToolChipRow(label: "Model Tools", values: capability.modelToolNames, kind: .model)
-            ToolChipRow(label: "Blocked Tools", values: capability.blockedToolNames, kind: .blocked)
-        }
-    }
-}
-
-private struct CapabilityRequirementRows: View {
-    let capability: IOSPlatformCapability
-    let systemResult: IOSSystemPermissionResult
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            DetailLine(label: "Request", value: capability.requestKind.title)
-            DetailLine(label: "Entry point", value: capability.requestEntryPoint)
-
-            if !capability.requiredInfoPlistKeys.isEmpty {
-                ToolChipRow(label: "Info.plist", values: capability.requiredInfoPlistKeys, kind: .plain)
-            }
-            if !capability.requiredEntitlements.isEmpty {
-                ToolChipRow(label: "Entitlements", values: capability.requiredEntitlements, kind: .plain)
-            }
-            if !capability.requiredBackgroundModes.isEmpty {
-                ToolChipRow(label: "Background", values: capability.requiredBackgroundModes, kind: .plain)
-            }
-            if !capability.requiredExtensionTargets.isEmpty {
-                ToolChipRow(label: "Extensions", values: capability.requiredExtensionTargets, kind: .plain)
-            }
-
-            HStack(spacing: 6) {
-                SystemStatusBadge(status: systemResult.status)
-                Text(systemResult.message)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(2)
-            }
-
-            if let reason = capability.unavailableReason {
-                Text(reason)
-                    .font(.caption)
-                    .foregroundStyle(capability.status == .unsupported ? AmberTheme.accentRed : AmberTheme.muted)
-            }
-        }
-    }
-}
-
-private struct DetailLine: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(AmberTheme.muted2)
-                .frame(width: 72, alignment: .leading)
-            Text(value)
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-private struct ToolChipRow: View {
-    let label: String
-    let values: [String]
-    let kind: ToolChipKind
-
-    var body: some View {
-        if !values.isEmpty {
-            HStack(alignment: .top, spacing: 5) {
-                Text(label)
-                    .font(.caption2)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(AmberTheme.muted2)
-                    .padding(.top, 2)
-
-                FlowLine(spacing: 5) {
-                    ForEach(values, id: \.self) { value in
-                        ToolChip(text: value, kind: kind)
-                    }
-                }
             }
-        }
-    }
-}
-
-private enum ToolChipKind {
-    case plain
-    case ui
-    case model
-    case blocked
-
-    var foreground: Color {
-        switch self {
-        case .plain: AmberTheme.foreground2
-        case .ui: AmberTheme.accentCyan
-        case .model: AmberTheme.accentIndigo
-        case .blocked: AmberTheme.accentRed
-        }
-    }
-
-    var background: Color {
-        switch self {
-        case .plain: AmberTheme.surface2
-        case .ui: AmberTheme.accentCyan.opacity(0.10)
-        case .model: AmberTheme.accentIndigo.opacity(0.10)
-        case .blocked: AmberTheme.accentRed.opacity(0.10)
-        }
-    }
-}
-
-private struct ToolChip: View {
-    let text: String
-    let kind: ToolChipKind
-
-    var body: some View {
-        Text(text)
-            .font(.system(.caption2, design: .monospaced))
-            .foregroundStyle(kind.foreground)
-            .lineLimit(1)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(kind.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-    }
-}
-
-private struct FlowLine<Content: View>: View {
-    let spacing: CGFloat
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: spacing) {
-                content
-            }
-        }
-        .scrollIndicators(.hidden)
-    }
-}
-
-private struct StatusBadge: View {
-    let status: IOSCapabilityStatus
-
-    var body: some View {
-        BadgeText(text: status.title, tone: tone)
-    }
-
-    private var tone: BadgeTone {
-        switch status {
-        case .supported: .green
-        case .degraded, .requiresSystemSettings: .amber
-        case .requiresEntitlement, .requiresExtensionTarget: .cyan
-        case .unsupported: .red
-        }
-    }
-}
-
-private struct SystemStatusBadge: View {
-    let status: IOSSystemPermissionStatus
-
-    var body: some View {
-        BadgeText(text: status.title, tone: tone)
-    }
-
-    private var tone: BadgeTone {
-        switch status {
-        case .authorized: .green
-        case .limited, .notDetermined, .unknown: .amber
-        case .requiresEntitlement, .requiresExtensionTarget, .requiresSystemSettings, .missingUsageDescription: .cyan
-        case .denied, .restricted, .unavailableOnDevice: .red
-        }
-    }
-}
-
-private struct RiskBadge: View {
-    let risk: IOSCapabilityRisk
-
-    var body: some View {
-        BadgeText(text: risk.title, tone: tone, small: true)
-    }
-
-    private var tone: BadgeTone {
-        switch risk {
-        case .normal: .neutral
-        case .sensitive: .amber
-        case .high: .red
-        }
-    }
-}
-
-private enum BadgeTone {
-    case green
-    case amber
-    case cyan
-    case red
-    case neutral
-
-    var foreground: Color {
-        switch self {
-        case .green: AmberTheme.accentGreen
-        case .amber: AmberTheme.accentAmber
-        case .cyan: AmberTheme.accentCyan
-        case .red: AmberTheme.accentRed
-        case .neutral: AmberTheme.muted
-        }
-    }
-}
-
-private struct BadgeText: View {
-    let text: String
-    let tone: BadgeTone
-    var small = false
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: small ? 9.5 : 10, weight: .semibold))
-            .foregroundStyle(tone.foreground)
-            .lineLimit(1)
-            .padding(.horizontal, small ? 6 : 7)
-            .padding(.vertical, 2)
-            .background(tone.foreground.opacity(0.13), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-    }
-}
-
-private struct FileGrantButtonStyle: ButtonStyle {
-    enum Kind {
-        case filled
-        case glass
-        case danger
-    }
-
-    let kind: Kind
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(foreground)
-            .frame(height: 34)
+            .frame(minHeight: 60)
             .padding(.horizontal, 14)
-            .background(background, in: Capsule())
-            .overlay {
-                if kind == .glass {
-                    Capsule()
-                        .stroke(.white.opacity(0.65), lineWidth: 0.5)
-                }
-            }
-            .opacity(isEnabled ? 1 : 0.42)
-            .scaleEffect(configuration.isPressed && isEnabled ? 0.97 : 1)
-    }
-
-    private var foreground: Color {
-        switch kind {
-        case .filled: .white
-        case .glass: AmberTheme.accent
-        case .danger: AmberTheme.accentRed
-        }
-    }
-
-    private var background: Color {
-        switch kind {
-        case .filled: AmberTheme.accent
-        case .glass: AmberTheme.glass
-        case .danger: .clear
-        }
-    }
-}
-
-private struct CapabilityActionButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(AmberTheme.accent)
-            .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(AmberTheme.glass, in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(.white.opacity(0.65), lineWidth: 0.5)
-            }
-            .opacity(isEnabled ? 1 : 0.42)
-            .scaleEffect(configuration.isPressed && isEnabled ? 0.97 : 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(item.title)，\(status.text)")
     }
 }
