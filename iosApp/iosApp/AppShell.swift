@@ -180,6 +180,8 @@ enum Route: Hashable {
     case providerDetail(name: String, endpoint: String)
     case modelEdit
     case modelDefaults
+    case searchServices
+    case searchProvider
     case ttsSettings
     case board
     case miniApps
@@ -258,6 +260,14 @@ private extension View {
                 ModelEditView()
             case .modelDefaults:
                 ModelDefaultsView(settingsStore: settingsStore)
+            case .searchServices:
+                SearchServicesView()
+            case .searchProvider:
+                PlaceholderDetailView(
+                    title: "搜索服务提供商",
+                    subtitle: "编辑能力、API Key 与启用状态",
+                    systemImage: "magnifyingglass"
+                )
             case .ttsSettings:
                 TTSSettingsView()
             case .board:
