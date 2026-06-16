@@ -1,29 +1,22 @@
 plugins {
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
 }
 
-android {
-    namespace = "app.amber.feature.task"
-    compileSdk = 36
-
-    defaultConfig {
-        minSdk = 26
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-}
-
 kotlin {
+    jvm()
+    iosArm64()
+    iosSimulatorArm64()
+
     compilerOptions {
         optIn.add("kotlin.uuid.ExperimentalUuidApi")
     }
-}
 
-dependencies {
-    api(libs.kotlinx.serialization.json)
-    api(libs.kotlinx.coroutines.core)
+    sourceSets {
+        commonMain.dependencies {
+            api(libs.kotlinx.serialization.json)
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.datetime)
+        }
+    }
 }

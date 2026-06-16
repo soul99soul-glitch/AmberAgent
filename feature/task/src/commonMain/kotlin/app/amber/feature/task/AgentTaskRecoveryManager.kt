@@ -1,13 +1,15 @@
 package app.amber.feature.task
 
-import java.io.File
+import kotlin.time.Clock
 
 class AgentTaskRecoveryManager(
     private val outputExists: (AgentTaskSnapshot) -> Boolean = { snapshot ->
-        snapshot.outputPath?.let { File(it).exists() } ?: snapshot.outputRef?.path?.let { File(it).exists() } ?: false
+        snapshot.outputPath?.let { TaskFile(it).exists() }
+            ?: snapshot.outputRef?.path?.let { TaskFile(it).exists() }
+            ?: false
     },
 ) {
-    fun recoverOnStartup(snapshot: AgentTaskSnapshot, nowMs: Long = System.currentTimeMillis()): AgentTaskSnapshot {
+    fun recoverOnStartup(snapshot: AgentTaskSnapshot, nowMs: Long = Clock.System.now().toEpochMilliseconds()): AgentTaskSnapshot {
         val outputExists = outputExists(snapshot)
         val outputRef = snapshot.outputRef?.copy(exists = outputExists)
             ?: snapshot.outputPath?.let {

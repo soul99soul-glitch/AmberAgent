@@ -1,5 +1,6 @@
 package app.amber.core.di
 
+import android.content.Context
 import app.amber.agent.BuildConfig
 import app.amber.feature.runtime.AgentLiveStatusNotifier
 import app.amber.feature.runtime.AgentToolActivityStore
@@ -37,7 +38,7 @@ import org.koin.dsl.module
 val agentInfraModule = module {
     single { AgentToolActivityStore() }
 
-    single { AgentTaskStore(get(), get()) }
+    single { AgentTaskStore(get<Context>().filesDir.absolutePath, get()) }
 
     single { AgentTaskScheduler(get()) }
 

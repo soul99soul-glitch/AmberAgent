@@ -1,6 +1,5 @@
 package app.amber.feature.task
 
-import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -8,21 +7,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.time.Clock
 import kotlinx.serialization.json.Json
-import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 
 class AgentTaskStore(
-    context: Context,
+    filesDirPath: String,
     private val json: Json,
 ) {
-    private val appFilesDir = context.filesDir
-    private val taskDir = File(context.filesDir, "amberagent/tasks").also { it.mkdirs() }
+    private val appFilesDirPath = filesDirPath
+    private val taskDir = TaskFile(filesDirPath + separatorChar() + "amberagent" + separatorChar() + "tasks").also { it.mkdirs() }
     private val recoveryManager = AgentTaskRecoveryManager()
     private val mutex = Mutex()
-    private val tasks = ConcurrentHashMap<String, AgentTaskSnapshot>()
-    private val cancelCallbacks = ConcurrentHashMap<String, suspend () -> Boolean>()
-    private val retryCallbacks = ConcurrentHashMap<String, suspend () -> Boolean>()
+    private val tasks = mutableMapOf<String, AgentTaskSnapshot>()
+    private val cancelCallbacks = mutableMapOf<String, suspend () -> Boolean>()
+    private val retryCallbacks = mutableMapOf<String, suspend () -> Boolean>()
     private val _tasksFlow = MutableStateFlow<List<AgentTaskSnapshot>>(emptyList())
     val tasksFlow: StateFlow<List<AgentTaskSnapshot>> = _tasksFlow.asStateFlow()
 
@@ -87,7 +85,7 @@ class AgentTaskStore(
             retryPolicy = retryPolicy ?: current.retryPolicy,
             outputRef = outputRef ?: current.outputRef,
             lastHeartbeatMs = lastHeartbeatMs ?: current.lastHeartbeatMs,
-            updatedAtMs = System.currentTimeMillis(),
+            updatedAtMs = Clock.System.now().toEpochMilliseconds(),
         )
         tasks[taskId] = next
         persist(next)
@@ -99,7 +97,7 @@ class AgentTaskStore(
         val removed = tasks.remove(taskId) != null
         cancelCallbacks.remove(taskId)
         retryCallbacks.remove(taskId)
-        File(taskDir, "$taskId.json").delete()
+        taskDir.child("$taskId.json").delete()
         publish()
         removed
     }
@@ -112,7 +110,7 @@ class AgentTaskStore(
 
     fun read(taskId: String): AgentTaskSnapshot? = tasks[taskId]
 
-    suspend fun cancel(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.IO) {
+    suspend fun cancel(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.Default) {
         val current = tasks[taskId] ?: error("Unknown agent task: $taskId")
         if (!current.status.running) return@withContext current
         val callback = cancelCallbacks[taskId]
@@ -130,7 +128,7 @@ class AgentTaskStore(
         } ?: current
     }
 
-    suspend fun retry(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.IO) {
+    suspend fun retry(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.Default) {
         val current = tasks[taskId] ?: error("Unknown agent task: $taskId")
         if (!current.retryPolicy.retryable) {
             return@withContext update(
@@ -186,13 +184,13 @@ class AgentTaskStore(
         tasks.remove(taskId)
         cancelCallbacks.remove(taskId)
         retryCallbacks.remove(taskId)
-        File(taskDir, "$taskId.json").delete()
+        taskDir.child("$taskId.json").delete()
         publish()
         true
     }
 
     suspend fun reconcileOnStartup(): List<AgentTaskSnapshot> = mutex.withLock {
-        val now = System.currentTimeMillis()
+        val now = Clock.System.now().toEpochMilliseconds()
         val recovered = tasks.values.map { recoveryManager.recoverOnStartup(it, now) }
         recovered.forEach { snapshot ->
             tasks[snapshot.taskId] = snapshot
@@ -203,27 +201,27 @@ class AgentTaskStore(
     }
 
     private fun loadSnapshots() {
-        taskDir.listFiles { file -> file.extension == "json" }.orEmpty().forEach { file ->
+        taskDir.listFilesByExtension("json").forEach { file ->
             val snapshot = runCatching {
-                json.decodeFromString(AgentTaskSnapshot.serializer(), file.readText())
+                json.decodeFromString(AgentTaskSnapshot.serializer(), file.readText() ?: return@forEach)
             }.getOrNull() ?: return@forEach
-            val restored = recoveryManager.recoverOnStartup(snapshot, System.currentTimeMillis())
+            val restored = recoveryManager.recoverOnStartup(snapshot, Clock.System.now().toEpochMilliseconds())
             tasks[restored.taskId] = restored
             if (restored != snapshot) persist(restored)
         }
     }
 
-    private fun privateOutputFile(snapshot: AgentTaskSnapshot): File? {
+    private fun privateOutputFile(snapshot: AgentTaskSnapshot): TaskFile? {
         val path = snapshot.outputRef?.path ?: snapshot.outputPath ?: return null
-        val file = File(path)
-        val canonical = runCatching { file.canonicalFile }.getOrNull() ?: return null
-        val root = runCatching { appFilesDir.canonicalFile }.getOrNull() ?: return null
-        return canonical.takeIf { it.path.startsWith(root.path + File.separator) }
+        val file = TaskFile(path)
+        val canonical = runCatching { file.canonicalPath() }.getOrNull() ?: return null
+        val root = runCatching { TaskFile(appFilesDirPath).canonicalPath() }.getOrNull() ?: return null
+        return file.takeIf { canonical.startsWith(root + separatorChar()) }
     }
 
     private fun persist(snapshot: AgentTaskSnapshot) {
         runCatching {
-            File(taskDir, "${snapshot.taskId}.json").writeText(json.encodeToString(AgentTaskSnapshot.serializer(), snapshot))
+            taskDir.child("${snapshot.taskId}.json").writeText(json.encodeToString(AgentTaskSnapshot.serializer(), snapshot))
         }
     }
 
