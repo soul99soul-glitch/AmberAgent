@@ -1,7 +1,9 @@
 import SwiftUI
+import Shared
 
 struct MarkdownView: View {
     let markdown: String
+    var displaySetting: DisplaySetting? = nil
 
     /// Cache the parsed AST to avoid re-parsing on every SwiftUI body evaluation.
     /// Only re-parses when `markdown` content changes.
@@ -105,9 +107,17 @@ struct MarkdownView: View {
 
     // MARK: - Code Block
 
+    @State private var codeBlockExpanded: Set<String> = []
+
     private func renderCodeBlock(_ node: PackedAstNode, source: String) -> some View {
         let code = sliceSource(source, start: node.startOffset, end: node.endOffset)
         let lang = node.codeLang()
+        let autoWrap = displaySetting?.codeBlockAutoWrap ?? true
+        let autoCollapse = displaySetting?.codeBlockAutoCollapse ?? false
+        let blockId = "\(node.startOffset)-\(node.endOffset)"
+        let isExpanded = codeBlockExpanded.contains(blockId) || !autoCollapse
+        let shouldCollapse = autoCollapse && code.count > 500 && !isExpanded
+
         return VStack(alignment: .leading, spacing: 0) {
             if let lang, !lang.isEmpty {
                 Text(lang)
@@ -117,10 +127,30 @@ struct MarkdownView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 4)
             }
-            Text(code)
-                .font(.system(.body, design: .monospaced))
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if shouldCollapse {
+                Text(String(code.prefix(300)))
+                    .font(.system(.body, design: .monospaced))
+                    .lineLimit(8)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    codeBlockExpanded.insert(blockId)
+                } label: {
+                    Text("展开（共 \(code.count) 字符）")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 8)
+                        .padding(.leading, 12)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text(code)
+                    .font(.system(.body, design: .monospaced))
+                    .lineLimit(autoWrap ? nil : nil)
+                    .fixedSize(horizontal: !autoWrap, vertical: false)
+                    .padding(12)
+                    .frame(maxWidth: autoWrap ? .infinity : nil, alignment: .leading)
+            }
         }
         .background(Color(.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 8))

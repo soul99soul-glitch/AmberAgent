@@ -17,6 +17,7 @@ struct ChatView: View {
     @FocusState private var isInputFocused: Bool
     @Environment(\.dismiss) private var dismiss
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @State private var sharedSettings = IOSSharedSettingsStore()
 
     init(settingsStore: SettingsStore, localToolExecutor: IOSLocalToolExecutor? = nil) {
         self.settingsStore = settingsStore
@@ -90,7 +91,7 @@ struct ChatView: View {
                         ChatEmptyState()
                     } else {
                         ForEach(viewModel.messages, id: \.id) { message in
-                            MessageBubbleView(message: message)
+                            MessageBubbleView(message: message, displaySetting: sharedSettings.displaySetting)
                                 .id(message.id)
                         }
                     }

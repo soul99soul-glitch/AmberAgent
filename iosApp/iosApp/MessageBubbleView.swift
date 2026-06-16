@@ -4,6 +4,7 @@ import Shared
 struct MessageBubbleView: View {
 
     let message: UIMessage
+    var displaySetting: DisplaySetting? = nil
 
     private var isUser: Bool {
         message.role == MessageRole.user
@@ -37,7 +38,7 @@ struct MessageBubbleView: View {
                     ChatUserBubble(text: textPart.text)
                 } else {
                     ChatAssistantText {
-                        MarkdownView(markdown: textPart.text)
+                        MarkdownView(markdown: textPart.text, displaySetting: displaySetting)
                     }
                 }
             } else if let reasoning = part as? UIMessagePart.Reasoning, !reasoning.reasoning.isEmpty {
