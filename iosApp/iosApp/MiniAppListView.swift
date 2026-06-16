@@ -100,7 +100,7 @@ struct MiniAppListView: View {
                 Text("小应用")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(AmberTheme.foreground)
-                Text("Android/KMP 已实现 · iOS 运行桥未接线")
+                Text("Android/KMP 已实现 · iOS WKWebView 可用（Runner 待完整 bridge）")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }

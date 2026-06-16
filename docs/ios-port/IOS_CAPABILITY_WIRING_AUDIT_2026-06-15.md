@@ -839,6 +839,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - HONESTY: real WKWebView can load any URL. Full WebMount (site registry/OAuth/cookie/JS bridge/agent tools) still pending — but the WebView rendering chain is proven.
 - Verification: xcodebuild BUILD SUCCEEDED.
 
+### Slice 42 - Phase 8.3: MiniApp WKWebView preview
+
+- Scope: MiniAppRunnerView now has a real WKWebView preview (reuses SimpleWebView from WebMount). Users enter a URL and see it rendered. MiniAppListView header updated from "iOS 运行桥未接线" to "iOS WKWebView 可用（Runner 待完整 bridge）".
+- HONESTY: real WKWebView. Full MiniApp (HTML validation/bridge injection/sandbox/permissions) still pending.
+- Verification: xcodebuild BUILD SUCCEEDED.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

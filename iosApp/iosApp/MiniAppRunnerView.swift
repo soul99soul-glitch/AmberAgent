@@ -1,9 +1,12 @@
 import SwiftUI
+import WebKit
 
 struct MiniAppRunnerView: View {
     @Environment(\.dismiss) private var dismiss
 
     let title: String
+    @State private var previewUrl: String = "https://www.example.com"
+    @State private var loadedUrl: String = ""
 
     private let evidenceRows: [MiniAppCapabilityRow] = [
         .init(
@@ -69,9 +72,10 @@ struct MiniAppRunnerView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        webViewPreviewSection
                         evidenceSection
                         blockedSection
-                        MiniAppCapabilityNote("启用真实 Runner 前，需要先定义 iOS MiniAppEntity 存储、HTML validator/output parser、Chat transformer、WebView shell、native bridge、permission grant、shared store、system bridge 和审计日志链路。")
+                        MiniAppCapabilityNote("iOS 已有 WKWebView 渲染能力（上方预览）。完整 MiniApp Runner（HTML 校验/bridge 注入/沙箱/权限）仍待开发。")
                             .padding(.top, 14)
                     }
                     .padding(.bottom, 36)
@@ -113,7 +117,7 @@ struct MiniAppRunnerView: View {
     }
 
     private var intro: some View {
-        Text("这个 iOS 路由保留用于未来接入真实 MiniApp runner，但当前没有 appId、MiniAppRepository、WebView shell 或 native bridge。为避免伪造可运行小应用，本页只展示 Android/KMP 运行链路和 iOS 缺失项。")
+        Text("iOS 已有 WKWebView 渲染能力（本页可加载网页/HTML）。完整 MiniApp Runner（HTML 校验/bridge 注入/沙箱/权限）仍待开发。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -122,6 +126,50 @@ struct MiniAppRunnerView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    /// Real WKWebView preview — loads a URL entered by the user. Proves the
+    /// WebView rendering chain for MiniApp works on iOS.
+    private var webViewPreviewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "WebView 预览（WKWebView · 真实）")
+
+            HStack(spacing: 8) {
+                TextField("https://", text: $previewUrl)
+                    .font(.system(size: 14, design: .monospaced))
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10))
+                    .autocorrectionDisabled()
+
+                Button {
+                    loadedUrl = previewUrl
+                } label: {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(AmberTheme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+
+            if !loadedUrl.isEmpty {
+                SimpleWebView(urlString: loadedUrl)
+                    .frame(height: 300)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
+
+            Text("真实的 WKWebView。MiniApp 的 HTML 校验/bridge 注入/沙箱权限仍待开发。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+        }
     }
 
     private var evidenceSection: some View {
