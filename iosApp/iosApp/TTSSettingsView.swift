@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct TTSSettingsView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
 
@@ -38,6 +40,7 @@ struct TTSSettingsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        presetProvidersSection
                         engineSection
                         configurationSection
                         previewSection
@@ -92,6 +95,34 @@ struct TTSSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 2)
+    }
+
+    /// Read-only list of the REAL KMP default TTS providers (DEFAULT_TTS_PROVIDERS),
+    /// sourced from `IOSSharedSettingsStore` (which calls the KMP
+    /// `IosSettingsDefaults.defaultSeededSettings()`). This proves the "real seeded
+    /// Settings read" data path is wired end-to-end (UI -> IOSSharedSettingsStore
+    /// -> IosSettingsDefaults -> applyBackfillAndSeedShared ->
+    /// applyCrossDomainConsistencyShared -> seeded Settings). It does NOT make these
+    /// engines editable/playable — the cloud engine editing below stays draft-only.
+    private var presetProvidersSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "预置 TTS（KMP 默认 · 只读）")
+
+            AmberFormGroup {
+                ForEach(Array(sharedSettings.ttsProviders.enumerated()), id: \.offset) { index, provider in
+                    TTSPresetProviderRow(
+                        name: provider.name,
+                        isSelected: provider.id == sharedSettings.selectedTTSProviderId
+                    )
+
+                    if index < sharedSettings.ttsProviders.count - 1 {
+                        TTSSettingsDivider()
+                    }
+                }
+            }
+
+            TTSSettingsNote("这些行来自 Android/KMP DEFAULT_TTS_PROVIDERS，经 IosSettingsDefaults 真实 seed/去重后只读展示。当前选中的默认是 \(sharedSettings.ttsProviders.first { $0.id == sharedSettings.selectedTTSProviderId }?.name ?? "系统 TTS")。下方引擎编辑区仍是草稿，不保存。")
+        }
     }
 
     private var engineSection: some View {
@@ -757,6 +788,42 @@ private struct TTSSettingsDivider: View {
     }
 }
 
+private struct TTSPresetProviderRow: View {
+    let name: String
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "speaker.wave.2")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AmberTheme.accent)
+                .frame(width: 30, height: 30)
+                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            Text(name)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isSelected {
+                Text("默认")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accentGreen)
+            } else {
+                Text("预置")
+                    .font(.caption2)
+                    .foregroundStyle(AmberTheme.muted2)
+            }
+        }
+        .frame(minHeight: 48)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name)\(isSelected ? "，当前默认" : "")")
+    }
+}
+
 private struct TTSSettingsNote: View {
     let text: String
 
@@ -807,7 +874,7 @@ private extension String {
 
 #Preview {
     NavigationStack {
-        TTSSettingsView()
+        TTSSettingsView(sharedSettings: IOSSharedSettingsStore())
     }
 }
 

@@ -12,6 +12,7 @@ struct AppShell: View {
     @State private var systemPermissionCoordinator: IOSSystemPermissionCoordinator
     @State private var localToolExecutor: IOSLocalToolExecutor
     @State private var providerRegistry: ProviderRegistryStore
+    @State private var sharedSettings: IOSSharedSettingsStore
     @State private var rootRouter = RouterPath()
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = "light"
 
@@ -31,6 +32,7 @@ struct AppShell: View {
             )
         )
         self._providerRegistry = State(initialValue: ProviderRegistryStore(settingsStore: settingsStore))
+        self._sharedSettings = State(initialValue: IOSSharedSettingsStore())
     }
 
     var body: some View {
@@ -39,6 +41,7 @@ struct AppShell: View {
                 .withAppDestinations(
                     settingsStore: settingsStore,
                     providerRegistry: providerRegistry,
+                    sharedSettings: sharedSettings,
                     permissionStore: permissionStore,
                     documentStore: documentAccessStore,
                     systemPermissionCoordinator: systemPermissionCoordinator,
@@ -241,6 +244,7 @@ private extension View {
     func withAppDestinations(
         settingsStore: SettingsStore,
         providerRegistry: ProviderRegistryStore,
+        sharedSettings: IOSSharedSettingsStore,
         permissionStore: IOSPermissionStore,
         documentStore: DocumentAccessStore,
         systemPermissionCoordinator: IOSSystemPermissionCoordinator,
@@ -312,7 +316,7 @@ private extension View {
             case .searchProvider:
                 SearchProviderView()
             case .ttsSettings:
-                TTSSettingsView()
+                TTSSettingsView(sharedSettings: sharedSettings)
             case .ttsAdd:
                 TTSAddView()
             case .board:
