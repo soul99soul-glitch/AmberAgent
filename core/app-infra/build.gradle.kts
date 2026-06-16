@@ -1,22 +1,18 @@
 plugins {
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.multiplatform)
 }
 
-android {
-    namespace = "app.amber.core.infra"
-    compileSdk = 36
+kotlin {
+    jvm()
+    iosArm64()
+    iosSimulatorArm64()
 
-    defaultConfig {
-        minSdk = 26
+    sourceSets {
+        commonMain.dependencies {
+            api(libs.kotlinx.coroutines.core)
+        }
+        jvmMain.dependencies {
+            api(libs.androidx.datastore.preferences.core)
+        }
     }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-}
-
-dependencies {
-    api(libs.kotlinx.coroutines.core)
-    api(libs.androidx.datastore.preferences.core)
 }

@@ -758,6 +758,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: `feature:task:compileKotlinJvm` BUILD SUCCESSFUL; `feature:task:compileKotlinIosSimulatorArm64` BUILD SUCCESSFUL; `shared:linkDebugFrameworkIosSimulatorArm64` BUILD SUCCESSFUL; `xcodebuild` iPhone 17 sim BUILD SUCCEEDED. Android app full compile skipped (no Android SDK on this machine — environment limitation, not a code regression; DI change is one line `get<Context>().filesDir.absolutePath`). Subagent review: CONDITIONAL PASS → fixed Finding 1 (iOS canonicalPath now resolves symlinks via NSURL.standardizedURL) + Finding 8 (removed unused imports); Android zero regression, expect-actual complete, Clock API correct.
 - Remaining risk: `AgentTaskStore` is KMP but not yet consumed by iOS (no Swift-visible symbol, no ModelCouncilManager bridge yet). The execution bridge (running a council) still needs `feature/modelcouncil` KMP-ification + `core/app-infra` (AppScope) + `core/settings` (SettingsAggregator) — the next phase 4 slices. Concurrent reads outside mutex (list/read) are a pre-existing behavior carried over from the original ConcurrentHashMap version.
 
+### Slice 30 - core/app-infra KMP-ified (phase 4 execution bridge step 2)
+
+- Scope: `core/app-infra` converted from Android-only to KMP (`kotlin.multiplatform` + `jvm()`/`iosArm64()`/`iosSimulatorArm64()`). `AppScope` moved to commonMain with `android.util.Log` abstracted to `expect fun logE` (jvmMain uses `java.util.logging.Logger`, iosMain uses `platform.Foundation.NSLog`). `PreferencesKeys.kt` moved to jvmMain (Android-only, uses `androidx.datastore.preferences.core` which is available on JVM target via the jvmMain dependency).
+- HONESTY: jvmMain logE uses `java.util.logging.Logger` instead of `android.util.Log` — benign substitution (both log to the system; Android's logcat captures java.util.logging too). The `jvm()` target cannot resolve `android.util.Log` (it's an Android SDK class, not pure JVM), so this substitution is required for KMP compatibility.
+- Verification: `core:app-infra:compileKotlinJvm` BUILD SUCCESSFUL; `compileKotlinIosSimulatorArm64` BUILD SUCCESSFUL; `shared:linkDebugFrameworkIosSimulatorArm64` BUILD SUCCESSFUL. AppScope is now instantiable on iOS.
+- Remaining risk: AppScope itself is KMP but not yet consumed by iOS (ModelCouncilManager bridge still pending).
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
