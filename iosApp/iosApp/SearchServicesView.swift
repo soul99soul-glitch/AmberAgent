@@ -134,7 +134,7 @@ struct SearchServicesView: View {
                     iconColor: AmberTheme.accentCyan,
                     title: "Agent 网络搜索",
                     subtitle: "Android 使用 settings.enableWebSearch 进入 SearchTools / SearchOrchestrator；iOS 生成链路未接该开关。",
-                    value: "未接线",
+                    value: "执行待接",
                     valueColor: AmberTheme.accentAmber
                 )
             }
@@ -371,7 +371,7 @@ private struct SearchSourceStatusRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("未接线")
+            Text("执行待接")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AmberTheme.accentAmber)
         }

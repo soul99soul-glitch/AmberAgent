@@ -104,7 +104,7 @@ struct ConversationStorageView: View {
             AmberFormGroup {
                 StorageActionRow(
                     systemImage: "arrow.clockwise",
-                    title: "清除缓存尚未接线",
+                    title: "清除缓存尚执行待接",
                     subtitle: "需要真实缓存统计与清理服务"
                 ) {
                     pendingAlert = .cache
@@ -114,7 +114,7 @@ struct ConversationStorageView: View {
 
                 StorageActionRow(
                     systemImage: "calendar.badge.clock",
-                    title: "按时间清理尚未接线",
+                    title: "按时间清理尚执行待接",
                     subtitle: "需要对话存储层、置顶规则与备份检查"
                 ) {
                     pendingAlert = .oldConversations
@@ -131,7 +131,7 @@ struct ConversationStorageView: View {
                 Button {
                     pendingAlert = .deleteAll
                 } label: {
-                    Text("删除全部对话尚未接线")
+                    Text("删除全部对话尚执行待接")
                         .font(.body.weight(.medium))
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity)
@@ -175,7 +175,7 @@ private struct StorageUsageBar: View {
                 }
             }
 
-            Label("用量统计未接线", systemImage: "externaldrive.badge.questionmark")
+            Label("用量统计执行待接", systemImage: "externaldrive.badge.questionmark")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AmberTheme.muted)
                 .padding(.horizontal, 10)
@@ -300,9 +300,9 @@ private enum StorageAlert: Identifiable {
 
     var title: String {
         switch self {
-        case .cache: "清除缓存尚未接线"
-        case .oldConversations: "按时间清理尚未接线"
-        case .deleteAll: "删除全部对话尚未接线"
+        case .cache: "清除缓存尚执行待接"
+        case .oldConversations: "按时间清理尚执行待接"
+        case .deleteAll: "删除全部对话尚执行待接"
         }
     }
 

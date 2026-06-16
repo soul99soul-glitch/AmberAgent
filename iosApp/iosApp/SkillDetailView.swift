@@ -82,7 +82,7 @@ struct SkillDetailView: View {
                 Circle()
                     .fill(AmberTheme.muted2)
                     .frame(width: 7, height: 7)
-                Text("未接线 · 未读取 SKILL.md")
+                Text("执行待接 · 未读取 SKILL.md")
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -101,7 +101,7 @@ struct SkillDetailView: View {
                         .foregroundStyle(AmberTheme.foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Text("未接线")
+                    Text("执行待接")
                         .font(.subheadline)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -130,7 +130,7 @@ struct SkillDetailView: View {
                 }
                 .padding(.horizontal, 16)
 
-            SkillDetailFooter("真实触发条件需要读取 SKILL.md；iOS 详情页尚未接线。")
+            SkillDetailFooter("真实触发条件需要读取 SKILL.md；iOS 详情页尚执行待接。")
         }
     }
 
@@ -153,7 +153,7 @@ struct SkillDetailView: View {
             AmberFormGroup {
                 SkillStaticValueRow(title: "版本", value: "未知", monospace: true)
                 SkillDetailDivider()
-                SkillStaticValueRow(title: "来源", value: "未接线")
+                SkillStaticValueRow(title: "来源", value: "执行待接")
                 SkillDetailDivider()
                 SkillDetailValueRow(title: "文件", value: "SKILL.md", monospace: true) {
                     pendingAlert = .file
@@ -170,7 +170,7 @@ struct SkillDetailView: View {
                 Button {
                     pendingAlert = .delete
                 } label: {
-                    Text("删除尚未接线")
+                    Text("删除尚执行待接")
                         .font(.body.weight(.medium))
                         .foregroundStyle(AmberTheme.accentRed)
                         .frame(maxWidth: .infinity)

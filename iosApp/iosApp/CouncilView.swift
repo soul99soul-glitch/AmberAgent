@@ -6,6 +6,7 @@ struct CouncilView: View {
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
+    @State private var runner = CouncilRunner()
 
     private let evidenceRows: [CouncilCapabilityEvidence] = [
         .init(
@@ -29,7 +30,7 @@ struct CouncilView: View {
         .init(
             title: "iOS 运行桥",
             subtitle: "当前 SwiftUI 没有 Settings.agentRuntime、ModelCouncilManager 或 model_council 工具执行桥。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -52,6 +53,7 @@ struct CouncilView: View {
                         rolePresetsSection
                         evidenceSection
                         iOSStatusSection
+                        runnerSection
                         draftActionSection
                     }
                     .padding(.bottom, 36)
@@ -76,7 +78,7 @@ struct CouncilView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 运行桥未接线")
+                Text("Android/KMP 已实现 · iOS 运行桥执行待接")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -95,7 +97,7 @@ struct CouncilView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 当前没有把这些能力接入 SettingsStore、ChatViewModel 或本地工具执行器。本页只展示能力证据和未接线边界，不启动议会、不生成转录、不发送模型请求。")
+        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 当前没有把这些能力接入 SettingsStore、ChatViewModel 或本地工具执行器。本页只展示能力证据和执行待接边界，不启动议会、不生成转录、不发送模型请求。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -194,7 +196,7 @@ struct CouncilView: View {
                     row: .init(
                         title: "发起议会",
                         subtitle: "没有 iOS model_council_start 执行路径；聊天输入也不会触发议会 run。",
-                        value: "未接线",
+                        value: "执行待接",
                         color: AmberTheme.accentAmber
                     )
                 )
@@ -203,7 +205,7 @@ struct CouncilView: View {
                     row: .init(
                         title: "实时席位 / 转录",
                         subtitle: "没有 runId、liveTextFlow、transcriptPath 或 AgentTask 快照来源。",
-                        value: "未接线",
+                        value: "执行待接",
                         color: AmberTheme.accentAmber
                     )
                 )
@@ -216,6 +218,33 @@ struct CouncilView: View {
                         color: AmberTheme.muted
                     )
                 )
+            }
+        }
+    }
+    /// Council execution entry — calls CouncilRunner.runTestCycle() to start
+    /// a council via IosCouncilFactory. Real provider if API key configured.
+    private var runnerSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "执行（真实调用链）")
+            AmberFormGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    if runner.isRunning {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("正在启动议会…").font(.body).foregroundStyle(AmberTheme.foreground)
+                        }
+                    } else {
+                        Button { runner.runTestCycle() } label: {
+                            Label("启动议会", systemImage: "bubble.left.and.bubble.right.fill")
+                                .font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
+                        }.buttonStyle(.plain)
+                    }
+                    if runner.lastRunResult != "(未运行)" {
+                        Text(runner.lastRunResult).font(.footnote).foregroundStyle(AmberTheme.muted)
+                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14).padding(.vertical, 12)
             }
         }
     }

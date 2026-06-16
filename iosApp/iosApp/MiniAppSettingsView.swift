@@ -9,7 +9,7 @@ struct MiniAppSettingsView: View {
         .init(
             title: "enabled",
             subtitle: "Android/KMP gate for MiniApp prompt/output transformers, saved app list, runner, and sandbox permission checks.",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
@@ -63,19 +63,19 @@ struct MiniAppSettingsView: View {
         .init(
             title: "Settings.agentRuntime.miniApp",
             subtitle: "iOS SettingsStore has no MiniAppSetting fields, no SettingsAggregator bridge, and no save path for these toggles.",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
             title: "MiniApp grants",
             subtitle: "iOS has no MiniAppGrantDAO or per-app permission decision store; this page cannot grant or deny declared permissions.",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
             title: "Runner consumption",
             subtitle: "iOS has no WebView runner or MiniAppSandbox, so setting fields would not be consumed even if local UI state existed.",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         )
     ]

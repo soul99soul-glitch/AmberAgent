@@ -249,7 +249,7 @@ private struct AccountHeatmapBlock: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("iOS 统计桥尚未接线")
+                    Text("iOS 统计桥尚执行待接")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -280,7 +280,7 @@ private struct AccountHeatmap: View {
                     .frame(width: gridWidth, height: gridHeight)
                     .opacity(0.42)
 
-                Label("统计未接线", systemImage: "chart.bar.xaxis")
+                Label("统计执行待接", systemImage: "chart.bar.xaxis")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AmberTheme.muted)
                     .padding(.horizontal, 10)

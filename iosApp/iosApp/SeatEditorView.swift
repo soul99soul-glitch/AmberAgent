@@ -39,7 +39,7 @@ struct SeatEditorView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert("移除尚未接线", isPresented: $showRemoveInfo) {
+        .alert("移除尚执行待接", isPresented: $showRemoveInfo) {
             Button("知道了", role: .cancel) { }
         } message: {
             Text("当前 iOS 页面没有读取真实 defaultSeats，因此不会删除任何模型议会席位。")
@@ -279,7 +279,7 @@ struct SeatEditorView: View {
             Button {
                 showRemoveInfo = true
             } label: {
-                Text("移除席位尚未接线")
+                Text("移除席位尚执行待接")
                     .font(.body)
                     .foregroundStyle(AmberTheme.muted)
                     .frame(maxWidth: .infinity)

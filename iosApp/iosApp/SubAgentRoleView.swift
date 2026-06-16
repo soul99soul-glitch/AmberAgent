@@ -231,25 +231,25 @@ private struct SubAgentRoleDetail {
             .init(
                 title: "modelId",
                 subtitle: "KMP 支持为角色覆盖聊天模型；iOS 当前没有 provider/model registry bridge。",
-                value: "未接线",
+                value: "执行待接",
                 color: AmberTheme.accentAmber
             ),
             .init(
                 title: "reasoningLevel / temperature",
                 subtitle: "KMP SubAgentOverride 可覆盖推理强度和采样温度；iOS 当前不会写入。",
-                value: "未接线",
+                value: "执行待接",
                 color: AmberTheme.accentAmber
             ),
             .init(
                 title: "systemPrompt",
                 subtitle: "KMP 支持角色提示词覆盖并写入 subagent markdown；iOS 当前不保存草稿。",
-                value: "未接线",
+                value: "执行待接",
                 color: AmberTheme.accentAmber
             ),
             .init(
                 title: "turns / timeout / outputBudget",
                 subtitle: "KMP 可按角色覆盖最大轮数、超时和输出预算；iOS 当前不暴露保存。",
-                value: "未接线",
+                value: "执行待接",
                 color: AmberTheme.accentAmber
             )
         ]

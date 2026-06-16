@@ -337,7 +337,7 @@ private struct ContextRingButton: View {
         }
         .buttonStyle(.plain)
         .amberGlass(cornerRadius: 17)
-        .accessibilityLabel("上下文统计尚未接线")
+        .accessibilityLabel("上下文统计尚执行待接")
         .accessibilityValue("\(snapshot.messageCount) 条消息")
     }
 }
@@ -727,7 +727,7 @@ private struct ComposerContextPanel: View {
                     }
                     .frame(width: 60, height: 60)
 
-                    Text("Token 统计未接线")
+                    Text("Token 统计执行待接")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 

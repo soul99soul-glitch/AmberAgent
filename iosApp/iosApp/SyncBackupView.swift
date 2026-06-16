@@ -45,13 +45,13 @@ struct SyncBackupView: View {
         .init(
             title: "Google 账号",
             subtitle: "不读取 GoogleDriveAuthSession，也不恢复 Android syncSettings.googleAccountEmail。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "备份状态",
             subtitle: "不读取 lastBackupVersionName、lastUploadAt、lastDownloadAt 或 lastLocalExportAt。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(
@@ -63,13 +63,13 @@ struct SyncBackupView: View {
         .init(
             title: "自动同步",
             subtitle: "不再写本地 @AppStorage；真实字段应来自 SyncSettings.autoSyncEnabled。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "加密口令",
             subtitle: "Android 归档用 PBKDF2WithHmacSHA256 + AES/GCM；iOS 没有口令存储或归档服务。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(

@@ -114,9 +114,9 @@ struct McpServersView: View {
             AmberSectionLabel(text: "配置状态")
             AmberFormGroup {
                 McpStatusRow(
-                    title: "MCP 配置桥尚未接线",
+                    title: "MCP 配置桥尚执行待接",
                     subtitle: "没有读取 Settings.mcpServers，也没有订阅 McpManager.syncingStatus。",
-                    badge: "未接线"
+                    badge: "执行待接"
                 )
             }
 

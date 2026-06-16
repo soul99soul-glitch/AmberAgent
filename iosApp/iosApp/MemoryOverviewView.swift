@@ -28,7 +28,7 @@ struct MemoryOverviewView: View {
         .init(
             title: "iOS 记忆桥",
             subtitle: "当前 SwiftUI 没有 MemoryRepository、Settings.agentRuntime 或 memory_tool executor bridge。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -37,19 +37,19 @@ struct MemoryOverviewView: View {
         .init(
             title: "核心 / 短期 / 长期记忆开关",
             subtitle: "Android Settings.agentRuntime 已有真实开关；iOS 当前不读写这些字段。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "最近会话参考 / 时间提醒",
             subtitle: "Android Settings.agentRuntime 有 enableRecentChatsReference 和 enableTimeReminder。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "选择性召回 / 自动整理 / 上下文压缩",
             subtitle: "Android 有 memoryRecall、memoryWorker、contextCompaction；iOS 当前没有设置桥。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -150,7 +150,7 @@ struct MemoryOverviewView: View {
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
-                        Text("iOS 未接线")
+                        Text("iOS 执行待接")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(AmberTheme.accentAmber)
                             .padding(.horizontal, 7)
@@ -229,7 +229,7 @@ struct MemoryOverviewView: View {
                     row: .init(
                         title: "核心 / 短期 / 长期条目",
                         subtitle: "Android/KMP 通过 MemoryRepository 读取；iOS 当前没有 DAO/repository bridge，因此不显示样例记忆条数。",
-                        value: "未接线",
+                        value: "执行待接",
                         color: AmberTheme.accentAmber
                     )
                 )

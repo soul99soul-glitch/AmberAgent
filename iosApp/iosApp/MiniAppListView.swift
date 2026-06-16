@@ -32,7 +32,7 @@ struct MiniAppListView: View {
         .init(
             title: "iOS MiniApp bridge",
             subtitle: "SwiftUI currently has no MiniAppSetting bridge, repository/DAO, transformer, HTML validator, WebView bridge, permission grant store, or runner.",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         )
     ]
@@ -41,7 +41,7 @@ struct MiniAppListView: View {
         .init(
             title: "已保存小应用",
             subtitle: "不再展示硬编码番茄钟、汇率换算、配色板、待办、JSON 工具或抽签骰子。真实列表应来自 MiniAppRepository.observeAll().",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
@@ -53,13 +53,13 @@ struct MiniAppListView: View {
         .init(
             title: "置顶 / 重命名 / 删除 / 导出 / 版本",
             subtitle: "这些操作在 Android 通过 MiniAppRepository 和 HTML exporter 完成；iOS 当前不执行任何存储或文件写入。",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
             title: "聊天生成 MiniApp",
             subtitle: "iOS ChatViewModel 未接 MiniAppPromptTransformer、MiniAppOutputTransformer、MiniAppOutputParser 或 UIMessagePart.MiniApp 渲染链。",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         )
     ]

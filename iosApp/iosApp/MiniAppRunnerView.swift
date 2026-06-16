@@ -30,7 +30,7 @@ struct MiniAppRunnerView: View {
         .init(
             title: "iOS runner",
             subtitle: "SwiftUI route currently receives only a display title, not a persisted appId, and has no repository, WebView, bridge, sandbox, or grant store.",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         )
     ]
@@ -45,13 +45,13 @@ struct MiniAppRunnerView: View {
         .init(
             title: "桥接能力调用",
             subtitle: "Amber.fetch/search/ai/host/sharedStore/eventBus/location/sensor/clipboard 在 iOS 没有 MiniAppBridge executor。",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
             title: "菜单操作",
             subtitle: "不提供打开、置顶、版本历史、导出、重命名或删除，因为没有 iOS MiniAppRepository 事务。",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
@@ -101,7 +101,7 @@ struct MiniAppRunnerView: View {
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
-                Text("Runner 未接线")
+                Text("Runner 执行待接")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }

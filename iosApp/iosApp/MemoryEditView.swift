@@ -36,7 +36,7 @@ struct MemoryEditView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert("删除尚未接线", isPresented: $showDeleteInfo) {
+        .alert("删除尚执行待接", isPresented: $showDeleteInfo) {
             Button("知道了", role: .cancel) { }
         } message: {
             Text("当前 iOS 编辑页没有读取真实 MemoryRepository，因此不会删除任何记忆记录。")
@@ -249,7 +249,7 @@ struct MemoryEditView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "处理方式")
             AmberFormGroup {
-                MemoryPreviewLine(label: "保存", value: "未接线")
+                MemoryPreviewLine(label: "保存", value: "执行待接")
                 MemoryEditDivider()
                 MemoryPreviewLine(label: "写入位置", value: "本页草稿")
                 MemoryEditDivider()
@@ -263,7 +263,7 @@ struct MemoryEditView: View {
             Button {
                 showDeleteInfo = true
             } label: {
-                Text("删除记忆尚未接线")
+                Text("删除记忆尚执行待接")
                     .font(.body.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
                     .frame(maxWidth: .infinity)

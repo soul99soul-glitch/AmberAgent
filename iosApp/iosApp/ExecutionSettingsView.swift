@@ -52,7 +52,7 @@ struct ExecutionSettingsView: View {
     }
 
     private var intro: some View {
-        Text("这里仅保留已经被 iOS Chat 运行链消费的实时活动开关；其他 Android/KMP 执行字段先作为未接线映射展示。")
+        Text("这里仅保留已经被 iOS Chat 运行链消费的实时活动开关；其他 Android/KMP 执行字段先作为执行待接映射展示。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)

@@ -118,7 +118,7 @@ struct ProviderDetailView: View {
                     ProviderStaticRow(
                         title: "账户余额",
                         subtitle: "余额读取会触发外部请求，iOS 不做例行测试",
-                        value: "未接线"
+                        value: "执行待接"
                     )
                 }
             }
@@ -378,7 +378,7 @@ struct ProviderDetailView: View {
         }
 
         if requiresResponseAPIBridge {
-            return "Android 默认 useResponseApi = true；iOS 未接线"
+            return "Android 默认 useResponseApi = true；iOS 执行待接"
         }
 
         return "当前 ChatViewModel 固定使用"
@@ -397,7 +397,7 @@ struct ProviderDetailView: View {
     }
 
     private var responseAPIValue: String {
-        requiresResponseAPIBridge ? "模板需要" : "未接线"
+        requiresResponseAPIBridge ? "模板需要" : "执行待接"
     }
 
     private var connectionFooterText: String {
@@ -473,7 +473,7 @@ private enum ProviderDetailAlert: Identifiable {
     var title: String {
         switch self {
         case .protocolPicker:
-            "接口协议选择尚未接线"
+            "接口协议选择尚执行待接"
         case .presetApplied:
             "API 地址已套用"
         case .providerBridgeRequired:
@@ -481,7 +481,7 @@ private enum ProviderDetailAlert: Identifiable {
         case .endpointConfirmationRequired:
             "Base URL 需要确认"
         case .responseAPIRequired:
-            "Response API 尚未接线"
+            "Response API 尚执行待接"
         }
     }
 

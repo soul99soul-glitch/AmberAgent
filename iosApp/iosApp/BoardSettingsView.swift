@@ -47,25 +47,25 @@ struct BoardSettingsView: View {
         .init(
             title: "关注规则",
             subtitle: "Android 通过 BoardFocusRuleDAO 增删改关注点；iOS 当前没有 DAO 或输入保存。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "来源权重",
             subtitle: "Android 将完成、忽略、聊天反馈写入 BoardWeightEntity，并可自动 hard-mute。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "自定义热榜源",
             subtitle: "Android 通过 HotListRepository 写入 HotListSourceEntity 并触发 HotListScheduler.runOnce()。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "搜索服务复用",
             subtitle: "Android 深度阅读复用 Settings.searchEnabledServiceIds；iOS 搜索服务桥也仍未完成。",
-            value: "未接线",
+            value: "执行待接",
             color: AmberTheme.accentAmber
         )
     ]

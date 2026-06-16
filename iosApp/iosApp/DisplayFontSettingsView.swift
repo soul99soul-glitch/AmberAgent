@@ -128,13 +128,13 @@ struct DisplayFontSettingsView: View {
                 DisplayStatusRow(
                     title: "显示助手消息气泡",
                     subtitle: "当前 Chat 渲染器没有助手气泡模式",
-                    value: "未接线"
+                    value: "执行待接"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "昵称下方显示日期",
-                    subtitle: "消息模型/时间格式桥尚未接线",
-                    value: "未接线"
+                    subtitle: "消息模型/时间格式桥尚执行待接",
+                    value: "执行待接"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
@@ -165,7 +165,7 @@ struct DisplayFontSettingsView: View {
                 DisplayStatusRow(
                     title: "显示行号",
                     subtitle: "当前 iOS Markdown renderer 不生成行号",
-                    value: "未接线"
+                    value: "执行待接"
                 )
             }
         }
@@ -191,14 +191,14 @@ struct DisplayFontSettingsView: View {
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "粘贴长文本为文件",
-                    subtitle: "KMP 默认值（pasteLongTextAsFile，阈值 \(sharedSettings.displaySetting.pasteLongTextThreshold)）；iOS 粘贴管线尚未接线",
+                    subtitle: "KMP 默认值（pasteLongTextAsFile，阈值 \(sharedSettings.displaySetting.pasteLongTextThreshold)）；iOS 粘贴管线尚执行待接",
                     value: sharedSettings.displaySetting.pasteLongTextAsFile ? "默认开" : "默认关"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "启动入口",
                     subtitle: "App 启动路由目前固定进入 Home",
-                    value: "未接线"
+                    value: "执行待接"
                 )
             }
         }

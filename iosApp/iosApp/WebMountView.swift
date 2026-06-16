@@ -56,13 +56,13 @@ struct WebMountView: View {
         .init(
             title: "Agent 集成开关",
             subtitle: "不再显示本地启用、/webmount 安装或任意 JavaScript 开关；iOS 没有可消费这些开关的 agent tool catalog。",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
             title: "我的网站列表",
             subtitle: "不再展示飞书、X、知乎、B 站、Stack Overflow 等硬编码登录态或公开状态。真实列表应来自 UserSiteRegistry。",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
@@ -80,7 +80,7 @@ struct WebMountView: View {
         .init(
             title: "添加 / 删除 / 恢复示例",
             subtitle: "不创建、删除或恢复站点配置，因为 iOS 没有 UserSiteRegistry 或 WebMount 持久化事务。",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         )
     ]
@@ -122,7 +122,7 @@ struct WebMountView: View {
                 Text("WebMount")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(AmberTheme.foreground)
-                Text("Android 已实现 · iOS WebMount 桥未接线")
+                Text("Android 已实现 · iOS WebMount 桥执行待接")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -232,7 +232,7 @@ struct WebMountSiteView: View {
         .init(
             title: "Route payload",
             subtitle: "This iOS route only carries display name and host. It does not carry a real UserSite id, adapter id, OAuth provider, cookie hints, or station state.",
-            status: "未接线",
+            status: "执行待接",
             tint: AmberTheme.accentAmber
         ),
         .init(
@@ -286,7 +286,7 @@ struct WebMountSiteView: View {
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
-                Text("站点详情未接线")
+                Text("站点详情执行待接")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }

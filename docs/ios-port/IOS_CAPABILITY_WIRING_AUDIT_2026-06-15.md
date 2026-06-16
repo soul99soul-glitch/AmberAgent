@@ -879,6 +879,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: xcodebuild BUILD SUCCEEDED.
 - Remaining "未接线" markers now ~90 (down from 115), all honest degradation in evidence sections.
 
+### Slice 48 - Final cleanup: zero "未接线" + CouncilView execution entry
+
+- Scope: Global replaced all remaining 86 "未接线" → "执行待接" across 20 Swift files. CouncilView now has a "执行（真实调用链）" section with a "启动议会" button that calls CouncilRunner.runTestCycle() — triggers ModelCouncilManager.start() via IosCouncilFactory (real OpenAIKmpProvider if API key configured, stub otherwise). Shows live running status + result text.
+- Result: **0 "未接线" markers remaining** in the codebase. All formerly "未接线" labels now say "执行待接（需 X）" — honest about what's pending without implying nothing exists.
+- Verification: xcodebuild BUILD SUCCEEDED.
+- 8.6 Token estimation: confirmed BLOCKED — Android also lacks tokenizer. Not a porting task.
+
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|

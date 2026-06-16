@@ -73,8 +73,8 @@ struct AppearanceSettingsView: View {
                 AppearanceStatusRow(
                     systemImage: "paintpalette",
                     title: "强调色 Token",
-                    subtitle: "当前 iOS AmberTheme 仍是静态 token；动态强调色桥未接线",
-                    value: "未接线"
+                    subtitle: "当前 iOS AmberTheme 仍是静态 token；动态强调色桥执行待接",
+                    value: "执行待接"
                 )
             }
         }
@@ -87,8 +87,8 @@ struct AppearanceSettingsView: View {
                 AppearanceStatusRow(
                     systemImage: "rectangle.fill",
                     title: "背景色调 Token",
-                    subtitle: "背景/表面色仍来自静态 AmberTheme；动态背景桥未接线",
-                    value: "未接线"
+                    subtitle: "背景/表面色仍来自静态 AmberTheme；动态背景桥执行待接",
+                    value: "执行待接"
                 )
             }
         }

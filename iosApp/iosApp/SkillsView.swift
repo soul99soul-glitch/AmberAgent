@@ -162,9 +162,9 @@ struct SkillsView: View {
                 SkillStatusRow(
                     systemImage: "wrench.and.screwdriver",
                     iconColor: AmberTheme.accentAmber,
-                    title: "Skill 扫描尚未接线",
+                    title: "Skill 扫描尚执行待接",
                     subtitle: "Android/KMP 已有 SkillManager；iOS 还没有本地目录扫描、启用状态或文件读写桥。",
-                    badge: "未接线"
+                    badge: "执行待接"
                 )
             }
 
@@ -181,7 +181,7 @@ struct SkillsView: View {
                     iconColor: AmberTheme.accentCyan,
                     title: "MCP 服务器",
                     subtitle: "配置列表尚未接入 iOS SettingsStore / McpManager",
-                    trailing: "未接线"
+                    trailing: "执行待接"
                 ) {
                     router.navigate(to: .mcpServers)
                 }
@@ -209,7 +209,7 @@ struct SkillsView: View {
                 SkillUtilityRow(
                     systemImage: "arrow.triangle.2.circlepath",
                     iconColor: AmberTheme.accent,
-                    title: "重新扫描尚未接线",
+                    title: "重新扫描尚执行待接",
                     subtitle: "需要 iOS SkillManager bridge 后才能扫描和修复索引"
                 ) {
                     pendingAlert = .rescan
