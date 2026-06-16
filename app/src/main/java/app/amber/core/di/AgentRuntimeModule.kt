@@ -23,6 +23,8 @@ import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.feature.modelcouncil.ExternalCliModelCouncilRunner
 import app.amber.feature.modelcouncil.ModelCouncilManager
 import app.amber.feature.modelcouncil.ProviderModelCouncilTextRunner
+import app.amber.feature.subagent.AndroidSubAgentRunStorage
+import app.amber.feature.subagent.AndroidSubAgentSettingsSource
 import app.amber.feature.subagent.GenerationSubAgentRunner
 import app.amber.feature.subagent.SubAgentManager
 import org.koin.dsl.module
@@ -101,15 +103,21 @@ val agentRuntimeModule = module {
     }
     single<app.amber.feature.subagent.SubAgentRunner> { get<GenerationSubAgentRunner>() }
 
+    single { AndroidSubAgentSettingsSource(get()) }
+    single<app.amber.feature.subagent.SubAgentSettingsSource<app.amber.core.settings.Settings>> { get<AndroidSubAgentSettingsSource>() }
+
+    single { AndroidSubAgentRunStorage(get<Context>()) }
+    single<app.amber.feature.subagent.SubAgentRunStorage> { get<AndroidSubAgentRunStorage>() }
+
     single {
         SubAgentManager(
-            get(),
-            get(),
-            get(),
-            get(),
-            get<GenerationSubAgentRunner>(),
-            get(),
-            get(),
+            appScope = get(),
+            settingsSource = get(),
+            json = get(),
+            runner = get<GenerationSubAgentRunner>(),
+            agentTaskStore = get(),
+            sessionAccessGrantStore = get(),
+            runStorage = get(),
         )
     }
 

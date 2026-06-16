@@ -1,6 +1,5 @@
 package app.amber.feature.subagent
 
-import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -8,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
@@ -19,45 +20,42 @@ import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.core.infra.AppScope
+import app.amber.core.settings.Settings
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskOutputRef
 import app.amber.feature.task.AgentTaskRetryPolicy
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.toQueueState
-import app.amber.core.settings.prefs.SettingsAggregator
-import java.io.File
-import java.time.Instant
-import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 class SubAgentManager(
-    context: Context,
     private val appScope: AppScope,
-    private val settingsStore: SettingsAggregator,
+    private val settingsSource: SubAgentSettingsSource<Settings>,
     private val json: Json,
     private val runner: SubAgentRunner,
     private val agentTaskStore: AgentTaskStore,
     private val sessionAccessGrantStore: SessionAccessGrantStore,
+    private val runStorage: SubAgentRunStorage,
 ) {
-    private val runDir = File(context.filesDir, "amberagent/subagents/runs").also { it.mkdirs() }
-    private val runs = ConcurrentHashMap<String, RuntimeRun>()
-    private val admissionLock = Any()
+    private val runs = mutableMapOf<String, RuntimeRun>()
+    private val runsMutex = Mutex()
 
     /**
      * Per-run streaming text flows. The runner writes the assistant's evolving response here as
      * generation chunks arrive; UI subscribes via [liveTextFlow]. Entries are kept after the run
      * finishes so a freshly-opened sheet can display the final text; cleaned up via [LIVE_TEXT_CAP].
      */
-    private val liveTextFlows = ConcurrentHashMap<String, MutableStateFlow<String>>()
-    private val livePartsFlows = ConcurrentHashMap<String, MutableStateFlow<List<UIMessagePart>>>()
+    private val liveTextFlows = mutableMapOf<String, MutableStateFlow<String>>()
+    private val livePartsFlows = mutableMapOf<String, MutableStateFlow<List<UIMessagePart>>>()
 
     suspend fun start(
         parentConversationId: Uuid,
         input: JsonObject,
         parentTools: List<Tool>,
-    ): JsonObject = withContext(Dispatchers.IO) {
-        val settings = settingsStore.settingsFlow.value
+    ): JsonObject = withContext(Dispatchers.Default) {
+        val settings = settingsSource.settingsFlow.value
         val subAgentSetting = settings.agentRuntime.subAgent
         if (!subAgentSetting.enabled) {
             return@withContext errorPayload("subagent_disabled", "Subagent experimental mode is disabled.")
@@ -118,20 +116,20 @@ class SubAgentManager(
                 }
             }
 
-        val now = Instant.now().toEpochMilli()
+        val now = Clock.System.now().toEpochMilliseconds()
         val runId = Uuid.random().toString()
-        val transcript = File(runDir, "$runId.jsonl")
+        val transcriptPath = runStorage.newTranscriptPath(runId)
         val run = SubAgentRun(
             runId = runId,
             parentConversationId = parentConversationId,
             definition = effectiveDefinition,
             task = effectiveTask,
             status = SubAgentRunStatus.RUNNING,
-            transcriptPath = transcript.absolutePath,
+            transcriptPath = transcriptPath,
             startedAtMs = now,
         )
         val runtimeRun = RuntimeRun(run)
-        val admissionError = synchronized(admissionLock) {
+        val admissionError = runsMutex.withLock {
             val runLimit = subAgentSetting.maxConcurrentRuns.coerceAtLeast(1)
             val running = runs.values.count { it.snapshot.status.running }
             when {
@@ -163,11 +161,13 @@ class SubAgentManager(
         // immediately after subagent_start sees the same flow that will be written to.
         val liveText = MutableStateFlow("")
         val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
-        liveTextFlows[runId] = liveText
-        livePartsFlows[runId] = liveParts
-        capLiveTextFlows()
+        runsMutex.withLock {
+            liveTextFlows[runId] = liveText
+            livePartsFlows[runId] = liveParts
+            capLiveTextFlowsLocked()
+        }
 
-        runtimeRun.job = appScope.launch(Dispatchers.IO) {
+        runtimeRun.job = appScope.launch(Dispatchers.Default) {
             val result = try {
                 withTimeout(definition.timeoutMs) {
                     runner.run(
@@ -185,7 +185,7 @@ class SubAgentManager(
                 val timedOut = error is kotlinx.coroutines.TimeoutCancellationException
                 SubAgentResult(
                     status = if (timedOut) SubAgentRunStatus.TIMED_OUT else SubAgentRunStatus.FAILED,
-                    error = error.message ?: error::class.java.simpleName,
+                    error = error.message ?: error::class.simpleName ?: "Error",
                 )
             }
             finish(runId, result, displayText = liveText.value)
@@ -194,23 +194,23 @@ class SubAgentManager(
         runToPayload(run)
     }
 
-    suspend fun read(runId: String): JsonObject = withContext(Dispatchers.IO) {
-        val run = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
+    suspend fun read(runId: String): JsonObject = withContext(Dispatchers.Default) {
+        val run = runsMutex.withLock { runs[runId]?.snapshot } ?: return@withContext readMissingRun(runId)
         runToPayload(run)
     }
 
-    suspend fun wait(runId: String, waitTimeoutMs: Long): JsonObject = withContext(Dispatchers.IO) {
-        val deadline = System.currentTimeMillis() + waitTimeoutMs.coerceIn(0, 60_000L)
-        while (System.currentTimeMillis() < deadline) {
-            val current = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
+    suspend fun wait(runId: String, waitTimeoutMs: Long): JsonObject = withContext(Dispatchers.Default) {
+        val deadline = Clock.System.now().toEpochMilliseconds() + waitTimeoutMs.coerceIn(0, 60_000L)
+        while (Clock.System.now().toEpochMilliseconds() < deadline) {
+            val current = runsMutex.withLock { runs[runId]?.snapshot } ?: return@withContext readMissingRun(runId)
             if (!current.status.running) return@withContext runToPayload(current)
             delay(200)
         }
         read(runId)
     }
 
-    suspend fun cancel(runId: String): JsonObject = withContext(Dispatchers.IO) {
-        val runtimeRun = runs[runId] ?: return@withContext readMissingRun(runId)
+    suspend fun cancel(runId: String): JsonObject = withContext(Dispatchers.Default) {
+        val runtimeRun = runsMutex.withLock { runs[runId] } ?: return@withContext readMissingRun(runId)
         runtimeRun.job?.cancel()
         finish(
             runId,
@@ -223,7 +223,7 @@ class SubAgentManager(
     }
 
     fun listBuiltIns(): List<SubAgentDefinition> {
-        val setting = settingsStore.settingsFlow.value.agentRuntime.subAgent
+        val setting = settingsSource.settingsFlow.value.agentRuntime.subAgent
         val builtIns = if (setting.mode == SubAgentMode.SMART_DYNAMIC) {
             emptyList()
         } else {
@@ -259,10 +259,10 @@ class SubAgentManager(
     /** True iff Model Council experimental mode is currently on. Used by SubAgentTools to
      *  decide whether to advertise @council alongside the regular subagent roster. */
     fun isModelCouncilEnabled(): Boolean =
-        settingsStore.settingsFlow.value.agentRuntime.modelCouncil.enabled
+        settingsSource.settingsFlow.value.agentRuntime.modelCouncil.enabled
 
     fun runtimeMode(): SubAgentMode =
-        settingsStore.settingsFlow.value.agentRuntime.subAgent.mode
+        settingsSource.settingsFlow.value.agentRuntime.subAgent.mode
 
     /**
      * Keep live UI flows bounded. Iterate the flow keys (not [runs].values) so orphaned
@@ -273,7 +273,7 @@ class SubAgentManager(
      * before this runs, so the cap is soft. Worst case: temporarily 65–66 entries, never an
      * eviction of a still-active run. Acceptable.
      */
-    private fun capLiveTextFlows() {
+    private fun capLiveTextFlowsLocked() {
         if (liveTextFlows.size <= LIVE_TEXT_CAP && livePartsFlows.size <= LIVE_TEXT_CAP) return
         // Build (runId, lastUpdate) for every live-text key and pick the oldest non-running ones.
         val candidates = (liveTextFlows.keys + livePartsFlows.keys).mapNotNull { id ->
@@ -292,7 +292,7 @@ class SubAgentManager(
     }
 
     fun runtimeSummary(): JsonObject {
-        val setting = settingsStore.settingsFlow.value.agentRuntime.subAgent
+        val setting = settingsSource.settingsFlow.value.agentRuntime.subAgent
         return buildJsonObject {
             put("enabled", setting.enabled)
             put("mode", setting.mode.name.lowercase())
@@ -308,20 +308,20 @@ class SubAgentManager(
         }
     }
 
-    private fun finish(runId: String, result: SubAgentResult, displayText: String = "") {
-        val runtimeRun = runs[runId] ?: return
-        val next = synchronized(runtimeRun) {
+    private suspend fun finish(runId: String, result: SubAgentResult, displayText: String = "") {
+        val runtimeRun = runsMutex.withLock { runs[runId] } ?: return
+        val next = runtimeRun.snapshotMutex.withLock {
             val current = runtimeRun.snapshot
-            if (!current.status.running) return@synchronized null
+            if (!current.status.running) return@withLock null
             current.copy(
                 status = result.status,
                 result = result,
                 displayText = displayText.ifBlank { current.displayText },
-                updatedAtMs = Instant.now().toEpochMilli(),
+                updatedAtMs = Clock.System.now().toEpochMilliseconds(),
             ).also { runtimeRun.snapshot = it }
         } ?: return
         val status = next.status
-        appScope.launch(Dispatchers.IO) {
+        appScope.launch(Dispatchers.Default) {
             agentTaskStore.update(
                 taskId = runId,
                 status = status.toAgentTaskStatus(),
@@ -334,12 +334,13 @@ class SubAgentManager(
     }
 
     private fun readMissingRun(runId: String): JsonObject {
-        val transcript = File(runDir, "$runId.jsonl")
-        return if (transcript.exists()) {
+        val transcriptPath = runStorage.newTranscriptPath(runId)
+        return if (runStorage.transcriptExists(transcriptPath)) {
             buildJsonObject {
                 put("status", SubAgentRunStatus.INTERRUPTED.name.lowercase())
                 put("run_id", runId)
                 put("transcript_available", true)
+                put("transcript_path", transcriptPath)
                 put("error", "Subagent run is no longer active in memory.")
             }
         } else {
@@ -347,13 +348,16 @@ class SubAgentManager(
         }
     }
 
-    private fun appendEvent(runtimeRun: RuntimeRun, event: String, payload: JsonObject) {
+    private suspend fun appendEvent(runtimeRun: RuntimeRun, event: String, payload: JsonObject) {
         val line = buildJsonObject {
             put("event", event)
-            put("created_at_ms", Instant.now().toEpochMilli())
+            put("created_at_ms", Clock.System.now().toEpochMilliseconds())
             put("payload", payload)
         }
-        File(runtimeRun.snapshot.transcriptPath).appendText(line.toString() + "\n")
+        val transcriptPath = runtimeRun.snapshot.transcriptPath
+        runtimeRun.transcriptMutex.withLock {
+            runStorage.appendEvent(transcriptPath, line.toString() + "\n")
+        }
     }
 
     private fun runToPayload(run: SubAgentRun, includeDisplayText: Boolean = false): JsonObject =
@@ -376,7 +380,7 @@ class SubAgentManager(
         outputRef = AgentTaskOutputRef(
             type = "transcript",
             path = transcriptPath,
-            exists = File(transcriptPath).exists(),
+            exists = runStorage.transcriptExists(transcriptPath),
         ),
         retryPolicy = AgentTaskRetryPolicy(
             retryable = status == SubAgentRunStatus.FAILED,
@@ -402,8 +406,10 @@ class SubAgentManager(
     }
 
     private class RuntimeRun(
-        @Volatile var snapshot: SubAgentRun,
-        @Volatile var job: Job? = null,
+        @kotlin.concurrent.Volatile var snapshot: SubAgentRun,
+        @kotlin.concurrent.Volatile var job: Job? = null,
+        val snapshotMutex: Mutex = Mutex(),
+        val transcriptMutex: Mutex = Mutex(),
     )
 
     private fun SubAgentDefinition.isHistoryReader(): Boolean =

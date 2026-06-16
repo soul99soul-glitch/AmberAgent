@@ -5,6 +5,7 @@ struct SubAgentsView: View {
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
+    @State private var runner = SubAgentRunner()
 
     private let evidenceRows: [SubAgentEvidenceRow] = [
         .init(
@@ -27,9 +28,9 @@ struct SubAgentsView: View {
         ),
         .init(
             title: "iOS 运行桥",
-            subtitle: "当前 SwiftUI 没有 Settings.agentRuntime.subAgent、SubAgentManager 或 subagent_* 工具执行桥。",
-            value: "待接",
-            color: AmberTheme.accentAmber
+            subtitle: "IosSubAgentFactory 可构造 SubAgentManager，并从 SwiftUI 手动触发 start/read/wait/cancel 调用链。",
+            value: "已接",
+            color: AmberTheme.accentGreen
         )
     ]
 
@@ -112,6 +113,7 @@ struct SubAgentsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        runnerSection
                         presetConfigSection
                         evidenceSection
                         iOSStatusSection
@@ -141,7 +143,7 @@ struct SubAgentsView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 运行桥待接（需 SubAgentManager）")
+                Text("Android/KMP 已实现 · iOS 可手动启动运行桥")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -159,7 +161,7 @@ struct SubAgentsView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实 SubAgent 设置、内置角色、运行管理器和 subagent_* 工具；iOS 当前没有把这些能力接入 SettingsStore、ChatViewModel 或本地工具执行器。本页只展示能力证据和字段映射，不启用子代理、不启动运行、不保存角色。")
+        Text("Android/KMP 已有真实 SubAgent 设置、内置角色、运行管理器和 subagent_* 工具；iOS 现在可从本页手动构造 IosSubAgentFactory 并启动 start/read/wait/cancel 调用链。ChatViewModel 自动注入 subagent_* 工具、SettingsStore 写回和角色持久化仍未接。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -167,6 +169,49 @@ struct SubAgentsView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    private var runnerSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "执行（真实调用链）")
+            AmberFormGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        if runner.isRunning {
+                            ProgressView()
+                            Text("正在启动 SubAgent…")
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground)
+                        } else {
+                            Button { runner.runTestCycle() } label: {
+                                Label("启动 SubAgent", systemImage: "person.2.wave.2.fill")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.accent)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button { runner.cancelCurrentRun() } label: {
+                            Label("取消", systemImage: "xmark.circle")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(runner.isRunning ? AmberTheme.accentAmber : AmberTheme.muted)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if runner.lastRunResult != "(未运行)" {
+                        Text(runner.lastRunResult)
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+        }
     }
 
     /// Read-only view of the REAL seeded SubAgent runtime defaults from

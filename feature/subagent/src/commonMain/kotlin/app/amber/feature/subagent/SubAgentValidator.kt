@@ -278,7 +278,7 @@ object SubAgentValidator {
             .trim('-')
 
     private fun fallbackDynamicId(seed: String): String =
-        "dynamic-${Integer.toUnsignedString(seed.hashCode(), 36)}"
+        "dynamic-${seed.hashCode().toUInt().toString(36)}"
 
     private fun isGenericName(id: String): Boolean =
         genericNameParts.any { id.contains(it, ignoreCase = true) }

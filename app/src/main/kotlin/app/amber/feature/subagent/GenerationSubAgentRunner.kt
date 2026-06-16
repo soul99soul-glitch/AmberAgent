@@ -14,25 +14,6 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
-import app.amber.core.model.Assistant
-
-interface SubAgentRunner {
-    /**
-     * Run a subagent task. [liveText] receives the running assistant text as it streams in;
-     * [liveParts] receives the latest message parts so UI can derive render-time presentation
-     * from tool outputs without rewriting assistant text.
-     * UI code can subscribe via [SubAgentManager.liveTextFlow] to render real-time output.
-     * Pass a no-op flow if you don't need live updates.
-     */
-    suspend fun run(
-        settings: Settings,
-        definition: SubAgentDefinition,
-        task: SubAgentTaskSpec,
-        tools: List<Tool>,
-        liveText: MutableStateFlow<String>,
-        liveParts: MutableStateFlow<List<UIMessagePart>>,
-    ): SubAgentResult
-}
 
 class GenerationSubAgentRunner(
     private val generationHandler: Generator,
@@ -270,44 +251,5 @@ class GenerationSubAgentRunner(
         """.trimIndent()
     }
 }
-
-fun Assistant.toIsolatedSubAgentAssistant(definition: SubAgentDefinition) = copy(
-    name = definition.name,
-    systemPrompt = definition.systemPrompt,
-    // streamOutput must be true so GenerationHandler emits per-token Messages chunks.
-    // Without it the underlying provider buffers the whole response and we get just one
-    // chunk at the end — UI live view stays empty until the run finishes, then jumps
-    // straight to the final text. Cost: per-chunk transformer pass, negligible.
-    streamOutput = true,
-    contextMessageSize = 0,
-    enableMemory = false,
-    useGlobalMemory = false,
-    enableRecentChatsReference = false,
-    presetMessages = emptyList(),
-    quickMessageIds = emptySet(),
-    regexes = emptyList(),
-    mcpServers = emptySet(),
-    localTools = emptyList(),
-    modeInjectionIds = emptySet(),
-    lorebookIds = emptySet(),
-    enabledSkills = emptySet(),
-    enableTimeReminder = false,
-    messageTemplate = "{{ message }}",
-    temperature = definition.temperature ?: temperature,
-    reasoningLevel = definition.reasoningLevel ?: reasoningLevel,
-)
-
-fun Settings.toIsolatedSubAgentSettings(): Settings = copy(
-    agentRuntime = agentRuntime.copy(
-        enableCoreMemory = false,
-        enableShortTermMemory = false,
-        enableLongTermMemory = false,
-        enableRecentChatsReference = false,
-        enableTimeReminder = false,
-        agentSoulMarkdown = "",
-        generativeUi = agentRuntime.generativeUi.copy(enabled = false),
-        speculativeToolExecution = agentRuntime.speculativeToolExecution.copy(enabled = false),
-    )
-)
 
 private const val SUBAGENT_REPORT_RETRY_STEPS = 2

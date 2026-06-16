@@ -39,7 +39,7 @@ kotlin {
         ":feature:terminal:api",
         ":feature:modelcouncil:api",
         ":feature:modelcouncil",
-        ":feature:subagent:api",
+        ":feature:subagent",
         ":feature:runtime:api",
         ":feature:tools:api",
         ":feature:task",
