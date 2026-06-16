@@ -16,6 +16,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":feature:modelcouncil:api"))
             api(project(":ai-core"))
+            api(project(":ai-provider-openai"))
             api(project(":core:app-infra"))
             api(project(":core:types"))
             api(project(":feature:task"))

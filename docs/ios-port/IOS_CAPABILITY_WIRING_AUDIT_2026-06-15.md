@@ -850,6 +850,14 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Scope: SyncBackupView now reads real `sharedSettings.snapshot.syncSettings` (autoSyncEnabled, mode, deviceId). Header updated from "iOS 备份桥未接线" to "KMP SyncSettings 只读可用 · 备份执行待接". Evidence rows show real seed values instead of "未接线".
 - Verification: xcodebuild BUILD SUCCEEDED.
 
+### Slice 44 - Phase 8.5: Council real model inference via OpenAIKmpProvider
+
+- Scope: IosCouncilFactory gained `createWithRealProvider(baseUrl:, apiKey:, modelId:)` which builds a ModelCouncilManager with `RealOpenAIModelRunner` — a real `ModelCouncilTextRunner` implementation that calls `OpenAIKmpProvider.generateText()` to make actual API calls for council seat generation + synthesis. This is NOT a stub — it produces real model-generated text when given a valid API key.
+- Key discovery: `OpenAIKmpProvider` is already in `ai-provider-openai/src/commonMain` (KMP) and already exported. No need to KMP-ify `:ai` ProviderManager.
+- HONESTY: makes REAL network API calls. Requires valid credentials. Without them returns error (not crash). Stub `create()` still default.
+- Verification: modelcouncil iOS compile + shared linkDebugFramework + xcodebuild BUILD SUCCEEDED; Shared.h has createWithRealProvider.
+- Remaining: 8.6 (Token estimation) — Android also lacks this.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
