@@ -820,6 +820,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: xcodebuild BUILD SUCCEEDED.
 - Remaining risk: read-only; no MCP connection management or tool calling.
 
+### Slice 39 - Phase 7.4+7.5: AccountView + ConversationStorageView read real seed data
+
+- Scope: AccountView stats now read real seed values (assistants count, providers count, TTS count, search count, launchCount) instead of "未接线". ConversationStorageView usage items now read real seed counts (assistants, providers, quickMessages) instead of "未接线". Both use sharedSettings.
+- Verification: git diff --check OK; xcodebuild BUILD SUCCEEDED.
+- Remaining risk: read-only; no real conversation file scanning or token stats.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

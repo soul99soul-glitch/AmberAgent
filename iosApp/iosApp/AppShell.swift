@@ -257,7 +257,7 @@ private extension View {
             case .search:
                 SearchView()
             case .account:
-                AccountView()
+                AccountView(sharedSettings: sharedSettings)
             case .settings:
                 SettingsHomeView(settingsStore: settingsStore)
             case .appearance:
@@ -265,7 +265,7 @@ private extension View {
             case .displayFont:
                 DisplayFontSettingsView(sharedSettings: sharedSettings)
             case .conversationStorage:
-                ConversationStorageView()
+                ConversationStorageView(sharedSettings: sharedSettings)
             case .syncBackup:
                 SyncBackupView()
             case .capabilities:

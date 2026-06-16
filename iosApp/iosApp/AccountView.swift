@@ -1,6 +1,9 @@
 import SwiftUI
+import Shared
 
 struct AccountView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var displayName = "Amber"
@@ -104,7 +107,7 @@ struct AccountView: View {
     private var statsSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "统计")
-            AccountStatsPanel()
+            AccountStatsPanel(sharedSettings: sharedSettings)
                 .padding(.horizontal, 16)
         }
     }
@@ -136,17 +139,23 @@ private struct AccountTextFieldRow: View {
 }
 
 private struct AccountStatsPanel: View {
-    private let overviewStats: [AccountStatItem] = [
-        .init(systemImage: "bubble.left.and.bubble.right", label: "总会话", value: "未接线"),
-        .init(systemImage: "message", label: "总消息", value: "未接线")
-    ]
+    let sharedSettings: IOSSharedSettingsStore
 
-    private let detailStats: [AccountStatItem] = [
-        .init(systemImage: "cpu", label: "输入 Token", value: "未接线"),
-        .init(systemImage: "cpu", label: "输出 Token", value: "未接线"),
-        .init(systemImage: "bolt", label: "缓存节省", value: "未接线"),
-        .init(systemImage: "power", label: "启动次数", value: "未接线")
-    ]
+    private var overviewStats: [AccountStatItem] {
+        [
+            .init(systemImage: "bubble.left.and.bubble.right", label: "助手数", value: "\(sharedSettings.snapshot.assistants.count)"),
+            .init(systemImage: "person.2", label: "默认助手", value: sharedSettings.snapshot.assistants.first?.name ?? "Amber"),
+        ]
+    }
+
+    private var detailStats: [AccountStatItem] {
+        [
+            .init(systemImage: "server.rack", label: "Provider 模板", value: "\(sharedSettings.snapshot.providers.count)"),
+            .init(systemImage: "speaker.wave.2", label: "TTS 引擎", value: "\(sharedSettings.snapshot.ttsProviders.count)"),
+            .init(systemImage: "magnifyingglass", label: "搜索服务", value: "\(sharedSettings.snapshot.searchServices.count)"),
+            .init(systemImage: "power", label: "启动次数", value: "\(sharedSettings.snapshot.launchCount)"),
+        ]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -367,6 +376,6 @@ private struct AccountDivider: View {
 
 #Preview {
     NavigationStack {
-        AccountView()
+        AccountView(sharedSettings: IOSSharedSettingsStore())
     }
 }

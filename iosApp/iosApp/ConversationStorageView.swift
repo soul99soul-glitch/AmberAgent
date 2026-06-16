@@ -1,16 +1,21 @@
 import SwiftUI
+import Shared
 
 struct ConversationStorageView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var pendingAlert: StorageAlert?
 
-    private let usageItems: [StorageUsageItem] = [
-        .init(title: "聊天附件文件", detail: "统计未接线", color: AmberTheme.accent),
-        .init(title: "历史对话", detail: "存储桥未接线", color: AmberTheme.accentAmber),
-        .init(title: "生成图片", detail: "目录统计未接线", color: AmberTheme.accentCyan),
-        .init(title: "缓存", detail: "清理服务未接线", color: AmberTheme.muted2)
-    ]
+    private var usageItems: [StorageUsageItem] {
+        [
+            .init(title: "助手条目", detail: "\(sharedSettings.snapshot.assistants.count) 个", color: AmberTheme.accent),
+            .init(title: "Provider 模板", detail: "\(sharedSettings.snapshot.providers.count) 个", color: AmberTheme.accentAmber),
+            .init(title: "快捷消息", detail: "\(sharedSettings.snapshot.quickMessages.count) 条", color: AmberTheme.accentCyan),
+            .init(title: "对话文件", detail: "待接（需 iOS 文件系统扫描）", color: AmberTheme.muted2)
+        ]
+    }
 
     var body: some View {
         ZStack {
