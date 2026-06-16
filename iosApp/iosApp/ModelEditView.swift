@@ -50,6 +50,7 @@ struct ModelEditView: View {
                         modalitiesSection
                         builtInToolsSection
                         advancedSection
+                        savedModelsSection
                         footerSection
                     }
                     .padding(.bottom, 36)

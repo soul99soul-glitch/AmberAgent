@@ -39,10 +39,10 @@ struct SeatEditorView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert("移除尚执行待接", isPresented: $showRemoveInfo) {
+        .alert("移除席位", isPresented: $showRemoveInfo) {
             Button("知道了", role: .cancel) { }
         } message: {
-            Text("当前 iOS 页面没有读取真实 defaultSeats，因此不会删除任何模型议会席位。")
+            Text("将从 UserDefaults 删除该自定义席位。KMP seed 席位不可删除。")
         }
     }
 
@@ -76,7 +76,7 @@ struct SeatEditorView: View {
     }
 
     private var noticeSection: some View {
-        SeatEditorFootnote(text: "Android/KMP 通过 ModelCouncilRuntimeSetting.defaultSeats 和 AgentPromptConfigRepository 保存席位与 prompt；iOS 当前没有这条设置/文件桥。本页只保留草稿预览，关闭后不会保存。")
+        SeatEditorFootnote(text: "Android/KMP 通过 ModelCouncilRuntimeSetting.defaultSeats 和 AgentPromptConfigRepository 保存席位与 prompt；iOS 当前没有这条设置/文件桥。本页编辑的席位会保存到 UserDefaults，重启后保留。")
             .padding(.bottom, 10)
     }
 
@@ -156,7 +156,7 @@ struct SeatEditorView: View {
                 cliRunnerGroup
             }
 
-            SeatEditorFootnote(text: "Android/KMP 支持 provider_model 和 external_cli；iOS 当前不会保存 runnerType、modelId、externalTool 或 reasoningLevel。")
+            SeatEditorFootnote(text: "Android/KMP 支持 provider_model 和 external_cli；自定义席位的名称、角色、模型 ID 会保存到 UserDefaults。")
         }
     }
 
