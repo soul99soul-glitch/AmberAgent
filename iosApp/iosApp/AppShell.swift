@@ -314,7 +314,7 @@ private extension View {
             case .searchServices:
                 SearchServicesView(sharedSettings: sharedSettings)
             case .searchProvider:
-                SearchProviderView()
+                SearchProviderView(sharedSettings: sharedSettings)
             case .ttsSettings:
                 TTSSettingsView(sharedSettings: sharedSettings)
             case .ttsAdd:

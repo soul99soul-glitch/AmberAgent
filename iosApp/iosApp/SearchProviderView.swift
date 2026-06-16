@@ -1,6 +1,9 @@
 import SwiftUI
+import Shared
 
 struct SearchProviderView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var providerType: SearchProviderType = .bing
@@ -179,18 +182,49 @@ struct SearchProviderView: View {
 
     private var draftPreviewSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "草稿预览")
+            AmberSectionLabel(text: "已保存搜索服务（UserDefaults · 可读写）")
             AmberFormGroup {
-                SearchProviderPreviewLine(label: "类型", value: providerType.title)
+                let providers = sharedSettings.savedSearchProviders
+                if providers.isEmpty {
+                    Text("暂无自定义搜索服务。选择类型并填写名称后点「保存服务」。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
+                } else {
+                    ForEach(Array(providers.enumerated()), id: \.offset) { index, provider in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(provider["name"] ?? "?").font(.body.weight(.semibold))
+                                Text("\(provider["serviceType"] ?? "?")")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(AmberTheme.muted2)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            Button { sharedSettings.removeSearchProvider(at: index) } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.system(size: 18)).foregroundStyle(AmberTheme.accentRed)
+                            }.buttonStyle(.plain)
+                        }.frame(minHeight: 48).padding(.horizontal, 14).padding(.vertical, 4)
+                        if index < providers.count - 1 {
+                            SearchProviderDivider()
+                        }
+                    }
+                }
+
                 SearchProviderDivider()
-                SearchProviderPreviewLine(label: "序列化类型", value: providerType.serialName)
-                SearchProviderDivider()
-                SearchProviderPreviewLine(label: "凭据", value: credentialPreview)
-                SearchProviderDivider()
-                SearchProviderPreviewLine(label: "保存方式", value: "编辑待接（需持久化层）")
+
+                Button {
+                    let trimmedName = providerType.title
+                    sharedSettings.addSearchProvider(name: trimmedName, apiKey: apiKey, serviceType: providerType.serialName)
+                    apiKey = ""
+                } label: {
+                    Label("保存服务", systemImage: "plus.circle.fill")
+                        .font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
+                }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14).padding(.vertical, 8)
             }
 
-            SearchProviderNote("关闭页面会丢弃草稿；不会写入 Keychain、UserDefaults、KMP Settings 或发起网络请求。")
+            SearchProviderNote("搜索服务保存到 UserDefaults，重启后保留。这是真实的 iOS 本地持久化。")
         }
     }
 
@@ -448,6 +482,6 @@ private struct SearchProviderNote: View {
 
 #Preview {
     NavigationStack {
-        SearchProviderView()
+        SearchProviderView(sharedSettings: IOSSharedSettingsStore())
     }
 }
