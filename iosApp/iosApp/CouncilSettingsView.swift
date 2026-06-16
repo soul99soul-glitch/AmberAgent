@@ -1,59 +1,70 @@
 import SwiftUI
+import Shared
 
 struct CouncilSettingsView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
-    private let runtimeRows: [CouncilSettingsEvidence] = [
-        .init(
-            title: "enabled",
-            subtitle: "Android/KMP 通过 Settings.agentRuntime.modelCouncil.enabled 控制 ChatService 是否注入 model_council_* 工具。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "synthesisModelId / showSeatOutputs",
-            subtitle: "Android 设置页可选择综合模型并控制席位输出展示；iOS 当前没有设置桥。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        )
-    ]
+    private var mc: ModelCouncilRuntimeSetting { sharedSettings.agentRuntime.modelCouncil }
 
-    private let rolePresetRows: [CouncilSettingsEvidence] = [
-        .init(
-            title: "核心席位",
-            subtitle: "ModelCouncilRolePresets.coreSeats 包含支持者、反对者、裁判，运行时会自动注入。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "领域视角",
-            subtitle: "ModelCouncilRolePresets.lensPresets 包含产品、营销、公关、工程、用户体验、风险等可选视角。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "默认席位列表",
-            subtitle: "Android/KMP 存在 defaultSeats；iOS 当前不会读取、保存或删除默认席位。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        )
-    ]
+    private var runtimeRows: [CouncilSettingsEvidence] {
+        [
+            .init(
+                title: "enabled",
+                subtitle: "KMP Settings.agentRuntime.modelCouncil.enabled 控制 ChatService 是否注入 model_council_* 工具。",
+                value: mc.enabled ? "启用" : "关闭",
+                color: mc.enabled ? AmberTheme.accentGreen : AmberTheme.muted2
+            ),
+            .init(
+                title: "showSeatOutputs",
+                subtitle: "KMP modelCouncil.showSeatOutputs 控制席位输出是否展示。",
+                value: mc.showSeatOutputs ? "显示" : "隐藏",
+                color: AmberTheme.foreground2
+            ),
+        ]
+    }
 
-    private let limitRows: [CouncilSettingsEvidence] = [
-        .init(
-            title: "maxSeats / rounds",
-            subtitle: "Android/KMP 默认最多 8 席、默认 2 轮、最大 5 轮；iOS 当前不保存这些值。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "timeout / outputBudget",
-            subtitle: "Android/KMP 有 3 分钟默认席位超时和 12k 默认输出预算，以及扩展档位。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        )
-    ]
+    private var rolePresetRows: [CouncilSettingsEvidence] {
+        [
+            .init(
+                title: "核心席位",
+                subtitle: "ModelCouncilRolePresets.coreSeats 包含支持者、反对者、裁判，运行时会自动注入。",
+                value: "存在",
+                color: AmberTheme.accentGreen
+            ),
+            .init(
+                title: "领域视角",
+                subtitle: "ModelCouncilRolePresets.lensPresets 包含产品、营销、公关、工程、用户体验、风险等可选视角。",
+                value: "存在",
+                color: AmberTheme.accentGreen
+            ),
+            .init(
+                title: "默认席位列表",
+                subtitle: "KMP modelCouncil.defaultSeats 真实种子值，只读展示。",
+                value: "\(mc.defaultSeats.count) 席",
+                color: AmberTheme.foreground2
+            ),
+        ]
+    }
+
+    private var limitRows: [CouncilSettingsEvidence] {
+        [
+            .init(
+                title: "maxSeats / rounds",
+                subtitle: "KMP modelCouncil 真实种子值，只读展示。",
+                value: "最多 \(mc.maxSeats) 席 · 默认 \(mc.defaultRounds) 轮 · 最多 \(mc.maxRounds) 轮",
+                color: AmberTheme.foreground2
+            ),
+            .init(
+                title: "timeout / outputBudget",
+                subtitle: "KMP modelCouncil 真实种子值，只读展示。",
+                value: "席位超时 \(mc.seatTimeoutMs / 1000)s · 输出预算 \(mc.outputBudgetChars) 字",
+                color: AmberTheme.foreground2
+            ),
+        ]
+    }
 
     var body: some View {
         ZStack {
@@ -103,7 +114,7 @@ struct CouncilSettingsView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实 ModelCouncilRuntimeSetting、默认席位、角色预设、综合模型、轮数、超时和输出预算设置；iOS 当前没有 Settings.agentRuntime.modelCouncil 桥。本页只展示字段映射和草稿入口，不保存配置。")
+        Text("以下字段来自 KMP Settings.agentRuntime.modelCouncil 真实种子值（只读展示）。席位编辑仍为草稿，不保存配置。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -120,13 +131,13 @@ struct CouncilSettingsView: View {
                 CouncilSettingsStatusRow(
                     row: .init(
                         title: "iOS 模型议会",
-                        subtitle: "ChatViewModel 当前不会注入 model_council_* 工具，也不会响应 @council。",
-                        value: "未接线",
+                        subtitle: "ChatViewModel 当前不会注入 model_council_* 工具；IosCouncilFactory 可构造 Manager（stub runner）验证调用链。",
+                        value: "调用链已通（stub）",
                         color: AmberTheme.accentAmber
                     )
                 )
             }
-            CouncilFootnote(text: "Android/KMP 中议会席位只做纯文本生成，不继承工具、记忆或完整聊天记录；iOS 尚未接入该运行时。")
+            CouncilFootnote(text: "议会席位只做纯文本生成，不继承工具、记忆或完整聊天记录。IosCouncilFactory 用 stub runner 验证了 start 调用链，真实推理需 ProviderManager KMP 化。")
         }
     }
 
@@ -267,7 +278,7 @@ private struct CouncilFootnote: View {
 
 #Preview {
     NavigationStack {
-        CouncilSettingsView()
+        CouncilSettingsView(sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
     }
 }

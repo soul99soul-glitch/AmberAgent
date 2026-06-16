@@ -1,6 +1,9 @@
 import SwiftUI
+import Shared
 
 struct ExecutionSettingsView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage(IOSExecutionPreferenceKeys.liveActivity) private var liveActivity = true
@@ -59,14 +62,15 @@ struct ExecutionSettingsView: View {
     }
 
     private var operationPreviewSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "Android/KMP 字段映射")
+        let rt = sharedSettings.agentRuntime
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "执行字段（KMP 默认值 · 只读）")
             AmberFormGroup {
                 ExecutionStatusRow(
                     systemImage: "rectangle.stack",
                     title: "操作预览模式",
-                    subtitle: "Android: agentRuntime.operationPreviewMode；iOS 暂无工具运行时间线 UI",
-                    value: "未接线"
+                    subtitle: "KMP agentRuntime.operationPreviewMode；iOS 工具运行时间线 UI 尚未消费",
+                    value: rt.operationPreviewMode.name
                 )
 
                 ExecutionDivider(leading: 54)
@@ -74,8 +78,8 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "sparkles",
                     title: "生成式 UI",
-                    subtitle: "Android: agentRuntime.generativeUi；iOS Chat 暂无 widget prompt 与渲染链",
-                    value: "未接线"
+                    subtitle: "KMP agentRuntime.generativeUi；iOS Chat widget 渲染链尚未消费",
+                    value: rt.generativeUi.enabled ? "启用" : "关闭"
                 )
 
                 ExecutionDivider(leading: 54)
@@ -83,8 +87,8 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "arrow.clockwise",
                     title: "工具循环上限",
-                    subtitle: "Android: agentRuntime.maxToolLoopSteps；iOS 当前没有工具循环调度器",
-                    value: "未接线"
+                    subtitle: "KMP agentRuntime.maxToolLoopSteps；iOS 工具循环调度器尚未接入",
+                    value: "\(rt.maxToolLoopSteps)"
                 )
             }
         }
@@ -149,14 +153,15 @@ struct ExecutionSettingsView: View {
     }
 
     private var stabilitySection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "生成稳定性")
+        let rt = sharedSettings.agentRuntime
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "生成稳定性（KMP 默认值 · 只读）")
             AmberFormGroup {
                 ExecutionStatusRow(
                     systemImage: "clock.arrow.circlepath",
                     title: "自动重试生成",
-                    subtitle: "Android: agentRuntime.generationRetry；iOS provider streaming 暂未接重试策略",
-                    value: "未接线"
+                    subtitle: "KMP agentRuntime.generationRetry；iOS provider streaming 尚未接重试策略",
+                    value: rt.generationRetry.enabled ? "启用" : "关闭"
                 )
 
                 ExecutionDivider(leading: 54)
@@ -164,8 +169,8 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "arrow.triangle.2.circlepath",
                     title: "重试上限",
-                    subtitle: "需要 iOS GenerationHandler/Provider retry bridge 后才能保存并消费",
-                    value: "未接线"
+                    subtitle: "KMP generationRetry.maxRetries；iOS GenerationHandler 尚未消费",
+                    value: "\(rt.generationRetry.maxRetries)"
                 )
 
                 ExecutionDivider(leading: 54)
@@ -173,8 +178,8 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "bell",
                     title: "后台生成保活",
-                    subtitle: "Android: keepGenerationAliveInBackground；iOS 暂无前台通知保活实现",
-                    value: "未接线"
+                    subtitle: "KMP keepGenerationAliveInBackground；iOS 前台通知保活尚未实现",
+                    value: rt.keepGenerationAliveInBackground ? "启用" : "关闭"
                 )
             }
         }

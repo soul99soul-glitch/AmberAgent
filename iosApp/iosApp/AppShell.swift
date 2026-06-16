@@ -292,7 +292,7 @@ private extension View {
             case .skillDetail(let name):
                 SkillDetailView(skillName: name)
             case .execution:
-                ExecutionSettingsView()
+                ExecutionSettingsView(sharedSettings: sharedSettings)
             case .providers:
                 ProvidersView(settingsStore: settingsStore, providerRegistry: providerRegistry)
             case .providerAdd:
@@ -322,7 +322,7 @@ private extension View {
             case .board:
                 BoardView(sharedSettings: sharedSettings)
             case .boardSettings:
-                BoardSettingsView()
+                BoardSettingsView(sharedSettings: sharedSettings)
             case .miniApps:
                 MiniAppListView()
             case .miniAppSettings:
@@ -340,7 +340,7 @@ private extension View {
             case .council:
                 CouncilView(sharedSettings: sharedSettings)
             case .councilSettings:
-                CouncilSettingsView()
+                CouncilSettingsView(sharedSettings: sharedSettings)
             case .seatEditor:
                 SeatEditorView()
             case .subagents:

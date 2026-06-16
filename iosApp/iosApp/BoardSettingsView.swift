@@ -1,46 +1,47 @@
 import SwiftUI
+import Shared
 
 struct BoardSettingsView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
-    private let settingRows: [BoardCapabilityRow] = [
-        .init(
-            title: "enabled",
-            subtitle: "Android 写入 Settings.agentRuntime.todayBoard.enabled，并同步 BoardScheduler；iOS 当前没有 Settings bridge。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "boardModelId",
-            subtitle: "Android 可跟随主聊天模型或选择特定 CHAT 模型；iOS 没有 Board model registry bridge。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "triggerHours / backgroundStrategy",
-            subtitle: "Android 默认 08:00、12:00、13:00、18:00、19:00，并支持 smart / wifi_only / foreground_only。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "enabledSources",
-            subtitle: "Android 支持 notification、calendar、feishu_msg、feishu_doc、chat_history、time。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "hotList*",
-            subtitle: "Android 支持热榜刷新间隔、Wi-Fi 限制、启用来源、关注词和 focus-first/filter-only 筛选。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "deepRead* / reading font",
-            subtitle: "Android 支持深度阅读模板、字体模式、字体包和字号；iOS 未接 DeepRead 模板/缓存/字体源。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        )
-    ]
+    private var tb: TodayBoardSetting { sharedSettings.agentRuntime.todayBoard }
+
+    private var settingRows: [BoardCapabilityRow] {
+        [
+            .init(
+                title: "enabled",
+                subtitle: "KMP Settings.agentRuntime.todayBoard.enabled 真实种子值，只读展示。",
+                value: tb.enabled ? "启用" : "关闭",
+                color: tb.enabled ? AmberTheme.accentGreen : AmberTheme.muted2
+            ),
+            .init(
+                title: "boardModelId",
+                subtitle: "KMP todayBoard.boardModelId 真实种子值指针（Uuid）。",
+                value: String(describing: tb.boardModelId).prefix(8) + "…",
+                color: AmberTheme.foreground2
+            ),
+            .init(
+                title: "triggerHours",
+                subtitle: "KMP todayBoard.triggerHours 真实种子值。",
+                value: tb.triggerHours.map { "\($0)" }.joined(separator: ", "),
+                color: AmberTheme.foreground2
+            ),
+            .init(
+                title: "enabledSources",
+                subtitle: "KMP todayBoard.enabledSources 真实种子值。",
+                value: "\(tb.enabledSources.count) 个来源",
+                color: AmberTheme.foreground2
+            ),
+            .init(
+                title: "hotList*",
+                subtitle: "KMP todayBoard 热榜配置（刷新间隔 \(tb.hotListRefreshIntervalMinutes) 分钟，\(tb.hotListEnabledSources.count) 个源，WiFi Only \(tb.hotListWifiOnly ? "是" : "否")）。",
+                value: "存在",
+                color: AmberTheme.accentGreen
+            ),
+        ]
+    }
 
     private let persistenceRows: [BoardCapabilityRow] = [
         .init(
@@ -123,7 +124,7 @@ struct BoardSettingsView: View {
     }
 
     private var intro: some View {
-        Text("Android 设置页会直接写 Settings.agentRuntime.todayBoard，并维护焦点规则、热榜源、来源权重、深度阅读模板和字体配置。iOS 当前没有这些 settings/DAO/repository bridge，因此这里不显示开关、模型选择器、单选策略或保存按钮。")
+        Text("以下字段来自 KMP Settings.agentRuntime.todayBoard 真实种子值（只读展示）。持久化/DAO/调度/采集仍待 iOS 原生实现。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -182,6 +183,6 @@ struct BoardSettingsView: View {
 
 #Preview {
     NavigationStack {
-        BoardSettingsView()
+        BoardSettingsView(sharedSettings: IOSSharedSettingsStore())
     }
 }

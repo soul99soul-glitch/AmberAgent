@@ -782,6 +782,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: `feature:modelcouncil:compileKotlinIosSimulatorArm64` BUILD SUCCESSFUL; `shared:linkDebugFrameworkIosSimulatorArm64` BUILD SUCCESSFUL (Shared.h has `SharedIosCouncilFactory` with `create(documentsDir:)`, `startInput(objective:)`, `extractRunId(result:)`, `extractStatus(result:)`); iOS `xcodebuild` BUILD SUCCEEDED; `ios_build_and_run` iPhone 17 Pro/iOS 26.5 `code 0` app launched (PID 35739).
 - Remaining risk: stub runner only (no real model inference). Android DI compile-verified only via compileKotlinJvm of upstream modules (no Android SDK on this machine).
 
+### Slice 33 - Phase 5 pure-Swift wiring (Execution/CouncilSettings/BoardSettings)
+
+- Scope: 3 settings pages that had real KMP data available but showed "未接线" now read actual `sharedSettings.agentRuntime` values. ExecutionSettingsView reads operationPreviewMode/generativeUi/maxToolLoopSteps/generationRetry/keepGenerationAlive. CouncilSettingsView reads modelCouncil.enabled/showSeatOutputs/defaultSeats.count/maxSeats/rounds/timeouts/budgets. BoardSettingsView reads todayBoard.enabled/boardModelId/triggerHours/enabledSources/hotList config. All existing draft/evidence areas preserved.
+- Verification: git diff --check OK; xcodebuild BUILD SUCCEEDED; subagent review PASS (reads real KMP data, no fake, drafts preserved, AppShell wiring correct, no runtime crash risk).
+- Remaining risk: read-only only; persistence/execution/scheduling still pending.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
