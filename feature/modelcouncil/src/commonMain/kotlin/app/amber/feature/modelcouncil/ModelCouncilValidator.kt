@@ -15,7 +15,7 @@ import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.feature.terminal.TerminalRuntimeCapabilities
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
-import java.util.Locale
+
 import kotlin.uuid.Uuid
 
 object ModelCouncilValidator {
@@ -114,7 +114,7 @@ object ModelCouncilValidator {
         settings: Settings,
         setting: ModelCouncilRuntimeSetting,
     ): List<ModelCouncilSeat> {
-        val seatStrategy = task.stringOrBlank("seat_strategy").lowercase(Locale.ROOT)
+        val seatStrategy = task.stringOrBlank("seat_strategy").lowercase()
         val allowExternalCli = task.booleanFlag("allow_external_cli")
         when (seatStrategy) {
             "agent_planned" -> return parseAgentPlannedSeats(task, settings, setting)
@@ -329,7 +329,7 @@ object ModelCouncilValidator {
     }
 
     private fun JsonObject.runnerType(): ModelCouncilSeatRunner {
-        val runnerType = stringOrBlank("runner_type").lowercase(Locale.ROOT)
+        val runnerType = stringOrBlank("runner_type").lowercase()
         val externalTool = stringOrBlank("external_tool")
         return when {
             runnerType in setOf("external_cli", "cli") + ExternalCliToolRegistry.supportedToolIds ->
@@ -344,7 +344,7 @@ object ModelCouncilValidator {
     private fun JsonObject.externalToolFor(runnerType: ModelCouncilSeatRunner): String {
         val explicit = stringOrBlank("external_tool")
         if (runnerType != ModelCouncilSeatRunner.EXTERNAL_CLI || explicit.isNotBlank()) return explicit
-        val alias = stringOrBlank("runner_type").lowercase(Locale.ROOT)
+        val alias = stringOrBlank("runner_type").lowercase()
         return alias.takeIf(ExternalCliToolRegistry::isSupported).orEmpty()
     }
 
@@ -360,7 +360,9 @@ object ModelCouncilValidator {
         }
         val uniqueByModel = LinkedHashMap<Uuid, ModelCandidate>()
         preferred.forEach { candidate ->
-            uniqueByModel.putIfAbsent(candidate.model.id, candidate)
+            if (!uniqueByModel.containsKey(candidate.model.id)) {
+                uniqueByModel[candidate.model.id] = candidate
+            }
         }
         return uniqueByModel.values
             .toList()
@@ -433,7 +435,7 @@ object ModelCouncilValidator {
         }
 
     private fun String.toSeatId(index: Int): String {
-        val slug = lowercase(Locale.ROOT)
+        val slug = lowercase()
             .replace(Regex("[^a-z0-9\\u4e00-\\u9fa5_-]+"), "-")
             .trim('-')
         return slug.ifBlank { "planned-${index + 1}" }.take(48)
@@ -444,7 +446,7 @@ object ModelCouncilValidator {
         val used = HashSet<String>()
         return mapIndexed { index, seat ->
             val base = seat.seatId.ifBlank { seat.role.toSeatId(index) }
-            val seen = counts.getOrDefault(base, 0)
+            val seen = counts[base] ?: 0
             var nextCount = seen + 1
             var unique = if (seen == 0) base else "${base.take(44)}-$nextCount"
             while (!used.add(unique)) {
@@ -473,7 +475,7 @@ object ModelCouncilValidator {
         }
 
     private fun String.normalizeModelRef(): String =
-        lowercase(Locale.ROOT)
+        lowercase()
             .replace(Regex("[\\s_\\-:.]+"), "")
             .trim()
 

@@ -38,6 +38,7 @@ kotlin {
         ":feature:office:api",
         ":feature:terminal:api",
         ":feature:modelcouncil:api",
+        ":feature:modelcouncil",
         ":feature:subagent:api",
         ":feature:runtime:api",
         ":feature:tools:api",

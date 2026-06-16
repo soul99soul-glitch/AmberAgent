@@ -1,6 +1,5 @@
 package app.amber.feature.modelcouncil
 
-import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,6 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -27,10 +28,6 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import app.amber.ai.core.ReasoningLevel
-import app.amber.ai.provider.ProviderManager
-import app.amber.ai.provider.TextGenerationParams
-import app.amber.ai.ui.UIMessage
-import app.amber.ai.ui.UIMessagePart
 import app.amber.core.infra.AppScope
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskOutputRef
@@ -38,66 +35,29 @@ import app.amber.feature.task.AgentTaskRetryPolicy
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.toQueueState
-import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.core.settings.Settings
-import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
-import java.io.File
-import java.time.Instant
+import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
-interface ModelCouncilTextRunner {
-    /**
-     * Generate the seat's reply.
-     * - [onChunk] is invoked with the *cumulative* text every time the provider streams in.
-     *   Pass `{ }` if you don't care about live updates.
-     * - The returned text is the final (already truncated to budget) text.
-     */
-    suspend fun generate(
-        settings: Settings,
-        modelId: Uuid,
-        systemPrompt: String,
-        userPrompt: String,
-        outputBudgetChars: Int,
-        reasoningLevel: ReasoningLevel? = null,
-        temperature: Float? = null,
-        onChunk: (String) -> Unit = {},
-    ): ModelCouncilTextResult
-}
-
-data class ModelCouncilTextResult(
-    val text: String,
-    val warnings: List<String> = emptyList(),
-)
-
 class ModelCouncilManager(
-    context: Context,
     private val appScope: AppScope,
-    private val settingsStore: SettingsAggregator,
+    private val settingsSource: ModelCouncilSettingsSource,
     private val json: Json,
     private val modelRunner: ModelCouncilTextRunner,
-    private val externalCliRunner: ExternalCliModelCouncilRunner,
+    private val externalCliRunner: ExternalCliCouncilRunner,
     private val agentTaskStore: AgentTaskStore,
+    private val runStorage: ModelCouncilRunStorage,
 ) {
-    private val runDir = File(context.filesDir, "amberagent/model-council/runs").also { it.mkdirs() }
-    private val runs = java.util.concurrent.ConcurrentHashMap<String, RuntimeRun>()
+    private val runs = mutableMapOf<String, RuntimeRun>()
+    private val seatLiveTextFlows = mutableMapOf<String, MutableMap<String, MutableStateFlow<String>>>()
 
-    /**
-     * Per-run, per-seat live text streams. Each seat's MutableStateFlow receives the seat's
-     * accumulating reply as it streams from the provider; UI subscribes via [liveTextFlow] /
-     * [liveTextFlows] to render real-time tabs in the run sheet.
-     *
-     * Synthesizer uses the special key [SYNTHESIZER_SEAT_KEY].
-     *
-     * Kept after the run finishes so a sheet opened later can still see the final text.
-     * Capped at [LIVE_TEXT_CAP] active runs by evicting the oldest finished entries.
-     */
-    private val seatLiveTextFlows = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<String>>>()
+    private val settingsStore get() = settingsSource
 
-    suspend fun start(input: JsonObject): JsonObject = withContext(Dispatchers.IO) {
-        val settings = settingsStore.settingsFlow.value
+    suspend fun start(input: JsonObject): JsonObject = withContext(Dispatchers.Default) {
+        val settings = settingsSource.settingsFlow.value
         val councilSetting = settings.agentRuntime.modelCouncil
         val task = runCatching {
             ModelCouncilValidator.parseTask(input, settings, councilSetting)
@@ -110,24 +70,21 @@ class ModelCouncilManager(
             return@withContext errorPayload("invalid_synthesis_model", it.message ?: it.toString())
         }
 
-        val now = Instant.now().toEpochMilli()
+        val now = Clock.System.now().toEpochMilliseconds()
         val runId = Uuid.random().toString()
-        val transcript = File(runDir, "$runId.jsonl")
+        val transcriptPath = runStorage.newTranscriptPath(runId)
         val run = ModelCouncilRun(
             runId = runId,
             status = ModelCouncilRunStatus.RUNNING,
             mode = task.mode,
             seats = task.seats,
             task = task,
-            transcriptPath = transcript.absolutePath,
+            transcriptPath = transcriptPath,
             startedAtMs = now,
         )
         val runtimeRun = RuntimeRun(run)
         runs[runId] = runtimeRun
-        // Pre-create a flow per seat (and the synthesizer) so the run sheet can subscribe
-        // immediately, even before the first chunk arrives. Live flows survive after finish so
-        // a freshly opened sheet still sees the final text.
-        val perSeatFlows = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<String>>()
+        val perSeatFlows = mutableMapOf<String, MutableStateFlow<String>>()
         run.seats.forEach { seat -> perSeatFlows[seat.seatId] = MutableStateFlow("") }
         perSeatFlows[SYNTHESIZER_SEAT_KEY] = MutableStateFlow("")
         seatLiveTextFlows[runId] = perSeatFlows
@@ -138,7 +95,7 @@ class ModelCouncilManager(
         })
         appendEvent(runtimeRun, "started", runToPayload(run))
 
-        runtimeRun.job = appScope.launch(Dispatchers.IO) {
+        runtimeRun.job = appScope.launch(Dispatchers.Default) {
             val result = try {
                 withTimeoutOrNull(settings.effectiveCouncilTotalTimeoutMs(councilSetting, task)) {
                     executeCouncil(
@@ -151,20 +108,20 @@ class ModelCouncilManager(
             } catch (error: CancellationException) {
                 return@launch
             } catch (error: Throwable) {
-                failResult(error.message ?: error::class.java.simpleName)
+                failResult(error.message ?: error::class.simpleName ?: "Error")
             }
             finish(runId, result.first, result.second)
         }
         runToPayload(run)
     }
 
-    suspend fun read(runId: String): JsonObject = withContext(Dispatchers.IO) {
+    suspend fun read(runId: String): JsonObject = withContext(Dispatchers.Default) {
         val run = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
         runToPayload(run)
     }
 
-    suspend fun wait(runId: String, waitTimeoutMs: Long): JsonObject = withContext(Dispatchers.IO) {
-        val setting = settingsStore.settingsFlow.value.agentRuntime.modelCouncil
+    suspend fun wait(runId: String, waitTimeoutMs: Long): JsonObject = withContext(Dispatchers.Default) {
+        val setting = settingsSource.settingsFlow.value.agentRuntime.modelCouncil
         val maxWaitMs = (setting.totalTimeoutMs + 30_000L)
             .coerceAtLeast(60_000L)
             .coerceAtMost(15 * 60_000L)
@@ -173,8 +130,8 @@ class ModelCouncilManager(
         } else {
             DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS.coerceAtMost(maxWaitMs)
         }
-        val deadline = System.currentTimeMillis() + effectiveWaitMs
-        while (System.currentTimeMillis() < deadline) {
+        val deadline = Clock.System.now().toEpochMilliseconds() + effectiveWaitMs
+        while (Clock.System.now().toEpochMilliseconds() < deadline) {
             val current = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
             if (!current.status.running) return@withContext runToPayload(current)
             delay(250)
@@ -195,7 +152,7 @@ class ModelCouncilManager(
         }
     }
 
-    suspend fun cancel(runId: String): JsonObject = withContext(Dispatchers.IO) {
+    suspend fun cancel(runId: String): JsonObject = withContext(Dispatchers.Default) {
         val runtimeRun = runs[runId] ?: return@withContext readMissingRun(runId)
         runtimeRun.job?.cancel()
         finish(
@@ -206,34 +163,20 @@ class ModelCouncilManager(
         runToPayload(runtimeRun.snapshot)
     }
 
-    /**
-     * UI-facing live stream of a council seat's accumulating reply. `seatId` may be a real seat id
-     * or [SYNTHESIZER_SEAT_KEY] for the synthesizer pane. Null = unknown runId or seatId.
-     *
-     * **Completion signal**: this flow does NOT carry a "done" marker. UI should observe
-     * [snapshot] / [read] in parallel to know when the run finished.
-     */
     fun liveTextFlow(runId: String, seatId: String): StateFlow<String>? =
         seatLiveTextFlows[runId]?.get(seatId)?.asStateFlow()
 
-    /** All live flows for a run, keyed by seatId (+ [SYNTHESIZER_SEAT_KEY]). Null if run unknown. */
     fun liveTextFlows(runId: String): Map<String, StateFlow<String>>? =
         seatLiveTextFlows[runId]?.mapValues { it.value.asStateFlow() }
 
-    /** Snapshot of a known run, or null if it was never started or was already evicted. */
     fun snapshot(runId: String): ModelCouncilRun? = runs[runId]?.snapshot
 
-    /**
-     * Drop oldest finished entries when over [LIVE_TEXT_CAP]. Active runs are skipped (the runner
-     * still holds references to write into them). Iterates [seatLiveTextFlows] keys (not [runs])
-     * so orphaned entries — flows whose snapshot was already evicted elsewhere — also get reclaimed.
-     */
     private fun capLiveTextFlows() {
         if (seatLiveTextFlows.size <= LIVE_TEXT_CAP) return
         val candidates = seatLiveTextFlows.keys.mapNotNull { id ->
             val snap = runs[id]?.snapshot
             when {
-                snap == null -> id to 0L  // orphan
+                snap == null -> id to 0L
                 snap.status.running -> null
                 else -> id to snap.updatedAtMs
             }
@@ -243,7 +186,7 @@ class ModelCouncilManager(
     }
 
     fun runtimeSummary(): JsonObject {
-        val settings = settingsStore.settingsFlow.value
+        val settings = settingsSource.settingsFlow.value
         val setting = settings.agentRuntime.modelCouncil
         val synthesisModelId = setting.synthesisModelId ?: settings.chatModelId
         val synthesisModelInfo = settings.describeCouncilProviderModel(synthesisModelId)
@@ -378,9 +321,6 @@ class ModelCouncilManager(
     ): List<ModelCouncilTurn> = supervisorScope {
         val runId = runtimeRun.snapshot.runId
         val seatFlows = seatLiveTextFlows[runId]
-        // Derive prior text from the canonical `runtimeRun.snapshot.turns` (the source of truth)
-        // instead of reading from the live flow. The live flow could in theory be
-        // cleared/reformatted by a future change; turns are append-only.
         val priorPrefixBySeat: Map<String, String> = if (round > 1) {
             runtimeRun.snapshot.seats.associate { seat ->
                 val priorTurns = runtimeRun.snapshot.turns
@@ -470,7 +410,7 @@ class ModelCouncilManager(
                             } else {
                                 ModelCouncilRunStatus.FAILED
                             },
-                            error = modelInfo.decorateError(error.message ?: error::class.java.simpleName),
+                            error = modelInfo.decorateError(error.message ?: error::class.simpleName ?: "Error"),
                         )
                     },
                 ).also { turn ->
@@ -506,7 +446,7 @@ class ModelCouncilManager(
                 )
             }
         }.getOrElse { error ->
-            synthesisError = "Synthesis failed (${synthesisModelInfo.label()}): ${error.message ?: error::class.java.simpleName}"
+            synthesisError = "Synthesis failed (${synthesisModelInfo.label()}): ${error.message ?: error::class.simpleName ?: "Error"}"
             ModelCouncilTextResult(text = synthesisError, warnings = emptyList())
         }
         val result = ModelCouncilResult(
@@ -564,16 +504,16 @@ class ModelCouncilManager(
         )
     }
 
-    private fun appendTurn(runtimeRun: RuntimeRun, turn: ModelCouncilTurn) {
-        val next = synchronized(runtimeRun) {
+    private suspend fun appendTurn(runtimeRun: RuntimeRun, turn: ModelCouncilTurn) {
+        val next = runtimeRun.snapshotMutex.withLock {
             val current = runtimeRun.snapshot
-            if (!current.status.running) return@synchronized null
+            if (!current.status.running) return@withLock null
             current.copy(
                 turns = current.turns + turn,
-                updatedAtMs = Instant.now().toEpochMilli(),
+                updatedAtMs = Clock.System.now().toEpochMilliseconds(),
             ).also { runtimeRun.snapshot = it }
         } ?: return
-        appScope.launch(Dispatchers.IO) {
+        appScope.launch(Dispatchers.Default) {
             agentTaskStore.update(
                 taskId = next.runId,
                 status = AgentTaskStatus.RUNNING,
@@ -584,18 +524,18 @@ class ModelCouncilManager(
         appendEvent(runtimeRun, "turn", turnToPayload(next, turn))
     }
 
-    private fun finish(runId: String, status: ModelCouncilRunStatus, result: ModelCouncilResult) {
+    private suspend fun finish(runId: String, status: ModelCouncilRunStatus, result: ModelCouncilResult) {
         val runtimeRun = runs[runId] ?: return
-        val next = synchronized(runtimeRun) {
+        val next = runtimeRun.snapshotMutex.withLock {
             val current = runtimeRun.snapshot
-            if (!current.status.running) return@synchronized null
+            if (!current.status.running) return@withLock null
             current.copy(
                 status = status,
                 result = result,
-                updatedAtMs = Instant.now().toEpochMilli(),
+                updatedAtMs = Clock.System.now().toEpochMilliseconds(),
             ).also { runtimeRun.snapshot = it }
         } ?: return
-        appScope.launch(Dispatchers.IO) {
+        appScope.launch(Dispatchers.Default) {
             agentTaskStore.update(
                 taskId = runId,
                 status = status.toAgentTaskStatus(),
@@ -608,12 +548,12 @@ class ModelCouncilManager(
     }
 
     private fun readMissingRun(runId: String): JsonObject {
-        val transcript = File(runDir, "$runId.jsonl")
-        return if (transcript.exists()) {
+        val transcriptPath = runStorage.newTranscriptPath(runId)
+        return if (runStorage.transcriptExists(transcriptPath)) {
             buildJsonObject {
                 put("status", ModelCouncilRunStatus.INTERRUPTED.name.lowercase())
                 put("run_id", runId)
-                put("transcript_path", transcript.absolutePath)
+                put("transcript_path", transcriptPath)
                 put("error", "Model Council run is no longer active in memory.")
             }
         } else {
@@ -621,20 +561,20 @@ class ModelCouncilManager(
         }
     }
 
-    private fun appendEvent(runtimeRun: RuntimeRun, event: String, payload: JsonObject) {
+    private suspend fun appendEvent(runtimeRun: RuntimeRun, event: String, payload: JsonObject) {
         val line = buildJsonObject {
             put("event", event)
-            put("created_at_ms", Instant.now().toEpochMilli())
+            put("created_at_ms", Clock.System.now().toEpochMilliseconds())
             put("payload", payload)
         }
         val transcriptPath = runtimeRun.snapshot.transcriptPath
-        synchronized(runtimeRun.transcriptLock) {
-            File(transcriptPath).appendText(line.toString() + "\n")
+        runtimeRun.transcriptMutex.withLock {
+            runStorage.appendEvent(transcriptPath, line.toString() + "\n")
         }
     }
 
     private fun runToPayload(run: ModelCouncilRun): JsonObject = buildJsonObject {
-        val settings = settingsStore.settingsFlow.value
+        val settings = settingsSource.settingsFlow.value
         val exposeSeatOutputs = settings.agentRuntime.modelCouncil.showSeatOutputs
         put("status", run.status.name.lowercase())
         put("run_id", run.runId)
@@ -656,7 +596,7 @@ class ModelCouncilManager(
     }
 
     private fun turnToPayload(run: ModelCouncilRun, turn: ModelCouncilTurn): JsonObject = buildJsonObject {
-        val exposeSeatOutputs = settingsStore.settingsFlow.value.agentRuntime.modelCouncil.showSeatOutputs
+        val exposeSeatOutputs = settingsSource.settingsFlow.value.agentRuntime.modelCouncil.showSeatOutputs
         put("status", run.status.name.lowercase())
         put("run_id", run.runId)
         put("mode", run.mode.name.lowercase())
@@ -703,7 +643,7 @@ class ModelCouncilManager(
         outputRef = AgentTaskOutputRef(
             type = "transcript",
             path = transcriptPath,
-            exists = File(transcriptPath).exists(),
+            exists = runStorage.transcriptExists(transcriptPath),
         ),
         retryPolicy = AgentTaskRetryPolicy(
             retryable = status == ModelCouncilRunStatus.FAILED,
@@ -732,9 +672,10 @@ class ModelCouncilManager(
         json.encodeToJsonElement(value)
 
     private class RuntimeRun(
-        @Volatile var snapshot: ModelCouncilRun,
-        @Volatile var job: Job? = null,
-        val transcriptLock: Any = Any(),
+        @kotlin.concurrent.Volatile var snapshot: ModelCouncilRun,
+        @kotlin.concurrent.Volatile var job: Job? = null,
+        val snapshotMutex: Mutex = Mutex(),
+        val transcriptMutex: Mutex = Mutex(),
     )
 
     private data class ModelCouncilSynthesisResult(
@@ -743,10 +684,7 @@ class ModelCouncilManager(
     )
 
     companion object {
-        /** Reserved seat id for the synthesizer pane in [seatLiveTextFlows]. */
         const val SYNTHESIZER_SEAT_KEY = "__synthesizer__"
-
-        /** Soft cap on retained live-text run entries. Same scale as SubAgent. */
         const val LIVE_TEXT_CAP = 64
     }
 }
@@ -761,7 +699,6 @@ private fun ModelCouncilTurn.visible(exposeContent: Boolean): ModelCouncilTurn {
         error = error.take(700),
     )
 }
-
 
 private fun seatSystemPrompt(seat: ModelCouncilSeat): String = """
     You are `${seat.name}` in AmberAgent Model Council.
@@ -925,156 +862,3 @@ private fun StringBuilder.appendLines(lines: List<String>) {
         lines.forEach { appendLine("- $it") }
     }
 }
-
-object ModelCouncilExternalCliCommandBuilder {
-    private const val OUTPUT_BEGIN = "__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_BEGIN__"
-    private const val OUTPUT_END = "__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_END__"
-
-    enum class Marker { NONE, BEGIN, END }
-
-    fun build(
-        seat: ModelCouncilSeat,
-        prompt: String,
-        timeoutMs: Long,
-        externalCliHomeRoot: String,
-        runtime: TerminalRuntimeKind = TerminalRuntimeKind.BUILTIN_ALPINE,
-    ): String {
-        require(seat.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) {
-            "External CLI command requires runner_type=external_cli."
-        }
-        require(externalCliHomeRoot.isNotBlank()) { "externalCliHomeRoot is required." }
-        val spec = ExternalCliToolRegistry.requireSpec(seat.externalTool)
-        val boundedPrompt = prompt.take(MODEL_COUNCIL_EXTERNAL_CLI_PROMPT_CHARS)
-        val timeoutSeconds = (timeoutMs / 1_000L).coerceAtLeast(1L).coerceAtMost(24 * 60 * 60)
-        val promptDelimiter = "AMBERAGENT_COUNCIL_PROMPT_${Uuid.random().toString().replace("-", "")}"
-        val modelArg = ExternalCliToolRegistry.safeModelArg(seat.externalModel)
-        val homeRoot = "${externalCliHomeRoot.trimEnd('/')}/${spec.id}"
-        val seatCommand = spec.seatCommand("\${prompt_file}", modelArg)
-        val readinessProbeCommand = spec.readinessProbeCommand(modelArg)
-        return buildString {
-            appendLine("set -u")
-            appendLine("if ! command -v ${spec.binary.shellSingleQuoted()} >/dev/null 2>&1; then")
-            appendLine("  echo ${spec.missingMessage.shellSingleQuoted()} >&2")
-            appendLine("  exit 127")
-            appendLine("fi")
-            appendLine("workspace_root=\"${'$'}PWD\"")
-            appendLine("tmp_root=\"${'$'}workspace_root/.amberagent-council-cli-${'$'}$\"")
-            if (runtime == TerminalRuntimeKind.TERMUX_EXTERNAL) {
-                appendLine("home_root=\"${'$'}HOME/.amberagent/external-cli-home/${spec.id}\"")
-            } else {
-                appendLine("home_root=${homeRoot.shellSingleQuoted()}")
-            }
-            appendLine("if ! mkdir -p \"${'$'}tmp_root/home\" \"${'$'}tmp_root/work\" \"${'$'}home_root/${spec.credentialHome}\"; then")
-            appendLine("  echo 'External CLI credential home is not writable in this runtime. Choose builtin_alpine/android_shell or finish login in an accessible runtime.' >&2")
-            appendLine("  exit 125")
-            appendLine("fi")
-            appendLine("cli_pid=\"\"")
-            appendLine("probe_pid=\"\"")
-            appendLine("stop_process_tree() {")
-            appendLine("  target_pid=\"${'$'}1\"")
-            appendLine("  if [ -n \"${'$'}target_pid\" ] && kill -0 \"${'$'}target_pid\" >/dev/null 2>&1; then")
-            appendLine("    if command -v pkill >/dev/null 2>&1; then")
-            appendLine("      pkill -TERM -P \"${'$'}target_pid\" >/dev/null 2>&1 || true")
-            appendLine("    fi")
-            appendLine("    kill -TERM \"-${'$'}target_pid\" >/dev/null 2>&1 || true")
-            appendLine("    kill -TERM \"${'$'}target_pid\" >/dev/null 2>&1 || true")
-            appendLine("    sleep 2")
-            appendLine("    if command -v pkill >/dev/null 2>&1; then")
-            appendLine("      pkill -KILL -P \"${'$'}target_pid\" >/dev/null 2>&1 || true")
-            appendLine("    fi")
-            appendLine("    kill -KILL \"-${'$'}target_pid\" >/dev/null 2>&1 || true")
-            appendLine("    kill -KILL \"${'$'}target_pid\" >/dev/null 2>&1 || true")
-            appendLine("  fi")
-            appendLine("}")
-            appendLine("stop_cli_tree() { stop_process_tree \"${'$'}cli_pid\"; }")
-            appendLine("stop_probe_tree() { stop_process_tree \"${'$'}probe_pid\"; }")
-            appendLine("cleanup() { stop_probe_tree; stop_cli_tree; rm -rf \"${'$'}tmp_root\"; }")
-            appendLine("trap cleanup EXIT INT TERM")
-            appendLine("export HOME=\"${'$'}home_root\"")
-            appendLine("export CLAUDE_CONFIG_DIR=\"${'$'}home_root/.claude\"")
-            appendLine("export KIMI_HOME=\"${'$'}home_root/.kimi\"")
-            appendLine("export GEMINI_CLI_HOME=\"${'$'}home_root/.gemini\"")
-            appendLine("export NO_COLOR=1")
-            appendLine("probe_log=\"${'$'}tmp_root/probe.log\"")
-            appendLine("probe_status=0")
-            appendLine("if command -v setsid >/dev/null 2>&1; then")
-            appendLine("  setsid sh -lc ${readinessProbeCommand.shellSingleQuoted()} >\"${'$'}probe_log\" 2>&1 &")
-            appendLine("else")
-            appendLine("  sh -lc ${readinessProbeCommand.shellSingleQuoted()} >\"${'$'}probe_log\" 2>&1 &")
-            appendLine("fi")
-            appendLine("probe_pid=${'$'}!")
-            appendLine("(")
-            appendLine("  sleep $MODEL_COUNCIL_EXTERNAL_CLI_PROBE_TIMEOUT_SECONDS")
-            appendLine("  if kill -0 \"${'$'}probe_pid\" >/dev/null 2>&1; then")
-            appendLine("    echo 'External CLI readiness probe timed out for ${spec.displayName}; stopping ${spec.binary}.' >&2")
-            appendLine("    stop_probe_tree")
-            appendLine("  fi")
-            appendLine(") &")
-            appendLine("probe_watchdog_pid=${'$'}!")
-            appendLine("wait \"${'$'}probe_pid\" || probe_status=${'$'}?")
-            appendLine("kill \"${'$'}probe_watchdog_pid\" >/dev/null 2>&1 || true")
-            appendLine("wait \"${'$'}probe_watchdog_pid\" >/dev/null 2>&1 || true")
-            appendLine("if [ \"${'$'}probe_status\" -ne 0 ]; then")
-            appendLine("  echo 'External CLI ${spec.displayName} is not ready. Run ${spec.loginCommand} in the selected runtime, complete login, then retry. Council runs never start login.' >&2")
-            appendLine("  exit 65")
-            appendLine("fi")
-            appendLine("prompt_file=\"${'$'}tmp_root/prompt.txt\"")
-            appendLine("cat > \"${'$'}prompt_file\" <<'$promptDelimiter'")
-            appendLine(boundedPrompt)
-            appendLine(promptDelimiter)
-            appendLine("export prompt_file")
-            appendLine("cd \"${'$'}tmp_root/work\"")
-            appendLine("printf '%s\\n' '$OUTPUT_BEGIN'")
-            appendLine("if command -v setsid >/dev/null 2>&1; then")
-            appendLine("  setsid sh -lc ${seatCommand.shellSingleQuoted()} &")
-            appendLine("else")
-            appendLine("  sh -lc ${seatCommand.shellSingleQuoted()} &")
-            appendLine("fi")
-            appendLine("cli_pid=${'$'}!")
-            appendLine("(")
-            appendLine("  sleep $timeoutSeconds")
-            appendLine("  if kill -0 \"${'$'}cli_pid\" >/dev/null 2>&1; then")
-            appendLine("    echo 'External CLI seat timed out after ${timeoutSeconds}s; stopping ${spec.binary}.' >&2")
-            appendLine("    stop_cli_tree")
-            appendLine("  fi")
-            appendLine(") &")
-            appendLine("watchdog_pid=${'$'}!")
-            appendLine("wait \"${'$'}cli_pid\"")
-            appendLine("status=${'$'}?")
-            appendLine("kill \"${'$'}watchdog_pid\" >/dev/null 2>&1 || true")
-            appendLine("wait \"${'$'}watchdog_pid\" >/dev/null 2>&1 || true")
-            appendLine("printf '\\n%s\\n' '$OUTPUT_END'")
-            appendLine("exit \"${'$'}status\"")
-        }
-    }
-
-    fun extractLiveLine(line: String): String? {
-        val trimmed = line.trim()
-        if (trimmed == OUTPUT_BEGIN || trimmed == OUTPUT_END) return null
-        if (line.contains("Preparing /workspace mirror") || line.contains("Starting ")) return null
-        return line.takeIf { it.isNotBlank() }
-    }
-
-    fun marker(line: String): Marker = when (line.trim()) {
-        OUTPUT_BEGIN -> Marker.BEGIN
-        OUTPUT_END -> Marker.END
-        else -> Marker.NONE
-    }
-
-    fun extractFinalOutput(output: String): String {
-        val start = output.indexOf(OUTPUT_BEGIN)
-        if (start < 0) return ""
-        val bodyStart = start + OUTPUT_BEGIN.length
-        val end = output.indexOf(OUTPUT_END, startIndex = bodyStart)
-        return if (end >= 0) {
-            output.substring(bodyStart, end)
-        } else {
-            output.substring(bodyStart)
-        }.trim()
-    }
-
-}
-
-private const val MODEL_COUNCIL_EXTERNAL_CLI_PROMPT_CHARS = 24_000
-private const val MODEL_COUNCIL_EXTERNAL_CLI_PROBE_TIMEOUT_SECONDS = 15
-internal const val MODEL_COUNCIL_EXTERNAL_CLI_WAIT_GRACE_MS = 1_000L

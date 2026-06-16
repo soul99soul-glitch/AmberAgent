@@ -19,7 +19,7 @@ class ExternalCliModelCouncilRunner(
     private val terminalRuntime: TerminalRuntime,
     context: Context,
     private val settingsStore: SettingsAggregator,
-) {
+) : ExternalCliCouncilRunner {
     private val externalCliHomeRoot = context.filesDir
         .resolve("amberagent/external-cli-home")
         .also { it.mkdirs() }

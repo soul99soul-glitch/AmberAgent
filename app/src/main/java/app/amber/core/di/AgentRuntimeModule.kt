@@ -117,16 +117,23 @@ val agentRuntimeModule = module {
     single<app.amber.feature.modelcouncil.ModelCouncilTextRunner> { get<ProviderModelCouncilTextRunner>() }
 
     single { ExternalCliModelCouncilRunner(get(), get<Context>(), get()) }
+    single<app.amber.feature.modelcouncil.ExternalCliCouncilRunner> { get<ExternalCliModelCouncilRunner>() }
+
+    single { AndroidModelCouncilSettingsSource(get()) }
+    single<app.amber.feature.modelcouncil.ModelCouncilSettingsSource> { get<AndroidModelCouncilSettingsSource>() }
+
+    single { AndroidModelCouncilRunStorage(get<Context>()) }
+    single<app.amber.feature.modelcouncil.ModelCouncilRunStorage> { get<AndroidModelCouncilRunStorage>() }
 
     single {
         ModelCouncilManager(
-            get(),
-            get(),
-            get(),
-            get(),
-            get<ProviderModelCouncilTextRunner>(),
-            get(),
-            get(),
+            appScope = get(),
+            settingsSource = get(),
+            json = get(),
+            modelRunner = get<ProviderModelCouncilTextRunner>(),
+            externalCliRunner = get(),
+            agentTaskStore = get(),
+            runStorage = get(),
         )
     }
 }
