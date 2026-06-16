@@ -113,6 +113,34 @@ final class IOSSharedSettingsStore {
         savedSearchProviders = providers
     }
 
+    // MARK: - Custom TTS engines write-back
+
+    private let ttsEnginesKey = "app.amber.ios.customTtsEngines"
+
+    var savedTtsEngines: [[String: String]] {
+        get { (defaults.array(forKey: ttsEnginesKey) as? [[String: String]]) ?? [] }
+        set { defaults.set(newValue, forKey: ttsEnginesKey) }
+    }
+
+    func addTtsEngine(name: String, engineType: String, apiKey: String = "", model: String = "") {
+        var engines = savedTtsEngines
+        engines.append([
+            "id": UUID().uuidString,
+            "name": name,
+            "engineType": engineType,
+            "apiKey": apiKey,
+            "model": model,
+        ])
+        savedTtsEngines = engines
+    }
+
+    func removeTtsEngine(at index: Int) {
+        var engines = savedTtsEngines
+        guard index >= 0 && index < engines.count else { return }
+        engines.remove(at: index)
+        savedTtsEngines = engines
+    }
+
     // MARK: - Real seeded collections (for UI display)
 
     /// Real KMP default TTS providers (DEFAULT_TTS_PROVIDERS), seeded + de-duplicated.

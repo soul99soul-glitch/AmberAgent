@@ -247,18 +247,39 @@ struct TTSSettingsView: View {
     }
 
     private var deleteSection: some View {
-        AmberFormGroup {
-            Button {
-                alert = selectedEngine == .system ? .deleteSystem : .delete
-            } label: {
-                Text("删除待接（需 Keychain 持久化）")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(AmberTheme.accentRed)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 52)
-                    .contentShape(Rectangle())
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "已保存云端引擎（UserDefaults · 可读写）")
+            AmberFormGroup {
+                let engines = sharedSettings.savedTtsEngines
+                if engines.isEmpty {
+                    Text("暂无自定义云端引擎。选择引擎类型后点保存引擎添加。")
+                        .font(.caption).foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
+                } else {
+                    ForEach(Array(engines.enumerated()), id: \.offset) { index, engine in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(engine["name"] ?? "?").font(.body.weight(.semibold))
+                                Text("\(engine["engineType"] ?? "?") · \(engine["model"] ?? "?")")
+                                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(AmberTheme.muted2)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            Button { sharedSettings.removeTtsEngine(at: index) } label: {
+                                Image(systemName: "minus.circle.fill").font(.system(size: 18)).foregroundStyle(AmberTheme.accentRed)
+                            }.buttonStyle(.plain)
+                        }.frame(minHeight: 48).padding(.horizontal, 14).padding(.vertical, 4)
+                        if index < engines.count - 1 { TTSSettingsDivider() }
+                    }
+                }
+                TTSSettingsDivider()
+                Button {
+                    let name: String
+                    switch selectedEngine { case .system: name = "System"; case .miniMax: name = "MiniMax"; case .openAI: name = "OpenAI"; case .gemini: name = "Gemini" }
+                    sharedSettings.addTtsEngine(name: name, engineType: name)
+                } label: {
+                    Label("保存引擎", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
+                }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
             }
-            .buttonStyle(.plain)
         }
         .padding(.top, 20)
     }
