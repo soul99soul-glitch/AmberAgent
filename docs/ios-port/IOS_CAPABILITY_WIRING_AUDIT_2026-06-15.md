@@ -800,6 +800,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: `feature:subagent:api:compileKotlinIosSimulatorArm64` BUILD SUCCESSFUL; `shared:linkDebugFrameworkIosSimulatorArm64` BUILD SUCCESSFUL; Shared.h confirms `SharedSubAgentDefinitions` (11 hits); xcodebuild BUILD SUCCEEDED.
 - Remaining risk: read-only only; iOS cannot run/edit subagents yet (SubAgentManager KMP 化 is phase 7).
 
+### Slice 36 - Phase 7.1: iOS memory read/write via IosMemoryFactory
+
+- Scope: new KMP `IosMemoryFactory` (core/memory/api commonMain) provides in-memory memory record CRUD (addMemory/updateContent/deleteMemory/getAllRecords). MemoryEditView now has a "记忆库（KMP 内存版 · 可读写）" section that reads/writes real KMP MemoryRecord objects via IosMemoryFactory. Users can add memories (with scope/kind mapping), see them listed, and delete them.
+- HONESTY: in-memory only, NOT persisted (no Room DB on iOS). Changes lost on app restart. Seed is empty (memories live in Room, not Settings). Proves the read/write UI chain works; real persistence needs Room KMP store.
+- Verification: core/memory/api compileKotlinIosSimulatorArm64 BUILD SUCCESSFUL; shared linkDebugFramework BUILD SUCCESSFUL; Shared.h has IosMemoryFactory; xcodebuild BUILD SUCCEEDED.
+- Remaining risk: not persisted; Android MemoryRepository untouched (still in :app).
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 
 struct MemoryEditView: View {
     @Environment(\.dismiss) private var dismiss
@@ -7,6 +8,7 @@ struct MemoryEditView: View {
     @State private var scope: MemoryEditScope
     @State private var pinned: Bool
     @State private var showDeleteInfo = false
+    @State private var iosRecords: [MemoryRecord] = []
 
     init(initialText: String, initialScope: String, initialPinned: Bool) {
         self._text = State(initialValue: initialText)
@@ -21,6 +23,7 @@ struct MemoryEditView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     header
+                    iosMemorySection
                     noticeSection
                     contentSection
                     classificationSection
@@ -61,6 +64,98 @@ struct MemoryEditView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 18)
+    }
+
+    /// Real KMP memory store (in-memory, NOT persisted). Uses IosMemoryFactory
+    /// to add/list/delete memory records. Proves the read/write chain works;
+    /// changes are lost on app restart (no Room DB on iOS).
+    private var iosMemorySection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "记忆库（KMP 内存版 · 可读写）")
+
+            AmberFormGroup {
+                ForEach(Array(iosRecords.enumerated()), id: \.offset) { index, record in
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(record.content)
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground)
+                                .lineLimit(3)
+                            Text("#\(record.id) · \(record.scope.name) · \(record.kind.name)")
+                                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                                .foregroundStyle(AmberTheme.muted2)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button {
+                            IosMemoryFactory.shared.deleteMemory(id: record.id)
+                            iosRecords = IosMemoryFactory.shared.getAllRecords()
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 14))
+                                .foregroundStyle(AmberTheme.accentRed)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .frame(minHeight: 52)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 4)
+
+                    if index < iosRecords.count - 1 {
+                        Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
+                    }
+                }
+
+                if iosRecords.isEmpty {
+                    Text("记忆库为空。在下方「内容」输入文字后点「保存到记忆库」添加。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    // Map UI scope title to KMP MemoryScope + assistantId bucket.
+                    let memScope: MemoryScope
+                    let bucket: String
+                    switch scope.title {
+                    case "核心": memScope = MemoryScope.core; bucket = IosMemoryFactory.shared.GLOBAL_MEMORY_ID
+                    case "短期": memScope = MemoryScope.shortTerm; bucket = IosMemoryFactory.shared.SHORT_TERM_MEMORY_ID
+                    default: memScope = MemoryScope.longTerm; bucket = IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+                    }
+                    IosMemoryFactory.shared.addMemory(
+                        scope: memScope,
+                        kind: memScope == MemoryScope.shortTerm ? MemoryKind.project : MemoryKind.note,
+                        content: trimmed,
+                        assistantId: bucket,
+                    )
+                    iosRecords = IosMemoryFactory.shared.getAllRecords()
+                    text = ""
+                } label: {
+                    Label("保存到记忆库", systemImage: "plus.circle.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            Text("注意：这是 KMP 内存版记忆库，可读写但不持久化（无 Room DB）。重启后清空。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+        }
+        .onAppear {
+            iosRecords = IosMemoryFactory.shared.getAllRecords()
+        }
     }
 
     private var noticeSection: some View {
