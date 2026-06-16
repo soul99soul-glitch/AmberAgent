@@ -3,6 +3,7 @@ import Shared
 
 struct ProviderDetailView: View {
     @Bindable var settingsStore: SettingsStore
+    let providerRegistry: ProviderRegistryStore
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -193,6 +194,13 @@ struct ProviderDetailView: View {
         DefaultProvidersKt.DEFAULT_PROVIDERS.first { $0.name == providerName }?.models ?? []
     }
 
+    /// The real KMP `ProviderSetting` for this preset, matched by unique name, or
+    /// nil if this row is not a DEFAULT_PROVIDERS preset. The "current" config row
+    /// uses name "OpenAI-compatible", which never matches a preset name.
+    private var matchedPreset: ProviderSetting? {
+        DefaultProvidersKt.DEFAULT_PROVIDERS.first { $0.name == providerName }
+    }
+
     private var apiKeyRow: some View {
         ProviderEditableTextFieldRow(
             title: "API Key",
@@ -290,11 +298,7 @@ struct ProviderDetailView: View {
                 valueStyle: .monoMuted
             )
         } else {
-            ProviderStaticRow(
-                title: "API Key",
-                subtitle: "DEFAULT_PROVIDERS 不包含凭据",
-                value: "未预置"
-            )
+            presetAPIKeyRow
             ProviderDetailDivider()
             ProviderStaticRow(
                 title: "预置 API 地址",
@@ -316,6 +320,38 @@ struct ProviderDetailView: View {
                 subtitle: presetPathSubtitle,
                 value: presetPathValue,
                 valueStyle: .monoMuted
+            )
+        }
+    }
+
+    /// API Key row for a preset provider.
+    ///
+    /// Only presets the current scalar chat chain can faithfully represent
+    /// (`canActivate`: OpenAI-compatible, non-Response-API, non-MiMo) get a real
+    /// Key editor that writes the per-provider Keychain slot. Providers the chain
+    /// cannot represent (Gemini Google type, xAI Response API, MiMo placeholder)
+    /// keep the static "未预置" state, because even with a key they could not be
+    /// projected without faking provider identity.
+    @ViewBuilder
+    private var presetAPIKeyRow: some View {
+        // Track keyRevision so the row re-renders after the Key editor writes a
+        // key (hasStoredKey reads the Keychain via a static helper, not an
+        // observable property, so the revision is the tracked dependency).
+        let _ = providerRegistry.keyRevision
+        if let preset = matchedPreset, providerRegistry.canActivate(preset) {
+            let hasKey = providerRegistry.hasStoredKey(preset)
+            ProviderValueRow(
+                title: "API Key",
+                value: hasKey ? "已保存（Keychain）" : "未保存",
+                showsChevron: true
+            ) {
+                router.navigate(to: .providerKeyEditor(name: providerName))
+            }
+        } else {
+            ProviderStaticRow(
+                title: "API Key",
+                subtitle: "DEFAULT_PROVIDERS 不包含凭据",
+                value: "未预置"
             )
         }
     }
@@ -381,7 +417,7 @@ struct ProviderDetailView: View {
             return "此模板在 Android/KMP 中要求 useResponseApi=true；iOS 当前无法保存该开关，所以不只套用 Base URL。"
         }
 
-        return "套用只写入 SettingsStore.baseUrl，不写入 API Key、不创建 ProviderSetting、不拉取模型、不测试连接。"
+        return "API Key 行进入真实 Key 编辑页，只写入该 provider 的 Keychain account（不写入 UserDefaults、不改当前服务商、不发网络请求）。保存 Key 后该模板即可在列表里「设为当前」。套用地址只写入 SettingsStore.baseUrl。"
     }
 
     private func applyPresetBaseURL() {
@@ -777,9 +813,11 @@ private struct ProviderModelRow: View {
 }
 
 #Preview {
-    NavigationStack {
+    let settings = SettingsStore()
+    return NavigationStack {
         ProviderDetailView(
-            settingsStore: SettingsStore(),
+            settingsStore: settings,
+            providerRegistry: ProviderRegistryStore(settingsStore: settings),
             providerName: "OpenAI-compatible",
             endpoint: "https://api.openai.com/v1",
             providerKind: .current

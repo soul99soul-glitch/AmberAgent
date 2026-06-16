@@ -155,8 +155,14 @@ struct ProvidersView: View {
                 }
             }
 
-            ProviderDraftNote("这些行来自 Android/KMP DEFAULT_PROVIDERS，并叠加本机 Keychain 是否已有该 provider id 的密钥。只有当前 iOS 聊天链路能表达、且已有 Key 的 OpenAI-compatible 模板可以设为当前；列表不含明文 API Key。Gemini、xAI、MiMo 等类型仍等待完整 ProviderSetting bridge。编辑某个服务商的 Key 仍在「当前聊天配置」中进行，写回可编辑 registry 将在后续切片接入。")
+            ProviderDraftNote("这些行来自 Android/KMP DEFAULT_PROVIDERS，并叠加本机 Keychain 是否已有该 provider id 的密钥。只有当前 iOS 聊天链路能表达、且已有 Key 的 OpenAI-compatible 模板可以设为当前；列表不含明文 API Key。Gemini、xAI、MiMo 等类型仍等待完整 ProviderSetting bridge。在服务商详情页可编辑某个 activatable 模板的 API Key，只写入该 provider 的 Keychain；保存后即可「设为当前」。")
         }
+        // hasStoredKey/canSelect read the Keychain via a static helper (not an
+        // observable property), so tying this section's identity to keyRevision
+        // forces a rebuild whenever a per-provider key is written or cleared —
+        // the row status (Key 已/未填写, 设为当前/需要 Key) then re-reads the
+        // Keychain honestly on back-navigation.
+        .id(providerRegistry.keyRevision)
     }
 }
 

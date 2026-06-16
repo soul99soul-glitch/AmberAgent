@@ -24,6 +24,15 @@ final class ProviderRegistryStore {
     private(set) var providers: [ProviderSetting]
     private(set) var selectedProviderId: String
 
+    /// Monotonic counter bumped whenever a per-provider Keychain key is written or
+    /// cleared. The key itself never lives in an observable property (it stays in
+    /// the Keychain), but UI status rows (`hasStoredKey` / `canSelect`) read this
+    /// revision so SwiftUI tracks them as observable and re-renders after a key
+    /// edit when the user navigates back. This keeps the registry honest: the only
+    /// observable surface for keys is "did the set of stored keys change", never the
+    /// key value itself.
+    private(set) var keyRevision: Int = 0
+
     @ObservationIgnored private let settingsStore: SettingsStore
 
     private static let selectedKey = "app.amber.ios.providerRegistry.selectedId"
@@ -104,6 +113,29 @@ final class ProviderRegistryStore {
     /// Whether this provider has a stored Keychain key (for honest UI status only).
     func hasStoredKey(_ provider: ProviderSetting) -> Bool {
         !(Self.loadKey(id: Self.id(of: provider)) ?? "").isEmpty
+    }
+
+    /// The real per-provider Keychain key for `provider`, or nil if none is stored.
+    /// Used only to seed the Key editor and to show honest status. Never returns the
+    /// key for a provider that is not the current selection into SettingsStore.
+    func storedKey(for provider: ProviderSetting) -> String? {
+        Self.loadKey(id: Self.id(of: provider))
+    }
+
+    /// Write a per-provider API key into the real Keychain account for `provider`.
+    ///
+    /// This is the ONLY key-editing entry point for preset providers. It writes the
+    /// real per-provider Keychain slot (account `app.amber.ios.provider.<id>`) and
+    /// nothing else: it does NOT touch UserDefaults, does NOT mutate the in-memory
+    /// key-less `ProviderSetting`, does NOT change the selected/current provider,
+    /// does NOT project into `SettingsStore`, and does NOT make any network request.
+    ///
+    /// A provider becomes selectable as the current chat provider only after this
+    /// stores a non-empty key AND the user taps "设为当前" (which runs `select()` and
+    /// projects). Writing a key alone never activates the provider.
+    func saveKey(_ key: String, for provider: ProviderSetting) {
+        Self.saveKey(key, id: Self.id(of: provider))
+        keyRevision &+= 1
     }
 
     // MARK: - Projection into SettingsStore (the surface Chat reads)
