@@ -886,6 +886,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: xcodebuild BUILD SUCCEEDED.
 - 8.6 Token estimation: confirmed BLOCKED — Android also lacks tokenizer. Not a porting task.
 
+### Slice 49 - Retrospective review + edit pages product decision
+
+- Retrospective subagent review of Slice 36-48: VERDICT PASS. No P0/P1. All call chains closed (Factory/Store/Player → UI). No fake data. Android zero regression. CouncilView runnerSection → runTestCycle confirmed. 3 LOW/INFO findings (IosMemoryFactory in commonMain not iosMain; stale KDoc; CouncilRunner result text always says "stub" even for real provider).
+- **Edit pages (SeatEditorView/ModelEditView/SearchProviderView) — PAUSED (product decision required)**:
+  These pages need Settings write-back persistence. IOSSharedSettingsStore is currently read-only seed snapshot. Implementing write-back requires choosing a persistence layer (UserDefaults vs Room KMP vs DataStore KMP) — an architecture decision that needs product input. Per the pause condition ("核心数据模型重设" / "必须由产品决定的冲突"), this is paused pending product decision on the persistence approach.
+- Verification: subagent review PASS; xcodebuild BUILD SUCCEEDED (no code change — analysis + documentation only).
+
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|
