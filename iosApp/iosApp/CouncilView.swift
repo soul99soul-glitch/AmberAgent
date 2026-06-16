@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct CouncilView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
@@ -31,7 +33,8 @@ struct CouncilView: View {
         )
     ]
 
-    init(settingsStore: SettingsStore? = nil) {
+    init(sharedSettings: IOSSharedSettingsStore) {
+        self.sharedSettings = sharedSettings
     }
 
     var body: some View {
@@ -44,6 +47,7 @@ struct CouncilView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        presetConfigSection
                         evidenceSection
                         iOSStatusSection
                         draftActionSection
@@ -97,6 +101,29 @@ struct CouncilView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    /// Read-only view of the REAL seeded ModelCouncil runtime defaults from
+    /// `IOSSharedSettingsStore.agentRuntime.modelCouncil`. Proves the read path;
+    /// does NOT enable council execution.
+    private var presetConfigSection: some View {
+        let c = sharedSettings.agentRuntime.modelCouncil
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "KMP 默认议会配置（只读）")
+            AmberFormGroup {
+                CouncilPresetKVRow(title: "启用议会", value: c.enabled ? "默认开" : "默认关")
+                CouncilStatusDivider()
+                CouncilPresetKVRow(title: "默认席位数", value: "\(c.defaultSeats)")
+                CouncilStatusDivider()
+                CouncilPresetKVRow(title: "最大席位数", value: "\(c.maxSeats)")
+                CouncilStatusDivider()
+                CouncilPresetKVRow(title: "默认轮数", value: "\(c.defaultRounds)")
+                CouncilStatusDivider()
+                CouncilPresetKVRow(title: "最大轮数", value: "\(c.maxRounds)")
+                CouncilStatusDivider()
+                CouncilPresetKVRow(title: "显示各席输出", value: c.showSeatOutputs ? "默认开" : "默认关")
+            }
+        }
     }
 
     private var evidenceSection: some View {
@@ -232,9 +259,31 @@ private struct CouncilStatusDivider: View {
     }
 }
 
+/// Read-only key/value row for a real seeded ModelCouncil setting.
+private struct CouncilPresetKVRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+        }
+        .frame(minHeight: 46)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .accessibilityLabel("\(title)，\(value)")
+    }
+}
+
 #Preview {
     NavigationStack {
-        CouncilView()
+        CouncilView(sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
     }
 }

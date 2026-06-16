@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct BoardView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
@@ -107,6 +109,7 @@ struct BoardView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        presetConfigSection
                         evidenceSection
                         handlingSection
                         sourceSection
@@ -160,6 +163,27 @@ struct BoardView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    /// Read-only view of the REAL seeded TodayBoard defaults from
+    /// `IOSSharedSettingsStore.agentRuntime.todayBoard`. Proves the read path;
+    /// does NOT enable board collection/generation.
+    private var presetConfigSection: some View {
+        let b = sharedSettings.agentRuntime.todayBoard
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "KMP 默认看板配置（只读）")
+            AmberFormGroup {
+                BoardPresetKVRow(title: "启用看板", value: b.enabled ? "默认开" : "默认关")
+                BoardCapabilityDivider()
+                BoardPresetKVRow(title: "启用数据源数", value: "\(b.enabledSources.count)")
+                BoardCapabilityDivider()
+                BoardPresetKVRow(title: "热榜启用数据源数", value: "\(b.hotListEnabledSources.count)")
+                BoardCapabilityDivider()
+                BoardPresetKVRow(title: "热榜刷新间隔（分钟）", value: "\(b.hotListRefreshIntervalMinutes)")
+                BoardCapabilityDivider()
+                BoardPresetKVRow(title: "热榜仅 WiFi", value: b.hotListWifiOnly ? "默认开" : "默认关")
+            }
+        }
     }
 
     private var evidenceSection: some View {
@@ -253,6 +277,28 @@ struct BoardCapabilityDivider: View {
     }
 }
 
+/// Read-only key/value row for a real seeded TodayBoard setting.
+struct BoardPresetKVRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+        }
+        .frame(minHeight: 46)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .accessibilityLabel("\(title)，\(value)")
+    }
+}
+
 struct BoardCapabilityNote: View {
     let text: String
 
@@ -274,7 +320,7 @@ struct BoardCapabilityNote: View {
 
 #Preview {
     NavigationStack {
-        BoardView()
+        BoardView(sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
     }
 }

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SubAgentsView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
@@ -110,6 +112,7 @@ struct SubAgentsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        presetConfigSection
                         evidenceSection
                         iOSStatusSection
                         settingMapSection
@@ -164,6 +167,25 @@ struct SubAgentsView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    /// Read-only view of the REAL seeded SubAgent runtime defaults from
+    /// `IOSSharedSettingsStore.agentRuntime.subAgent`. Proves the read path;
+    /// does NOT enable subagent execution.
+    private var presetConfigSection: some View {
+        let s = sharedSettings.agentRuntime.subAgent
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "KMP 默认 SubAgent 配置（只读）")
+            AmberFormGroup {
+                SubAgentPresetKVRow(title: "启用 SubAgent", value: s.enabled ? "默认开" : "默认关")
+                SubAgentDivider()
+                SubAgentPresetKVRow(title: "允许动态子代理", value: s.allowDynamicSubAgents ? "默认开" : "默认关")
+                SubAgentDivider()
+                SubAgentPresetKVRow(title: "最大并发运行", value: "\(s.maxConcurrentRuns)")
+                SubAgentDivider()
+                SubAgentPresetKVRow(title: "最大轮数", value: "\(s.maxTurns)")
+            }
+        }
     }
 
     private var evidenceSection: some View {
@@ -348,6 +370,28 @@ private struct SubAgentDivider: View {
     }
 }
 
+/// Read-only key/value row for a real seeded SubAgent setting.
+private struct SubAgentPresetKVRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+        }
+        .frame(minHeight: 46)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .accessibilityLabel("\(title)，\(value)")
+    }
+}
+
 private struct SubAgentFootnote: View {
     let text: String
 
@@ -364,7 +408,7 @@ private struct SubAgentFootnote: View {
 
 #Preview {
     NavigationStack {
-        SubAgentsView()
+        SubAgentsView(sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
     }
 }

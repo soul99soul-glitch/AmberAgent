@@ -60,6 +60,18 @@ final class IOSSharedSettingsStore {
         snapshot.searchServices
     }
 
+    /// Index of the real seeded default selected search service.
+    var searchServiceSelected: Int32 { snapshot.searchServiceSelected }
+
+    /// Real seeded built-in search source toggles + web-search master switch (read-only).
+    var enableWebSearch: Bool { snapshot.enableWebSearch }
+    var searchBuiltinJinaEnabled: Bool { snapshot.searchBuiltinJinaEnabled }
+    var searchBuiltinDuckDuckGoEnabled: Bool { snapshot.searchBuiltinDuckDuckGoEnabled }
+    var searchBuiltinBingEnabled: Bool { snapshot.searchBuiltinBingEnabled }
+    var searchBuiltinWikipediaEnabled: Bool { snapshot.searchBuiltinWikipediaEnabled }
+    var searchBuiltinHackerNewsEnabled: Bool { snapshot.searchBuiltinHackerNewsEnabled }
+    var searchGoogleWebViewFallbackEnabled: Bool { snapshot.searchGoogleWebViewFallbackEnabled }
+
     /// Real default display setting.
     var displaySetting: DisplaySetting {
         snapshot.displaySetting

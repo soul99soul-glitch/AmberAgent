@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct MiniAppSettingsView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
     private let coreRows: [MiniAppCapabilityRow] = [
@@ -88,6 +90,7 @@ struct MiniAppSettingsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        presetConfigSection
                         coreSection
                         advancedSection
                         persistenceSection
@@ -141,6 +144,27 @@ struct MiniAppSettingsView: View {
             .padding(.bottom, 16)
     }
 
+    /// Read-only view of the REAL seeded MiniApp defaults from
+    /// `IOSSharedSettingsStore.agentRuntime.miniApp`. Proves the read path;
+    /// does NOT enable MiniApp generation/runner.
+    private var presetConfigSection: some View {
+        let m = sharedSettings.agentRuntime.miniApp
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "KMP 默认 MiniApp 配置（只读）")
+            AmberFormGroup {
+                MiniAppPresetKVRow(title: "启用 MiniApp", value: m.enabled ? "默认开" : "默认关")
+                MiniAppCapabilityDivider()
+                MiniAppPresetKVRow(title: "AI 能力", value: m.aiEnabled ? "默认开" : "默认关")
+                MiniAppCapabilityDivider()
+                MiniAppPresetKVRow(title: "网络访问", value: m.networkEnabled ? "默认开" : "默认关")
+                MiniAppCapabilityDivider()
+                MiniAppPresetKVRow(title: "剪贴板读取", value: m.clipboardReadEnabled ? "默认开" : "默认关")
+                MiniAppCapabilityDivider()
+                MiniAppPresetKVRow(title: "启动", value: m.launchEnabled ? "默认开" : "默认关")
+            }
+        }
+    }
+
     private var coreSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "MiniAppSetting 核心字段")
@@ -186,6 +210,28 @@ struct MiniAppSettingsView: View {
 
 #Preview {
     NavigationStack {
-        MiniAppSettingsView()
+        MiniAppSettingsView(sharedSettings: IOSSharedSettingsStore())
+    }
+}
+
+/// Read-only key/value row for a real seeded MiniApp setting.
+private struct MiniAppPresetKVRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+        }
+        .frame(minHeight: 46)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .accessibilityLabel("\(title)，\(value)")
     }
 }

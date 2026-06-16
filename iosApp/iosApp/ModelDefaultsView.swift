@@ -1,12 +1,23 @@
 import SwiftUI
+import Shared
 
 struct ModelDefaultsView: View {
     @Bindable var settingsStore: SettingsStore
+    let sharedSettings: IOSSharedSettingsStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var alert: ModelDefaultsAlert?
 
     private let chatModelIDs = ["gpt-4o"]
+
+    /// Render a real seeded modelId pointer (Uuid) as a short prefix so the row
+    /// shows actual KMP data (not a hardcoded label). The seed value is a random
+    /// Uuid that does not resolve to a readable model name — shown as a prefix
+    /// only, honestly labeled in the section note.
+    private func modelIdPreview(_ id: KotlinUuid) -> String {
+        let full = id.toHexDashString()
+        return String(full.prefix(8)) + "…"
+    }
 
     var body: some View {
         ZStack {
@@ -95,8 +106,8 @@ struct ModelDefaultsView: View {
                     systemImage: "photo",
                     iconColor: AmberTheme.accentAmber,
                     title: "生图模型",
-                    subtitle: "Android 有 imageGenerationModelId；iOS 未接入生成工具默认值",
-                    value: "未接线"
+                    subtitle: "KMP Settings 已有 imageGenerationModelId 默认指针；iOS 生成工具执行入口尚未接线",
+                    value: modelIdPreview(sharedSettings.imageGenerationModelId)
                 )
             }
         }
@@ -109,8 +120,8 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "text.alignleft",
                     title: "标题总结模型",
-                    subtitle: "Android titleModelId/titlePrompt 尚未桥接到 iOS",
-                    value: "未接线"
+                    subtitle: "KMP Settings 已有 titleModelId 默认指针；iOS 标题生成执行尚未接线",
+                    value: modelIdPreview(sharedSettings.titleModelId)
                 )
 
                 ModelDefaultsDivider()
@@ -118,8 +129,8 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "lightbulb",
                     title: "聊天建议模型",
-                    subtitle: "Android suggestionModelId/suggestionPrompt 尚未桥接到 iOS",
-                    value: "未接线"
+                    subtitle: "KMP Settings 已有 suggestionModelId 默认指针；iOS 建议生成执行尚未接线",
+                    value: modelIdPreview(sharedSettings.suggestionModelId)
                 )
 
                 ModelDefaultsDivider()
@@ -127,8 +138,8 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "eye",
                     title: "视觉识别模型",
-                    subtitle: "Android ocrModelId/OCR prompt 尚未桥接到 iOS",
-                    value: "未接线"
+                    subtitle: "KMP Settings 已有 ocrModelId 默认指针；iOS OCR 执行尚未接线",
+                    value: modelIdPreview(sharedSettings.ocrModelId)
                 )
 
                 ModelDefaultsDivider()
@@ -136,12 +147,12 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "arrow.down.left.and.arrow.up.right",
                     title: "压缩模型",
-                    subtitle: "Android compressModelId/compressPrompt 尚未桥接到 iOS",
-                    value: "未接线"
+                    subtitle: "KMP Settings 已有 compressModelId 默认指针；iOS 压缩执行尚未接线",
+                    value: modelIdPreview(sharedSettings.compressModelId)
                 )
             }
 
-            ModelDefaultsNote("这些辅助任务在 Android/KMP 中有真实设置和调用路径；当前 iOS 没有对应 SettingsStore 字段或执行入口，因此不会保存草稿选择。")
+            ModelDefaultsNote("这些 modelId 指针来自 KMP Settings 真实 seed（只读展示上方前缀），种子值是随机 Uuid，不保证映射到某 provider 的可读模型名。iOS 当前没有对应的执行入口，因此不保存草稿选择。")
         }
     }
 
@@ -352,6 +363,6 @@ private struct ModelDefaultsNote: View {
 
 #Preview {
     NavigationStack {
-        ModelDefaultsView(settingsStore: SettingsStore())
+        ModelDefaultsView(settingsStore: SettingsStore(), sharedSettings: IOSSharedSettingsStore())
     }
 }

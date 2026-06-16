@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct MemoryOverviewView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
 
@@ -60,6 +62,7 @@ struct MemoryOverviewView: View {
                 VStack(spacing: 0) {
                     header
                     intro
+                    presetConfigSection
                     soulSection
                     evidenceSection
                     configurationSection
@@ -104,6 +107,28 @@ struct MemoryOverviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.bottom, 3)
+    }
+
+    /// Read-only view of the REAL seeded memory settings from
+    /// `IOSSharedSettingsStore.agentRuntime` (enableCoreMemory / short / long /
+    /// recentChats / timeReminder). Proves the real-settings read path is wired
+    /// for this module; does NOT enable memory execution/editing.
+    private var presetConfigSection: some View {
+        let rt = sharedSettings.agentRuntime
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "KMP 默认记忆配置（只读）")
+            AmberFormGroup {
+                MemoryPresetRow(title: "核心记忆", isOn: rt.enableCoreMemory)
+                MemoryDivider()
+                MemoryPresetRow(title: "短期记忆", isOn: rt.enableShortTermMemory)
+                MemoryDivider()
+                MemoryPresetRow(title: "长期记忆", isOn: rt.enableLongTermMemory)
+                MemoryDivider()
+                MemoryPresetRow(title: "最近会话参考", isOn: rt.enableRecentChatsReference)
+                MemoryDivider()
+                MemoryPresetRow(title: "时间提醒", isOn: rt.enableTimeReminder)
+            }
+        }
     }
 
     private var soulSection: some View {
@@ -221,6 +246,28 @@ struct MemoryOverviewView: View {
 
             MemoryNote("Android/KMP 的记忆库能力真实存在；本页当前只记录 iOS bridge 缺口。")
         }
+    }
+}
+
+/// Read-only toggle row for a real seeded memory setting. Display-only.
+private struct MemoryPresetRow: View {
+    let title: String
+    let isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(isOn ? "默认开" : "默认关")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isOn ? AmberTheme.accentGreen : AmberTheme.muted2)
+        }
+        .frame(minHeight: 48)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .accessibilityLabel("\(title)\(isOn ? "，默认开" : "，默认关")")
     }
 }
 

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SearchServicesView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
@@ -32,6 +34,7 @@ struct SearchServicesView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        presetServicesSection
                         agentSearchSection
                         builtInSection
                         repositoryTypesSection
@@ -79,6 +82,46 @@ struct SearchServicesView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 2)
+    }
+
+    /// Read-only view of the REAL seeded search settings (built-in source toggles
+    /// + the master enableWebSearch switch + count of seeded SearchServiceOptions),
+    /// sourced from `IOSSharedSettingsStore` → KMP `IosSettingsDefaults`. Proves the
+    /// real-settings read path is wired for this module. Does NOT make search
+    /// executable or editable — the draft sections below stay draft-only.
+    private var presetServicesSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "预置搜索设置（KMP 默认 · 只读）")
+
+            AmberFormGroup {
+                SearchPresetToggleRow(title: "Agent 网络搜索", isOn: sharedSettings.enableWebSearch)
+                SearchServicesDivider()
+                SearchPresetToggleRow(title: "Jina Search / Reader", isOn: sharedSettings.searchBuiltinJinaEnabled)
+                SearchServicesDivider()
+                SearchPresetToggleRow(title: "DuckDuckGo Lite", isOn: sharedSettings.searchBuiltinDuckDuckGoEnabled)
+                SearchServicesDivider()
+                SearchPresetToggleRow(title: "Bing HTML", isOn: sharedSettings.searchBuiltinBingEnabled)
+                SearchServicesDivider()
+                SearchPresetToggleRow(title: "Wikipedia", isOn: sharedSettings.searchBuiltinWikipediaEnabled)
+                SearchServicesDivider()
+                SearchPresetToggleRow(title: "Hacker News", isOn: sharedSettings.searchBuiltinHackerNewsEnabled)
+                SearchServicesDivider()
+                SearchPresetToggleRow(title: "Google WebView 兜底", isOn: sharedSettings.searchGoogleWebViewFallbackEnabled)
+                SearchServicesDivider()
+                SearchStatusRow(
+                    systemImage: "list.bullet.rectangle",
+                    iconColor: AmberTheme.accentCyan,
+                    title: "预置服务条目",
+                    subtitle: "Android/KMP DEFAULT_PROVIDERS 种子中的 SearchServiceOptions 条目，只读展示",
+                    value: "\(sharedSettings.searchServices.count) 条",
+                    valueColor: AmberTheme.foreground2
+                )
+            }
+
+            SearchServicesNote {
+                Text("这些开关与计数来自 KMP Settings 真实 seed（IosSettingsDefaults），只读展示当前默认状态。下方服务类型与配置仍是草稿，不保存。")
+            }
+        }
     }
 
     private var agentSearchSection: some View {
@@ -367,6 +410,38 @@ private struct SearchServicesDivider: View {
     }
 }
 
+/// Read-only toggle row for a real seeded search setting (from IOSSharedSettingsStore).
+/// The switch is display-only and never mutates the KMP seed snapshot.
+private struct SearchPresetToggleRow: View {
+    let title: String
+    let isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(isOn ? AmberTheme.accent : AmberTheme.border)
+                .frame(width: 48, height: 30)
+                .overlay(alignment: isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 26, height: 26)
+                        .shadow(color: .black.opacity(0.14), radius: 3, y: 1)
+                        .padding(2)
+                }
+                .opacity(0.9)
+        }
+        .frame(minHeight: 52)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .accessibilityLabel("\(title)\(isOn ? "，开启" : "，关闭")")
+    }
+}
+
 private struct SearchServicesNote<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -384,7 +459,7 @@ private struct SearchServicesNote<Content: View>: View {
 
 #Preview {
     NavigationStack {
-        SearchServicesView()
+        SearchServicesView(sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
     }
 }

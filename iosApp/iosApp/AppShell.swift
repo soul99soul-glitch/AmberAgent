@@ -263,7 +263,7 @@ private extension View {
             case .appearance:
                 AppearanceSettingsView()
             case .displayFont:
-                DisplayFontSettingsView()
+                DisplayFontSettingsView(sharedSettings: sharedSettings)
             case .conversationStorage:
                 ConversationStorageView()
             case .syncBackup:
@@ -310,9 +310,9 @@ private extension View {
             case .modelCustomBody:
                 ModelCustomFieldsView(kind: .body)
             case .modelDefaults:
-                ModelDefaultsView(settingsStore: settingsStore)
+                ModelDefaultsView(settingsStore: settingsStore, sharedSettings: sharedSettings)
             case .searchServices:
-                SearchServicesView()
+                SearchServicesView(sharedSettings: sharedSettings)
             case .searchProvider:
                 SearchProviderView()
             case .ttsSettings:
@@ -320,13 +320,13 @@ private extension View {
             case .ttsAdd:
                 TTSAddView()
             case .board:
-                BoardView()
+                BoardView(sharedSettings: sharedSettings)
             case .boardSettings:
                 BoardSettingsView()
             case .miniApps:
                 MiniAppListView()
             case .miniAppSettings:
-                MiniAppSettingsView()
+                MiniAppSettingsView(sharedSettings: sharedSettings)
             case .miniAppRunner(let title):
                 MiniAppRunnerView(title: title)
             case .webMount:
@@ -336,15 +336,15 @@ private extension View {
             case .workspace:
                 WorkspaceView()
             case .memory:
-                MemoryOverviewView()
+                MemoryOverviewView(sharedSettings: sharedSettings)
             case .council:
-                CouncilView(settingsStore: settingsStore)
+                CouncilView(sharedSettings: sharedSettings)
             case .councilSettings:
                 CouncilSettingsView()
             case .seatEditor:
                 SeatEditorView()
             case .subagents:
-                SubAgentsView()
+                SubAgentsView(sharedSettings: sharedSettings)
             case .subAgentRole(let name, let roleId):
                 SubAgentRoleView(name: name, roleId: roleId)
             case .sandbox:

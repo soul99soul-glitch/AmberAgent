@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DisplayFontSettingsView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
@@ -137,8 +139,8 @@ struct DisplayFontSettingsView: View {
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "助手状态点 / 思考折叠",
-                    subtitle: "状态点与生成结束折叠策略尚未接到 Chat 状态机",
-                    value: "未接线"
+                    subtitle: "KMP 默认值（autoCloseThinking）；状态点与生成结束折叠策略尚未接到 Chat 状态机",
+                    value: sharedSettings.displaySetting.autoCloseThinking ? "默认开" : "默认关"
                 )
             }
         }
@@ -150,14 +152,14 @@ struct DisplayFontSettingsView: View {
             AmberFormGroup {
                 DisplayStatusRow(
                     title: "自动换行",
-                    subtitle: "Markdown 代码块 renderer 尚未接偏好",
-                    value: "未接线"
+                    subtitle: "KMP 默认值（codeBlockAutoWrap）；iOS 渲染器尚未消费",
+                    value: sharedSettings.displaySetting.codeBlockAutoWrap ? "默认开" : "默认关"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "自动折叠",
-                    subtitle: "代码块折叠状态尚未接线",
-                    value: "未接线"
+                    subtitle: "KMP 默认值（codeBlockAutoCollapse）；iOS 渲染器尚未消费",
+                    value: sharedSettings.displaySetting.codeBlockAutoCollapse ? "默认开" : "默认关"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
@@ -175,22 +177,22 @@ struct DisplayFontSettingsView: View {
             AmberFormGroup {
                 DisplayStatusRow(
                     title: "启用 LaTeX 渲染",
-                    subtitle: "LaTeX renderer 尚未接线",
-                    value: "未接线"
+                    subtitle: "KMP 默认值（enableLatexRendering）；iOS LaTeX renderer 尚未消费",
+                    value: sharedSettings.displaySetting.enableLatexRendering ? "默认开" : "默认关"
                 )
                 DisplayDivider()
                 DisplayToggleRow(title: "生成时跟随滚动", isOn: followGeneration) { followGeneration.toggle() }
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "按 Enter 发送",
-                    subtitle: "移动端输入器未接硬件键盘提交策略",
-                    value: "未接线"
+                    subtitle: "KMP 默认值（sendOnEnter）；移动端输入器尚未接硬件键盘提交策略",
+                    value: sharedSettings.displaySetting.sendOnEnter ? "默认开" : "默认关"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "粘贴长文本为文件",
-                    subtitle: "粘贴拦截与文件化管线尚未接线",
-                    value: "未接线"
+                    subtitle: "KMP 默认值（pasteLongTextAsFile，阈值 \(sharedSettings.displaySetting.pasteLongTextThreshold)）；iOS 粘贴管线尚未接线",
+                    value: sharedSettings.displaySetting.pasteLongTextAsFile ? "默认开" : "默认关"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
