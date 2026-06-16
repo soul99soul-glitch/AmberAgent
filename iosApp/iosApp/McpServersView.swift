@@ -1,6 +1,9 @@
 import SwiftUI
+import Shared
 
 struct McpServersView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
@@ -12,6 +15,7 @@ struct McpServersView: View {
                 VStack(spacing: 0) {
                     header
                     intro
+                    seedConfigSection
                     connectedSection
                     managementSection
                 }
@@ -52,13 +56,57 @@ struct McpServersView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有 MCP 配置、连接和工具调用链路；iOS 当前尚未接入 Settings.mcpServers / McpManager，因此不会显示连接状态或工具列表。")
+        Text("Android/KMP 已有 MCP 配置、连接和工具调用链路；iOS 当前可读取 Settings.mcpServers 真实配置（只读），连接管理和工具调用待接。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.bottom, 3)
+    }
+
+    /// Read-only view of the REAL seeded MCP server configs from Settings.
+    /// Seed is empty (MCP servers are user-configured, not seeded). Shows honest
+    /// empty state or real config entries.
+    private var seedConfigSection: some View {
+        let servers = sharedSettings.snapshot.mcpServers
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "已配置 MCP 服务器（KMP · 只读）")
+            AmberFormGroup {
+                if servers.isEmpty {
+                    HStack(spacing: 10) {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 16))
+                            .foregroundStyle(AmberTheme.muted2)
+                        Text("Settings.mcpServers 为空。种子数据不包含 MCP 服务器（需用户自行配置）。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(servers.enumerated()), id: \.offset) { index, server in
+                        VStack(alignment: .leading, spacing: 3) {
+                            let name = server.commonOptions.name
+                            Text(name.isEmpty ? "未命名" : name)
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text("\(server.commonOptions.tools.count) 工具 · \(server.commonOptions.enable ? "启用" : "禁用")")
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .foregroundStyle(AmberTheme.muted2)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+
+                        if index < servers.count - 1 {
+                            Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var connectedSection: some View {

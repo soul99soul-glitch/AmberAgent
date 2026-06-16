@@ -814,6 +814,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: feature:task compileKotlinIosSimulatorArm64 BUILD SUCCESSFUL; shared linkDebugFramework BUILD SUCCESSFUL; Shared.h has SharedIosSkillFactory + SharedIosSkillFactorySkillMetadata; xcodebuild BUILD SUCCEEDED.
 - Remaining risk: read-only scan; no skill enable/disable/import. Android SkillManager untouched.
 
+### Slice 38 - Phase 7.3: McpServersView reads real Settings.mcpServers
+
+- Scope: McpServersView now reads `sharedSettings.snapshot.mcpServers` (real KMP McpServerConfig list, already exported). New "已配置 MCP 服务器（KMP · 只读）" section shows server name/tool count/enable status, or honest empty state (seed has no MCP servers — user-configured). No new KMP factory needed (data already available via IOSSharedSettingsStore).
+- Verification: xcodebuild BUILD SUCCEEDED.
+- Remaining risk: read-only; no MCP connection management or tool calling.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

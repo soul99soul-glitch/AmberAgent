@@ -284,7 +284,7 @@ private extension View {
             case .skillAdd:
                 SkillAddView()
             case .mcpServers:
-                McpServersView()
+                McpServersView(sharedSettings: sharedSettings)
             case .mcpImport:
                 McpImportView()
             case .mcpAdd:
