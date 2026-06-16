@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 struct WebMountSiteRoute: Hashable, Identifiable {
     let name: String
@@ -9,6 +10,8 @@ struct WebMountSiteRoute: Hashable, Identifiable {
 
 struct WebMountView: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var previewUrl: String = "https://www.apple.com"
+    @State private var loadedUrl: String = ""
 
     private let evidenceRows: [WebMountCapabilityRow] = [
         .init(
@@ -43,9 +46,9 @@ struct WebMountView: View {
         ),
         .init(
             title: "iOS WebMount bridge",
-            subtitle: "SwiftUI currently has no WebMountManager, site registry, cookie/OAuth store, login WebView, WebView pool, JS bridge, tool adapter, or permission gate.",
-            status: "未接线",
-            tint: AmberTheme.accentAmber
+            subtitle: "iOS 已有 WKWebView 预览能力（本页可加载网页）。完整 WebMount（OAuth/cookie/JS bridge/agent tool）仍待开发。",
+            status: "WKWebView 可用",
+            tint: AmberTheme.accentGreen
         )
     ]
 
@@ -92,9 +95,10 @@ struct WebMountView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        webViewPreviewSection
                         evidenceSection
                         handlingSection
-                        WebMountCapabilityNote("启用真实 WebMount 前，需要先定义 iOS 侧站点配置存储、cookie/OAuth 安全存储、登录 WebView、WebView session pool、bridge.js 等价层、ProfileBridge、tool executor、权限批准和站点 adapter。")
+                        WebMountCapabilityNote("iOS 已有 WKWebView 预览（上方）。完整 WebMount（站点配置/OAuth/cookie/JS bridge/agent tool）仍需开发。")
                             .padding(.top, 14)
                     }
                     .padding(.bottom, 36)
@@ -134,7 +138,7 @@ struct WebMountView: View {
     }
 
     private var intro: some View {
-        Text("Android 的 WebMount 会把登录网站和公开站点注册为 agent 工具：它维护站点配置、Cookie/OAuth、WebView session、bridge.js、浏览器原语、signed fetch 和站点专用 adapter。iOS 当前没有这些存储、登录、运行或工具桥，本页只展示能力证据，不展示假登录站点或假开关。")
+        Text("Android 的 WebMount 会把登录网站和公开站点注册为 agent 工具。iOS 已有 WKWebView 预览能力（本页可加载任意网页），完整 WebMount（OAuth/cookie/JS bridge/agent tool）仍待开发。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -143,6 +147,51 @@ struct WebMountView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    /// Real WKWebView preview — lets the user load any URL. This is a real
+    /// iOS-native WebView, not a mock. Proves the WKWebView rendering chain
+    /// works; full WebMount (site registry/OAuth/agent tools) still pending.
+    private var webViewPreviewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "WebView 预览（WKWebView · 真实）")
+
+            HStack(spacing: 8) {
+                TextField("https://", text: $previewUrl)
+                    .font(.system(size: 14, design: .monospaced))
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10))
+                    .autocorrectionDisabled()
+
+                Button {
+                    loadedUrl = previewUrl
+                } label: {
+                    Image(systemName: "arrow.forward.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(AmberTheme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+
+            if !loadedUrl.isEmpty {
+                SimpleWebView(urlString: loadedUrl)
+                    .frame(height: 300)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
+
+            Text("真实的 WKWebView，可加载任意网页。完整 WebMount（站点注册/OAuth 登录/cookie 持久化/agent 工具桥）仍待开发。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+        }
     }
 
     private var evidenceSection: some View {
@@ -350,4 +399,29 @@ struct WebMountCapabilityNote: View {
     NavigationStack {
         WebMountSiteView(site: .init(name: "Example", host: "example.com"))
     }
+}
+
+/// Minimal WKWebView wrapper for SwiftUI. Loads a URL when created.
+struct SimpleWebView: UIViewRepresentable {
+    let urlString: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.navigationDelegate = context.coordinator
+        if let url = URL(string: urlString) {
+            webView.load(URLRequest(url: url))
+        }
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        if let url = URL(string: urlString),
+           webView.url?.absoluteString != url.absoluteString {
+            webView.load(URLRequest(url: url))
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {}
 }

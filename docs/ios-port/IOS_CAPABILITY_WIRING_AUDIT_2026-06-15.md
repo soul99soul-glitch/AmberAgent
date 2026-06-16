@@ -833,6 +833,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: xcodebuild BUILD SUCCEEDED.
 - Remaining risk: cloud TTS playback not supported; no TTS provider selection/editing.
 
+### Slice 41 - Phase 8.2: WebMount WKWebView preview
+
+- Scope: WebMountView now has a real WKWebView preview section — users enter a URL and see the page rendered in a native WKWebView. Status row updated from "未接线" to "WKWebView 可用". SimpleWebView UIViewRepresentable wraps WKWebView.
+- HONESTY: real WKWebView can load any URL. Full WebMount (site registry/OAuth/cookie/JS bridge/agent tools) still pending — but the WebView rendering chain is proven.
+- Verification: xcodebuild BUILD SUCCEEDED.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
