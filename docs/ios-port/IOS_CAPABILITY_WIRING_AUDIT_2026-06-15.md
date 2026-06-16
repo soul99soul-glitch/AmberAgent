@@ -845,6 +845,11 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - HONESTY: real WKWebView. Full MiniApp (HTML validation/bridge injection/sandbox/permissions) still pending.
 - Verification: xcodebuild BUILD SUCCEEDED.
 
+### Slice 43 - Phase 8.4: SyncBackupView reads real SyncSettings
+
+- Scope: SyncBackupView now reads real `sharedSettings.snapshot.syncSettings` (autoSyncEnabled, mode, deviceId). Header updated from "iOS 备份桥未接线" to "KMP SyncSettings 只读可用 · 备份执行待接". Evidence rows show real seed values instead of "未接线".
+- Verification: xcodebuild BUILD SUCCEEDED.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

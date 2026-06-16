@@ -267,7 +267,7 @@ private extension View {
             case .conversationStorage:
                 ConversationStorageView(sharedSettings: sharedSettings)
             case .syncBackup:
-                SyncBackupView()
+                SyncBackupView(sharedSettings: sharedSettings)
             case .capabilities:
                 ToolPermissionsView(
                     permissionStore: permissionStore,

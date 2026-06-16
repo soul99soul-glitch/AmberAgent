@@ -1,46 +1,45 @@
 import SwiftUI
+import Shared
 
 struct SyncBackupView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
-    private let evidenceRows: [SyncBackupRow] = [
-        .init(
-            title: "SyncSettings",
-            subtitle: "commonMain model 保存 Google 账号、mode、autoSync、deviceId、lastUpload/download/export、remoteRevision 和 lastError。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "BackupVM",
-            subtitle: "Android ViewModel 处理 Google 授权、上传、下载、冲突、导出、导入和恢复确认。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "SyncArchiveManager",
-            subtitle: "Android 生成加密归档，写入 Settings、secrets、Room 表和文件树，并支持校验/恢复。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "GoogleDriveSyncRepository",
-            subtitle: "Android 通过 Google Identity + Drive AppData 管理云端快照，最多保留 5 份。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "LocalBackupRepository",
-            subtitle: "Android 使用系统文档 URI 导出、检查和恢复 .amberbackup 文件。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "iOS 同步桥",
-            subtitle: "当前 SwiftUI 没有 SettingsStore.syncSettings、SyncArchiveManager、Google Drive OAuth 或本地备份 repository。",
-            value: "未接线",
-            color: AmberTheme.accentAmber
-        )
-    ]
+    private var sync: SyncSettings { sharedSettings.snapshot.syncSettings }
+
+    private var evidenceRows: [SyncBackupRow] {
+        [
+            .init(
+                title: "SyncSettings",
+                subtitle: "commonMain 模型保存 Google 账号、mode、autoSync、deviceId 等。iOS 只读展示种子值。",
+                value: "只读可用",
+                color: AmberTheme.accentGreen
+            ),
+            .init(
+                title: "autoSync",
+                subtitle: "KMP syncSettings.autoSyncEnabled 真实种子值。",
+                value: sync.autoSyncEnabled ? "启用" : "关闭",
+                color: sync.autoSyncEnabled ? AmberTheme.accentGreen : AmberTheme.muted2
+            ),
+            .init(
+                title: "mode",
+                subtitle: "KMP syncSettings.mode（同步模式）。",
+                value: String(describing: sync.mode),
+                color: AmberTheme.foreground2
+            ),
+            .init(
+                title: "deviceId",
+                subtitle: "KMP syncSettings.deviceId。",
+                value: sync.deviceId.isEmpty ? "(空)" : String(sync.deviceId.prefix(12)) + "…",
+                color: AmberTheme.foreground2
+            ),
+        ]
+    }
+
+    private var headerSubtitle: String {
+        "KMP SyncSettings 只读可用 · 备份执行待接"
+    }
 
     private let currentRows: [SyncBackupRow] = [
         .init(
@@ -145,7 +144,7 @@ struct SyncBackupView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 备份桥未接线")
+                Text(headerSubtitle)
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
