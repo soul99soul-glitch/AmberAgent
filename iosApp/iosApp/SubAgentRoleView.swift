@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 
 struct SubAgentRoleView: View {
     @Environment(\.dismiss) private var dismiss
@@ -19,6 +20,7 @@ struct SubAgentRoleView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         hero
+                        presetRolesSection
                         sourceSection
                         settingMapSection
                         toolsSection
@@ -92,6 +94,47 @@ struct SubAgentRoleView: View {
         .padding(.horizontal, 24)
         .padding(.top, 6)
         .padding(.bottom, 16)
+    }
+
+    /// Read-only list of the REAL KMP built-in subagent roles from
+    /// `SubAgentDefinitions.shared.builtIns` (now exported via commonMain).
+    /// Shows explorer/historian/oracle/designer/writer/fixer with real names +
+    /// descriptions + tool counts.
+    private var presetRolesSection: some View {
+        let builtIns = SubAgentDefinitions.shared.builtIns
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "真实内置角色（KMP · 只读）")
+            AmberFormGroup {
+                ForEach(Array(builtIns.enumerated()), id: \.offset) { index, role in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text(role.name)
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Spacer()
+                            Text("\(role.toolAllowlist.count) 工具")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AmberTheme.accentAmber)
+                        }
+                        Text(role.description_)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("id: \(role.id)")
+                            .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            .foregroundStyle(AmberTheme.muted2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+
+                    if index < builtIns.count - 1 {
+                        SubAgentRoleDivider()
+                    }
+                }
+            }
+        }
     }
 
     private var sourceSection: some View {

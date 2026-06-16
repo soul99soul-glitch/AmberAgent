@@ -794,6 +794,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: git diff --check OK; xcodebuild BUILD SUCCEEDED.
 - Remaining: ~230 "未接线/草稿" markers remain across 30 files (most are honest degradation in draft/detail pages); phases 6-8 will continue reducing them.
 
+### Slice 35 - Phase 6: SubAgentDefinitions moved to commonMain + iOS wiring
+
+- Scope: `SubAgentDefinitions` (pure Kotlin, 0 platform deps, 6 built-in roles: explorer/historian/oracle/designer/writer/fixer) copied from `feature/subagent/src/main` to `feature/subagent/api/src/commonMain`. Already exported via `:feature:subagent:api` in shared. `SubAgentRoleView` now reads `SubAgentDefinitions.shared.builtIns` in a new "真实内置角色（KMP · 只读）" section showing each role's name/description/id/tool count. Existing draft sections preserved.
+- Verification: `feature:subagent:api:compileKotlinIosSimulatorArm64` BUILD SUCCESSFUL; `shared:linkDebugFrameworkIosSimulatorArm64` BUILD SUCCESSFUL; Shared.h confirms `SharedSubAgentDefinitions` (11 hits); xcodebuild BUILD SUCCEEDED.
+- Remaining risk: read-only only; iOS cannot run/edit subagents yet (SubAgentManager KMP 化 is phase 7).
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
