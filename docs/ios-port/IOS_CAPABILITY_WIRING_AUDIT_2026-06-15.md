@@ -743,6 +743,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: `git diff --check` passed; iOS `xcodebuild` (iPhone 17 sim) BUILD SUCCEEDED (pure Swift change, no framework rebuild needed); subagent review VERDICT PASS — confirmed reads `ModelCouncilRolePresets.shared` (correct `.shared` object access), no hardcoded role strings, existing evidence/draft areas untouched, honesty labels complete.
 - Remaining risk: read-only data only; no execution. The council execution bridge remains blocked on 4 Android-only upstream modules.
 
+### Slice 28 - Search reads real KMP service instances + DEFAULT + resultSize (phase 3 data deepening)
+
+- Scope: SearchServicesView now reads and renders REAL KMP search service data beyond the toggle booleans from Slice 26. A new `seededServiceDetailSection` shows the real `SearchServiceOptions.companion.DEFAULT` (BingLocalOptions singleton) and each seeded `Settings.searchServices` entry with its real type name via `String(describing: type(of:))`. The `commonOptionsSection` resultSize changed from hardcoded "Android 默认 10" to the real `sharedSettings.snapshot.searchCommonOptions.resultSize`. Added `import Shared`.
+- HONESTY: all displayed values are real KMP data (type names via live reflection, real resultSize from seed snapshot); "iOS 当前不可编辑或新增服务" is explicitly labeled. Existing draft areas (`builtInSources`, `repositorySearchTypes`, `SearchProviderView` route) untouched.
+- Verification: `git diff --check` passed; iOS `xcodebuild` iPhone 17 sim BUILD SUCCEEDED (two initial errors fixed: missing `import Shared`, and `className`/`companion.shared` not available on KMP classes — replaced with `String(describing: type(of:))` and `SearchServiceOptions.companion.DEFAULT`); subagent review VERDICT PASS — confirmed reads real KMP data, no fake values, draft areas preserved, `companion.DEFAULT` access matches Shared.h.
+- Remaining risk: read-only; iOS cannot edit/add services or execute search.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

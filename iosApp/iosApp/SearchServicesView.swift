@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 
 struct SearchServicesView: View {
     let sharedSettings: IOSSharedSettingsStore
@@ -37,6 +38,7 @@ struct SearchServicesView: View {
                         presetServicesSection
                         agentSearchSection
                         builtInSection
+                        seededServiceDetailSection
                         repositoryTypesSection
                         commonOptionsSection
                         recommendationSection
@@ -163,6 +165,45 @@ struct SearchServicesView: View {
         }
     }
 
+    /// Read-only view of the REAL seeded search service instances + the KMP
+    /// DEFAULT service type, from `sharedSettings` (IosSettingsDefaults seed).
+    /// Shows the actual default service (BingLocalOptions) and each seeded
+    /// SearchServiceOptions entry's type, proving the read path carries real
+    /// service identities — not just toggle booleans. Read-only.
+    private var seededServiceDetailSection: some View {
+        let defaultService = SearchServiceOptions.companion.DEFAULT
+        let defaultTypeName = String(describing: type(of: defaultService))
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "KMP 种子服务实例（只读）")
+            AmberFormGroup {
+                SearchStatusRow(
+                    systemImage: "star.fill",
+                    iconColor: AmberTheme.accentAmber,
+                    title: "KMP 默认服务",
+                    subtitle: "SearchServiceOptions.DEFAULT（companion 单例）",
+                    value: defaultTypeName,
+                    valueColor: AmberTheme.foreground2
+                )
+
+                ForEach(Array(sharedSettings.searchServices.enumerated()), id: \.offset) { index, service in
+                    SearchServicesDivider()
+                    SearchStatusRow(
+                        systemImage: "doc.text",
+                        iconColor: AmberTheme.accentCyan,
+                        title: "种子服务 #\(index + 1)",
+                        subtitle: "来自 Settings.searchServices 真实 seed",
+                        value: String(describing: type(of: service)),
+                        valueColor: AmberTheme.foreground2
+                    )
+                }
+            }
+
+            SearchServicesNote {
+                Text("这些是 KMP Settings 真实 seed 的 SearchServiceOptions 实例（只读展示类型与 DEFAULT 单例）。iOS 当前不可编辑或新增服务。")
+            }
+        }
+    }
+
     private var repositoryTypesSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "仓库已有服务类型")
@@ -183,16 +224,17 @@ struct SearchServicesView: View {
     }
 
     private var commonOptionsSection: some View {
-        VStack(spacing: 0) {
+        let resultSize = sharedSettings.snapshot.searchCommonOptions.resultSize
+        return VStack(spacing: 0) {
             AmberSectionLabel(text: "通用选项")
             AmberFormGroup {
                 SearchStatusRow(
                     systemImage: "list.bullet",
                     iconColor: AmberTheme.accent,
                     title: "结果数量",
-                    subtitle: "Android SearchCommonOptions.resultSize 默认 10；iOS 尚未接设置读写。",
-                    value: "Android 默认 10",
-                    valueColor: AmberTheme.muted
+                    subtitle: "KMP SearchCommonOptions 真实 seed 默认值（resultSize）；iOS 尚未接设置读写",
+                    value: "\(resultSize)",
+                    valueColor: AmberTheme.foreground2
                 )
             }
         }
