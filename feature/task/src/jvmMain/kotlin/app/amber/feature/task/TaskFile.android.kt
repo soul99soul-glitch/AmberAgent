@@ -26,6 +26,9 @@ actual class TaskFile actual constructor(actual val path: String) {
 
     actual fun listFilesByExtension(ext: String): List<TaskFile> =
         file.listFiles { f -> f.extension == ext }.orEmpty().map { TaskFile(it.absolutePath) }
+
+    actual fun listDirectories(): List<TaskFile> =
+        file.listFiles { f -> f.isDirectory }.orEmpty().map { TaskFile(it.absolutePath) }
 }
 
 actual fun separatorChar(): Char = File.separatorChar

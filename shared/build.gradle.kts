@@ -42,6 +42,7 @@ kotlin {
         ":feature:subagent:api",
         ":feature:runtime:api",
         ":feature:tools:api",
+        ":feature:task",
         ":core:memory:api",
         ":core:agent-store-room",
         ":core:native",

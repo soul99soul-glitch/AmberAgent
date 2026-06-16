@@ -807,6 +807,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: core/memory/api compileKotlinIosSimulatorArm64 BUILD SUCCESSFUL; shared linkDebugFramework BUILD SUCCESSFUL; Shared.h has IosMemoryFactory; xcodebuild BUILD SUCCEEDED.
 - Remaining risk: not persisted; Android MemoryRepository untouched (still in :app).
 
+### Slice 37 - Phase 7.2: iOS Skill scanning via IosSkillFactory
+
+- Scope: new KMP `IosSkillFactory` (feature/task commonMain) scans Documents/skills/ subdirectories for real SKILL.md files, parses YAML frontmatter (name/description). TaskFile gained `listDirectories()` method (jvmMain: File.listFiles isDirectory, iosMain: NSFileManager fileExistsAtPath isDirectory). SkillsView now has a "技能扫描（KMP · 真实）" section that calls `IosSkillFactory.shared.listSkills(documentsDir:)` and shows real scanned skills (or honest "no skills found" if empty). Re-scan button included.
+- HONESTY: real file system scan (not hardcoded). Fresh app = empty list (no bundled skill assets on iOS like Android's assets/builtin-skills). Users add skills by placing SKILL.md in Documents/skills/<name>/.
+- Verification: feature:task compileKotlinIosSimulatorArm64 BUILD SUCCESSFUL; shared linkDebugFramework BUILD SUCCESSFUL; Shared.h has SharedIosSkillFactory + SharedIosSkillFactorySkillMetadata; xcodebuild BUILD SUCCEEDED.
+- Remaining risk: read-only scan; no skill enable/disable/import. Android SkillManager untouched.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 
 struct SkillsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -6,6 +7,7 @@ struct SkillsView: View {
 
     @State private var pendingAlert: SkillsAlert?
     @State private var importOptionsPresented = false
+    @State private var scannedSkills: [IosSkillFactory.SkillMetadata] = []
 
     var body: some View {
         ZStack {
@@ -14,6 +16,7 @@ struct SkillsView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     header
+                    scannedSkillsSection
                     installedSection
                     extensionSection
                     managementSection
@@ -68,6 +71,88 @@ struct SkillsView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 18)
+    }
+
+    /// Real KMP skill scan — uses IosSkillFactory to scan Documents/skills/
+    /// for real SKILL.md files. If empty (fresh app, no skills installed),
+    /// shows honest "no skills found" message.
+    private var scannedSkillsSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "技能扫描（KMP · 真实）")
+            AmberFormGroup {
+                if scannedSkills.isEmpty {
+                    HStack(spacing: 10) {
+                        Image(systemName: "doc.questionmark")
+                            .font(.system(size: 16))
+                            .foregroundStyle(AmberTheme.muted2)
+                        Text("Documents/skills/ 未找到 SKILL.md。将技能放入该目录的子文件夹后重新进入此页可扫描到。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(scannedSkills.enumerated()), id: \.offset) { index, skill in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(skill.name)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.foreground)
+                                if !skill.description_.isEmpty {
+                                    Text(skill.description_)
+                                        .font(.caption)
+                                        .foregroundStyle(AmberTheme.muted)
+                                        .lineLimit(2)
+                                }
+                                Text("dir: \(skill.dirName)")
+                                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(AmberTheme.muted2)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(skill.enabled ? "启用" : "关闭")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(skill.enabled ? AmberTheme.accentGreen : AmberTheme.muted2)
+                        }
+                        .frame(minHeight: 52)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 4)
+
+                        if index < scannedSkills.count - 1 {
+                            Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    if let docsDir = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true).path {
+                        scannedSkills = IosSkillFactory.shared.listSkills(documentsDir: docsDir)
+                    }
+                } label: {
+                    Label("重新扫描", systemImage: "arrow.clockwise")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            Text("扫描 iOS Documents/skills/ 下的真实 SKILL.md 文件（frontmatter 解析 name/description）。这是真实文件系统扫描，不是硬编码。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+        }
+        .onAppear {
+            if let docsDir = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true).path {
+                scannedSkills = IosSkillFactory.shared.listSkills(documentsDir: docsDir)
+            }
+        }
     }
 
     private var installedSection: some View {

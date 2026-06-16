@@ -40,6 +40,9 @@ expect class TaskFile(path: String) {
 
     /** List child files whose extension equals [ext] (no leading dot). */
     fun listFilesByExtension(ext: String): List<TaskFile>
+
+    /** List immediate child directories of this directory. */
+    fun listDirectories(): List<TaskFile>
 }
 
 /**

@@ -1,6 +1,11 @@
 package app.amber.feature.task
 
+import kotlinx.cinterop.BooleanVar
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.value
 import platform.Foundation.NSArray
 import platform.Foundation.NSData
 import platform.Foundation.NSFileManager
@@ -62,6 +67,21 @@ actual class TaskFile actual constructor(actual val path: String) {
             // Compare extension without leading dot.
             val dotIndex = name.lastIndexOf('.')
             dotIndex >= 0 && name.substring(dotIndex + 1) == ext
+        }.map { name -> TaskFile(path + "/" + name) }
+    }
+
+    actual fun listDirectories(): List<TaskFile> {
+        if (!exists()) return emptyList()
+        val names: List<String> = runCatching {
+            (fm.contentsOfDirectoryAtPath(path, error = null) as? List<String>).orEmpty()
+        }.getOrDefault(emptyList())
+        return names.filter { name ->
+            val childPath = path + "/" + name
+            kotlinx.cinterop.memScoped {
+                val isDirPtr = alloc<BooleanVar>()
+                fm.fileExistsAtPath(childPath, isDirectory = isDirPtr.ptr)
+                isDirPtr.value
+            }
         }.map { name -> TaskFile(path + "/" + name) }
     }
 }
