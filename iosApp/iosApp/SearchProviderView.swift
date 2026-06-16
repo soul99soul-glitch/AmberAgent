@@ -156,7 +156,7 @@ struct SearchProviderView: View {
                 SearchProviderStatusRow(
                     title: "iOS 工具调用",
                     subtitle: "ChatViewModel 与 IOSLocalToolExecutor 尚未接 search_web / scrape_web。",
-                    value: "未接线",
+                    value: "待接（需 ChatViewModel 工具桥）",
                     valueColor: AmberTheme.accentAmber
                 )
             }
@@ -187,7 +187,7 @@ struct SearchProviderView: View {
                 SearchProviderDivider()
                 SearchProviderPreviewLine(label: "凭据", value: credentialPreview)
                 SearchProviderDivider()
-                SearchProviderPreviewLine(label: "保存方式", value: "本页草稿")
+                SearchProviderPreviewLine(label: "保存方式", value: "编辑待接（需持久化层）")
             }
 
             SearchProviderNote("关闭页面会丢弃草稿；不会写入 Keychain、UserDefaults、KMP Settings 或发起网络请求。")
@@ -197,7 +197,7 @@ struct SearchProviderView: View {
     private var deleteSection: some View {
         VStack(spacing: 0) {
             AmberFormGroup {
-                Text("删除服务尚未接线")
+                Text("删除服务 · 编辑待接（需 Settings 持久化）")
                     .font(.body.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
                     .frame(maxWidth: .infinity)

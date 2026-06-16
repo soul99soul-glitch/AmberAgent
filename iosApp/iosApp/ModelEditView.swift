@@ -210,7 +210,7 @@ struct ModelEditView: View {
                 ModelValueRow(
                     title: "自定义 Headers",
                     subtitle: "附加到该模型的请求头",
-                    value: "草稿"
+                    value: "编辑待接"
                 ) {
                     router.navigate(to: .modelCustomHeaders)
                 }
@@ -218,7 +218,7 @@ struct ModelEditView: View {
                 ModelValueRow(
                     title: "自定义 Body",
                     subtitle: "合并进请求体的 JSON 字段",
-                    value: "草稿"
+                    value: "编辑待接"
                 ) {
                     router.navigate(to: .modelCustomBody)
                 }
@@ -236,7 +236,7 @@ struct ModelEditView: View {
                 Button {
                     alert = .delete
                 } label: {
-                    Text("删除尚未接线")
+                    Text("删除模型 · 编辑待接（需 Settings.providers 持久化）")
                         .font(.body.weight(.medium))
                         .foregroundStyle(AmberTheme.accentRed)
                         .frame(maxWidth: .infinity)
@@ -308,7 +308,7 @@ private enum ModelEditAlert: Identifiable {
 
     var title: String {
         switch self {
-        case .delete: "删除模型尚未接线"
+        case .delete: "删除模型 · 编辑待接（需 Settings.providers 持久化）"
         }
     }
 

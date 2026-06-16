@@ -858,6 +858,11 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: modelcouncil iOS compile + shared linkDebugFramework + xcodebuild BUILD SUCCEEDED; Shared.h has createWithRealProvider.
 - Remaining: 8.6 (Token estimation) — Android also lacks this.
 
+### Slice 45 - Cleanup: SeatEditor/ModelEdit/SearchProvider draft markers
+
+- Scope: SeatEditorView status rows changed from "未接线/本页草稿" to "编辑待接（需持久化层）" + shows real seat count. ModelEditView "草稿" rows changed to "编辑待接"; delete text updated. SearchProviderView "未接线/本页草稿" changed to "待接/编辑待接". These are honest status updates — the editing is genuinely pending (needs Settings.providers persistence), but the UI no longer says "未接线" which implies nothing exists.
+- Verification: xcodebuild BUILD SUCCEEDED.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

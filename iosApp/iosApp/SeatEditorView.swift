@@ -1,6 +1,9 @@
 import SwiftUI
+import Shared
 
 struct SeatEditorView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = "工程"
@@ -262,9 +265,9 @@ struct SeatEditorView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "处理方式")
             AmberFormGroup {
-                SeatEditorStatusLine(label: "保存", value: "未接线")
+                SeatEditorStatusLine(label: "保存", value: "编辑待接（需持久化层）")
                 SeatEditorDivider()
-                SeatEditorStatusLine(label: "写入位置", value: "本页草稿")
+                SeatEditorStatusLine(label: "真实席位", value: "\(sharedSettings.agentRuntime.modelCouncil.defaultSeats.count) 席（只读）")
                 SeatEditorDivider()
                 SeatEditorStatusLine(label: "真实后端", value: "defaultSeats 未桥接")
             }
@@ -400,6 +403,6 @@ private struct SeatEditorFootnote: View {
 
 #Preview {
     NavigationStack {
-        SeatEditorView()
+        SeatEditorView(sharedSettings: IOSSharedSettingsStore())
     }
 }

@@ -342,7 +342,7 @@ private extension View {
             case .councilSettings:
                 CouncilSettingsView(sharedSettings: sharedSettings)
             case .seatEditor:
-                SeatEditorView()
+                SeatEditorView(sharedSettings: sharedSettings)
             case .subagents:
                 SubAgentsView(sharedSettings: sharedSettings)
             case .subAgentRole(let name, let roleId):
