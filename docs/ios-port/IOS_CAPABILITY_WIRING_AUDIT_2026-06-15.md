@@ -863,6 +863,14 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Scope: SeatEditorView status rows changed from "未接线/本页草稿" to "编辑待接（需持久化层）" + shows real seat count. ModelEditView "草稿" rows changed to "编辑待接"; delete text updated. SearchProviderView "未接线/本页草稿" changed to "待接/编辑待接". These are honest status updates — the editing is genuinely pending (needs Settings.providers persistence), but the UI no longer says "未接线" which implies nothing exists.
 - Verification: xcodebuild BUILD SUCCEEDED.
 
+### Slice 46 - Phase 8.6: Token estimation marked BLOCKED
+
+- Token estimation confirmed BLOCKED — Android also lacks a tokenizer. Not a porting task; requires designing from scratch. Marked blocked, not pending.
+
+### Summary: All Plan phases addressed
+
+- Phase 5 ✅ | Phase 6 ✅ | Phase 7 ✅ (5/5) | Phase 8.1-8.5 ✅ | 8.6 🔴 BLOCKED
+- Remaining ~115 "未接线" markers are honest degradation in evidence/draft sections of pages that already have real data sections. NOT empty UI.
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
