@@ -44,7 +44,8 @@ struct MessageBubbleView: View {
             } else if let reasoning = part as? UIMessagePart.Reasoning, !reasoning.reasoning.isEmpty {
                 ChatReasoningCard(
                     title: "思考 · \(reasoning.reasoning.count) chars",
-                    bodyText: reasoning.reasoning
+                    bodyText: reasoning.reasoning,
+                    autoCloseThinking: displaySetting?.autoCloseThinking ?? true
                 )
             } else if let tool = part as? UIMessagePart.Tool {
                 ChatToolTimeline(steps: [ChatToolStepModel(tool: tool)])

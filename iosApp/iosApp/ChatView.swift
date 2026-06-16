@@ -953,7 +953,17 @@ struct ChatAssistantText<Content: View>: View {
 struct ChatReasoningCard: View {
     let title: String
     let bodyText: String
-    @State private var isExpanded = false
+    var autoCloseThinking: Bool = true
+    @State private var isExpanded: Bool
+
+    init(title: String, bodyText: String, autoCloseThinking: Bool = true) {
+        self.title = title
+        self.bodyText = bodyText
+        self.autoCloseThinking = autoCloseThinking
+        // When autoCloseThinking is true (default), reasoning starts collapsed.
+        // When false, reasoning starts expanded so user sees it immediately.
+        self._isExpanded = State(initialValue: !autoCloseThinking)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
