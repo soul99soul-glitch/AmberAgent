@@ -2,11 +2,13 @@ import SwiftUI
 import Shared
 
 struct SubAgentRoleView: View {
+    let sharedSettings: IOSSharedSettingsStore
     @Environment(\.dismiss) private var dismiss
 
     private let detail: SubAgentRoleDetail
 
-    init(name: String, roleId: String) {
+    init(sharedSettings: IOSSharedSettingsStore, name: String, roleId: String) {
+        self.sharedSettings = sharedSettings
         detail = SubAgentRoleDetail.resolve(name: name, roleId: roleId)
     }
 
@@ -25,6 +27,7 @@ struct SubAgentRoleView: View {
                         settingMapSection
                         toolsSection
                         routingSection
+                        savedOverridesSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -189,6 +192,32 @@ struct SubAgentRoleView: View {
         }
     }
 
+
+
+    /// Saved subagent role overrides (UserDefaults persisted).
+    private var savedOverridesSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "角色覆盖（UserDefaults · 可读写）")
+            AmberFormGroup {
+                let overrides = sharedSettings.savedSubAgentOverrides.filter { $0["roleId"] == detail.roleId }
+                ForEach(Array(overrides.enumerated()), id: \.offset) { index, override in
+                    HStack(spacing: 10) {
+                        Text(override["systemPrompt"] ?? "?").font(.caption).foregroundStyle(AmberTheme.muted)
+                            .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { sharedSettings.removeSubAgentOverride(at: index) } label: {
+                            Image(systemName: "minus.circle.fill").font(.system(size: 16)).foregroundStyle(AmberTheme.accentRed)
+                        }.buttonStyle(.plain)
+                    }.frame(minHeight: 40).padding(.horizontal, 14).padding(.vertical, 4)
+                }
+                Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
+                Button {
+                    sharedSettings.addSubAgentOverride(roleId: detail.roleId, systemPrompt: detail.description)
+                } label: {
+                    Label("保存角色覆盖", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
+                }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
+            }
+        }
+    }
     private var routingSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "何时调用")
@@ -392,6 +421,6 @@ private struct SubAgentRoleFootnote: View {
 
 #Preview {
     NavigationStack {
-        SubAgentRoleView(name: "Oracle", roleId: "oracle")
+        SubAgentRoleView(sharedSettings: IOSSharedSettingsStore(), name: "Oracle", roleId: "oracle")
     }
 }

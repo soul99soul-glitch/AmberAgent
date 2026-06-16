@@ -141,6 +141,32 @@ final class IOSSharedSettingsStore {
         savedTtsEngines = engines
     }
 
+    // MARK: - SubAgent role overrides write-back
+
+    private let subAgentOverridesKey = "app.amber.ios.subAgentOverrides"
+
+    var savedSubAgentOverrides: [[String: String]] {
+        get { (defaults.array(forKey: subAgentOverridesKey) as? [[String: String]]) ?? [] }
+        set { defaults.set(newValue, forKey: subAgentOverridesKey) }
+    }
+
+    func addSubAgentOverride(roleId: String, systemPrompt: String) {
+        var overrides = savedSubAgentOverrides
+        overrides.append([
+            "id": UUID().uuidString,
+            "roleId": roleId,
+            "systemPrompt": systemPrompt,
+        ])
+        savedSubAgentOverrides = overrides
+    }
+
+    func removeSubAgentOverride(at index: Int) {
+        var overrides = savedSubAgentOverrides
+        guard index >= 0 && index < overrides.count else { return }
+        overrides.remove(at: index)
+        savedSubAgentOverrides = overrides
+    }
+
     // MARK: - Real seeded collections (for UI display)
 
     /// Real KMP default TTS providers (DEFAULT_TTS_PROVIDERS), seeded + de-duplicated.

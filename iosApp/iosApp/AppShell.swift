@@ -346,7 +346,7 @@ private extension View {
             case .subagents:
                 SubAgentsView(sharedSettings: sharedSettings)
             case .subAgentRole(let name, let roleId):
-                SubAgentRoleView(name: name, roleId: roleId)
+                SubAgentRoleView(sharedSettings: sharedSettings, name: name, roleId: roleId)
             case .sandbox:
                 RuntimeEnvironmentView(settingsStore: settingsStore)
             case .conversation(let id):
