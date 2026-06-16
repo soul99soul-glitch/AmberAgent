@@ -46,7 +46,7 @@ struct SkillAddView: View {
                     .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("创建本地 Skill 草稿")
+                    Text("创建本地 Skill 本地预览")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
@@ -92,7 +92,7 @@ struct SkillAddView: View {
             AmberSectionLabel(text: "权限")
             AmberFormGroup {
                 SkillDraftToggleRow(
-                    title: "草稿启用标记",
+                    title: "本地预览启用标记",
                     subtitle: "仅影响下方预览；当前不会写入 assistant.enabledSkills。",
                     isOn: enabled
                 ) {
@@ -104,7 +104,7 @@ struct SkillAddView: View {
                 SkillDraftTextFieldRow(title: "主文件", text: $fileName, placeholder: "SKILL.md", monospace: true)
             }
 
-            SkillDraftNote("真实创建时需要写入本地 Skill 目录；无人值守阶段只保留草稿，不创建文件。")
+            SkillDraftNote("真实创建时需要写入本地 Skill 目录；无人值守阶段只保留本地预览，不创建文件。")
         }
     }
 
@@ -116,7 +116,7 @@ struct SkillAddView: View {
                 SkillDraftDivider()
                 SkillPreviewLine(label: "文件", value: fileName.trimmed.isEmpty ? "SKILL.md" : fileName.trimmed)
                 SkillDraftDivider()
-                SkillPreviewLine(label: "状态", value: enabled ? "草稿启用" : "草稿停用")
+                SkillPreviewLine(label: "状态", value: enabled ? "本地预览启用" : "本地预览停用")
                 SkillDraftDivider()
                 SkillPreviewBlock(text: previewMarkdown)
             }
@@ -143,7 +143,7 @@ struct SkillAddView: View {
             return "触发说明为空；Agent 将无法判断何时使用。"
         }
 
-        return "草稿结构完整；当前不会写入文件系统。"
+        return "本地预览结构完整；当前不会写入文件系统。"
     }
 
     private var previewMarkdown: String {

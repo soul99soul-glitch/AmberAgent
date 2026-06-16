@@ -54,7 +54,7 @@ struct SeatEditorView: View {
 
             Spacer()
 
-            Text("席位草稿")
+            Text("席位本地预览")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -82,7 +82,7 @@ struct SeatEditorView: View {
 
     private var identitySection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "席位草稿")
+            AmberSectionLabel(text: "席位本地预览")
             AmberFormGroup {
                 HStack(spacing: 12) {
                     Text("名称")
@@ -122,13 +122,13 @@ struct SeatEditorView: View {
                 }
                 .buttonStyle(.plain)
             }
-            SeatEditorFootnote(text: "这些字段只影响本页草稿；不会写入 Android/KMP 的 ModelCouncilSeat。")
+            SeatEditorFootnote(text: "这些字段只影响本页本地预览；不会写入 Android/KMP 的 ModelCouncilSeat。")
         }
     }
 
     private var runnerSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行方式草稿")
+            AmberSectionLabel(text: "运行方式本地预览")
 
             HStack(spacing: 4) {
                 ForEach(SeatRunnerType.allCases) { type in
@@ -236,7 +236,7 @@ struct SeatEditorView: View {
 
     private var promptSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "席位提示词草稿")
+            AmberSectionLabel(text: "席位提示词本地预览")
             AmberFormGroup {
                 TextEditor(text: $prompt)
                     .font(.system(size: 14))
@@ -257,7 +257,7 @@ struct SeatEditorView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
             }
-            SeatEditorFootnote(text: "填写内容只留在本页草稿；不会写入 AgentPromptConfigRepository 的 modelCouncilPromptFile。")
+            SeatEditorFootnote(text: "填写内容只留在本页本地预览；不会写入 AgentPromptConfigRepository 的 modelCouncilPromptFile。")
         }
     }
 

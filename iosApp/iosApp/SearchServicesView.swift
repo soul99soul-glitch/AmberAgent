@@ -66,7 +66,7 @@ struct SearchServicesView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加搜索服务草稿", size: 44, symbolSize: 17) {
+            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加搜索服务本地预览", size: 44, symbolSize: 17) {
                 router.navigate(to: .searchProvider)
             }
         }
@@ -121,7 +121,7 @@ struct SearchServicesView: View {
             }
 
             SearchServicesNote {
-                Text("这些开关与计数来自 KMP Settings 真实 seed（IosSettingsDefaults），只读展示当前默认状态。下方服务类型与配置仍是草稿，不保存。")
+                Text("这些开关与计数来自 KMP Settings 真实 seed（IosSettingsDefaults），只读展示当前默认状态。下方服务类型与配置仍是本地预览，不保存。")
             }
         }
     }
@@ -218,7 +218,7 @@ struct SearchServicesView: View {
             }
 
             SearchServicesNote {
-                Text("右上角 + 只会打开本页草稿；不会创建 SearchServiceOptions、写入 API Key、保存启用状态或发起网络测试。")
+                Text("右上角 + 只会打开本页本地预览；不会创建 SearchServiceOptions、写入 API Key、保存启用状态或发起网络测试。")
             }
         }
     }
@@ -411,7 +411,7 @@ private struct SearchTypeRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("草稿")
+            Text("本地预览")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AmberTheme.muted)
         }

@@ -137,7 +137,7 @@ struct ModelEditView: View {
                 }
             }
 
-            ModelEditNote("当前只编辑本地草稿；真实聊天请求只读取 SettingsStore.modelId。")
+            ModelEditNote("当前只编辑本地本地预览；真实聊天请求只读取 SettingsStore.modelId。")
         }
     }
 
@@ -152,7 +152,7 @@ struct ModelEditView: View {
                 )
             }
 
-            ModelEditNote("能力标记尚未写入 KMP Model；ChatViewModel 当前不读取这些草稿能力。")
+            ModelEditNote("能力标记尚未写入 KMP Model；ChatViewModel 当前不读取这些本地预览能力。")
         }
     }
 
@@ -234,7 +234,7 @@ struct ModelEditView: View {
     @ViewBuilder
     private var footerSection: some View {
         if isAdding {
-            ModelEditNote("当前只保留本地草稿；关闭后返回模型列表，不创建真实模型配置。")
+            ModelEditNote("当前只保留本地本地预览；关闭后返回模型列表，不创建真实模型配置。")
                 .padding(.top, 4)
         } else {
             AmberFormGroup {
@@ -493,7 +493,7 @@ struct ModelCustomFieldsView: View {
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
-                        Text("\(kind.summary) 当前只做草稿预览，不写入 SettingsStore 或 ChatViewModel。")
+                        Text("\(kind.summary) 当前只做本地预览，不写入 SettingsStore 或 ChatViewModel。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -554,7 +554,7 @@ struct ModelCustomFieldsView: View {
 
     private var previewSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "草稿预览")
+            AmberSectionLabel(text: "本地预览")
             AmberFormGroup {
                 Text(previewText)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
@@ -583,11 +583,11 @@ struct ModelCustomFieldsView: View {
 
     private var validationText: String {
         if hasDuplicateNames {
-            return "\(kind.nameTitle) 名称重复；当前只保留本地草稿，关闭后不会写入真实服务商配置。"
+            return "\(kind.nameTitle) 名称重复；当前只保留本地本地预览，关闭后不会写入真实服务商配置。"
         }
 
         if fields.contains(where: { $0.name.trimmed.isEmpty || $0.value.trimmed.isEmpty }) {
-            return "空名称或空值会在真实写入前被拦截；当前先保留草稿用于编辑。"
+            return "空名称或空值会在真实写入前被拦截；当前先保留本地预览用于编辑。"
         }
 
         return "\(validFields.count) 个字段仅用于预览；当前不会保存到真实模型配置。"

@@ -51,7 +51,7 @@ struct MemoryEditView: View {
 
             Spacer()
 
-            Text("记忆草稿")
+            Text("记忆本地预览")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -159,13 +159,13 @@ struct MemoryEditView: View {
     }
 
     private var noticeSection: some View {
-        MemoryEditNote("Android/KMP 已有 MemoryRepository.addMemory/updateContent/deleteMemory；iOS 当前没有 repository/settings/tool bridge。本页只保留草稿预览，关闭后不会保存。")
+        MemoryEditNote("Android/KMP 已有 MemoryRepository.addMemory/updateContent/deleteMemory；iOS 当前没有 repository/settings/tool bridge。本页只保留本地预览，关闭后不会保存。")
             .padding(.bottom, 10)
     }
 
     private var contentSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "内容草稿")
+            AmberSectionLabel(text: "内容本地预览")
 
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
@@ -177,7 +177,7 @@ struct MemoryEditView: View {
                     .frame(minHeight: 176)
 
                 if text.isEmpty {
-                    Text("记一条草稿；当前不会写入真实记忆库")
+                    Text("记一条本地预览；当前不会写入真实记忆库")
                         .font(.body)
                         .foregroundStyle(AmberTheme.muted2)
                         .padding(.horizontal, 17)
@@ -197,7 +197,7 @@ struct MemoryEditView: View {
 
     private var classificationSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "归类草稿")
+            AmberSectionLabel(text: "归类本地预览")
             AmberFormGroup {
                 Menu {
                     ForEach(MemoryEditScope.allCases) { option in
@@ -208,7 +208,7 @@ struct MemoryEditView: View {
                 } label: {
                     MemoryValueRow(
                         title: "记忆层级",
-                        subtitle: "仅影响本页草稿；不会写入 MemoryScope。",
+                        subtitle: "仅影响本页本地预览；不会写入 MemoryScope。",
                         value: scope.title
                     )
                 }
@@ -223,7 +223,7 @@ struct MemoryEditView: View {
                             Text("置顶")
                                 .font(.body)
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("仅影响本页草稿；不会改变真实召回优先级。")
+                            Text("仅影响本页本地预览；不会改变真实召回优先级。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -240,7 +240,7 @@ struct MemoryEditView: View {
                 .buttonStyle(.plain)
             }
 
-            MemoryEditNote(text.isEmpty ? "本地草稿 · 空内容" : "本地草稿 · \(scope.title) · \(pinned ? "已置顶" : "未置顶")")
+            MemoryEditNote(text.isEmpty ? "本地本地预览 · 空内容" : "本地本地预览 · \(scope.title) · \(pinned ? "已置顶" : "未置顶")")
                 .padding(.top, 2)
         }
     }
@@ -251,7 +251,7 @@ struct MemoryEditView: View {
             AmberFormGroup {
                 MemoryPreviewLine(label: "保存", value: "执行待接")
                 MemoryEditDivider()
-                MemoryPreviewLine(label: "写入位置", value: "本页草稿")
+                MemoryPreviewLine(label: "写入位置", value: "本页本地预览")
                 MemoryEditDivider()
                 MemoryPreviewLine(label: "真实后端", value: "MemoryRepository 未桥接")
             }

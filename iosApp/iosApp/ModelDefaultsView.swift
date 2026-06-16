@@ -152,7 +152,7 @@ struct ModelDefaultsView: View {
                 )
             }
 
-            ModelDefaultsNote("这些 modelId 指针来自 KMP Settings 真实 seed（只读展示上方前缀），种子值是随机 Uuid，不保证映射到某 provider 的可读模型名。iOS 当前没有对应的执行入口，因此不保存草稿选择。")
+            ModelDefaultsNote("这些 modelId 指针来自 KMP Settings 真实 seed（只读展示上方前缀），种子值是随机 Uuid，不保证映射到某 provider 的可读模型名。iOS 当前没有对应的执行入口，因此不保存本地预览选择。")
         }
     }
 

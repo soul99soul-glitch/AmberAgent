@@ -18,7 +18,7 @@ struct AgentsMarkdownView: View {
 
                     editor
 
-                    AgentsNote("当前内容只保留在本页草稿状态；关闭页面会丢弃，不会写入 UserDefaults、SettingsStore 或下一次对话请求。")
+                    AgentsNote("当前内容只保留在本页本地预览状态；关闭页面会丢弃，不会写入 UserDefaults、SettingsStore 或下一次对话请求。")
                         .padding(.top, 7)
                 }
                 .padding(.bottom, 36)
@@ -37,7 +37,7 @@ struct AgentsMarkdownView: View {
 
             Spacer()
 
-            Text("agents.md 草稿")
+            Text("agents.md 本地预览")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -63,7 +63,7 @@ struct AgentsMarkdownView: View {
                 .frame(minHeight: 340)
 
             if content.isEmpty {
-                Text("草稿 Markdown；当前不会注入 System Prompt")
+                Text("本地预览 Markdown；当前不会注入 System Prompt")
                     .font(.body)
                     .foregroundStyle(AmberTheme.muted2)
                     .padding(.horizontal, 17)

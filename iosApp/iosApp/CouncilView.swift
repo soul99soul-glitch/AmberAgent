@@ -87,7 +87,7 @@ struct CouncilView: View {
 
             Spacer(minLength: 8)
 
-            AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "成员设置草稿", size: 44, symbolSize: 18) {
+            AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "成员设置本地预览", size: 44, symbolSize: 18) {
                 router.navigate(to: .councilSettings)
             }
         }
@@ -213,8 +213,8 @@ struct CouncilView: View {
                 CouncilStatusRow(
                     row: .init(
                         title: "成员配置",
-                        subtitle: "设置页和席位编辑页仅保留草稿预览；不会写入默认席位或 prompt 文件。",
-                        value: "草稿",
+                        subtitle: "设置页和席位编辑页仅保留本地预览；不会写入默认席位或 prompt 文件。",
+                        value: "本地预览",
                         color: AmberTheme.muted
                     )
                 )
@@ -251,7 +251,7 @@ struct CouncilView: View {
 
     private var draftActionSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "草稿入口")
+            AmberSectionLabel(text: "预览入口")
             AmberFormGroup {
                 Button {
                     router.navigate(to: .councilSettings)
@@ -264,7 +264,7 @@ struct CouncilView: View {
                             .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("成员设置草稿")
+                            Text("成员设置本地预览")
                                 .font(.body.weight(.medium))
                                 .foregroundStyle(AmberTheme.foreground)
                             Text("查看 Android/KMP 字段映射；当前不会保存席位。")

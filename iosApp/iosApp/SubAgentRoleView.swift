@@ -242,7 +242,7 @@ private struct SubAgentRoleDetail {
             ),
             .init(
                 title: "systemPrompt",
-                subtitle: "KMP 支持角色提示词覆盖并写入 subagent markdown；iOS 当前不保存草稿。",
+                subtitle: "KMP 支持角色提示词覆盖并写入 subagent markdown；iOS 当前不保存本地预览。",
                 value: "执行待接",
                 color: AmberTheme.accentAmber
             ),

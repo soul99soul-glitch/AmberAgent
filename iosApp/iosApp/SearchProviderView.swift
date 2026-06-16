@@ -47,7 +47,7 @@ struct SearchProviderView: View {
 
             Spacer()
 
-            Text("搜索服务草稿")
+            Text("搜索服务本地预览")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
                 .lineLimit(1)
@@ -94,7 +94,7 @@ struct SearchProviderView: View {
                     SearchProviderTextFieldRow(
                         title: "API Key",
                         text: $apiKey,
-                        placeholder: "草稿 API Key",
+                        placeholder: "本地预览 API Key",
                         monospace: true,
                         isSecure: true
                     )
@@ -126,14 +126,14 @@ struct SearchProviderView: View {
                     SearchProviderTextFieldRow(
                         title: "Username",
                         text: $searXNGUsername,
-                        placeholder: "可选草稿",
+                        placeholder: "可选本地预览",
                         monospace: true
                     )
                     SearchProviderDivider()
                     SearchProviderTextFieldRow(
                         title: "Password",
                         text: $searXNGPassword,
-                        placeholder: "可选草稿",
+                        placeholder: "可选本地预览",
                         monospace: true,
                         isSecure: true
                     )
@@ -323,7 +323,7 @@ private enum SearchProviderType: String, CaseIterable, Identifiable {
         case .bing:
             "Bing HTML 兜底是 Android 默认 SearchServiceOptions.DEFAULT；iOS 未接入时不会自动启用。"
         case .searXNG:
-            "SearXNG 在 Android/KMP 中保存 URL、引擎、语言、用户名和密码；当前字段只是草稿。"
+            "SearXNG 在 Android/KMP 中保存 URL、引擎、语言、用户名和密码；当前字段只是本地预览。"
         case .jina:
             "Jina 在 Android/KMP 中有 apiKey、searchUrl 和 scrapeUrl；iOS 当前不保存这些字段。"
         default:

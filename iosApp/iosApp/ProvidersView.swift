@@ -500,7 +500,7 @@ struct ProviderAddView: View {
                         .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("本地草稿")
+                        Text("本地预览")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
@@ -590,7 +590,7 @@ struct ProviderAddView: View {
                 ProviderDivider()
                 ProviderDraftToggleRow(
                     title: "余额刷新",
-                    subtitle: "iOS 不发起网络请求测试余额；此开关仅记录草稿意图",
+                    subtitle: "iOS 不发起网络请求测试余额；此开关仅记录本地预览意图",
                     isOn: balanceRefresh
                 ) {
                     balanceRefresh.toggle()

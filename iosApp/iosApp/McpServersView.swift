@@ -143,7 +143,7 @@ struct McpServersView: View {
                     systemImage: "plus",
                     iconColor: AmberTheme.accent,
                     title: "手动添加",
-                    subtitle: "填写传输类型、服务器地址与请求头草稿"
+                    subtitle: "填写传输类型、服务器地址与请求头本地预览"
                 ) {
                     router.navigate(to: .mcpAdd)
                 }
@@ -250,7 +250,7 @@ struct McpImportView: View {
                 McpDivider()
                 McpPreviewRow(title: "粗略条目数", value: "\(estimatedServerCount)")
                 McpDivider()
-                McpPreviewRow(title: "处理方式", value: "本地草稿")
+                McpPreviewRow(title: "处理方式", value: "本地本地预览")
             }
         }
     }
@@ -268,7 +268,7 @@ struct McpImportView: View {
             return "文本包含 mcpServers，但粗略预览没有识别到服务器条目。"
         }
 
-        return "粗略识别到 \(estimatedServerCount) 个疑似服务器条目；当前未使用真实 McpImportParser，只保留本地草稿。"
+        return "粗略识别到 \(estimatedServerCount) 个疑似服务器条目；当前未使用真实 McpImportParser，只保留本地本地预览。"
     }
 
     private var estimatedServerCount: Int {
@@ -393,8 +393,8 @@ struct McpAddView: View {
             AmberSectionLabel(text: "工具审批")
             AmberFormGroup {
                 McpDraftToggleRow(
-                    title: "草稿工具默认需要批准",
-                    subtitle: "仅影响本页草稿；当前没有写入 MCP 工具审批配置。",
+                    title: "本地预览工具默认需要批准",
+                    subtitle: "仅影响本页本地预览；当前没有写入 MCP 工具审批配置。",
                     isOn: needsApproval
                 ) {
                     needsApproval.toggle()
@@ -413,7 +413,7 @@ struct McpAddView: View {
 
     private var headerValidationText: String {
         if hasHeaderWarnings {
-            return "空名称或空值会在真实写入前被拦截；当前先保留本地草稿。"
+            return "空名称或空值会在真实写入前被拦截；当前先保留本地本地预览。"
         }
         return "\(validHeaders.count) 个请求头已准备好；当前不会保存。"
     }

@@ -168,7 +168,7 @@ struct SkillsView: View {
                 )
             }
 
-            SkillsFooter("当前页面不会读取、启用、禁用或删除本地 Skill。添加和导入入口仅保留草稿预览。")
+            SkillsFooter("当前页面不会读取、启用、禁用或删除本地 Skill。添加和导入入口仅保留本地预览。")
         }
     }
 
@@ -187,7 +187,7 @@ struct SkillsView: View {
                 }
             }
 
-            SkillsFooter("Android/KMP 已有 MCP 配置与连接管理；iOS 当前只展示草稿入口，不连接服务器。")
+            SkillsFooter("Android/KMP 已有 MCP 配置与连接管理；iOS 当前只展示预览入口，不连接服务器。")
         }
     }
 
@@ -198,7 +198,7 @@ struct SkillsView: View {
                 SkillUtilityRow(
                     systemImage: "square.and.arrow.down",
                     iconColor: AmberTheme.accentCyan,
-                    title: "导入技能草稿",
+                    title: "导入技能本地预览",
                     subtitle: "只说明导入方式，不下载、不打开文件、不写入 Skill 目录"
                 ) {
                     importOptionsPresented = true

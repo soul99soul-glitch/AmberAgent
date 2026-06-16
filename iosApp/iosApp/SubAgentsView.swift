@@ -55,7 +55,7 @@ struct SubAgentsView: View {
         .init(
             title: "角色覆盖与自定义角色",
             subtitle: "角色详情页只展示字段映射；不会写入 overrides、customDefinitions 或 prompt markdown。",
-            value: "草稿",
+            value: "本地预览",
             color: AmberTheme.muted
         )
     ]

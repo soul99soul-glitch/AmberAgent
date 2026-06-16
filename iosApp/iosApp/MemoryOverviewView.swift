@@ -90,7 +90,7 @@ struct MemoryOverviewView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "新增记忆草稿", size: 44, symbolSize: 20) {
+            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "新增记忆本地预览", size: 44, symbolSize: 20) {
                 router.navigate(to: .memoryEdit(text: "", scope: "核心", pinned: false))
             }
         }
@@ -146,7 +146,7 @@ struct MemoryOverviewView: View {
                             .frame(width: 30, height: 30)
                             .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                        Text("agents.md 草稿")
+                        Text("agents.md 本地预览")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
@@ -164,7 +164,7 @@ struct MemoryOverviewView: View {
                             .foregroundStyle(AmberTheme.muted2)
                     }
 
-                    Text("Android/KMP Settings.agentRuntime.agentSoulMarkdown 会通过 GenerationPrompts 注入；iOS 当前页面只保留草稿入口，不会影响 ChatViewModel 请求。")
+                    Text("Android/KMP Settings.agentRuntime.agentSoulMarkdown 会通过 GenerationPrompts 注入；iOS 当前页面只保留预览入口，不会影响 ChatViewModel 请求。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.foreground2)
                         .lineSpacing(2)
@@ -237,8 +237,8 @@ struct MemoryOverviewView: View {
                 MemoryStatusRow(
                     row: .init(
                         title: "新增 / 编辑 / 删除",
-                        subtitle: "右上角 + 和详情页只保留草稿预览；不会创建、更新或删除真实记忆。",
-                        value: "草稿",
+                        subtitle: "右上角 + 和详情页只保留本地预览；不会创建、更新或删除真实记忆。",
+                        value: "本地预览",
                         color: AmberTheme.muted
                     )
                 )

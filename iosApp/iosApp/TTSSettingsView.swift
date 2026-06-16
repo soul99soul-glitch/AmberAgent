@@ -89,7 +89,7 @@ struct TTSSettingsView: View {
     }
 
     private var intro: some View {
-        Text("KMP 默认提供系统 TTS；当前 iOS 页面仅确认系统 TTS 作为真实默认。云端引擎字段保留为草稿，不会保存或请求。")
+        Text("KMP 默认提供系统 TTS；当前 iOS 页面仅确认系统 TTS 作为真实默认。云端引擎字段保留为本地预览，不会保存或请求。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -123,7 +123,7 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("这些行来自 Android/KMP DEFAULT_TTS_PROVIDERS，经 IosSettingsDefaults 真实 seed/去重后只读展示。当前选中的默认是 \(sharedSettings.ttsProviders.first { $0.id == sharedSettings.selectedTTSProviderId }?.name ?? "系统 TTS")。下方引擎编辑区仍是草稿，不保存。")
+            TTSSettingsNote("这些行来自 Android/KMP DEFAULT_TTS_PROVIDERS，经 IosSettingsDefaults 真实 seed/去重后只读展示。当前选中的默认是 \(sharedSettings.ttsProviders.first { $0.id == sharedSettings.selectedTTSProviderId }?.name ?? "系统 TTS")。下方引擎编辑区仍是本地预览，不保存。")
         }
     }
 
@@ -142,7 +142,7 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("当前 iOS 仅确认系统 TTS 为真实默认。点按云端引擎只查看草稿字段，不会切换默认、保存配置或写入 Keychain。")
+            TTSSettingsNote("当前 iOS 仅确认系统 TTS 为真实默认。点按云端引擎只查看本地预览字段，不会切换默认、保存配置或写入 Keychain。")
         }
     }
 
@@ -287,7 +287,7 @@ struct TTSSettingsView: View {
     private var configurationNote: String {
         switch selectedEngine {
         case .system:
-            "系统 TTS 是 KMP 默认提供商，当前 iOS 页面只展示草稿参数；尚未接入真实 iOS TTS settings store。"
+            "系统 TTS 是 KMP 默认提供商，当前 iOS 页面只展示本地预览参数；尚未接入真实 iOS TTS settings store。"
         case .miniMax, .openAI, .gemini:
             "云端 TTS 配置待接（需 Provider 持久化）；这些字段不会保存、不会写入 Keychain，也不会用于试听或朗读。"
         }
@@ -365,7 +365,7 @@ struct TTSAddView: View {
     }
 
     private var intro: some View {
-        Text("先填写 TTS Provider 草稿。当前页面不会保存引擎、不会写入 Keychain，也不会发起试听请求。")
+        Text("先填写 TTS Provider 本地预览。当前页面不会保存引擎、不会写入 Keychain，也不会发起试听请求。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -464,7 +464,7 @@ struct TTSAddView: View {
                 TTSSettingsDivider()
                 TTSPreviewLine(label: "凭据", value: providerType.requiresAPIKey ? credentialPreview : "无需 Key")
                 TTSSettingsDivider()
-                TTSPreviewLine(label: "保存方式", value: "本地草稿")
+                TTSPreviewLine(label: "保存方式", value: "本地本地预览")
             }
         }
     }
@@ -483,10 +483,10 @@ struct TTSAddView: View {
         }
 
         if providerType.requiresAPIKey, apiKey.trimmedForTTS.isEmpty {
-            return "API Key 为空；当前仍可预览草稿，不会写入 Keychain。"
+            return "API Key 为空；当前仍可预览本地预览，不会写入 Keychain。"
         }
 
-        return "草稿结构完整；当前不会写入真实 TTS 配置。"
+        return "本地预览结构完整；当前不会写入真实 TTS 配置。"
     }
 
     private func applyProviderType(_ type: TTSProviderDraftType) {
@@ -532,9 +532,9 @@ private enum TTSEngine: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .system: "system · 默认"
-        case .miniMax: "minimax · 草稿"
-        case .openAI: "openai · 草稿"
-        case .gemini: "gemini · 草稿"
+        case .miniMax: "minimax · 本地预览"
+        case .openAI: "openai · 本地预览"
+        case .gemini: "gemini · 本地预览"
         }
     }
 }
@@ -691,7 +691,7 @@ private enum TTSProviderDraftType: String, CaseIterable, Identifiable {
     var note: String {
         switch self {
         case .system:
-            "系统 TTS 是默认类型；当前添加页仅保留草稿配置，不会创建真实提供商。"
+            "系统 TTS 是默认类型；当前添加页仅保留本地预览配置，不会创建真实提供商。"
         case .miniMax:
             "MiniMax 支持语音 ID、情感和语速参数。"
         case .openAI:
