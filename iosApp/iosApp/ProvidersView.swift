@@ -11,6 +11,7 @@ enum ProviderRouteKind: String, Hashable {
 
 struct ProvidersView: View {
     @Bindable var settingsStore: SettingsStore
+    let providerRegistry: ProviderRegistryStore
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -24,9 +25,7 @@ struct ProvidersView: View {
                     header
                     searchPill
                     providerSection(title: "当前聊天配置", rows: [currentProvider])
-                    providerSection(title: "预置 Provider 模板", rows: presetProviders)
-                    ProviderDraftNote("预置模板直接读取导出到 Shared 框架的 Android/KMP DEFAULT_PROVIDERS，按真实顺序与类型呈现，不包含 API Key。OpenAI-compatible 模板可把 Base URL 套用到当前聊天配置；Google / Response API 等类型需要后续 settings.providers bridge。")
-                    registrySection
+                    savedProvidersSection
                 }
                 .padding(.bottom, 40)
             }
@@ -130,27 +129,105 @@ struct ProvidersView: View {
         )
     }
 
-    // Read the real Android/KMP DEFAULT_PROVIDERS through the exported Shared
-    // framework instead of duplicating a hand-maintained Swift snapshot. Name,
-    // endpoint, and route kind are derived from each real ProviderSetting, so
-    // the list never drifts from the bundled defaults. DEFAULT_PROVIDERS always
-    // ships apiKey = "" — these stay no-key templates, not configured accounts.
-    private var presetProviders: [ProviderRowModel] {
-        DefaultProvidersKt.DEFAULT_PROVIDERS.map(ProviderRowModel.init(preset:))
-    }
-
-    private var registrySection: some View {
+    // Real KMP default provider templates plus per-provider Keychain status. Each
+    // row reuses ProviderSetting-derived rendering (name/endpoint/initial). A row
+    // can become active only when the current scalar chat chain can represent it
+    // and a Keychain key already exists for that provider id.
+    private var savedProvidersSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Provider registry")
+            AmberSectionLabel(text: "Provider 模板与密钥状态")
+
             AmberFormGroup {
-                ProviderStatusRow(
-                    title: "完整多服务商列表尚未接线",
-                    subtitle: "上方模板不等同于已保存的 Settings.providers。iOS 当前聊天请求仍只读取单一 OpenAI-compatible 配置。",
-                    badge: "未接线"
-                )
+                ForEach(Array(providerRegistry.providers.enumerated()), id: \.offset) { index, provider in
+                    RegistryProviderRow(
+                        model: ProviderRowModel(preset: provider),
+                        isSelected: providerRegistry.isSelected(provider),
+                        hasStoredKey: providerRegistry.hasStoredKey(provider),
+                        canActivate: providerRegistry.canActivate(provider),
+                        canSelect: providerRegistry.canSelect(provider)
+                    ) {
+                        providerRegistry.select(provider)
+                    }
+
+                    if index < providerRegistry.providers.count - 1 {
+                        ProviderDivider()
+                    }
+                }
             }
 
-            ProviderDraftNote("添加服务商会打开草稿页；不会创建 ProviderSetting、保存新 API Key、拉取模型列表或刷新余额。")
+            ProviderDraftNote("这些行来自 Android/KMP DEFAULT_PROVIDERS，并叠加本机 Keychain 是否已有该 provider id 的密钥。只有当前 iOS 聊天链路能表达、且已有 Key 的 OpenAI-compatible 模板可以设为当前；列表不含明文 API Key。Gemini、xAI、MiMo 等类型仍等待完整 ProviderSetting bridge。编辑某个服务商的 Key 仍在「当前聊天配置」中进行，写回可编辑 registry 将在后续切片接入。")
+        }
+    }
+}
+
+private struct RegistryProviderRow: View {
+    let model: ProviderRowModel
+    let isSelected: Bool
+    let hasStoredKey: Bool
+    let canActivate: Bool
+    let canSelect: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button {
+            if canSelect { onSelect() }
+        } label: {
+            HStack(spacing: 12) {
+                Text(model.initial)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .frame(width: 32, height: 32)
+                    .background(AmberTheme.surface2, in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.name)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(1)
+
+                    Text(model.endpoint)
+                        .font(.system(size: 11.5, weight: .regular, design: .monospaced))
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                trailing
+            }
+            .frame(minHeight: 56)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSelect)
+        .opacity(canActivate ? 1 : 0.55)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(model.name)\(isSelected ? "，当前服务商" : "")")
+    }
+
+    @ViewBuilder private var trailing: some View {
+        if !canActivate {
+            Text("暂不支持")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted2)
+        } else if isSelected {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                Text("当前")
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(AmberTheme.accentGreen)
+        } else {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(hasStoredKey ? "Key 已填写" : "Key 未填写")
+                    .font(.caption2)
+                    .foregroundStyle(hasStoredKey ? AmberTheme.accentGreen : AmberTheme.muted2)
+                Text(hasStoredKey ? "设为当前" : "需要 Key")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(hasStoredKey ? AmberTheme.accent : AmberTheme.muted2)
+            }
         }
     }
 }
@@ -685,8 +762,9 @@ private struct ProviderDivider: View {
 }
 
 #Preview {
-    NavigationStack {
-        ProvidersView(settingsStore: SettingsStore())
+    let settings = SettingsStore()
+    return NavigationStack {
+        ProvidersView(settingsStore: settings, providerRegistry: ProviderRegistryStore(settingsStore: settings))
             .environment(RouterPath())
     }
 }

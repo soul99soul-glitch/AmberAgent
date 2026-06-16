@@ -11,6 +11,7 @@ struct AppShell: View {
     @State private var documentAccessStore: DocumentAccessStore
     @State private var systemPermissionCoordinator: IOSSystemPermissionCoordinator
     @State private var localToolExecutor: IOSLocalToolExecutor
+    @State private var providerRegistry: ProviderRegistryStore
     @State private var rootRouter = RouterPath()
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = "light"
 
@@ -29,6 +30,7 @@ struct AppShell: View {
                 systemPermissionCoordinator: systemPermissionCoordinator
             )
         )
+        self._providerRegistry = State(initialValue: ProviderRegistryStore(settingsStore: settingsStore))
     }
 
     var body: some View {
@@ -36,6 +38,7 @@ struct AppShell: View {
             ConversationsView()
                 .withAppDestinations(
                     settingsStore: settingsStore,
+                    providerRegistry: providerRegistry,
                     permissionStore: permissionStore,
                     documentStore: documentAccessStore,
                     systemPermissionCoordinator: systemPermissionCoordinator,
@@ -236,6 +239,7 @@ enum SheetDestination: Identifiable, Hashable {
 private extension View {
     func withAppDestinations(
         settingsStore: SettingsStore,
+        providerRegistry: ProviderRegistryStore,
         permissionStore: IOSPermissionStore,
         documentStore: DocumentAccessStore,
         systemPermissionCoordinator: IOSSystemPermissionCoordinator,
@@ -285,7 +289,7 @@ private extension View {
             case .execution:
                 ExecutionSettingsView()
             case .providers:
-                ProvidersView(settingsStore: settingsStore)
+                ProvidersView(settingsStore: settingsStore, providerRegistry: providerRegistry)
             case .providerAdd:
                 ProviderAddView()
             case .providerDetail(let name, let endpoint, let kind):
