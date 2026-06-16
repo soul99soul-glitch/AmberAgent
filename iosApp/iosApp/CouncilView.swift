@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 
 struct CouncilView: View {
     let sharedSettings: IOSSharedSettingsStore
@@ -48,6 +49,7 @@ struct CouncilView: View {
                     VStack(spacing: 0) {
                         intro
                         presetConfigSection
+                        rolePresetsSection
                         evidenceSection
                         iOSStatusSection
                         draftActionSection
@@ -123,6 +125,50 @@ struct CouncilView: View {
                 CouncilStatusDivider()
                 CouncilPresetKVRow(title: "显示各席输出", value: c.showSeatOutputs ? "默认开" : "默认关")
             }
+        }
+    }
+
+    /// Real KMP council role presets (coreSeats + lensPresets), read live from
+    /// `ModelCouncilRolePresets.shared` (already exported, pure commonMain data).
+    /// Shows the actual default council roles — supporters/opponents/judge + lens
+    /// roles — instead of prose descriptions. Read-only; running a council still
+    /// needs the ModelCouncilManager execution bridge (blocked on Android-only
+    /// upstream modules — see audit).
+    private var rolePresetsSection: some View {
+        let coreSeats = ModelCouncilRolePresets.shared.coreSeats
+        let lensPresets = ModelCouncilRolePresets.shared.lensPresets
+        return VStack(spacing: 0) {
+            AmberSectionLabel(text: "真实议会角色预设（KMP · 只读）")
+
+            AmberFormGroup {
+                ForEach(Array(coreSeats.enumerated()), id: \.offset) { index, preset in
+                    CouncilRolePresetRow(name: preset.name, id: preset.id, prompt: preset.prompt, isCore: true)
+                    if index < coreSeats.count - 1 {
+                        CouncilStatusDivider()
+                    }
+                }
+            }
+
+            if !lensPresets.isEmpty {
+                AmberSectionLabel(text: "视角角色（Lens）")
+                AmberFormGroup {
+                    ForEach(Array(lensPresets.enumerated()), id: \.offset) { index, preset in
+                        CouncilRolePresetRow(name: preset.name, id: preset.id, prompt: preset.prompt, isCore: false)
+                        if index < lensPresets.count - 1 {
+                            CouncilStatusDivider()
+                        }
+                    }
+                }
+            }
+
+            Text("这些角色来自 Android/KMP ModelCouncilRolePresets 真实默认预设（只读展示）。真正运行议会（start/read）仍需 ModelCouncilManager 执行桥，iOS 当前不可执行。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 7)
         }
     }
 
@@ -278,6 +324,47 @@ private struct CouncilPresetKVRow: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
         .accessibilityLabel("\(title)，\(value)")
+    }
+}
+
+/// Read-only row for a real KMP council role preset (coreSeat or lens).
+private struct CouncilRolePresetRow: View {
+    let name: String
+    let id: String
+    let prompt: String
+    let isCore: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(name)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Spacer()
+                Text(isCore ? "核心" : "视角")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(isCore ? AmberTheme.accentGreen : AmberTheme.accentAmber)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(
+                        (isCore ? AmberTheme.accentGreen : AmberTheme.accentAmber).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    )
+            }
+            Text(prompt)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("id: \(id)")
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .foregroundStyle(AmberTheme.muted2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name)，\(isCore ? "核心" : "视角")角色")
     }
 }
 

@@ -735,6 +735,14 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Limitation: in-app navigation screenshots not captured (idb unavailable). Renders verified by build + review + real KMP source.
 - Remaining risk: read-only only; no writable persistence or execution. The preset blocks reduce "未接线" ambiguity but the underlying capabilities (search execution, council run, miniapp runner, etc.) remain 阶段 3 work.
 
+### Slice 27 - Council reads real ModelCouncilRolePresets (phase 3 data deepening)
+
+- Scope: CouncilView now reads and renders the REAL KMP council role presets — `ModelCouncilRolePresets.shared.coreSeats` (supporter/opponent/judge) and `.lensPresets` (product/marketing/pr/engineering/ux/risk) — each with name/id/prompt/isCore, instead of prose-only descriptions. This is pure-data deepening (the `ModelCouncilRolePresets` object is already exported, pure commonMain); no KMP/Android change. A new `rolePresetsSection` + `CouncilRolePresetRow` helper render the live KMP singleton data.
+- Investigation recorded (phase 3 execution bridge): running a council (`ModelCouncilManager.start/read`) is a LARGE effort — the manager constructor takes `android.content.Context` + `java.io.File` and depends on `AgentTaskStore`(`:feature:task`), `AppScope`(`:core:app-infra`), `SettingsAggregator`(`:core:settings`), and `ProviderManager`(`:ai`), all four of which are Android-only modules. Simply adding an ios target to `feature/modelcouncil` would not compile. The execution bridge is deferred to a dedicated multi-module KMP effort (see IOS_CAPABILITY_BRIDGE_PLAN_2026-06-16.md).
+- HONESTY: the role presets shown are real KMP default data (not Swift hardcoded); running a council is honestly labeled as still requiring the execution bridge (header subtitle, intro, section note, iOSStatusSection all say "iOS 不可执行").
+- Verification: `git diff --check` passed; iOS `xcodebuild` (iPhone 17 sim) BUILD SUCCEEDED (pure Swift change, no framework rebuild needed); subagent review VERDICT PASS — confirmed reads `ModelCouncilRolePresets.shared` (correct `.shared` object access), no hardcoded role strings, existing evidence/draft areas untouched, honesty labels complete.
+- Remaining risk: read-only data only; no execution. The council execution bridge remains blocked on 4 Android-only upstream modules.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
