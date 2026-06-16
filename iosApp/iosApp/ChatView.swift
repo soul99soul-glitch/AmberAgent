@@ -166,6 +166,13 @@ struct ChatView: View {
                         .foregroundStyle(AmberTheme.foreground)
                         .frame(minHeight: 38)
                         .focused($isInputFocused)
+                        .onSubmit {
+                            if sharedSettings.displaySetting.sendOnEnter {
+                                guard !viewModel.isLoading else { return }
+                                guard !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                                viewModel.sendMessage()
+                            }
+                        }
 
                     if viewModel.isLoading {
                         Button {
