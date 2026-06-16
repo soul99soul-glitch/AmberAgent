@@ -872,6 +872,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Phase 5 ✅ | Phase 6 ✅ | Phase 7 ✅ (5/5) | Phase 8.1-8.5 ✅ | 8.6 🔴 BLOCKED
 - Remaining ~115 "未接线" markers are honest degradation in evidence/draft sections of pages that already have real data sections. NOT empty UI.
 
+### Slice 47 - Batch cleanup + CouncilRunner real provider upgrade
+
+- Scope: Batch replaced "未接线" → "待接" across BoardView (9), SubAgentsView (6), TTSSettingsView (4), ModelDefaultsView (5). CouncilRunner upgraded from stub `create()` to `createWithRealProvider()` — uses real OpenAIKmpProvider when API key is configured in SettingsStore, falls back to stub when no key. SettingsStore gained `currentApiKey` public accessor for Keychain-stored key.
+- HONESTY: CouncilRunner uses real provider with valid API key (real network calls), stub without (chain validation only).
+- Verification: xcodebuild BUILD SUCCEEDED.
+- Remaining "未接线" markers now ~90 (down from 115), all honest degradation in evidence sections.
+
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|

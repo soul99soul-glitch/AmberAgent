@@ -40,7 +40,7 @@ struct BoardView: View {
         .init(
             title: "iOS 数据源桥",
             subtitle: "当前 SwiftUI 没有 Settings.agentRuntime.todayBoard、BoardRepository、worker 或热榜/信号/任务数据源。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -49,7 +49,7 @@ struct BoardView: View {
         .init(
             title: "看板内容",
             subtitle: "不再展示硬编码新闻标题、来源、排名或“刚刚更新”。真实内容应来自 BoardItemEntity / HotListDashboard。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
@@ -61,13 +61,13 @@ struct BoardView: View {
         .init(
             title: "任务流 / 机会",
             subtitle: "不读取 BoardTaskRepository 或 OpportunityRepository，也不派发任务或创建聊天会话。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "深度阅读",
             subtitle: "不读取 HotTopic、DeepRead cache、模板或字体包，也不启动隐藏阅读 Agent。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -76,25 +76,25 @@ struct BoardView: View {
         .init(
             title: "通知 / 日历",
             subtitle: "Android collector 可从通知和日历生成信号；iOS 未接相应权限、collector 或 DB 写入。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "飞书消息 / 文档",
             subtitle: "Android 有 Feishu signal collectors；iOS 当前没有 Feishu MCP/Skill 写入 BoardSignal 的桥。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "聊天记录",
             subtitle: "Android 可从历史会话提取信号；iOS 没有接 BoardSignalCollector 或 Message/Conversation DAO。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "热榜",
             subtitle: "Android HotListRepository/HotListScheduler 可抓取、缓存和筛选热点；iOS 未接网络抓取或缓存。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -136,7 +136,7 @@ struct BoardView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 数据源桥未接线")
+                Text("Android/KMP 已实现 · iOS 数据源桥待接（需 Board 采集链）")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)

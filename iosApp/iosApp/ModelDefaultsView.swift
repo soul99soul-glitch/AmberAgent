@@ -106,7 +106,7 @@ struct ModelDefaultsView: View {
                     systemImage: "photo",
                     iconColor: AmberTheme.accentAmber,
                     title: "生图模型",
-                    subtitle: "KMP Settings 已有 imageGenerationModelId 默认指针；iOS 生成工具执行入口尚未接线",
+                    subtitle: "KMP Settings 已有 imageGenerationModelId 默认指针；iOS 生成工具执行入口待接",
                     value: modelIdPreview(sharedSettings.imageGenerationModelId)
                 )
             }
@@ -120,7 +120,7 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "text.alignleft",
                     title: "标题总结模型",
-                    subtitle: "KMP Settings 已有 titleModelId 默认指针；iOS 标题生成执行尚未接线",
+                    subtitle: "KMP Settings 已有 titleModelId 默认指针；iOS 标题生成执行待接",
                     value: modelIdPreview(sharedSettings.titleModelId)
                 )
 
@@ -129,7 +129,7 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "lightbulb",
                     title: "聊天建议模型",
-                    subtitle: "KMP Settings 已有 suggestionModelId 默认指针；iOS 建议生成执行尚未接线",
+                    subtitle: "KMP Settings 已有 suggestionModelId 默认指针；iOS 建议生成执行待接",
                     value: modelIdPreview(sharedSettings.suggestionModelId)
                 )
 
@@ -138,7 +138,7 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "eye",
                     title: "视觉识别模型",
-                    subtitle: "KMP Settings 已有 ocrModelId 默认指针；iOS OCR 执行尚未接线",
+                    subtitle: "KMP Settings 已有 ocrModelId 默认指针；iOS OCR 执行待接",
                     value: modelIdPreview(sharedSettings.ocrModelId)
                 )
 
@@ -147,7 +147,7 @@ struct ModelDefaultsView: View {
                 auxiliaryRow(
                     systemImage: "arrow.down.left.and.arrow.up.right",
                     title: "压缩模型",
-                    subtitle: "KMP Settings 已有 compressModelId 默认指针；iOS 压缩执行尚未接线",
+                    subtitle: "KMP Settings 已有 compressModelId 默认指针；iOS 压缩执行待接",
                     value: modelIdPreview(sharedSettings.compressModelId)
                 )
             }
@@ -165,7 +165,7 @@ struct ModelDefaultsView: View {
                     iconColor: AmberTheme.accent,
                     title: "思考预算",
                     subtitle: "默认推理强度尚未持久化；Chat composer 使用当前会话状态",
-                    value: "未接线"
+                    value: "待接（需渲染器）"
                 )
 
                 ModelDefaultsDivider()
@@ -175,7 +175,7 @@ struct ModelDefaultsView: View {
                     iconColor: AmberTheme.accentCyan,
                     title: "上下文消息数量",
                     subtitle: "真实上下文窗口/消息数策略尚未接到 iOS 请求构造",
-                    value: "未接线"
+                    value: "待接（需渲染器）"
                 )
 
                 ModelDefaultsDivider()
@@ -188,7 +188,7 @@ struct ModelDefaultsView: View {
                         iconColor: AmberTheme.accentGreen,
                         title: "模型组默认规则",
                         subtitle: "Android modelGroupSessionDefaults 尚未桥接到 iOS",
-                        value: "未接线"
+                        value: "待接（需渲染器）"
                     )
                 }
                 .buttonStyle(.plain)
@@ -232,7 +232,7 @@ private enum ModelDefaultsAlert: Identifiable {
 
     var id: String { "group-defaults" }
 
-    var title: String { "模型组默认规则尚未接线" }
+    var title: String { "模型组默认规则待接（需 Settings 持久化）" }
 
     var message: String {
         "Android/KMP 有 modelGroupSessionDefaults；当前 iOS 未暴露对应设置桥，因此这里不会保存或应用模型组默认规则。"

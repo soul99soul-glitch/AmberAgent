@@ -25,7 +25,25 @@ final class CouncilRunner {
             for: .documentDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true
         ).path else { return nil }
-        let m = IosCouncilFactory.shared.create(documentsDir: docsDir)
+
+        // Try real provider first (needs valid API key from SettingsStore).
+        // If no key configured, fall back to stub for chain validation.
+        let store = SettingsStore()
+        let baseUrl = store.baseUrl
+        let apiKey = store.currentApiKey
+        let modelId = store.modelId
+
+        let m: ModelCouncilManager
+        if !apiKey.isEmpty {
+            m = IosCouncilFactory.shared.createWithRealProvider(
+                documentsDir: docsDir,
+                baseUrl: baseUrl,
+                apiKey: apiKey,
+                modelId: modelId
+            )
+        } else {
+            m = IosCouncilFactory.shared.create(documentsDir: docsDir)
+        }
         manager = m
         return m
     }

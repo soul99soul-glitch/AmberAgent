@@ -170,4 +170,7 @@ final class SettingsStore {
         guard status == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
+
+    /// Public read-only access to the Keychain-stored API key.
+    var currentApiKey: String { Self.loadApiKey() ?? "" }
 }

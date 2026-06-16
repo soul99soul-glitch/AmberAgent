@@ -251,7 +251,7 @@ struct TTSSettingsView: View {
             Button {
                 alert = selectedEngine == .system ? .deleteSystem : .delete
             } label: {
-                Text("删除尚未接线")
+                Text("删除待接（需 Keychain 持久化）")
                     .font(.body.weight(.medium))
                     .foregroundStyle(AmberTheme.accentRed)
                     .frame(maxWidth: .infinity)
@@ -268,7 +268,7 @@ struct TTSSettingsView: View {
         case .system:
             "系统 TTS 是 KMP 默认提供商，当前 iOS 页面只展示草稿参数；尚未接入真实 iOS TTS settings store。"
         case .miniMax, .openAI, .gemini:
-            "云端 TTS 配置尚未接线；这些字段不会保存、不会写入 Keychain，也不会用于试听或朗读。"
+            "云端 TTS 配置待接（需 Provider 持久化）；这些字段不会保存、不会写入 Keychain，也不会用于试听或朗读。"
         }
     }
 }
@@ -575,9 +575,9 @@ private enum TTSSettingsAlert: Identifiable {
 
     var title: String {
         switch self {
-        case .delete: "删除引擎尚未接线"
+        case .delete: "删除引擎待接（需 Keychain 持久化）"
         case .deleteSystem: "系统 TTS 不可删除"
-        case .previewUnavailable: "试听尚未接线"
+        case .previewUnavailable: "系统 TTS 试听"
         }
     }
 

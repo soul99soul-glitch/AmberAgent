@@ -28,7 +28,7 @@ struct SubAgentsView: View {
         .init(
             title: "iOS 运行桥",
             subtitle: "当前 SwiftUI 没有 Settings.agentRuntime.subAgent、SubAgentManager 或 subagent_* 工具执行桥。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -37,19 +37,19 @@ struct SubAgentsView: View {
         .init(
             title: "启用子代理",
             subtitle: "iOS SettingsStore 没有 subAgent.enabled；ChatViewModel 生成请求也不会注入 subagent_* 工具。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "@ 角色调用",
             subtitle: "iOS 输入框没有 SubAgentDefinitions.extractMentions 或 SubAgentTools system prompt 注入路径。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "运行结果 / 实时面板",
             subtitle: "没有 runId、liveTextFlow、livePartsFlow、transcriptPath 或 AgentTask 状态来源。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
@@ -64,13 +64,13 @@ struct SubAgentsView: View {
         .init(
             title: "enabled / mode",
             subtitle: "Android/KMP 支持 ROSTER 与 SMART_DYNAMIC；iOS 当前不读写这些值。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "allowDynamicSubAgents",
             subtitle: "动态角色需要 SubAgentValidator 校验边界、工具白名单和预算；iOS 未接该校验/保存链。",
-            value: "未接线",
+            value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
@@ -141,7 +141,7 @@ struct SubAgentsView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 运行桥未接线")
+                Text("Android/KMP 已实现 · iOS 运行桥待接（需 SubAgentManager）")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
