@@ -826,6 +826,13 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: git diff --check OK; xcodebuild BUILD SUCCEEDED.
 - Remaining risk: read-only; no real conversation file scanning or token stats.
 
+### Slice 40 - Phase 8.1: iOS TTS playback via AVSpeechSynthesizer
+
+- Scope: new pure-Swift `IOSTTSPlayer` (AVSpeechSynthesizer delegate) provides system TTS playback. TTSSettingsView preview section now has a working "系统 TTS 试听" button that speaks Chinese test text via the iOS system voice, with stop capability. Changed from "试听尚未接线" to real playback.
+- HONESTY: only system TTS (AVSpeechSynthesizer). Cloud TTS providers (MiniMax/Gemini/etc.) require network API calls — not implemented. The system voice proves the playback chain works.
+- Verification: xcodebuild BUILD SUCCEEDED.
+- Remaining risk: cloud TTS playback not supported; no TTS provider selection/editing.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

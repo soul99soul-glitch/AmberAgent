@@ -1,9 +1,11 @@
 import SwiftUI
+import AVFoundation
 
 struct TTSSettingsView: View {
     let sharedSettings: IOSSharedSettingsStore
 
     @Environment(\.dismiss) private var dismiss
+    @State private var ttsPlayer = IOSTTSPlayer()
     @Environment(RouterPath.self) private var router
 
     @State private var selectedEngine: TTSEngine = .system
@@ -210,20 +212,24 @@ struct TTSSettingsView: View {
     private var previewSection: some View {
         AmberFormGroup {
             Button {
-                alert = .previewUnavailable
+                if ttsPlayer.isSpeaking {
+                    ttsPlayer.stop()
+                } else {
+                    ttsPlayer.speak(text: "你好，这是 AmberAgent 的语音试听。系统 TTS 已接入。", language: "zh-CN")
+                }
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "speaker.slash.fill")
+                    Image(systemName: ttsPlayer.isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 30, height: 30)
-                        .background(AmberTheme.muted2, in: Circle())
+                        .background(ttsPlayer.isSpeaking ? AmberTheme.accentRed : AmberTheme.accent, in: Circle())
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("试听尚未接线")
+                        Text(ttsPlayer.isSpeaking ? "正在播放（点击停止）" : "系统 TTS 试听")
                             .font(.body)
                             .foregroundStyle(AmberTheme.foreground)
-                        Text("不会发起本地合成或云端试听请求。")
+                        Text(ttsPlayer.isSpeaking ? "AVSpeechSynthesizer 正在合成语音" : "使用 iOS 系统语音朗读测试文本")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                     }
@@ -235,7 +241,7 @@ struct TTSSettingsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("试听尚未接线")
+            .accessibilityLabel(ttsPlayer.isSpeaking ? "停止试听" : "系统 TTS 试听")
         }
         .padding(.top, 20)
     }
