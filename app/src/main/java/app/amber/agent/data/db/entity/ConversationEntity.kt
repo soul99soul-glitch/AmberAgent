@@ -30,4 +30,14 @@ data class ConversationEntity(
     val isPinned: Boolean,
     @ColumnInfo("auto_approve_tools", defaultValue = "0")
     val autoApproveToolCalls: Boolean = false,
+    /**
+     * Serialized [app.amber.feature.modelcouncil.CouncilRoom] JSON for the
+     * full-featured "host-led council room" feature. NULL when no room exists
+     * for this conversation. One conversation has at most one room.
+     *
+     * This is deliberately decoupled from the legacy ModelCouncil batch tool
+     * path (which persists out-of-band under amberagent/model-council/runs/).
+     */
+    @ColumnInfo("council_state", defaultValue = "NULL")
+    val councilState: String? = null,
 )

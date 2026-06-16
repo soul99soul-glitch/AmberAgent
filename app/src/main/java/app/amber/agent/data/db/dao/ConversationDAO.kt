@@ -87,6 +87,19 @@ interface ConversationDAO {
     @Query("UPDATE conversationentity SET is_pinned = :isPinned WHERE id = :id")
     suspend fun updatePinStatus(id: String, isPinned: Boolean)
 
+    /**
+     * Lightweight update of just the council_state column. Avoids rewriting the
+     * whole ConversationEntity (with its node blob) on every council state change.
+     */
+    @Query("UPDATE conversationentity SET council_state = :councilState, update_at = :updatedAt WHERE id = :id")
+    suspend fun updateCouncilState(id: String, councilState: String?, updatedAt: Long)
+
+    @Query("SELECT council_state FROM conversationentity WHERE id = :id")
+    suspend fun getCouncilState(id: String): String?
+
+    @Query("SELECT council_state FROM conversationentity WHERE id = :id")
+    fun observeCouncilState(id: String): Flow<String?>
+
     @Query("SELECT COUNT(*) FROM conversationentity")
     suspend fun countAll(): Int
 

@@ -171,6 +171,7 @@ private fun MainPage(vm: DebugVM) {
         ) {
             Text("toast")
         }
+        app.amber.feature.ui.pages.councilroom.CouncilRoomDevEntry()
         Button(
             onClick = {
                 vm.updateSettings(

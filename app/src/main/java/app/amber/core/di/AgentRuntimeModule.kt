@@ -1,6 +1,7 @@
 package app.amber.core.di
 
 import android.content.Context
+import app.amber.agent.AppScope
 import app.amber.core.agent.runtime.AgentRegistry
 import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.agent.runtime.impl.InMemoryAgentRegistry
@@ -20,9 +21,13 @@ import app.amber.feature.deepread.api.DeepReadArtifact
 import app.amber.feature.deepread.api.DeepReadDescriptor
 import app.amber.feature.deepread.impl.DeepReadAgentAdapter
 import app.amber.feature.history.SessionAccessGrantStore
+import app.amber.core.repository.CouncilRoomRepository
+import app.amber.feature.modelcouncil.CouncilRoomManager
+import app.amber.feature.modelcouncil.CouncilRoomStore
 import app.amber.feature.modelcouncil.ExternalCliModelCouncilRunner
 import app.amber.feature.modelcouncil.ModelCouncilManager
 import app.amber.feature.modelcouncil.ProviderModelCouncilTextRunner
+import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.subagent.GenerationSubAgentRunner
 import app.amber.feature.subagent.SubAgentManager
 import org.koin.dsl.module
@@ -117,6 +122,9 @@ val agentRuntimeModule = module {
     single<app.amber.feature.modelcouncil.ModelCouncilTextRunner> { get<ProviderModelCouncilTextRunner>() }
 
     single { ExternalCliModelCouncilRunner(get(), get<Context>(), get()) }
+    single<app.amber.feature.modelcouncil.ModelCouncilExternalCliRunner> {
+        get<ExternalCliModelCouncilRunner>()
+    }
 
     single {
         ModelCouncilManager(
@@ -127,6 +135,28 @@ val agentRuntimeModule = module {
             get<ProviderModelCouncilTextRunner>(),
             get(),
             get(),
+        )
+    }
+
+    // ── Council Room (full-featured host-led room; parallel to legacy batch) ──
+    single<CouncilRoomStore> {
+        CouncilRoomRepository(
+            conversationDao = get(),
+            appScope = get<AppScope>(),
+        )
+    }
+    single<app.amber.feature.modelcouncil.CouncilRoomTaskReporter> {
+        app.amber.feature.modelcouncil.AgentTaskStoreReporter(get())
+    }
+    single {
+        CouncilRoomManager(
+            get(),
+            get<SettingsAggregator>().settingsFlow,
+            get(),
+            get<ProviderModelCouncilTextRunner>(),
+            get(),
+            get(),
+            get<app.amber.feature.modelcouncil.CouncilRoomTaskReporter>(),
         )
     }
 }

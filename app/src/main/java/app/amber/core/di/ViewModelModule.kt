@@ -5,6 +5,7 @@ import app.amber.feature.ui.pages.assistant.detail.AssistantDetailVM
 import app.amber.feature.ui.pages.backup.BackupVM
 import app.amber.feature.ui.pages.chat.ChatDrawerVM
 import app.amber.feature.ui.pages.chat.ChatVM
+import app.amber.feature.ui.pages.councilroom.CouncilRoomVM
 import app.amber.feature.ui.pages.debug.DebugVM
 import app.amber.feature.ui.pages.developer.DeveloperVM
 import app.amber.feature.ui.pages.favorite.FavoriteVM
@@ -42,6 +43,12 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::ChatDrawerVM)
+    viewModel<CouncilRoomVM> { params ->
+        CouncilRoomVM(
+            conversationId = params.get(),
+            manager = get(),
+        )
+    }
     viewModelOf(::SettingVM)
     viewModelOf(::SettingAgentMemoryVM)
     viewModelOf(::DebugVM)

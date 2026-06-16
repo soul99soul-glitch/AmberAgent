@@ -62,6 +62,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.DashboardSquare01
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.Time02
@@ -73,6 +74,7 @@ import me.rerere.hugeicons.stroke.TransactionHistory
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.Settings
+import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.ui.Greeting
 import app.amber.feature.ui.components.ui.Tooltip
@@ -87,6 +89,7 @@ import app.amber.feature.ui.hooks.useEditState
 import app.amber.feature.ui.modifier.onClick
 import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 
 @Composable
 fun ChatDrawerContent(
@@ -103,6 +106,12 @@ fun ChatDrawerContent(
 
     val activity = context as ComponentActivity
     val drawerVm: ChatDrawerVM = koinViewModel(viewModelStoreOwner = activity)
+
+    // Council Room: open-or-resume the room for the current conversation, then
+    // navigate to the room page. Injected here (rather than deep in the header)
+    // so the header stays a pure function of its callbacks.
+    val councilRoomManager: app.amber.feature.modelcouncil.CouncilRoomManager = koinInject()
+    val settingsStore: app.amber.core.settings.prefs.SettingsAggregator = koinInject()
 
     val conversations = drawerVm.conversations.collectAsLazyPagingItems()
     val conversationListState = rememberLazyListState(
@@ -223,6 +232,27 @@ fun ChatDrawerContent(
                             chatTheme = chatTheme,
                             onOpenWorkspace = onOpenWorkspace,
                             onOpenFavoritesLive = onOpenFavoritesLive,
+                            onOpenCouncilRoom = {
+                                scope.launch {
+                                    val settings = settingsStore.settingsFlow.value
+                                    val assistant = settings.getCurrentAssistant()
+                                    // openRoom is idempotent-ish: if a room is already
+                                    // active (room_already_open) we just resume it. Any
+                                    // other error means we shouldn't navigate.
+                                    val result = councilRoomManager.openRoom(
+                                        conversationId = current.id,
+                                        hostAssistantId = assistant.id,
+                                        hostName = assistant.name.ifBlank { "Host" },
+                                        objective = "多模型协作讨论",
+                                    )
+                                    if (result is app.amber.feature.modelcouncil.CouncilRoomOpResult.Err &&
+                                        result.code != "room_already_open") {
+                                        android.util.Log.w("CouncilRoomDrawer", "openRoom failed: ${result.code}")
+                                        return@launch
+                                    }
+                                    navController.navigate(Screen.CouncilRoom(conversationId = current.id.toString()))
+                                }
+                            },
                         )
                     },
                     onClick = {
@@ -460,6 +490,7 @@ private fun V3DrawerHeader(
     chatTheme: ChatTheme,
     onOpenWorkspace: () -> Unit,
     onOpenFavoritesLive: () -> Unit,
+    onOpenCouncilRoom: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -515,6 +546,12 @@ private fun V3DrawerHeader(
                 contentDescription = "聊天热力图统计",
                 chatTheme = chatTheme,
                 onClick = { navController.navigate(Screen.Stats) },
+            )
+            V3QuickBtn(
+                icon = HugeIcons.MagicWand01,
+                contentDescription = "模型会议 Council Room",
+                chatTheme = chatTheme,
+                onClick = onOpenCouncilRoom,
             )
         }
 

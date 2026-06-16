@@ -91,6 +91,7 @@ import app.amber.feature.ui.pages.assistant.detail.AssistantPromptPage
 import app.amber.feature.ui.pages.assistant.detail.AssistantRequestPage
 import app.amber.feature.ui.pages.backup.BackupPage
 import app.amber.feature.ui.pages.chat.ChatPage
+import app.amber.feature.ui.pages.councilroom.CouncilRoomPage
 import app.amber.feature.ui.pages.debug.DebugPage
 import app.amber.feature.ui.pages.developer.DeveloperPage
 import app.amber.feature.ui.pages.extensions.ExtensionsPage
@@ -450,6 +451,13 @@ class RouteActivity : ComponentActivity() {
                                 )
                             }
 
+                            entry<Screen.CouncilRoom>(
+                                metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
+                                        + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
+                            ) { key ->
+                                CouncilRoomPage(conversationId = key.conversationId)
+                            }
+
                             entry<Screen.ShareHandler> { key ->
                                 ShareHandlerPage(
                                     text = key.text,
@@ -762,6 +770,15 @@ sealed interface Screen : NavKey {
         val files: List<String> = emptyList(),
         val nodeId: String? = null
     ) : Screen
+
+    /**
+     * Host-led Council Room page. conversationId links back to the conversation
+     * that owns the Room (1 conversation : 1 Room). The Room state is loaded
+     * by [app.amber.feature.ui.pages.councilroom.CouncilRoomVM] from the
+     * [app.amber.feature.modelcouncil.CouncilRoomManager].
+     */
+    @Serializable
+    data class CouncilRoom(val conversationId: String) : Screen
 
     @Serializable
     data class ShareHandler(

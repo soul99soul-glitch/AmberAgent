@@ -18,19 +18,19 @@ class ExternalCliModelCouncilRunner(
     private val terminalRuntime: TerminalRuntime,
     context: Context,
     private val settingsStore: SettingsAggregator,
-) {
+) : ModelCouncilExternalCliRunner {
     private val externalCliHomeRoot = context.filesDir
         .resolve("amberagent/external-cli-home")
         .also { it.mkdirs() }
         .absolutePath
 
-    suspend fun generate(
+    override suspend fun generate(
         seat: ModelCouncilSeat,
         systemPrompt: String,
         userPrompt: String,
         timeoutMs: Long,
         outputBudgetChars: Int,
-        onChunk: (String) -> Unit = {},
+        onChunk: (String) -> Unit,
     ): String {
         var terminalJobId: String? = null
         try {

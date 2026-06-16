@@ -119,7 +119,7 @@ import app.amber.core.utils.JsonInstant
         OpportunityEntity::class,
         ReferenceAnchorEntity::class,
     ],
-    version = 5
+    version = 6
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -402,6 +402,16 @@ abstract class AppDatabase : RoomDatabase() {
                     "ALTER TABLE `memory_dream_plan` ADD COLUMN `supersede_count` " +
                         "INTEGER NOT NULL DEFAULT 0"
                 )
+            }
+        }
+
+        // Council Room: adds the optional serialized CouncilRoom JSON column to
+        // the conversation table. NULL by default — only populated when the user
+        // opens the full-featured room for that conversation. The legacy
+        // ModelCouncil batch tool path is unaffected (it persists out-of-band).
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `conversationentity` ADD COLUMN `council_state` TEXT")
             }
         }
     }
