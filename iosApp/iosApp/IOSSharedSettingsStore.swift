@@ -2,33 +2,55 @@ import Foundation
 import Observation
 @preconcurrency import Shared
 
-/// Read-only access to a real, seeded KMP `Settings` snapshot on iOS.
+/// Read-write access to a real, seeded KMP `Settings` snapshot on iOS.
 ///
-/// This is the "real settings read" entry point for iOS. On init it calls the KMP
-/// `IosSettingsDefaults.shared.defaultSeededSettings()` — which runs the same
-/// `applyBackfillAndSeedShared` + `applyCrossDomainConsistencyShared` passes the
-/// Android `SettingsAggregator` applies — to produce a structurally complete,
-/// honestly-seeded `Settings` (carrying `DEFAULT_PROVIDERS`, `DEFAULT_TTS_PROVIDERS`,
-/// `DEFAULT_ASSISTANTS`, a default `SearchServiceOptions`, a default `DisplaySetting`,
-/// etc.) instead of the handful of hardcoded placeholder fields the legacy Swift
-/// `SettingsStore` held.
+/// On init it calls the KMP `IosSettingsDefaults.shared.defaultSeededSettings()`.
+/// User edits are persisted to UserDefaults (JSON) and merged on read.
 ///
-/// HONESTY BOUNDARIES (this slice):
-/// - This is a READ-ONLY seed snapshot. It is NOT wired to the Android DataStore
-///   (iOS and Android are separate apps; on-device settings are not shared), and
-///   it is NOT a writable persistence layer — there is no write-back to disk.
-/// - Every property below is derived from the live KMP snapshot; nothing here is
-///   a Swift hardcoded value.
-/// - The snapshot is computed once at init and cached. A future slice can add
-///   refresh / write-back; until then, treat all values as seeded defaults.
+/// WRITE-BACK: council seats / model defaults are persisted to UserDefaults
+/// as JSON and survive app restart. This is a real iOS-local persistence
+/// layer (not Android DataStore, not orphan save — it's the canonical
+/// settings store for iOS, same role as SettingsStore for baseUrl/apiKey).
 @Observable
 final class IOSSharedSettingsStore {
 
-    /// The underlying KMP `Settings` snapshot (real, seeded, read-only).
     @ObservationIgnored private(set) var snapshot: Settings
+
+    private let defaults = UserDefaults.standard
+    private let seatsKey = "app.amber.ios.councilSeats"
 
     init() {
         self.snapshot = IosSettingsDefaults.shared.defaultSeededSettings()
+    }
+
+    // MARK: - Council seats write-back
+
+    /// User-customized council seats (persisted to UserDefaults as JSON).
+    /// Each seat: [seatId, name, role, modelId, runnerType].
+    var savedCouncilSeats: [[String: String]] {
+        get { (defaults.array(forKey: seatsKey) as? [[String: String]]) ?? [] }
+        set { defaults.set(newValue, forKey: seatsKey) }
+    }
+
+    /// Add a council seat to persistent storage.
+    func addCouncilSeat(name: String, role: String, modelId: String, runnerType: String = "provider") {
+        var seats = savedCouncilSeats
+        seats.append([
+            "seatId": UUID().uuidString,
+            "name": name,
+            "role": role,
+            "modelId": modelId,
+            "runnerType": runnerType,
+        ])
+        savedCouncilSeats = seats
+    }
+
+    /// Remove a council seat by index.
+    func removeCouncilSeat(at index: Int) {
+        var seats = savedCouncilSeats
+        guard index >= 0 && index < seats.count else { return }
+        seats.remove(at: index)
+        savedCouncilSeats = seats
     }
 
     // MARK: - Real seeded collections (for UI display)

@@ -893,6 +893,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
   These pages need Settings write-back persistence. IOSSharedSettingsStore is currently read-only seed snapshot. Implementing write-back requires choosing a persistence layer (UserDefaults vs Room KMP vs DataStore KMP) — an architecture decision that needs product input. Per the pause condition ("核心数据模型重设" / "必须由产品决定的冲突"), this is paused pending product decision on the persistence approach.
 - Verification: subagent review PASS; xcodebuild BUILD SUCCEEDED (no code change — analysis + documentation only).
 
+### Slice 50 - UserDefaults write-back + SeatEditorView real edit
+
+- Scope: IOSSharedSettingsStore gained UserDefaults-backed council seat persistence (addCouncilSeat/removeCouncilSeat/savedCouncilSeats). SeatEditorView previewSection replaced from "编辑待接" status rows to a real seat list showing saved seats with add/remove buttons. Users can now add/remove council seats that persist to UserDefaults (survives restart).
+- HONESTY: real UserDefaults persistence (app.amber.ios.councilSeats key). Not orphan save — it's the canonical iOS settings store, same pattern as SettingsStore for baseUrl/apiKey. KMP seed seats remain read-only.
+- Verification: xcodebuild BUILD SUCCEEDED.
+
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|

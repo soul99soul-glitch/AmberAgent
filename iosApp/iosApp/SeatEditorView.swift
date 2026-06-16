@@ -263,14 +263,40 @@ struct SeatEditorView: View {
 
     private var previewSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "处理方式")
+            AmberSectionLabel(text: "已保存席位（UserDefaults · 可读写）")
             AmberFormGroup {
-                SeatEditorStatusLine(label: "保存", value: "编辑待接（需持久化层）")
+                let seats = sharedSettings.savedCouncilSeats
+                if seats.isEmpty {
+                    Text("暂无自定义席位。填写上方名称/角色/模型后点「保存席位」添加。")
+                        .font(.caption).foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
+                } else {
+                    ForEach(Array(seats.enumerated()), id: \.offset) { index, seat in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(seat["name"] ?? "?").font(.body.weight(.semibold))
+                                Text("\(seat["role"] ?? "?") · \(seat["modelId"] ?? "?")")
+                                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(AmberTheme.muted2)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            Button { sharedSettings.removeCouncilSeat(at: index) } label: {
+                                Image(systemName: "minus.circle.fill").font(.system(size: 18)).foregroundStyle(AmberTheme.accentRed)
+                            }.buttonStyle(.plain)
+                        }.frame(minHeight: 48).padding(.horizontal, 14).padding(.vertical, 4)
+                        if index < seats.count - 1 { SeatEditorDivider() }
+                    }
+                }
                 SeatEditorDivider()
-                SeatEditorStatusLine(label: "真实席位", value: "\(sharedSettings.agentRuntime.modelCouncil.defaultSeats.count) 席（只读）")
-                SeatEditorDivider()
-                SeatEditorStatusLine(label: "真实后端", value: "defaultSeats 未桥接")
+                Button {
+                    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    sharedSettings.addCouncilSeat(name: trimmed, role: role, modelId: model)
+                    name = ""
+                } label: {
+                    Label("保存席位", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
+                }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
             }
+            SeatEditorFootnote(text: "席位保存到 UserDefaults，重启后保留。KMP seed 席位（\(sharedSettings.agentRuntime.modelCouncil.defaultSeats.count) 席）仍为只读。")
         }
     }
 
