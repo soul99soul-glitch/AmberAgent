@@ -18,6 +18,7 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
     @State private var sharedSettings = IOSSharedSettingsStore()
+    @State private var pasteHintShown = false
 
     init(settingsStore: SettingsStore, localToolExecutor: IOSLocalToolExecutor? = nil) {
         self.settingsStore = settingsStore
@@ -171,6 +172,14 @@ struct ChatView: View {
                                 guard !viewModel.isLoading else { return }
                                 guard !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                                 viewModel.sendMessage()
+                            }
+                        }
+                        .onChange(of: viewModel.inputText) { _, newText in
+                            let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
+                            if sharedSettings.displaySetting.pasteLongTextAsFile,
+                               newText.count > threshold,
+                               !pasteHintShown {
+                                pasteHintShown = true
                             }
                         }
 
