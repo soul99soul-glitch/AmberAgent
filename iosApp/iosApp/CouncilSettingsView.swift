@@ -114,7 +114,7 @@ struct CouncilSettingsView: View {
     }
 
     private var intro: some View {
-        Text("以下字段来自 KMP Settings.agentRuntime.modelCouncil 真实种子值（只读展示）。席位编辑仍为草稿，不保存配置。")
+        Text("以下字段来自 KMP Settings.agentRuntime.modelCouncil 真实种子值（只读展示）。席位编辑保存到 UserDefaults，重启后保留。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -172,33 +172,38 @@ struct CouncilSettingsView: View {
 
     private var seatDraftSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "席位草稿")
+            AmberSectionLabel(text: "自定义席位（UserDefaults · 可读写）")
             AmberFormGroup {
-                Button {
-                    router.navigate(to: .seatEditor)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(AmberTheme.accent)
-                            .frame(width: 30, height: 30)
-
-                        Text("添加席位")
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(AmberTheme.accent)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Text("草稿")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AmberTheme.muted)
+                let seats = sharedSettings.savedCouncilSeats
+                if seats.isEmpty {
+                    Text("暂无自定义席位。点「添加席位」进入编辑页添加。")
+                        .font(.caption).foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
+                } else {
+                    ForEach(Array(seats.enumerated()), id: \.offset) { index, seat in
+                        HStack(spacing: 10) {
+                            Text(seat["name"] ?? "?").font(.body.weight(.semibold))
+                            Spacer()
+                            Text(seat["role"] ?? "?").font(.caption).foregroundStyle(AmberTheme.muted2)
+                            Button { sharedSettings.removeCouncilSeat(at: index) } label: {
+                                Image(systemName: "minus.circle.fill").font(.system(size: 16)).foregroundStyle(AmberTheme.accentRed)
+                            }.buttonStyle(.plain)
+                        }.frame(minHeight: 44).padding(.horizontal, 14).padding(.vertical, 4)
+                        if index < seats.count - 1 { CouncilSettingsDivider() }
                     }
-                    .frame(minHeight: 56)
-                    .padding(.horizontal, 14)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
             }
-            CouncilFootnote(text: "席位编辑页只保留字段预览；不会新增、更新、删除 defaultSeats，也不会写入 AgentPromptConfigRepository 的 council prompt 文件。")
+            Button {
+                router.navigate(to: .seatEditor)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "plus").font(.system(size: 17, weight: .semibold)).foregroundStyle(AmberTheme.accent).frame(width: 30, height: 30)
+                    Text("添加席位").font(.body.weight(.medium)).foregroundStyle(AmberTheme.accent).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(minHeight: 56).padding(.horizontal, 14).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            CouncilFootnote(text: "自定义席位保存到 UserDefaults，重启后保留。KMP seed 席位不可编辑。")
         }
     }
 
