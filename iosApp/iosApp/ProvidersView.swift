@@ -581,16 +581,16 @@ struct ProviderAddView: View {
             AmberSectionLabel(text: "选项")
             AmberFormGroup {
                 ProviderDraftToggleRow(
-                    title: "草稿 Response API",
-                    subtitle: "使用 /responses 端点（实验性）",
+                    title: "Response API",
+                    subtitle: "iOS 当前聊天链路不支持 useResponseApi；模板预设如 xAI 需要此开关但被阻断",
                     isOn: responseAPI
                 ) {
                     responseAPI.toggle()
                 }
                 ProviderDivider()
                 ProviderDraftToggleRow(
-                    title: "草稿余额刷新",
-                    subtitle: "仅影响本页草稿；当前不会保存余额接口或发起请求",
+                    title: "余额刷新",
+                    subtitle: "iOS 不发起网络请求测试余额；此开关仅记录草稿意图",
                     isOn: balanceRefresh
                 ) {
                     balanceRefresh.toggle()

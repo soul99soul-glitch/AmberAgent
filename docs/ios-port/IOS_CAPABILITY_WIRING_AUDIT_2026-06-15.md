@@ -788,6 +788,12 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Verification: git diff --check OK; xcodebuild BUILD SUCCEEDED; subagent review PASS (reads real KMP data, no fake, drafts preserved, AppShell wiring correct, no runtime crash risk).
 - Remaining risk: read-only only; persistence/execution/scheduling still pending.
 
+### Slice 34 - Phase 5 cleanup (Providers draft rows + PlaceholderViews home rows)
+
+- Scope: ProvidersView "草稿 Response API"/"草稿余额刷新" toggles relabeled to honest status (not "草稿" prefix, subtitle explains iOS limitation). PlaceholderViews settings home rows updated from "未接线"/"桥尚未接线" to accurate status: "默认配置只读 · 执行待接" / "start 调用链已通(stub) · 真实推理待接" / "待接(WKWebView)" etc. Execution summary from "运行控制未接线" to "执行字段只读".
+- Verification: git diff --check OK; xcodebuild BUILD SUCCEEDED.
+- Remaining: ~230 "未接线/草稿" markers remain across 30 files (most are honest degradation in draft/detail pages); phases 6-8 will continue reducing them.
+
 
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |

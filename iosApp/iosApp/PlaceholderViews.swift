@@ -846,8 +846,8 @@ struct SettingsHomeView: View {
 
     private var runtimeRows: [SettingsHomeRow] {
         [
-            .init(title: "核心记忆", subtitle: "本机草稿 · 记忆库未接线", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
-            .init(title: "技能", subtitle: "Skill/MCP 配置桥尚未接线", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
+            .init(title: "核心记忆", subtitle: "默认配置只读 · 记忆库执行待接", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
+            .init(title: "技能", subtitle: "Skill/MCP 配置桥待接", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
             .init(title: "执行与任务", subtitle: executionSummary, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
             .init(title: "工具权限", subtitle: "系统权限 · 批准策略", value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions),
             .init(title: "运行环境", subtitle: runtimeSummary, value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentIndigo, route: .sandbox)
@@ -858,25 +858,25 @@ struct SettingsHomeView: View {
         [
             .init(title: "服务商", subtitle: nil, value: "OpenAI-compatible", systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
             .init(title: "默认模型", subtitle: nil, value: settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
-            .init(title: "搜索服务", subtitle: nil, value: "未接线", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
+            .init(title: "搜索服务", subtitle: nil, value: "真实默认只读", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
             .init(title: "语音 TTS", subtitle: nil, value: "系统 TTS", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
         ]
     }
 
     private var dataRows: [SettingsHomeRow] {
         [
-            .init(title: "同步与备份", subtitle: "iOS 同步桥尚未接线", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
-            .init(title: "对话存储", subtitle: nil, value: "未接线", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
+            .init(title: "同步与备份", subtitle: "iOS 同步桥待接", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
+            .init(title: "对话存储", subtitle: nil, value: "待接", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
         ]
     }
 
     private var experimentalRows: [SettingsHomeRow] {
         [
-            .init(title: "今日看板", subtitle: "数据源桥尚未接线", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
-            .init(title: "模型议会", subtitle: "iOS 运行桥尚未接线", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
-            .init(title: "SubAgent", subtitle: "iOS SubAgent 配置桥尚未接线", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
-            .init(title: "小应用", subtitle: "iOS 小应用运行桥尚未接线", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
-            .init(title: "WebMount", subtitle: "iOS WebMount 桥尚未接线", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
+            .init(title: "今日看板", subtitle: "默认配置只读 · 采集待接", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
+            .init(title: "模型议会", subtitle: "start 调用链已通(stub) · 真实推理待接", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
+            .init(title: "SubAgent", subtitle: "默认配置只读 · 运行待接", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
+            .init(title: "小应用", subtitle: "默认配置只读 · 运行待接(WKWebView)", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
+            .init(title: "WebMount", subtitle: "待接(WKWebView)", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
         ]
     }
 
@@ -906,7 +906,7 @@ struct SettingsHomeView: View {
     }
 
     private var executionSummary: String {
-        "灵动岛 \(executionLiveActivity ? "开" : "关") · 运行控制未接线"
+        "灵动岛 \(executionLiveActivity ? "开" : "关") · 执行字段只读"
     }
 
     private var runtimeSummary: String {
