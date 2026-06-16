@@ -302,9 +302,9 @@ private extension View {
             case .providerKeyEditor(let name):
                 ProviderKeyEditView(providerRegistry: providerRegistry, providerName: name)
             case .modelAdd:
-                ModelEditView(isAdding: true)
+                ModelEditView(sharedSettings: sharedSettings, isAdding: true)
             case .modelEdit:
-                ModelEditView()
+                ModelEditView(sharedSettings: sharedSettings)
             case .modelCustomHeaders:
                 ModelCustomFieldsView(kind: .headers)
             case .modelCustomBody:

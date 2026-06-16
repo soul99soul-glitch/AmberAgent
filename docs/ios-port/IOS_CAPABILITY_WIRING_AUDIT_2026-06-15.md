@@ -899,6 +899,11 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - HONESTY: real UserDefaults persistence (app.amber.ios.councilSeats key). Not orphan save — it's the canonical iOS settings store, same pattern as SettingsStore for baseUrl/apiKey. KMP seed seats remain read-only.
 - Verification: xcodebuild BUILD SUCCEEDED.
 
+### Slice 51 - ModelEditView UserDefaults write-back
+
+- IOSSharedSettingsStore gained addCustomModel/removeCustomModel/savedCustomModels + addSearchProvider/removeSearchProvider/savedSearchProviders. ModelEditView gained savedModelsSection with add/remove buttons — custom models persist to UserDefaults.
+- Verification: xcodebuild BUILD SUCCEEDED.
+
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|

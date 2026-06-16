@@ -1,6 +1,9 @@
 import SwiftUI
+import Shared
 
 struct ModelEditView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
@@ -18,7 +21,8 @@ struct ModelEditView: View {
     @State private var imageGenerationEnabled: Bool
     @State private var alert: ModelEditAlert?
 
-    init(isAdding: Bool = false) {
+    init(sharedSettings: IOSSharedSettingsStore, isAdding: Bool = false) {
+        self.sharedSettings = sharedSettings
         self.isAdding = isAdding
         _modelID = State(initialValue: isAdding ? "" : "gpt-4o")
         _modelName = State(initialValue: isAdding ? "" : "gpt-4o")
@@ -249,6 +253,37 @@ struct ModelEditView: View {
             ModelEditNote("当前不会保存或删除真实模型配置；请在默认模型页修改实际使用的模型 ID。")
         }
     }
+
+
+    /// Saved custom models (UserDefaults persisted). Users can add/remove.
+    private var savedModelsSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "已保存自定义模型（UserDefaults · 可读写）")
+            AmberFormGroup {
+                let models = sharedSettings.savedCustomModels
+                ForEach(Array(models.enumerated()), id: \.offset) { index, model in
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(model["name"] ?? "?").font(.body.weight(.semibold))
+                            Text(model["modelId"] ?? "?").font(.system(size: 11, design: .monospaced)).foregroundStyle(AmberTheme.muted2)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        Button { sharedSettings.removeCustomModel(at: index) } label: {
+                            Image(systemName: "minus.circle.fill").font(.system(size: 18)).foregroundStyle(AmberTheme.accentRed)
+                        }.buttonStyle(.plain)
+                    }.frame(minHeight: 48).padding(.horizontal, 14).padding(.vertical, 4)
+                }
+                Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
+                Button {
+                    guard !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    sharedSettings.addCustomModel(name: modelName, modelId: modelID)
+                    modelName = ""; modelID = ""
+                } label: {
+                    Label("保存模型", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
+                }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
+            }
+        }
+    }
+
 }
 
 private enum ModelEditType: String, CaseIterable, Identifiable {
@@ -955,6 +990,6 @@ private struct FlowLayout: Layout {
 
 #Preview {
     NavigationStack {
-        ModelEditView()
+        ModelEditView(sharedSettings: IOSSharedSettingsStore())
     }
 }

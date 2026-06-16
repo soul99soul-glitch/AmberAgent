@@ -53,6 +53,66 @@ final class IOSSharedSettingsStore {
         savedCouncilSeats = seats
     }
 
+    // MARK: - Custom models write-back
+
+    private let modelsKey = "app.amber.ios.customModels"
+
+    /// User-customized model entries (persisted to UserDefaults).
+    var savedCustomModels: [[String: String]] {
+        get { (defaults.array(forKey: modelsKey) as? [[String: String]]) ?? [] }
+        set { defaults.set(newValue, forKey: modelsKey) }
+    }
+
+    /// Add a custom model to persistent storage.
+    func addCustomModel(name: String, modelId: String, providerName: String = "") {
+        var models = savedCustomModels
+        models.append([
+            "id": UUID().uuidString,
+            "name": name,
+            "modelId": modelId,
+            "providerName": providerName,
+        ])
+        savedCustomModels = models
+    }
+
+    /// Remove a custom model by index.
+    func removeCustomModel(at index: Int) {
+        var models = savedCustomModels
+        guard index >= 0 && index < models.count else { return }
+        models.remove(at: index)
+        savedCustomModels = models
+    }
+
+    // MARK: - Custom search providers write-back
+
+    private let searchProvidersKey = "app.amber.ios.customSearchProviders"
+
+    /// User-customized search provider entries (persisted to UserDefaults).
+    var savedSearchProviders: [[String: String]] {
+        get { (defaults.array(forKey: searchProvidersKey) as? [[String: String]]) ?? [] }
+        set { defaults.set(newValue, forKey: searchProvidersKey) }
+    }
+
+    /// Add a custom search provider to persistent storage.
+    func addSearchProvider(name: String, apiKey: String = "", serviceType: String = "") {
+        var providers = savedSearchProviders
+        providers.append([
+            "id": UUID().uuidString,
+            "name": name,
+            "apiKey": apiKey,
+            "serviceType": serviceType,
+        ])
+        savedSearchProviders = providers
+    }
+
+    /// Remove a custom search provider by index.
+    func removeSearchProvider(at index: Int) {
+        var providers = savedSearchProviders
+        guard index >= 0 && index < providers.count else { return }
+        providers.remove(at: index)
+        savedSearchProviders = providers
+    }
+
     // MARK: - Real seeded collections (for UI display)
 
     /// Real KMP default TTS providers (DEFAULT_TTS_PROVIDERS), seeded + de-duplicated.
