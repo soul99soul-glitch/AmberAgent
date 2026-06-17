@@ -8,6 +8,8 @@ import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material3.ripple
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -1765,7 +1767,12 @@ private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, f
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { openHttpUrl(uriHandler, link.url) }
+                    // Neutral grey tap highlight (matches the magazine palette)
+                    // instead of the theme's default blue ripple.
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = ripple(color = palette.muted),
+                    ) { openHttpUrl(uriHandler, link.url) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.Top,
