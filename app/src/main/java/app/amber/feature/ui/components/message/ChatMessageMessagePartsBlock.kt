@@ -89,6 +89,7 @@ internal fun MessagePartsBlock(
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
     onStreamingVisibleFrame: (() -> Unit)? = null,
+    onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
     deferStreamingParse: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -319,6 +320,13 @@ internal fun MessagePartsBlock(
                                                     } else {
                                                         null
                                                     },
+                                                    onStreamingVisualActiveChange = if (
+                                                        isStreamingText || onStreamingVisibleFrame != null
+                                                    ) {
+                                                        onStreamingVisualActiveChange
+                                                    } else {
+                                                        null
+                                                    },
                                                 )
                                             }
                                         }
@@ -331,8 +339,15 @@ internal fun MessagePartsBlock(
                                             streaming = isStreamingText,
                                             deferStreamingParse = deferStreamingParse && isStreamingText,
                                             onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                            onStreamingVisibleFrame = if (isStreamingText) {
+                                            onStreamingVisibleFrame = if (isStreamingText || onStreamingVisibleFrame != null) {
                                                 onStreamingVisibleFrame
+                                            } else {
+                                                null
+                                            },
+                                            onStreamingVisualActiveChange = if (
+                                                isStreamingText || onStreamingVisibleFrame != null
+                                            ) {
+                                                onStreamingVisualActiveChange
                                             } else {
                                                 null
                                             },

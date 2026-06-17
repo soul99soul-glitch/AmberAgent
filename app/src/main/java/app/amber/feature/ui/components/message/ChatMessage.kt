@@ -78,6 +78,7 @@ fun ChatMessage(
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
     onStreamingVisibleFrame: (() -> Unit)? = null,
+    onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
     deferStreamingParse: Boolean = false,
 ) {
     val message = node.messages[node.selectIndex]
@@ -151,6 +152,7 @@ fun ChatMessage(
                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                     onMiniAppModify = onMiniAppModify,
                     onStreamingVisibleFrame = onStreamingVisibleFrame,
+                    onStreamingVisualActiveChange = onStreamingVisualActiveChange,
                     deferStreamingParse = deferStreamingParse,
                 )
             }

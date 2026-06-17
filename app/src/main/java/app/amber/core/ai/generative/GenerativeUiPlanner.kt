@@ -85,6 +85,10 @@ object GenerativeUiPlanner {
                         appendLine("The user asked for an SVG/vector visual, structural diagram, chart, or schematic. Emit a concise show-widget SVG block to answer.")
                         appendLine("Start with one short sentence, then output the show-widget block immediately.")
                         appendLine("Prefer widget_code SVG for streaming; avoid renderer/spec unless the answer truly needs an interactive chart.")
+                        appendLine("Do not default to a square SVG canvas. Choose the viewBox aspect ratio from the content.")
+                        appendLine("Use a tall vertical viewBox for long timelines, histories, procedures, or stacked lists; size the height to the number of items.")
+                        appendLine("Use a wide horizontal viewBox for roadmaps, horizontal timelines, swimlanes, or comparison flows.")
+                        appendLine("""Set width="100%" and let height come from the viewBox ratio; only use equal width and height when the content is actually square.""")
                         appendLine("Keep the SVG inside its viewBox with 24px padding; do not draw outside the card.")
                     }
                 }

@@ -157,109 +157,46 @@ class ChatListSupportTest {
     }
 
     @Test
-    fun `generation end settle only runs on active generation falling edge`() {
-        assertTrue(
-            TimelineFollowEndSettlePolicy.effectPlan(
-                wasActiveGeneration = true,
-                activeGeneration = false,
-                autoScrollEnabled = true,
-            ).runEndSettleBeforeIdle
-        )
-        assertFalse(
-            TimelineFollowEndSettlePolicy.effectPlan(
-                wasActiveGeneration = false,
-                activeGeneration = false,
-                autoScrollEnabled = true,
-            ).runEndSettleBeforeIdle
-        )
-        assertFalse(
-            TimelineFollowEndSettlePolicy.effectPlan(
-                wasActiveGeneration = true,
-                activeGeneration = true,
-                autoScrollEnabled = true,
-            ).enterIdleAfterEndSettle
-        )
+    fun `generation end keeps bottom-follow without settle guards`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+        val policy = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatStreamingFollowPolicy.kt").readText()
+
+        assertTrue(source.contains("→ keep FollowingBottom after generation end"))
+        assertFalse(source.contains("settleAfterGenerationEnd"))
+        assertFalse(source.contains("TL_loading_end"))
+        assertFalse(source.contains("postSettle"))
+        assertFalse(source.contains("generationEndSettle"))
+        assertFalse(policy.contains("TimelineFollowEndSettlePolicy"))
     }
 
     @Test
-    fun `generation end settle keeps idle after settle ordering`() {
-        val plan = TimelineFollowEndSettlePolicy.effectPlan(
-            wasActiveGeneration = true,
-            activeGeneration = false,
-            autoScrollEnabled = true,
-        )
+    fun `bottom follow events are not gated by active generation after completion`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
 
-        assertTrue(plan.runEndSettleBeforeIdle)
-        assertTrue(plan.enterIdleAfterEndSettle)
+        assertTrue(source.contains("val willFollow = bottomFollowAllowed()"))
+        assertTrue(source.contains("val stillFollowing = bottomFollowAllowed()"))
+        assertFalse(source.contains("val willFollow = activeGenerationState &&"))
+        assertFalse(source.contains("val stillFollowing = activeGenerationState &&"))
     }
 
     @Test
-    fun `generation end settle gate respects follow mode finger and scroll state`() {
-        assertTrue(
-            TimelineFollowEndSettlePolicy.canSettleNow(
-                followMode = TimelineFollowMode.FollowingBottom,
-                userScrollInTimeline = false,
-                scrollInProgress = false,
-            )
-        )
-        assertFalse(
-            TimelineFollowEndSettlePolicy.canSettleNow(
-                followMode = TimelineFollowMode.PausedForUser,
-                userScrollInTimeline = false,
-                scrollInProgress = false,
-            )
-        )
-        assertFalse(
-            TimelineFollowEndSettlePolicy.canSettleNow(
-                followMode = TimelineFollowMode.FollowingBottom,
-                userScrollInTimeline = true,
-                scrollInProgress = false,
-            )
-        )
-        assertFalse(
-            TimelineFollowEndSettlePolicy.canSettleNow(
-                followMode = TimelineFollowMode.FollowingBottom,
-                userScrollInTimeline = false,
-                scrollInProgress = true,
-            )
-        )
+    fun `tail assistant keeps visual callbacks after loading ends`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+
+        assertTrue(source.contains("onStreamingVisibleFrame = if (isTailAssistantMessage)"))
+        assertTrue(source.contains("onStreamingVisualActiveChange = if (isTailAssistantMessage)"))
+        assertFalse(source.contains("onStreamingVisibleFrame = if (isLoadingMessage)"))
     }
 
     @Test
-    fun `generation end settle can still attempt while scroll is settling`() {
-        assertTrue(
-            TimelineFollowEndSettlePolicy.canAttemptSettle(
-                followMode = TimelineFollowMode.FollowingBottom,
-                userScrollInTimeline = false,
-            )
-        )
-        assertFalse(
-            TimelineFollowEndSettlePolicy.canAttemptSettle(
-                followMode = TimelineFollowMode.PausedForUser,
-                userScrollInTimeline = false,
-            )
-        )
-        assertFalse(
-            TimelineFollowEndSettlePolicy.canAttemptSettle(
-                followMode = TimelineFollowMode.FollowingBottom,
-                userScrollInTimeline = true,
-            )
-        )
-    }
+    fun `markdown reports streaming visual active while draining after stream`() {
+        val markdown = repoFile("src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt").readText()
+        val message = repoFile("src/main/java/app/amber/feature/ui/components/message/ChatMessage.kt").readText()
 
-    @Test
-    fun `generation end settle accepts bottom buffer but not missing anchor`() {
-        assertTrue(TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(distancePx = 0, bottomBufferPx = 24))
-        assertTrue(TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(distancePx = 24, bottomBufferPx = 24))
-        assertFalse(TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(distancePx = 25, bottomBufferPx = 24))
-        assertFalse(TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(distancePx = null, bottomBufferPx = 24))
-    }
-
-    @Test
-    fun `generation end settle waits for consecutive stable bottom frames`() {
-        assertFalse(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(0))
-        assertFalse(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(1))
-        assertTrue(TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(2))
+        assertTrue(markdown.contains("onStreamingVisualActiveChange"))
+        assertTrue(markdown.contains("active = streaming || displayDrainingAfterStream"))
+        assertTrue(markdown.contains("updatedOnStreamingVisibleFrame?.invoke()"))
+        assertTrue(message.contains("onStreamingVisualActiveChange = onStreamingVisualActiveChange"))
     }
 
     @Test
@@ -287,13 +224,19 @@ class ChatListSupportTest {
     @Test
     fun `streaming tail indicator uses pinned overlay with retained reserve`() {
         val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+        val plan = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListSupport.kt").readText()
 
         assertTrue(source.contains("retainedTailIndicatorMessageId"))
         assertTrue(source.contains("tailIndicatorReserveVisible"))
         assertTrue(source.contains("pinTailIndicator"))
+        assertTrue(source.contains("key = TimelineTailKey"))
+        assertTrue(source.contains("contentType = \"timeline-tail\""))
         assertTrue(source.contains("TimelineTailWorkingIndicator("))
         assertTrue(source.contains("visible = tailIndicatorDotVisible && !pinTailIndicator"))
         assertTrue(source.contains("visible = pinTailIndicator && !captureProgress"))
+        assertTrue(plan.contains("add(ChatTimelineEntry.TimelineTail)"))
+        assertFalse(plan.contains("add(ChatTimelineEntry.Loading)"))
+        assertFalse(plan.contains("add(ChatTimelineEntry.ScrollBottom)"))
     }
 
     @Test

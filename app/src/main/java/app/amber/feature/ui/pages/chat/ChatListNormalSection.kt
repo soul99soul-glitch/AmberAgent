@@ -196,8 +196,6 @@ internal fun ChatListNormal(
     val conversationId = conversation.id.toString()
     val postSendState = chatTimelinePlan.postSendState
     val timelineLoading = chatTimelinePlan.timelineLoading
-    var previousTimelineLoading by remember(conversation.id) { mutableStateOf(timelineLoading) }
-    var timelineEndGuardArmed by remember(conversation.id) { mutableStateOf(false) }
     val timelineBottomPadding = TimelineBottomSafetyPadding +
         if (postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
     var retainedTailIndicatorMessageId by remember(conversation.id) {
@@ -212,6 +210,11 @@ internal fun ChatListNormal(
                 null
             }
         )
+    }
+    var tailVisualActiveSourceCount by remember(conversation.id) { mutableIntStateOf(0) }
+    val tailVisualActive = tailVisualActiveSourceCount > 0
+    val streamingVisibleEvents = remember(conversation.id) {
+        createStreamingBottomFollowEvents()
     }
 
     LaunchedEffect(conversation.id, activeGeneration) {
@@ -300,6 +303,23 @@ internal fun ChatListNormal(
         logScroll("pauseAutoFollowTemporarily", "mode=$mode")
     }
 
+    fun bottomFollowAllowed(): Boolean =
+        followMode == TimelineFollowMode.FollowingBottom && !userScrollInTimeline
+
+    fun requestStreamingBottomFollow(reason: String) {
+        streamingVisibleEvents.tryEmit(reason)
+    }
+
+    fun updateTailVisualActive(active: Boolean) {
+        val nextCount = (tailVisualActiveSourceCount + if (active) 1 else -1).coerceAtLeast(0)
+        if (nextCount == tailVisualActiveSourceCount) return
+        tailVisualActiveSourceCount = nextCount
+        logScroll("tailVisualActive", "active=$active count=$nextCount")
+        if (active && bottomFollowAllowed()) {
+            requestStreamingBottomFollow("visual-active")
+        }
+    }
+
     suspend fun scrollToTimelineBottom(
         reason: String,
         smoothLargeMove: Boolean = false,
@@ -315,7 +335,7 @@ internal fun ChatListNormal(
                 logScroll("scrollToTimelineBottom.interrupt", "reason=$reason token=$token")
                 return true
             }
-            return !activeGenerationState || followMode != TimelineFollowMode.FollowingBottom
+            return !bottomFollowAllowed()
         }
         try {
             val maxSmoothStepPx = with(density) { 18.dp.toPx() }
@@ -397,112 +417,6 @@ internal fun ChatListNormal(
         } finally {
             logScroll("scrollToTimelineBottom.exit", "reason=$reason token=$token")
             endProgrammaticScroll(token)
-        }
-    }
-
-    suspend fun waitForGenerationEndSettleGate(): Boolean {
-        repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) {
-            if (
-                TimelineFollowEndSettlePolicy.canSettleNow(
-                    followMode = followMode,
-                    userScrollInTimeline = userScrollInTimeline,
-                    scrollInProgress = state.isScrollInProgress,
-                )
-            ) {
-                return true
-            }
-            if (
-                !TimelineFollowEndSettlePolicy.canAttemptSettle(
-                    followMode = followMode,
-                    userScrollInTimeline = userScrollInTimeline,
-                )
-            ) {
-                return false
-            }
-            withFrameNanos { }
-        }
-        return TimelineFollowEndSettlePolicy.canAttemptSettle(
-            followMode = followMode,
-            userScrollInTimeline = userScrollInTimeline,
-        )
-    }
-
-    suspend fun settleAfterGenerationEnd() {
-        // Let loading=false commit at least one real layout before measuring.
-        // The retained tail indicator usually keeps height stable, but the
-        // completed-message action row can still settle one frame later.
-        withFrameNanos { }
-        // No early "already at bottom" return here: the end-of-stream
-        // virtualization re-keys the finished message (single item → header/
-        // blocks/footer), and that relayout can land SEVERAL frames after
-        // loading flips — past any single up-front measurement. A premature
-        // distance==0 return left the post-re-key viewport jump (anchored near
-        // the message header) uncorrected. The stable-frames loop below is the
-        // correct shape: when nothing moves it idles two frames and exits
-        // without scrolling; when the re-key displaces the viewport it snaps
-        // back to the bottom. The retained tail-indicator reserve keeps the
-        // indicator removal from fighting this settle.
-        if (!waitForGenerationEndSettleGate()) {
-            logScroll("generationEndSettle.skip", "gate=false")
-            return
-        }
-        var stableBottomFrames = 0
-        repeat(TimelineFollowEndSettlePolicy.MaxSettleFrames) { frame ->
-            val distanceBefore = state.distanceToTimelineBottomPx()
-            if (
-                TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
-                    distancePx = distanceBefore,
-                    bottomBufferPx = bottomFollowBufferPx,
-                )
-            ) {
-                stableBottomFrames += 1
-                logScroll(
-                    "generationEndSettle.stable",
-                    "frame=$frame distancePx=$distanceBefore stable=$stableBottomFrames",
-                )
-                if (TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(stableBottomFrames)) {
-                    logScroll("generationEndSettle.done", "frame=$frame distancePx=$distanceBefore")
-                    return
-                }
-                withFrameNanos { }
-                return@repeat
-            }
-            stableBottomFrames = 0
-            if (
-                !TimelineFollowEndSettlePolicy.canAttemptSettle(
-                    followMode = followMode,
-                    userScrollInTimeline = userScrollInTimeline,
-                )
-            ) {
-                logScroll("generationEndSettle.stop", "frame=$frame distancePx=$distanceBefore")
-                return
-            }
-            val reason = if (frame == 0) {
-                "generationEnded"
-            } else {
-                "generationEnded-settle-$frame"
-            }
-            scrollToTimelineBottom(reason, smoothLargeMove = false)
-            withFrameNanos { }
-            val distanceAfter = state.distanceToTimelineBottomPx()
-            logScroll(
-                "generationEndSettle.frame",
-                "frame=$frame before=$distanceBefore after=$distanceAfter stable=$stableBottomFrames",
-            )
-            if (
-                TimelineFollowEndSettlePolicy.isCloseEnoughToBottom(
-                    distancePx = distanceAfter,
-                    bottomBufferPx = bottomFollowBufferPx,
-                )
-            ) {
-                stableBottomFrames += 1
-                if (TimelineFollowEndSettlePolicy.hasEnoughStableBottomFrames(stableBottomFrames)) {
-                    return
-                }
-                withFrameNanos { }
-            } else {
-                stableBottomFrames = 0
-            }
         }
     }
 
@@ -652,85 +566,23 @@ internal fun ChatListNormal(
     )
 
     LaunchedEffect(
-        conversation.id,
-        timelineLoading,
-        followMode,
-    ) {
-        if (timelineLoading) {
-            timelineEndGuardArmed = followMode == TimelineFollowMode.FollowingBottom ||
-                state.isAtTimelineBottom(bottomFollowBufferPx) ||
-                state.isNearListEnd(bufferItems = 4)
-            previousTimelineLoading = true
-            logScroll(
-                "TL_loading_arm",
-                "armed=$timelineEndGuardArmed follow=$followMode enableAS=${settings.displaySetting.enableAutoScroll}"
-            )
-            return@LaunchedEffect
-        }
-        val endedTimelineLoading = previousTimelineLoading && !timelineLoading
-        val shouldGuard = endedTimelineLoading && timelineEndGuardArmed
-        previousTimelineLoading = timelineLoading
-        timelineEndGuardArmed = false
-        logScroll(
-            "TL_loading_effect",
-            "ended=$endedTimelineLoading shouldGuard=$shouldGuard enableAS=${settings.displaySetting.enableAutoScroll}"
-        )
-        if (!shouldGuard) return@LaunchedEffect
-        logScroll("TL_loading_end", "→ per-frame guard for finalize (~18 frames)")
-        // Per-frame re-pin for ~300ms (18 frames @ 60fps) covering Markdown
-        // finalize (~260ms after loading=false). Correction applied inside
-        // withFrameNanos so no displaced frame is ever painted.
-        repeat(18) { frame ->
-            withFrameNanos { }
-            val d = state.distanceToTimelineBottomPx()
-            if (d == null || d > bottomFollowBufferPx) {
-                logScroll("TL_loading_end.snap", "frame=$frame dist=$d")
-                scrollToTimelineBottom("timelineLoadingEnd", smoothLargeMove = false)
-            }
-        }
-        logScroll("TL_loading_end.done")
-    }
-
-    LaunchedEffect(
         settings.displaySetting.enableAutoScroll,
         activeGeneration,
         conversation.id,
     ) {
-        val effectPlan = TimelineFollowEndSettlePolicy.effectPlan(
-            wasActiveGeneration = previousActiveGeneration,
-            activeGeneration = activeGeneration,
-            autoScrollEnabled = settings.displaySetting.enableAutoScroll,
-        )
+        val endedGeneration = previousActiveGeneration && !activeGeneration
         previousActiveGeneration = activeGeneration
         logScroll(
             "LE_init",
-            "enableAutoScroll=${settings.displaySetting.enableAutoScroll} convId=${conversation.id}"
+            "enableAutoScroll=${settings.displaySetting.enableAutoScroll} " +
+                "active=$activeGeneration ended=$endedGeneration convId=${conversation.id}"
         )
-        if (effectPlan.enterIdleAfterEndSettle) {
-            if (effectPlan.runEndSettleBeforeIdle) {
-                settleAfterGenerationEnd()
-            }
-            val idleReason = if (settings.displaySetting.enableAutoScroll) {
-                "generationOff"
-            } else {
-                "autoScrollOff"
-            }
-            logScroll("LE_init.branch", "→ enterIdleFollowMode ($idleReason)")
-            // Per-frame re-pin for ~300ms (18 frames @ 60fps): Markdown finalize
-            // and reasoning collapse both land after settleAfterGenerationEnd
-            // exits. Pinning inside withFrameNanos corrects height displacement
-            // in the same frame it occurs — no displaced frame is painted.
-            if (effectPlan.runEndSettleBeforeIdle) {
-                repeat(18) { frame ->
-                    withFrameNanos { }
-                    val d = state.distanceToTimelineBottomPx()
-                    if (d == null || d > bottomFollowBufferPx) {
-                        logScroll("postSettle.snap", "frame=$frame dist=$d")
-                        scrollToTimelineBottom("postSettle", smoothLargeMove = false)
-                    }
-                }
-            }
+        if (!settings.displaySetting.enableAutoScroll) {
+            logScroll("LE_init.branch", "→ enterIdleFollowMode (autoScrollOff)")
             enterIdleFollowMode()
+        } else if (endedGeneration && bottomFollowAllowed()) {
+            logScroll("LE_init.branch", "→ keep FollowingBottom after generation end")
+            requestStreamingBottomFollow("generation-end")
         } else if (
             followMode == TimelineFollowMode.Idle &&
             (
@@ -783,7 +635,7 @@ internal fun ChatListNormal(
             if (userDrivenScroll) {
                 isRecentScroll = true
             }
-            if (activeGenerationState && userDrivenScroll) {
+            if (userDrivenScroll && followMode == TimelineFollowMode.FollowingBottom) {
                 pauseAutoFollowTemporarily(TimelineFollowMode.PausedForUser)
             }
         } else {
@@ -802,7 +654,6 @@ internal fun ChatListNormal(
             // only needs to decide "did the user release at the bottom?" —
             // never to demote from FollowingBottom.
             if (
-                activeGenerationState &&
                 !programmaticScrollInProgress &&
                 followMode == TimelineFollowMode.PausedForUser
             ) {
@@ -938,12 +789,6 @@ internal fun ChatListNormal(
                 (state.canScrollBackward || state.canScrollForward)
         }
     }
-    val streamingVisibleEvents = remember(conversation.id) {
-        createStreamingBottomFollowEvents()
-    }
-    fun requestStreamingBottomFollow(reason: String) {
-        streamingVisibleEvents.tryEmit(reason)
-    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -953,14 +798,10 @@ internal fun ChatListNormal(
             LaunchedEffect(streamingVisibleEvents, conversation.id) {
                 val bottomFollowEvents = streamingVisibleEvents.conflate()
                 bottomFollowEvents.collect { reason ->
-                    val willFollow = activeGenerationState &&
-                        followMode == TimelineFollowMode.FollowingBottom &&
-                        !userScrollInTimeline
+                    val willFollow = bottomFollowAllowed()
                     if (!willFollow) return@collect
                     withFrameNanos { }
-                    val stillFollowing = activeGenerationState &&
-                        followMode == TimelineFollowMode.FollowingBottom &&
-                        !userScrollInTimeline
+                    val stillFollowing = bottomFollowAllowed()
                     if (stillFollowing) {
                         scrollToTimelineBottom(
                             reason = "stream-$reason",
@@ -981,9 +822,7 @@ internal fun ChatListNormal(
                 loading,
             ) {
                 if (!activeGeneration) return@LaunchedEffect
-                val willFollow = activeGenerationState &&
-                    followMode == TimelineFollowMode.FollowingBottom &&
-                    !userScrollInTimeline
+                val willFollow = bottomFollowAllowed()
                 logScroll(
                     "LE_chunk",
                     "loading=$loading pendingUserMsgs=${pendingUserMessages.size} " +
@@ -1091,6 +930,8 @@ internal fun ChatListNormal(
                         val node = entry.node
                         val isLastMessage = index == conversation.messageNodes.lastIndex
                         val isLoadingMessage = timelineLoading && isLastMessage
+                        val isTailAssistantMessage = isLastMessage &&
+                            node.currentMessage.role == MessageRole.ASSISTANT
                         val isPreCompacted = visualCompactedTimelineEndIndex?.let { index <= it } == true
                         item(
                             key = node.id,
@@ -1182,8 +1023,13 @@ internal fun ChatListNormal(
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,
                                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                                         onMiniAppModify = onMiniAppModify,
-                                        onStreamingVisibleFrame = if (isLoadingMessage) {
+                                        onStreamingVisibleFrame = if (isTailAssistantMessage) {
                                             { requestStreamingBottomFollow("visible") }
+                                        } else {
+                                            null
+                                        },
+                                        onStreamingVisualActiveChange = if (isTailAssistantMessage) {
+                                            { active -> updateTailVisualActive(active) }
                                         } else {
                                             null
                                         },
@@ -1304,8 +1150,7 @@ internal fun ChatListNormal(
 
                     ChatTimelineEntry.PostSendWaitingAssistant,
                     is ChatTimelineEntry.Pending,
-                    ChatTimelineEntry.Loading,
-                    ChatTimelineEntry.ScrollBottom -> Unit
+                    ChatTimelineEntry.TimelineTail -> Unit
                 }
             }
 
@@ -1372,43 +1217,25 @@ internal fun ChatListNormal(
                         }
                     }
 
-                    ChatTimelineEntry.Loading -> {
+                    ChatTimelineEntry.TimelineTail -> {
                         item(
-                            key = LoadingIndicatorKey,
-                            contentType = "loading",
+                            key = TimelineTailKey,
+                            contentType = "timeline-tail",
                         ) {
-                            if (tailIndicatorReserveVisible) {
-                                TimelineTailWorkingIndicator(
-                                    processingStatus = processingStatus,
-                                    visible = tailIndicatorDotVisible && !pinTailIndicator,
-                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                if (tailIndicatorReserveVisible) {
+                                    TimelineTailWorkingIndicator(
+                                        processingStatus = processingStatus,
+                                        visible = tailIndicatorDotVisible && !pinTailIndicator,
+                                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                    )
+                                }
+                                Spacer(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(ScrollBottomSpacerHeight)
                                 )
                             }
-                        }
-                    }
-
-                    ChatTimelineEntry.ScrollBottom -> {
-                        if (tailIndicatorReserveVisible && !timelineLoading) {
-                            item(
-                                key = LoadingIndicatorKey,
-                                contentType = "loading",
-                            ) {
-                                TimelineTailWorkingIndicator(
-                                    processingStatus = processingStatus,
-                                    visible = false,
-                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                )
-                            }
-                        }
-                        item(
-                            key = ScrollBottomKey,
-                            contentType = "scroll-bottom",
-                        ) {
-                            Spacer(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(ScrollBottomSpacerHeight)
-                            )
                         }
                     }
 
@@ -1569,7 +1396,12 @@ internal fun ChatListNormal(
 
             // 消息快速跳转
             MessageJumper(
-                show = isRecentScroll && !state.isScrollInProgress && !activeGenerationState && settings.displaySetting.showMessageJumper && !captureProgress,
+                show = isRecentScroll &&
+                    !state.isScrollInProgress &&
+                    !activeGenerationState &&
+                    !tailVisualActive &&
+                    settings.displaySetting.showMessageJumper &&
+                    !captureProgress,
                 onLeft = settings.displaySetting.messageJumperOnLeft,
                 scope = scope,
                 state = state

@@ -84,6 +84,19 @@ class GenerativeUiPlannerTest {
     }
 
     @Test
+    fun diagramPromptRequiresAdaptiveSvgCanvas() {
+        val prompt = GenerativeUiPlanner.buildPrompt(
+            setting = GenerativeUiSetting(enabled = true),
+            messages = listOf(userMessage("画一个中国上下五千年时间线")),
+        )
+
+        assertTrue(prompt.contains("Do not default to a square SVG canvas"))
+        assertTrue(prompt.contains("viewBox aspect ratio"))
+        assertTrue(prompt.contains("long timelines"))
+        assertTrue(prompt.contains("""width="100%""""))
+    }
+
+    @Test
     fun toolMediatedVisualRequestsWarnAgainstProgressWidgets() {
         val prompt = GenerativeUiPlanner.buildPrompt(
             setting = GenerativeUiSetting(enabled = true),

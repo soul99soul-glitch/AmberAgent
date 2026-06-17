@@ -358,7 +358,6 @@ fun registerCargoBuild(taskName: String, crateDir: String, displayName: String) 
             "-t", "arm64-v8a",
             "-o", file("${layout.buildDirectory.get()}/rustJniLibs/android").absolutePath,
             "build", "--release",
-            "--manifest-path", file("$crateDir/Cargo.toml").absolutePath,
         )
         isIgnoreExitValue = false
         onlyIf {

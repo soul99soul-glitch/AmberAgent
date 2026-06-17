@@ -63,7 +63,6 @@ val cargoBuildHighlightParser = tasks.register<Exec>("cargoBuildHighlightParser"
         "-t", "arm64-v8a",
         "-o", file("${layout.buildDirectory.get()}/rustJniLibs/android").absolutePath,
         "build", "--release",
-        "--manifest-path", file("../native/highlight-parser/Cargo.toml").absolutePath,
     )
     isIgnoreExitValue = false
     onlyIf {

@@ -133,6 +133,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
     onClickCitation: (String) -> Unit,
     onGenerativeWidgetAction: (String) -> Unit,
     onStreamingVisibleFrame: (() -> Unit)? = null,
+    onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
 ) {
     val generativeUiEnabled = LocalSettings.current.agentRuntime.generativeUi.enabled
     val canRenderWidget = remember(generativeUiEnabled, content) {
@@ -159,6 +160,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
             streaming = streaming,
             deferStreamingParse = deferStreamingParse,
             onStreamingVisibleFrame = onStreamingVisibleFrame,
+            onStreamingVisualActiveChange = onStreamingVisualActiveChange,
             onClickCitation = onClickCitation,
         )
         return
@@ -187,11 +189,12 @@ internal fun AssistantMarkdownBlockOrWidgets(
                         content = segment.content,
                         streaming = segmentStreaming,
                         deferStreamingParse = deferStreamingParse && segmentStreaming,
-                        onStreamingVisibleFrame = if (segmentStreaming) {
+                        onStreamingVisibleFrame = if (segmentStreaming || onStreamingVisibleFrame != null) {
                             onStreamingVisibleFrame
                         } else {
                             null
                         },
+                        onStreamingVisualActiveChange = onStreamingVisualActiveChange,
                         onClickCitation = onClickCitation,
                     )
 
