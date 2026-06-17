@@ -1,14 +1,24 @@
 package app.amber.feature.ui.pages.councilroom
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -32,12 +43,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -45,10 +62,15 @@ import app.amber.feature.modelcouncil.COUNCIL_ROOM_HOST_ID
 import app.amber.feature.modelcouncil.COUNCIL_ROOM_USER_ID
 import app.amber.feature.modelcouncil.CouncilMessage
 import app.amber.feature.modelcouncil.CouncilMessageStatus
+import app.amber.feature.modelcouncil.CouncilParticipant
+import app.amber.feature.modelcouncil.CouncilParticipantStatus
 import app.amber.feature.modelcouncil.CouncilPhaseMarker
 import app.amber.feature.modelcouncil.CouncilRoom
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.modelcouncil.running
 import app.amber.feature.ui.components.richtext.MarkdownBlock
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -107,6 +129,7 @@ fun CouncilTimelineTab(
     val streamingTail = room.messages.lastOrNull { it.status.running }?.text?.length ?: 0
 
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     var followBottom by remember { mutableStateOf(true) }
 
     // Re-engage follow when the viewport is parked near the bottom (reactive to
@@ -140,9 +163,29 @@ fun CouncilTimelineTab(
     // AND streamingTail so it re-fires on every in-place chunk growth.
     LaunchedEffect(entries.size, isStreaming, streamingTail, followBottom) {
         if (followBottom && entries.isNotEmpty()) {
-            listState.animateScrollToItem((entries.size - 1).coerceAtLeast(0))
+            // Land at the very BOTTOM of the last item (a large offset is clamped to
+            // the list end). Scrolling to the item's TOP (animateScrollToItem) was the
+            // bug: once a streaming message grew taller than the viewport, its top sat
+            // at the viewport top and the growing bottom scrolled out of view.
+            listState.scrollToItem((entries.size - 1).coerceAtLeast(0), scrollOffset = 100_000)
         }
     }
+
+    // The first user message is the room's "topic"; it gets the 议题 · 发起人 label.
+    val topicMessageId = remember(room.messages) {
+        room.messages.firstOrNull { it.authorId == COUNCIL_ROOM_USER_ID }?.id
+    }
+    // Who is mid-turn — drives the live "正在发言" strip above the composer.
+    val speaking = remember(room.participants, streamingTail) {
+        room.participants.firstOrNull { it.status == CouncilParticipantStatus.SPEAKING }
+    }
+
+    // Timeline keys whose entrance "pop" has already played. Pre-seeded with the
+    // entries present at first composition, so opening a room with history does
+    // NOT replay the pop for every past message — only turns that arrive after
+    // open pop, and each only once (scrolling a popped item back into view, which
+    // re-creates its composition, finds the key here and skips re-animating).
+    val poppedKeys = remember { entries.mapTo(mutableSetOf<String>()) { it.key } }
 
     Column(modifier = modifier) {
         LazyColumn(
@@ -157,10 +200,68 @@ fun CouncilTimelineTab(
                 }
             }
             items(items = entries, key = { it.key }) { entry ->
-                when (entry) {
-                    is TimelineEntry.Phase -> PhaseDivider(entry.marker)
-                    is TimelineEntry.Message -> TimelineMessageRow(msg = entry.msg, room = room)
+                // animateItem gives every new turn the design's "rise" entrance
+                // (fade + settle) and smoothly reflows neighbours on insertion.
+                // On top of that, a user message that arrives after the room is
+                // open gets a one-shot scale "pop" from its trailing edge — the
+                // same send feedback as the main chat. firstAppearance is false
+                // for history (pre-seeded) and for items scrolled back into view,
+                // so neither replays the pop.
+                val isUserMsg = entry is TimelineEntry.Message &&
+                    entry.msg.authorId == COUNCIL_ROOM_USER_ID
+                val firstAppearance = remember(entry.key) { entry.key !in poppedKeys }
+                val popIn = isUserMsg && firstAppearance
+                val popScale = remember(entry.key) { Animatable(if (popIn) 0.8f else 1f) }
+                LaunchedEffect(entry.key) {
+                    if (popIn) {
+                        poppedKeys += entry.key
+                        popScale.animateTo(
+                            targetValue = 1f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMediumLow,
+                            ),
+                        )
+                    }
                 }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            scaleX = popScale.value
+                            scaleY = popScale.value
+                            // User bubble is right-aligned; pop from its trailing edge.
+                            transformOrigin = TransformOrigin(1f, 0.5f)
+                        }
+                        .animateItem(),
+                ) {
+                    when (entry) {
+                        is TimelineEntry.Phase -> PhaseDivider(entry.marker)
+                        is TimelineEntry.Message -> TimelineMessageRow(
+                            msg = entry.msg,
+                            room = room,
+                            isTopic = entry.msg.id == topicMessageId,
+                        )
+                    }
+                }
+            }
+        }
+        // Live speaking strip — slides/fades in while a guest turn streams.
+        AnimatedVisibility(
+            visible = isStreaming && speaking != null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            speaking?.let { p ->
+                CouncilSpeakingStrip(
+                    participant = p,
+                    onClick = {
+                        val idx = entries.indexOfLast {
+                            it is TimelineEntry.Message && it.msg.authorId == p.id
+                        }
+                        if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
+                    },
+                )
             }
         }
         // Composer only in active (non-terminal) mode.
@@ -169,6 +270,84 @@ fun CouncilTimelineTab(
         }
     }
 }
+
+/** Live "X 正在发言…" strip with a breathing signal dot + model label. */
+@Composable
+private fun CouncilSpeakingStrip(participant: CouncilParticipant, onClick: () -> Unit) {
+    val chatTheme = LocalChatTheme.current
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = chatTheme.surface,
+        border = BorderStroke(1.dp, chatTheme.surfaceEdge),
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CouncilBreathingDot(color = workspace.green)
+            Text(
+                text = "${participant.name.ifBlank { participant.id }} 正在发言…",
+                style = MaterialTheme.typography.bodySmall,
+                color = workspace.muted,
+            )
+            val modelLabel = participant.modelLabel()
+            if (modelLabel.isNotBlank()) {
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    Text(
+                        text = modelLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.faint,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Pulsing signal dot — a fading, expanding ring around a solid core (design `.dot::after`). */
+@Composable
+private fun CouncilBreathingDot(color: Color) {
+    val transition = rememberInfiniteTransition(label = "council-dot")
+    val ringScale by transition.animateFloat(
+        initialValue = 0.7f,
+        targetValue = 2.1f,
+        animationSpec = infiniteRepeatable(animation = tween(2200, easing = LinearEasing), repeatMode = RepeatMode.Restart),
+        label = "council-dot-scale",
+    )
+    val ringAlpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(animation = tween(2200, easing = LinearEasing), repeatMode = RepeatMode.Restart),
+        label = "council-dot-alpha",
+    )
+    Box(modifier = Modifier.size(15.dp), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .graphicsLayer {
+                    scaleX = ringScale
+                    scaleY = ringScale
+                    alpha = ringAlpha
+                }
+                .background(color, CircleShape),
+        )
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .background(color, CircleShape),
+        )
+    }
+}
+
+/** A guest's display model id, e.g. "gpt-5.1" / "deepseek-v3.2". */
+private fun CouncilParticipant.modelLabel(): String =
+    modelName.ifBlank { externalModel }.ifBlank { providerName }
 
 @Composable
 private fun CouncilTimelineEmpty(room: CouncilRoom) {
@@ -214,81 +393,194 @@ private fun PhaseDivider(marker: CouncilPhaseMarker) {
             modifier = Modifier
                 .weight(1f)
                 .height(1.dp)
-                .background(chatTheme.hair),
+                .background(chatTheme.surfaceEdge),
         )
-        Text(
-            text = marker.label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = chatTheme.inkFaint,
-        )
+        Surface(
+            shape = RoundedCornerShape(999.dp),
+            color = chatTheme.surface,
+            border = BorderStroke(1.dp, chatTheme.surfaceEdge),
+        ) {
+            Text(
+                text = marker.label,
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 3.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = chatTheme.inkFaint,
+            )
+        }
         Box(
             modifier = Modifier
                 .weight(1f)
                 .height(1.dp)
-                .background(chatTheme.hair),
+                .background(chatTheme.surfaceEdge),
         )
     }
 }
 
 @Composable
-private fun TimelineMessageRow(msg: CouncilMessage, room: CouncilRoom) {
+private fun TimelineMessageRow(msg: CouncilMessage, room: CouncilRoom, isTopic: Boolean) {
     val isUser = msg.authorId == COUNCIL_ROOM_USER_ID
     val isHost = msg.authorId == COUNCIL_ROOM_HOST_ID
     val chatTheme = LocalChatTheme.current
-    val workspace = workspaceColors()
 
     if (isUser) {
-        Column(
+        // Mirror the main chat user bubble: solid userBubble fill, light userBubbleInk
+        // text, asymmetric 16/16/5/16 corners, RIGHT-aligned, wraps content up to 82%
+        // of the row (fillWidth=false on the markdown is what makes it adaptive).
+        val userBubbleShape = RoundedCornerShape(
+            topStart = 16.dp,
+            topEnd = 16.dp,
+            bottomEnd = 5.dp,
+            bottomStart = 16.dp,
+        )
+        BoxWithConstraints(
             modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.End,
+            contentAlignment = Alignment.TopEnd,
         ) {
-            MessageBubble(
-                msg = msg,
-                container = chatTheme.userBubble,
-                content = chatTheme.userBubbleInk,
-                borderColor = chatTheme.userBubbleEdge,
-            )
-            ReferenceFootnotes(msg, room, alignEnd = true)
+            val userBubbleMaxWidth = maxWidth * 0.82f
+            Surface(
+                modifier = Modifier
+                    .wrapContentWidth(Alignment.End)
+                    .widthIn(max = userBubbleMaxWidth)
+                    .clip(userBubbleShape),
+                shape = userBubbleShape,
+                color = chatTheme.userBubble,
+                contentColor = chatTheme.userBubbleInk,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                    if (isTopic) {
+                        Text(
+                            text = "议题 · 发起人",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = chatTheme.userBubbleInk.copy(alpha = 0.55f),
+                            modifier = Modifier.padding(bottom = 5.dp),
+                        )
+                    }
+                    if (msg.attachments.isNotEmpty()) {
+                        CouncilBubbleAttachments(
+                            attachments = msg.attachments,
+                            modifier = Modifier.padding(bottom = if (msg.text.isNotBlank()) 8.dp else 0.dp),
+                        )
+                    }
+                    if (msg.text.isNotBlank()) {
+                        MarkdownBlock(
+                            content = msg.text,
+                            fillWidth = false,
+                        )
+                    }
+                }
+            }
         }
     } else {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top,
-        ) {
-            SubAgentAvatar(id = msg.authorId, name = msg.authorName, avatarSize = 34.dp)
-            Column(modifier = Modifier.widthIn(max = 360.dp)) {
-                AuthorLabel(msg, isHost)
-                MessageBubble(
-                    msg = msg,
-                    container = if (isHost) chatTheme.accentSoft else chatTheme.surface,
-                    content = if (isHost) chatTheme.accentDeep else chatTheme.ink,
-                    borderColor = if (isHost) chatTheme.accentTint else chatTheme.surfaceEdge,
-                )
-                ReferenceFootnotes(msg, room, alignEnd = false)
+        val modelLabel = remember(room.participants, msg.authorId) {
+            room.participantById(msg.authorId)?.modelLabel().orEmpty()
+        }
+        // Member / host turn: header (avatar + identity + model) on top, then a
+        // FULL-WIDTH bubble flush to the content margins (left margin = right
+        // margin). The bubble's top-left corner is squared, mirroring the user
+        // bubble's squared bottom-right — each notch points back at its sender.
+        val bubbleShape = RoundedCornerShape(
+            topStart = 5.dp,
+            topEnd = 16.dp,
+            bottomEnd = 16.dp,
+            bottomStart = 16.dp,
+        )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(bottom = 6.dp),
+            ) {
+                SubAgentAvatar(id = msg.authorId, name = msg.authorName, avatarSize = 34.dp)
+                AuthorLabel(msg, isHost, modelLabel)
             }
+            MessageBubble(
+                msg = msg,
+                container = if (isHost) chatTheme.accentSoft else chatTheme.surface,
+                content = if (isHost) chatTheme.accentDeep else chatTheme.ink,
+                borderColor = if (isHost) chatTheme.accentTint else chatTheme.surfaceEdge,
+                shape = bubbleShape,
+            )
+            ReferenceFootnotes(msg, room, alignEnd = false)
+        }
+    }
+}
+
+/** Renders a user message's image thumbnails + document chips inside its bubble. */
+@Composable
+private fun CouncilBubbleAttachments(attachments: List<UIMessagePart>, modifier: Modifier = Modifier) {
+    val chatTheme = LocalChatTheme.current
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        attachments.filterIsInstance<UIMessagePart.Image>().forEach { img ->
+            AsyncImage(
+                model = img.url,
+                contentDescription = "图片附件",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .widthIn(max = 220.dp)
+                    .clip(RoundedCornerShape(12.dp)),
+            )
+        }
+        attachments.filterIsInstance<UIMessagePart.Document>().forEach { doc ->
+            Text(
+                text = "文件 · ${doc.fileName}",
+                style = MaterialTheme.typography.labelMedium,
+                color = chatTheme.userBubbleInk,
+                maxLines = 1,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(chatTheme.userBubbleInk.copy(alpha = 0.12f))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun AuthorLabel(msg: CouncilMessage, isHost: Boolean) {
+private fun AuthorLabel(msg: CouncilMessage, isHost: Boolean, modelLabel: String) {
     val workspace = workspaceColors()
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = msg.authorName.ifBlank { msg.authorId },
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            color = if (isHost) workspace.amber else workspace.ink,
-        )
-        if (msg.role.isNotBlank() && msg.role != msg.authorName) {
+    Column(modifier = Modifier.padding(bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = "· ${msg.role}",
+                text = msg.authorName.ifBlank { msg.authorId },
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isHost) workspace.amber else workspace.ink,
+            )
+            val displayRole = if (isHost) "主持人" else msg.role
+            if (displayRole.isNotBlank() && displayRole != msg.authorName) {
+                CouncilRolePill(text = displayRole, isHost = isHost)
+            }
+        }
+        if (modelLabel.isNotBlank()) {
+            Text(
+                text = modelLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = workspace.faint,
             )
         }
+    }
+}
+
+@Composable
+internal fun CouncilRolePill(text: String, isHost: Boolean) {
+    val chatTheme = LocalChatTheme.current
+    val workspace = workspaceColors()
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, if (isHost) chatTheme.accentTint else chatTheme.surfaceEdge),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = if (isHost) chatTheme.accent else workspace.muted,
+        )
     }
 }
 
@@ -298,11 +590,13 @@ private fun MessageBubble(
     container: Color,
     content: Color,
     borderColor: Color,
+    shape: Shape = RoundedCornerShape(18.dp),
 ) {
     val workspace = workspaceColors()
     val streaming = msg.status == CouncilMessageStatus.STREAMING
     Surface(
-        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
         color = container,
         contentColor = content,
         border = BorderStroke(1.dp, borderColor),
@@ -370,9 +664,8 @@ private fun ReferenceFootnotes(msg: CouncilMessage, room: CouncilRoom, alignEnd:
             val name = room.messages.firstOrNull { it.id == id }?.authorName ?: "已删除"
             add("↳ 延续 $name 的论点")
         }
-        if (msg.invitedBy == COUNCIL_ROOM_HOST_ID && msg.authorId != COUNCIL_ROOM_HOST_ID) {
-            add("由 Host 邀请")
-        }
+        // (Removed the "由 Host 邀请" note — in auto-orchestration every member is
+        // host-invited, so it was on every bubble and carried no signal.)
     }
     if (notes.isEmpty()) return
     Column(

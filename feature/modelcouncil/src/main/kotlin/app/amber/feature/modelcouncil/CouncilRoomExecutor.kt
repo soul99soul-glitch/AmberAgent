@@ -9,9 +9,23 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.Channel
 import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import kotlin.uuid.Uuid
+
+/**
+ * Every image the user has attached across the room's user turns, flattened into
+ * provider image parts. Passed multimodally to member/host generations so they
+ * can actually see what the user shared. (Document attachments are inlined as
+ * text into the prompt upstream, not here.)
+ */
+private fun CouncilRoom.userImageParts(): List<UIMessagePart.Image> =
+    messages.asSequence()
+        .filter { it.authorId == COUNCIL_ROOM_USER_ID }
+        .flatMap { it.attachments.asSequence() }
+        .filterIsInstance<UIMessagePart.Image>()
+        .toList()
 
 /**
  * Sink contract the executor uses to write streaming progress back into the
@@ -134,6 +148,7 @@ class CouncilRoomExecutor(
                                     outputBudgetChars = budget,
                                     reasoningLevel = guest.reasoningLevel ?: ReasoningLevel.OFF,
                                     temperature = guest.temperature,
+                                    userImageParts = room.userImageParts(),
                                     onChunk = { cumulative -> chunkChannel.trySend(cumulative) },
                                 )
                             }
@@ -248,6 +263,108 @@ class CouncilRoomExecutor(
                     room.conversationId,
                     "综合失败：${error.message ?: error::class.java.simpleName}",
                     listOf("Synthesis failed: ${error.message}"),
+                )
+            },
+        )
+    }
+
+    /**
+     * Generate a HOST turn (opening / steer) and STREAM it back through the sink,
+     * exactly like a guest turn — so the host's proposition types in live instead
+     * of popping in whole. The host has no own modelId; [hostModelId] is the
+     * caller-resolved conversation Assistant model, and [systemPrompt]/[userPrompt]
+     * are the host-specific prompts.
+     */
+    suspend fun generateHostTurn(
+        room: CouncilRoom,
+        hostModelId: Uuid,
+        systemPrompt: String,
+        userPrompt: String,
+        messageId: String,
+        settings: Settings,
+    ) = withContext(dispatcher) {
+        val host = room.host ?: return@withContext
+        val now = nowMs()
+        val streaming = CouncilMessage(
+            id = messageId,
+            authorId = host.id,
+            authorName = host.name,
+            role = host.role,
+            round = room.round,
+            mode = room.mode,
+            text = "",
+            createdAtMs = now,
+            status = CouncilMessageStatus.STREAMING,
+        )
+        sink.upsertStreamingMessage(room.conversationId, streaming)
+
+        val budget = room.outputBudgetChars.coerceAtLeast(1_000)
+        val result = runCatching {
+            withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
+                coroutineScope {
+                    val chunkChannel = Channel<String>(Channel.UNLIMITED)
+                    val consumer = launch {
+                        for (cumulative in chunkChannel) {
+                            streamingSafeUpdate(room.conversationId, messageId, cumulative)
+                        }
+                    }
+                    val textResult = try {
+                        modelRunner.generate(
+                            settings = settings,
+                            modelId = hostModelId,
+                            systemPrompt = systemPrompt,
+                            userPrompt = userPrompt,
+                            outputBudgetChars = budget,
+                            reasoningLevel = ReasoningLevel.OFF,
+                            temperature = null,
+                            userImageParts = room.userImageParts(),
+                            onChunk = { cumulative -> chunkChannel.trySend(cumulative) },
+                        )
+                    } finally {
+                        chunkChannel.close()
+                    }
+                    consumer.join()
+                    textResult
+                }
+            } ?: run {
+                sink.completeMessage(
+                    conversationId = room.conversationId,
+                    messageId = messageId,
+                    status = CouncilMessageStatus.TIMED_OUT,
+                    text = "",
+                    warnings = emptyList(),
+                    error = "主持发言超时。",
+                    authorId = host.id,
+                    authorStatus = CouncilParticipantStatus.IDLE,
+                )
+                return@withContext
+            }
+        }
+
+        result.fold(
+            onSuccess = { textResult ->
+                sink.completeMessage(
+                    conversationId = room.conversationId,
+                    messageId = messageId,
+                    status = CouncilMessageStatus.COMPLETED,
+                    text = textResult.text,
+                    warnings = textResult.warnings,
+                    error = "",
+                    authorId = host.id,
+                    authorStatus = CouncilParticipantStatus.IDLE,
+                )
+            },
+            onFailure = { error ->
+                if (error is CancellationException) throw error
+                sink.completeMessage(
+                    conversationId = room.conversationId,
+                    messageId = messageId,
+                    status = CouncilMessageStatus.FAILED,
+                    text = "",
+                    warnings = emptyList(),
+                    error = error.message ?: error::class.java.simpleName,
+                    authorId = host.id,
+                    authorStatus = CouncilParticipantStatus.IDLE,
                 )
             },
         )

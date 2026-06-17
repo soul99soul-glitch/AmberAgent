@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.ProviderManager
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
@@ -29,6 +30,7 @@ class ProviderModelCouncilTextRunner(
         outputBudgetChars: Int,
         reasoningLevel: ReasoningLevel?,
         temperature: Float?,
+        userImageParts: List<UIMessagePart.Image>,
         onChunk: (String) -> Unit,
     ): ModelCouncilTextResult {
         val model = settings.findModelById(modelId) ?: error("Model not found: $modelId")
@@ -36,7 +38,15 @@ class ProviderModelCouncilTextRunner(
         val providerImpl = providerManager.getProviderByType(provider)
         val messages = buildList {
             add(UIMessage.system(systemPrompt))
-            add(UIMessage.user(userPrompt))
+            // User turn carries the synthesized prompt text plus any images the
+            // user attached (passed multimodally). Documents are already inlined
+            // into userPrompt as text upstream, so only image parts ride here.
+            add(
+                UIMessage(
+                    role = MessageRole.USER,
+                    parts = listOf(UIMessagePart.Text(userPrompt)) + userImageParts,
+                )
+            )
         }
         suspend fun streamWith(candidateTemperature: Float?, reasoningLevel: ReasoningLevel): String {
             val params = TextGenerationParams(

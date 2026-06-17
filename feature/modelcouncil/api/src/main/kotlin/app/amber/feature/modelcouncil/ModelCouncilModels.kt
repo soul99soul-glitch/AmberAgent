@@ -9,7 +9,7 @@ import kotlin.uuid.Uuid
 // Core (supporter / opponent / judge) are structural and always present;
 // lenses (product / marketing / pr / engineering / ux / risk) are picked per topic.
 const val DEFAULT_MODEL_COUNCIL_MAX_SEATS = 8
-const val DEFAULT_MODEL_COUNCIL_DEFAULT_ROUNDS = 2
+const val DEFAULT_MODEL_COUNCIL_DEFAULT_ROUNDS = 3
 const val DEFAULT_MODEL_COUNCIL_MAX_ROUNDS = 5
 const val DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS = 180_000L
 const val DEFAULT_MODEL_COUNCIL_TOTAL_TIMEOUT_MS = 8 * 60_000L

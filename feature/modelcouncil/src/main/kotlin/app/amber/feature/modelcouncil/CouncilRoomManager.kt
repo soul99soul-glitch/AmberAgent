@@ -10,8 +10,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.infra.AppScope
 import app.amber.core.settings.Settings
+import app.amber.core.settings.findModelById
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskQueueState
@@ -121,6 +124,28 @@ class CouncilRoomManager(
     private val synthesisJobs = mutableMapOf<Uuid, Job>()
     private val closingConversationIds = mutableSetOf<Uuid>()
 
+    /**
+     * Conversations whose automatic deliberation loop is in flight. Guarded by
+     * [jobsLock]. Set synchronously before launching the auto-run job so two
+     * near-simultaneous user messages can't start two parallel runs.
+     */
+    private val autoRunConversationIds = mutableSetOf<Uuid>()
+
+    /**
+     * Conversations where the user explicitly picked a discussion mode (via the
+     * top-bar dropdown → [switchMode]). Auto-detect won't override these. Guarded
+     * by [jobsLock]; cleared when a fresh room opens.
+     */
+    private val userModeOverrideIds = mutableSetOf<Uuid>()
+
+    /**
+     * Per-conversation high-water-mark (createdAtMs) of the last user message the
+     * auto-run loop has already consumed. New user messages with a later timestamp
+     * are mid-run interjections the loop handles between turns. Guarded by
+     * [jobsLock]; cleared when a fresh room opens.
+     */
+    private val interjectionWatermarks = mutableMapOf<Uuid, Long>()
+
     /** Per-conversation mutation lock; prevents races between host actions / user input. */
     private val locks = mutableMapOf<Uuid, Mutex>()
     private val locksLock = Mutex()
@@ -174,12 +199,21 @@ class CouncilRoomManager(
                 )
             }
             val now = nowMs()
+            // Resolve the host's model display name so the host bubble can show it
+            // (the host has no modelId — it runs on the conversation's Assistant model).
+            val settings = settingsFlow.value
+            val hostModelName = run {
+                val assistant = settings.assistants.firstOrNull { it.id == hostAssistantId }
+                val modelId = assistant?.chatModelId ?: settings.chatModelId
+                settings.findModelById(modelId)?.displayName.orEmpty()
+            }
             val host = CouncilParticipant(
                 id = COUNCIL_ROOM_HOST_ID,
                 name = hostName.ifBlank { "Host" },
                 role = "host",
                 kind = CouncilParticipantKind.HOST,
                 status = CouncilParticipantStatus.IDLE,
+                modelName = hostModelName,
             )
             val participants = buildList {
                 add(host)
@@ -207,6 +241,11 @@ class CouncilRoomManager(
             )
             store.upsertRoom(room)
             registerTask(room)
+            // Fresh room → reset auto-detect + interjection bookkeeping.
+            jobsLock.withLock {
+                userModeOverrideIds.remove(conversationId)
+                interjectionWatermarks.remove(conversationId)
+            }
             CouncilRoomOpResult.Ok(room)
         }
     }
@@ -375,7 +414,10 @@ class CouncilRoomManager(
     suspend fun switchMode(
         conversationId: Uuid,
         mode: CouncilRoomMode,
-    ): CouncilRoomOpResult = mutate(conversationId) { room ->
+    ): CouncilRoomOpResult {
+        // User-driven mode pick — record it so the auto-detector won't override.
+        jobsLock.withLock { userModeOverrideIds.add(conversationId) }
+        return mutate(conversationId) { room ->
         if (room.status.terminal) {
             return@mutate CouncilRoomOpResult.Err("room_terminal", "Room has ended; cannot switch mode.")
         }
@@ -398,6 +440,7 @@ class CouncilRoomManager(
             ),
             updatedAtMs = now,
         ))
+        }
     }
 
     /**
@@ -409,29 +452,62 @@ class CouncilRoomManager(
         conversationId: Uuid,
         text: String,
         mentionTargets: List<String> = emptyList(),
-    ): CouncilRoomOpResult = mutate(conversationId) { room ->
-        if (room.status.terminal) {
-            return@mutate CouncilRoomOpResult.Err("room_terminal", "Room has ended; cannot send messages.")
+        attachments: List<UIMessagePart> = emptyList(),
+        attachmentText: String = "",
+    ): CouncilRoomOpResult {
+        val result = mutate(conversationId) { room ->
+            if (room.status.terminal) {
+                return@mutate CouncilRoomOpResult.Err("room_terminal", "Room has ended; cannot send messages.")
+            }
+            // An attachment-only message (image / file, no text) is still valid.
+            if (text.isBlank() && attachments.isEmpty()) {
+                return@mutate CouncilRoomOpResult.Err("empty_message", "Message text is empty.")
+            }
+            val now = nowMs()
+            val isFirstUserMessage = room.messages.none { it.authorId == COUNCIL_ROOM_USER_ID }
+            val userMessage = CouncilMessage(
+                id = msgId(),
+                authorId = COUNCIL_ROOM_USER_ID,
+                authorName = "You",
+                role = "user",
+                round = room.round,
+                mode = room.mode,
+                text = text.take(MAX_MESSAGE_CHARS),
+                createdAtMs = now,
+                status = CouncilMessageStatus.COMPLETED,
+                attachments = attachments,
+                attachmentText = attachmentText.take(MAX_CONTEXT_CHARS),
+            )
+            // The first user message IS the topic — promote it to the room
+            // objective so every member/synthesis prompt deliberates on it. For an
+            // attachment-only first message (no text), derive a topic from the
+            // attachment so mode-detection and host framing aren't left blank.
+            val objective = if (isFirstUserMessage) {
+                text.take(MAX_OBJECTIVE_CHARS).ifBlank {
+                    val docName = attachments.filterIsInstance<UIMessagePart.Document>()
+                        .firstOrNull()?.fileName
+                    when {
+                        docName != null -> "讨论用户提供的文件：$docName"
+                        attachments.any { it is UIMessagePart.Image } -> "讨论用户提供的图片"
+                        else -> room.objective
+                    }
+                }
+            } else {
+                room.objective
+            }
+            CouncilRoomOpResult.Ok(room.copy(
+                objective = objective,
+                messages = room.messages + userMessage,
+                updatedAtMs = now,
+            ))
         }
-        if (text.isBlank()) {
-            return@mutate CouncilRoomOpResult.Err("empty_message", "Message text is empty.")
+        if (result is CouncilRoomOpResult.Ok) {
+            // Fire the automatic deliberation: members speak across rounds, then
+            // the host synthesizes — no manual turn-by-turn driving. No-op if a
+            // run is already in flight (mid-run interjection is handled elsewhere).
+            maybeStartAutoRun(conversationId)
         }
-        val now = nowMs()
-        val userMessage = CouncilMessage(
-            id = msgId(),
-            authorId = COUNCIL_ROOM_USER_ID,
-            authorName = "You",
-            role = "user",
-            round = room.round,
-            mode = room.mode,
-            text = text.take(MAX_MESSAGE_CHARS),
-            createdAtMs = now,
-            status = CouncilMessageStatus.COMPLETED,
-        )
-        CouncilRoomOpResult.Ok(room.copy(
-            messages = room.messages + userMessage,
-            updatedAtMs = now,
-        ))
+        return result
     }
 
     /**
@@ -727,6 +803,433 @@ class CouncilRoomManager(
             )
         }
         return CouncilRoomOpResult.Ok(updatedRoom)
+    }
+
+    // ── automatic orchestration ─────────────────────────────────────────────
+
+    /**
+     * Start the automatic deliberation if the room is live with guests and no run
+     * is already in flight. The whole pipeline (rounds + synthesis) runs as one
+     * cancellable job registered in [generationJobs], so [close] tears it down.
+     *
+     * Dedupe is synchronous via [autoRunConversationIds] under [jobsLock]: two
+     * near-simultaneous user messages can't both pass and launch parallel runs.
+     */
+    private suspend fun maybeStartAutoRun(conversationId: Uuid) {
+        val room = peekRoom(conversationId) ?: return
+        if (room.status.terminal || room.activeGuests.isEmpty()) return
+        val claimed = jobsLock.withLock {
+            if (conversationId in autoRunConversationIds || conversationId in closingConversationIds) {
+                false
+            } else {
+                autoRunConversationIds.add(conversationId)
+                true
+            }
+        }
+        if (!claimed) return
+        val job = launchGuestJob(conversationId) {
+            try {
+                runCatching { runAutoOrchestration(conversationId) }
+                    .onFailure { error ->
+                        if (error !is CancellationException) {
+                            android.util.Log.e(TAG, "Council auto-run failed", error)
+                        }
+                    }
+            } finally {
+                jobsLock.withLock { autoRunConversationIds.remove(conversationId) }
+            }
+        }
+        if (job == null) {
+            // The closing gate blocked the launch — release the dedupe slot so a
+            // later (re)open can run.
+            jobsLock.withLock { autoRunConversationIds.remove(conversationId) }
+        }
+    }
+
+    /**
+     * The deliberation loop. For each of the configured rounds, every active guest
+     * speaks once in roster order — awaited one at a time so turns stream serially.
+     * Round 1 is independent openings; rounds 2..N use the mode-specific response
+     * prompts (EXPLORE adds breadth; DEBATE cross-rebuts, and its last round asks
+     * for a final position). After the final round the host synthesizes.
+     *
+     * Every step re-reads the room and bails on a terminal status, so [close]
+     * (which cancels this job AND flips the room terminal) stops it promptly.
+     */
+    private suspend fun runAutoOrchestration(conversationId: Uuid) {
+        val settings = settingsFlow.value
+        val initial = peekRoom(conversationId) ?: return
+        val totalRounds = initial.maxRounds.coerceIn(1, MAX_ROUNDS_CAP)
+        val guestIds = initial.activeGuests.map { it.id }
+        if (guestIds.isEmpty()) return
+
+        // Interjection watermark = the topic message; anything the user sends AFTER
+        // this is a mid-run interjection handled between turns.
+        val startWatermark = initial.messages
+            .filter { it.authorId == COUNCIL_ROOM_USER_ID }
+            .maxOfOrNull { it.createdAtMs } ?: 0L
+        jobsLock.withLock { interjectionWatermarks[conversationId] = startWatermark }
+
+        // Auto-detect the discussion mode from the topic — unless the user already
+        // picked one via the dropdown (recorded in [userModeOverrideIds]).
+        val userPickedMode = jobsLock.withLock { conversationId in userModeOverrideIds }
+        if (!userPickedMode) {
+            classifyMode(initial, settings)?.let { detected ->
+                mutateRoomOrNull(conversationId) { room ->
+                    if (room.mode == detected) {
+                        room
+                    } else {
+                        room.copy(
+                            mode = detected,
+                            status = statusForMode(detected),
+                            updatedAtMs = nowMs(),
+                        )
+                    }
+                }
+            }
+        }
+
+        // Host opening: the host receives the topic and frames the core proposition
+        // for the members BEFORE round 1 (the "主持承接命题" turn). Members pick the
+        // framing up via appendSteeringNote on their first turn.
+        val openingRoom = peekRoom(conversationId) ?: return
+        if (!openingRoom.status.terminal) {
+            resolveHostModelId(openingRoom, settings)?.let { hostModelId ->
+                generateHostOpening(openingRoom, hostModelId, settings)
+            }
+        }
+
+        for (round in 1..totalRounds) {
+            val roundReady = mutateRoomOrNull(conversationId) { room ->
+                room.copy(
+                    round = round,
+                    status = statusForMode(room.mode),
+                    phaseMarkers = room.phaseMarkers + CouncilPhaseMarker(
+                        id = msgId(),
+                        label = "第 $round 轮 · ${modeShortLabel(room.mode)}",
+                        mode = room.mode,
+                        createdAtMs = nowMs(),
+                    ),
+                    updatedAtMs = nowMs(),
+                )
+            } ?: return // null = terminal/missing → stop
+
+            for (gid in guestIds) {
+                val current = peekRoom(conversationId) ?: return
+                if (current.status.terminal) return
+                val guest = current.participantById(gid) ?: continue
+                if (guest.status == CouncilParticipantStatus.DISMISSED) continue
+                // Suspends until this guest's turn completes (or times out); the
+                // executor streams + finalizes the message via the sink.
+                executor.generateGuestTurn(
+                    room = current,
+                    guest = guest,
+                    messageId = msgId(),
+                    userPrompt = buildAutoPrompt(current, guest, round, totalRounds),
+                    invitedBy = COUNCIL_ROOM_HOST_ID,
+                    settings = settings,
+                )
+                // Let the user steer between turns: @member → that member replies;
+                // no @ → the host produces a redirect the next members will see.
+                handleInterjections(conversationId, settings)
+            }
+        }
+
+        // Drain any final interjection before synthesizing.
+        handleInterjections(conversationId, settings)
+
+        // Final synthesis — inline (awaited) in this same job so close() cancels
+        // it too. We ALWAYS drive the room to a terminal state here (never leave it
+        // stuck mid-run): the only bare returns below are when the room is already
+        // terminal/evicted. If the host model can't be resolved, finalize with an
+        // honest note instead of silently stopping.
+        val finalRoom = peekRoom(conversationId) ?: return
+        if (finalRoom.status.terminal) return
+        val hostModelId = resolveHostModelId(finalRoom, settings)
+        if (hostModelId == null) {
+            completeSynthesis(
+                conversationId,
+                "（无法生成综合结论：未找到主持模型，请在设置中为当前助手配置主模型。）",
+                listOf("Host model not found; synthesis skipped."),
+            )
+            return
+        }
+        val synthRoom = mutateRoomOrNull(conversationId) { room ->
+            room.copy(
+                mode = CouncilRoomMode.SYNTHESIZE,
+                status = CouncilRoomStatus.FINALIZING,
+                phaseMarkers = room.phaseMarkers + CouncilPhaseMarker(
+                    id = msgId(),
+                    label = "Host 综合",
+                    mode = CouncilRoomMode.SYNTHESIZE,
+                    createdAtMs = nowMs(),
+                ),
+                updatedAtMs = nowMs(),
+            )
+        } ?: return
+        executor.generateSynthesis(
+            room = synthRoom,
+            hostModelId = hostModelId,
+            hostSystemPrompt = CouncilRoomPrompts.hostSystemPrompt(synthRoom),
+            settings = settings,
+        )
+    }
+
+    /** Mutate that returns the new room, or null if the room is terminal/missing. */
+    private suspend fun mutateRoomOrNull(
+        conversationId: Uuid,
+        transform: (CouncilRoom) -> CouncilRoom,
+    ): CouncilRoom? {
+        val result = mutate(conversationId) { room ->
+            if (room.status.terminal) {
+                CouncilRoomOpResult.Err("room_terminal", "Room has ended.")
+            } else {
+                CouncilRoomOpResult.Ok(transform(room))
+            }
+        }
+        return (result as? CouncilRoomOpResult.Ok)?.room
+    }
+
+    /**
+     * Pick the round/mode-appropriate guest prompt. This is where the EXPLORE vs
+     * DEBATE difference is actually executed (wiring the previously-unused
+     * exploreResponse / debateResponse / debateFinalPosition templates).
+     */
+    private fun buildAutoPrompt(
+        room: CouncilRoom,
+        guest: CouncilParticipant,
+        round: Int,
+        totalRounds: Int,
+    ): String {
+        val priorGuestMessages = room.messages
+            .filter {
+                it.authorId != COUNCIL_ROOM_HOST_ID &&
+                    it.authorId != COUNCIL_ROOM_USER_ID &&
+                    it.authorId != guest.id &&
+                    it.status == CouncilMessageStatus.COMPLETED
+            }
+            .takeLast(6)
+            .reversed() // newest-first, matching the prompt templates' expectation
+        val base = when (room.mode) {
+            CouncilRoomMode.EXPLORE ->
+                if (round <= 1 || priorGuestMessages.isEmpty()) {
+                    CouncilRoomPrompts.exploreOpening(room, guest)
+                } else {
+                    CouncilRoomPrompts.exploreResponse(room, guest, priorGuestMessages)
+                }
+
+            CouncilRoomMode.DEBATE -> when {
+                round <= 1 || priorGuestMessages.isEmpty() ->
+                    CouncilRoomPrompts.debateOpening(room, guest)
+
+                round >= totalRounds -> CouncilRoomPrompts.debateFinalPosition(
+                    room = room,
+                    guest = guest,
+                    ownPriorMessages = room.messages.filter {
+                        it.authorId == guest.id && it.status == CouncilMessageStatus.COMPLETED
+                    },
+                )
+
+                else -> CouncilRoomPrompts.debateResponse(
+                    room = room,
+                    guest = guest,
+                    priorMessages = priorGuestMessages,
+                    referenceMessage = priorGuestMessages.firstOrNull(),
+                )
+            }
+
+            // Not reached mid-loop (synthesis is handled separately), but keep total.
+            CouncilRoomMode.SYNTHESIZE -> CouncilRoomPrompts.exploreOpening(room, guest)
+        }
+        return appendSteeringNote(room, base + userAttachmentContext(room))
+    }
+
+    /**
+     * Inline the text extracted from user-attached documents so members can read
+     * file contents (the council generation path can't see Document parts; images
+     * ride multimodally instead). Empty when the user attached nothing / only
+     * images. Bounded to keep per-turn prompt size sane.
+     */
+    private fun userAttachmentContext(room: CouncilRoom): String {
+        val docs = room.messages
+            .filter { it.authorId == COUNCIL_ROOM_USER_ID && it.attachmentText.isNotBlank() }
+            .joinToString("\n\n") { it.attachmentText }
+        if (docs.isBlank()) return ""
+        return "\n\n———\n用户附带的文件内容（请结合其作答）：\n" + docs.take(MAX_CONTEXT_CHARS)
+    }
+
+    /**
+     * Append the latest user interjection or host redirect (anything newer than the
+     * topic, authored by the user or host) so members actually adjust course. Both
+     * stay public; the most recent steer wins.
+     */
+    private fun appendSteeringNote(room: CouncilRoom, base: String): String {
+        val firstUserMessageId = room.messages.firstOrNull { it.authorId == COUNCIL_ROOM_USER_ID }?.id
+        val steer = room.messages.lastOrNull {
+            it.text.isNotBlank() &&
+                it.status == CouncilMessageStatus.COMPLETED &&
+                it.id != firstUserMessageId &&
+                (it.authorId == COUNCIL_ROOM_USER_ID || it.authorId == COUNCIL_ROOM_HOST_ID)
+        } ?: return base
+        return buildString {
+            append(base)
+            append("\n\n———\n最新指引（来自 ${steer.authorName}，请优先据此调整你的发言）：\n")
+            append(steer.text.take(600))
+        }
+    }
+
+    private fun modeShortLabel(mode: CouncilRoomMode): String = when (mode) {
+        CouncilRoomMode.EXPLORE -> "自由群聊"
+        CouncilRoomMode.DEBATE -> "辩论"
+        CouncilRoomMode.SYNTHESIZE -> "综合"
+    }
+
+    /**
+     * Ask the host model to classify the topic as EXPLORE (open / divergent /
+     * brainstorm) or DEBATE (clear stances / decision / stress-test). Returns null
+     * on any failure (no host model, timeout, unparseable) → caller keeps the
+     * current mode, so auto-detect is a best-effort enhancement, never a blocker.
+     */
+    private suspend fun classifyMode(room: CouncilRoom, settings: Settings): CouncilRoomMode? {
+        val hostModelId = resolveHostModelId(room, settings) ?: return null
+        val prompt = buildString {
+            appendLine("判断下面这个议题更适合哪种多模型讨论模式，只回一个英文词：")
+            appendLine("- explore：开放/发散，集思广益、还没定方向、想多挖角度和可能性。")
+            appendLine("- debate：有明确分歧或要做决策，需要立场对抗、互相质疑、压力测试。")
+            appendLine()
+            appendLine("议题：${room.objective}")
+            appendLine()
+            append("只回 explore 或 debate，不要解释。")
+        }
+        val result = runCatching {
+            withTimeoutOrNull(20_000L) {
+                modelRunner.generate(
+                    settings = settings,
+                    modelId = hostModelId,
+                    systemPrompt = "你是一个简洁的分类器，只输出一个英文词。",
+                    userPrompt = prompt,
+                    outputBudgetChars = 50,
+                    reasoningLevel = ReasoningLevel.OFF,
+                    temperature = 0f,
+                    onChunk = {},
+                )
+            }
+        }.getOrElse { error ->
+            // Let close()'s cancellation propagate; only soft-fail real errors.
+            if (error is CancellationException) throw error
+            null
+        } ?: return null
+        val text = result.text.lowercase()
+        return when {
+            "debate" in text -> CouncilRoomMode.DEBATE
+            "explore" in text -> CouncilRoomMode.EXPLORE
+            else -> null
+        }
+    }
+
+    /**
+     * Process user messages that arrived since the watermark (mid-run interjections).
+     * @-mentioned members reply directly to the user message (public); an
+     * un-targeted message goes to the host, who emits a redirect the subsequent
+     * members will see. Advances the watermark per message. Everything stays
+     * public — no private side-channels. Called between turns by the auto-run loop.
+     */
+    private suspend fun handleInterjections(conversationId: Uuid, settings: Settings) {
+        while (true) {
+            val room = peekRoom(conversationId) ?: return
+            if (room.status.terminal) return
+            val watermark = jobsLock.withLock { interjectionWatermarks[conversationId] ?: 0L }
+            val pending = room.messages
+                .filter { it.authorId == COUNCIL_ROOM_USER_ID && it.createdAtMs > watermark }
+                .minByOrNull { it.createdAtMs }
+                ?: return
+            // Consume it up front so a failure below can't re-process it forever.
+            jobsLock.withLock { interjectionWatermarks[conversationId] = pending.createdAtMs }
+
+            val mentioned = mentionedGuests(room, pending.text)
+            if (mentioned.isNotEmpty()) {
+                for (guest in mentioned) {
+                    val current = peekRoom(conversationId) ?: return
+                    if (current.status.terminal) return
+                    if (current.participantById(guest.id)?.status == CouncilParticipantStatus.DISMISSED) continue
+                    executor.generateGuestTurn(
+                        room = current,
+                        guest = guest,
+                        messageId = msgId(),
+                        userPrompt = CouncilRoomPrompts.followUpPrompt(current, guest, pending),
+                        replyToMessageId = pending.id,
+                        invitedBy = COUNCIL_ROOM_USER_ID,
+                        settings = settings,
+                    )
+                }
+            } else {
+                val current = peekRoom(conversationId) ?: return
+                if (current.status.terminal) return
+                val hostModelId = resolveHostModelId(current, settings) ?: continue
+                generateHostSteer(current, pending, hostModelId, settings)
+            }
+        }
+    }
+
+    /** Active guests whose `@name` appears in [text] at a word boundary. */
+    private fun mentionedGuests(room: CouncilRoom, text: String): List<CouncilParticipant> =
+        room.activeGuests.filter { it.name.isNotBlank() && containsMention(text, it.name) }
+
+    /**
+     * True iff `@name` occurs in [text] not immediately followed by another name
+     * character — so "@GPT-4" matches the guest "GPT-4" but NOT the guest "GPT".
+     */
+    private fun containsMention(text: String, name: String): Boolean {
+        val token = "@$name"
+        var idx = text.indexOf(token)
+        while (idx >= 0) {
+            val next = text.getOrNull(idx + token.length)
+            val isBoundary = next == null || !(next.isLetterOrDigit() || next == '-' || next == '_')
+            if (isBoundary) return true
+            idx = text.indexOf(token, idx + 1)
+        }
+        return false
+    }
+
+    /**
+     * Host redirect for an un-targeted interjection: generate a short steering
+     * message off the host model and append it as a host turn. Members pick it up
+     * via [buildAutoPrompt]'s steering block on their next turn.
+     */
+    private suspend fun generateHostSteer(
+        room: CouncilRoom,
+        userMessage: CouncilMessage,
+        hostModelId: Uuid,
+        settings: Settings,
+    ) {
+        executor.generateHostTurn(
+            room = room,
+            hostModelId = hostModelId,
+            systemPrompt = CouncilRoomPrompts.hostSystemPrompt(room),
+            userPrompt = CouncilRoomPrompts.hostInterjectionPrompt(room, userMessage.text),
+            messageId = msgId(),
+            settings = settings,
+        )
+    }
+
+    /**
+     * Host's opening turn — generated off the host model and appended as a host
+     * message. The host receives the topic and frames the core proposition before
+     * the members deliberate (they pick it up via [appendSteeringNote]).
+     */
+    private suspend fun generateHostOpening(
+        room: CouncilRoom,
+        hostModelId: Uuid,
+        settings: Settings,
+    ) {
+        executor.generateHostTurn(
+            room = room,
+            hostModelId = hostModelId,
+            systemPrompt = CouncilRoomPrompts.hostSystemPrompt(room),
+            userPrompt = CouncilRoomPrompts.hostOpeningPrompt(room),
+            messageId = msgId(),
+            settings = settings,
+        )
     }
 
     /**

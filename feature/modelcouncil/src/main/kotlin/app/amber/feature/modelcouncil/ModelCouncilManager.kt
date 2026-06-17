@@ -63,6 +63,7 @@ interface ModelCouncilTextRunner {
         outputBudgetChars: Int,
         reasoningLevel: ReasoningLevel? = null,
         temperature: Float? = null,
+        userImageParts: List<UIMessagePart.Image> = emptyList(),
         onChunk: (String) -> Unit = {},
     ): ModelCouncilTextResult
 }

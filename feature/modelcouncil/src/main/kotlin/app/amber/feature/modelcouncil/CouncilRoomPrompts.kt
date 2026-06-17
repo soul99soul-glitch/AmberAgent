@@ -54,6 +54,8 @@ object CouncilRoomPrompts {
         - 你没有工具。
         - 不要声称检查了文件/网页/私有数据，除非证据已在讨论中给出。
         - 回复要简洁、有据，面向主持人综合。
+        - 直接输出你的发言内容本身；不要复述题目、你的角色或这些指令，
+          不要以"用户想让我…""作为…我将…""好的，我来…"之类的话开头。
     """.trimIndent()
 
     // ── EXPLORE mode ───────────────────────────────────────────────────────
@@ -176,6 +178,27 @@ object CouncilRoomPrompts {
         综合必须基于已给出的证据，不要引入未在讨论中出现的事实。
     """.trimIndent()
 
+    /**
+     * Host's OPENING when a council starts — the host RECEIVES the user's topic,
+     * restates/clarifies the real intent, turns it into a clear core proposition,
+     * and frames how the members should approach it. This is the "主持承接命题"
+     * turn that runs BEFORE any member speaks.
+     */
+    fun hostOpeningPrompt(room: CouncilRoom): String = """
+        议题（来自发起人）：${room.objective}
+        ${if (room.context.isBlank()) "" else "背景：${room.context}\n"}
+        当前模式：${modeName(room.mode)}
+        参与成员：${room.participants
+            .filter { it.kind == CouncilParticipantKind.GUEST }
+            .joinToString("、") { "${it.name}（${it.role}）" }}
+
+        作为主持人，请用简短几句开场：
+        - 复述并澄清这个议题真正要解决的核心问题，把发起人的需求转成一个清晰的核心命题。
+        - 点明本轮讨论的重点与边界。
+        - 简要说明希望各成员分别从自己的角色切入什么。
+        不要替成员下结论，只做承接与框定。
+    """.trimIndent()
+
     // ── host-action turn prompts (the directive the host passes to a guest) ─
 
     /** Prompt for a guest being directly invited by the host. */
@@ -202,6 +225,26 @@ object CouncilRoomPrompts {
 
         作为「${guest.name}」，针对以上发言补充、支持或反驳。
         ${modeGuestGuidance(room.mode)}
+    """.trimIndent()
+
+    /**
+     * Host's redirect when the user interjects WITHOUT targeting a specific member.
+     * The host reads the recent discussion + the user's instruction and produces a
+     * short, concrete steer that the next members should follow.
+     */
+    fun hostInterjectionPrompt(room: CouncilRoom, userInstruction: String): String = """
+        议题：${room.objective}
+
+        当前讨论（节选）：
+        ${room.messages
+            .filter { it.authorId != COUNCIL_ROOM_USER_ID && it.status == CouncilMessageStatus.COMPLETED }
+            .takeLast(6)
+            .joinToString("\n\n") { it.summaryBlock(limit = 500) }}
+
+        用户中途介入：$userInstruction
+
+        作为主持人，请据此给出一句到几句明确的引导：是否纠偏、聚焦到哪、避免什么、下一步该怎么说。
+        简洁、可执行，面向接下来发言的成员；不要替成员下结论。
     """.trimIndent()
 
     // ── helpers ────────────────────────────────────────────────────────────

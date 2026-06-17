@@ -43,6 +43,14 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         }
     }
 
+    /**
+     * Extract a document's text the same way [transform] does, exposed for callers
+     * that need the content outside the UIMessage transform pipeline (e.g. the
+     * Council Room, whose generation path has no transformer chain). Runs on IO.
+     */
+    suspend fun extractText(document: UIMessagePart.Document): String =
+        withContext(Dispatchers.IO) { readDocumentContent(document) }
+
     private fun parsePdfAsText(file: File): String {
         return PdfParser.parserPdf(file, MAX_INLINE_TEXT_CHARS)
     }

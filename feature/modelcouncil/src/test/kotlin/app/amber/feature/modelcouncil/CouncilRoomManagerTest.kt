@@ -2,6 +2,7 @@ package app.amber.feature.modelcouncil
 
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
+import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.infra.AppScope
@@ -365,6 +366,7 @@ class CouncilRoomManagerTest {
             outputBudgetChars: Int,
             reasoningLevel: ReasoningLevel?,
             temperature: Float?,
+            userImageParts: List<UIMessagePart.Image>,
             onChunk: (String) -> Unit,
         ): ModelCouncilTextResult {
             _calls.add(Call(modelId, systemPrompt, userPrompt))

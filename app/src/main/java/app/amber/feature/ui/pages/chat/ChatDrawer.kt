@@ -62,7 +62,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.DashboardSquare01
 import me.rerere.hugeicons.stroke.Folder01
-import me.rerere.hugeicons.stroke.MagicWand01
+import me.rerere.hugeicons.stroke.UserGroup
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.Time02
@@ -75,6 +75,8 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentAssistant
+import app.amber.core.settings.findModelById
+import app.amber.feature.modelcouncil.toCouncilParticipant
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.ui.Greeting
 import app.amber.feature.ui.components.ui.Tooltip
@@ -234,16 +236,42 @@ fun ChatDrawerContent(
                             onOpenFavoritesLive = onOpenFavoritesLive,
                             onOpenCouncilRoom = {
                                 scope.launch {
+                                    // If this conversation already has a council (running OR
+                                    // finished), just open it — resume a live one, or view the
+                                    // finished one as history. Never overwrite it on open.
+                                    val existingRoom = councilRoomManager.observeRoom(current.id).value
+                                    if (existingRoom != null) {
+                                        navController.navigate(Screen.CouncilRoom(conversationId = current.id.toString()))
+                                        return@launch
+                                    }
                                     val settings = settingsStore.settingsFlow.value
+                                    // Members come from the configured Council seats. With no
+                                    // seats the Room is just a host (nothing to deliberate), so
+                                    // we route the user to configure members first.
+                                    val councilSeats = settings.agentRuntime.modelCouncil.defaultSeats
+                                    if (councilSeats.isEmpty()) {
+                                        navController.navigate(Screen.SettingExperimentalModelCouncil)
+                                        return@launch
+                                    }
                                     val assistant = settings.getCurrentAssistant()
+                                    // Resolve each seat's model display name so the roster / bubbles
+                                    // can show e.g. "Deepseek V4 Flash" under the member.
+                                    val guests = councilSeats.map { seat ->
+                                        seat.toCouncilParticipant().copy(
+                                            modelName = settings.findModelById(seat.modelId)?.displayName.orEmpty(),
+                                        )
+                                    }
                                     // openRoom is idempotent-ish: if a room is already
                                     // active (room_already_open) we just resume it. Any
                                     // other error means we shouldn't navigate.
                                     val result = councilRoomManager.openRoom(
                                         conversationId = current.id,
                                         hostAssistantId = assistant.id,
-                                        hostName = assistant.name.ifBlank { "Host" },
+                                        // Show the host as "Amber", not "Amber Agent".
+                                        hostName = assistant.name.removeSuffix(" Agent").ifBlank { "Amber" },
                                         objective = "多模型协作讨论",
+                                        initialGuests = guests,
+                                        maxRounds = settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
                                     )
                                     if (result is app.amber.feature.modelcouncil.CouncilRoomOpResult.Err &&
                                         result.code != "room_already_open") {
@@ -548,7 +576,7 @@ private fun V3DrawerHeader(
                 onClick = { navController.navigate(Screen.Stats) },
             )
             V3QuickBtn(
-                icon = HugeIcons.MagicWand01,
+                icon = HugeIcons.UserGroup,
                 contentDescription = "模型会议 Council Room",
                 chatTheme = chatTheme,
                 onClick = onOpenCouncilRoom,

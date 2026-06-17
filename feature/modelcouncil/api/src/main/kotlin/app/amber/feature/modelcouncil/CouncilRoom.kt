@@ -3,6 +3,7 @@ package app.amber.feature.modelcouncil
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.ui.UIMessagePart
 import kotlin.uuid.Uuid
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,7 +20,9 @@ import kotlin.uuid.Uuid
 
 /** Hard cap on participants in a Room (host counts toward this). */
 const val DEFAULT_COUNCIL_ROOM_MAX_PARTICIPANTS = 8
-const val DEFAULT_COUNCIL_ROOM_MAX_ROUNDS = 5
+// Default auto-deliberation rounds. User-configurable range is [2, 6]; 3 gives
+// one opening round + at least one cross-exchange round before synthesis.
+const val DEFAULT_COUNCIL_ROOM_MAX_ROUNDS = 3
 const val DEFAULT_COUNCIL_ROOM_OUTPUT_BUDGET_CHARS = 12_000
 const val DEFAULT_COUNCIL_ROOM_SEAT_TIMEOUT_MS = 180_000L
 const val DEFAULT_COUNCIL_ROOM_TOTAL_TIMEOUT_MS = 8 * 60_000L
@@ -175,6 +178,18 @@ data class CouncilMessage(
     val status: CouncilMessageStatus = CouncilMessageStatus.COMPLETED,
     val warnings: List<String> = emptyList(),
     val error: String = "",
+    /**
+     * User-attached media (Image + Document parts) carried on a user message.
+     * Images are passed to members multimodally; documents are shown as chips.
+     * Defaulted empty so old persisted council_state decodes without migration.
+     */
+    val attachments: List<UIMessagePart> = emptyList(),
+    /**
+     * Text extracted from [attachments] documents at send time (the council's
+     * generation path has no document parser), injected into member prompts so
+     * they can read file contents. NOT shown in the bubble (the chip is).
+     */
+    @SerialName("attachment_text") val attachmentText: String = "",
 )
 
 /**
@@ -243,3 +258,31 @@ data class CouncilRoom(
     fun participantById(id: String): CouncilParticipant? =
         participants.firstOrNull { it.id == id }
 }
+
+/**
+ * Map a configured [ModelCouncilSeat] (from the experimental Model Council
+ * settings' `defaultSeats`) into a Room guest participant. This is the bridge
+ * that makes "configure seats in settings → those seats join the Room" work:
+ * the Council Room opens with the host + every configured seat as a guest.
+ *
+ * `providerName` / `modelName` are left blank here (display labels are resolved
+ * from `modelId` at render time); everything the executor needs to run the turn
+ * (modelId, runner type, prompt, budget, reasoning, temperature, external CLI
+ * binding) is carried over verbatim.
+ */
+fun ModelCouncilSeat.toCouncilParticipant(): CouncilParticipant = CouncilParticipant(
+    id = seatId,
+    name = name,
+    role = role,
+    kind = CouncilParticipantKind.GUEST,
+    modelId = modelId,
+    runnerType = runnerType,
+    status = CouncilParticipantStatus.IDLE,
+    systemPrompt = systemPrompt,
+    outputBudgetChars = outputBudgetChars,
+    reasoningLevel = reasoningLevel,
+    temperature = temperature,
+    externalTool = externalTool,
+    externalRuntime = externalRuntime,
+    externalModel = externalModel,
+)

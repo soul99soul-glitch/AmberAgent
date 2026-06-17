@@ -72,7 +72,7 @@ fun SettingExperimentalModelCouncilPage(
     // Bumped to fit the new "3 core seats + up to 5 lens" model. Old code clamped at 4 which
     // truncated user lens picks the moment they touched this row after upgrading.
     val maxSeatOptions = listOf(3, 5, 6, 8)
-    val roundOptions = listOf(1, 2, 3, 4, 5)
+    val roundOptions = listOf(2, 3, 4, 5, 6)
     val timeoutOptions = listOf(60_000L, DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS, 480_000L, EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS)
     val budgetOptions = listOf(8_000, DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS, 20_000, 40_000, EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS)
     val scope = rememberCoroutineScope()
@@ -265,7 +265,7 @@ fun SettingExperimentalModelCouncilPage(
                     ModelCouncilSelectRow(
                         label = stringResource(R.string.setting_model_council_default_rounds),
                         options = roundOptions,
-                        selected = council.defaultRounds.coerceIn(1, council.maxRounds.coerceAtLeast(DEFAULT_MODEL_COUNCIL_MAX_ROUNDS)),
+                        selected = council.defaultRounds.coerceIn(2, 6),
                         onSelected = { value ->
                             update { current ->
                                 current.copy(

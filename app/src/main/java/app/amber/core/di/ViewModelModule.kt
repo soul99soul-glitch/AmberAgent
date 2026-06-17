@@ -47,6 +47,7 @@ val viewModelModule = module {
         CouncilRoomVM(
             conversationId = params.get(),
             manager = get(),
+            settingsStore = get(),
         )
     }
     viewModelOf(::SettingVM)
