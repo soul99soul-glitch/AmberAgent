@@ -18,6 +18,7 @@ kotlin {
         ":ai-core",
         ":ai-provider-openai",
         ":core:types",
+        ":core:conversation-storage",
         ":core:ai:api",
         ":core:ai:generation:api",
         ":core:ai:transformers:api",
