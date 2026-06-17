@@ -411,7 +411,12 @@ abstract class AppDatabase : RoomDatabase() {
         // ModelCouncil batch tool path is unaffected (it persists out-of-band).
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE `conversationentity` ADD COLUMN `council_state` TEXT")
+                // DEFAULT NULL is required: the entity declares
+                // @ColumnInfo(defaultValue = "NULL"), so Room's expected schema has
+                // `DEFAULT NULL`. Omitting it here makes the migrated column's default
+                // 'undefined', which fails Room's post-migration schema validation
+                // (crash on first launch when upgrading an existing pre-council DB).
+                db.execSQL("ALTER TABLE `conversationentity` ADD COLUMN `council_state` TEXT DEFAULT NULL")
             }
         }
     }
