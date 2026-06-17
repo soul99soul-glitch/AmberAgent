@@ -84,7 +84,7 @@
   <application
     android:name="app.amber.agent.AmberAgentApp"
     android:largeHeap="true"
-    android:allowBackup="false"
+    android:allowBackup="true"
     android:appCategory="productivity"
     android:dataExtractionRules="@xml/data_extraction_rules"
     android:enableOnBackInvokedCallback="true"
