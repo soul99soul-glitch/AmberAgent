@@ -125,6 +125,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/iosApp.app/iosApp"
         BUNDLE_LOADER: "$(TEST_HOST)"
         FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]:

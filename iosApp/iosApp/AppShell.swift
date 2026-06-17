@@ -13,6 +13,7 @@ struct AppShell: View {
     @State private var localToolExecutor: IOSLocalToolExecutor
     @State private var providerRegistry: ProviderRegistryStore
     @State private var sharedSettings: IOSSharedSettingsStore
+    @State private var mcpConfigStore: IOSMcpConfigStore
     @State private var rootRouter = RouterPath()
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = "light"
 
@@ -33,6 +34,7 @@ struct AppShell: View {
         )
         self._providerRegistry = State(initialValue: ProviderRegistryStore(settingsStore: settingsStore))
         self._sharedSettings = State(initialValue: IOSSharedSettingsStore())
+        self._mcpConfigStore = State(initialValue: IOSMcpConfigStore())
     }
 
     var body: some View {
@@ -42,6 +44,7 @@ struct AppShell: View {
                     settingsStore: settingsStore,
                     providerRegistry: providerRegistry,
                     sharedSettings: sharedSettings,
+                    mcpConfigStore: mcpConfigStore,
                     permissionStore: permissionStore,
                     documentStore: documentAccessStore,
                     systemPermissionCoordinator: systemPermissionCoordinator,
@@ -245,6 +248,7 @@ private extension View {
         settingsStore: SettingsStore,
         providerRegistry: ProviderRegistryStore,
         sharedSettings: IOSSharedSettingsStore,
+        mcpConfigStore: IOSMcpConfigStore,
         permissionStore: IOSPermissionStore,
         documentStore: DocumentAccessStore,
         systemPermissionCoordinator: IOSSystemPermissionCoordinator,
@@ -284,11 +288,11 @@ private extension View {
             case .skillAdd:
                 SkillAddView()
             case .mcpServers:
-                McpServersView(sharedSettings: sharedSettings)
+                McpServersView(sharedSettings: sharedSettings, configStore: mcpConfigStore)
             case .mcpImport:
-                McpImportView()
+                McpImportView(configStore: mcpConfigStore)
             case .mcpAdd:
-                McpAddView()
+                McpAddView(configStore: mcpConfigStore)
             case .skillDetail(let name):
                 SkillDetailView(skillName: name)
             case .execution:
@@ -320,7 +324,7 @@ private extension View {
             case .ttsAdd:
                 TTSAddView()
             case .board:
-                BoardView(sharedSettings: sharedSettings)
+                BoardView(settingsStore: settingsStore, sharedSettings: sharedSettings)
             case .boardSettings:
                 BoardSettingsView(sharedSettings: sharedSettings)
             case .miniApps:

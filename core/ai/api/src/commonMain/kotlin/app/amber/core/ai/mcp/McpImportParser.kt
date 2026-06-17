@@ -12,8 +12,8 @@ fun parseMcpServersFromJson(json: String): List<McpServerConfig> {
         val obj = element.jsonObject
         val type = obj["type"]?.jsonPrimitive?.contentOrNull ?: "streamable_http"
         val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-        val headers = obj["headers"]?.jsonObject?.entries?.map { (k, v) ->
-            k to (v.jsonPrimitive.contentOrNull ?: "")
+        val headers = obj["headers"]?.jsonObject?.entries?.map { (key, value) ->
+            key to (value.jsonPrimitive.contentOrNull ?: "")
         } ?: emptyList()
         val commonOptions = McpCommonOptions(name = name, headers = headers)
         when (type) {

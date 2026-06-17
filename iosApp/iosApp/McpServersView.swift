@@ -3,9 +3,17 @@ import Shared
 
 struct McpServersView: View {
     let sharedSettings: IOSSharedSettingsStore
+    let configStore: IOSMcpConfigStore
+    @State private var mcpManager: IOSMcpManager
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
+
+    init(sharedSettings: IOSSharedSettingsStore, configStore: IOSMcpConfigStore) {
+        self.sharedSettings = sharedSettings
+        self.configStore = configStore
+        self._mcpManager = State(initialValue: IOSMcpManager(sharedSettings: sharedSettings, configStore: configStore))
+    }
 
     var body: some View {
         ZStack {
@@ -16,6 +24,7 @@ struct McpServersView: View {
                     header
                     intro
                     seedConfigSection
+                    localConfigSection
                     connectedSection
                     managementSection
                 }
@@ -25,6 +34,12 @@ struct McpServersView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .task {
+            await mcpManager.syncAll()
+        }
+        .onChange(of: configStore.servers.count) { _, _ in
+            Task { await mcpManager.syncAll() }
+        }
     }
 
     private var header: some View {
@@ -56,7 +71,7 @@ struct McpServersView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有 MCP 配置、连接和工具调用链路；iOS 当前可读取 Settings.mcpServers 真实配置（只读），连接管理和工具调用待接。")
+        Text("iOS 已接入 Settings.mcpServers，并使用 URLSession 执行 MCP initialize、tools/list 与 tools/call。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -92,7 +107,7 @@ struct McpServersView: View {
                             Text(name.isEmpty ? "未命名" : name)
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("\(server.commonOptions.tools.count) 工具 · \(server.commonOptions.enable ? "启用" : "禁用")")
+                            Text("\(server.commonOptions.tools.count) 已保存工具 · \(server.commonOptions.enable ? "启用" : "禁用") · \(statusTitle(for: name))")
                                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                                 .foregroundStyle(AmberTheme.muted2)
                         }
@@ -109,18 +124,95 @@ struct McpServersView: View {
         }
     }
 
+    private var localConfigSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "本机 MCP 服务器（可编辑）")
+            AmberFormGroup {
+                if configStore.servers.isEmpty {
+                    HStack(spacing: 10) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 16))
+                            .foregroundStyle(AmberTheme.muted2)
+                        Text("本机尚未保存 MCP 服务器。可通过导入或手动添加写入。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(configStore.servers.enumerated()), id: \.element.id) { index, server in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(server.name.isEmpty ? "未命名" : server.name)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.foreground)
+                                Text("\(server.transportTitle) · \(server.enabled ? "启用" : "禁用") · \(statusTitle(for: server.name))")
+                                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(AmberTheme.muted2)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button(role: .destructive) {
+                                configStore.remove(named: server.name)
+                                Task { await mcpManager.syncAll() }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(AmberTheme.accentRed)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+
+                        if index < configStore.servers.count - 1 {
+                            McpDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var connectedSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "配置状态")
+            AmberSectionLabel(text: "连接状态")
             AmberFormGroup {
-                McpStatusRow(
-                    title: "MCP 配置桥尚执行待接",
-                    subtitle: "没有读取 Settings.mcpServers，也没有订阅 McpManager.syncingStatus。",
-                    badge: "执行待接"
-                )
+                if mcpManager.servers.isEmpty {
+                    McpStatusRow(
+                        title: "没有 MCP 服务器",
+                        subtitle: "Settings.mcpServers 为空。导入或手动添加后可在此同步工具。",
+                        badge: "空配置"
+                    )
+                } else {
+                    ForEach(Array(mcpManager.servers.enumerated()), id: \.element.id) { index, server in
+                        McpStatusRow(
+                            title: server.name.isEmpty ? "未命名" : server.name,
+                            subtitle: "\(server.transportTitle) · \(server.url)",
+                            badge: statusTitle(for: server.name)
+                        )
+
+                        if index < mcpManager.servers.count - 1 {
+                            McpDivider()
+                        }
+                    }
+                }
             }
 
-            McpNote("当前页面不会连接服务器、同步工具、切换启用状态或删除配置。")
+            if !mcpManager.tools.isEmpty {
+                AmberSectionLabel(text: "已发现工具")
+                AmberFormGroup {
+                    ForEach(Array(mcpManager.tools.enumerated()), id: \.element.id) { index, discovered in
+                        McpPreviewRow(title: discovered.tool.name, value: discovered.serverName)
+                        if index < mcpManager.tools.count - 1 {
+                            McpDivider()
+                        }
+                    }
+                }
+            }
+
+            McpNote("页面进入时会尝试连接已启用 MCP 服务器并同步 tools/list；tools/call 已由 IOSMcpManager 提供给后续调用链。")
         }
     }
 
@@ -132,7 +224,7 @@ struct McpServersView: View {
                     systemImage: "square.and.arrow.down",
                     iconColor: AmberTheme.accentCyan,
                     title: "导入服务器",
-                    subtitle: "粘贴标准 mcpServers JSON，仅做粗略文本预览"
+                    subtitle: "粘贴标准 mcpServers JSON，解析后保存到本机配置"
                 ) {
                     router.navigate(to: .mcpImport)
                 }
@@ -143,18 +235,31 @@ struct McpServersView: View {
                     systemImage: "plus",
                     iconColor: AmberTheme.accent,
                     title: "手动添加",
-                    subtitle: "填写传输类型、服务器地址与请求头本地预览"
+                    subtitle: "填写传输类型、服务器地址与请求头并保存"
                 ) {
                     router.navigate(to: .mcpAdd)
                 }
             }
 
-            McpNote("导入和手动添加页面当前不写入设置、不保存请求头、不发起 MCP 连接。")
+            McpNote("导入和手动添加会写入 iOS 本机 MCP 配置；KMP seed 配置仍保持只读。")
+        }
+    }
+    private func statusTitle(for serverName: String) -> String {
+        switch mcpManager.statusByServer[serverName] ?? .idle {
+        case .idle:
+            return "未连接"
+        case .connecting:
+            return "连接中"
+        case .connected:
+            return "已连接"
+        case .error:
+            return "连接失败"
         }
     }
 }
 
 struct McpImportView: View {
+    let configStore: IOSMcpConfigStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var jsonText = """
@@ -173,7 +278,10 @@ struct McpImportView: View {
             AmberTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                McpDraftHeader(title: "导入服务器", doneTitle: "关闭") {
+                McpDraftHeader(title: "导入服务器", doneTitle: "保存") {
+                    if !parsedServers.isEmpty {
+                        configStore.importServers(json: jsonText)
+                    }
                     dismiss()
                 }
 
@@ -207,7 +315,7 @@ struct McpImportView: View {
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
-                        Text("粘贴 Claude / Codex 常见的 mcpServers 配置。当前只做粗略文本预览，不读取剪贴板、不写入设置。")
+                        Text("粘贴 Claude / Codex 常见的 mcpServers 配置。保存后会写入 iOS 本机 MCP 配置并在服务器列表页同步连接。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                             .lineSpacing(2)
@@ -248,45 +356,36 @@ struct McpImportView: View {
             AmberFormGroup {
                 McpPreviewRow(title: "根字段文本", value: jsonText.contains("\"mcpServers\"") ? "mcpServers" : "未检测到")
                 McpDivider()
-                McpPreviewRow(title: "粗略条目数", value: "\(estimatedServerCount)")
+                McpPreviewRow(title: "解析条目数", value: "\(parsedServers.count)")
                 McpDivider()
-                McpPreviewRow(title: "处理方式", value: "本地本地预览")
+                McpPreviewRow(title: "处理方式", value: "KMP McpImportParser")
             }
         }
     }
 
     private var hasWarnings: Bool {
-        !jsonText.contains("\"mcpServers\"") || estimatedServerCount == 0
+        !jsonText.contains("\"mcpServers\"") || parsedServers.isEmpty
     }
 
     private var validationText: String {
         if !jsonText.contains("\"mcpServers\"") {
-            return "未检测到 mcpServers 文本；当前不会写入真实配置。"
+            return "未检测到 mcpServers 文本；保存不会写入配置。"
         }
 
-        if estimatedServerCount == 0 {
-            return "文本包含 mcpServers，但粗略预览没有识别到服务器条目。"
+        if parsedServers.isEmpty {
+            return "文本包含 mcpServers，但 KMP McpImportParser 没有解析到服务器条目。"
         }
 
-        return "粗略识别到 \(estimatedServerCount) 个疑似服务器条目；当前未使用真实 McpImportParser，只保留本地本地预览。"
+        return "McpImportParser 解析到 \(parsedServers.count) 个服务器；点击保存后写入 iOS 本机配置。"
     }
 
-    private var estimatedServerCount: Int {
-        let lines = jsonText
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-        return lines.filter { line in
-            line.hasPrefix("\"") &&
-                line.contains("\":") &&
-                !line.contains("\"mcpServers\"") &&
-                !line.contains("\"transport\"") &&
-                !line.contains("\"url\"") &&
-                !line.contains("\"headers\"")
-        }.count
+    private var parsedServers: [McpServerConfig] {
+        McpImportParserKt.parseMcpServersFromJson(json: jsonText)
     }
 }
 
 struct McpAddView: View {
+    let configStore: IOSMcpConfigStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = "context7"
@@ -302,7 +401,10 @@ struct McpAddView: View {
             AmberTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                McpDraftHeader(title: "手动添加", doneTitle: "关闭") {
+                McpDraftHeader(title: "手动添加", doneTitle: "保存") {
+                    if let server = draftServer {
+                        configStore.add(server)
+                    }
                     dismiss()
                 }
 
@@ -341,7 +443,7 @@ struct McpAddView: View {
                 McpDraftTextFieldRow(title: "服务器 URL", text: $serverURL, placeholder: transport.defaultURL, monospace: true)
             }
 
-            McpNote("当前不会连接服务器，也不会保存到 MCP 配置。真实接入时再绑定 McpManager / SettingsStore。")
+            McpNote("保存后会写入 iOS 本机 MCP 配置，并可在服务器列表页同步连接。")
         }
     }
 
@@ -394,12 +496,25 @@ struct McpAddView: View {
             AmberFormGroup {
                 McpDraftToggleRow(
                     title: "本地预览工具默认需要批准",
-                    subtitle: "仅影响本页本地预览；当前没有写入 MCP 工具审批配置。",
+                    subtitle: "保存到本机配置；工具审批策略后续由工具权限页面统一接入。",
                     isOn: needsApproval
                 ) {
                     needsApproval.toggle()
                 }
             }
+        }
+    }
+
+    private var draftServer: IOSMcpServerConfig? {
+        let trimmedName = name.trimmed
+        let trimmedURL = serverURL.trimmed
+        guard !trimmedName.isEmpty, !trimmedURL.isEmpty else { return nil }
+        let headerMap = Dictionary(uniqueKeysWithValues: validHeaders.map { ($0.name.trimmed, $0.value.trimmed) })
+        switch transport {
+        case .streamableHTTP:
+            return .streamableHTTP(name: trimmedName, url: trimmedURL, headers: headerMap)
+        case .sse:
+            return .sse(name: trimmedName, url: trimmedURL, headers: headerMap)
         }
     }
 
@@ -413,9 +528,9 @@ struct McpAddView: View {
 
     private var headerValidationText: String {
         if hasHeaderWarnings {
-            return "空名称或空值会在真实写入前被拦截；当前先保留本地本地预览。"
+            return "空名称或空值不会保存到请求头。"
         }
-        return "\(validHeaders.count) 个请求头已准备好；当前不会保存。"
+        return "\(validHeaders.count) 个请求头将随服务器配置保存。"
     }
 }
 
