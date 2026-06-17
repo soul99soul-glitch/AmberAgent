@@ -95,6 +95,7 @@ final class ChatViewModel {
     private var currentRunId: String?
     private var currentStartedAt: Int64?
     private var currentInputDigest: String?
+    private var currentConversationIdForRun: KotlinUuid?
     private var currentToolResumeCount: Int = 0
     private let maxToolResumeCount = 1
 
@@ -125,11 +126,16 @@ final class ChatViewModel {
     }
 
     /// 把当前 messages 落盘（节流：只在流式结束/取消/切换时调，不在每个 chunk 调）。
-    private func persistMessages() {
+    private func persistMessages(conversationId: KotlinUuid? = nil) {
         guard let store = conversationStore else { return }
         let snapshot = messages
+        let targetConversationId = conversationId ?? store.currentConversation?.id
         Task { @MainActor in
-            await store.saveCurrent(messages: snapshot)
+            if let targetConversationId {
+                await store.save(messages: snapshot, to: targetConversationId)
+            } else {
+                await store.saveCurrent(messages: snapshot)
+            }
         }
     }
 
@@ -145,10 +151,11 @@ final class ChatViewModel {
         inputText = ""
         pendingSelectedFilePreview = nil
         selectedFileContextError = nil
+        let runConversationId = currentConversationId
         // 用户消息立即落盘：即使随后生成崩溃/被杀进程，用户输入也不会丢。
-        persistMessages()
+        persistMessages(conversationId: runConversationId)
         guard autoGenerateResponses else { return }
-        generateResponse(inputDigest: digest)
+        generateResponse(inputDigest: digest, conversationId: runConversationId)
     }
 
     func attachSelectedFilePreviewToNextMessage() async {
@@ -223,12 +230,14 @@ final class ChatViewModel {
         let runId = currentRunId
         let startedAt = currentStartedAt
         let digest = currentInputDigest
+        let conversationId = currentConversationIdForRun
 
         streamJob?.cancel(cause: nil)
         streamJob = nil
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil
+        currentConversationIdForRun = nil
         currentToolResumeCount = 0
         isLoading = false
 
@@ -245,13 +254,13 @@ final class ChatViewModel {
                 inputDigest: digest
             )
             // 持久化已生成的部分消息——用户取消后，半截回复仍应留存在历史里。
-            self.persistMessages()
+            self.persistMessages(conversationId: conversationId)
         }
     }
 
     // MARK: - Private
 
-    private func generateResponse(inputDigest: String) {
+    private func generateResponse(inputDigest: String, conversationId: KotlinUuid?) {
         if streamJob != nil {
             cancelGeneration()
         }
@@ -265,6 +274,7 @@ final class ChatViewModel {
         currentRunId = runId
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
+        currentConversationIdForRun = conversationId
         currentToolResumeCount = 0
         startLiveActivity(
             runId: runId,
@@ -277,6 +287,7 @@ final class ChatViewModel {
             runId: runId,
             startedAt: startedAt,
             inputDigest: inputDigest,
+            conversationId: conversationId,
             uploadMessages: messages
         )
     }
@@ -287,6 +298,7 @@ final class ChatViewModel {
         runId: String,
         startedAt: Int64,
         inputDigest: String,
+        conversationId: KotlinUuid?,
         uploadMessages: [UIMessage]
     ) {
         let accumulator = MessageStreamAccumulator(
@@ -339,6 +351,7 @@ final class ChatViewModel {
                                 runId: runId,
                                 startedAt: startedAt,
                                 inputDigest: inputDigest,
+                                conversationId: conversationId,
                                 baseMessages: snapshot
                             )
                         }
@@ -355,7 +368,7 @@ final class ChatViewModel {
                         runId: runId,
                         presentation: .completed()
                     )
-                    self.persistMessages()
+                    self.persistMessages(conversationId: conversationId)
                     self.finishStreaming()
                 }
             },
@@ -385,7 +398,7 @@ final class ChatViewModel {
                         runId: runId,
                         presentation: .failed()
                     )
-                    self.persistMessages()
+                    self.persistMessages(conversationId: conversationId)
                     self.finishStreaming()
                 }
             }
@@ -396,6 +409,7 @@ final class ChatViewModel {
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil
+        currentConversationIdForRun = nil
         streamJob = nil
         isLoading = false
     }
@@ -429,6 +443,7 @@ final class ChatViewModel {
         runId: String,
         startedAt: Int64,
         inputDigest: String,
+        conversationId: KotlinUuid?,
         baseMessages: [UIMessage]
     ) async {
         let resultText: String
@@ -449,6 +464,7 @@ final class ChatViewModel {
             runId: runId,
             startedAt: startedAt,
             inputDigest: inputDigest,
+            conversationId: conversationId,
             uploadMessages: resumedMessages
         )
     }

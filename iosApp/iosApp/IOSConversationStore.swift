@@ -35,12 +35,17 @@ final class IOSConversationStore {
 
     // MARK: - Init
 
-    init() {
+    init(baseDirectory: URL? = nil) {
         // Documents/conversations/ —— iOS Documents 目录会被 iTunes 文件共享暴露，
         // 第一版可接受（便于调试）；后续如要隐藏可换 Application Support。
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        let baseDirPath = documents.appendingPathComponent("conversations").path
+        let baseDirPath: String
+        if let baseDirectory {
+            baseDirPath = baseDirectory.path
+        } else {
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            baseDirPath = documents.appendingPathComponent("conversations").path
+        }
         let baseDir = ConversationFile(path: baseDirPath)
         self.storage = JsonConversationStorage(baseDir: baseDir)
     }
@@ -99,7 +104,26 @@ final class IOSConversationStore {
     /// 把当前内存里的 [messages] 回填进 currentConversation（节点合并），落盘，刷新 index。
     /// 流式结束后调用一次（不在每个 chunk 调，避免写盘抖动）。
     func saveCurrent(messages: [UIMessage]) async {
-        guard let conversation = currentConversation else { return }
+        guard let id = currentConversation?.id else { return }
+        await save(messages: messages, to: id)
+    }
+
+    /// 把 [messages] 保存到指定会话 id。用于生成回调按 run 发起时的 conversation 归属落盘，
+    /// 避免用户在流式生成期间切换/新建会话后把旧 run 写进当前新会话。
+    func save(messages: [UIMessage], to id: KotlinUuid) async {
+        let conversation: Conversation?
+        if currentConversation?.id == id {
+            conversation = currentConversation
+        } else {
+            do {
+                conversation = try await storage.loadConversation(id: id)
+            } catch {
+                print("[IOSConversationStore] loadConversation failed for save target \(id): \(error)")
+                conversation = nil
+            }
+        }
+        guard let conversation else { return }
+
         // updateCurrentMessages 已做 identity 短路：消息没变时返回同一引用，节省落盘。
         var updated = conversation.updateCurrentMessages(messages: messages)
 
@@ -115,7 +139,9 @@ final class IOSConversationStore {
         }
 
         await persist(updated)
-        setCurrent(updated)
+        if currentConversation?.id == id {
+            setCurrent(updated)
+        }
         await refreshSummaries()
     }
 
