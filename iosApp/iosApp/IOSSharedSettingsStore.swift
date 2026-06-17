@@ -17,10 +17,25 @@ final class IOSSharedSettingsStore {
     @ObservationIgnored private(set) var snapshot: Settings
 
     private let defaults = UserDefaults.standard
+    private let fullSettingsJsonKey = "app.amber.ios.sharedSettingsJson"
     private let seatsKey = "app.amber.ios.councilSeats"
 
     init() {
-        self.snapshot = IosSettingsDefaults.shared.defaultSeededSettings()
+        if let json = defaults.string(forKey: fullSettingsJsonKey),
+           let decoded = try? Self.decodeSettings(json) {
+            self.snapshot = decoded
+        } else {
+            self.snapshot = IosSettingsDefaults.shared.defaultSeededSettings()
+        }
+    }
+
+    func restoreSnapshot(_ settings: Settings) {
+        snapshot = settings
+        defaults.set(IosSettingsJsonBridge.shared.encode(settings: settings), forKey: fullSettingsJsonKey)
+    }
+
+    private static func decodeSettings(_ json: String) throws -> Settings {
+        IosSettingsJsonBridge.shared.decode(json: json)
     }
 
     // MARK: - Council seats write-back

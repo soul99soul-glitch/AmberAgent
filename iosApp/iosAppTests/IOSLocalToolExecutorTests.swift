@@ -151,6 +151,7 @@ final class IOSLocalToolExecutorTests: XCTestCase {
             let output = await executor.execute(request)
             guard case .denied = output else {
                 XCTFail("Expected denied for mismatched request \(request), got \(output)")
+                continue
             }
         }
     }

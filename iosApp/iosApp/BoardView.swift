@@ -1,7 +1,13 @@
 import SwiftUI
+@preconcurrency import Shared
+
+extension BoardSignal: @retroactive @unchecked Sendable {}
 
 struct BoardView: View {
+    let settingsStore: SettingsStore
     let sharedSettings: IOSSharedSettingsStore
+
+    @State private var generationState = BoardGenerationState.idle
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -109,6 +115,7 @@ struct BoardView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        manualGenerationSection
                         presetConfigSection
                         evidenceSection
                         handlingSection
@@ -163,6 +170,158 @@ struct BoardView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    private var manualGenerationSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "手动生成")
+            AmberFormGroup {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image(systemName: generationState.isRunning ? "clock.arrow.circlepath" : "sparkles")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accent)
+                            .frame(width: 34, height: 34)
+                            .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("生成今日看板")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text("采集 iOS 时间锚点信号，并用当前 OpenAI 兼容配置调用 KMP BoardAgent。")
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Button {
+                        runManualGeneration()
+                    } label: {
+                        HStack(spacing: 8) {
+                            if generationState.isRunning {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(generationState.isRunning ? "正在生成…" : "生成今日看板")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(AmberTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(generationState.isRunning)
+
+                    if let message = generationState.message {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(generationState.isError ? AmberTheme.accentAmber : AmberTheme.muted)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if !generationState.signals.isEmpty {
+                        BoardSignalPreview(signals: generationState.signals)
+                    }
+
+                    if let output = generationState.output, !output.isEmpty {
+                        Text(output)
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.foreground2)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(AmberTheme.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+
+            BoardCapabilityNote("阶段 1 仅接时间信号和手动触发；不会启动 WorkManager/BGTaskScheduler，也不会伪造日历、热榜或聊天数据。")
+        }
+    }
+
+    private func runManualGeneration() {
+        generationState = .running(message: "正在采集时间信号…")
+        Task {
+            do {
+                let setting = sharedSettings.agentRuntime.todayBoard
+                let factory = IosBoardFactory.shared
+                let context = factory.createTimeCollectContext(
+                    assistantId: "ios-manual-board",
+                    anchorTime: 0,
+                    limit: 50
+                )
+                let collectors = factory.createCollectors(setting: setting)
+                var collected: [BoardSignal] = []
+                for collector in collectors {
+                    collected.append(contentsOf: try await collectSignals(collector: collector, context: context))
+                }
+
+                await MainActor.run {
+                    generationState = .running(
+                        message: "已采集 \(collected.count) 条时间信号，正在调用模型…",
+                        signals: BoardSignalPreviewItem.from(collected)
+                    )
+                }
+
+                let agent = factory.createAgent(
+                    baseUrl: settingsStore.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+                    apiKey: settingsStore.currentApiKey,
+                    modelId: settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines),
+                    chatCompletionsPath: "/chat/completions"
+                )
+                let output = try await generateBoard(agent: agent, signals: collected, setting: setting)
+                await MainActor.run {
+                    generationState = .finished(
+                        message: "采集完成：\(collected.count) 条时间信号。",
+                        signals: BoardSignalPreviewItem.from(collected),
+                        output: output
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    generationState = .failed("生成失败：\(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func collectSignals(
+        collector: BoardSignalCollectorInterface,
+        context: BoardCollectContext
+    ) async throws -> [BoardSignal] {
+        try await withCheckedThrowingContinuation { continuation in
+            collector.collect(context: context) { signals, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: signals ?? [])
+                }
+            }
+        }
+    }
+
+    private func generateBoard(
+        agent: BoardAgentInterface,
+        signals: [BoardSignal],
+        setting: TodayBoardSetting
+    ) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            agent.generate(signals: signals, setting: setting) { output, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: output ?? "模型未返回今日看板内容。")
+                }
+            }
+        }
     }
 
     /// Read-only view of the REAL seeded TodayBoard defaults from
@@ -228,6 +387,77 @@ struct BoardView: View {
 
             BoardCapabilityNote("设置按钮保留为字段映射入口；它不会保存 enabled、模型、后台策略、热榜源或关注规则。")
         }
+    }
+}
+
+private struct BoardGenerationState {
+    var isRunning: Bool
+    var message: String?
+    var signals: [BoardSignalPreviewItem]
+    var output: String?
+    var isError: Bool
+
+    static let idle = BoardGenerationState(
+        isRunning: false,
+        message: "尚未生成。点击按钮后会采集真实 iOS 时间信号。",
+        signals: [],
+        output: nil,
+        isError: false
+    )
+
+    static func running(message: String, signals: [BoardSignalPreviewItem] = []) -> BoardGenerationState {
+        BoardGenerationState(isRunning: true, message: message, signals: signals, output: nil, isError: false)
+    }
+
+    static func finished(message: String, signals: [BoardSignalPreviewItem], output: String) -> BoardGenerationState {
+        BoardGenerationState(isRunning: false, message: message, signals: signals, output: output, isError: false)
+    }
+
+    static func failed(_ message: String) -> BoardGenerationState {
+        BoardGenerationState(isRunning: false, message: message, signals: [], output: nil, isError: true)
+    }
+}
+
+private struct BoardSignalPreviewItem: Identifiable {
+    let id = UUID()
+    let sourceType: String
+    let sourceRef: String
+    let title: String
+
+    static func from(_ signals: [BoardSignal]) -> [BoardSignalPreviewItem] {
+        signals.map {
+            BoardSignalPreviewItem(
+                sourceType: $0.sourceType,
+                sourceRef: $0.sourceRef,
+                title: $0.title
+            )
+        }
+    }
+}
+
+private struct BoardSignalPreview: View {
+    let signals: [BoardSignalPreviewItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("已采集信号")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground)
+            ForEach(signals) { signal in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(signal.title)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.foreground2)
+                    Text("\(signal.sourceType) · \(signal.sourceRef)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(AmberTheme.muted2)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(10)
+        .background(AmberTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -320,7 +550,7 @@ struct BoardCapabilityNote: View {
 
 #Preview {
     NavigationStack {
-        BoardView(sharedSettings: IOSSharedSettingsStore())
+        BoardView(settingsStore: SettingsStore(), sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
     }
 }

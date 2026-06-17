@@ -1,10 +1,17 @@
 import SwiftUI
 import Shared
+import UniformTypeIdentifiers
 
 struct SyncBackupView: View {
     let sharedSettings: IOSSharedSettingsStore
 
     @Environment(\.dismiss) private var dismiss
+
+    @State private var passphrase = ""
+    @State private var exportedFile: IOSSyncBackupDocument?
+    @State private var isExportingFile = false
+    @State private var isImportingFile = false
+    @State private var alert: SyncBackupAlert?
 
     private var sync: SyncSettings { sharedSettings.snapshot.syncSettings }
 
@@ -38,7 +45,7 @@ struct SyncBackupView: View {
     }
 
     private var headerSubtitle: String {
-        "KMP SyncSettings 只读可用 · 备份执行待接"
+        "Settings JSON 加密导出/导入已接通 · 纯本地 AES-GCM"
     }
 
     private let currentRows: [SyncBackupRow] = [
@@ -50,9 +57,9 @@ struct SyncBackupView: View {
         ),
         .init(
             title: "备份状态",
-            subtitle: "不读取 lastBackupVersionName、lastUploadAt、lastDownloadAt 或 lastLocalExportAt。",
-            value: "执行待接",
-            color: AmberTheme.accentAmber
+            subtitle: "阶段 1 本地导出/导入不会写 Android lastUploadAt / lastDownloadAt；iOS 恢复本地 Settings 快照。",
+            value: "本地可用",
+            color: AmberTheme.accentGreen
         ),
         .init(
             title: "上传 / 下载",
@@ -68,23 +75,23 @@ struct SyncBackupView: View {
         ),
         .init(
             title: "加密口令",
-            subtitle: "Android 归档用 PBKDF2WithHmacSHA256 + AES/GCM；iOS 没有口令存储或归档服务。",
-            value: "执行待接",
-            color: AmberTheme.accentAmber
+            subtitle: "PBKDF2WithHmacSHA256 210,000 次 + AES/GCM/NoPadding；留空时使用 Android NO_PASSPHRASE_FALLBACK。",
+            value: "已接通",
+            color: AmberTheme.accentGreen
         ),
         .init(
             title: "本地导出 / 导入",
-            subtitle: "没有 iOS 文件导出、文件选择、归档格式检查、恢复确认或覆盖事务。",
-            value: "禁用",
-            color: AmberTheme.muted
+            subtitle: "SwiftUI document exporter/importer 打开系统文件面板，读写 .amberbackup 文件。",
+            value: "已接通",
+            color: AmberTheme.accentGreen
         )
     ]
 
     private let archiveRows: [SyncBackupRow] = [
         .init(
-            title: "Settings + secrets",
-            subtitle: "归档 Settings；STANDARD 会遮蔽敏感字段，FULL 会包含 WebMount OAuth 和 OpenAI Codex OAuth raw JSON。",
-            value: "Android 实现",
+            title: "Settings JSON",
+            subtitle: "iOS 阶段 1 写入真实 KMP Settings JSON；secrets、Room tables 和 file roots 后续阶段再接。",
+            value: "iOS 已接",
             color: AmberTheme.accentGreen
         ),
         .init(
@@ -117,6 +124,7 @@ struct SyncBackupView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
+                        localBackupSection
                         evidenceSection
                         currentHandlingSection
                         archiveScopeSection
@@ -129,6 +137,35 @@ struct SyncBackupView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .fileExporter(
+            isPresented: $isExportingFile,
+            document: exportedFile,
+            contentType: .amberBackup,
+            defaultFilename: "amber-settings-\(exportFileStamp()).amberbackup"
+        ) { result in
+            switch result {
+            case .success:
+                alert = .success("已导出加密 Settings 备份")
+            case .failure(let error):
+                alert = .error("导出文件失败：\(error.localizedDescription)")
+            }
+        }
+        .fileImporter(
+            isPresented: $isImportingFile,
+            allowedContentTypes: [.amberBackup, .zip, .data, .item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                importSettingsBackup(from: url)
+            case .failure(let error):
+                alert = .error("选择文件失败：\(error.localizedDescription)")
+            }
+        }
+        .alert(item: $alert) { alert in
+            Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("好")))
+        }
     }
 
     private var header: some View {
@@ -162,7 +199,7 @@ struct SyncBackupView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实同步与备份能力：Settings、数据库、文件树和部分 OAuth secrets 会被打包成加密归档，可上传到 Google Drive AppData 或导出到本地文件。iOS 当前没有这条 repository / OAuth / 归档 / 恢复链路，本页只展示能力证据和缺口，不连接账号、不上传下载、不写 Keychain、不覆盖本机数据。")
+        Text("阶段 1 已接通纯本地 Settings JSON 加密导出/导入：iOS 使用 KMP Settings 真实序列化，按 Android .amberbackup 结构写入 manifest.json + payload.enc，并用 PBKDF2WithHmacSHA256 + AES/GCM/NoPadding 加密。不会连接 Google Drive、WebDAV、S3，也不会上传任何数据。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -170,6 +207,40 @@ struct SyncBackupView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    private var localBackupSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "本地 Settings 备份")
+            AmberFormGroup {
+                VStack(alignment: .leading, spacing: 10) {
+                    SecureField("加密口令（留空使用 Android 兼容 fallback）", text: $passphrase)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.body)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    HStack(spacing: 10) {
+                        Button(action: exportSettingsBackup) {
+                            Label("导出备份", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button(action: { isImportingFile = true }) {
+                            Label("导入备份", systemImage: "tray.and.arrow.down")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+            }
+            SyncBackupNote("导出内容是真实 KMP Settings JSON。导入会解密并恢复 iOS 本地 sharedSettings 快照；阶段 1 不包含 Room 表、文件树或云同步。")
+        }
     }
 
     private var evidenceSection: some View {
@@ -218,9 +289,9 @@ struct SyncBackupView: View {
 
     private var blockedSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "启用前需要")
+            AmberSectionLabel(text: "后续阶段")
             AmberFormGroup {
-                Text("需要先定义 iOS 侧 SyncSettings 持久化、Keychain/secret redaction 策略、Google Drive OAuth AppData client、本地文件导入导出、归档格式兼容校验、恢复事务与回滚策略。没有这些链路前，按钮会让用户误以为备份真的发生。")
+                Text("阶段 1 只做本地 Settings JSON 加密备份。Google Drive OAuth、Drive AppData、WebDAV、S3、Room tables、文件树、恢复事务与冲突处理仍未接通，后续阶段再实现。")
                     .font(.caption)
                     .lineSpacing(4)
                     .foregroundStyle(AmberTheme.foreground2)
@@ -230,6 +301,37 @@ struct SyncBackupView: View {
                     .padding(.vertical, 13)
             }
         }
+    }
+
+    private func exportSettingsBackup() {
+        do {
+            let data = try IOSSyncBackup.export(settings: sharedSettings.snapshot, passphrase: passphrase)
+            exportedFile = IOSSyncBackupDocument(data: data)
+            isExportingFile = true
+        } catch {
+            alert = .error("导出失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func importSettingsBackup(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if scoped { url.stopAccessingSecurityScopedResource() }
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            let result = try IOSSyncBackup.import(data: data, passphrase: passphrase)
+            sharedSettings.restoreSnapshot(result.settings)
+            alert = .success("已导入 Settings 备份：\(result.preview.manifest.appVersionName)，\(ByteCountFormatter.string(fromByteCount: result.preview.sizeBytes, countStyle: .file))")
+        } catch {
+            alert = .error("导入失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func exportFileStamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
     }
 }
 

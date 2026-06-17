@@ -4,6 +4,7 @@ enum AmberTheme {
     static let background = Color(hex: 0xFBF7F1)
     static let surface = Color(hex: 0xF2EADE)
     static let surface2 = Color(hex: 0xE7DBCB)
+    static let card = surface
     static let foreground = Color(hex: 0x2A2320)
     static let foreground2 = Color(hex: 0x4A4039)
     static let muted = Color(hex: 0x6E6254)
