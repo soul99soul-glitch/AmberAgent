@@ -1,0 +1,10 @@
+{
+  "message": {
+    "role": "USER",
+    "parts": [
+      { "type": "text", "text": "总结附件。" },
+      { "type": "document", "url": "file://fixture/doc-001.txt", "mimeType": "text/plain", "name": "doc-001.txt" }
+    ]
+  },
+  "documentText": "第一段：鸿蒙迁移需要先做 Gate 0。\n第二段：SSE/RDB/ArkUI 是 Chat 生死门。"
+}

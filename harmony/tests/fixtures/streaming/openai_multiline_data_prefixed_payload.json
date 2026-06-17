@@ -1,0 +1,16 @@
+{
+  "source": "ChatCompletionsAPI.normalizeOpenAIStreamDataLines parity edge case",
+  "rawData": "data: {\"id\":\"x\",\"choices\":[{\"delta\":\ndata: {\"content\":\"hello\"},\"finish_reason\":null}]}",
+  "expectedPayloadCount": 1,
+  "expectedJson": {
+    "id": "x",
+    "choices": [
+      {
+        "delta": {
+          "content": "hello"
+        },
+        "finish_reason": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "expectedContains": [
+    "Summarize today's migration status.",
+    "Time:",
+    "Date:"
+  ],
+  "notes": "Exact locale/time formatting may differ; ArkTS implementation must document chosen timezone/locale."
+}

@@ -1,0 +1,48 @@
+{
+  "sourceFixture": "../messages/conversation_minimal.json",
+  "tables": {
+    "conversation": [
+      {
+        "id": "conversation-001",
+        "assistant_id": "assistant-default",
+        "title": "HarmonyOS migration spike",
+        "is_pinned": 0,
+        "auto_approve_tool_calls": 0,
+        "created_at": "2026-06-15T00:00:00Z",
+        "updated_at": "2026-06-15T00:03:00Z"
+      }
+    ],
+    "message_node": [
+      {
+        "id": "node-user-001",
+        "conversation_id": "conversation-001",
+        "position": 0,
+        "select_index": 0,
+        "is_favorite": 0
+      },
+      {
+        "id": "node-assistant-001",
+        "conversation_id": "conversation-001",
+        "position": 1,
+        "select_index": 0,
+        "is_favorite": 0
+      }
+    ],
+    "ui_message": [
+      {
+        "id": "msg-user-001",
+        "node_id": "node-user-001",
+        "position": 0,
+        "role": "USER",
+        "parts_json": "[{\"type\":\"text\",\"text\":\"先跑通鸿蒙聊天闭环。\"}]"
+      },
+      {
+        "id": "msg-assistant-001",
+        "node_id": "node-assistant-001",
+        "position": 0,
+        "role": "ASSISTANT",
+        "parts_json": "[{\"type\":\"text\",\"text\":\"先验证 SSE、RDB 和 ArkUI 流式渲染。\"}]"
+      }
+    ]
+  }
+}

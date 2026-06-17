@@ -1,0 +1,5 @@
+{"type":"delta","text":"我会先检查"}
+{"type":"tool_call","id":"call-search","name":"search_web","args":"{\"query\":\"HarmonyOS requestInStream\"}"}
+{"type":"tool_result","id":"call-search","output":"{\"items\":[{\"title\":\"HTTP request\",\"url\":\"https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/http-request\"}]}","isError":false,"durationMs":1200}
+{"type":"delta","text":"，然后给出结论。"}
+{"type":"done"}

@@ -1,0 +1,17 @@
+{
+  "source": "ai/src/test/java/app/amber/ai/provider/providers/openai/ChatCompletionsAPIMessageTest.kt",
+  "case": "stream payload normalization keeps multi-line single json payload intact",
+  "rawData": "{\"id\":\"x\",\"choices\":[{\"delta\":\n{\"content\":\"hello\"},\"finish_reason\":null}]}",
+  "expectedPayloadCount": 1,
+  "expectedJson": {
+    "id": "x",
+    "choices": [
+      {
+        "delta": {
+          "content": "hello"
+        },
+        "finish_reason": null
+      }
+    ]
+  }
+}

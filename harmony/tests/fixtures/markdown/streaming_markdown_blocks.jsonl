@@ -1,0 +1,5 @@
+{"chunk":"# 标题\n\n","expectedStableBlocks":[{"type":"heading","level":1,"text":"标题"}],"note":"Heading becomes stable after blank line."}
+{"chunk":"- 第一项\n- 第二项\n\n","expectedStableBlocks":[{"type":"list","items":["第一项","第二项"]}],"note":"List block becomes stable after blank line."}
+{"chunk":"```ts\nconst answer = 42;\n","expectedOpenBlock":{"type":"code","language":"ts","closed":false},"note":"Open code fence must not be treated as final stable block."}
+{"chunk":"console.log(answer);\n```\n\n","expectedStableBlocks":[{"type":"code","language":"ts","closed":true,"textContains":"console.log(answer);"}],"note":"Code fence becomes stable only after closing fence."}
+{"chunk":"| 能力 | 状态 |\n|---|---|\n| SSE | P0 |\n\n","expectedStableBlocks":[{"type":"table","headers":["能力","状态"],"rows":[["SSE","P0"]]}],"note":"Table block must survive streaming parse batching."}

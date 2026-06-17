@@ -1,0 +1,13 @@
+{
+  "input": {
+    "role": "USER",
+    "parts": [
+      { "type": "image", "url": "file://fixture/screen.png", "mimeType": "image/png" }
+    ]
+  },
+  "expectedFallback": {
+    "type": "text",
+    "textContains": "OCR unavailable until a HarmonyOS OCR provider or cloud OCR tool is configured."
+  },
+  "notes": "This fixture defines fallback behavior, not real OCR output."
+}

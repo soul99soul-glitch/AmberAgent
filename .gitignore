@@ -27,3 +27,6 @@ docs/cloud-design/**/.thumbnail
 
 # Local data backups — too large for GitHub, never commit
 /amberagent-notion-data-backup-*.tgz
+
+# Local deepwork notes for long-running agent sessions
+.slim/deepwork/

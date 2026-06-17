@@ -1,0 +1,15 @@
+{
+  "source": "app/src/test/java/app/amber/agent/data/ai/transformers/StreamingTailVisualTransformTest.kt",
+  "inputText": "hello <think>reasoning",
+  "expectedParts": [
+    {
+      "type": "text",
+      "text": "hello "
+    },
+    {
+      "type": "reasoning",
+      "reasoning": "reasoning",
+      "finishedAt": null
+    }
+  ]
+}

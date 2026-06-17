@@ -1,0 +1,3 @@
+{"event":"message","raw":"data: {\"id\":\"chatcmpl_reasoning\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"先分析\"},\"finish_reason\":null}]}","expected":{"reasoningDelta":"先分析","hasExplicitReasoningContentField":true}}
+{"event":"message","raw":"data: {\"id\":\"chatcmpl_reasoning\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"，再回答。\"},\"finish_reason\":null}]}","expected":{"reasoningDelta":"，再回答。","accumulatedReasoning":"先分析，再回答。"}}
+{"event":"message","raw":"data: {\"id\":\"chatcmpl_reasoning\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"答案\"},\"finish_reason\":null}]}","expected":{"textDelta":"答案","reasoningShouldBeMarkedFinished":true}}

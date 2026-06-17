@@ -1,0 +1,5 @@
+{"event":"message","raw":"data: {\"id\":\"chatcmpl_fixture\",\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}","expected":{"role":"assistant","textDelta":"","finishReason":null}}
+{"event":"message","raw":"data: {\"id\":\"chatcmpl_fixture\",\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"你好\"},\"finish_reason\":null}]}","expected":{"textDelta":"你好","finishReason":null}}
+{"event":"message","raw":"data: {\"id\":\"chatcmpl_fixture\",\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"世界\"},\"finish_reason\":null}]}","expected":{"textDelta":"世界","accumulatedText":"你好世界","finishReason":null}}
+{"event":"message","raw":"data: {\"id\":\"chatcmpl_fixture\",\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}","expected":{"finishReason":"stop"}}
+{"event":"message","raw":"data: [DONE]","expected":{"done":true}}

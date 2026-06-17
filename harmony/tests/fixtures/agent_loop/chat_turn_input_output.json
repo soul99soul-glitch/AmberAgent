@@ -1,0 +1,20 @@
+{
+  "input": {
+    "conversationId": "conversation-001",
+    "assistantId": "assistant-default",
+    "userMessage": "查 requestInStream。",
+    "autoApproveTools": false
+  },
+  "expected": {
+    "status": "completed",
+    "checkpoints": ["started", "streaming", "tool_pending", "tool_result", "final"],
+    "finalAssistantText": "我会先检查，然后给出结论。",
+    "toolCalls": [
+      {
+        "id": "call-search",
+        "name": "search_web",
+        "approvalState": "PENDING_OR_APPROVED_BY_FIXTURE"
+      }
+    ]
+  }
+}

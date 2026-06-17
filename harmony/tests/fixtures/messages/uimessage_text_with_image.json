@@ -1,0 +1,17 @@
+{
+  "id": "00000000-0000-0000-0000-000000000101",
+  "role": "USER",
+  "parts": [
+    {
+      "type": "text",
+      "text": "请描述这张图片。"
+    },
+    {
+      "type": "image",
+      "url": "file://fixture/image-001.png",
+      "mimeType": "image/png"
+    }
+  ],
+  "annotations": [],
+  "createdAt": "2026-06-15T00:00:00Z"
+}

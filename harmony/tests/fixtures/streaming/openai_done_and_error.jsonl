@@ -1,0 +1,2 @@
+{"event":"message","raw":"data: {\"error\":{\"message\":\"quota exceeded\",\"type\":\"insufficient_quota\"}}","expected":{"errorMessage":"quota exceeded","errorType":"insufficient_quota"}}
+{"event":"message","raw":"data: [DONE]","expected":{"done":true}}

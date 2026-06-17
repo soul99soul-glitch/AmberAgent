@@ -1,0 +1,22 @@
+{
+  "id": "node-branch-001",
+  "selectIndex": 1,
+  "isFavorite": false,
+  "messages": [
+    {
+      "id": "branch-a",
+      "role": "ASSISTANT",
+      "parts": [{ "type": "text", "text": "第一个回答。" }]
+    },
+    {
+      "id": "branch-b",
+      "role": "ASSISTANT",
+      "parts": [{ "type": "text", "text": "第二个回答，被选中。" }]
+    },
+    {
+      "id": "branch-c",
+      "role": "ASSISTANT",
+      "parts": [{ "type": "text", "text": "第三个回答。" }]
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "template": "{{ message }}\n\nTime: {{ time }}\nDate: {{ date }}",
+  "message": "Summarize today's migration status.",
+  "clock": "2026-06-15T08:30:00Z"
+}

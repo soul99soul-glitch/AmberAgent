@@ -1,0 +1,1 @@
+hello <think>reasoning

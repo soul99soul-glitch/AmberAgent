@@ -1,0 +1,3 @@
+{"type":"messages","update":"streaming","messages":[{"role":"USER","parts":[{"type":"text","text":"查 requestInStream。"}]},{"role":"ASSISTANT","parts":[{"type":"text","text":"我会先检查"}]}]}
+{"type":"messages","update":"streaming","messages":[{"role":"USER","parts":[{"type":"text","text":"查 requestInStream。"}]},{"role":"ASSISTANT","parts":[{"type":"text","text":"我会先检查"},{"type":"tool","toolCallId":"call-search","toolName":"search_web","input":"{\"query\":\"HarmonyOS requestInStream\"}","output":[]}]}]}
+{"type":"messages","update":"final","messages":[{"role":"USER","parts":[{"type":"text","text":"查 requestInStream。"}]},{"role":"ASSISTANT","parts":[{"type":"text","text":"我会先检查，然后给出结论。"}]}]}

@@ -1,0 +1,21 @@
+{
+  "preferencesFile": "settings",
+  "keys": {
+    "provider_config_v1": {
+      "providers": [
+        {
+          "id": "provider-openai-compatible",
+          "name": "OpenAI Compatible Fixture",
+          "baseUrl": "https://api.example.test/v1",
+          "models": ["test-model"],
+          "apiKeyRef": "secret://provider-openai-compatible/api-key"
+        }
+      ]
+    },
+    "ui_settings_v1": {
+      "theme": "system",
+      "streamingMarkdownBatchMs": 80
+    }
+  },
+  "notes": "Secrets should be stored through a secret/encrypted storage strategy, not plain preferences, if HarmonyOS provides one."
+}

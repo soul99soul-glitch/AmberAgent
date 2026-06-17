@@ -1,0 +1,9 @@
+{
+  "source": "ai/src/test/java/app/amber/ai/provider/providers/openai/ChatCompletionsAPIMessageTest.kt",
+  "case": "stream payload normalization still splits independent json lines",
+  "rawData": "{\"a\":1}\n{\"b\":2}",
+  "expectedPayloads": [
+    { "a": 1 },
+    { "b": 2 }
+  ]
+}

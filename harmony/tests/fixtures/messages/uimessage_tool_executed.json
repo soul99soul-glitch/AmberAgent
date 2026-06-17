@@ -1,0 +1,28 @@
+{
+  "id": "00000000-0000-0000-0000-000000000102",
+  "role": "ASSISTANT",
+  "parts": [
+    {
+      "type": "tool",
+      "toolCallId": "call-search",
+      "toolName": "search_web",
+      "input": "{\"query\":\"HarmonyOS NEXT ArkTS SSE\"}",
+      "approvalState": "APPROVED",
+      "output": [
+        {
+          "type": "text",
+          "text": "{\"items\":[{\"title\":\"HarmonyOS HTTP request\",\"url\":\"https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/http-request\"}]}"
+        }
+      ],
+      "metadata": {
+        "durationMs": 1200,
+        "isError": false
+      }
+    },
+    {
+      "type": "text",
+      "text": "找到了 HarmonyOS HTTP 流式请求文档。"
+    }
+  ],
+  "createdAt": "2026-06-15T00:01:00Z"
+}

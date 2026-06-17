@@ -1,0 +1,34 @@
+{
+  "id": "conversation-001",
+  "assistantId": "assistant-default",
+  "title": "HarmonyOS migration spike",
+  "isPinned": false,
+  "autoApproveToolCalls": false,
+  "createAt": "2026-06-15T00:00:00Z",
+  "updateAt": "2026-06-15T00:03:00Z",
+  "messageNodes": [
+    {
+      "id": "node-user-001",
+      "selectIndex": 0,
+      "messages": [
+        {
+          "id": "msg-user-001",
+          "role": "USER",
+          "parts": [{ "type": "text", "text": "先跑通鸿蒙聊天闭环。" }]
+        }
+      ]
+    },
+    {
+      "id": "node-assistant-001",
+      "selectIndex": 0,
+      "messages": [
+        {
+          "id": "msg-assistant-001",
+          "role": "ASSISTANT",
+          "parts": [{ "type": "text", "text": "先验证 SSE、RDB 和 ArkUI 流式渲染。" }]
+        }
+      ]
+    }
+  ],
+  "chatSuggestions": []
+}

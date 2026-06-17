@@ -1,0 +1,3 @@
+{"event":"message","raw":"data:{\"error\":{\"message\":\"unexpected end of data\"}}","expectedPayload":"{\"error\":{\"message\":\"unexpected end of data\"}}"}
+{"event":"message","raw":"data: data:{\"choices\":[]}","expectedPayload":"{\"choices\":[]}","note":"ArkTS parser should trim nested data: prefix and whitespace before JSON parse."}
+{"event":"message","raw":"data: {\"choices\":[]}   ","expectedPayload":"{\"choices\":[]}","note":"Trailing whitespace after payload should not survive normalization."}

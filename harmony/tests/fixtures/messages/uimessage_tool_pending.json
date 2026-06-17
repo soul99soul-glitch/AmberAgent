@@ -1,0 +1,18 @@
+{
+  "id": "00000000-0000-0000-0000-000000000103",
+  "role": "ASSISTANT",
+  "parts": [
+    {
+      "type": "tool",
+      "toolCallId": "call-file",
+      "toolName": "external_file_read",
+      "input": "{\"path\":\"/user/selected/report.pdf\"}",
+      "approvalState": "PENDING",
+      "output": [],
+      "metadata": {
+        "requiresUserApproval": true
+      }
+    }
+  ],
+  "createdAt": "2026-06-15T00:02:00Z"
+}

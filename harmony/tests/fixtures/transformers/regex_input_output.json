@@ -1,0 +1,13 @@
+{
+  "input": {
+    "role": "ASSISTANT",
+    "parts": [{ "type": "text", "text": "hello <think>reasoning" }]
+  },
+  "transformers": ["RegexOutputTransformer", "ThinkTagTransformer"],
+  "expected": {
+    "parts": [
+      { "type": "text", "text": "hi " },
+      { "type": "reasoning", "reasoning": "reasoning", "finishedAt": null }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+[
+  {
+    "id": "regex-hello",
+    "findRegex": "hello",
+    "replaceString": "hi",
+    "affectingScope": ["ASSISTANT"],
+    "visualOnly": false
+  }
+]
