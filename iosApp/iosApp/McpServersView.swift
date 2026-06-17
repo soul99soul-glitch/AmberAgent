@@ -496,8 +496,9 @@ struct McpAddView: View {
             AmberFormGroup {
                 McpDraftToggleRow(
                     title: "本地预览工具默认需要批准",
-                    subtitle: "保存到本机配置；工具审批策略后续由工具权限页面统一接入。",
-                    isOn: needsApproval
+                    subtitle: "暂未接入：工具审批策略后续由工具权限页面统一接入，当前对保存的服务器配置无影响。",
+                    isOn: needsApproval,
+                    disabled: true
                 ) {
                     needsApproval.toggle()
                 }
@@ -862,6 +863,7 @@ private struct McpDraftToggleRow: View {
     let title: String
     let subtitle: String
     let isOn: Bool
+    var disabled: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -870,7 +872,7 @@ private struct McpDraftToggleRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.body)
-                        .foregroundStyle(AmberTheme.foreground)
+                        .foregroundStyle(disabled ? AmberTheme.muted : AmberTheme.foreground)
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
@@ -879,6 +881,7 @@ private struct McpDraftToggleRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 McpSwitch(isOn: isOn)
+                    .opacity(disabled ? 0.5 : 1)
             }
             .frame(minHeight: 58)
             .padding(.horizontal, 14)
@@ -886,8 +889,9 @@ private struct McpDraftToggleRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
         .accessibilityLabel(title)
-        .accessibilityValue(isOn ? "开启" : "关闭")
+        .accessibilityValue(disabled ? "暂未接入" : (isOn ? "开启" : "关闭"))
     }
 }
 

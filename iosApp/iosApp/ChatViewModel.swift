@@ -296,7 +296,8 @@ final class ChatViewModel {
                     self.messages = snapshot
                     self.messageRevision &+= 1
 
-                    if let searchToolCall = self.pendingSearchToolCall(in: snapshot),
+                    if sharedSettings.snapshot.enableWebSearch,
+                       let searchToolCall = self.pendingSearchToolCall(in: snapshot),
                        self.currentToolResumeCount < self.maxToolResumeCount {
                         self.currentToolResumeCount += 1
                         self.streamJob = nil
