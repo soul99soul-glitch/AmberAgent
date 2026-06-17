@@ -33,4 +33,55 @@ final class IOSConversationStoreTests: XCTestCase {
         await store.selectConversation(id: secondConversationId)
         XCTAssertTrue(store.currentMessages.isEmpty)
     }
+
+    func testSendMessagePersistsAcrossStoreRestart() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStorePhase2Acceptance-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let firstStore = IOSConversationStore(baseDirectory: baseDirectory)
+        await firstStore.bootstrap()
+        let firstConversationId = try XCTUnwrap(firstStore.currentConversation?.id)
+
+        let firstViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        firstViewModel.conversationStore = firstStore
+        firstViewModel.reloadFromStore()
+        firstViewModel.inputText = "phase2 persistence acceptance"
+        firstViewModel.sendMessage()
+
+        let didPersistBeforeRestart = await waitFor {
+            firstStore.currentMessages.map { $0.toText() } == ["phase2 persistence acceptance"]
+        }
+        XCTAssertTrue(didPersistBeforeRestart)
+
+        let restartedStore = IOSConversationStore(baseDirectory: baseDirectory)
+        await restartedStore.bootstrap()
+        XCTAssertEqual(restartedStore.currentConversation?.id, firstConversationId)
+
+        let restartedViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        restartedViewModel.conversationStore = restartedStore
+        restartedViewModel.reloadFromStore()
+
+        XCTAssertEqual(restartedViewModel.messages.map { $0.toText() }, ["phase2 persistence acceptance"])
+    }
+
+    private func waitFor(
+        timeout: TimeInterval = 2,
+        condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return condition()
+    }
 }
