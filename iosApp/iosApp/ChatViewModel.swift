@@ -53,6 +53,7 @@ final class ChatViewModel {
     // MARK: - Private
 
     private let settingsStore: SettingsStore
+    private let sharedSettings: IOSSharedSettingsStore
     private let localToolExecutor: IOSLocalToolExecutor?
     private let autoGenerateResponses: Bool
     private let liveActivityController: AgentLiveActivityController
@@ -85,16 +86,20 @@ final class ChatViewModel {
     private var currentRunId: String?
     private var currentStartedAt: Int64?
     private var currentInputDigest: String?
+    private var currentToolResumeCount: Int = 0
+    private let maxToolResumeCount = 1
 
     // MARK: - Init
 
     init(
         settingsStore: SettingsStore,
+        sharedSettings: IOSSharedSettingsStore = IOSSharedSettingsStore(),
         localToolExecutor: IOSLocalToolExecutor? = nil,
         autoGenerateResponses: Bool = true,
         liveActivityController: AgentLiveActivityController? = nil
     ) {
         self.settingsStore = settingsStore
+        self.sharedSettings = sharedSettings
         self.localToolExecutor = localToolExecutor
         self.autoGenerateResponses = autoGenerateResponses
         self.liveActivityController = liveActivityController ?? .shared
@@ -196,6 +201,7 @@ final class ChatViewModel {
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil
+        currentToolResumeCount = 0
         isLoading = false
 
         guard let runId, let startedAt, let digest else { return }
@@ -229,33 +235,85 @@ final class ChatViewModel {
         currentRunId = runId
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
+        currentToolResumeCount = 0
         startLiveActivity(
             runId: runId,
             presentation: .generatingResponse(modelName: params.model.modelId)
         )
 
+        startStreaming(
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            uploadMessages: messages
+        )
+    }
+
+    private func startStreaming(
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        uploadMessages: [UIMessage]
+    ) {
         let accumulator = MessageStreamAccumulator(
-            initialMessages: messages,
+            initialMessages: uploadMessages,
             model: params.model
         )
+        var detectedToolCallIds = Set<String>()
 
         streamJob = provider.streamTextCancellable(
             providerSetting: providerSetting,
-            messages: messages,
+            messages: uploadMessages,
             params: params,
             onChunk: { chunk in
                 // Called sequentially from Dispatchers.Default.
                 accumulator.append(chunk: chunk)
+                let toolCalls = Self.toolCalls(in: chunk)
+                    .filter { toolCall in
+                        let key = Self.toolCallKey(toolCall)
+                        guard !detectedToolCallIds.contains(key) else { return false }
+                        detectedToolCallIds.insert(key)
+                        return true
+                    }
                 let snapshot = accumulator.snapshot()
                 Task { @MainActor [weak self] in
                     guard let self, self.currentRunId == runId else { return }
+                    if !toolCalls.isEmpty {
+                        self.handleDetectedToolCalls(toolCalls, runId: runId)
+                    }
                     self.messages = snapshot
                     self.messageRevision &+= 1
                 }
             },
             onComplete: { [weak self] in
+                let snapshot = accumulator.snapshot()
                 Task { @MainActor [weak self] in
                     guard let self, self.currentRunId == runId else { return }
+                    self.messages = snapshot
+                    self.messageRevision &+= 1
+
+                    if let searchToolCall = self.pendingSearchToolCall(in: snapshot),
+                       self.currentToolResumeCount < self.maxToolResumeCount {
+                        self.currentToolResumeCount += 1
+                        self.streamJob = nil
+                        Task { @MainActor in
+                            await self.executeSearchToolCall(
+                                searchToolCall,
+                                providerSetting: providerSetting,
+                                params: params,
+                                runId: runId,
+                                startedAt: startedAt,
+                                inputDigest: inputDigest,
+                                baseMessages: snapshot
+                            )
+                        }
+                        return
+                    }
+
                     await self.recordRun(
                         runId: runId,
                         startedAt: startedAt,
@@ -307,6 +365,110 @@ final class ChatViewModel {
         currentInputDigest = nil
         streamJob = nil
         isLoading = false
+    }
+
+    private static func toolCalls(in chunk: MessageChunk) -> [UIMessagePart.Tool] {
+        chunk.choices.flatMap { choice in
+            (choice.delta ?? choice.message)?.parts.compactMap { $0 as? UIMessagePart.Tool } ?? []
+        }
+    }
+
+    private static func toolCallKey(_ toolCall: UIMessagePart.Tool) -> String {
+        let id = toolCall.toolCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !id.isEmpty { return id }
+        return "\(toolCall.toolName):\(toolCall.input)"
+    }
+
+    private func pendingSearchToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+        for message in messages.reversed() where message.role == MessageRole.assistant {
+            if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
+                .first(where: { $0.toolName == "search_web" && $0.output.isEmpty }) {
+                return toolCall
+            }
+        }
+        return nil
+    }
+
+    private func executeSearchToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        baseMessages: [UIMessage]
+    ) async {
+        let resultText: String
+        do {
+            resultText = try await IOSSearchExecutor.execute(toolInput: toolCall.input)
+        } catch {
+            resultText = "Search failed: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+        }
+
+        guard currentRunId == runId else { return }
+        let resumedMessages = messagesByFinishingToolCall(toolCall, outputText: resultText, in: baseMessages)
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        startStreaming(
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func messagesByFinishingToolCall(
+        _ targetToolCall: UIMessagePart.Tool,
+        outputText: String,
+        in messages: [UIMessage]
+    ) -> [UIMessage] {
+        let outputPart = UIMessagePart.Text(text: outputText, metadata: nil)
+        var didFinishToolCall = false
+
+        return messages.map { message in
+            guard message.role == MessageRole.assistant else { return message }
+            var didChangeMessage = false
+            let parts = message.parts.map { part -> UIMessagePart in
+                guard !didFinishToolCall,
+                      let toolPart = part as? UIMessagePart.Tool,
+                      Self.toolCallKey(toolPart) == Self.toolCallKey(targetToolCall) else {
+                    return part
+                }
+
+                didFinishToolCall = true
+                didChangeMessage = true
+                return UIMessagePart.Tool(
+                    toolCallId: toolPart.toolCallId,
+                    toolName: toolPart.toolName,
+                    input: toolPart.input,
+                    output: [outputPart],
+                    approvalState: toolPart.approvalState,
+                    metadata: toolPart.metadata
+                )
+            }
+
+            guard didChangeMessage else { return message }
+            return UIMessage(
+                id: message.id,
+                role: message.role,
+                parts: parts,
+                annotations: message.annotations,
+                createdAt: message.createdAt,
+                finishedAt: message.finishedAt ?? nowLocalDateTime(),
+                modelId: message.modelId,
+                usage: message.usage,
+                translation: message.translation
+            )
+        }
+    }
+
+    private func handleDetectedToolCalls(_ toolCalls: [UIMessagePart.Tool], runId: String) {
+        for toolCall in toolCalls where toolCall.toolName == "search_web" {
+            print("[ChatViewModel] Detected search tool call runId=\(runId) toolCallId=\(toolCall.toolCallId) input=\(toolCall.input)")
+        }
     }
 
     private func startLiveActivity(runId: String, presentation: AgentActivityPresentation) {
@@ -399,6 +561,7 @@ final class ChatViewModel {
     private func makeTextGenerationParams() -> TextGenerationParams {
         let modelId = currentModelId
         let modelAbilities = currentModelAbilities
+        let searchEnabled = sharedSettings.snapshot.enableWebSearch
         let model = Model(
             modelId: modelId,
             displayName: modelId,
@@ -409,7 +572,7 @@ final class ChatViewModel {
             inputModalities: [],
             outputModalities: [],
             abilities: modelAbilities,
-            tools: Set<BuiltInTools>(),
+            tools: searchEnabled ? Set([BuiltInTools.Search.shared]) : Set<BuiltInTools>(),
             contextWindowTokens: nil,
             providerOverwrite: nil
         )
@@ -418,7 +581,7 @@ final class ChatViewModel {
             temperature: KotlinFloat(value: 0.7),
             topP: nil,
             maxTokens: nil,
-            tools: [],
+            tools: searchEnabled ? [ToolKt.createSearchWebToolDeclaration()] : [],
             reasoningLevel: modelAbilities.contains(.reasoning) ? reasoningLevel : .off,
             customHeaders: [],
             customBody: []

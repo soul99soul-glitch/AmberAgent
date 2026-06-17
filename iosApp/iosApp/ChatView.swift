@@ -1100,21 +1100,55 @@ struct ChatToolStepModel: Identifiable {
     let id = UUID()
     let systemImage: String
     let title: String
+    let detail: String?
     let state: ChatToolStepState
 
-    init(systemImage: String, title: String, state: ChatToolStepState) {
+    init(systemImage: String, title: String, detail: String? = nil, state: ChatToolStepState) {
         self.systemImage = systemImage
         self.title = title
+        self.detail = detail
         self.state = state
     }
 
     init(tool: UIMessagePart.Tool) {
+        if tool.toolName == "search_web" {
+            let query = Self.searchQuery(from: tool.input)
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "magnifyingglass",
+                title: executed ? "搜索完成" : "正在搜索",
+                detail: executed ? Self.searchResultSummary(from: tool.output) : query.map { "关键词：\($0)" },
+                state: executed ? .done : .active
+            )
+            return
+        }
+
         let title = tool.toolName.isEmpty ? "工具调用" : tool.toolName
         self.init(
             systemImage: Self.icon(for: title),
             title: title,
+            detail: tool.input.isEmpty ? nil : tool.input,
             state: tool.output.isEmpty ? .active : .done
         )
+    }
+
+    private static func searchQuery(from input: String) -> String? {
+        let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else { return nil }
+        if let data = trimmedInput.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let query = object["query"] as? String {
+            let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedQuery.isEmpty ? nil : trimmedQuery
+        }
+        return trimmedInput
+    }
+
+    private static func searchResultSummary(from output: [UIMessagePart]) -> String? {
+        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
+        guard !text.isEmpty else { return "已返回搜索结果" }
+        let firstLine = text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init)
+        return firstLine ?? "已返回搜索结果"
     }
 
     private static func icon(for title: String) -> String {
@@ -1146,10 +1180,19 @@ struct ChatToolTimeline: View {
                         .frame(width: 20, height: 20)
                         .background(step.state.iconFill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
 
-                    Text(step.title)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.foreground2)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(step.title)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.foreground2)
+                            .lineLimit(1)
+
+                        if let detail = step.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(.caption2)
+                                .foregroundStyle(AmberTheme.muted)
+                                .lineLimit(2)
+                        }
+                    }
 
                     Spacer(minLength: 8)
 
