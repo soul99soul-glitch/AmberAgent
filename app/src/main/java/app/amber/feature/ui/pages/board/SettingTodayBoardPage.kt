@@ -2,6 +2,8 @@ package app.amber.feature.ui.pages.board
 
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,7 +12,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -35,8 +36,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.serialization.encodeToString
@@ -44,6 +47,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.ProviderSetting
 import app.amber.agent.Screen
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
@@ -66,7 +70,7 @@ import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateReposit
 import app.amber.core.font.FontPackCategory
 import app.amber.core.font.FontPackState
 import app.amber.core.font.SlidesFontRepository
-import app.amber.feature.ui.components.ai.ModelSelector
+import app.amber.feature.ui.components.ai.ProviderAccordionModelPicker
 import app.amber.feature.ui.components.ui.NotionSlider
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -75,6 +79,7 @@ import app.amber.feature.ui.pages.setting.ExperimentDivider
 import app.amber.feature.ui.pages.setting.ExperimentSectionCard
 import app.amber.feature.ui.pages.setting.ExperimentalSettingsScaffold
 import app.amber.feature.ui.pages.setting.SettingVM
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -667,23 +672,79 @@ private fun BoardModelRow(
 ) {
     val boardModelUuid = board.boardModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
     val boardModel: Model? = boardModelUuid?.let { uuid -> settings.findModelById(uuid) }
-    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    val selectedProvider = boardModel?.findProviderForBoard(settings.providers)
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(12.dp).animateContentSize(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         Text("看板模型", style = MaterialTheme.typography.titleSmall)
-        Text(
-            if (boardModel != null) "使用 ${boardModel.displayName}" else "跟随主聊天模型",
-            style = MaterialTheme.typography.bodySmall,
-            color = workspaceColors().muted,
-        )
-        ModelSelector(
-            modelId = boardModelUuid,
-            type = ModelType.CHAT,
-            onSelect = { model -> update { it.copy(boardModelId = model.id.toString()) } },
-            providers = settings.providers,
-            allowClear = true,
-            emptyLabel = "跟随主聊天模型",
-            onClear = { update { it.copy(boardModelId = null) } },
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(20.dp).padding(2.dp)) {
+                Surface(
+                    Modifier.fillMaxSize(),
+                    RoundedCornerShape(50),
+                    color = if (boardModel == null) {
+                        MaterialTheme.colorScheme.outline
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    content = {},
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = boardModel?.displayName ?: "跟随主聊天模型",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = workspaceColors().ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = selectedProvider?.name ?: "使用当前聊天模型",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspaceColors().muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = if (expanded) "−" else "+",
+                style = LocalAmberType.current.meta.copy(
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+                color = workspaceColors().muted,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier.width(42.dp),
+            )
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
             modifier = Modifier.fillMaxWidth(),
-        )
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                ProviderAccordionModelPicker(
+                    currentModel = boardModel?.id,
+                    providers = settings.providers,
+                    modelType = ModelType.CHAT,
+                    clearLabel = "跟随主聊天模型",
+                    onClear = { update { it.copy(boardModelId = null) } },
+                    onSelect = { model -> update { it.copy(boardModelId = model.id.toString()) } },
+                    dense = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 
@@ -817,20 +878,26 @@ private fun BackgroundStrategyRow(current: TodayBoardBackgroundStrategy, onChang
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("后台策略", style = MaterialTheme.typography.titleSmall)
         listOf(
-            TodayBoardBackgroundStrategy.SMART to "智能",
-            TodayBoardBackgroundStrategy.WIFI_ONLY to "仅 WiFi",
-            TodayBoardBackgroundStrategy.FOREGROUND_ONLY to "仅前台",
-        ).forEach { (strategy, label) ->
-            RadioRow(selected = current == strategy, label = label, onClick = { onChange(strategy) })
+            Triple(TodayBoardBackgroundStrategy.SMART, "智能", "按网络与电量自动调度刷新"),
+            Triple(TodayBoardBackgroundStrategy.WIFI_ONLY, "仅 WiFi", "仅在 WiFi 环境下后台刷新"),
+            Triple(TodayBoardBackgroundStrategy.FOREGROUND_ONLY, "仅前台", "仅在 App 打开时刷新"),
+        ).forEach { (strategy, label, description) ->
+            RadioRow(
+                selected = current == strategy,
+                label = label,
+                description = description,
+                onClick = { onChange(strategy) },
+            )
         }
     }
 }
 
 @Composable
-private fun RadioRow(selected: Boolean, label: String, onClick: () -> Unit) {
+private fun RadioRow(selected: Boolean, label: String, description: String, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(Modifier.size(20.dp).padding(2.dp)) {
             Surface(
@@ -840,8 +907,10 @@ private fun RadioRow(selected: Boolean, label: String, onClick: () -> Unit) {
                 content = {},
             )
         }
-        Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = workspaceColors().ink)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+        }
     }
 }
 
@@ -863,6 +932,11 @@ private fun toggleSignalSource(
     update {
         it.copy(enabledSources = if (source in it.enabledSources) it.enabledSources - source else it.enabledSources + source)
     }
+}
+
+private fun Model.findProviderForBoard(providers: List<ProviderSetting>): ProviderSetting? {
+    providerOverwrite?.let { return it }
+    return providers.firstOrNull { provider -> provider.models.any { it.id == id } }
 }
 
 private fun FontPackCategory.label(): String =
