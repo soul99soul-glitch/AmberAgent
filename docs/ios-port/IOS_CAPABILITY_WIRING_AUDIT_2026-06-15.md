@@ -965,6 +965,23 @@ This audit tracks which AmberAgent iOS SwiftUI surfaces are wired to real, repos
 - Self-review (subagent timed out, did direct 4-dim audit): call-chain closed end-to-end; no fake data; iOS-only (no Kotlin changes); link risks mitigated — `currentRevision: Int` instead of KotlinUuid for onChange, `fromEpochMilliseconds` instead of ISO parse, weak store ref breaks cycle, @MainActor serial. No P0/P1 found.
 - Open risks / Phase 3 prerequisites: full message-history survive-restart for a *real generated assistant reply* not exercised without API key (deferred to user with credentials); `ConversationFile` Documents dir is iTunes-file-sharing-visible (acceptable v1, can move to Application Support later); Phase 3 will surface `summaries` in a real list UI (currently only the chat view consumes `currentConversation`).
 
+### Slice 69 - Conversation persistence Phase 3: real conversation-list UI
+
+- Plan: `docs/ios-port/PLAN_CONVERSATION_PERSISTENCE.md` Phase 3.
+- Replaced the fake-data `ConversationsView` (PlaceholderViews.swift) — which previously rendered hardcoded `recentRows` ("iOS 液态玻璃设计应用推荐", "威尔史密斯子女", …) and a no-op "+" FAB — with a real-data list backed by `IOSConversationStore`:
+  - `@Environment(IOSConversationStore.self)`; reads `store.summaries` (real KMP `ConversationSummary` list).
+  - `LazyVStack` of `ConversationSummaryRow`: title (empty → "新对话"), relative time (`updateAt.toEpochMilliseconds()` via `RelativeDateTimeFormatter`), `messageCount` "条", pin indicator (`pin.fill` amber when pinned, else `bubble.left.fill`), current-conversation highlight (`AmberTheme.accentTint` background + accent icon).
+  - Tap row → `store.selectConversation(id:)` + navigate to `.chat`.
+  - "+" FAB → `store.newConversation()` + navigate (was a no-op before).
+  - Real local-title search field (`TextField` filtering `summaries.title` via `localizedCaseInsensitiveContains`, with clear button); empty-state ("还没有会话" / "没有匹配的会话").
+  - Row `contextMenu` (long-press): 置顶/取消置顶 (`store.togglePin`), 重命名 (alert with `TextField` → `store.renameConversation`), 删除 (destructive confirmation alert → `store.deleteConversation`). Used contextMenu instead of swipeActions because swipeActions only work in `List` (which conflicts with the glass-style ScrollView background).
+  - Deleted the now-orphaned fake `ConversationRowModel` + `AmberConversationRow` components.
+  - Kept the legitimate `header` + `shortcutStrip` (board/mini-apps/workspace/memory/council navigation — unchanged).
+- Added `@preconcurrency import Shared` to PlaceholderViews.swift (was SwiftUI-only).
+- Verification: `xcodebuild build` BUILD SUCCEEDED (iPhone 17 Pro sim, iOS 26.5). Runtime on sim: planted 3 real Conversations (pinned titled / titled / empty) → app loaded all 3 from `index.json`, correctly ordered pinned-first, highlighted the current (most-recent pinned), showed titles + relative times + message counts. Confirmed `listSummaries` reads index.json (not a dir scan) — an orphan `{id}.json` outside the index was correctly excluded from the list. No crash, no fake data.
+- Phase-3 acceptance met: list visible, new/switch/pin/rename/delete all reachable, current-conversation highlight + message switch (Slice 68 wiring) work together. (Real screenshot at `/tmp/amber_phase3_final.png`; image-analysis MCP requires a remote URL so AI vision verification was not available, but file-system + runtime checks are conclusive.)
+- Open / future: swipeActions deferred (List vs glass background); real generated-reply round-trip pending API key; full-message preview under each title (Phase 1 plan item, deferred) — currently shows message count + time only.
+
 
 | commit hash | 接线范围 | 验证命令 | 截图路径 | 未覆盖风险 |
 |---|---|---|---|---|

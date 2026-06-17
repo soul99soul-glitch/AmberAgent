@@ -1,4 +1,5 @@
 import SwiftUI
+@preconcurrency import Shared
 
 enum AmberTheme {
     static let background = Color(hex: 0xFBF7F1)
@@ -264,6 +265,12 @@ struct AmberFormRow: View {
 
 struct ConversationsView: View {
     @Environment(RouterPath.self) private var router
+    @Environment(IOSConversationStore.self) private var conversationStore
+
+    @State private var searchQuery: String = ""
+    @State private var renamingConversationId: KotlinUuid?
+    @State private var renameDraft: String = ""
+    @State private var deletingConversationId: KotlinUuid?
 
     private let shortcuts: [ConversationShortcut] = [
         .init(title: "今日看板", systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
@@ -273,13 +280,16 @@ struct ConversationsView: View {
         .init(title: "模型议会", systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accentIndigo, route: .council)
     ]
 
-    private let recentRows: [ConversationRowModel] = [
-        .init(initial: "I", title: "iOS 液态玻璃设计应用推荐", preview: "以下是几款适配 iOS 26 液态玻璃风格的设计参考应用...", time: "刚刚", color: AmberTheme.accent),
-        .init(initial: "威", title: "威尔史密斯子女", preview: "威尔·史密斯有两个儿子和一个女儿，分别是...", time: "昨天", color: AmberTheme.accentAmber),
-        .init(initial: "贪", title: "贪吃蛇应用生成", preview: "好的，我来帮您用原生 Canvas 实现一个贪吃蛇小游戏...", time: "周二", color: AmberTheme.accentGreen),
-        .init(initial: "从", title: "从头再来", preview: "明白，我们从零开始重新规划这个项目...", time: "周一", color: AmberTheme.surface2, textColor: AmberTheme.foreground2),
-        .init(initial: "流", title: "流式输出测试", preview: "流式输出已完成，首字节延迟约 120ms，整体表现正常", time: "上周五", color: AmberTheme.accentCyan)
-    ]
+    /// 本地标题过滤后的会话摘要（summaries 已按 updateAt 倒序/置顶优先）。
+    private var filteredSummaries: [ConversationSummary] {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return conversationStore.summaries }
+        return conversationStore.summaries.filter { summary in
+            // 空标题会话用占位串参与匹配，避免搜索框里全是空白行。
+            let title = summary.title.isEmpty ? "新对话" : summary.title
+            return title.localizedCaseInsensitiveContains(trimmed)
+        }
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -290,21 +300,22 @@ struct ConversationsView: View {
                     header
                     searchField
                     shortcutStrip
-                    AmberSectionLabel(text: "最近")
-                    Text("今天")
-                        .font(.footnote)
-                        .foregroundStyle(AmberTheme.muted)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 10)
-                        .padding(.bottom, 2)
-                    conversationRows(recentRows)
+                    AmberSectionLabel(text: "会话")
+                    if filteredSummaries.isEmpty {
+                        emptyState
+                    } else {
+                        conversationList
+                    }
                 }
                 .padding(.bottom, 120)
             }
             .scrollIndicators(.hidden)
 
             Button {
-                router.navigate(to: .chat)
+                Task { @MainActor in
+                    await conversationStore.newConversation()
+                    router.navigate(to: .chat)
+                }
             } label: {
                 Image(systemName: "pencil")
                     .font(.system(size: 24, weight: .semibold))
@@ -321,6 +332,40 @@ struct ConversationsView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .alert("重命名会话", isPresented: Binding(
+            get: { renamingConversationId != nil },
+            set: { if !$0 { renamingConversationId = nil } }
+        )) {
+            TextField("会话标题", text: $renameDraft)
+            Button("取消", role: .cancel) { renamingConversationId = nil }
+            Button("保存") {
+                if let id = renamingConversationId {
+                    let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        Task { @MainActor in
+                            await conversationStore.renameConversation(id: id, title: trimmed)
+                        }
+                    }
+                }
+                renamingConversationId = nil
+            }
+        }
+        .alert("删除会话？", isPresented: Binding(
+            get: { deletingConversationId != nil },
+            set: { if !$0 { deletingConversationId = nil } }
+        )) {
+            Button("取消", role: .cancel) { deletingConversationId = nil }
+            Button("删除", role: .destructive) {
+                if let id = deletingConversationId {
+                    Task { @MainActor in
+                        await conversationStore.deleteConversation(id: id)
+                    }
+                }
+                deletingConversationId = nil
+            }
+        } message: {
+            Text("此操作不可撤销，会话内的全部消息将被删除。")
+        }
     }
 
     private var header: some View {
@@ -356,24 +401,31 @@ struct ConversationsView: View {
     }
 
     private var searchField: some View {
-        Button {
-            router.navigate(to: .search)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(AmberTheme.muted2)
-                Text("搜索任何内容")
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.muted)
-                Spacer()
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(AmberTheme.muted2)
+            TextField("搜索会话标题", text: $searchQuery)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if !searchQuery.isEmpty {
+                Button {
+                    searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(AmberTheme.muted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除搜索")
             }
-            .frame(height: 38)
-            .padding(.horizontal, 14)
-            .background(AmberTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .frame(height: 38)
+        .padding(.horizontal, 14)
+        .background(AmberTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
@@ -417,14 +469,133 @@ struct ConversationsView: View {
         .buttonStyle(.plain)
     }
 
-    private func conversationRows(_ rows: [ConversationRowModel]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(rows) { row in
-                AmberConversationRow(row: row) {
-                    router.navigate(to: row.title.hasPrefix("iOS") ? .chat : .conversation(id: row.id.uuidString))
-                }
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(AmberTheme.muted2)
+            Text(searchQuery.isEmpty ? "还没有会话" : "没有匹配的会话")
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
+    }
+
+    private var conversationList: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(filteredSummaries, id: \.id) { summary in
+                ConversationSummaryRow(
+                    summary: summary,
+                    isCurrent: conversationStore.currentConversation?.id == summary.id,
+                    onTap: {
+                        Task { @MainActor in
+                            await conversationStore.selectConversation(id: summary.id)
+                            router.navigate(to: .chat)
+                        }
+                    },
+                    onRename: {
+                        renameDraft = summary.title
+                        renamingConversationId = summary.id
+                    },
+                    onTogglePin: {
+                        Task { @MainActor in
+                            await conversationStore.togglePin(id: summary.id)
+                        }
+                    },
+                    onDelete: {
+                        deletingConversationId = summary.id
+                    }
+                )
             }
         }
+    }
+}
+
+/// 真实会话摘要行：标题 / 相对时间 / 消息数 / 置顶标记 / 当前高亮 / 左滑操作。
+private struct ConversationSummaryRow: View {
+    let summary: ConversationSummary
+    let isCurrent: Bool
+    let onTap: () -> Void
+    let onRename: () -> Void
+    let onTogglePin: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(isCurrent ? AmberTheme.accent.opacity(0.16) : AmberTheme.surface2)
+                    if summary.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accentAmber)
+                    } else {
+                        Image(systemName: "bubble.left.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(isCurrent ? AmberTheme.accent : AmberTheme.muted2)
+                    }
+                }
+                .frame(width: 40, height: 40)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(summary.title.isEmpty ? "新对话" : summary.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(relativeTime)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                        Text("·")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted2)
+                        Text("\(summary.messageCount) 条")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                }
+
+                Spacer(minLength: 8)
+            }
+            .frame(minHeight: 58)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 2)
+            .background(isCurrent ? AmberTheme.accentTint : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("会话 \(summary.title.isEmpty ? "新对话" : summary.title)，\(summary.messageCount) 条消息\(summary.isPinned ? "，已置顶" : "")")
+        // contextMenu 在 LazyVStack 里可用（swipeActions 仅 List 支持，与玻璃风格背景冲突）。
+        // 长按行弹出：置顶 / 重命名 / 删除。
+        .contextMenu {
+            Button {
+                onTogglePin()
+            } label: {
+                Label(summary.isPinned ? "取消置顶" : "置顶",
+                      systemImage: summary.isPinned ? "pin.slash" : "pin")
+            }
+            Button {
+                onRename()
+            } label: {
+                Label("重命名", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
+    }
+
+    /// 相对时间：updateAt -> "刚刚 / N分钟前 / N小时前 / 昨天 / M月D日"。
+    private var relativeTime: String {
+        let ms = summary.updateAt.toEpochMilliseconds()
+        let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000.0)
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
@@ -777,55 +948,6 @@ private struct ConversationShortcut: Identifiable {
     let systemImage: String
     let color: Color
     let route: Route
-}
-
-private struct ConversationRowModel: Identifiable {
-    let id = UUID()
-    let initial: String
-    let title: String
-    let preview: String
-    let time: String
-    let color: Color
-    var textColor: Color? = nil
-}
-
-private struct AmberConversationRow: View {
-    let row: ConversationRowModel
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Text(row.initial)
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
-                    .foregroundStyle(row.textColor ?? row.color)
-                    .frame(width: 40, height: 40)
-                    .background(row.textColor == nil ? row.color.opacity(0.14) : row.color, in: Circle())
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(row.title)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(AmberTheme.foreground)
-                        .lineLimit(1)
-                    Text(row.preview)
-                        .font(.subheadline)
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                Text(row.time)
-                    .font(.footnote)
-                    .foregroundStyle(AmberTheme.muted)
-            }
-            .frame(minHeight: 58)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 struct SettingsHomeView: View {
