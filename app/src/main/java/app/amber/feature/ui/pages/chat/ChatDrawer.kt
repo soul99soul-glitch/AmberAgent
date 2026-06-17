@@ -245,18 +245,14 @@ fun ChatDrawerContent(
                                         return@launch
                                     }
                                     val settings = settingsStore.settingsFlow.value
-                                    // Members come from the configured Council seats. With no
-                                    // seats the Room is just a host (nothing to deliberate), so
-                                    // we route the user to configure members first.
-                                    val councilSeats = settings.agentRuntime.modelCouncil.defaultSeats
-                                    if (councilSeats.isEmpty()) {
-                                        navController.navigate(Screen.SettingExperimentalModelCouncil)
-                                        return@launch
-                                    }
                                     val assistant = settings.getCurrentAssistant()
+                                    // Members come from the configured Council seats. With NONE,
+                                    // open a host-only room and let the host assemble the council
+                                    // from the user's first request (CouncilRoomManager.userMessage
+                                    // → autoAssembleSeats) instead of routing to settings.
                                     // Resolve each seat's model display name so the roster / bubbles
                                     // can show e.g. "Deepseek V4 Flash" under the member.
-                                    val guests = councilSeats.map { seat ->
+                                    val guests = settings.agentRuntime.modelCouncil.defaultSeats.map { seat ->
                                         seat.toCouncilParticipant().copy(
                                             modelName = settings.findModelById(seat.modelId)?.displayName.orEmpty(),
                                         )

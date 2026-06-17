@@ -10,7 +10,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelType
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.infra.AppScope
 import app.amber.core.settings.Settings
@@ -130,6 +136,13 @@ class CouncilRoomManager(
      * near-simultaneous user messages can't start two parallel runs.
      */
     private val autoRunConversationIds = mutableSetOf<Uuid>()
+
+    /**
+     * Conversations whose council is currently being auto-assembled by the host
+     * (the host model is picking role lenses + models for an empty room). Guarded
+     * by [jobsLock] so two near-simultaneous first messages can't double-assemble.
+     */
+    private val assemblingConversationIds = mutableSetOf<Uuid>()
 
     /**
      * Conversations where the user explicitly picked a discussion mode (via the
@@ -344,11 +357,31 @@ class CouncilRoomManager(
                 return@mutate CouncilRoomOpResult.Ok(room)
             }
             val now = nowMs()
+            // Surface the synthesis inline in the timeline as the host's final
+            // message — not only in room.synthesis (which the 综合 view reads) — so
+            // users see the summary in the message flow without opening a sheet.
+            val host = room.participants.firstOrNull { it.id == COUNCIL_ROOM_HOST_ID }
+            val messages = if (synthesis.isNotBlank() && host != null) {
+                room.messages + CouncilMessage(
+                    id = msgId(),
+                    authorId = host.id,
+                    authorName = host.name,
+                    role = host.role,
+                    round = room.round,
+                    mode = CouncilRoomMode.SYNTHESIZE,
+                    text = synthesis.take(MAX_MESSAGE_CHARS),
+                    createdAtMs = now,
+                    status = CouncilMessageStatus.COMPLETED,
+                )
+            } else {
+                room.messages
+            }
             CouncilRoomOpResult.Ok(room.copy(
                 mode = CouncilRoomMode.SYNTHESIZE,
                 status = CouncilRoomStatus.FINALIZED,
                 synthesis = synthesis,
                 warnings = warnings,
+                messages = messages,
                 finishedAtMs = now,
                 updatedAtMs = now,
             ))
@@ -502,6 +535,15 @@ class CouncilRoomManager(
             ))
         }
         if (result is CouncilRoomOpResult.Ok) {
+            // Host-only room (no seats configured): let the host assemble a council
+            // from the just-set objective before the run starts. No-op once members
+            // exist, so it only fires on the first request into an empty room.
+            val current = peekRoom(conversationId)
+            if (current != null && !current.status.terminal &&
+                current.activeGuests.isEmpty() && current.objective.isNotBlank()
+            ) {
+                autoAssembleSeats(conversationId, current.objective, settingsFlow.value)
+            }
             // Fire the automatic deliberation: members speak across rounds, then
             // the host synthesizes — no manual turn-by-turn driving. No-op if a
             // run is already in flight (mid-run interjection is handled elsewhere).
@@ -1126,6 +1168,144 @@ class CouncilRoomManager(
             else -> null
         }
     }
+
+    /**
+     * Build a council for a host-only room from [objective]. The three core seats
+     * (supporter/opponent/judge) are always included; the host model additionally
+     * picks the domain lenses that fit the topic (best-effort). Each role is
+     * assigned a chat model from the user's providers — the default model first,
+     * then the rest round-robin so a multi-model setup yields a diverse council.
+     * Members are added via [inviteParticipant] so the roster fills in live. No-op
+     * if no chat models are configured or an assembly is already running.
+     */
+    private suspend fun autoAssembleSeats(conversationId: Uuid, objective: String, settings: Settings) {
+        val claimed = jobsLock.withLock {
+            if (conversationId in assemblingConversationIds) {
+                false
+            } else {
+                assemblingConversationIds.add(conversationId)
+                true
+            }
+        }
+        if (!claimed) return
+        try {
+            val room = peekRoom(conversationId) ?: return
+            if (room.status.terminal || room.activeGuests.isNotEmpty()) return
+
+            val chatModels = settings.providers
+                .flatMap { it.models }
+                .filter { it.type == ModelType.CHAT }
+            if (chatModels.isEmpty()) return
+
+            // Let the user see the host is working before the (network) pick begins.
+            mutateRoomOrNull(conversationId) { r ->
+                r.copy(
+                    phaseMarkers = r.phaseMarkers + CouncilPhaseMarker(
+                        id = msgId(),
+                        label = "主持人正在按需求组建议会…",
+                        mode = r.mode,
+                        createdAtMs = nowMs(),
+                    ),
+                    updatedAtMs = nowMs(),
+                )
+            }
+
+            // Cap so host + guests stay within the roster limit.
+            val maxGuests = (room.maxParticipants - 1).coerceAtLeast(1)
+            // The host DESIGNS the roster for this specific objective — bespoke
+            // roles (name + perspective), not a fixed preset list. Falls back to the
+            // classic supporter/opponent/judge trio only if generation fails.
+            val roles = planRoles(room, objective, settings, maxGuests)
+                .ifEmpty { ModelCouncilRolePresets.coreSeats.map { it.name to it.prompt } }
+                .distinctBy { it.first }
+                .take(maxGuests)
+
+            val defaultModel = settings.findModelById(settings.chatModelId)
+            val ordered: List<Model> =
+                (listOfNotNull(defaultModel) + chatModels.filter { it.id != defaultModel?.id })
+                    .ifEmpty { chatModels }
+
+            roles.forEachIndexed { index, (name, perspective) ->
+                val model = ordered[index % ordered.size]
+                val invited = inviteParticipant(
+                    conversationId,
+                    CouncilParticipant(
+                        id = "auto-${Uuid.random()}",
+                        name = name,
+                        role = "auto",
+                        kind = CouncilParticipantKind.GUEST,
+                        modelId = model.id,
+                        systemPrompt = perspective.ifBlank {
+                            "请从你的角色视角对议题给出清晰、可验证、不过度发散的判断。"
+                        },
+                        modelName = model.displayName,
+                    ),
+                )
+                // Roster full or room ended — stop adding more.
+                if (invited is CouncilRoomOpResult.Err) return
+            }
+        } finally {
+            jobsLock.withLock { assemblingConversationIds.remove(conversationId) }
+        }
+    }
+
+    /**
+     * Let the host model DESIGN the council roster for [objective] — bespoke roles
+     * tailored to this specific topic (a short role name + a one-line perspective),
+     * NOT a fixed preset list. Returns (name, perspective) pairs. Best-effort:
+     * empty on any failure so the caller falls back to a sensible default. Mirrors
+     * [classifyMode]'s lightweight call.
+     */
+    private suspend fun planRoles(
+        room: CouncilRoom,
+        objective: String,
+        settings: Settings,
+        maxGuests: Int,
+    ): List<Pair<String, String>> {
+        val hostModelId = resolveHostModelId(room, settings) ?: return emptyList()
+        val prompt = buildString {
+            appendLine("你是一场多模型议会的主持人。请针对下面的议题，自主设计最合适的 2-$maxGuests 个参会角色——")
+            appendLine("不要套用固定模板，要为这个具体议题量身设计：决策/争议类可设计对抗或评审角色，探索/创作/事实类则按议题真正需要的专业视角或人格来设计。")
+            appendLine("每个角色给两项：")
+            appendLine("- name：简短角色名（中文，4-12 字，体现其立场/专长/视角）")
+            appendLine("- perspective：一句话说明这个角色从什么角度参与、重点关注什么。")
+            appendLine()
+            appendLine("议题：$objective")
+            appendLine()
+            append("只输出 JSON 数组，例如：[{\"name\":\"成本核算\",\"perspective\":\"从投入产出和长期成本评估方案是否划算。\"}]。不要解释，不要代码块。")
+        }
+        val result = runCatching {
+            withTimeoutOrNull(25_000L) {
+                modelRunner.generate(
+                    settings = settings,
+                    modelId = hostModelId,
+                    systemPrompt = "你只输出 JSON 数组，不要任何多余文字。",
+                    userPrompt = prompt,
+                    outputBudgetChars = 800,
+                    reasoningLevel = ReasoningLevel.OFF,
+                    temperature = 0.4f,
+                    onChunk = {},
+                )
+            }
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            null
+        } ?: return emptyList()
+        return parseGeneratedRoles(result.text, maxGuests)
+    }
+
+    /** Tolerant parse of the host's role JSON — strips surrounding prose / fences. */
+    private fun parseGeneratedRoles(raw: String, maxGuests: Int): List<Pair<String, String>> = runCatching {
+        val start = raw.indexOf('[')
+        val end = raw.lastIndexOf(']')
+        if (start < 0 || end <= start) return emptyList()
+        json.parseToJsonElement(raw.substring(start, end + 1)).jsonArray.mapNotNull { el ->
+            val obj = el.jsonObject
+            val name = obj["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            val perspective = obj["perspective"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            if (name.isBlank()) null else name to perspective
+        }.take(maxGuests)
+    }.getOrElse { emptyList() }
 
     /**
      * Process user messages that arrived since the watermark (mid-run interjections).

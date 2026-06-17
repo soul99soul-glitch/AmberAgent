@@ -46,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.amber.feature.modelcouncil.COUNCIL_ROOM_HOST_ID
+import app.amber.feature.modelcouncil.CouncilRoomMode
 import app.amber.feature.modelcouncil.COUNCIL_ROOM_USER_ID
 import app.amber.feature.modelcouncil.CouncilMessage
 import app.amber.feature.modelcouncil.CouncilMessageStatus
@@ -132,42 +134,38 @@ fun CouncilTimelineTab(
     val scope = rememberCoroutineScope()
     var followBottom by remember { mutableStateOf(true) }
 
-    // Re-engage follow when the viewport is parked near the bottom (reactive to
-    // both new items landing and the user scrolling back down). Breaking out of
-    // follow happens implicitly: an upward scroll drops lastVisible below the
-    // threshold, so this collector stops flipping followBottom back on.
+    // Follow engages only at the TRUE bottom (canScrollForward == false). A user
+    // scroll that leaves the bottom suspends it immediately — even a small upward
+    // swipe — so the timeline never drags the reader back down while they look
+    // around; it re-engages only when they return to the very bottom. Streaming
+    // growth re-pins programmatically (isScrollInProgress stays false), so that
+    // path never trips the "user scrolled away" branch.
     LaunchedEffect(listState) {
-        snapshotFlow {
-            val info = listState.layoutInfo
-            val total = info.totalItemsCount
-            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-            total > 0 && lastVisible >= total - 2
-        }.collect { atBottom ->
-            if (atBottom) followBottom = true
-        }
-    }
-    // A user-initiated scroll that moves away from the bottom cancels follow.
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            val info = listState.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-            val lastIndex = (info.totalItemsCount - 1).coerceAtLeast(0)
-            Triple(listState.isScrollInProgress, lastVisible, lastIndex)
-        }.collect { (scrolling, lastVisible, lastIndex) ->
-            if (scrolling) {
-                followBottom = lastVisible >= lastIndex - 1
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, canScrollForward) ->
+                when {
+                    scrolling && canScrollForward -> followBottom = false
+                    !canScrollForward -> followBottom = true
+                }
             }
-        }
     }
-    // Pin to the newest entry while following. Keyed on size, streaming state,
-    // AND streamingTail so it re-fires on every in-place chunk growth.
-    LaunchedEffect(entries.size, isStreaming, streamingTail, followBottom) {
-        if (followBottom && entries.isNotEmpty()) {
-            // Land at the very BOTTOM of the last item (a large offset is clamped to
-            // the list end). Scrolling to the item's TOP (animateScrollToItem) was the
-            // bug: once a streaming message grew taller than the viewport, its top sat
-            // at the viewport top and the growing bottom scrolled out of view.
-            listState.scrollToItem((entries.size - 1).coerceAtLeast(0), scrollOffset = 100_000)
+    // Anchor the newest content to the bottom while following. A one-shot pin
+    // handles a freshly-landed message; during an in-flight stream we re-pin EVERY
+    // FRAME so the column simply grows upward — a per-chunk scroll lagged behind
+    // fast token bursts and let new lines spill below the fold. The frame loop runs
+    // only while streaming AND following, so it stops the instant the user scrolls
+    // away (followBottom flips) or the turn finishes (isStreaming flips).
+    LaunchedEffect(entries.size, isStreaming, followBottom) {
+        if (!followBottom || entries.isEmpty()) return@LaunchedEffect
+        val lastIndex = (entries.size - 1).coerceAtLeast(0)
+        listState.scrollToItem(lastIndex, scrollOffset = 100_000)
+        if (isStreaming) {
+            while (true) {
+                withFrameNanos { }
+                if (listState.canScrollForward) {
+                    listState.scrollToItem(lastIndex, scrollOffset = 100_000)
+                }
+            }
         }
     }
 
@@ -191,7 +189,9 @@ fun CouncilTimelineTab(
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 18.dp),
+            // Extra bottom headroom so the streaming tail (and a freshly appended
+            // line) stays comfortably above the composer instead of hugging the edge.
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 64.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             if (entries.isEmpty()) {
@@ -224,6 +224,11 @@ fun CouncilTimelineTab(
                         )
                     }
                 }
+                // The actively-streaming message must NOT use animateItem: its
+                // placement animation chases the per-frame auto-scroll and the two
+                // fight, which reads as a flicker at the anchor point. Landed turns
+                // and phase markers keep the "rise" entrance / reflow.
+                val isStreamingMsg = entry is TimelineEntry.Message && entry.msg.status.running
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -233,7 +238,7 @@ fun CouncilTimelineTab(
                             // User bubble is right-aligned; pop from its trailing edge.
                             transformOrigin = TransformOrigin(1f, 0.5f)
                         }
-                        .animateItem(),
+                        .then(if (isStreamingMsg) Modifier else Modifier.animateItem()),
                 ) {
                     when (entry) {
                         is TimelineEntry.Phase -> PhaseDivider(entry.marker)
@@ -475,6 +480,11 @@ private fun TimelineMessageRow(msg: CouncilMessage, room: CouncilRoom, isTopic: 
             }
         }
     } else {
+        // The host's final synthesis is surfaced inline as a host message
+        // (mode == SYNTHESIZE). Give it its own look — a neutral surface card with
+        // an accent frame + "综合结论" kicker — so it reads as the conclusion and
+        // doesn't get confused with the green topic ("命题") or ordinary host turns.
+        val isSynthesis = isHost && msg.mode == CouncilRoomMode.SYNTHESIZE
         val modelLabel = remember(room.participants, msg.authorId) {
             room.participantById(msg.authorId)?.modelLabel().orEmpty()
         }
@@ -497,11 +507,32 @@ private fun TimelineMessageRow(msg: CouncilMessage, room: CouncilRoom, isTopic: 
                 SubAgentAvatar(id = msg.authorId, name = msg.authorName, avatarSize = 34.dp)
                 AuthorLabel(msg, isHost, modelLabel)
             }
+            if (isSynthesis) {
+                Text(
+                    text = "综合结论",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = chatTheme.accent,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
             MessageBubble(
                 msg = msg,
-                container = if (isHost) chatTheme.accentSoft else chatTheme.surface,
-                content = if (isHost) chatTheme.accentDeep else chatTheme.ink,
-                borderColor = if (isHost) chatTheme.accentTint else chatTheme.surfaceEdge,
+                container = when {
+                    isSynthesis -> chatTheme.surface
+                    isHost -> chatTheme.accentSoft
+                    else -> chatTheme.surface
+                },
+                content = when {
+                    isSynthesis -> chatTheme.ink
+                    isHost -> chatTheme.accentDeep
+                    else -> chatTheme.ink
+                },
+                borderColor = when {
+                    isSynthesis -> chatTheme.accent
+                    isHost -> chatTheme.accentTint
+                    else -> chatTheme.surfaceEdge
+                },
                 shape = bubbleShape,
             )
             ReferenceFootnotes(msg, room, alignEnd = false)

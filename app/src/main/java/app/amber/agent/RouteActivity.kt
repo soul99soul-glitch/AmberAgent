@@ -451,10 +451,10 @@ class RouteActivity : ComponentActivity() {
                                 )
                             }
 
-                            entry<Screen.CouncilRoom>(
-                                metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
-                                        + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
-                            ) { key ->
+                            // No transition override: fall back to NavDisplay's default
+                            // slide-in/slide-out push (and default pop) so entering the
+                            // Council Room animates exactly like the Stats page.
+                            entry<Screen.CouncilRoom> { key ->
                                 CouncilRoomPage(conversationId = key.conversationId)
                             }
 

@@ -3,7 +3,16 @@ package app.amber.feature.ui.pages.councilroom
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -25,8 +35,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -45,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -58,6 +67,7 @@ import app.amber.core.files.FilesManager
 import app.amber.feature.modelcouncil.CouncilParticipant
 import app.amber.feature.modelcouncil.CouncilParticipantStatus
 import app.amber.feature.modelcouncil.CouncilRoom
+import app.amber.feature.modelcouncil.running
 import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -71,6 +81,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
+import me.rerere.hugeicons.stroke.Image02
 import org.koin.compose.koinInject
 
 /**
@@ -100,7 +111,7 @@ fun CouncilRoomComposer(
     // cleared on send. Picked files are first copied into app storage so their
     // local uris stay valid after the picker grant is gone.
     val attachments = remember { mutableStateListOf<UIMessagePart>() }
-    var attachMenuOpen by remember { mutableStateOf(false) }
+    var attachExpanded by remember { mutableStateOf(false) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents(),
@@ -219,45 +230,93 @@ fun CouncilRoomComposer(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
-                // Attach — surface2 circle (46dp) anchoring an image / file menu.
+                // Attach — surface2 capsule that expands to the right into inline
+                // image / file actions (+ rotates to ×), mirroring the main chat
+                // composer instead of popping a dropdown menu.
                 val attachInteraction = remember { MutableInteractionSource() }
-                Box {
+                val addRotation by animateFloatAsState(
+                    targetValue = if (attachExpanded) 45f else 0f,
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                    label = "councilAttachToggleRotation",
+                )
+                Row(
+                    modifier = Modifier
+                        .height(46.dp)
+                        .clip(CircleShape)
+                        .background(tokens.surface2)
+                        .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Box(
                         modifier = Modifier
                             .size(46.dp)
                             .councilPressBounce(attachInteraction)
                             .clip(CircleShape)
-                            .background(tokens.surface2)
                             .clickable(interactionSource = attachInteraction, indication = null) {
-                                attachMenuOpen = true
+                                attachExpanded = !attachExpanded
                             },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = HugeIcons.Add01,
                             contentDescription = "添加附件",
-                            tint = tokens.ink3,
-                            modifier = Modifier.size(24.dp),
+                            tint = if (attachExpanded) tokens.accent else tokens.ink3,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer { rotationZ = addRotation },
                         )
                     }
-                    DropdownMenu(
-                        expanded = attachMenuOpen,
-                        onDismissRequest = { attachMenuOpen = false },
+                    AnimatedVisibility(
+                        visible = attachExpanded,
+                        enter = fadeIn(animationSpec = tween(160)) + scaleIn(
+                            initialScale = 0.92f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        ),
+                        exit = fadeOut(animationSpec = tween(120)) + scaleOut(
+                            targetScale = 0.94f,
+                            animationSpec = tween(160, easing = FastOutSlowInEasing),
+                        ),
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("图片") },
-                            onClick = {
-                                attachMenuOpen = false
-                                imagePickerLauncher.launch("image/*")
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("文件") },
-                            onClick = {
-                                attachMenuOpen = false
-                                filePickerLauncher.launch(arrayOf("*/*"))
-                            },
-                        )
+                        Row(
+                            modifier = Modifier.padding(end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        attachExpanded = false
+                                        imagePickerLauncher.launch("image/*")
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Image02,
+                                    contentDescription = "图片",
+                                    tint = tokens.ink3,
+                                    modifier = Modifier.size(23.dp),
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        attachExpanded = false
+                                        filePickerLauncher.launch(arrayOf("*/*"))
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.File02,
+                                    contentDescription = "文件",
+                                    tint = tokens.ink3,
+                                    modifier = Modifier.size(23.dp),
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -300,13 +359,24 @@ fun CouncilRoomComposer(
                 }
 
                 // Send — flat circle (46dp); accent fill when there's a draft.
+                // While the council is actively producing output AND the draft is
+                // empty, this flips to a red STOP button that cancels the run
+                // (vm.close keeps the partial discussion). A non-empty draft always
+                // sends, so the user can still drop a mid-run interjection.
                 val sendInteraction = remember { MutableInteractionSource() }
                 val armed = textFieldValue.text.isNotBlank() || attachments.isNotEmpty()
+                val running = room.status.running && room.messages.any { it.role != "user" }
+                val showStop = running && !armed
+                // Mirror the main chat composer's send/stop button exactly: an
+                // accent-filled circle with a white glyph — ArrowUp to send, Cancel01
+                // (×) to stop; neutral surface only when idle with an empty draft.
                 val sendFill by animateColorAsState(
-                    if (armed) tokens.accent else tokens.surface2, label = "council-send-fill",
+                    if (!armed && !showStop) tokens.surface2 else tokens.accent,
+                    label = "council-send-fill",
                 )
                 val sendIconTint by animateColorAsState(
-                    if (armed) Color.White else tokens.ink3, label = "council-send-tint",
+                    if (!armed && !showStop) tokens.ink3 else Color.White,
+                    label = "council-send-tint",
                 )
                 Box(
                     modifier = Modifier
@@ -314,7 +384,15 @@ fun CouncilRoomComposer(
                         .councilPressBounce(sendInteraction)
                         .clip(CircleShape)
                         .background(sendFill)
-                        .clickable(interactionSource = sendInteraction, indication = null, enabled = armed) {
+                        .clickable(
+                            interactionSource = sendInteraction,
+                            indication = null,
+                            enabled = showStop || armed,
+                        ) {
+                            if (showStop) {
+                                vm.close()
+                                return@clickable
+                            }
                             val text = textFieldValue.text.trim()
                             if (text.isNotEmpty() || attachments.isNotEmpty()) {
                                 val resolved = mentionTargets.filter { pid ->
@@ -328,13 +406,13 @@ fun CouncilRoomComposer(
                         }
                         .semantics {
                             role = Role.Button
-                            contentDescription = "发送"
+                            contentDescription = if (showStop) "停止" else "发送"
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = HugeIcons.ArrowUp02,
-                        contentDescription = "发送",
+                        imageVector = if (showStop) HugeIcons.Cancel01 else HugeIcons.ArrowUp02,
+                        contentDescription = if (showStop) "停止" else "发送",
                         tint = sendIconTint,
                         modifier = Modifier.size(22.dp),
                     )
