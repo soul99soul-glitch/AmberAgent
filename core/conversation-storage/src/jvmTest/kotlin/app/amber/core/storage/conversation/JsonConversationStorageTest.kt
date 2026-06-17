@@ -6,6 +6,7 @@ import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import kotlinx.coroutines.test.runTest
+import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -201,6 +202,20 @@ class JsonConversationStorageTest {
         tempDir.child("${id}.json").writeText("{ broken")
 
         assertNull(storage.loadConversation(id), "损坏文件应返回 null，不抛异常")
+    }
+
+    @Test
+    fun atomicWriteReplacesContentWithoutLeakingTempFiles() = runTest {
+        val file = tempDir.child("atomic.json")
+
+        file.writeText("first")
+        file.writeText("second")
+
+        assertEquals("second", file.readText())
+        val tempFiles = File(tempDir.path).listFiles { candidate ->
+            candidate.name.startsWith("atomic.json") && candidate.name.endsWith(".tmp")
+        }.orEmpty()
+        assertTrue(tempFiles.isEmpty(), "atomic write tmp files must be cleaned up")
     }
 
     // ---- 构造助手 ----

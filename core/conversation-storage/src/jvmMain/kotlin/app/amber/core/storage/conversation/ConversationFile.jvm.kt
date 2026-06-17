@@ -1,6 +1,8 @@
 package app.amber.core.storage.conversation
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 actual class ConversationFile actual constructor(actual val path: String) {
 
@@ -13,11 +15,28 @@ actual class ConversationFile actual constructor(actual val path: String) {
     actual fun delete(): Boolean = file.delete()
 
     actual fun writeText(text: String) {
-        // File.writeText 内部走 tmp 文件 + rename（FileOutputStream + 系统调用），
-        // 在常见 JVM 文件系统上等价于原子写。若需更强保证可换
-        // java.nio.file.Files.write(..., StandardOpenOption.ATOMIC_MOVE)，
-        // 但当前规模无必要。
-        file.writeText(text)
+        val parent = file.parentFile
+        if (parent != null && !parent.isDirectory) parent.mkdirs()
+        val tmp = File.createTempFile(file.name, ".tmp", parent)
+        try {
+            tmp.writeText(text)
+            runCatching {
+                Files.move(
+                    tmp.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE,
+                )
+            }.getOrElse {
+                Files.move(
+                    tmp.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete()
+        }
     }
 
     actual fun readText(): String? =
