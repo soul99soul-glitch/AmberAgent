@@ -19,6 +19,7 @@ struct ChatView: View {
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
     @State private var sharedSettings = IOSSharedSettingsStore()
     @State private var pasteHintShown = false
+    @Environment(IOSConversationStore.self) private var conversationStore
 
     init(settingsStore: SettingsStore, localToolExecutor: IOSLocalToolExecutor? = nil) {
         self.settingsStore = settingsStore
@@ -54,6 +55,16 @@ struct ChatView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
+            viewModel.conversationStore = conversationStore
+            viewModel.reloadFromStore()
+        }
+        // 会话切换（store.currentRevision 变化）时重新灌入历史消息。
+        // 用 Int 修订号而非 KotlinUuid——后者是否被 Swift 当作 Equatable 不可靠。
+        .onChange(of: conversationStore.currentRevision) { _, _ in
+            viewModel.reloadFromStore()
+        }
     }
 
     private var navBar: some View {
@@ -72,9 +83,10 @@ struct ChatView: View {
 
             AmberGlassCircleButton(systemImage: "square.and.pencil", accessibilityLabel: "新建对话", size: 38, symbolSize: 16) {
                 viewModel.cancelGeneration()
-                viewModel.messages.removeAll()
-                viewModel.messageRevision &+= 1
-                viewModel.inputText = ""
+                Task { @MainActor in
+                    await conversationStore.newConversation()
+                    viewModel.reloadFromStore()
+                }
             }
         }
         .padding(.horizontal, 16)

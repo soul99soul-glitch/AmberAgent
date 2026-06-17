@@ -36,6 +36,15 @@ final class ChatViewModel {
     var reasoningLevel: ReasoningLevel = .off
     var messageRevision: Int = 0
 
+    /// 持久化存储（由 AppShell 注入）。nil 时退化为纯内存模式（向后兼容旧调用方）。
+    weak var conversationStore: IOSConversationStore?
+
+    /// 当前会话 id，与 conversationStore.currentConversation.id 同步。
+    /// 留作快速访问；切换会话后由 reloadFromStore() 刷新。
+    var currentConversationId: KotlinUuid? {
+        conversationStore?.currentConversation?.id
+    }
+
     var contextSnapshot: ChatContextSnapshot {
         ChatContextSnapshot(
             messageCount: messages.count,
@@ -107,6 +116,23 @@ final class ChatViewModel {
 
     // MARK: - Actions
 
+    /// 从 store 的 currentConversation 灌入 messages（切换会话 / App 启动时调用）。
+    /// 必须在主线程；调用方负责确保 store 已 bootstrap。
+    func reloadFromStore() {
+        guard let store = conversationStore else { return }
+        messages = store.currentMessages
+        messageRevision &+= 1
+    }
+
+    /// 把当前 messages 落盘（节流：只在流式结束/取消/切换时调，不在每个 chunk 调）。
+    private func persistMessages() {
+        guard let store = conversationStore else { return }
+        let snapshot = messages
+        Task { @MainActor in
+            await store.saveCurrent(messages: snapshot)
+        }
+    }
+
     func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isAttachingSelectedFile else { return }
@@ -119,6 +145,8 @@ final class ChatViewModel {
         inputText = ""
         pendingSelectedFilePreview = nil
         selectedFileContextError = nil
+        // 用户消息立即落盘：即使随后生成崩溃/被杀进程，用户输入也不会丢。
+        persistMessages()
         guard autoGenerateResponses else { return }
         generateResponse(inputDigest: digest)
     }
@@ -216,6 +244,8 @@ final class ChatViewModel {
                 status: "interrupted",
                 inputDigest: digest
             )
+            // 持久化已生成的部分消息——用户取消后，半截回复仍应留存在历史里。
+            self.persistMessages()
         }
     }
 
@@ -325,6 +355,7 @@ final class ChatViewModel {
                         runId: runId,
                         presentation: .completed()
                     )
+                    self.persistMessages()
                     self.finishStreaming()
                 }
             },
@@ -354,6 +385,7 @@ final class ChatViewModel {
                         runId: runId,
                         presentation: .failed()
                     )
+                    self.persistMessages()
                     self.finishStreaming()
                 }
             }

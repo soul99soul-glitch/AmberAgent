@@ -14,6 +14,7 @@ struct AppShell: View {
     @State private var providerRegistry: ProviderRegistryStore
     @State private var sharedSettings: IOSSharedSettingsStore
     @State private var mcpConfigStore: IOSMcpConfigStore
+    @State private var conversationStore: IOSConversationStore
     @State private var rootRouter = RouterPath()
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = "light"
 
@@ -35,6 +36,7 @@ struct AppShell: View {
         self._providerRegistry = State(initialValue: ProviderRegistryStore(settingsStore: settingsStore))
         self._sharedSettings = State(initialValue: IOSSharedSettingsStore())
         self._mcpConfigStore = State(initialValue: IOSMcpConfigStore())
+        self._conversationStore = State(initialValue: IOSConversationStore())
     }
 
     var body: some View {
@@ -55,8 +57,15 @@ struct AppShell: View {
             sheetView(sheet)
         }
         .environment(rootRouter)
+        .environment(conversationStore)
         .tint(AmberTheme.accent)
         .preferredColorScheme(preferredColorScheme)
+        .task {
+            // 启动时引导会话存储：加载历史摘要，选最近一条或新建。
+            // 仅做一次——SwiftUI .task 在 view identity 存活期间重启时会重跑，
+            // 但 bootstrap 是幂等的（选最近一条 / 无历史新建）。
+            await conversationStore.bootstrap()
+        }
     }
 
     private var preferredColorScheme: ColorScheme? {
