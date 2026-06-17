@@ -23,6 +23,14 @@
 # keep kotlinx serializable classes
 -keep @kotlinx.serialization.Serializable class * {*;}
 
+# JNI: the native reader-extractor lib (libreader_extractor.so) constructs this
+# class via JNI new_object with signature (String,String,String,int). R8 can't
+# see the native caller, so in a minified (release) build it shrinks/rewrites the
+# "unused" constructor — find_class still resolves (we keep names via
+# -dontobfuscate) but new_object then hits NoSuchMethodError and the native layer
+# aborts (SIGABRT) the moment DeepRead extracts an article. Keep its ctor+fields.
+-keep class app.amber.feature.deepread.nativebridge.ExtractedArticle { *; }
+
 # keep jlatexmath
 -keep class org.scilab.forge.jlatexmath.** {*;}
 
