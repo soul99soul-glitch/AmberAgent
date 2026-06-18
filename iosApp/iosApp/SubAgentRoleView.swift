@@ -170,7 +170,7 @@ struct SubAgentRoleView: View {
                 }
             }
 
-            SubAgentRoleFootnote(text: "Android/KMP 的角色页会写 SubAgentOverride 并同步 subagent markdown；iOS 当前没有 Settings.agentRuntime.subAgent bridge，因此不显示保存、恢复默认或删除操作。")
+            SubAgentRoleFootnote(text: "systemPrompt 覆盖已接：下方\"角色覆盖\"区可保存/删除并持久化到 snapshot.agentRuntime.subAgent.overrides（重启保留）。modelId/reasoningLevel/turns 等字段仍待接（本页未暴露编辑入口）。")
         }
     }
 
@@ -194,10 +194,14 @@ struct SubAgentRoleView: View {
 
 
 
-    /// Saved subagent role overrides (UserDefaults persisted).
+    /// [Slice 4] Saved subagent role overrides. add/remove now merge a real
+    /// SubAgentOverride into snapshot.agentRuntime.subAgent.overrides via
+    /// IosSettingsMutations.putSubAgentOverride/removeSubAgentOverride +
+    /// restoreSnapshot — survives restart. (Only systemPrompt is writable from
+    /// this form; modelId/reasoningLevel/turns are not edited here.)
     private var savedOverridesSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "角色覆盖（UserDefaults · 可读写）")
+            AmberSectionLabel(text: "角色覆盖（systemPrompt 持久化到 snapshot.agentRuntime.subAgent）")
             AmberFormGroup {
                 let overrides = sharedSettings.savedSubAgentOverrides.filter { $0["roleId"] == detail.roleId }
                 ForEach(Array(overrides.enumerated()), id: \.offset) { index, override in
@@ -269,11 +273,15 @@ private struct SubAgentRoleDetail {
                 value: "执行待接",
                 color: AmberTheme.accentAmber
             ),
+            // [Slice 4] systemPrompt 覆盖已接：上方"保存角色覆盖"经
+            // IosSettingsMutations.putSubAgentOverride 合并进
+            // snapshot.agentRuntime.subAgent.overrides 并 restoreSnapshot 全量落盘，
+            // 重启保留；按行删除亦持久化（4 XCTest 验证）。
             .init(
                 title: "systemPrompt",
-                subtitle: "KMP 支持角色提示词覆盖并写入 subagent markdown；iOS 当前不保存本地预览。",
-                value: "执行待接",
-                color: AmberTheme.accentAmber
+                subtitle: "已接：保存角色覆盖经 IosSettingsMutations.putSubAgentOverride 合并进 snapshot.agentRuntime.subAgent.overrides（重启保留）。",
+                value: "已接",
+                color: AmberTheme.accentGreen
             ),
             .init(
                 title: "turns / timeout / outputBudget",

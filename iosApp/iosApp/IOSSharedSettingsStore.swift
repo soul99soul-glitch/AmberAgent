@@ -305,7 +305,18 @@ final class IOSSharedSettingsStore {
         set { defaults.set(newValue, forKey: subAgentOverridesKey) }
     }
 
+    /// [Slice 4] Now merges a real SubAgentOverride into
+    /// `snapshot.agentRuntime.subAgent.overrides` via
+    /// `IosSettingsMutations.putSubAgentOverride`, then `restoreSnapshot`.
+    /// Survives restart. The legacy `savedSubAgentOverrides` mirror is kept in
+    /// sync (records roleId for removal) for backward-compatible readers.
     func addSubAgentOverride(roleId: String, systemPrompt: String) {
+        let merged = IosSettingsMutations.shared.putSubAgentOverride(
+            settings: snapshot,
+            roleId: roleId,
+            systemPrompt: systemPrompt
+        )
+        restoreSnapshot(merged)
         var overrides = savedSubAgentOverrides
         overrides.append([
             "id": UUID().uuidString,
@@ -315,11 +326,20 @@ final class IOSSharedSettingsStore {
         savedSubAgentOverrides = overrides
     }
 
+    /// [Slice 4] Removes from BOTH the snapshot (via removeSubAgentOverride by
+    /// roleId) and the legacy mirror.
     func removeSubAgentOverride(at index: Int) {
         var overrides = savedSubAgentOverrides
         guard index >= 0 && index < overrides.count else { return }
-        overrides.remove(at: index)
+        let removed = overrides.remove(at: index)
         savedSubAgentOverrides = overrides
+        if let roleId = removed["roleId"] {
+            let merged = IosSettingsMutations.shared.removeSubAgentOverride(
+                settings: snapshot,
+                roleId: roleId
+            )
+            restoreSnapshot(merged)
+        }
     }
 
     // MARK: - Real seeded collections (for UI display)

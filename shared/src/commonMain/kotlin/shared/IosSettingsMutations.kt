@@ -6,6 +6,7 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.core.settings.Settings
 import app.amber.feature.modelcouncil.ModelCouncilSeat
 import app.amber.feature.modelcouncil.ModelCouncilSeatRunner
+import app.amber.feature.subagent.SubAgentOverride
 import app.amber.search.SearchServiceOptions
 import app.amber.tts.provider.TTSProviderSetting
 
@@ -22,18 +23,6 @@ import app.amber.tts.provider.TTSProviderSetting
  *
  * These are pure functions: they take a snapshot and return a new snapshot;
  * they never touch UserDefaults. The iOS store owns durability.
- *
- * NOTE: SubAgent overrides (`Settings.subAgent.overrides`) are NOT wired
- * here. Empirically, accessing `settings.subAgent` from the `:shared`
- * module fails to compile ("Unresolved reference 'subAgent'") even though
- * `settings.agentRuntime` (same Settings.kt, adjacent field) resolves. The
- * `:core:types` Settings field `subAgent: SubAgentRuntimeSetting` pulls its
- * type from `:feature:subagent:api`, and the `:shared` dependency graph
- * (`:feature:subagent` main module -> `:core:types` -> `:feature:subagent:api`)
- * produces metadata where that field is not visible to `:shared`. This is a
- * module-visibility problem worth a dedicated KMP cleanup, not something to
- * force-clone in Swift. Until then, the SubAgentRoleView edit markers stay
- * 待接 (honestly preserved).
  */
 @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
 object IosSettingsMutations {
@@ -207,6 +196,44 @@ object IosSettingsMutations {
             // persisted and editable. Honest — the iOS form offers known types.
             else -> SearchServiceOptions.TavilyOptions(id = id, apiKey = apiKey)
         }
+    }
+
+    // ---- SubAgent overrides (settings.agentRuntime.subAgent.overrides) ----
+    // NOTE: the path is agentRuntime.subAgent (subAgent is a field of
+    // AgentRuntimeSetting, not of Settings directly — Settings only carries
+    // agentRuntime). This compiles fine from :shared.
+
+    /**
+     * Put a [SubAgentOverride] for [roleId] into
+     * `agentRuntime.subAgent.overrides`. Only [systemPrompt] is writable from
+     * iOS in this slice; other override fields keep their defaults. Returns a
+     * new [Settings]; caller persists via restoreSnapshot.
+     */
+    fun putSubAgentOverride(
+        settings: Settings,
+        roleId: String,
+        systemPrompt: String,
+    ): Settings {
+        val sub = settings.agentRuntime.subAgent
+        val existing = sub.overrides[roleId]
+        val merged = (existing ?: SubAgentOverride()).copy(systemPrompt = systemPrompt)
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                subAgent = sub.copy(overrides = sub.overrides + (roleId to merged))
+            )
+        )
+    }
+
+    /** Remove a sub-agent override for [roleId]; no-op if not found. */
+    fun removeSubAgentOverride(settings: Settings, roleId: String): Settings {
+        val sub = settings.agentRuntime.subAgent
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                subAgent = sub.copy(
+                    overrides = sub.overrides.filterKeys { it != roleId }
+                )
+            )
+        )
     }
 
     // ---- helpers ----
