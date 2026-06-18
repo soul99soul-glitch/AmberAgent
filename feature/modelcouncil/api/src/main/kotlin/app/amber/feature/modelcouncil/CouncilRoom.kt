@@ -149,6 +149,18 @@ val CouncilMessageStatus.running: Boolean
     get() = this == CouncilMessageStatus.PENDING || this == CouncilMessageStatus.STREAMING
 
 /**
+ * Optional discriminator for special host messages. Default null = a normal
+ * turn (the overwhelmingly common case). [ASK_USER] marks a host message that
+ * is actually a question to the user — the timeline renders an answer card
+ * instead of a bubble, and [CouncilRoomManager.runAutoOrchestration] is
+ * suspended until the user answers.
+ */
+@Serializable
+enum class CouncilMessageKind {
+    @SerialName("ask_user") ASK_USER,
+}
+
+/**
  * One entry in the Room timeline. This is NOT a UIMessage — it's an internal
  * event-stream entry owned by the Room state machine, persisted inside
  * ConversationEntity.council_state.
@@ -190,6 +202,13 @@ data class CouncilMessage(
      * they can read file contents. NOT shown in the bubble (the chip is).
      */
     @SerialName("attachment_text") val attachmentText: String = "",
+    /**
+     * Optional message discriminator. null = a normal turn. [CouncilMessageKind.ASK_USER]
+     * = the host is asking the user a question (timeline renders an answer card, the
+     * orchestration is suspended). Defaulted null so old persisted council_state
+     * decodes without migration.
+     */
+    val kind: CouncilMessageKind? = null,
 )
 
 /**

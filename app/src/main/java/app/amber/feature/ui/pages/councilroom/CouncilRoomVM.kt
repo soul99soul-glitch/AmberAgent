@@ -113,6 +113,16 @@ class CouncilRoomVM(
     }
 
     /**
+     * Answer a host ask_user question and resume the suspended council. Called
+     * from the timeline's answer card ([CouncilAskUserCard]).
+     */
+    fun resumeAfterUserAnswer(answer: String) {
+        viewModelScope.launch {
+            manager.resumeAfterUserAnswer(cid, answer)
+        }
+    }
+
+    /**
      * Discard the current (usually finished) deliberation and start a brand-new
      * council in the same conversation, seeded from the latest configured seats.
      * Mirrors the drawer's open flow: close (force terminal + evict) → openRoom

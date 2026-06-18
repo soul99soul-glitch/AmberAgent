@@ -24,10 +24,18 @@ object CouncilRoomPrompts {
 
     // ── shared building blocks ─────────────────────────────────────────────
 
-    fun hostSystemPrompt(room: CouncilRoom): String = """
+    /**
+     * @param hasTools true when the host will actually be able to call tools this
+     *   turn (FULL mode's pre-topic research). The "硬性边界" block then describes
+     *   the tool set instead of asserting "you have no tools" — which otherwise
+     *   contradicts the tools passed in [TextGenerationParams] and the host simply
+     *   parrots "我没有工具" instead of searching. Default false: most host turns
+     *   (opening / review / synthesis) are pure-text and genuinely tool-less.
+     */
+    fun hostSystemPrompt(room: CouncilRoom, hasTools: Boolean = false): String = """
         你是 AmberAgent Council Room 的主持人（Host）。
         当前议题：${room.objective}
-        ${if (room.context.isBlank()) "" else "背景：${room.context}\n"}
+        ${backgroundSection(room)}
         当前模式：${modeName(room.mode)}
         参与者：${room.participants.joinToString("、") { "${it.name}（${it.role}）" }}
 
@@ -37,8 +45,14 @@ object CouncilRoomPrompts {
         - 不替嘉宾下结论；综合时只基于已给出的证据。
 
         硬性边界：
+        ${if (hasTools) """
+        - 你可以使用以下工具：search_web（联网搜索）、scrape_web（抓取网页）、time（获取当前时间）。
+        - 对时效性/事实性议题（新发布、最新数据、项目现状、近期事件）请主动调用搜索/抓取工具获取准确信息，不要凭记忆作答。
+        - 其余未列出的工具一律不可用；不要声称检查了未实际通过工具获取的文件/网页/私有数据。
+        """.trimIndent() else """
         - 你没有工具。
         - 不要声称检查了文件/网页/私有数据，除非证据已在讨论中给出。
+        """.trimIndent()}
     """.trimIndent()
 
     fun guestSystemPrompt(room: CouncilRoom, guest: CouncilParticipant): String = """
@@ -66,7 +80,7 @@ object CouncilRoomPrompts {
      */
     fun exploreOpening(room: CouncilRoom, guest: CouncilParticipant): String = """
         议题：${room.objective}
-        ${if (room.context.isBlank()) "" else "背景：${room.context}\n"}
+        ${backgroundSection(room)}
 
         这是发散（Explore）阶段。请作为「${guest.name}」贡献你的视角：
         - 给出 idea（想法）、signal（信号）、question（待解问题）或 possibility（可能性）。
@@ -99,7 +113,7 @@ object CouncilRoomPrompts {
     /** DEBATE opening: guest takes a stance (claim). */
     fun debateOpening(room: CouncilRoom, guest: CouncilParticipant): String = """
         议题：${room.objective}
-        ${if (room.context.isBlank()) "" else "背景：${room.context}\n"}
+        ${backgroundSection(room)}
 
         这是辩论（Debate）阶段。请作为「${guest.name}」表明立场：
         - 给出 claim（主张）、counterpoint（反例）、risk（风险）或 evidence（证据）。
@@ -158,7 +172,7 @@ object CouncilRoomPrompts {
      */
     fun synthesize(room: CouncilRoom): String = """
         议题：${room.objective}
-        ${if (room.context.isBlank()) "" else "背景：${room.context}\n"}
+        ${backgroundSection(room)}
 
         讨论记录（嘉宾发言）：
         ${room.messages
@@ -186,7 +200,7 @@ object CouncilRoomPrompts {
      */
     fun hostOpeningPrompt(room: CouncilRoom): String = """
         议题（来自发起人）：${room.objective}
-        ${if (room.context.isBlank()) "" else "背景：${room.context}\n"}
+        ${backgroundSection(room)}
         当前模式：${modeName(room.mode)}
         参与成员：${room.participants
             .filter { it.kind == CouncilParticipantKind.GUEST }
@@ -248,36 +262,44 @@ object CouncilRoomPrompts {
     """.trimIndent()
 
     /**
-     * FULL mode: host's pre-synthesis RESEARCH turn. Before synthesizing, the host
-     * may call read-only tools (search_web / scrape_web) to fill factual gaps or
-     * verify claims made during the discussion. The output is a short research
-     * summary that gets appended as a host message — which the subsequent
-     * synthesis turn then sees as part of the record.
+     * FULL mode: host's PRE-TOPIC research turn — runs BEFORE the council
+     * deliberates, so that facts (recent releases, benchmarks, project status,
+     * specific data) enter the room BEFORE members speak. This is the fix for the
+     * "members discuss glm5.2 with no training-data knowledge" problem: the host
+     * gathers the facts first, they land in [CouncilRoom.context] (the "背景"
+     * field every member/synthesis prompt renders), AND the research summary is
+     * appended as a host message so [appendSteeringNote] injects it into later
+     * rounds too.
      *
-     * Crucially the host decides whether research is even needed: if the
-     * discussion is self-contained, it should answer directly without tools.
-     * Tool budget is enforced by the caller ([CouncilHostToolProvider]).
+     * The host should ALWAYS try to gather concrete facts for the topic; the
+     * caller (CouncilHostToolProvider) gates availability on a configured search
+     * provider. Output = a concise factual digest (200-400 chars, with sources)
+     * that becomes the room's shared fact base. If the topic genuinely needs no
+     * external facts, the host says so in one line — but for time-sensitive /
+     * factual / recent topics (new model releases, latest benchmarks, project
+     * status, recent news) it MUST search and scrape.
      */
-    fun hostResearchPrompt(room: CouncilRoom): String = """
-        议题：${room.objective}
+    fun hostPreTopicResearchPrompt(room: CouncilRoom): String = """
+        议题（来自发起人）：${room.objective}
 
-        已完成的讨论（嘉宾发言节选）：
-        ${room.messages
-            .filter {
-                it.authorId != COUNCIL_ROOM_HOST_ID &&
-                    it.authorId != COUNCIL_ROOM_USER_ID &&
-                    it.status == CouncilMessageStatus.COMPLETED
-            }
-            .takeLast(8)
-            .joinToString("\n\n") { it.summaryBlock(limit = 500) }}
+        你是多模型议会的主持人。在指挥成员讨论之前，请先为全员建立一个共同的事实底座。
 
-        你现在要为综合结论做准备。请判断：
-        - 讨论中是否存在事实性缺口、过时信息、未经验证的关键主张，或需要最新外部信息（如近期事件、项目现状、最新数据）？
-        - 如果是，用 search_web 搜索、或用 scrape_web 抓取相关页面来补全/核验。
-        - 如果讨论本身已经充分、自洽、不需要外部信息，就直接输出"无需补充调研"并结束，不要为了用工具而用工具。
+        判断这个议题是否需要外部事实：
+        - 如果涉及近期事件、新发布、具体数据、项目现状、最新评测结果（例如新模型发布、最新 benchmark、最新产品能力、近期新闻），你必须用 search_web 搜索、用 scrape_web 抓取相关页面来获取准确、最新的信息。
+        - 议题里的成员模型（包括你自己）训练数据往往不包含最新内容，所以时效性/事实性议题务必先查，不要凭记忆作答。
+        - 只有纯主观/创作/抽象议题才可能不需要查。
 
-        完成调研后，用几句话总结你查到的、对综合有用的关键事实（带来源）；如果没查，就说明为什么不需要。
-        保持克制，只补真正缺失的信息。
+        如何检索（重要）：
+        - 多维度、多关键词：复杂议题不要只搜一次。按议题的关键维度分别检索（例如评价一个新模型，应分别搜索：发布与概览、benchmark/评测、代码与推理能力、中文/特定语言能力、价格与上下文窗口等），每个维度用聚焦的关键词单独搜一次。
+        - 不要人为限制结果数：调用 search_web 时不要传过小的 max_results，让搜索服务返回足够的候选（默认配置已设好），你需要从较多结果里挑选最相关的，必要时用 scrape_web 抓取详情页核对。
+        - 深度优先：对每个维度，优先看是否有权威来源、具体数据；摘要不够就 scrape 详情页。
+
+        完成检索后，输出一份 200-400 字的关键事实摘要，作为后续全员讨论的共同事实底座：
+        - 按维度组织，只陈述查到的客观事实（能力数据、发布信息、关键评测结果等），带来源。
+        - 不要加入你的评价或结论——那是后续成员和综合阶段的事。
+        - 如果确实无需外部事实，就用一句话说明，并简述原因。
+
+        这份摘要会被写入"背景"，供全体成员、命题、综合共同参考。
     """.trimIndent()
 
     /**
@@ -305,6 +327,7 @@ object CouncilRoomPrompts {
 
         作为主持人，判断这一轮是否需要你的点评与引导：
         - 如果出现了矛盾、错误信息、明显偏离议题、或关键信息缺口，请给出简短点评：指出问题在哪、下一步该聚焦什么、哪些已被证伪可以剔除、哪些需要深化。
+        - 如果发现需要向用户澄清的关键问题（议题目标本身有歧义、用户的偏好/约束/取舍需要明确、继续讨论缺少一个用户才知道的前提），输出一行以 $ASK_USER_SENTINEL 开头，紧跟你要问用户的问题（一句话，直接可答）。此时议会会暂停，等用户回答后再继续。
         - 如果本轮信息已充分收敛、没有需要纠正或补充的方向，就只输出一行：$NO_COMMENT_SENTINEL（不要输出其他任何内容）。
 
         你的点评会作为指引传给下一轮成员，帮助他们基于已积累的结论继续深化。简洁、聚焦、可执行。
@@ -313,7 +336,22 @@ object CouncilRoomPrompts {
     /** Sentinel the host emits when a round needs no commentary. */
     const val NO_COMMENT_SENTINEL = "[no_comment]"
 
+    /**
+     * Sentinel the host emits (at the start of the line) when it wants to ask the
+     * user a clarifying question during the end-of-round review. The text AFTER the
+     * sentinel is the question to display. e.g. `[ask_user] 你更关注 glm5.2 的代码能力还是中文表现？`
+     */
+    const val ASK_USER_SENTINEL = "[ask_user]"
+
     // ── helpers ────────────────────────────────────────────────────────────
+
+    /**
+     * Shared "背景：…" block rendered by every prompt that wants room.context.
+     * Empty string (renders nothing) when no background is set, so prompts stay
+     * clean in the common no-context case. Used by host/member/synthesis prompts.
+     */
+    private fun backgroundSection(room: CouncilRoom): String =
+        if (room.context.isBlank()) "" else "背景：${room.context}\n"
 
     private fun modeName(mode: CouncilRoomMode): String = when (mode) {
         CouncilRoomMode.EXPLORE -> "发散（Explore）"

@@ -104,7 +104,7 @@ class AppCouncilHostToolProvider(
             }
             streamed.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             if (streamed.getOrNull() == null) {
-                warnings += "Host tool turn timed out after ${timeoutMs}ms."
+                warnings += "主持人调研超时（${timeoutMs}ms）。"
             }
 
             messages = accumulator.snapshot()
@@ -137,7 +137,7 @@ class AppCouncilHostToolProvider(
                     ?.joinToString("") { it.text }
                     .orEmpty()
                     .take(outputBudgetChars)
-                warnings += "Host reached the $maxToolRounds-round tool budget; stopping with partial info."
+                warnings += "主持人已完成 $maxToolRounds 轮调研，基于已获取的信息继续。"
                 return HostToolOutcome.Done(finalText, warnings)
             }
 

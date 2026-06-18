@@ -162,6 +162,16 @@ class CouncilRoomManager(
      */
     private val interjectionWatermarks = mutableMapOf<Uuid, Long>()
 
+    /**
+     * Per-conversation pending ask_user awaiter. When the host asks the user a
+     * question (FULL mode), [runAutoOrchestration] suspends on
+     * [awaitUserAnswer], which parks a [CompletableDeferred] here. The user's
+     * answer via [resumeAfterUserAnswer] completes it, un-suspending the loop.
+     * [close] cancels it so a closing room tears the awaiter down cleanly. Guarded
+     * by [jobsLock].
+     */
+    private val pendingAskUser = mutableMapOf<Uuid, kotlinx.coroutines.CompletableDeferred<String>>()
+
     /** Per-conversation mutation lock; prevents races between host actions / user input. */
     private val locks = mutableMapOf<Uuid, Mutex>()
     private val locksLock = Mutex()
@@ -250,7 +260,7 @@ class CouncilRoomManager(
                 participants = participants,
                 phaseMarkers = listOf(CouncilPhaseMarker(
                     id = msgId(),
-                    label = phaseOpenLabel(initialMode),
+                    label = modeLabel(initialMode) + " · Opening",
                     mode = initialMode,
                     createdAtMs = now,
                 )),
@@ -543,12 +553,17 @@ class CouncilRoomManager(
             ))
         }
         if (result is CouncilRoomOpResult.Ok) {
-            // Host-only room (no seats configured): let the host assemble a council
-            // from the just-set objective before the run starts. No-op once members
-            // exist, so it only fires on the first request into an empty room.
             val current = peekRoom(conversationId)
+            // STANDARD mode: assemble the council immediately (the original path).
+            // FULL mode: DEFER assembly to runAutoOrchestration, so it runs AFTER the
+            // host's pre-topic research turn — that way the bespoke roles are tailored
+            // to the facts the host actually found, not generic presets. The deferred
+            // call lives in runAutoOrchestration (gated on activeGuests.isEmpty()).
+            val isFullMode = settingsFlow.value.agentRuntime.modelCouncil.councilPowerMode ==
+                CouncilPowerMode.FULL
             if (current != null && !current.status.terminal &&
-                current.activeGuests.isEmpty() && current.objective.isNotBlank()
+                current.activeGuests.isEmpty() && current.objective.isNotBlank() &&
+                !isFullMode
             ) {
                 autoAssembleSeats(conversationId, current.objective, settingsFlow.value)
             }
@@ -558,37 +573,6 @@ class CouncilRoomManager(
             maybeStartAutoRun(conversationId)
         }
         return result
-    }
-
-    /**
-     * Append a host message (the room owner speaking). Used by host-action
-     * routing in PR2 (e.g. "DeepSeek，你先从推理角度判断"). The host's actual
-     * text generation is PR2; PR1 exposes this so the wiring is testable.
-     */
-    suspend fun hostMessage(
-        conversationId: Uuid,
-        text: String,
-    ): CouncilRoomOpResult = mutate(conversationId) { room ->
-        if (room.status.terminal) {
-            return@mutate CouncilRoomOpResult.Err("room_terminal", "Room has ended.")
-        }
-        if (text.isBlank()) return@mutate CouncilRoomOpResult.Ok(room)
-        val now = nowMs()
-        val host = room.host ?: return@mutate CouncilRoomOpResult.Err("no_host", "Host participant missing.")
-        CouncilRoomOpResult.Ok(room.copy(
-            messages = room.messages + CouncilMessage(
-                id = msgId(),
-                authorId = host.id,
-                authorName = host.name,
-                role = host.role,
-                round = room.round,
-                mode = room.mode,
-                text = text.take(MAX_MESSAGE_CHARS),
-                createdAtMs = now,
-                status = CouncilMessageStatus.COMPLETED,
-            ),
-            updatedAtMs = now,
-        ))
     }
 
     /**
@@ -858,6 +842,86 @@ class CouncilRoomManager(
         return CouncilRoomOpResult.Ok(updatedRoom)
     }
 
+    // ── ask_user (FULL mode HITL) ───────────────────────────────────────────
+
+    /**
+     * FULL mode: suspend the orchestration until the user answers a host question.
+     * Called from [runAutoOrchestration] when the host emits an ask_user (either
+     * during the pre-topic research turn or the end-of-round review). Parks a
+     * [CompletableDeferred] in [pendingAskUser]; [resumeAfterUserAnswer] completes
+     * it; [close] cancels it.
+     *
+     * The host's question is already persisted as a COMPLETED CouncilMessage with
+     * [CouncilMessageKind.ASK_USER] (so the timeline shows the answer card) BEFORE
+     * this is called — this function only does the waiting.
+     *
+     * Bounded by the room's total timeout as a safety net so a deferred that's
+     * never completed (e.g. a crash in the answer path) can't leak the coroutine
+     * forever. Returns null on timeout; the caller treats that as "no answer" and
+     * continues the council.
+     */
+    private suspend fun awaitUserAnswer(conversationId: Uuid): String? {
+        val deferred = kotlinx.coroutines.CompletableDeferred<String>()
+        jobsLock.withLock { pendingAskUser[conversationId] = deferred }
+        return try {
+            val room = peekRoom(conversationId)
+            val bound = room?.totalTimeoutMs?.coerceAtLeast(60_000L) ?: Long.MAX_VALUE / 2
+            kotlinx.coroutines.withTimeoutOrNull(bound) { deferred.await() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // close() cancelled the awaiting job — propagate so the loop dies.
+            throw e
+        } finally {
+            jobsLock.withLock { pendingAskUser.remove(conversationId) }
+        }
+    }
+
+    /**
+     * Resume a council paused on [awaitUserAnswer] by submitting the user's answer.
+     * Appends the answer as a normal USER CouncilMessage (so the next round's
+     * buildAutoPrompt / appendSteeringNote pick it up automatically), then completes
+     * the parked deferred to un-suspend [runAutoOrchestration]. Also flips the room
+     * status back from INTERRUPTED to the mode-appropriate running status.
+     *
+     * No-op (returns Err) if no ask_user is pending for this conversation.
+     */
+    suspend fun resumeAfterUserAnswer(
+        conversationId: Uuid,
+        answer: String,
+    ): CouncilRoomOpResult {
+        val deferred = jobsLock.withLock { pendingAskUser.remove(conversationId) }
+            ?: return CouncilRoomOpResult.Err("no_pending_question", "No pending ask_user for this room.")
+        val result = mutate(conversationId) { room ->
+            if (room.status.terminal) {
+                return@mutate CouncilRoomOpResult.Err("room_terminal", "Room has ended.")
+            }
+            val now = nowMs()
+            val userMessage = CouncilMessage(
+                id = msgId(),
+                authorId = COUNCIL_ROOM_USER_ID,
+                authorName = "You",
+                role = "user",
+                round = room.round,
+                mode = room.mode,
+                text = answer.take(MAX_MESSAGE_CHARS),
+                createdAtMs = now,
+                status = CouncilMessageStatus.COMPLETED,
+            )
+            CouncilRoomOpResult.Ok(room.copy(
+                messages = room.messages + userMessage,
+                // Flip back from INTERRUPTED (set when the host asked) to the
+                // running status for the current mode so the UI shows live again.
+                status = if (room.status == CouncilRoomStatus.INTERRUPTED) {
+                    statusForMode(room.mode)
+                } else {
+                    room.status
+                },
+                updatedAtMs = now,
+            ))
+        }
+        deferred.complete(answer)
+        return result
+    }
+
     // ── automatic orchestration ─────────────────────────────────────────────
 
     /**
@@ -870,7 +934,17 @@ class CouncilRoomManager(
      */
     private suspend fun maybeStartAutoRun(conversationId: Uuid) {
         val room = peekRoom(conversationId) ?: return
-        if (room.status.terminal || room.activeGuests.isEmpty()) return
+        if (room.status.terminal) return
+        // FULL mode defers roster assembly into runAutoOrchestration (after the
+        // pre-topic research), so a FULL-mode room legitimately has no guests yet at
+        // this point — it must still be allowed to start the orchestration, which
+        // will research → assemble → run. STANDARD mode assembles eagerly in
+        // sendUserMessage, so for it the empty-guests guard still means "nothing to
+        // run" and we bail. Without this distinction FULL-mode rooms deadlock:
+        // empty → don't start → never assemble.
+        val isFullMode = settingsFlow.value.agentRuntime.modelCouncil.councilPowerMode ==
+            CouncilPowerMode.FULL
+        if (!isFullMode && room.activeGuests.isEmpty()) return
         val claimed = jobsLock.withLock {
             if (conversationId in autoRunConversationIds || conversationId in closingConversationIds) {
                 false
@@ -913,21 +987,38 @@ class CouncilRoomManager(
         val settings = settingsFlow.value
         val initial = peekRoom(conversationId) ?: return
         val totalRounds = initial.maxRounds.coerceIn(1, MAX_ROUNDS_CAP)
-        val guestIds = initial.activeGuests.map { it.id }
+
+        // FULL mode: gather external facts BEFORE any deliberation. The research
+        // summary lands in room.context (the "背景" field every member/host/
+        // synthesis prompt renders) and as a host message (so appendSteeringNote
+        // injects it into later rounds). Runs before roster assembly so the bespoke
+        // roles can be tailored to what the host actually found. STANDARD mode and
+        // no-search-provider both no-op here. See runPreTopicResearch.
+        if (initial.activeGuests.isEmpty()) {
+            // FULL mode defers roster assembly to here (after research); STANDARD
+            // already assembled in sendUserMessage. autoAssembleSeats is itself a
+            // no-op once members exist, so this is safe for both paths.
+            runPreTopicResearch(conversationId, settings)
+            autoAssembleSeats(conversationId, initial.objective, settings)
+        }
+
+        val seeded = peekRoom(conversationId) ?: return
+        val guestIds = seeded.activeGuests.map { it.id }
         if (guestIds.isEmpty()) return
 
         // Interjection watermark = the topic message; anything the user sends AFTER
         // this is a mid-run interjection handled between turns.
-        val startWatermark = initial.messages
+        val startWatermark = seeded.messages
             .filter { it.authorId == COUNCIL_ROOM_USER_ID }
             .maxOfOrNull { it.createdAtMs } ?: 0L
         jobsLock.withLock { interjectionWatermarks[conversationId] = startWatermark }
 
         // Auto-detect the discussion mode from the topic — unless the user already
-        // picked one via the dropdown (recorded in [userModeOverrideIds]).
+        // picked one via the dropdown (recorded in [userModeOverrideIds]). Done on
+        // the post-research room so detection can use the gathered facts too.
         val userPickedMode = jobsLock.withLock { conversationId in userModeOverrideIds }
         if (!userPickedMode) {
-            classifyMode(initial, settings)?.let { detected ->
+            classifyMode(seeded, settings)?.let { detected ->
                 mutateRoomOrNull(conversationId) { room ->
                     if (room.mode == detected) {
                         room
@@ -1001,7 +1092,36 @@ class CouncilRoomManager(
             ) {
                 val reviewRoom = peekRoom(conversationId) ?: return
                 if (!reviewRoom.status.terminal) {
-                    runHostReviewTurn(conversationId, reviewRoom, round, totalRounds, settings)
+                    val question = runHostReviewTurn(conversationId, reviewRoom, round, totalRounds, settings)
+                    // Host wants to ask the user a clarifying question. Persist it
+                    // as an ASK_USER host message, flip the room to INTERRUPTED, and
+                    // suspend until the user answers (resumeAfterUserAnswer appends
+                    // the answer as a USER message + flips status back). The next
+                    // round's buildAutoPrompt / appendSteeringNote then see the
+                    // answer for free — no extra wiring.
+                    if (question != null) {
+                        val askRoom = peekRoom(conversationId) ?: return
+                        val host = askRoom.host ?: return
+                        mutateRoomOrNull(conversationId) { r ->
+                            r.copy(
+                                messages = r.messages + CouncilMessage(
+                                    id = msgId(),
+                                    authorId = host.id,
+                                    authorName = host.name,
+                                    role = host.role,
+                                    round = round,
+                                    mode = r.mode,
+                                    text = question,
+                                    createdAtMs = nowMs(),
+                                    status = CouncilMessageStatus.COMPLETED,
+                                    kind = CouncilMessageKind.ASK_USER,
+                                ),
+                                status = CouncilRoomStatus.INTERRUPTED,
+                                updatedAtMs = nowMs(),
+                            )
+                        } ?: return
+                        awaitUserAnswer(conversationId)
+                    }
                 }
             }
         }
@@ -1039,52 +1159,20 @@ class CouncilRoomManager(
             )
         } ?: return
         val councilSetting = settings.agentRuntime.modelCouncil
-        // FULL mode: before synthesizing, let the host run an optional tool-augmented
-        // RESEARCH turn to fill factual gaps / verify claims. The research summary
-        // streams into the timeline as a host message (so the user sees the host
-        // working), AND its text is explicitly injected into the synthesis turn's
-        // system prompt below — because CouncilRoomPrompts.synthesize() deliberately
-        // filters OUT host messages, relying on room.messages alone would hide the
-        // research from the verdict (review Q3). Skipped entirely in STANDARD mode,
-        // or when no search provider is configured (isAvailable gate).
-        var researchSummary: String? = null
-        if (councilSetting.councilPowerMode == CouncilPowerMode.FULL &&
-            toolProvider.isAvailable(settings)
-        ) {
-            val researchRoom = peekRoom(conversationId) ?: return
-            researchSummary = runHostToolTurn(
-                conversationId = conversationId,
-                hostModelId = hostModelId,
-                systemPrompt = CouncilRoomPrompts.hostSystemPrompt(researchRoom),
-                userPrompt = CouncilRoomPrompts.hostResearchPrompt(researchRoom),
-                settings = settings,
-                maxToolRounds = 2,
-                kindLabel = "Host research",
-            )
-        }
-        // Re-read so synthesis sees the research message (if any) in the record.
+        // Synthesis. External facts were already gathered BEFORE the deliberation
+        // (FULL mode's runPreTopicResearch, which wrote them into room.context — the
+        // "背景" field synthesize() renders). So there's no pre-synthesis research
+        // turn here any more: discussing first and gathering facts only at synthesis
+        // left the whole deliberation fact-free, which is why the pre-synthesis
+        // research was removed. Synthesis just reads the (fact-enriched) record.
         val finalSynthRoom = peekRoom(conversationId) ?: return
-        // Compose the synthesis extra prompt: user's static host supplement + the
-        // research summary (if the host produced one). The research text is the
-        // channel by which tool results reach the verdict, since synthesize() filters
-        // host-authored messages out of its discussion record.
-        val synthExtraPrompt = buildString {
-            if (councilSetting.hostSystemPrompt.isNotBlank()) {
-                append(councilSetting.hostSystemPrompt.trim())
-            }
-            researchSummary?.takeIf { it.isNotBlank() }?.let { summary ->
-                if (isNotEmpty()) append("\n\n")
-                append("—— 主持人综合前调研摘要（基于联网搜索/抓取，请在综合时参考这些事实并标明来源）——\n")
-                append(summary.trim())
-            }
-        }.toString()
         executor.generateSynthesis(
             room = finalSynthRoom,
             hostModelId = hostModelId,
             hostSystemPrompt = CouncilRoomPrompts.hostSystemPrompt(finalSynthRoom),
             settings = settings,
             reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
-            extraSystemPrompt = synthExtraPrompt,
+            extraSystemPrompt = councilSetting.hostSystemPrompt,
         )
     }
 
@@ -1342,6 +1430,16 @@ class CouncilRoomManager(
             appendLine("- perspective：一句话说明这个角色从什么角度参与、重点关注什么。")
             appendLine()
             appendLine("议题：$objective")
+            // FULL mode: if the host already ran a pre-topic research turn, the
+            // gathered facts live in room.context. Feed them to the roster planner so
+            // the bespoke roles are tailored to what was actually found (e.g. once the
+            // host has glm5.2 benchmark data, "代码推理手"/"中文体验派" become grounded
+            // choices instead of generic "基准评测派"/"产品落地官").
+            if (room.context.isNotBlank()) {
+                appendLine()
+                appendLine("已查到的关键事实（请据此选择最契合的分析视角，而非泛泛角色）：")
+                appendLine(room.context.take(2000))
+            }
             appendLine()
             append("只输出 JSON 数组，例如：[{\"name\":\"成本核算\",\"perspective\":\"从投入产出和长期成本评估方案是否划算。\"}]。不要解释，不要代码块。")
         }
@@ -1464,6 +1562,92 @@ class CouncilRoomManager(
             reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
             extraSystemPrompt = councilSetting.hostSystemPrompt,
         )
+    }
+
+    /**
+     * FULL mode: PRE-TOPIC host research turn. Runs BEFORE mode classification,
+     * roster assembly, and the host opening — so external facts (recent releases,
+     * benchmarks, project status) enter the room BEFORE any member speaks. This is
+     * the fix for "members discuss glm5.2 with no training-data knowledge": the
+     * host gathers the facts first.
+     *
+     * The research summary is persisted into [CouncilRoom.context] (the "背景"
+     * field every member opening / host opening / synthesis prompt renders), AND it
+     * is already appended as a host message by [runHostToolTurn], so
+     * [appendSteeringNote] also injects it into later-round member prompts — two
+     * channels covering the whole deliberation.
+     *
+     * No-op (returns without side effects) when:
+     *   - power mode != FULL, or
+     *   - no search provider is configured ([toolProvider.isAvailable] gate), or
+     *   - the host produced no usable summary (the host judged the topic self-
+     *     contained; an honest placeholder message still lands in the timeline).
+     *
+     * @param conversationId the room to research into.
+     * @return the research summary text, or null if none was produced. The caller
+     *   (runAutoOrchestration) does NOT need this — context is already written —
+     *   but it is returned for testability.
+     */
+    private suspend fun runPreTopicResearch(
+        conversationId: Uuid,
+        settings: Settings,
+    ): String? {
+        val councilSetting = settings.agentRuntime.modelCouncil
+        if (councilSetting.councilPowerMode != CouncilPowerMode.FULL) return null
+        if (!toolProvider.isAvailable(settings)) return null
+
+        val room = peekRoom(conversationId) ?: return null
+        if (room.status.terminal) return null
+        val hostModelId = resolveHostModelId(room, settings) ?: return null
+
+        // Surface to the user that the host is gathering facts before discussing.
+        mutateRoomOrNull(conversationId) { r ->
+            r.copy(
+                phaseMarkers = r.phaseMarkers + CouncilPhaseMarker(
+                    id = msgId(),
+                    label = "主持人正在联网调研…",
+                    mode = r.mode,
+                    createdAtMs = nowMs(),
+                ),
+                updatedAtMs = nowMs(),
+            )
+        } ?: return null
+
+        val researchRoom = peekRoom(conversationId) ?: return null
+        val summary = runHostToolTurn(
+            conversationId = conversationId,
+            hostModelId = hostModelId,
+            systemPrompt = CouncilRoomPrompts.hostSystemPrompt(researchRoom, hasTools = true),
+            userPrompt = CouncilRoomPrompts.hostPreTopicResearchPrompt(researchRoom),
+            settings = settings,
+            // Give the host latitude for several search+scrape cycles so it can
+            // cover multiple dimensions of a complex topic (e.g. for a new model:
+            // overview → benchmark → specific capability → detail-page scrape).
+            // 2 rounds was too shallow — the host could only "search once, maybe
+            // scrape once", missing whole dimensions. With ~30 results/round (the
+            // user's searchCommonOptions.resultSize), 4 rounds give the host plenty
+            // of room to build a complete fact base before the council deliberates.
+            maxToolRounds = 4,
+            kindLabel = "Host research",
+        ) ?: return null
+
+        // Fold the summary into room.context — the shared fact base that every
+        // member opening / host opening / synthesis prompt renders. Truncated to
+        // MAX_CONTEXT_CHARS so a very long research digest can't blow up prompt size.
+        if (summary.isNotBlank()) {
+            mutateRoomOrNull(conversationId) { r ->
+                // Only set if blank: never overwrite an existing non-empty context
+                // (defensive — there is no UI that sets it today, but a future caller
+                // might pass an explicit background, and we shouldn't clobber it).
+                val merged = if (r.context.isBlank()) {
+                    summary.trim().take(MAX_CONTEXT_CHARS)
+                } else {
+                    (r.context.trim() + "\n\n—— 主持人调研补充 ——\n" + summary.trim()).take(MAX_CONTEXT_CHARS)
+                }
+                r.copy(context = merged, updatedAtMs = nowMs())
+            }
+        }
+        return summary
     }
 
     /**
@@ -1627,18 +1811,40 @@ class CouncilRoomManager(
                 }
             }
             is HostToolOutcome.AskUser -> {
-                // Step 4 will wire the HITL flow; for now skip gracefully so the
-                // council can still finish. Mark the placeholder as completed-empty.
+                // The host wants to ask the user a clarifying question during
+                // research. Surface it as an ASK_USER CouncilMessage (timeline
+                // shows the answer card), flip the room to INTERRUPTED so the UI
+                // reflects "waiting", then suspend until the user answers. The
+                // answer is appended as a normal USER message (picked up by the
+                // subsequent roster/opening/rounds via appendSteeringNote) and the
+                // room resumes its running status. We return null (no research
+                // summary) — the user's clarification IS the contribution here.
+                val question = outcome.displayQuestion.trim().ifBlank {
+                    "请补充说明你的需求。"
+                }
                 completeMessage(
                     conversationId = conversationId,
                     messageId = messageId,
                     status = CouncilMessageStatus.COMPLETED,
-                    text = "",
-                    warnings = listOf("Host asked a question; HITL not yet wired — skipped."),
+                    text = question,
+                    warnings = emptyList(),
                     error = "",
                     authorId = host.id,
                     authorStatus = CouncilParticipantStatus.IDLE,
                 )
+                // Re-mark the just-completed message with kind = ASK_USER so the
+                // timeline renders the answer card instead of a plain bubble.
+                mutate(conversationId) { r ->
+                    val updated = r.messages.map { m ->
+                        if (m.id == messageId) m.copy(kind = CouncilMessageKind.ASK_USER) else m
+                    }
+                    CouncilRoomOpResult.Ok(r.copy(
+                        messages = updated,
+                        status = CouncilRoomStatus.INTERRUPTED,
+                        updatedAtMs = nowMs(),
+                    ))
+                }
+                awaitUserAnswer(conversationId)
                 null
             }
         }
@@ -1662,12 +1868,12 @@ class CouncilRoomManager(
         round: Int,
         totalRounds: Int,
         settings: Settings,
-    ) {
+    ): String? {
         val councilSetting = settings.agentRuntime.modelCouncil
-        val hostModelId = resolveHostModelId(room, settings) ?: return
-        val host = room.host ?: return
+        val hostModelId = resolveHostModelId(room, settings) ?: return null
+        val host = room.host ?: return null
         // Generate the review text OFFLINE (no streaming into the timeline yet):
-        // we only surface it if it isn't the no-comment sentinel.
+        // we only surface it if it isn't a sentinel.
         val result = runCatching {
             kotlinx.coroutines.withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
                 modelRunner.generate(
@@ -1684,11 +1890,18 @@ class CouncilRoomManager(
         }.getOrElse { error ->
             if (error is kotlinx.coroutines.CancellationException) throw error
             null
-        } ?: return
+        } ?: return null
         val text = result.text.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty()) return null
         // Sentinel → host decided this round needs no commentary. Skip silently.
-        if (CouncilRoomPrompts.NO_COMMENT_SENTINEL in text) return
+        if (CouncilRoomPrompts.NO_COMMENT_SENTINEL in text) return null
+        // ask_user sentinel → host wants to ask the user a question. The text after
+        // the sentinel is the question. Do NOT append a review message here — the
+        // caller persists the question as an ASK_USER CouncilMessage and suspends.
+        if (CouncilRoomPrompts.ASK_USER_SENTINEL in text) {
+            val question = text.substringAfter(CouncilRoomPrompts.ASK_USER_SENTINEL).trim()
+            return question.ifBlank { "请补充说明你的需求。" }
+        }
         // Append the review as a COMPLETED host message. It becomes the latest
         // steer, which appendSteeringNote picks up for the next round's guests.
         val now = nowMs()
@@ -1710,6 +1923,7 @@ class CouncilRoomManager(
                 updatedAtMs = now,
             ))
         }
+        return null
     }
 
     /**
@@ -1758,13 +1972,18 @@ class CouncilRoomManager(
             // Cancel all in-flight jobs (guest + synthesis) without holding the
             // room mutex — the jobs may be blocked waiting to write back via
             // [RoomMutationSink].
-            val (guestJobs, synthesisJob) = jobsLock.withLock {
+            val (guestJobs, synthesisJob, askDeferred) = jobsLock.withLock {
                 val guests = generationJobs.remove(conversationId) ?: emptyList()
                 val synth = synthesisJobs.remove(conversationId)
-                guests to synth
+                val ask = pendingAskUser.remove(conversationId)
+                Triple(guests, synth, ask)
             }
             guestJobs.forEach { it.cancel() }
             synthesisJob?.cancel()
+            // If the council was paused on an ask_user, cancel the parked awaiter
+            // so the suspended runAutoOrchestration dies cleanly (its awaitUserAnswer
+            // throws CancellationException, which the loop propagates to close).
+            askDeferred?.cancel()
 
             val mutex = lockFor(conversationId)
             val result = mutex.withLock {
@@ -2094,12 +2313,6 @@ private fun modeLabel(mode: CouncilRoomMode): String = when (mode) {
     CouncilRoomMode.EXPLORE -> "Explore"
     CouncilRoomMode.DEBATE -> "Debate"
     CouncilRoomMode.SYNTHESIZE -> "Synthesize"
-}
-
-private fun phaseOpenLabel(mode: CouncilRoomMode): String = when (mode) {
-    CouncilRoomMode.EXPLORE -> "Explore · Opening"
-    CouncilRoomMode.DEBATE -> "Debate · Opening"
-    CouncilRoomMode.SYNTHESIZE -> "Synthesize · Opening"
 }
 
 private fun noParticipant(room: CouncilRoom, id: String): CouncilRoomOpResult =

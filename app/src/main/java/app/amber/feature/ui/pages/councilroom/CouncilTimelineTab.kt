@@ -33,7 +33,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,7 +47,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +63,7 @@ import app.amber.feature.modelcouncil.COUNCIL_ROOM_HOST_ID
 import app.amber.feature.modelcouncil.CouncilRoomMode
 import app.amber.feature.modelcouncil.COUNCIL_ROOM_USER_ID
 import app.amber.feature.modelcouncil.CouncilMessage
+import app.amber.feature.modelcouncil.CouncilMessageKind
 import app.amber.feature.modelcouncil.CouncilMessageStatus
 import app.amber.feature.modelcouncil.CouncilParticipant
 import app.amber.feature.modelcouncil.CouncilParticipantStatus
@@ -98,6 +97,14 @@ private sealed interface TimelineEntry {
         override val sortMs get() = marker.createdAtMs
     }
 }
+
+/**
+ * Pixel tolerance for the "is the viewport at the bottom?" check. Generous (~1/3
+ * of a typical screen) so that a streaming chunk that grows the tail item by a
+ * line or two does NOT flip isAtBottom false and kill follow — the exact bug the
+ * previous pixel-only check (`+8`) had.
+ */
+private const val bottomFollowBufferPx = 480
 
 /**
  * 群聊时间线 — merges messages + phase markers by timestamp.
@@ -135,34 +142,64 @@ fun CouncilTimelineTab(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    // Is the viewport parked at the bottom? Same definition rikkahub's ChatList
-    // uses: the last visible item's bottom edge is at/above the viewport's bottom
-    // line. This is the single source of truth for "should we keep following".
-    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        return lastItem.offset + lastItem.size <= listState.layoutInfo.viewportEndOffset + 8
+    // "Is the viewport at the bottom?" — the single source of truth for follow.
+    // Two-stage check, matching the main chat's ChatListSupport.isAtTimelineBottom:
+    //   1) index check: the last VISIBLE item must be the LAST item (guards against
+    //      "the tail got pushed below the fold" — a pure pixel check can't see that
+    //      and falsely reports bottom during fast scrolls).
+    //   2) pixel check WITH a generous buffer: the last item's bottom edge is within
+    //      bufferPx of the viewport's bottom. The buffer is what keeps follow alive
+    //      while a streaming chunk grows the tail item by a line or two — the exact
+    //      case the previous `+8` (pixel-only) version choked on, killing follow.
+    //
+    // No followMode / selfScrolling state machine: requestScrollToItem is non-suspending
+    // and never flips isScrollInProgress, so the ONLY way follow stops is for the user
+    // to scroll up (lastVisibleIndex < total-1) — which makes isAtBottom() false for
+    // free. Scroll back down and it re-engages automatically. Adding a manual state
+    // machine on top of this is what caused the "dragged back to bottom" / "stuck mid-
+    // scroll" regressions (competing with fling physics), so it was removed.
+    fun isAtBottom(bufferPx: Int): Boolean {
+        val info = listState.layoutInfo
+        val total = info.totalItemsCount
+        if (total == 0) return true
+        val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return true
+        if (lastVisible.index < total - 1) return false
+        val contentBottom = lastVisible.offset + lastVisible.size + info.afterContentPadding
+        return contentBottom <= info.viewportEndOffset + bufferPx
     }
 
-    // ── Streaming bottom-follow (ported from rikkahub ChatList.kt) ──────────
-    // KEY INSIGHT: use requestScrollToItem, NOT scrollToItem/animateScrollToItem.
-    // The suspend scroll APIs flip isScrollInProgress=true while running; if a
-    // scroll-progress detector were present it would misread that programmatic
-    // scroll as a user gesture and toggle a follow flag every frame, jittering the
-    // timeline up and down (the exact bug the previous token-gate + scrollBy
-    // version failed to fully fix). requestScrollToItem is non-suspending: it only
-    // SCHEDULES a scroll for the next remeasure and never touches isScrollInProgress,
-    // so there is no feedback loop — no follow flag, no token gate needed at all.
-    //
-    // "User scrolled away" falls out for free: after an upward swipe the newest
-    // item is below the fold so isAtBottom() is false and requestScrollToItem is
-    // simply not called; scrolling back to the bottom flips it true again and the
-    // stream is re-followed automatically.
+    /**
+     * Pixels from the current viewport to the true content bottom — null when the
+     * last item isn't measured yet (off-screen). Same approach as the main chat's
+     * distanceToTimelineBottomPx: we scrollBy this exact distance, NOT scrollToItem,
+     * because scrollToItem(last) pins to the item's TOP edge — and when a streaming
+     * message grows taller than one screen, that leaves the newest text scrolling
+     * off below the fold (the "doesn't follow" symptom).
+     */
+    fun distanceToBottomPx(): Int? {
+        val info = listState.layoutInfo
+        val total = info.totalItemsCount
+        if (total == 0) return 0
+        val bottomItem = info.visibleItemsInfo.firstOrNull { it.index == total - 1 }
+            ?: return null
+        val contentBottom = bottomItem.offset + bottomItem.size + info.afterContentPadding
+        return (contentBottom - info.viewportEndOffset).coerceAtLeast(0)
+    }
+
+    // ── Streaming bottom-follow ────────────────────────────────────────────
+    // Pin to the true content bottom via scrollBy(distance), mirroring the main
+    // chat's scrollToTimelineBottom. scrollBy is suspending but does NOT trip the
+    // "user scrolled up → stop following" condition, because that condition is
+    // simply `isAtBottom() == false` after the user lifts their finger — a real
+    // upward drag moves the last visible item's index below total-1, so isAtBottom
+    // flips false and follow stops for free. Scroll back down → re-engages.
     LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo }.collect { visible ->
-            if (isStreaming && visible.isAtBottom()) {
-                // +10 over-shoots so the newest item is truly flush with the bottom
-                // even when several items land in one frame.
-                listState.requestScrollToItem(entries.lastIndex + 10)
+        snapshotFlow { listState.layoutInfo }.collect { info ->
+            if (isStreaming && isAtBottom(bottomFollowBufferPx)) {
+                val distance = distanceToBottomPx()
+                if (distance != null && distance > 0) {
+                    listState.scrollBy(distance.toFloat())
+                }
             }
         }
     }
@@ -240,11 +277,20 @@ fun CouncilTimelineTab(
                 ) {
                     when (entry) {
                         is TimelineEntry.Phase -> PhaseDivider(entry.marker)
-                        is TimelineEntry.Message -> TimelineMessageRow(
-                            msg = entry.msg,
-                            room = room,
-                            isTopic = entry.msg.id == topicMessageId,
-                        )
+                        is TimelineEntry.Message -> {
+                            if (entry.msg.kind == CouncilMessageKind.ASK_USER) {
+                                CouncilAskUserCard(
+                                    msg = entry.msg,
+                                    onAnswer = { answer -> vm?.resumeAfterUserAnswer(answer) },
+                                )
+                            } else {
+                                TimelineMessageRow(
+                                    msg = entry.msg,
+                                    room = room,
+                                    isTopic = entry.msg.id == topicMessageId,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -708,6 +754,121 @@ private fun ReferenceFootnotes(msg: CouncilMessage, room: CouncilRoom, alignEnd:
                 style = MaterialTheme.typography.labelSmall,
                 color = workspace.faint,
             )
+        }
+    }
+}
+
+/**
+ * Answer card for a host ask_user question. Renders the host's question with an
+ * accent border + a capsule text input + submit button. On submit, calls
+ * [onAnswer] which drives [CouncilRoomVM.resumeAfterUserAnswer], appending the
+ * user's answer and un-suspending the council.
+ *
+ * After the user answers, the room gains a normal USER message right after this
+ * card (so the card is historical context) and the council resumes. The card
+ * itself stays read-only (it already served its purpose).
+ */
+@Composable
+private fun CouncilAskUserCard(
+    msg: CouncilMessage,
+    onAnswer: (String) -> Unit,
+) {
+    val chatTheme = LocalChatTheme.current
+    val workspace = workspaceColors()
+    var answer by remember(msg.id) { mutableStateOf("") }
+    val answered = remember(msg.id) {
+        // Heuristic: if a later USER message exists after this ask, the question
+        // has been answered (resumeAfterUserAnswer appended it). We can't easily
+        // see the whole room here without passing it in, so we rely on a simple
+        // state: once submitted, flip a local flag. For a resumed room (process
+        // death / re-open), the card still shows — that's acceptable, the user
+        // just sees the question they answered in context.
+        mutableStateOf(false)
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = chatTheme.surface,
+        contentColor = chatTheme.ink,
+        border = BorderStroke(1.dp, chatTheme.accent),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = chatTheme.accentSoft,
+                ) {
+                    Text(
+                        text = "主持人提问",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = chatTheme.accent,
+                    )
+                }
+            }
+            Text(
+                text = msg.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = chatTheme.ink,
+            )
+            if (!answered.value) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    androidx.compose.material3.TextField(
+                        value = answer,
+                        onValueChange = { answer = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("回答主持人…", color = workspace.faint) },
+                        shape = RoundedCornerShape(999.dp),
+                        colors = androidx.compose.material3.TextFieldDefaults.colors(
+                            focusedContainerColor = chatTheme.surface,
+                            unfocusedContainerColor = chatTheme.surface,
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            focusedTextColor = chatTheme.ink,
+                            unfocusedTextColor = chatTheme.ink,
+                        ),
+                        maxLines = 4,
+                    )
+                    Surface(
+                        modifier = Modifier.size(46.dp),
+                        shape = CircleShape,
+                        color = if (answer.isNotBlank()) chatTheme.accent else chatTheme.surface,
+                        contentColor = if (answer.isNotBlank()) chatTheme.surface else workspace.faint,
+                        border = BorderStroke(1.dp, if (answer.isNotBlank()) chatTheme.accent else chatTheme.surfaceEdge),
+                        enabled = answer.isNotBlank(),
+                        onClick = {
+                            val text = answer.trim()
+                            if (text.isNotEmpty()) {
+                                answered.value = true
+                                onAnswer(text)
+                                answer = ""
+                            }
+                        },
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("→", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    text = "已回答",
+                    modifier = Modifier.padding(top = 10.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = workspace.faint,
+                )
+            }
         }
     }
 }

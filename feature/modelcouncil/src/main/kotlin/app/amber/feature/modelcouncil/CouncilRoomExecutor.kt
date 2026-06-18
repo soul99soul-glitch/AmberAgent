@@ -125,57 +125,37 @@ class CouncilRoomExecutor(
         val budget = guest.outputBudgetChars.coerceAtLeast(1_000)
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
-                coroutineScope {
-                    // Unbounded so the synchronous onChunk callback never blocks.
-                    // A consumer coroutine on this dispatcher drains the channel
-                    // and forwards cumulative text to the suspending sink.
-                    val chunkChannel = Channel<String>(Channel.UNLIMITED)
-                    val consumer = launch {
-                        for (cumulative in chunkChannel) {
-                            streamingSafeUpdate(room.conversationId, messageId, cumulative)
+                streamInto(room.conversationId, messageId) { onChunk ->
+                    when (guest.runnerType) {
+                        ModelCouncilSeatRunner.PROVIDER_MODEL -> {
+                            val modelId = guest.modelId
+                                ?: error("Guest ${guest.name} has no modelId for PROVIDER_MODEL runner.")
+                            modelRunner.generate(
+                                settings = settings,
+                                modelId = modelId,
+                                systemPrompt = systemPrompt,
+                                userPrompt = userPrompt,
+                                outputBudgetChars = budget,
+                                reasoningLevel = guest.reasoningLevel ?: ReasoningLevel.OFF,
+                                temperature = guest.temperature,
+                                userImageParts = room.userImageParts(),
+                                onChunk = onChunk,
+                            )
                         }
-                    }
-                    val textResult = try {
-                        when (guest.runnerType) {
-                            ModelCouncilSeatRunner.PROVIDER_MODEL -> {
-                                val modelId = guest.modelId
-                                    ?: error("Guest ${guest.name} has no modelId for PROVIDER_MODEL runner.")
-                                modelRunner.generate(
-                                    settings = settings,
-                                    modelId = modelId,
-                                    systemPrompt = systemPrompt,
-                                    userPrompt = userPrompt,
-                                    outputBudgetChars = budget,
-                                    reasoningLevel = guest.reasoningLevel ?: ReasoningLevel.OFF,
-                                    temperature = guest.temperature,
-                                    userImageParts = room.userImageParts(),
-                                    onChunk = { cumulative -> chunkChannel.trySend(cumulative) },
-                                )
-                            }
 
-                            ModelCouncilSeatRunner.EXTERNAL_CLI -> {
-                                val seat = guest.toLegacySeat(systemPrompt, budget)
-                                val text = externalCliRunner.generate(
-                                    seat = seat,
-                                    systemPrompt = systemPrompt,
-                                    userPrompt = userPrompt,
-                                    timeoutMs = room.seatTimeoutMs.coerceAtLeast(1_000L),
-                                    outputBudgetChars = budget,
-                                    onChunk = { cumulative -> chunkChannel.trySend(cumulative) },
-                                )
-                                ModelCouncilTextResult(text = text.take(budget))
-                            }
+                        ModelCouncilSeatRunner.EXTERNAL_CLI -> {
+                            val seat = guest.toLegacySeat(systemPrompt, budget)
+                            val text = externalCliRunner.generate(
+                                seat = seat,
+                                systemPrompt = systemPrompt,
+                                userPrompt = userPrompt,
+                                timeoutMs = room.seatTimeoutMs.coerceAtLeast(1_000L),
+                                outputBudgetChars = budget,
+                                onChunk = onChunk,
+                            )
+                            ModelCouncilTextResult(text = text.take(budget))
                         }
-                    } finally {
-                        // Signal the consumer no more chunks are coming. Generation
-                        // cancellation also lands here: the scope tears down and the
-                        // for-loop exits via its own cancellation.
-                        chunkChannel.close()
                     }
-                    // Drain any buffered streaming updates before finalizing so the
-                    // timeline never shows a stale partial above the final row.
-                    consumer.join()
-                    textResult
                 }
             } ?: run {
                 sink.completeMessage(
@@ -319,30 +299,18 @@ class CouncilRoomExecutor(
         }
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
-                coroutineScope {
-                    val chunkChannel = Channel<String>(Channel.UNLIMITED)
-                    val consumer = launch {
-                        for (cumulative in chunkChannel) {
-                            streamingSafeUpdate(room.conversationId, messageId, cumulative)
-                        }
-                    }
-                    val textResult = try {
-                        modelRunner.generate(
-                            settings = settings,
-                            modelId = hostModelId,
-                            systemPrompt = effectiveSystemPrompt,
-                            userPrompt = userPrompt,
-                            outputBudgetChars = budget,
-                            reasoningLevel = reasoningLevel,
-                            temperature = null,
-                            userImageParts = room.userImageParts(),
-                            onChunk = { cumulative -> chunkChannel.trySend(cumulative) },
-                        )
-                    } finally {
-                        chunkChannel.close()
-                    }
-                    consumer.join()
-                    textResult
+                streamInto(room.conversationId, messageId) { onChunk ->
+                    modelRunner.generate(
+                        settings = settings,
+                        modelId = hostModelId,
+                        systemPrompt = effectiveSystemPrompt,
+                        userPrompt = userPrompt,
+                        outputBudgetChars = budget,
+                        reasoningLevel = reasoningLevel,
+                        temperature = null,
+                        userImageParts = room.userImageParts(),
+                        onChunk = onChunk,
+                    )
                 }
             } ?: run {
                 sink.completeMessage(
@@ -420,6 +388,42 @@ class CouncilRoomExecutor(
                 ),
             )
         }
+    }
+
+    /**
+     * The shared streaming spine: bridge a synchronous `(String) -> Unit` chunk
+     * callback (the kind [modelRunner] / [externalCliRunner] take) onto a suspending
+     * sink, preserving per-chunk order and cancellation.
+     *
+     * - An unbounded [Channel] absorbs the synchronous callbacks (so they never
+     *   block, even on a single-threaded test scheduler).
+     * - A consumer coroutine on [dispatcher] drains the channel and forwards each
+     *   cumulative text to [onCumulative] (which writes to the sink).
+     * - [generate] receives the `onChunk` callback to hand to the runner. Whatever
+     *   [generate] returns is the final result text; the channel is closed in its
+     *   `finally` so the consumer drains remaining chunks before we return.
+     *
+     * Used by both [generateGuestTurn] and [generateHostTurn] to collapse what was
+     * two copy-pasted `Channel + launch consumer + close + join` blocks.
+     */
+    private suspend fun <T> streamInto(
+        conversationId: Uuid,
+        messageId: String,
+        generate: suspend (onChunk: (String) -> Unit) -> T,
+    ): T = coroutineScope {
+        val chunkChannel = Channel<String>(Channel.UNLIMITED)
+        val consumer = launch {
+            for (cumulative in chunkChannel) {
+                streamingSafeUpdate(conversationId, messageId, cumulative)
+            }
+        }
+        val textResult = try {
+            generate { cumulative -> chunkChannel.trySend(cumulative) }
+        } finally {
+            chunkChannel.close()
+        }
+        consumer.join()
+        textResult
     }
 
     /** Adapt a CouncilParticipant to the legacy ModelCouncilSeat shape the CLI runner expects. */
