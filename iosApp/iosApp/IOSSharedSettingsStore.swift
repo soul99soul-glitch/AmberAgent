@@ -16,11 +16,12 @@ final class IOSSharedSettingsStore {
 
     @ObservationIgnored private(set) var snapshot: Settings
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let fullSettingsJsonKey = "app.amber.ios.sharedSettingsJson"
     private let seatsKey = "app.amber.ios.councilSeats"
 
-    init() {
+    init(userDefaults: UserDefaults = .standard) {
+        self.defaults = userDefaults
         if let json = defaults.string(forKey: fullSettingsJsonKey),
            let decoded = try? Self.decodeSettings(json) {
             self.snapshot = decoded
@@ -48,24 +49,66 @@ final class IOSSharedSettingsStore {
     }
 
     /// Add a council seat to persistent storage.
+    ///
+    /// [Slice 4] Now merges into the live snapshot via
+    /// `IosSettingsMutations.addCouncilSeat` (shared/IosSettingsMutations.kt:42)
+    /// and persists the WHOLE snapshot via `restoreSnapshot` — so the seat
+    /// survives restart as a real `agentRuntime.modelCouncil.defaultSeats`
+    /// entry, not just a side-channel UserDefaults row. The legacy
+    /// `savedCouncilSeats` mirror is kept in sync for any reader still on it.
     func addCouncilSeat(name: String, role: String, modelId: String, runnerType: String = "provider") {
+        let seatId = UUID().uuidString
+        // [Slice 4] The KMP side (IosSettingsMutations.addCouncilSeat) calls
+        // kotlin.uuid.Uuid.parse(modelId), which on an invalid Uuid throws —
+        // but the ObjC bridge marks the call non-throwing, so it would CRASH
+        // rather than throw. Guard BEFORE calling: only run the real snapshot
+        // merge when modelId is a valid Uuid. Otherwise fall back to the
+        // legacy mirror only (honest: no fake seat in the snapshot).
+        var mergedIntoSnapshot = false
+        if UUID(uuidString: modelId) != nil {
+            let merged = IosSettingsMutations.shared.addCouncilSeat(
+                settings: snapshot,
+                seatId: seatId,
+                name: name,
+                role: role,
+                modelId: modelId,
+                runnerType: runnerType,
+                systemPrompt: "",
+                outputBudgetChars: 4096
+            )
+            restoreSnapshot(merged)
+            mergedIntoSnapshot = true
+        }
         var seats = savedCouncilSeats
         seats.append([
-            "seatId": UUID().uuidString,
+            "seatId": seatId,
             "name": name,
             "role": role,
             "modelId": modelId,
             "runnerType": runnerType,
+            "mergedIntoSnapshot": mergedIntoSnapshot ? "true" : "false",
         ])
         savedCouncilSeats = seats
     }
 
     /// Remove a council seat by index.
+    ///
+    /// [Slice 4] Removes from BOTH the snapshot (via
+    /// `IosSettingsMutations.removeCouncilSeat`, matching by seatId) and the
+    /// legacy mirror, so a delete survives restart. Seats added before Slice 4
+    /// (mirror-only) are also cleared from the mirror.
     func removeCouncilSeat(at index: Int) {
         var seats = savedCouncilSeats
         guard index >= 0 && index < seats.count else { return }
-        seats.remove(at: index)
+        let removed = seats.remove(at: index)
         savedCouncilSeats = seats
+        if let seatId = removed["seatId"] {
+            let merged = IosSettingsMutations.shared.removeCouncilSeat(
+                settings: snapshot,
+                seatId: seatId
+            )
+            restoreSnapshot(merged)
+        }
     }
 
     // MARK: - Custom models write-back

@@ -15,6 +15,8 @@ struct SeatEditorView: View {
     @State private var cliModel = ""
     @State private var prompt = ""
     @State private var showRemoveInfo = false
+    @State private var isRemoving = false
+    @State private var removeResultMessage: String?
 
     var body: some View {
         ZStack {
@@ -40,10 +42,35 @@ struct SeatEditorView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .alert("移除席位", isPresented: $showRemoveInfo) {
+            Button("移除", role: .destructive) {
+                removeAllCustomSeats()
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("将从快照 agentRuntime.modelCouncil.defaultSeats 与 UserDefaults 删除全部 \(customSeatCount) 个自定义席位。KMP seed 席位不可删除。此操作不可恢复。")
+        }
+        .alert("移除结果", isPresented: Binding(
+            get: { removeResultMessage != nil },
+            set: { if !$0 { removeResultMessage = nil } }
+        )) {
             Button("知道了", role: .cancel) { }
         } message: {
-            Text("将从 UserDefaults 删除该自定义席位。KMP seed 席位不可删除。")
+            Text(removeResultMessage ?? "")
         }
+    }
+
+    // [Slice 4] 真删除：从后往前逐个调 removeCouncilSeat(at:)，
+    // 每次 removeCouncilSeat 都会同步从快照（IosSettingsMutations.removeCouncilSeat）
+    // 与 legacy 镜像移除。KMP seed 席位不受影响。
+    private func removeAllCustomSeats() {
+        isRemoving = true
+        let count = customSeatCount
+        // 从尾部删，避免索引位移
+        for index in stride(from: count - 1, through: 0, by: -1) {
+            sharedSettings.removeCouncilSeat(at: index)
+        }
+        isRemoving = false
+        removeResultMessage = count > 0 ? "已移除 \(count) 个自定义席位。" : "没有可移除的自定义席位。"
     }
 
     private var header: some View {
@@ -300,21 +327,34 @@ struct SeatEditorView: View {
         }
     }
 
+    // [Slice 4] 移除席位：真接。删除所有用户自定义席位（从快照
+    // agentRuntime.modelCouncil.defaultSeats 与 legacy 镜像同步移除）。
+    // KMP seed 席位不可删除（不在 savedCouncilSeats 里）。
     private var deleteSection: some View {
         AmberFormGroup {
-            Button {
+            Button(role: .destructive) {
                 showRemoveInfo = true
             } label: {
-                Text("移除席位尚执行待接")
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.muted)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 54)
-                    .contentShape(Rectangle())
+                HStack(spacing: 8) {
+                    if isRemoving {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(customSeatCount == 0 ? "没有可移除的自定义席位" : "移除全部 \(customSeatCount) 个自定义席位")
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.accentRed)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 54)
+                        .contentShape(Rectangle())
+                }
             }
             .buttonStyle(.plain)
+            .disabled(customSeatCount == 0 || isRemoving)
         }
         .padding(.top, 20)
+    }
+
+    private var customSeatCount: Int {
+        sharedSettings.savedCouncilSeats.count
     }
 }
 
