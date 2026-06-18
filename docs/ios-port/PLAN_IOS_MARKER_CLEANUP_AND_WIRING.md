@@ -152,6 +152,8 @@ KMP `Settings` 是 data class，`copy(...)` 可用；`restoreSnapshot` 已实现
 
 ### Slice 6：Memory 持久化（~1-2 天）
 
+> **状态（2026-06-18）：✅ 已完成并 commit。** 新增 KMP `IosMemoryFactory.replaceAll/snapshotRecords`（commonMain，内存 StateFlow + Swift 驱动持久化）；新增 Swift `IOSMemoryPersistence` 读写 `Documents/memories/memories.json`（原子写 + Codable 镜像 MemoryRecord）；AppShell.init 启动时 `load()`；MemoryEditView 增/删/清空后 `persist()`；撤 MemoryEditView 保存/删除/不保存 标记。验收「加记忆→杀进程→重启→仍在」由 3 个 XCTest 全过证明。诚实保留：MemoryOverviewView 的 MemoryRepository/recall/worker/compaction 标记（Slice 6 仅给现有内存 CRUD 加文件持久化，Room 召回/worker 是更深 KMP 能力）。
+
 **目标**：`IosMemoryFactory` 真 CRUD 但全内存，重启丢。
 
 **做法**：参照 ConversationStorage 模式——给 memory 落 JSON 文件（`Documents/memories/{id}.json` + index），或更简单：把 `IosMemoryFactory` 的 `recordsFlow` 状态序列化到一个 `memories.json` 单文件（memory 量小）。KMP 侧 `IosMemoryFactory` 加 `persist()`/`load()`，iOS 侧在 App 启动调 load、变更后调 persist。

@@ -37,6 +37,10 @@ struct AppShell: View {
         self._sharedSettings = State(initialValue: IOSSharedSettingsStore())
         self._mcpConfigStore = State(initialValue: IOSMcpConfigStore())
         self._conversationStore = State(initialValue: IOSConversationStore())
+        // [Slice 6] Load persisted memories (Documents/memories/memories.json)
+        // into the IosMemoryFactory store before any view reads it. Missing or
+        // corrupt file is a no-op (store keeps its seed/empty state).
+        Task { @MainActor in IOSMemoryPersistence.shared.load() }
     }
 
     var body: some View {

@@ -36,10 +36,19 @@ struct MemoryEditView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert("删除尚执行待接", isPresented: $showDeleteInfo) {
-            Button("知道了", role: .cancel) { }
+        .alert("清空全部记忆？", isPresented: $showDeleteInfo) {
+            Button("清空", role: .destructive) {
+                // [Slice 6] 真清空：逐条 deleteMemory（KMP 内存层），最后统一
+                // persist() 一次写空文件。重启后 load() 读到空。
+                for record in iosRecords {
+                    IosMemoryFactory.shared.deleteMemory(id: record.id)
+                }
+                IOSMemoryPersistence.shared.persist()
+                iosRecords = IosMemoryFactory.shared.getAllRecords()
+            }
+            Button("取消", role: .cancel) { }
         } message: {
-            Text("当前 iOS 编辑页没有读取真实 MemoryRepository，因此不会删除任何记忆记录。")
+            Text("将删除全部 \(iosRecords.count) 条记忆并写入 Documents/memories/。此操作不可恢复。")
         }
     }
 
@@ -89,6 +98,9 @@ struct MemoryEditView: View {
 
                         Button {
                             IosMemoryFactory.shared.deleteMemory(id: record.id)
+                            // [Slice 6] Persist the deletion to Documents/memories/memories.json
+                            // so it survives restart.
+                            IOSMemoryPersistence.shared.persist()
                             iosRecords = IosMemoryFactory.shared.getAllRecords()
                         } label: {
                             Image(systemName: "trash")
@@ -134,6 +146,8 @@ struct MemoryEditView: View {
                         content: trimmed,
                         assistantId: bucket,
                     )
+                    // [Slice 6] Persist the new memory to Documents/memories/memories.json.
+                    IOSMemoryPersistence.shared.persist()
                     iosRecords = IosMemoryFactory.shared.getAllRecords()
                     text = ""
                 } label: {
@@ -159,7 +173,9 @@ struct MemoryEditView: View {
     }
 
     private var noticeSection: some View {
-        MemoryEditNote("Android/KMP 已有 MemoryRepository.addMemory/updateContent/deleteMemory；iOS 当前没有 repository/settings/tool bridge。本页只保留本地预览，关闭后不会保存。")
+        // [Slice 6] 增删已持久化：addMemory/deleteMemory 经 IOSMemoryPersistence
+        // 写入 Documents/memories/memories.json，重启后由 AppShell 启动时 load() 恢复。
+        MemoryEditNote("记忆增删已持久化到 Documents/memories/memories.json（重启保留）。KMP 端为内存 StateFlow + Swift 持久化层；非 Room。")
             .padding(.bottom, 10)
     }
 
@@ -249,11 +265,13 @@ struct MemoryEditView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "处理方式")
             AmberFormGroup {
-                MemoryPreviewLine(label: "保存", value: "执行待接")
+                // [Slice 6] 保存已接：addMemory 后 IOSMemoryPersistence.persist()
+                // 写入 Documents/memories/memories.json（原子写），重启后 load() 恢复。
+                MemoryPreviewLine(label: "保存", value: "已接（持久化）")
                 MemoryEditDivider()
-                MemoryPreviewLine(label: "写入位置", value: "本页本地预览")
+                MemoryPreviewLine(label: "写入位置", value: "Documents/memories/")
                 MemoryEditDivider()
-                MemoryPreviewLine(label: "真实后端", value: "MemoryRepository 未桥接")
+                MemoryPreviewLine(label: "真实后端", value: "iOS 本地 JSON（非 Room）")
             }
         }
     }
@@ -263,14 +281,15 @@ struct MemoryEditView: View {
             Button {
                 showDeleteInfo = true
             } label: {
-                Text("删除记忆尚执行待接")
+                Text("清空全部记忆（\(iosRecords.count) 条）")
                     .font(.body.weight(.medium))
-                    .foregroundStyle(AmberTheme.muted)
+                    .foregroundStyle(AmberTheme.accentRed)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 52)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(iosRecords.isEmpty)
         }
         .padding(.top, 20)
     }

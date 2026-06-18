@@ -7,22 +7,25 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Clock
 
 /**
- * iOS in-memory memory store — provides read/write access to memory records
- * WITHOUT Room persistence. Seeds from the KMP Settings snapshot (assistants'
- * memory entries), then allows add/delete/update in memory.
+ * iOS memory store — provides read/write access to memory records.
  *
- * HONESTY: This is NOT persisted (no Room DB on iOS). Changes are lost on app
- * restart. The seed data comes from IosSettingsDefaults (the same seeded
- * Settings snapshot other settings pages read). This proves the Memory UI
- * read/write chain works on iOS; real persistence needs a Room KMP store
- * (future work, like core/agent-store-room).
+ * [Slice 6] Persistence: a Swift wrapper (IOSMemoryPersistence) observes
+ * recordsFlow and writes the records to Documents/memories/memories.json on
+ * every change; on app startup it loads that file and calls [replaceAll] to
+ * seed the store. The KMP side stays platform-agnostic (pure in-memory
+ * StateFlow); file IO lives in Swift where Foundation interop is native.
+ *
+ * HONESTY: Persistence is real (JSON file via Swift NSFileManager, atomic
+ * write). The seed data comes from IosSettingsDefaults when no persisted file
+ * exists. This is the iOS-local persistence layer for memories — same role as
+ * the Android Room MemoryRepository, but file-based.
  */
 object IosMemoryFactory {
 
     private val _records = MutableStateFlow<List<MemoryRecord>>(seedRecords())
     val recordsFlow: StateFlow<List<MemoryRecord>> = _records
 
-    private var nextId = 1000
+    private var nextId = (_records.value.maxOfOrNull { it.id } ?: 999) + 1
 
     fun getAllRecords(): List<MemoryRecord> = _records.value
 
@@ -82,6 +85,25 @@ object IosMemoryFactory {
     fun getShortTermMemories(): List<AssistantMemory> = getMemoriesOfAssistant(SHORT_TERM_MEMORY_ID)
     fun getLongTermMemories(): List<AssistantMemory> = getMemoriesOfAssistant(LONG_TERM_MEMORY_ID)
 
+    // ---------- Persistence hooks (Slice 6, driven by Swift wrapper) ----------
+
+    /**
+     * Replace all records with [records]. Called once at app startup by the
+     * Swift IOSMemoryPersistence wrapper after it loads
+     * Documents/memories/memories.json. Resets nextId above the highest id.
+     */
+    fun replaceAll(records: List<MemoryRecord>) {
+        _records.value = records
+        nextId = (records.maxOfOrNull { it.id } ?: 999) + 1
+    }
+
+    /**
+     * Snapshot for the Swift wrapper to serialize. Returns the current records
+     * so Swift can JSON-encode + write the file (Swift's Codable/JSONEncoder is
+     * cleaner than K/N Foundation interop for this).
+     */
+    fun snapshotRecords(): List<MemoryRecord> = _records.value
+
     // ---------- Constants (mirror Android MemoryRepository) ----------
 
     const val GLOBAL_MEMORY_ID = "__global__"
@@ -92,7 +114,8 @@ object IosMemoryFactory {
 
     private fun seedRecords(): List<MemoryRecord> {
         // No memory records in the seed Settings snapshot (memories live in Room DB,
-        // not in Settings). iOS starts with an empty store; addMemory populates it.
+        // not in Settings). iOS starts with an empty store; addMemory populates it
+        // and the Swift wrapper persists it to disk for next launch.
         return emptyList()
     }
 
