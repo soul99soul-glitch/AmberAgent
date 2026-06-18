@@ -155,6 +155,10 @@ struct SkillsView: View {
         }
     }
 
+    // [Slice 1] 扫描标记已撤：IosSkillFactory.shared.listSkills(documentsDir:) 真实扫描
+    // Documents/skills/*/SKILL.md（feature/task/.../IosSkillFactory.kt:24），本页 scannedSkillsSection
+    // 已在 SkillsView.swift:132(按钮)/:153(onAppear) 调用，结果存入 scannedSkills。
+    // 因此"本机 Skill 库"改为诚实反映扫描结果数，不再标"执行待接"。
     private var installedSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "本机 Skill 库")
@@ -162,16 +166,21 @@ struct SkillsView: View {
                 SkillStatusRow(
                     systemImage: "wrench.and.screwdriver",
                     iconColor: AmberTheme.accentAmber,
-                    title: "Skill 扫描尚执行待接",
-                    subtitle: "Android/KMP 已有 SkillManager；iOS 还没有本地目录扫描、启用状态或文件读写桥。",
-                    badge: "执行待接"
+                    title: scannedSkills.isEmpty ? "尚未扫描到 Skill" : "已扫描 \(scannedSkills.count) 个 Skill",
+                    subtitle: scannedSkills.isEmpty
+                        ? "Documents/skills/ 下没有 SKILL.md。把技能放入该目录的子文件夹后点\"重新扫描\"即可。"
+                        : "扫描结果见上方\"技能扫描\"区。启用/禁用与删除本地 Skill 仍待接（需 Skill 文件写入桥）。",
+                    badge: scannedSkills.isEmpty ? "空" : "已扫描"
                 )
             }
 
-            SkillsFooter("当前页面不会读取、启用、禁用或删除本地 Skill。添加和导入入口仅保留本地预览。")
+            SkillsFooter("扫描为真实文件系统读取（IosSkillFactory.listSkills）；启用/禁用/删除本地 Skill 仍待接。")
         }
     }
 
+    // [Slice 1] MCP 标记已撤：IOSMcpManager 真连接（JSON-RPC over URLSession）。
+    // McpServersView.swift:15 构造 IOSMcpManager，进入页面 .task 同步已启用服务器（tools/list）；
+    // tools/call 由 IOSMcpClient.swift:220 发起，IOSMcpManager.callTool（IOSMcpManager.swift:69）暴露给后续调用链。
     private var extensionSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "扩展")
@@ -180,17 +189,19 @@ struct SkillsView: View {
                     systemImage: "point.3.connected.trianglepath.dotted",
                     iconColor: AmberTheme.accentCyan,
                     title: "MCP 服务器",
-                    subtitle: "配置列表尚未接入 iOS SettingsStore / McpManager",
-                    trailing: "执行待接"
+                    subtitle: "已接入 IOSMcpManager（真 JSON-RPC 连接）；进入可查看连接状态与工具列表",
+                    trailing: "已接"
                 ) {
                     router.navigate(to: .mcpServers)
                 }
             }
 
-            SkillsFooter("Android/KMP 已有 MCP 配置与连接管理；iOS 当前只展示预览入口，不连接服务器。")
+            SkillsFooter("MCP 已接：IOSMcpManager 负责真实连接与 tools/list、tools/call（见 MCP 服务器页）。")
         }
     }
 
+    // [Slice 1] 重新扫描标记已撤：managementSection 的"重新扫描"按钮与上方 scannedSkillsSection
+    // 复用同一 IosSkillFactory.shared.listSkills 调用链（SkillsView.swift:132），点击即真扫描。
     private var managementSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "管理")
@@ -209,12 +220,18 @@ struct SkillsView: View {
                 SkillUtilityRow(
                     systemImage: "arrow.triangle.2.circlepath",
                     iconColor: AmberTheme.accent,
-                    title: "重新扫描尚执行待接",
-                    subtitle: "需要 iOS SkillManager bridge 后才能扫描和修复索引"
+                    title: "重新扫描",
+                    subtitle: "重新调用 IosSkillFactory.listSkills 扫描 Documents/skills/"
                 ) {
-                    pendingAlert = .rescan
+                    rescanSkills()
                 }
             }
+        }
+    }
+
+    private func rescanSkills() {
+        if let docsDir = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true).path {
+            scannedSkills = IosSkillFactory.shared.listSkills(documentsDir: docsDir)
         }
     }
 }

@@ -45,8 +45,11 @@ struct BoardView: View {
         ),
         .init(
             title: "iOS 数据源桥",
-            subtitle: "当前 SwiftUI 没有 Settings.agentRuntime.todayBoard、BoardRepository、worker 或热榜/信号/任务数据源。",
-            value: "待接",
+            // [Slice 1] 文案诚实拆分：时间锚点信号采集已接——BoardView.swift:255
+            // IosBoardFactory.shared.createTimeCollectContext + :261 createCollectors + :263
+            // 循环 collect 已在手动生成里跑通。BoardRepository / worker / 日历 / 飞书 / 热榜采集仍待接。
+            subtitle: "时间锚点采集已接（IosBoardFactory.createTimeCollectContext/createCollectors，手动生成区可见真实信号）；BoardRepository、worker、日历/飞书/热榜采集仍待接。",
+            value: "部分接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -143,7 +146,7 @@ struct BoardView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 数据源桥待接（需 Board 采集链）")
+                Text("Android/KMP 已实现 · iOS 时间锚点采集已接；日历/飞书/热榜采集待接")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -162,7 +165,7 @@ struct BoardView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 的今日看板会收集通知、日历、飞书、聊天记录和热榜信号，调度 worker 调用模型生成结构化看板，并把任务、机会、日报和深度阅读缓存写入数据库。iOS 当前没有这些数据源、DAO、worker 或模型生成桥，本页只展示能力证据，不展示假新闻流、不刷新、不派发任务。")
+        Text("Android/KMP 的今日看板会收集通知、日历、飞书、聊天记录和热榜信号，调度 worker 调用模型生成结构化看板，并把任务、机会、日报和深度阅读缓存写入数据库。iOS 已接时间锚点信号采集 + 手动模型生成（IosBoardFactory.createCollectors/createAgent，上方\"手动生成\"区可触发真实 BoardAgent 调用）；BoardRepository、后台 worker、日历/飞书/热榜采集仍待接。本页不展示假新闻流、不刷新、不派发任务。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)

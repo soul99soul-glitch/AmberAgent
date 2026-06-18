@@ -29,9 +29,12 @@ struct CouncilView: View {
         ),
         .init(
             title: "iOS 运行桥",
-            subtitle: "当前 SwiftUI 没有 Settings.agentRuntime、ModelCouncilManager 或 model_council 工具执行桥。",
-            value: "执行待接",
-            color: AmberTheme.accentAmber
+            // [Slice 1] 标记已升级为"已接"：CouncilRunner.swift:38(IosCouncilFactory.createWithRealProvider)
+            // 在有 API key 时走真 OpenAI-compatible 推理；CouncilRunner.swift:60(startInput)+:62(m.start)
+            // 构成完整 start 调用链。无 key 时回退 stub（仅验证调用链）。
+            subtitle: "CouncilRunner 通过 IosCouncilFactory.createWithRealProvider 构造 ModelCouncilManager 并执行 start()。有 API key 时真推理；无 key 时 stub。",
+            value: "已接",
+            color: AmberTheme.accentGreen
         )
     ]
 
@@ -78,7 +81,7 @@ struct CouncilView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 运行桥执行待接")
+                Text("Android/KMP 已实现 · iOS 运行链已通（带 key 真推理；无 key stub）")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -97,7 +100,7 @@ struct CouncilView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 当前没有把这些能力接入 SettingsStore、ChatViewModel 或本地工具执行器。本页只展示能力证据和执行待接边界，不启动议会、不生成转录、不发送模型请求。")
+        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 通过下方\"执行（真实调用链）\"区可手动启动议会（IosCouncilFactory.createWithRealProvider → ModelCouncilManager.start，带 API key 真推理；无 key 时诚实 stub）。ChatViewModel 自动注入 model_council_* 工具、SettingsStore 写回与席位持久化仍待接。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -194,9 +197,9 @@ struct CouncilView: View {
             AmberFormGroup {
                 CouncilStatusRow(
                     row: .init(
-                        title: "发起议会",
-                        subtitle: "没有 iOS model_council_start 执行路径；聊天输入也不会触发议会 run。",
-                        value: "执行待接",
+                        title: "从聊天触发议会",
+                        subtitle: "手动\"启动议会\"按钮已接（上方执行区，CouncilRunner.swift:62 m.start）；但 ChatViewModel 尚未注入 model_council_* 工具，聊天输入不会触发议会 run。",
+                        value: "待接",
                         color: AmberTheme.accentAmber
                     )
                 )
@@ -204,8 +207,8 @@ struct CouncilView: View {
                 CouncilStatusRow(
                     row: .init(
                         title: "实时席位 / 转录",
-                        subtitle: "没有 runId、liveTextFlow、transcriptPath 或 AgentTask 快照来源。",
-                        value: "执行待接",
+                        subtitle: "手动 run 只能读 start() 返回的 runId/status；聊天里实时 liveTextFlow/transcriptPath 快照来源仍待接。",
+                        value: "待接",
                         color: AmberTheme.accentAmber
                     )
                 )
