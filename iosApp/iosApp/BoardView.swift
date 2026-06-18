@@ -8,6 +8,9 @@ struct BoardView: View {
     let sharedSettings: IOSSharedSettingsStore
 
     @State private var generationState = BoardGenerationState.idle
+    // [Board MVP] Guards the .task restore so in-session re-navigation to this
+    // page doesn't overwrite a just-generated state with the persisted restore.
+    @State private var hasRestoredPersistedBoard = false
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -56,22 +59,26 @@ struct BoardView: View {
 
     private let handlingRows: [BoardCapabilityRow] = [
         .init(
+            // [Board MVP] 看板内容已接：模型生成的 Markdown 持久化到
+            // Documents/boards/<date>.json（IOSBoardPersistence），重启后 .task
+            // 加载最近一条重新显示。范围只做今日看板内容，不做结构化任务流。
             title: "看板内容",
-            subtitle: "不再展示硬编码新闻标题、来源、排名或“刚刚更新”。真实内容应来自 BoardItemEntity / HotListDashboard。",
-            value: "待接",
-            color: AmberTheme.accentAmber
+            subtitle: "已接：模型生成的 Markdown 经 IOSBoardPersistence 按日期持久化，重启后重新显示上一份看板。",
+            value: "已接",
+            color: AmberTheme.accentGreen
         ),
         .init(
             title: "刷新",
-            subtitle: "Android 的刷新会调用 BoardScheduler.runOnce() 和 HotListScheduler.runOnce()；iOS 当前不触发后台任务。",
-            value: "禁用",
+            subtitle: "Android 的刷新会调用 BoardScheduler.runOnce() 和 HotListScheduler.runOnce()；iOS 当前不触发后台任务（可手动重新生成）。",
+            value: "手动",
             color: AmberTheme.muted
         ),
         .init(
-            title: "任务流 / 机会",
-            subtitle: "不读取 BoardTaskRepository 或 OpportunityRepository，也不派发任务或创建聊天会话。",
-            value: "待接",
-            color: AmberTheme.accentAmber
+            // 任务流/机会/派发明确不在 iOS 范围（产品决定：只做今日看板内容）。
+            title: "任务流 / 机会（不做）",
+            subtitle: "iOS 范围只做今日看板内容；任务流/机会/日报派发/BoardItemEntity 不做（产品决定）。",
+            value: "不做",
+            color: .gray
         ),
         .init(
             title: "深度阅读",
@@ -131,6 +138,25 @@ struct BoardView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        // [Board MVP] On entry, redisplay the most recent persisted board so a
+        // generated board survives app restart. Honest: if none saved, stays idle.
+        // Guard on idle so in-session navigation back to this page doesn't
+        // clobber a just-generated state with the "重启后恢复" message.
+        .task {
+            guard !hasRestoredPersistedBoard else { return }
+            hasRestoredPersistedBoard = true
+            if !generationState.isRunning,
+               let recent = IOSBoardPersistence.shared.loadMostRecent(),
+               let output = recent.markdown.isEmpty ? nil : recent.markdown {
+                generationState = BoardGenerationState(
+                    isRunning: false,
+                    message: "上次生成的今日看板（\(recent.boardDate)，\(recent.signalCount) 条信号）— 重启后恢复显示。",
+                    signals: [],
+                    output: output,
+                    isError: false
+                )
+            }
+        }
     }
 
     private var header: some View {
@@ -165,7 +191,7 @@ struct BoardView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 的今日看板会收集通知、日历、飞书、聊天记录和热榜信号，调度 worker 调用模型生成结构化看板，并把任务、机会、日报和深度阅读缓存写入数据库。iOS 已接时间锚点信号采集 + 手动模型生成（IosBoardFactory.createCollectors/createAgent，上方\"手动生成\"区可触发真实 BoardAgent 调用）；BoardRepository、后台 worker、日历/飞书/热榜采集仍待接。本页不展示假新闻流、不刷新、不派发任务。")
+        Text("iOS 今日看板（范围：只做今日看板内容）：时间锚点信号采集 + 手动模型生成（IosBoardFactory.createCollectors/createAgent，上方\"手动生成\"区触发真实 BoardAgent）+ 生成的 Markdown 按日期持久化到 Documents/boards/，重启后重新显示。任务流/机会/日报派发/深度阅读不做（产品决定）。日历/飞书/热榜采集仍待接。本页不展示假新闻流、不派发任务。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -281,9 +307,18 @@ struct BoardView: View {
                     chatCompletionsPath: "/chat/completions"
                 )
                 let output = try await generateBoard(agent: agent, signals: collected, setting: setting)
+                // [Board MVP] Persist the generated board Markdown by date so it
+                // survives restart and redisplay on next launch. Scope = 今日看板
+                // 内容 only (no task-flow / BoardItemEntity / dispatch).
+                IOSBoardPersistence.shared.save(board: .init(
+                    boardDate: IOSBoardPersistence.shared.todayBoardDate(),
+                    markdown: output,
+                    signalCount: collected.count,
+                    generatedAt: Int64(Date().timeIntervalSince1970 * 1000)
+                ))
                 await MainActor.run {
                     generationState = .finished(
-                        message: "采集完成：\(collected.count) 条时间信号。",
+                        message: "采集完成：\(collected.count) 条时间信号。已保存到 Documents/boards/（重启保留）。",
                         signals: BoardSignalPreviewItem.from(collected),
                         output: output
                     )
