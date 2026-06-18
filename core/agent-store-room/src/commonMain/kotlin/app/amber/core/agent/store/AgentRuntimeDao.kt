@@ -39,6 +39,15 @@ interface AgentRuntimeDao {
     @Query("SELECT * FROM agent_run WHERE message_node_id = :id ORDER BY started_at ASC")
     suspend fun listRunsForMessageNode(id: String): List<AgentRunEntity>
 
+    /**
+     * All runs ordered by started_at ascending. Used by iOS AccountView to
+     * render a real usage heatmap (grouped by day from startedAt). Kept simple
+     * (no day-bucketing SQL) so Swift can bucket with its own calendar logic
+     * and timezone. [Slice 5]
+     */
+    @Query("SELECT * FROM agent_run ORDER BY started_at ASC")
+    suspend fun listAllRuns(): List<AgentRunEntity>
+
     @Query("DELETE FROM trace_span WHERE run_id IN (SELECT run_id FROM agent_run WHERE status = 'completed' AND finished_at < :cutoff)")
     suspend fun pruneOldSpans(cutoff: Long)
 

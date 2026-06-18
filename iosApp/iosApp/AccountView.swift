@@ -249,7 +249,9 @@ private struct AccountHeatmapBlock: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("iOS 统计桥尚执行待接")
+                    // [Slice 5] 真接：AccountHeatmap 从 AgentRuntimeDao.listAllRuns()
+                    // 加载真实 run，按 startedAt 的日分桶着色。
+                    Text("近 21 周每日运行次数（来自 agent_runtime.db）")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -266,6 +268,12 @@ private struct AccountHeatmap: View {
     private let weeks = 21
     private let rows = 7
 
+    // [Slice 5] 真实运行数据：从 AgentRuntimeDao.listAllRuns() 加载所有 run，
+    // 按 startedAt 的"日"分桶计数。空时所有格为 level 0（诚实，不造假）。
+    @State private var dailyCounts: [Date: Int] = [:]
+    @State private var totalRuns: Int = 0
+    @State private var didLoad = false
+
     var body: some View {
         GeometryReader { geometry in
             let cellGap: CGFloat = 3
@@ -278,29 +286,70 @@ private struct AccountHeatmap: View {
             ZStack {
                 heatmapGrid(cellSize: cellSize, cellGap: cellGap)
                     .frame(width: gridWidth, height: gridHeight)
-                    .opacity(0.42)
 
-                Label("统计执行待接", systemImage: "chart.bar.xaxis")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        AmberTheme.surface.opacity(0.92),
-                        in: Capsule()
-                    )
+                if !didLoad {
+                    Label("加载中…", systemImage: "arrow.clockwise")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(AmberTheme.surface.opacity(0.92), in: Capsule())
+                } else if totalRuns == 0 {
+                    Label("暂无运行记录", systemImage: "chart.bar.xaxis")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(AmberTheme.surface.opacity(0.92), in: Capsule())
+                }
             }
             .frame(maxWidth: .infinity, minHeight: gridHeight)
         }
         .frame(height: 112)
+        .task {
+            guard !didLoad else { return }
+            await loadRuns()
+            didLoad = true
+        }
+    }
+
+    // [Slice 5] 调 IosDatabaseFactory.createDatabase().agentRuntimeDao()
+    // .listAllRuns(completionHandler:)（AgentRuntimeDao.kt:42），把每个 run
+    // 的 startedAt (epoch ms) 折算成"日"key 累加。在 callback 内就把
+    // non-Sendable 的 [AgentRunEntity] 降级成 Sendable 的 [Date:Int]/Int，
+    // 再 resume continuation，避免数据竞争。dao 失败时按空数据渲染（诚实）。
+    private func loadRuns() async {
+        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
+        let calendar = Calendar.current
+        let result: (counts: [Date: Int], total: Int) = await withCheckedContinuation { (cont: CheckedContinuation<(counts: [Date: Int], total: Int), Never>) in
+            dao.listAllRuns { result, _ in
+                let runs = result ?? []
+                var counts: [Date: Int] = [:]
+                for run in runs {
+                    let date = Date(timeIntervalSince1970: TimeInterval(run.startedAt) / 1000.0)
+                    let day = calendar.startOfDay(for: date)
+                    counts[day, default: 0] += 1
+                }
+                cont.resume(returning: (counts, runs.count))
+            }
+        }
+        dailyCounts = result.counts
+        totalRuns = result.total
     }
 
     private func heatmapGrid(cellSize: CGFloat, cellGap: CGFloat) -> some View {
         Canvas { context, _ in
             let columnPitch = cellSize + cellGap
             let rowPitch = cellSize + cellGap
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            // 网格右下角是"今天"，往左回溯 weeks*rows 天。
             for week in 0..<weeks {
                 for row in 0..<rows {
+                    // 该格距今天的偏移天数（右下角 = 0）
+                    let offsetFromToday = (weeks - 1 - week) * rows + (rows - 1 - row)
+                    guard let cellDay = calendar.date(byAdding: .day, value: -offsetFromToday, to: today) else { continue }
+                    let count = dailyCounts[cellDay] ?? 0
                     let rect = CGRect(
                         x: CGFloat(week) * columnPitch,
                         y: CGFloat(row) * rowPitch,
@@ -309,10 +358,21 @@ private struct AccountHeatmap: View {
                     )
                     context.fill(
                         Path(roundedRect: rect, cornerRadius: 2.6),
-                        with: .color(legendColor(0))
+                        with: .color(legendColor(level(for: count)))
                     )
                 }
             }
+        }
+    }
+
+    /// 把单日 run 数映射到 0..4 的强度档。
+    private func level(for count: Int) -> Int {
+        switch count {
+        case 0: return 0
+        case 1: return 1
+        case 2...3: return 2
+        case 4...6: return 3
+        default: return 4
         }
     }
 

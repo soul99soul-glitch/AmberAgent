@@ -19,6 +19,13 @@ struct ChatContextSnapshot {
     let supportsReasoning: Bool
     let pendingSelectedFileName: String?
     let pendingSelectedFileBytesText: String?
+    // [Slice 5] Real token aggregation from messages.usage (TokenUsage on
+    // each UIMessage; aggregated by reduce over messages). 0 when no usage
+    // recorded (e.g. no API key / no completed runs yet) — honest, not faked.
+    let promptTokens: Int
+    let completionTokens: Int
+    let totalTokens: Int
+    let cachedTokens: Int
 }
 
 @MainActor
@@ -46,12 +53,27 @@ final class ChatViewModel {
     }
 
     var contextSnapshot: ChatContextSnapshot {
-        ChatContextSnapshot(
+        // [Slice 5] Aggregate TokenUsage across all messages (each UIMessage
+        // carries usage: TokenUsage? set by the provider on completion).
+        var prompt = 0
+        var completion = 0
+        var cached = 0
+        for message in messages {
+            guard let usage = message.usage else { continue }
+            prompt += Int(usage.promptTokens)
+            completion += Int(usage.completionTokens)
+            cached += Int(usage.cachedTokens)
+        }
+        return ChatContextSnapshot(
             messageCount: messages.count,
             modelId: currentModelId,
             supportsReasoning: currentModelSupportsReasoning,
             pendingSelectedFileName: pendingSelectedFilePreview?.fileName,
-            pendingSelectedFileBytesText: pendingSelectedFilePreview.map { "\($0.bytesRead) bytes" }
+            pendingSelectedFileBytesText: pendingSelectedFilePreview.map { "\($0.bytesRead) bytes" },
+            promptTokens: prompt,
+            completionTokens: completion,
+            totalTokens: prompt + completion,
+            cachedTokens: cached
         )
     }
 

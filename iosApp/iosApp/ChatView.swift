@@ -366,8 +366,8 @@ private struct ContextRingButton: View {
         }
         .buttonStyle(.plain)
         .amberGlass(cornerRadius: 17)
-        .accessibilityLabel("上下文统计尚执行待接")
-        .accessibilityValue("\(snapshot.messageCount) 条消息")
+        .accessibilityLabel("上下文统计")
+        .accessibilityValue("\(snapshot.messageCount) 条消息，\(snapshot.totalTokens) tokens")
     }
 }
 
@@ -746,7 +746,9 @@ private struct ComposerContextPanel: View {
                         Circle()
                             .stroke(AmberTheme.surface2, lineWidth: 5)
                         Circle()
-                            .trim(from: 0, to: 0)
+                            // [Slice 5] 用量环按已用/上限比例填充（上限 8K 作视觉参考，
+                            // 非硬上限）。0 token 时环为空（诚实）。
+                            .trim(from: 0, to: min(CGFloat(snapshot.totalTokens) / 8_000.0, 1.0))
                             .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                             .rotationEffect(.degrees(-90))
 
@@ -756,11 +758,12 @@ private struct ComposerContextPanel: View {
                     }
                     .frame(width: 60, height: 60)
 
-                    Text("Token 统计执行待接")
+                    // [Slice 5] 真实 token 总数：聚合 messages.usage.totalTokens。
+                    Text("\(snapshot.totalTokens) tokens")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("当前仅显示 ViewModel 可验证状态")
+                    Text(snapshot.totalTokens > 0 ? "本会话累计用量" : "尚无用量记录")
                         .font(.caption2)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -777,6 +780,12 @@ private struct ComposerContextPanel: View {
                     ComposerContextStatRow(label: "当前模型", value: snapshot.modelId)
                     ComposerContextStatRow(label: "Reasoning", value: snapshot.supportsReasoning ? "可用" : "未标记")
                     ComposerContextStatRow(label: "待附加文件", value: pendingFileValue)
+                    // [Slice 5] 拆分 token 统计（来自 messages.usage）。
+                    ComposerContextStatRow(label: "Prompt", value: "\(snapshot.promptTokens)")
+                    ComposerContextStatRow(label: "Completion", value: "\(snapshot.completionTokens)")
+                    if snapshot.cachedTokens > 0 {
+                        ComposerContextStatRow(label: "Cached", value: "\(snapshot.cachedTokens)")
+                    }
                 }
                 .padding(.vertical, 4)
             }

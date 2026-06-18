@@ -137,6 +137,8 @@ KMP `Settings` 是 data class，`copy(...)` 可用；`restoreSnapshot` 已实现
 
 ### Slice 5：AccountView 统计 + ChatView Token 统计（~1 天）
 
+> **状态（2026-06-18）：✅ 已完成并 commit。** ChatView：`ChatContextSnapshot` 增加 prompt/completion/total/cached tokens（reduce `messages.usage`，TokenUsage 由 provider 在完成时填充）；ComposerContextPanel 显示真实 token 总数 + 拆分行；ContextRingButton 环按 token 比例填充。AccountView：新增 DAO `listAllRuns()`；AccountHeatmap 从 `dao.listAllRuns(completionHandler:)` 加载真实 run，按 startedAt 的日分桶着色 level 0-4；空状态诚实"暂无运行记录"。撤 3 处标记（ChatView Token 统计、ContextRingButton label、AccountView 热力图）。验收：xcodebuild build SUCCEEDED；2/2 XCTest（listAllRuns 读写闭环）PASS；subagent review APPROVE 4 维 0 P0/P1。
+
 **目标**：AgentRuntimeDao 在写真 run 记录（ChatViewModel.recordRun），但没人读统计；TokenUsage 在 UIMessage.usage 里，但没聚合显示。
 
 **做法**：
