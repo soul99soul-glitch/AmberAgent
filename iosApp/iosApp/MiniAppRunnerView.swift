@@ -7,6 +7,33 @@ struct MiniAppRunnerView: View {
     let title: String
     @State private var previewUrl: String = "https://www.example.com"
     @State private var loadedUrl: String = ""
+    // [MiniApp MVP] generated-HTML runner state.
+    @State private var generatedHtml: String = MiniAppRunnerView.sampleHtml
+    @State private var loadedHtml: String = ""
+    @State private var runnerError: String?
+    @State private var bridgeLog: [String] = []
+
+    /// A self-contained sample that exercises the bridge (calls app.info + log)
+    /// so the loop is demonstrable without external dependencies.
+    static let sampleHtml = """
+    <!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system;padding:12px}button{font-size:16px;padding:8px 14px;margin:4px}</style></head>
+    <body>
+    <h3>iOS MiniApp MVP</h3>
+    <div id="out">（点下方按钮调用 AmberNative bridge）</div>
+    <p><button onclick="callInfo()">app.info</button>
+    <button onclick="callLog()">log</button>
+    <button onclick="callAi()">ai.generate (stub)</button></p>
+    <script>
+      AmberNative.onResponse = function(json){
+        var r = typeof json === 'string' ? JSON.parse(json) : json;
+        document.getElementById('out').textContent = JSON.stringify(r);
+      };
+      function callInfo(){ AmberNative.postMessage({method:'app.info'}); }
+      function callLog(){ AmberNative.postMessage({method:'log', params:{message:'hello from MiniApp'}}); }
+      function callAi(){ AmberNative.postMessage({method:'ai.generate', params:{prompt:'hi'}}); }
+    </script>
+    </body></html>
+    """
 
     private let evidenceRows: [MiniAppCapabilityRow] = [
         .init(
@@ -73,6 +100,7 @@ struct MiniAppRunnerView: View {
                     VStack(spacing: 0) {
                         intro
                         webViewPreviewSection
+                        miniAppRunnerSection
                         evidenceSection
                         blockedSection
                         MiniAppCapabilityNote("iOS 已有 WKWebView 渲染能力（上方预览）。完整 MiniApp Runner（HTML 校验/bridge 注入/沙箱/权限）仍待开发。")
@@ -164,6 +192,91 @@ struct MiniAppRunnerView: View {
             }
 
             Text("真实的 WKWebView。MiniApp 的 HTML 校验/bridge 注入/沙箱权限仍待开发。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+        }
+    }
+
+    /// [MiniApp MVP] Generated-HTML runner: validates the HTML (Android-parity
+    /// security gate), loads it into a WKWebView with the AmberNative bridge
+    /// injected, and shows the bridge message log. The sample HTML exercises
+    /// app.info / log / ai.generate(stub) so the closed loop is demonstrable.
+    private var miniAppRunnerSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "MiniApp Runner（HTML 校验 + AmberNative bridge · MVP）")
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("生成的 HTML（校验后加载）")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted)
+                TextEditor(text: $generatedHtml)
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(height: 120)
+                    .padding(6)
+                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10))
+                    .scrollContentBackground(.hidden)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+
+            HStack(spacing: 8) {
+                Button {
+                    loadedHtml = generatedHtml
+                    runnerError = nil
+                } label: {
+                    Label("加载并校验", systemImage: "play.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(AmberTheme.accent, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+
+            if let runnerError {
+                Text("⚠️ \(runnerError)")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.accentRed)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
+
+            if !loadedHtml.isEmpty {
+                MiniAppRunnerWebView(
+                    html: loadedHtml,
+                    onValidationError: { runnerError = $0 },
+                    onBridgeLog: { bridgeLog = $0 }
+                )
+                .frame(height: 240)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+                if !bridgeLog.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Bridge 日志（最近 \(min(bridgeLog.count, 8)) 条）")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AmberTheme.muted)
+                        ForEach(bridgeLog.suffix(8).indices, id: \.self) { i in
+                            Text(bridgeLog.suffix(8)[i])
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(AmberTheme.muted2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                }
+            }
+
+            Text("HTML 经 MiniAppHtmlValidator 校验（与 Android 同规则：禁外链 script/危险 API）；AmberNative.postMessage → 原生 → onResponse 闭环。完整 bridge（ai/search/host/sensor/权限/沙箱）仍待开发。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
                 .frame(maxWidth: .infinity, alignment: .leading)
