@@ -98,12 +98,17 @@ struct ExecutionSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "运行链路")
             AmberFormGroup {
+                // [Slice 3] 工具执行已接：ChatViewModel.makeTextGenerationParams 注入
+                // mcp_call/subagent_dispatch/model_council_run 工具声明，onComplete 检测
+                // pending 调用后 dispatch（IOSMcpManager.callTool/SubAgentRunner.run/
+                // CouncilRunner.run），结果回填并 resume stream。逻辑闭环；真链路运行时
+                // 验证需 API key（编译级+逻辑已就绪）。
                 ExecutionStatusRow(
                     systemImage: "terminal",
                     title: "工具执行",
-                    subtitle: "iOS 目前只接 selected-file 本地工具；无 Agent 工具循环",
-                    value: "局部可用",
-                    valueColor: AmberTheme.accentAmber
+                    subtitle: "已注入 mcp_call / subagent_dispatch / model_council_run 工具；onComplete dispatch + resume。真链路验证需 API key",
+                    value: "已接(逻辑)",
+                    valueColor: AmberTheme.accentGreen
                 )
 
                 ExecutionDivider(leading: 54)

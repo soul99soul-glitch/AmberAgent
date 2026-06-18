@@ -36,9 +36,11 @@ struct SubAgentsView: View {
 
     private let iOSRows: [SubAgentEvidenceRow] = [
         .init(
+            // [Slice 3] subagent_dispatch 工具已注入聊天（onComplete dispatch →
+            // SubAgentRunner.run → resume）。但 subAgent.enabled 总开关仍待接。
             title: "启用子代理",
-            subtitle: "iOS SettingsStore 没有 subAgent.enabled；ChatViewModel 生成请求也不会注入 subagent_* 工具。",
-            value: "待接",
+            subtitle: "聊天已注入 subagent_dispatch 工具（Slice 3，dispatch+resume 逻辑闭环；真链路需 API key）；但 SettingsStore 的 subAgent.enabled 总开关仍待接。",
+            value: "部分接",
             color: AmberTheme.accentAmber
         ),
         .init(
@@ -49,15 +51,16 @@ struct SubAgentsView: View {
         ),
         .init(
             title: "运行结果 / 实时面板",
-            subtitle: "没有 runId、liveTextFlow、livePartsFlow、transcriptPath 或 AgentTask 状态来源。",
+            subtitle: "dispatch 仅返回最终 runId/status；没有实时 liveTextFlow、livePartsFlow、transcriptPath 或 AgentTask 快照来源。",
             value: "待接",
             color: AmberTheme.accentAmber
         ),
         .init(
+            // [Slice 4] systemPrompt 覆盖已持久化到 snapshot.agentRuntime.subAgent.overrides。
             title: "角色覆盖与自定义角色",
-            subtitle: "角色详情页只展示字段映射；不会写入 overrides、customDefinitions 或 prompt markdown。",
-            value: "本地预览",
-            color: AmberTheme.muted
+            subtitle: "systemPrompt 覆盖已持久化（Slice 4，重启保留）；customDefinitions / prompt markdown 写入仍待接。",
+            value: "部分接",
+            color: AmberTheme.accentAmber
         )
     ]
 

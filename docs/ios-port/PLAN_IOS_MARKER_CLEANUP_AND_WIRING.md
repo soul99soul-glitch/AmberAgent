@@ -92,6 +92,8 @@
 
 ### Slice 3：Chat 工具注入——MCP/SubAgent/Council 进 chat（~2-3 天，**核心价值**）
 
+> **状态（2026-06-18）：⚠️ 编译级+逻辑完成（真链路运行时验证待 API key）。** KMP `Tool.kt` 新增 `createMcpCallToolDeclaration`/`createSubAgentDispatchToolDeclaration`/`createModelCouncilRunToolDeclaration`；Swift `SubAgentRunner.run(objective:)`/`CouncilRunner.run(objective:)` 驱动 startInput+manager；`IOSMcpConfigStore.shared` 让 ChatViewModel 复用配置；`ChatViewModel` 在 `makeTextGenerationParams` 注入 3 工具、`onComplete` 检测 pending 调用并 dispatch（IOSMcpManager.callTool / SubAgentRunner.run / CouncilRunner.run），结果回填 `messagesByFinishingToolCall` 后 `startStreaming` resume（`maxToolResumeCount=1` 防死循环）。验收：xcodebuild build SUCCEEDED；subagent review APPROVE 4 维 0 P0/P1。**真链路运行时验证（chat 里触发→看到步骤→拿到结果→模型继续）按用户授权延后，需 API key**。诚实保留待接：@mention extractMentions、liveTextFlow/transcript 实时面板、subAgent.enabled 总开关、operationPreviewMode/generativeUi/maxToolLoopSteps（只读 KMP 默认值）。
+
 **目标**：现在 MCP/SubAgent/Council 三个能力都能跑，但**在 chat 里用不了**——用户问"帮我用 subagent 查 X"时 ChatViewModel 不认识 `subagent_*` 工具。这是把"能跑的能力"变成"用户日常可用"的关键一跳。
 
 参照 Slice 64（search_web 注入）的成熟模式：

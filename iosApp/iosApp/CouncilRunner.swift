@@ -49,6 +49,33 @@ final class CouncilRunner {
     }
 
     /// Run a minimal council start cycle to prove the call chain works.
+    /// [Slice 3] Input-driven run for the chat-tool dispatch path. Drives
+    /// startInput → m.start with a caller-supplied `objective`. Returns a text
+    /// summary usable as a tool-call output. Failures return an honest error
+    /// string — never empty/fabricated success.
+    func run(objective: String) async -> String {
+        guard let m = ensureManager() else {
+            return "ModelCouncil 不可用：无法构造 Manager（文档目录不可用）。"
+        }
+        let input = IosCouncilFactory.shared.startInput(objective: objective)
+
+        let outcome: (runId: String, status: String) = await withCheckedContinuation { cont in
+            m.start(input: input) { result, error in
+                if let error = error {
+                    cont.resume(returning: ("(unknown)", "error: \(error.localizedDescription)"))
+                } else if let result = result {
+                    cont.resume(returning: (
+                        IosCouncilFactory.shared.extractRunId(result: result),
+                        IosCouncilFactory.shared.extractStatus(result: result)
+                    ))
+                } else {
+                    cont.resume(returning: ("(unknown)", "empty"))
+                }
+            }
+        }
+        return "ModelCouncil 已执行（runId: \(outcome.runId)，状态: \(outcome.status)）。objective: \(objective)。配置 API Key 时为真实多模型推理；无 Key 时为诚实 stub。"
+    }
+
     func runTestCycle() {
         guard let m = ensureManager() else {
             lastRunResult = "无法构造 Manager（文档目录不可用）"

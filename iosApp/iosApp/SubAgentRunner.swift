@@ -121,6 +121,72 @@ final class SubAgentRunner {
         }
     }
 
+    /// [Slice 3] Input-driven run for the chat-tool dispatch path. Drives the
+    /// same startInput → start → wait → read chain as runTestCycle, but with a
+    /// caller-supplied `objective`. Returns a text summary suitable to use as a
+    /// tool-call output that the model can read to continue the conversation.
+    /// Failures (no manager, start/wait/read error, timeout) return an honest
+    /// error string — never empty/fabricated success.
+    func run(objective: String) async -> String {
+        guard let m = ensureManager() else {
+            return "SubAgent 不可用：无法构造 Manager（文档目录不可用）。"
+        }
+        let input = IosSubAgentFactory.shared.startInput(
+            objective: objective,
+            subagentId: "ios-chat-dispatch",
+            outputFormat: "返回针对 objective 的最终 Markdown 回答。",
+            toolsAndSources: "不使用外部工具，仅完成委派任务。",
+            boundaries: "不要请求用户输入，不要伪造真实工具结果。",
+            context: "iOS ChatViewModel subagent_dispatch 工具调用。"
+        )
+
+        // start
+        let startResult: (runId: String, status: String) = await withCheckedContinuation { cont in
+            m.start(parentConversationId: KotlinUuid.companion.random(), input: input, parentTools: []) { result, error in
+                if let error {
+                    cont.resume(returning: ("(unknown)", "error: \(error.localizedDescription)"))
+                } else if let result {
+                    cont.resume(returning: (
+                        IosSubAgentFactory.shared.extractRunId(result: result),
+                        IosSubAgentFactory.shared.extractStatus(result: result)
+                    ))
+                } else {
+                    cont.resume(returning: ("(unknown)", "empty"))
+                }
+            }
+        }
+        guard startResult.runId != "(unknown)" else {
+            return "SubAgent 启动失败：\(startResult.status)"
+        }
+
+        // wait (15s budget, matches runTestCycle)
+        let _: String = await withCheckedContinuation { cont in
+            m.wait(runId: startResult.runId, waitTimeoutMs: 15_000) { waitResult, waitError in
+                if let waitError {
+                    cont.resume(returning: "wait 错误: \(waitError.localizedDescription)")
+                } else if let waitResult {
+                    cont.resume(returning: IosSubAgentFactory.shared.extractStatus(result: waitResult))
+                } else {
+                    cont.resume(returning: "wait 空结果")
+                }
+            }
+        }
+
+        // read final status (the honest result we expose as tool output)
+        let finalStatus: String = await withCheckedContinuation { cont in
+            m.read(runId: startResult.runId) { readResult, readError in
+                if let readError {
+                    cont.resume(returning: "read 错误: \(readError.localizedDescription)")
+                } else if let readResult {
+                    cont.resume(returning: IosSubAgentFactory.shared.extractStatus(result: readResult))
+                } else {
+                    cont.resume(returning: "read 空结果")
+                }
+            }
+        }
+        return "SubAgent 已执行（runId: \(startResult.runId)，状态: \(finalStatus)）。objective: \(objective)。配置 API Key 时为真实推理；无 Key 时为诚实 stub。"
+    }
+
     func cancelCurrentRun() {
         guard let m = ensureManager(), let runId = currentRunId else {
             lastRunResult = "没有可取消的 SubAgent runId"

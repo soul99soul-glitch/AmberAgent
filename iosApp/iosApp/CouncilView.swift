@@ -100,7 +100,7 @@ struct CouncilView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 通过下方\"执行（真实调用链）\"区可手动启动议会（IosCouncilFactory.createWithRealProvider → ModelCouncilManager.start，带 API key 真推理；无 key 时诚实 stub）。ChatViewModel 自动注入 model_council_* 工具、SettingsStore 写回与席位持久化仍待接。")
+        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 通过下方\"执行（真实调用链）\"区可手动启动议会，且聊天里模型可调用 model_council_run 工具触发（Slice 3 已接：onComplete dispatch → CouncilRunner.run → resume，逻辑闭环；真链路需 API key）。席位增删已持久化。实时 liveText/transcript 快照来源仍待接。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -197,10 +197,13 @@ struct CouncilView: View {
             AmberFormGroup {
                 CouncilStatusRow(
                     row: .init(
+                        // [Slice 3] 已接：ChatViewModel.makeTextGenerationParams 注入
+                        // model_council_run 工具，onComplete dispatch → CouncilRunner.run
+                        // → resume stream。逻辑闭环；真链路需 API key。
                         title: "从聊天触发议会",
-                        subtitle: "手动\"启动议会\"按钮已接（上方执行区，CouncilRunner.swift:62 m.start）；但 ChatViewModel 尚未注入 model_council_* 工具，聊天输入不会触发议会 run。",
-                        value: "待接",
-                        color: AmberTheme.accentAmber
+                        subtitle: "已接：聊天里模型可调用 model_council_run 工具，经 CouncilRunner.run 触发议会并 resume（逻辑闭环；真链路需 API key）。手动按钮仍可用。",
+                        value: "已接(逻辑)",
+                        color: AmberTheme.accentGreen
                     )
                 )
                 CouncilStatusDivider()

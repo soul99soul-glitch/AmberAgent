@@ -91,6 +91,15 @@ final class ChatViewModel {
     @ObservationIgnored private lazy var provider = OpenAIKmpProvider()
     @ObservationIgnored private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
     @ObservationIgnored private let streamJobBox = StreamJobBox()
+    // [Slice 3] Dispatch targets for chat-injected tools. Lazily built so a
+    // chat without these tools pays no construction cost.
+    @ObservationIgnored private lazy var subAgentRunner = SubAgentRunner()
+    @ObservationIgnored private lazy var councilRunner = CouncilRunner()
+    @ObservationIgnored private lazy var mcpManager: IOSMcpManager = {
+        // Build from the shared config store (same UserDefaults key as
+        // McpServersView) so callTool reaches the same configured servers.
+        IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared)
+    }()
     private var attachRequestId: UUID?
 
     private var streamJob: Kotlinx_coroutines_coreJob? {
@@ -380,6 +389,28 @@ final class ChatViewModel {
                         return
                     }
 
+                    // [Slice 3] MCP / sub-agent / council dispatch: if the model
+                    // invoked one of these tools, run its executor and resume the
+                    // stream with the result (same resume pattern as search_web).
+                    if let slice3ToolCall = self.pendingSlice3ToolCall(in: snapshot),
+                       self.currentToolResumeCount < self.maxToolResumeCount {
+                        self.currentToolResumeCount += 1
+                        self.streamJob = nil
+                        Task { @MainActor in
+                            await self.executeSlice3ToolCall(
+                                slice3ToolCall,
+                                providerSetting: providerSetting,
+                                params: params,
+                                runId: runId,
+                                startedAt: startedAt,
+                                inputDigest: inputDigest,
+                                conversationId: conversationId,
+                                baseMessages: snapshot
+                            )
+                        }
+                        return
+                    }
+
                     await self.recordRun(
                         runId: runId,
                         startedAt: startedAt,
@@ -458,6 +489,20 @@ final class ChatViewModel {
         return nil
     }
 
+    /// [Slice 3] Detects a pending MCP / sub-agent / council tool call (one
+    /// whose output is still empty) so onComplete can dispatch it. Mirrors
+    /// pendingSearchToolCall but matches the Slice-3 tool names.
+    private func pendingSlice3ToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+        let slice3Names: Set<String> = ["mcp_call", "subagent_dispatch", "model_council_run"]
+        for message in messages.reversed() where message.role == MessageRole.assistant {
+            if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
+                .first(where: { slice3Names.contains($0.toolName) && $0.output.isEmpty }) {
+                return toolCall
+            }
+        }
+        return nil
+    }
+
     private func executeSearchToolCall(
         _ toolCall: UIMessagePart.Tool,
         providerSetting: ProviderSetting.OpenAI,
@@ -489,6 +534,75 @@ final class ChatViewModel {
             conversationId: conversationId,
             uploadMessages: resumedMessages
         )
+    }
+
+    /// [Slice 3] Executes an MCP / sub-agent / council tool call and resumes the
+    /// stream with the result. Mirrors executeSearchToolCall but dispatches to
+    /// IOSMcpManager.callTool / SubAgentRunner.run / CouncilRunner.run based on
+    /// the tool name. The tool `input` is a JSON string; we extract the fields
+    /// the model provided.
+    private func executeSlice3ToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        let resultText = await dispatchSlice3ToolCall(toolCall)
+
+        guard currentRunId == runId else { return }
+        let resumedMessages = messagesByFinishingToolCall(toolCall, outputText: resultText, in: baseMessages)
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        startStreaming(
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    /// [Slice 3] Routes a Slice-3 tool call to its executor and returns the
+    /// result text (or an honest error string — never fabricated success).
+    private func dispatchSlice3ToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
+        switch toolCall.toolName {
+        case "subagent_dispatch":
+            let objective = jsonObject(toolCall.input)?["objective"] as? String ?? toolCall.input
+            return await subAgentRunner.run(objective: objective)
+        case "model_council_run":
+            let objective = jsonObject(toolCall.input)?["objective"] as? String ?? toolCall.input
+            return await councilRunner.run(objective: objective)
+        case "mcp_call":
+            guard let args = jsonObject(toolCall.input),
+                  let server = args["server"] as? String,
+                  let tool = args["tool"] as? String else {
+                return "mcp_call 参数无效：需要 server 与 tool。"
+            }
+            let arguments = (args["arguments"] as? [String: Any]) ?? [:]
+            do {
+                // IOSMcpManager.callTool connects to the server (JSON-RPC) and
+                // invokes the named tool, returning text content.
+                return try await mcpManager.callTool(serverName: server, toolName: tool, arguments: arguments)
+            } catch {
+                return "MCP 调用失败（server: \(server)，tool: \(tool)）：\(error.localizedDescription)"
+            }
+        default:
+            return "未知工具：\(toolCall.toolName)"
+        }
+    }
+
+    /// Best-effort JSON object parse of a tool-call input string. Returns nil
+    /// if the input isn't a valid JSON object (callers fall back to raw text).
+    private func jsonObject(_ string: String) -> [String: Any]? {
+        guard let data = string.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     private func messagesByFinishingToolCall(
@@ -647,12 +761,22 @@ final class ChatViewModel {
             contextWindowTokens: nil,
             providerOverwrite: nil
         )
+        // [Slice 3] Tool declarations: search_web (existing) + MCP dispatch +
+        // sub-agent dispatch + model-council run. The model decides which to
+        // call; the iOS onComplete dispatch routes each to its executor.
+        var toolDeclarations: [Tool] = []
+        if searchEnabled {
+            toolDeclarations.append(ToolKt.createSearchWebToolDeclaration())
+        }
+        toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
+        toolDeclarations.append(ToolKt.createSubAgentDispatchToolDeclaration())
+        toolDeclarations.append(ToolKt.createModelCouncilRunToolDeclaration())
         return TextGenerationParams(
             model: model,
             temperature: KotlinFloat(value: 0.7),
             topP: nil,
             maxTokens: nil,
-            tools: searchEnabled ? [ToolKt.createSearchWebToolDeclaration()] : [],
+            tools: toolDeclarations,
             reasoningLevel: modelAbilities.contains(.reasoning) ? reasoningLevel : .off,
             customHeaders: [],
             customBody: []
