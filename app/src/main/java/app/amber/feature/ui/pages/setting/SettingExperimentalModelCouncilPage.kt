@@ -43,6 +43,7 @@ import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS
 import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_TOTAL_TIMEOUT_MS
 import app.amber.feature.modelcouncil.EXTERNAL_CLI_DEFAULT_TOOL_ID
 import app.amber.feature.modelcouncil.ExternalCliToolRegistry
+import app.amber.feature.modelcouncil.CouncilPowerMode
 import app.amber.feature.modelcouncil.MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER
 import app.amber.feature.modelcouncil.ModelCouncilRolePresets
 import app.amber.feature.modelcouncil.ModelCouncilRuntimeSetting
@@ -73,6 +74,9 @@ fun SettingExperimentalModelCouncilPage(
     // truncated user lens picks the moment they touched this row after upgrading.
     val maxSeatOptions = listOf(3, 5, 6, 8)
     val roundOptions = listOf(2, 3, 4, 5, 6)
+    // Host reasoning effort: null = defer to model default, then every level.
+    val reasoningLevelOptions = listOf<ReasoningLevel?>(null) + ReasoningLevel.entries
+    val powerModeOptions = CouncilPowerMode.entries
     val timeoutOptions = listOf(60_000L, DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS, 480_000L, EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS)
     val budgetOptions = listOf(8_000, DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS, 20_000, 40_000, EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS)
     val scope = rememberCoroutineScope()
@@ -156,43 +160,67 @@ fun SettingExperimentalModelCouncilPage(
                         style = MaterialTheme.typography.bodySmall,
                         color = workspaceColors().muted,
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.setting_model_council_show_seat_outputs),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = workspaceColors().ink,
-                            )
-                            Text(
-                                text = stringResource(R.string.setting_model_council_show_seat_outputs_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = workspaceColors().muted,
-                            )
-                        }
-                        Switch(
-                            checked = council.showSeatOutputs,
-                            onCheckedChange = { checked -> update { it.copy(showSeatOutputs = checked) } },
+                    ModelCouncilPropertyRow(label = "议会模式") {
+                        Select(
+                            options = powerModeOptions,
+                            selectedOption = council.councilPowerMode,
+                            onOptionSelected = { mode ->
+                                update { it.copy(councilPowerMode = mode) }
+                            },
+                            optionToString = { mode ->
+                                when (mode) {
+                                    CouncilPowerMode.STANDARD -> "标准"
+                                    CouncilPowerMode.FULL -> "全能"
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     Text(
-                        text = stringResource(R.string.setting_model_council_synthesis_model),
+                        text = when (council.councilPowerMode) {
+                            CouncilPowerMode.STANDARD -> "标准：串行发言→综合，主持人被动，速度快。"
+                            CouncilPowerMode.FULL -> "全能：主持人主动编排，可联网搜索/抓取补全信息、轮末点评指引，速度较慢。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspaceColors().muted,
+                    )
+                    Text(
+                        text = "主持人模型",
                         style = MaterialTheme.typography.labelMedium,
                         color = workspaceColors().faint,
                     )
                     ModelSelector(
-                        modelId = council.synthesisModelId ?: settings.chatModelId,
+                        modelId = council.hostModelId ?: settings.chatModelId,
                         providers = settings.providers,
                         type = ModelType.CHAT,
                         compact = true,
                         modifier = Modifier.fillMaxWidth(),
-                        onSelect = { model -> update { it.copy(synthesisModelId = model.id) } },
+                        onSelect = { model -> update { it.copy(hostModelId = model.id) } },
+                    )
+                    ModelCouncilPropertyRow(label = "主持人推理强度") {
+                        Select(
+                            options = reasoningLevelOptions,
+                            selectedOption = council.hostReasoningLevel,
+                            onOptionSelected = { level ->
+                                update { it.copy(hostReasoningLevel = level) }
+                            },
+                            optionToString = { level -> level?.name?.lowercase() ?: "跟随模型默认" },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    OutlinedTextField(
+                        value = council.hostSystemPrompt,
+                        onValueChange = { value -> update { it.copy(hostSystemPrompt = value.take(2_000)) } },
+                        label = { Text("主持人提示词（可选）") },
+                        placeholder = { Text("留空用内置主持人提示；填写则作为风格 / 人设补充追加到内置提示之后") },
+                        minLines = 2,
+                        maxLines = 5,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "主持人负责开场、引导讨论与综合前的收束；不选模型则跟随对话助手模型。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspaceColors().muted,
                     )
                 }
             }

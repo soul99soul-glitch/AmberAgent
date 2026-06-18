@@ -23,8 +23,31 @@ const val MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER = "00000000-0000-0000-0000-00
 @Serializable
 data class ModelCouncilRuntimeSetting(
     val enabled: Boolean = false,
+    /**
+     * Council orchestration tier. STANDARD = the original flow (serial turns →
+     * synthesis, passive host, no tools) — fast and simple. FULL = the enhanced
+     * flow where the host actively orchestrates: it can call read-only tools
+     * (search/scrape) to fill information gaps before synthesis, and review each
+     * round / ask the user to steer. FULL is slower (extra model turns + network
+     * round-trips); users opt in. Default STANDARD so an upgrade never slows
+     * existing councils.
+     */
+    val councilPowerMode: CouncilPowerMode = CouncilPowerMode.STANDARD,
     val defaultSeats: List<ModelCouncilSeat> = emptyList(),
     val synthesisModelId: Uuid? = null,
+    // Host (moderator) model override. null = follow the conversation's main
+    // Assistant model (the historical default). When set, it flows into
+    // CouncilRoom.hostModelIdOverride at open time, and resolveHostModelId()
+    // adopts it with highest priority.
+    val hostModelId: Uuid? = null,
+    // Host reasoning effort. null = leave it to the model default (the host
+    // historically ran with reasoning OFF). Mirrors the per-seat reasoningLevel.
+    val hostReasoningLevel: ReasoningLevel? = null,
+    // Optional extra host system prompt. Blank = use the built-in
+    // CouncilRoomPrompts.hostSystemPrompt unchanged; non-blank = appended after
+    // the built-in prompt as a style/persona supplement (same pattern as the
+    // guest seat's own systemPrompt vs the mode guidance).
+    val hostSystemPrompt: String = "",
     val maxSeats: Int = DEFAULT_MODEL_COUNCIL_MAX_SEATS,
     val defaultRounds: Int = DEFAULT_MODEL_COUNCIL_DEFAULT_ROUNDS,
     val maxRounds: Int = DEFAULT_MODEL_COUNCIL_MAX_ROUNDS,
@@ -66,6 +89,18 @@ enum class ModelCouncilSeatRunner {
 
     @SerialName("external_cli")
     EXTERNAL_CLI,
+}
+
+/**
+ * Council orchestration tier — see [ModelCouncilRuntimeSetting.councilPowerMode].
+ */
+@Serializable
+enum class CouncilPowerMode {
+    @SerialName("standard")
+    STANDARD,
+
+    @SerialName("full")
+    FULL,
 }
 
 @Serializable

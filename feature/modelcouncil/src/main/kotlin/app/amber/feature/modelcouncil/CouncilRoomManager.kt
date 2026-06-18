@@ -109,6 +109,9 @@ class CouncilRoomManager(
     private val externalCliRunner: ModelCouncilExternalCliRunner,
     private val store: CouncilRoomStore,
     private val taskReporter: CouncilRoomTaskReporter,
+    // Tool-augmented host turns (FULL mode). Defaults to NoOp so STANDARD mode
+    // and unit tests are unaffected; DI injects AppCouncilHostToolProvider.
+    private val toolProvider: CouncilHostToolProvider = NoOpCouncilHostToolProvider,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RoomMutationSink {
     /** Lazy executor — constructed once with `this` as the sink. */
@@ -184,6 +187,7 @@ class CouncilRoomManager(
         initialGuests: List<CouncilParticipant> = emptyList(),
         maxRounds: Int = DEFAULT_COUNCIL_ROOM_MAX_ROUNDS,
         maxParticipants: Int = DEFAULT_COUNCIL_ROOM_MAX_PARTICIPANTS,
+        hostModelIdOverride: Uuid? = null,
     ): CouncilRoomOpResult {
         // SYNTHESIZE is a terminal-ish phase reachable only via synthesize().
         if (initialMode == CouncilRoomMode.SYNTHESIZE) {
@@ -212,12 +216,15 @@ class CouncilRoomManager(
                 )
             }
             val now = nowMs()
-            // Resolve the host's model display name so the host bubble can show it
-            // (the host has no modelId — it runs on the conversation's Assistant model).
+            // Resolve the host's model display name so the host bubble can show it.
+            // When a hostModelIdOverride is supplied it takes priority (matches
+            // resolveHostModelId()'s resolution order), so the bubble shows the model
+            // the host will ACTUALLY run on, not the Assistant's configured model.
             val settings = settingsFlow.value
             val hostModelName = run {
-                val assistant = settings.assistants.firstOrNull { it.id == hostAssistantId }
-                val modelId = assistant?.chatModelId ?: settings.chatModelId
+                val modelId = hostModelIdOverride?.let { settings.findModelById(it)?.id }
+                    ?: settings.assistants.firstOrNull { it.id == hostAssistantId }?.chatModelId
+                    ?: settings.chatModelId
                 settings.findModelById(modelId)?.displayName.orEmpty()
             }
             val host = CouncilParticipant(
@@ -249,6 +256,7 @@ class CouncilRoomManager(
                 )),
                 maxRounds = maxRounds.coerceIn(1, MAX_ROUNDS_CAP),
                 maxParticipants = effectiveMaxParticipants,
+                hostModelIdOverride = hostModelIdOverride,
                 createdAtMs = now,
                 updatedAtMs = now,
             )
@@ -820,11 +828,14 @@ class CouncilRoomManager(
 
         val job = launchSynthesisJob(conversationId) {
             runCatching {
+                val councilSetting = settings.agentRuntime.modelCouncil
                 executor.generateSynthesis(
                     room = updatedRoom,
                     hostModelId = resolvedHostModelId,
                     hostSystemPrompt = CouncilRoomPrompts.hostSystemPrompt(updatedRoom),
                     settings = settings,
+                    reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
+                    extraSystemPrompt = councilSetting.hostSystemPrompt,
                 )
             }.onFailure { error ->
                 if (error !is CancellationException) {
@@ -975,6 +986,24 @@ class CouncilRoomManager(
                 // no @ → the host produces a redirect the next members will see.
                 handleInterjections(conversationId, settings)
             }
+
+            // FULL mode end-of-round host review: after all guests have spoken,
+            // the host decides whether the round warrants commentary. A real
+            // review (pointing out contradictions / drift / next-round focus) is
+            // appended as a host message and auto-flows into the next round's
+            // guest prompts via appendSteeringNote — giving the iterative
+            // "accumulate & refine" feel. Skipped on the final round (synthesis
+            // follows immediately) and when the host emits NO_COMMENT_SENTINEL.
+            // Pure host text here (no tools) to keep round pacing tight; research
+            // tools run once before synthesis (see the synthesis block below).
+            if (settings.agentRuntime.modelCouncil.councilPowerMode == CouncilPowerMode.FULL &&
+                round < totalRounds
+            ) {
+                val reviewRoom = peekRoom(conversationId) ?: return
+                if (!reviewRoom.status.terminal) {
+                    runHostReviewTurn(conversationId, reviewRoom, round, totalRounds, settings)
+                }
+            }
         }
 
         // Drain any final interjection before synthesizing.
@@ -1009,11 +1038,53 @@ class CouncilRoomManager(
                 updatedAtMs = nowMs(),
             )
         } ?: return
+        val councilSetting = settings.agentRuntime.modelCouncil
+        // FULL mode: before synthesizing, let the host run an optional tool-augmented
+        // RESEARCH turn to fill factual gaps / verify claims. The research summary
+        // streams into the timeline as a host message (so the user sees the host
+        // working), AND its text is explicitly injected into the synthesis turn's
+        // system prompt below — because CouncilRoomPrompts.synthesize() deliberately
+        // filters OUT host messages, relying on room.messages alone would hide the
+        // research from the verdict (review Q3). Skipped entirely in STANDARD mode,
+        // or when no search provider is configured (isAvailable gate).
+        var researchSummary: String? = null
+        if (councilSetting.councilPowerMode == CouncilPowerMode.FULL &&
+            toolProvider.isAvailable(settings)
+        ) {
+            val researchRoom = peekRoom(conversationId) ?: return
+            researchSummary = runHostToolTurn(
+                conversationId = conversationId,
+                hostModelId = hostModelId,
+                systemPrompt = CouncilRoomPrompts.hostSystemPrompt(researchRoom),
+                userPrompt = CouncilRoomPrompts.hostResearchPrompt(researchRoom),
+                settings = settings,
+                maxToolRounds = 2,
+                kindLabel = "Host research",
+            )
+        }
+        // Re-read so synthesis sees the research message (if any) in the record.
+        val finalSynthRoom = peekRoom(conversationId) ?: return
+        // Compose the synthesis extra prompt: user's static host supplement + the
+        // research summary (if the host produced one). The research text is the
+        // channel by which tool results reach the verdict, since synthesize() filters
+        // host-authored messages out of its discussion record.
+        val synthExtraPrompt = buildString {
+            if (councilSetting.hostSystemPrompt.isNotBlank()) {
+                append(councilSetting.hostSystemPrompt.trim())
+            }
+            researchSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+                if (isNotEmpty()) append("\n\n")
+                append("—— 主持人综合前调研摘要（基于联网搜索/抓取，请在综合时参考这些事实并标明来源）——\n")
+                append(summary.trim())
+            }
+        }.toString()
         executor.generateSynthesis(
-            room = synthRoom,
+            room = finalSynthRoom,
             hostModelId = hostModelId,
-            hostSystemPrompt = CouncilRoomPrompts.hostSystemPrompt(synthRoom),
+            hostSystemPrompt = CouncilRoomPrompts.hostSystemPrompt(finalSynthRoom),
             settings = settings,
+            reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
+            extraSystemPrompt = synthExtraPrompt,
         )
     }
 
@@ -1382,6 +1453,7 @@ class CouncilRoomManager(
         hostModelId: Uuid,
         settings: Settings,
     ) {
+        val councilSetting = settings.agentRuntime.modelCouncil
         executor.generateHostTurn(
             room = room,
             hostModelId = hostModelId,
@@ -1389,6 +1461,8 @@ class CouncilRoomManager(
             userPrompt = CouncilRoomPrompts.hostInterjectionPrompt(room, userMessage.text),
             messageId = msgId(),
             settings = settings,
+            reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
+            extraSystemPrompt = councilSetting.hostSystemPrompt,
         )
     }
 
@@ -1402,6 +1476,7 @@ class CouncilRoomManager(
         hostModelId: Uuid,
         settings: Settings,
     ) {
+        val councilSetting = settings.agentRuntime.modelCouncil
         executor.generateHostTurn(
             room = room,
             hostModelId = hostModelId,
@@ -1409,7 +1484,232 @@ class CouncilRoomManager(
             userPrompt = CouncilRoomPrompts.hostOpeningPrompt(room),
             messageId = msgId(),
             settings = settings,
+            reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
+            extraSystemPrompt = councilSetting.hostSystemPrompt,
         )
+    }
+
+    /**
+     * FULL mode: run a host turn that may call read-only tools (search/scrape),
+     * streaming the host's own text into the timeline as a normal host message.
+     * Used for the pre-synthesis RESEARCH turn and (potentially) end-of-round
+     * review. Gated on [CouncilHostToolProvider.isAvailable] by the caller.
+     *
+     * Returns the host's final text (already persisted as a COMPLETED host
+     * message), or null if the provider returned empty/no usable text (caller
+     * then skips — no empty bubble enters the timeline).
+     *
+     * `ask_user` outcomes are NOT handled here yet (step 4); for now an AskUser
+     * result is treated as "no usable research text" and the turn is skipped,
+     * so the council can still complete synthesis without the research context.
+     */
+    private suspend fun runHostToolTurn(
+        conversationId: Uuid,
+        hostModelId: Uuid,
+        systemPrompt: String,
+        userPrompt: String,
+        settings: Settings,
+        maxToolRounds: Int,
+        kindLabel: String,
+    ): String? {
+        val room = peekRoom(conversationId) ?: return null
+        val councilSetting = settings.agentRuntime.modelCouncil
+        val messageId = msgId()
+        val host = room.host ?: return null
+        val now = nowMs()
+        // Seed a streaming host message so the user sees the host "working".
+        upsertStreamingMessage(
+            conversationId,
+            CouncilMessage(
+                id = messageId,
+                authorId = host.id,
+                authorName = host.name,
+                role = host.role,
+                round = room.round,
+                mode = room.mode,
+                text = "",
+                createdAtMs = now,
+                status = CouncilMessageStatus.STREAMING,
+            ),
+        )
+        val outcome = runCatching {
+            // Bridge the sync onChunk callback to the suspend sink via a channel +
+            // consumer coroutine, exactly like generateGuestTurn does. Avoids
+            // runBlocking on the generation dispatcher.
+            kotlinx.coroutines.coroutineScope {
+                val chunkChannel = kotlinx.coroutines.channels.Channel<String>(
+                    kotlinx.coroutines.channels.Channel.UNLIMITED,
+                )
+                val consumer = launch {
+                    for (cumulative in chunkChannel) {
+                        runCatching {
+                            upsertStreamingMessage(
+                                conversationId,
+                                CouncilMessage(
+                                    id = messageId,
+                                    authorId = host.id,
+                                    authorName = host.name,
+                                    role = host.role,
+                                    round = room.round,
+                                    mode = room.mode,
+                                    text = cumulative,
+                                    createdAtMs = now,
+                                    status = CouncilMessageStatus.STREAMING,
+                                ),
+                            )
+                        }
+                    }
+                }
+                try {
+                    toolProvider.generateWithTools(
+                        settings = settings,
+                        modelId = hostModelId,
+                        systemPrompt = systemPrompt,
+                        userPrompt = userPrompt,
+                        reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
+                        maxToolRounds = maxToolRounds,
+                        timeoutMs = room.seatTimeoutMs.coerceAtLeast(1_000L),
+                        outputBudgetChars = room.outputBudgetChars,
+                        onChunk = { cumulative -> chunkChannel.trySend(cumulative) },
+                    )
+                } finally {
+                    chunkChannel.close()
+                    consumer.join()
+                }
+            }
+        }.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            completeMessage(
+                conversationId = conversationId,
+                messageId = messageId,
+                status = CouncilMessageStatus.FAILED,
+                text = "",
+                warnings = emptyList(),
+                error = "$kindLabel failed: ${error.message ?: error::class.java.simpleName}",
+                authorId = host.id,
+                authorStatus = CouncilParticipantStatus.IDLE,
+            )
+            return null
+        }
+        return when (outcome) {
+            is HostToolOutcome.Done -> {
+                val finalText = outcome.text.trim()
+                if (finalText.isEmpty()) {
+                    // The host ran the research turn but produced no summary text —
+                    // meaning it judged the discussion self-contained (no tools needed,
+                    // or tools returned nothing usable). Rather than leave an empty
+                    // bubble, finalize the placeholder with a one-line honest note so
+                    // the timeline reads naturally. Returns null so the caller knows
+                    // there is no research summary to fold into synthesis.
+                    completeMessage(
+                        conversationId = conversationId,
+                        messageId = messageId,
+                        status = CouncilMessageStatus.COMPLETED,
+                        text = "（主持人判断当前讨论已自洽，无需补充外部调研。）",
+                        warnings = outcome.warnings,
+                        error = "",
+                        authorId = host.id,
+                        authorStatus = CouncilParticipantStatus.IDLE,
+                    )
+                    null
+                } else {
+                    completeMessage(
+                        conversationId = conversationId,
+                        messageId = messageId,
+                        status = CouncilMessageStatus.COMPLETED,
+                        text = finalText,
+                        warnings = outcome.warnings,
+                        error = "",
+                        authorId = host.id,
+                        authorStatus = CouncilParticipantStatus.IDLE,
+                    )
+                    finalText
+                }
+            }
+            is HostToolOutcome.AskUser -> {
+                // Step 4 will wire the HITL flow; for now skip gracefully so the
+                // council can still finish. Mark the placeholder as completed-empty.
+                completeMessage(
+                    conversationId = conversationId,
+                    messageId = messageId,
+                    status = CouncilMessageStatus.COMPLETED,
+                    text = "",
+                    warnings = listOf("Host asked a question; HITL not yet wired — skipped."),
+                    error = "",
+                    authorId = host.id,
+                    authorStatus = CouncilParticipantStatus.IDLE,
+                )
+                null
+            }
+        }
+    }
+
+    /**
+     * FULL mode end-of-round host review. Pure text (no tools, to keep round
+     * pacing tight): the host reads this round's guest turns and either writes a
+     * pointed review + next-round steer (appended as a host message, which
+     * [appendSteeringNote] then injects into the next round's guest prompts) or
+     * emits [CouncilRoomPrompts.NO_COMMENT_SENTINEL] (in which case nothing is
+     * appended — no empty/noise bubble).
+     *
+     * Uses the plain [modelRunner] (not the tool provider) and appends the
+     * finished text only after the sentinel check, so a "no comment" decision
+     * leaves the timeline untouched.
+     */
+    private suspend fun runHostReviewTurn(
+        conversationId: Uuid,
+        room: CouncilRoom,
+        round: Int,
+        totalRounds: Int,
+        settings: Settings,
+    ) {
+        val councilSetting = settings.agentRuntime.modelCouncil
+        val hostModelId = resolveHostModelId(room, settings) ?: return
+        val host = room.host ?: return
+        // Generate the review text OFFLINE (no streaming into the timeline yet):
+        // we only surface it if it isn't the no-comment sentinel.
+        val result = runCatching {
+            kotlinx.coroutines.withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
+                modelRunner.generate(
+                    settings = settings,
+                    modelId = hostModelId,
+                    systemPrompt = CouncilRoomPrompts.hostSystemPrompt(room),
+                    userPrompt = CouncilRoomPrompts.hostRoundReviewPrompt(room, round, totalRounds),
+                    outputBudgetChars = 800,
+                    reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
+                    temperature = null,
+                    onChunk = {},
+                )
+            }
+        }.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            null
+        } ?: return
+        val text = result.text.trim()
+        if (text.isEmpty()) return
+        // Sentinel → host decided this round needs no commentary. Skip silently.
+        if (CouncilRoomPrompts.NO_COMMENT_SENTINEL in text) return
+        // Append the review as a COMPLETED host message. It becomes the latest
+        // steer, which appendSteeringNote picks up for the next round's guests.
+        val now = nowMs()
+        mutate(conversationId) { r ->
+            if (r.status.terminal) return@mutate CouncilRoomOpResult.Ok(r)
+            val reviewMessage = CouncilMessage(
+                id = msgId(),
+                authorId = host.id,
+                authorName = host.name,
+                role = host.role,
+                round = round,
+                mode = r.mode,
+                text = text,
+                createdAtMs = now,
+                status = CouncilMessageStatus.COMPLETED,
+            )
+            CouncilRoomOpResult.Ok(r.copy(
+                messages = r.messages + reviewMessage,
+                updatedAtMs = now,
+            ))
+        }
     }
 
     /**

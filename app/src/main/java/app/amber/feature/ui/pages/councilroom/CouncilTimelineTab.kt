@@ -16,6 +16,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -132,39 +134,35 @@ fun CouncilTimelineTab(
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var followBottom by remember { mutableStateOf(true) }
 
-    // Follow engages only at the TRUE bottom (canScrollForward == false). A user
-    // scroll that leaves the bottom suspends it immediately — even a small upward
-    // swipe — so the timeline never drags the reader back down while they look
-    // around; it re-engages only when they return to the very bottom. Streaming
-    // growth re-pins programmatically (isScrollInProgress stays false), so that
-    // path never trips the "user scrolled away" branch.
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
-            .collect { (scrolling, canScrollForward) ->
-                when {
-                    scrolling && canScrollForward -> followBottom = false
-                    !canScrollForward -> followBottom = true
-                }
-            }
+    // Is the viewport parked at the bottom? Same definition rikkahub's ChatList
+    // uses: the last visible item's bottom edge is at/above the viewport's bottom
+    // line. This is the single source of truth for "should we keep following".
+    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
+        val lastItem = lastOrNull() ?: return false
+        return lastItem.offset + lastItem.size <= listState.layoutInfo.viewportEndOffset + 8
     }
-    // Anchor the newest content to the bottom while following. A one-shot pin
-    // handles a freshly-landed message; during an in-flight stream we re-pin EVERY
-    // FRAME so the column simply grows upward — a per-chunk scroll lagged behind
-    // fast token bursts and let new lines spill below the fold. The frame loop runs
-    // only while streaming AND following, so it stops the instant the user scrolls
-    // away (followBottom flips) or the turn finishes (isStreaming flips).
-    LaunchedEffect(entries.size, isStreaming, followBottom) {
-        if (!followBottom || entries.isEmpty()) return@LaunchedEffect
-        val lastIndex = (entries.size - 1).coerceAtLeast(0)
-        listState.scrollToItem(lastIndex, scrollOffset = 100_000)
-        if (isStreaming) {
-            while (true) {
-                withFrameNanos { }
-                if (listState.canScrollForward) {
-                    listState.scrollToItem(lastIndex, scrollOffset = 100_000)
-                }
+
+    // ── Streaming bottom-follow (ported from rikkahub ChatList.kt) ──────────
+    // KEY INSIGHT: use requestScrollToItem, NOT scrollToItem/animateScrollToItem.
+    // The suspend scroll APIs flip isScrollInProgress=true while running; if a
+    // scroll-progress detector were present it would misread that programmatic
+    // scroll as a user gesture and toggle a follow flag every frame, jittering the
+    // timeline up and down (the exact bug the previous token-gate + scrollBy
+    // version failed to fully fix). requestScrollToItem is non-suspending: it only
+    // SCHEDULES a scroll for the next remeasure and never touches isScrollInProgress,
+    // so there is no feedback loop — no follow flag, no token gate needed at all.
+    //
+    // "User scrolled away" falls out for free: after an upward swipe the newest
+    // item is below the fold so isAtBottom() is false and requestScrollToItem is
+    // simply not called; scrolling back to the bottom flips it true again and the
+    // stream is re-followed automatically.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo }.collect { visible ->
+            if (isStreaming && visible.isAtBottom()) {
+                // +10 over-shoots so the newest item is truly flush with the bottom
+                // even when several items land in one frame.
+                listState.requestScrollToItem(entries.lastIndex + 10)
             }
         }
     }

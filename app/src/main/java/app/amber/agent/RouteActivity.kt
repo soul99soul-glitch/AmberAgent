@@ -3,11 +3,13 @@ import app.amber.agent.R
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
@@ -187,7 +189,18 @@ class RouteActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // Pass explicit transparent SystemBarStyles instead of the default
+        // SystemBarStyle.auto(): the default re-derives icon light/dark appearance
+        // from the window background luminance and RE-APPLIES that derived value on
+        // configuration / window-insets updates, racing (and on ColorOS, winning
+        // against) the WindowInsetsControllerCompat calls issued from the Compose
+        // SideEffect in AmberAgentTheme. Transparent placeholders here mean "don't
+        // introduce a scrim and don't guess icon appearance" — the running theme's
+        // SideEffect owns icon light/dark for every theme (LIGHT/DARK/SYSTEM/AMOLED).
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+        )
         disableNavigationBarContrast()
         super.onCreate(savedInstanceState)
         if (CrashHandler.hasCrashed(this)) {

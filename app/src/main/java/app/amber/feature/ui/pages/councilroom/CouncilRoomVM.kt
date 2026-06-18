@@ -138,6 +138,7 @@ class CouncilRoomVM(
                 objective = "多模型协作讨论",
                 initialGuests = guests,
                 maxRounds = settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
+                hostModelIdOverride = settings.agentRuntime.modelCouncil.hostModelId,
             )
             reopen.value += 1
         }

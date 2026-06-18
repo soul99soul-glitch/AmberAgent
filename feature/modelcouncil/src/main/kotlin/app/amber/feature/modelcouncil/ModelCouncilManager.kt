@@ -259,7 +259,8 @@ class ModelCouncilManager(
             put("seat_timeout_ms", setting.seatTimeoutMs)
             put("total_timeout_ms", setting.totalTimeoutMs)
             put("output_budget_chars", setting.outputBudgetChars)
-            put("show_seat_outputs", setting.showSeatOutputs)
+            // Toggle removed from the UI; full seat outputs are always returned now.
+            put("show_seat_outputs", true)
             put("recommended_wait_timeout_ms", DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS)
             put("synthesis_model_id", synthesisModelId.toString())
             put("synthesis_model_name", synthesisModelInfo.modelName)
@@ -636,7 +637,11 @@ class ModelCouncilManager(
 
     private fun runToPayload(run: ModelCouncilRun): JsonObject = buildJsonObject {
         val settings = settingsStore.settingsFlow.value
-        val exposeSeatOutputs = settings.agentRuntime.modelCouncil.showSeatOutputs
+        // The "show seat outputs" toggle was removed from the UI. Its old purpose
+        // (truncating each seat's text to 700 chars before feeding the council
+        // result back to the calling model) is no longer desirable — full outputs
+        // are always returned now. The seat_outputs_visible field is kept true to
+        // honour the existing AI-tool contract.
         put("status", run.status.name.lowercase())
         put("run_id", run.runId)
         put("mode", run.mode.name.lowercase())
@@ -651,18 +656,17 @@ class ModelCouncilManager(
             val synthesisModelId = settings.agentRuntime.modelCouncil.synthesisModelId ?: settings.chatModelId
             put(SYNTHESIZER_SEAT_KEY, settings.describeCouncilProviderModel(synthesisModelId).label())
         })
-        put("seat_outputs_visible", exposeSeatOutputs)
-        put("turns", encoded(run.turns.map { it.visible(exposeSeatOutputs) }))
+        put("seat_outputs_visible", true)
+        put("turns", encoded(run.turns.map { it.visible(exposeContent = true) }))
         run.result?.let { put("result", encoded(it)) }
     }
 
     private fun turnToPayload(run: ModelCouncilRun, turn: ModelCouncilTurn): JsonObject = buildJsonObject {
-        val exposeSeatOutputs = settingsStore.settingsFlow.value.agentRuntime.modelCouncil.showSeatOutputs
         put("status", run.status.name.lowercase())
         put("run_id", run.runId)
         put("mode", run.mode.name.lowercase())
         put("updated_at_ms", run.updatedAtMs)
-        put("turn", encoded(turn.visible(exposeSeatOutputs)))
+        put("turn", encoded(turn.visible(exposeContent = true)))
         put("turn_count", run.turns.size)
     }
 

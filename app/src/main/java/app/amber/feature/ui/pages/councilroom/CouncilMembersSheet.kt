@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.councilroom
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,13 +9,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +35,8 @@ import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.pages.chat.LocalChatTheme
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowReloadHorizontal
 
 /**
  * Council members & synthesis as a bottom sheet (opened from the room top bar's
@@ -47,6 +54,10 @@ import app.amber.feature.ui.pages.chat.LocalChatTheme
 fun CouncilMembersSheet(
     room: CouncilRoom,
     onDismiss: () -> Unit,
+    // Non-null only when the room is terminal (finished/stopped). When present,
+    // the sheet shows a prominent solid-accent "重新开始" button at the bottom;
+    // tapping it routes back to the page's confirm dialog.
+    onRequestRestart: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val workspace = workspaceColors()
@@ -96,6 +107,44 @@ fun CouncilMembersSheet(
                     participant = participant,
                     isHost = participant.kind == CouncilParticipantKind.HOST,
                 )
+            }
+
+            // Restart action sits BETWEEN the member roster and the synthesis block,
+            // so it's reachable right after the (short) member list — no need to
+            // scroll past the (often long) synthesis to find it. Terminal rooms only
+            // (onRequestRestart is non-null exactly then). Filled accent + onAccent
+            // text tracks the theme automatically.
+            if (onRequestRestart != null) {
+                item(key = "restart") {
+                    val restartInteraction = remember { MutableInteractionSource() }
+                    Surface(
+                        onClick = onRequestRestart,
+                        interactionSource = restartInteraction,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 18.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = chatTheme.accent,
+                        contentColor = chatTheme.onAccent,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.ArrowReloadHorizontal,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Text(
+                                text = "重新开始议会",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
             }
 
             item(key = "synthesis") {

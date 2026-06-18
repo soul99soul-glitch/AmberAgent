@@ -148,6 +148,12 @@ val agentRuntimeModule = module {
     single<app.amber.feature.modelcouncil.CouncilRoomTaskReporter> {
         app.amber.feature.modelcouncil.AgentTaskStoreReporter(get())
     }
+    single<app.amber.feature.modelcouncil.CouncilHostToolProvider> {
+        app.amber.feature.modelcouncil.AppCouncilHostToolProvider(
+            providerManager = get(),
+            toolDispatcher = get(),
+        )
+    }
     single {
         CouncilRoomManager(
             get(),
@@ -157,6 +163,7 @@ val agentRuntimeModule = module {
             get(),
             get(),
             get<app.amber.feature.modelcouncil.CouncilRoomTaskReporter>(),
+            get<app.amber.feature.modelcouncil.CouncilHostToolProvider>(),
         )
     }
 }

@@ -234,17 +234,24 @@ class CouncilRoomExecutor(
         hostModelId: Uuid,
         hostSystemPrompt: String,
         settings: Settings,
+        reasoningLevel: ReasoningLevel = ReasoningLevel.OFF,
+        extraSystemPrompt: String = "",
     ) = withContext(dispatcher) {
         val budget = room.outputBudgetChars
+        val effectiveSystemPrompt = if (extraSystemPrompt.isBlank()) {
+            hostSystemPrompt
+        } else {
+            "$hostSystemPrompt\n\n—— 主持人补充设定 ——\n${extraSystemPrompt.trim()}"
+        }
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
                 modelRunner.generate(
                     settings = settings,
                     modelId = hostModelId,
-                    systemPrompt = hostSystemPrompt,
+                    systemPrompt = effectiveSystemPrompt,
                     userPrompt = CouncilRoomPrompts.synthesize(room),
                     outputBudgetChars = budget,
-                    reasoningLevel = ReasoningLevel.OFF,
+                    reasoningLevel = reasoningLevel,
                     temperature = null,
                     onChunk = { /* synthesis streams to room.synthesis only on completion */ },
                 )
@@ -282,6 +289,8 @@ class CouncilRoomExecutor(
         userPrompt: String,
         messageId: String,
         settings: Settings,
+        reasoningLevel: ReasoningLevel = ReasoningLevel.OFF,
+        extraSystemPrompt: String = "",
     ) = withContext(dispatcher) {
         val host = room.host ?: return@withContext
         val now = nowMs()
@@ -299,6 +308,15 @@ class CouncilRoomExecutor(
         sink.upsertStreamingMessage(room.conversationId, streaming)
 
         val budget = room.outputBudgetChars.coerceAtLeast(1_000)
+        // The built-in host prompt carries dynamic context (topic/mode/duty/
+        // hard boundaries); a user-supplied supplement is appended AFTER it as a
+        // style/persona layer — never replaces it, mirroring how a guest seat's
+        // own systemPrompt sits on top of the mode guidance.
+        val effectiveSystemPrompt = if (extraSystemPrompt.isBlank()) {
+            systemPrompt
+        } else {
+            "$systemPrompt\n\n—— 主持人补充设定 ——\n${extraSystemPrompt.trim()}"
+        }
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
                 coroutineScope {
@@ -312,10 +330,10 @@ class CouncilRoomExecutor(
                         modelRunner.generate(
                             settings = settings,
                             modelId = hostModelId,
-                            systemPrompt = systemPrompt,
+                            systemPrompt = effectiveSystemPrompt,
                             userPrompt = userPrompt,
                             outputBudgetChars = budget,
-                            reasoningLevel = ReasoningLevel.OFF,
+                            reasoningLevel = reasoningLevel,
                             temperature = null,
                             userImageParts = room.userImageParts(),
                             onChunk = { cumulative -> chunkChannel.trySend(cumulative) },

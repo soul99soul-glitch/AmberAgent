@@ -247,6 +247,72 @@ object CouncilRoomPrompts {
         简洁、可执行，面向接下来发言的成员；不要替成员下结论。
     """.trimIndent()
 
+    /**
+     * FULL mode: host's pre-synthesis RESEARCH turn. Before synthesizing, the host
+     * may call read-only tools (search_web / scrape_web) to fill factual gaps or
+     * verify claims made during the discussion. The output is a short research
+     * summary that gets appended as a host message — which the subsequent
+     * synthesis turn then sees as part of the record.
+     *
+     * Crucially the host decides whether research is even needed: if the
+     * discussion is self-contained, it should answer directly without tools.
+     * Tool budget is enforced by the caller ([CouncilHostToolProvider]).
+     */
+    fun hostResearchPrompt(room: CouncilRoom): String = """
+        议题：${room.objective}
+
+        已完成的讨论（嘉宾发言节选）：
+        ${room.messages
+            .filter {
+                it.authorId != COUNCIL_ROOM_HOST_ID &&
+                    it.authorId != COUNCIL_ROOM_USER_ID &&
+                    it.status == CouncilMessageStatus.COMPLETED
+            }
+            .takeLast(8)
+            .joinToString("\n\n") { it.summaryBlock(limit = 500) }}
+
+        你现在要为综合结论做准备。请判断：
+        - 讨论中是否存在事实性缺口、过时信息、未经验证的关键主张，或需要最新外部信息（如近期事件、项目现状、最新数据）？
+        - 如果是，用 search_web 搜索、或用 scrape_web 抓取相关页面来补全/核验。
+        - 如果讨论本身已经充分、自洽、不需要外部信息，就直接输出"无需补充调研"并结束，不要为了用工具而用工具。
+
+        完成调研后，用几句话总结你查到的、对综合有用的关键事实（带来源）；如果没查，就说明为什么不需要。
+        保持克制，只补真正缺失的信息。
+    """.trimIndent()
+
+    /**
+     * FULL mode: host's end-of-round REVIEW turn. After all guests have spoken in
+     * a round, the host decides whether the round warrants commentary. If there
+     * are contradictions, unverified claims, or the discussion is drifting, the
+     * host writes a pointed review + a steer for the next round (which members
+     * pick up via [appendSteeringNote]). If the round already converged cleanly,
+     * the host emits the [NO_COMMENT_SENTINEL] so the caller skips appending an
+     * empty message.
+     */
+    fun hostRoundReviewPrompt(room: CouncilRoom, round: Int, totalRounds: Int): String = """
+        议题：${room.objective}
+        当前：第 $round / $totalRounds 轮（模式：${modeName(room.mode)}）
+
+        本轮嘉宾发言：
+        ${room.messages
+            .filter {
+                it.authorId != COUNCIL_ROOM_HOST_ID &&
+                    it.authorId != COUNCIL_ROOM_USER_ID &&
+                    it.status == CouncilMessageStatus.COMPLETED
+            }
+            .takeLast(8)
+            .joinToString("\n\n") { it.summaryBlock(limit = 600) }}
+
+        作为主持人，判断这一轮是否需要你的点评与引导：
+        - 如果出现了矛盾、错误信息、明显偏离议题、或关键信息缺口，请给出简短点评：指出问题在哪、下一步该聚焦什么、哪些已被证伪可以剔除、哪些需要深化。
+        - 如果本轮信息已充分收敛、没有需要纠正或补充的方向，就只输出一行：$NO_COMMENT_SENTINEL（不要输出其他任何内容）。
+
+        你的点评会作为指引传给下一轮成员，帮助他们基于已积累的结论继续深化。简洁、聚焦、可执行。
+    """.trimIndent()
+
+    /** Sentinel the host emits when a round needs no commentary. */
+    const val NO_COMMENT_SENTINEL = "[no_comment]"
+
     // ── helpers ────────────────────────────────────────────────────────────
 
     private fun modeName(mode: CouncilRoomMode): String = when (mode) {

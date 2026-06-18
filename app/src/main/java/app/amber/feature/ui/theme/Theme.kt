@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.serialization.Serializable
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberColorMode
@@ -180,8 +181,19 @@ fun AmberAgentTheme(
             val window = (view.context as? Activity)?.window
             if (window != null) {
                 WindowCompat.getInsetsController(window, view).apply {
+                    // Light icons on dark theme, dark icons on light theme. With the
+                    // explicit transparent SystemBarStyle passed to enableEdgeToEdge
+                    // in RouteActivity, the system no longer re-derives appearance
+                    // from window background luminance, so this call is the single
+                    // authority for icon light/dark across every theme switch.
                     isAppearanceLightStatusBars = !darkTheme
                     isAppearanceLightNavigationBars = !darkTheme
+                    // Keep the controller in an active, writable state (matches the
+                    // immersive pages DeepReadScreen / MiniAppRunnerPage). ColorOS is
+                    // sensitive to controller readiness timing; asserting behavior
+                    // here ensures the appearance calls above are honoured.
+                    systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
             }
         }

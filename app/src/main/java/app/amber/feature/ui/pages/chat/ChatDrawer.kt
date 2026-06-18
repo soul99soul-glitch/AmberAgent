@@ -268,6 +268,7 @@ fun ChatDrawerContent(
                                         objective = "多模型协作讨论",
                                         initialGuests = guests,
                                         maxRounds = settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
+                                        hostModelIdOverride = settings.agentRuntime.modelCouncil.hostModelId,
                                     )
                                     if (result is app.amber.feature.modelcouncil.CouncilRoomOpResult.Err &&
                                         result.code != "room_already_open") {

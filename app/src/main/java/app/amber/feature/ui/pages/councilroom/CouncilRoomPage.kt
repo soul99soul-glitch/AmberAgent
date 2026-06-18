@@ -64,7 +64,6 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowReloadHorizontal
 import me.rerere.hugeicons.stroke.BubbleChat
-import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.UserGroup
 import org.koin.androidx.compose.koinViewModel
@@ -241,24 +240,6 @@ private fun CouncilRoomTopBar(
             )
         }
 
-        // Restart — only on the read-only (finished/stopped) view: discard this
-        // deliberation and reopen a fresh council with the latest seats. Gated by
-        // a confirm dialog because it overwrites the persisted transcript.
-        if (onRestart != null) {
-            val restartInteraction = remember { MutableInteractionSource() }
-            IconButton(
-                onClick = { confirmRestart = true },
-                interactionSource = restartInteraction,
-                modifier = Modifier.councilPressBounce(restartInteraction),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Refresh01,
-                    contentDescription = "重新开始议会",
-                    tint = workspace.muted,
-                )
-            }
-        }
-
         val settingsInteraction = remember { MutableInteractionSource() }
         IconButton(
             onClick = { nav.navigate(Screen.SettingExperimentalModelCouncil) },
@@ -275,7 +256,14 @@ private fun CouncilRoomTopBar(
     HorizontalDivider(color = chatTheme.hair)
 
     if (membersSheetOpen) {
-        CouncilMembersSheet(room = room, onDismiss = { membersSheetOpen = false })
+        CouncilMembersSheet(
+            room = room,
+            onDismiss = { membersSheetOpen = false },
+            // "重新开始" now lives inside the members sheet (only meaningful once
+            // the room is terminal). onRestart is non-null exactly then, so the
+            // sheet surfaces the action; tapping it opens the confirm dialog here.
+            onRequestRestart = onRestart?.let { { confirmRestart = true } },
+        )
     }
 
     if (confirmRestart && onRestart != null) {
