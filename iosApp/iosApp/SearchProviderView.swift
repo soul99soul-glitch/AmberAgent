@@ -182,7 +182,10 @@ struct SearchProviderView: View {
 
     private var draftPreviewSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已保存搜索服务（UserDefaults · 可读写）")
+            // [Slice 4] add/remove now merge a real SearchServiceOptions subtype
+            // into snapshot.searchServices via IosSettingsMutations +
+            // restoreSnapshot — survives restart.
+            AmberSectionLabel(text: "已保存搜索服务（持久化到 snapshot.searchServices）")
             AmberFormGroup {
                 let providers = sharedSettings.savedSearchProviders
                 if providers.isEmpty {
@@ -231,7 +234,10 @@ struct SearchProviderView: View {
     private var deleteSection: some View {
         VStack(spacing: 0) {
             AmberFormGroup {
-                Text("删除服务 · 编辑待接（需 Settings 持久化）")
+                // [Slice 4] 删除单条服务已在上方"已保存搜索服务"区按行真删
+                //（removeSearchProvider 现持久化到 snapshot.searchServices）。
+                // 此底部入口为信息占位（未接批量删），按行删请用上方列表。
+                Text("删除单条请用上方列表的 ⊖ 按钮")
                     .font(.body.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
                     .frame(maxWidth: .infinity)
@@ -239,7 +245,7 @@ struct SearchProviderView: View {
             }
             .padding(.top, 20)
 
-            SearchProviderNote("没有读取到真实 iOS searchServices 列表，因此这里不会删除任何配置。")
+            SearchProviderNote("按行删除已持久化到 snapshot.searchServices（重启生效）。批量清空入口暂未接。")
         }
     }
 

@@ -248,7 +248,11 @@ struct TTSSettingsView: View {
 
     private var deleteSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已保存云端引擎（UserDefaults · 可读写）")
+            // [Slice 4] add/remove for OpenAI-type engines now merge a real
+            // TTSProviderSetting.OpenAI into snapshot.ttsProviders via
+            // IosSettingsMutations + restoreSnapshot — survives restart.
+            // (Non-OpenAI types still mirror-only; honest.)
+            AmberSectionLabel(text: "已保存云端引擎（OpenAI 类型持久化到 snapshot.ttsProviders）")
             AmberFormGroup {
                 let engines = sharedSettings.savedTtsEngines
                 if engines.isEmpty {

@@ -122,23 +122,50 @@ final class IOSSharedSettingsStore {
     }
 
     /// Add a custom model to persistent storage.
+    ///
+    /// [Slice 4] Now merges a real ProviderSetting.OpenAI (containing the model)
+    /// into `snapshot.providers` via `IosSettingsMutations.buildOpenAIProvider`
+    /// + `addProvider`, then `restoreSnapshot` (full JSON persist). The model
+    /// survives restart as a real provider entry. The legacy `savedCustomModels`
+    /// mirror is kept in sync (records the KMP providerId for removal) for
+    /// backward-compatible readers.
     func addCustomModel(name: String, modelId: String, providerName: String = "") {
+        let provider = IosSettingsMutations.shared.buildOpenAIProvider(
+            name: providerName.isEmpty ? name : providerName,
+            apiKey: "",
+            baseUrl: "https://api.openai.com/v1",
+            modelName: name,
+            modelId: modelId
+        )
+        let merged = IosSettingsMutations.shared.addProvider(settings: snapshot, provider: provider)
+        restoreSnapshot(merged)
         var models = savedCustomModels
         models.append([
             "id": UUID().uuidString,
             "name": name,
             "modelId": modelId,
             "providerName": providerName,
+            // KMP-side provider Uuid (string) so removeCustomModel can filter
+            // it out of snapshot.providers by id.
+            "providerId": providerIdString(from: provider),
         ])
         savedCustomModels = models
     }
 
     /// Remove a custom model by index.
+    ///
+    /// [Slice 4] Removes from BOTH the snapshot (via
+    /// `IosSettingsMutations.removeProvider`, by the providerId recorded at add
+    /// time) and the legacy mirror, so the delete survives restart.
     func removeCustomModel(at index: Int) {
         var models = savedCustomModels
         guard index >= 0 && index < models.count else { return }
-        models.remove(at: index)
+        let removed = models.remove(at: index)
         savedCustomModels = models
+        if let providerId = removed["providerId"] {
+            let merged = IosSettingsMutations.shared.removeProvider(settings: snapshot, id: providerId)
+            restoreSnapshot(merged)
+        }
     }
 
     // MARK: - Custom search providers write-back
@@ -152,23 +179,42 @@ final class IOSSharedSettingsStore {
     }
 
     /// Add a custom search provider to persistent storage.
+    ///
+    /// [Slice 4] Now merges a real SearchServiceOptions subtype (built by
+    /// `IosSettingsMutations.buildSearchService`) into `snapshot.searchServices`
+    /// via `addSearchService`, then `restoreSnapshot`. Survives restart.
     func addSearchProvider(name: String, apiKey: String = "", serviceType: String = "") {
+        let service = IosSettingsMutations.shared.buildSearchService(
+            serviceType: serviceType.isEmpty ? "tavily" : serviceType,
+            apiKey: apiKey
+        )
+        let merged = IosSettingsMutations.shared.addSearchService(settings: snapshot, service: service)
+        restoreSnapshot(merged)
         var providers = savedSearchProviders
         providers.append([
             "id": UUID().uuidString,
             "name": name,
             "apiKey": apiKey,
             "serviceType": serviceType,
+            // KMP-side search service Uuid (string) for removal.
+            "serviceId": searchServiceIdString(from: service),
         ])
         savedSearchProviders = providers
     }
 
     /// Remove a custom search provider by index.
+    ///
+    /// [Slice 4] Removes from BOTH snapshot (via removeSearchService by id) and
+    /// the legacy mirror.
     func removeSearchProvider(at index: Int) {
         var providers = savedSearchProviders
         guard index >= 0 && index < providers.count else { return }
-        providers.remove(at: index)
+        let removed = providers.remove(at: index)
         savedSearchProviders = providers
+        if let serviceId = removed["serviceId"] {
+            let merged = IosSettingsMutations.shared.removeSearchService(settings: snapshot, id: serviceId)
+            restoreSnapshot(merged)
+        }
     }
 
     // MARK: - Custom TTS engines write-back
@@ -180,28 +226,79 @@ final class IOSSharedSettingsStore {
         set { defaults.set(newValue, forKey: ttsEnginesKey) }
     }
 
+    /// [Slice 4] Now merges a real TTSProviderSetting.OpenAI into
+    /// `snapshot.ttsProviders` via `buildOpenAITtsProvider` + `addTtsProvider`,
+    /// then `restoreSnapshot`. Survives restart. Only engineType == "openai"
+    /// builds a real provider; other types fall back to legacy mirror only
+    /// (honest — their markers stay 待接).
     func addTtsEngine(name: String, engineType: String, apiKey: String = "", model: String = "") {
-        var engines = savedTtsEngines
-        engines.append([
-            "id": UUID().uuidString,
-            "name": name,
-            "engineType": engineType,
-            "apiKey": apiKey,
-            "model": model,
-        ])
-        savedTtsEngines = engines
+        if engineType.lowercased() == "openai" {
+            let provider = IosSettingsMutations.shared.buildOpenAITtsProvider(
+                name: name,
+                apiKey: apiKey,
+                model: model.isEmpty ? "gpt-4o-mini-tts" : model
+            )
+            let merged = IosSettingsMutations.shared.addTtsProvider(settings: snapshot, provider: provider)
+            restoreSnapshot(merged)
+            var engines = savedTtsEngines
+            engines.append([
+                "id": UUID().uuidString,
+                "name": name,
+                "engineType": engineType,
+                "apiKey": apiKey,
+                "model": model,
+                // KMP-side TTS provider Uuid (string) for removal.
+                "ttsId": ttsIdString(from: provider),
+            ])
+            savedTtsEngines = engines
+        } else {
+            // Non-OpenAI engine types aren't built from the iOS form in this
+            // slice — legacy mirror only (honest fallback, no fake snapshot entry).
+            var engines = savedTtsEngines
+            engines.append([
+                "id": UUID().uuidString,
+                "name": name,
+                "engineType": engineType,
+                "apiKey": apiKey,
+                "model": model,
+            ])
+            savedTtsEngines = engines
+        }
     }
 
+    /// [Slice 4] Removes from BOTH snapshot (via removeTtsProvider by id) and
+    /// the legacy mirror.
     func removeTtsEngine(at index: Int) {
         var engines = savedTtsEngines
         guard index >= 0 && index < engines.count else { return }
-        engines.remove(at: index)
+        let removed = engines.remove(at: index)
         savedTtsEngines = engines
+        if let ttsId = removed["ttsId"] {
+            let merged = IosSettingsMutations.shared.removeTtsProvider(settings: snapshot, id: ttsId)
+            restoreSnapshot(merged)
+        }
     }
 
     // MARK: - SubAgent role overrides write-back
 
     private let subAgentOverridesKey = "app.amber.ios.subAgentOverrides"
+
+    // MARK: - KMP id extraction (Slice 4)
+
+    /// Extract the canonical Uuid string from a freshly-built KMP provider/
+    /// service, so it can be recorded in the legacy mirror and used by the
+    /// removeXxx path to filter it out of the snapshot on restart.
+    private func providerIdString(from provider: ProviderSetting) -> String {
+        provider.id.description()
+    }
+
+    private func searchServiceIdString(from service: SearchServiceOptions) -> String {
+        service.id.description()
+    }
+
+    private func ttsIdString(from provider: TTSProviderSetting) -> String {
+        provider.id.description()
+    }
 
     var savedSubAgentOverrides: [[String: String]] {
         get { (defaults.array(forKey: subAgentOverridesKey) as? [[String: String]]) ?? [] }

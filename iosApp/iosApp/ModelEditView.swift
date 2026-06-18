@@ -234,7 +234,11 @@ struct ModelEditView: View {
     @ViewBuilder
     private var footerSection: some View {
         if isAdding {
-            ModelEditNote("当前只保留本地本地预览；关闭后返回模型列表，不创建真实模型配置。")
+            // [Slice 4] "保存模型" above now creates a real ProviderSetting.OpenAI
+            // (merged into snapshot.providers, persisted). The per-row delete in
+            // savedModelsSection also persists. The bottom "删除模型" button below
+            // is an info-only stub (not wired) so it stays 待接.
+            ModelEditNote("上方\"保存模型\"会创建真实 ProviderSetting.OpenAI 并持久化（重启保留）；下方\"删除模型\"按钮仍为待接。")
                 .padding(.top, 4)
         } else {
             AmberFormGroup {
@@ -256,10 +260,13 @@ struct ModelEditView: View {
     }
 
 
-    /// Saved custom models (UserDefaults persisted). Users can add/remove.
+    /// Saved custom models. [Slice 4] add/remove now merge a real
+    /// ProviderSetting.OpenAI into snapshot.providers via
+    /// IosSettingsMutations + restoreSnapshot (full JSON persist) — survives
+    /// restart. (Previously mirror-only.)
     private var savedModelsSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已保存自定义模型（UserDefaults · 可读写）")
+            AmberSectionLabel(text: "已保存自定义模型（持久化到 snapshot.providers）")
             AmberFormGroup {
                 let models = sharedSettings.savedCustomModels
                 ForEach(Array(models.enumerated()), id: \.offset) { index, model in

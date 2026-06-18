@@ -111,7 +111,7 @@
 
 ### Slice 4：Settings 写回桥——让"增删"真生效（~2-3 天，**基础设施**）
 
-> **状态（2026-06-18）：⚠️ 部分完成并 commit（仅 council seats）。** 新增 KMP 桥 `IosSettingsMutations.addCouncilSeat/removeCouncilSeat`（shared 模块，用原生 `Settings.copy` 合并进 `snapshot.agentRuntime.modelCouncil.defaultSeats`）；`IOSSharedSettingsStore.addCouncilSeat/removeCouncilSeat` 重写为真合并进快照（经 `restoreSnapshot` 全量落盘），重启保留；SeatEditorView 移除按钮真删。验收「新增/删除席位→重启→还在/真没了」由 4 个 XCTest 全过证明。**未做（诚实保留标记）**：SubAgent overrides——`settings.subAgent` 从 `:shared` 编译报 "Unresolved reference"（KMP metadata 可见性问题，`:feature:subagent` ↔ `:core:types` ↔ `:feature:subagent:api` 菱形依赖），需专门 KMP 清理，不硬接；providers/ttsProviders/searchServices 写回（sealed class 复杂，本切片不做）。SubAgentRoleView / ModelEditView / ProviderDetailView / SearchProviderView / TTSSettingsView 标记全部保留。
+> **状态（2026-06-18）：⚠️ 大部分完成（5 类写回已接 4 类）。** 已接并验证：council seats（commit 57390c15，4 XCTest）+ providers/ttsProviders/searchServices（KMP `IosSettingsMutations` addProvider/removeProvider/buildOpenAIProvider、addTtsProvider/removeTtsProvider/buildOpenAITtsProvider、addSearchService/removeSearchService/buildSearchService；`IOSSharedSettingsStore` addCustomModel/addTtsEngine(OpenAI)/addSearchProvider + removeXxx 真合并进快照，9 XCTest 全过）。验收「新增/删除→重启→还在/真没了」对席位/provider/tts/search 全部达成。**未做（诚实保留标记）**：SubAgent overrides——`settings.subAgent` 从 `:shared` 编译报 "Unresolved reference"（KMP metadata 可见性，需单独评估）；以及若干真未接子功能（ModelEditView 自定义 Headers/Body、底部信息态删除桩；ProviderDetailView Response API/协议选择/类型切换；非 OpenAI 的 TTS 引擎类型；SearchProviderView 批量清空桩）。
 
 **目标**：当前"新增模型/provider/搜索服务/TTS/SubAgent 角色"全部只进 UserDefaults 旁路，重启后 KMP `snapshot` 回到 seed。这是 ModelEditView / ProviderDetailView / SearchProviderView / TTSSettingsView / SubAgentRoleView / SeatEditorView 一堆"编辑待接（需 Settings 持久化）"的共同根因。
 
