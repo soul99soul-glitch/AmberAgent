@@ -72,6 +72,8 @@
 
 ### Slice 2：ConversationStorageView 真接（会话持久化延伸，~1 天）
 
+> **状态（2026-06-18）：✅ 已完成并 commit。** ConversationStorageView 的 8 处「待接」全部处理：对话文件数（summaries.count）、按时间清理（updateAt 过滤+批量 deleteConversation）、删除全部（确认+循环删）、用量统计（扫 Documents/conversations/ 求和）真接；清除缓存诚实改成"v1 无附件缓存，无需清理"。验收：xcodebuild build SUCCEEDED；模拟器运行（PID 29483）；容器 Documents/conversations/ = 503 字节 / 2 文件，与视图扫描一致；subagent review APPROVE（P1 ByteCountFormatter 字节显示已修）。
+
 **目标**：用刚做好的 `IOSConversationStore` 接掉 ConversationStorageView 的 8 处待接。
 
 | 标记 | 现状 | 接法 |
