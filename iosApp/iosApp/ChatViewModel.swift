@@ -28,6 +28,40 @@ struct ChatContextSnapshot {
     let cachedTokens: Int
 }
 
+struct MemoryToolApprovalRequest: Identifiable, Equatable {
+    let id: String
+    let action: String
+    let scope: String?
+    let kind: String?
+    let contentPreview: String?
+    let targetId: Int?
+    let reason: String
+
+    var title: String {
+        switch action {
+        case "create", "add", "write":
+            "保存记忆"
+        case "edit", "update":
+            "更新记忆"
+        case "delete", "remove":
+            "删除记忆"
+        default:
+            "修改记忆"
+        }
+    }
+}
+
+private struct PendingMemoryToolApproval {
+    let toolCall: UIMessagePart.Tool
+    let providerSetting: ProviderSetting.OpenAI
+    let params: TextGenerationParams
+    let runId: String
+    let startedAt: Int64
+    let inputDigest: String
+    let conversationId: KotlinUuid?
+    let baseMessages: [UIMessage]
+}
+
 @MainActor
 @Observable
 final class ChatViewModel {
@@ -42,6 +76,7 @@ final class ChatViewModel {
     var selectedFileContextError: String?
     var reasoningLevel: ReasoningLevel = .off
     var messageRevision: Int = 0
+    var pendingMemoryApproval: MemoryToolApprovalRequest?
 
     /// 持久化存储（由 AppShell 注入）。nil 时退化为纯内存模式（向后兼容旧调用方）。
     weak var conversationStore: IOSConversationStore?
@@ -130,6 +165,7 @@ final class ChatViewModel {
     private var currentConversationIdForRun: KotlinUuid?
     private var currentToolResumeCount: Int = 0
     private let maxToolResumeCount = 4
+    private var pendingMemoryToolApproval: PendingMemoryToolApproval?
 
     // MARK: - Init
 
@@ -175,7 +211,7 @@ final class ChatViewModel {
 
     func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isAttachingSelectedFile else { return }
+        guard !text.isEmpty, !isAttachingSelectedFile, pendingMemoryApproval == nil else { return }
 
         let prompt = Self.promptText(userText: text, selectedFilePreview: pendingSelectedFilePreview)
         let digest = Self.inputDigest(for: prompt)
@@ -266,6 +302,14 @@ final class ChatViewModel {
         selectedFileContextError = nil
     }
 
+    func approvePendingMemoryTool() {
+        finishPendingMemoryToolApproval(writePolicy: .allow)
+    }
+
+    func denyPendingMemoryTool() {
+        finishPendingMemoryToolApproval(writePolicy: .deniedByUser("User denied memory write."))
+    }
+
     func cancelGeneration() {
         // Capture run info before clearing state so we can record the interruption.
         let runId = currentRunId
@@ -280,6 +324,7 @@ final class ChatViewModel {
         currentInputDigest = nil
         currentConversationIdForRun = nil
         currentToolResumeCount = 0
+        clearPendingMemoryApproval()
         isLoading = false
 
         guard let runId, let startedAt, let digest else { return }
@@ -521,6 +566,7 @@ final class ChatViewModel {
         currentConversationIdForRun = nil
         streamJob = nil
         isLoading = false
+        clearPendingMemoryApproval()
     }
 
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
@@ -942,7 +988,24 @@ final class ChatViewModel {
         conversationId: KotlinUuid?,
         baseMessages: [UIMessage]
     ) async {
-        let resultText = dispatchMemoryToolCall(toolCall)
+        let writePolicy = memoryToolWritePolicy(input: toolCall.input, isUserInitiated: false)
+        if case .needsUserAction(let reason) = writePolicy,
+           let request = memoryApprovalRequest(for: toolCall, reason: reason) {
+            await pauseForMemoryToolApproval(
+                request,
+                toolCall: toolCall,
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                baseMessages: baseMessages
+            )
+            return
+        }
+
+        let resultText = dispatchMemoryToolCall(toolCall, writePolicy: writePolicy)
 
         guard currentRunId == runId else { return }
         let resumedMessages = messagesByFinishingToolCall(toolCall, outputText: resultText, in: baseMessages)
@@ -960,15 +1023,121 @@ final class ChatViewModel {
         )
     }
 
-    private func dispatchMemoryToolCall(_ toolCall: UIMessagePart.Tool) -> String {
-        let writePolicy = localToolExecutor?.memoryToolWritePolicy(
-            input: toolCall.input,
-            isUserInitiated: false
-        ) ?? .needsUserAction("Memory writes require foreground approval.")
+    private func pauseForMemoryToolApproval(
+        _ request: MemoryToolApprovalRequest,
+        toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        guard currentRunId == runId else { return }
+        pendingMemoryToolApproval = PendingMemoryToolApproval(
+            toolCall: toolCall,
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            baseMessages: baseMessages
+        )
+        pendingMemoryApproval = request
+        messages = baseMessages
+        messageRevision &+= 1
+        isLoading = false
+        await liveActivityController.update(
+            runId: runId,
+            presentation: .waitingForUser(toolTitle: "记忆写入"),
+            force: true
+        )
+    }
+
+    private func finishPendingMemoryToolApproval(writePolicy: IOSMemoryToolWritePolicy) {
+        guard let pending = pendingMemoryToolApproval else { return }
+        clearPendingMemoryApproval()
+        guard currentRunId == pending.runId else { return }
+
+        let resultText = IOSMemoryToolExecutor.execute(
+            input: pending.toolCall.input,
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: writePolicy
+        )
+        let resumedMessages = messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: resultText,
+            in: pending.baseMessages
+        )
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        guard autoGenerateResponses else {
+            persistMessages(conversationId: pending.conversationId)
+            finishStreaming()
+            return
+        }
+
+        isLoading = true
+        startLiveActivity(
+            runId: pending.runId,
+            presentation: .generatingResponse(modelName: pending.params.model.modelId)
+        )
+        startStreaming(
+            providerSetting: pending.providerSetting,
+            params: pending.params,
+            runId: pending.runId,
+            startedAt: pending.startedAt,
+            inputDigest: pending.inputDigest,
+            conversationId: pending.conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func clearPendingMemoryApproval() {
+        pendingMemoryToolApproval = nil
+        pendingMemoryApproval = nil
+    }
+
+    private func dispatchMemoryToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        writePolicy: IOSMemoryToolWritePolicy
+    ) -> String {
         return IOSMemoryToolExecutor.execute(
             input: toolCall.input,
             runtime: sharedSettings.agentRuntime,
             writePolicy: writePolicy
+        )
+    }
+
+    private func memoryToolWritePolicy(input: String, isUserInitiated: Bool) -> IOSMemoryToolWritePolicy {
+        localToolExecutor?.memoryToolWritePolicy(
+            input: input,
+            isUserInitiated: isUserInitiated
+        ) ?? (IOSMemoryToolExecutor.requiresWriteApproval(input: input)
+            ? .needsUserAction("Memory writes require foreground approval.")
+            : .allow)
+    }
+
+    private func memoryApprovalRequest(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> MemoryToolApprovalRequest? {
+        guard let preview = IOSMemoryToolExecutor.approvalPreview(input: toolCall.input) else {
+            return nil
+        }
+        let rawId = toolCall.toolCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestId = rawId.isEmpty ? Self.inputDigest(for: toolCall.input) : rawId
+        return MemoryToolApprovalRequest(
+            id: requestId,
+            action: preview.action,
+            scope: preview.scope,
+            kind: preview.kind,
+            contentPreview: preview.contentPreview,
+            targetId: preview.targetId,
+            reason: reason
         )
     }
 
@@ -1104,7 +1273,33 @@ final class ChatViewModel {
             approvalState: ToolApprovalState.Auto.shared,
             metadata: nil
         )
-        return dispatchMemoryToolCall(toolCall)
+        return dispatchMemoryToolCall(
+            toolCall,
+            writePolicy: memoryToolWritePolicy(input: input, isUserInitiated: false)
+        )
+    }
+
+    func memoryApprovalRequestForTesting(input: String) -> MemoryToolApprovalRequest? {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "test-memory-tool",
+            toolName: "memory_tool",
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        guard case .needsUserAction(let reason) = memoryToolWritePolicy(input: input, isUserInitiated: false) else {
+            return nil
+        }
+        return memoryApprovalRequest(for: toolCall, reason: reason)
+    }
+
+    func memoryToolApprovalOutputForTesting(input: String, allow: Bool) -> String {
+        IOSMemoryToolExecutor.execute(
+            input: input,
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: allow ? .allow : .deniedByUser("User denied memory write.")
+        )
     }
 #endif
 

@@ -128,6 +128,19 @@ struct ChatView: View {
 
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let request = viewModel.pendingMemoryApproval {
+                MemoryToolApprovalCard(
+                    request: request,
+                    onApprove: {
+                        viewModel.approvePendingMemoryTool()
+                    },
+                    onDeny: {
+                        viewModel.denyPendingMemoryTool()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if let preview = viewModel.pendingSelectedFilePreview {
                 HStack(spacing: 8) {
                     Label(preview.fileName, systemImage: "doc.text")
@@ -170,7 +183,11 @@ struct ChatView: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isLoading || viewModel.isAttachingSelectedFile)
+                    .disabled(
+                        viewModel.isLoading ||
+                            viewModel.isAttachingSelectedFile ||
+                            viewModel.pendingMemoryApproval != nil
+                    )
 
                     TextField("发消息给 Amber...", text: $viewModel.inputText, axis: .vertical)
                         .lineLimit(1...5)
@@ -181,11 +198,11 @@ struct ChatView: View {
                         .focused($isInputFocused)
                         .onSubmit {
                             if sharedSettings.displaySetting.sendOnEnter {
-                                guard !viewModel.isLoading else { return }
-                                guard !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                                guard sendEnabled else { return }
                                 viewModel.sendMessage()
                             }
                         }
+                        .disabled(viewModel.pendingMemoryApproval != nil)
                         .onChange(of: viewModel.inputText) { _, newText in
                             let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
                             if sharedSettings.displaySetting.pasteLongTextAsFile,
@@ -300,7 +317,9 @@ struct ChatView: View {
 
     private var sendEnabled: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !viewModel.isAttachingSelectedFile
+            !viewModel.isLoading &&
+            !viewModel.isAttachingSelectedFile &&
+            viewModel.pendingMemoryApproval == nil
     }
 
     private var showsComposerMeta: Bool {

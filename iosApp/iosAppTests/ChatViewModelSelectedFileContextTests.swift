@@ -340,15 +340,53 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             localToolExecutor: executor,
             autoGenerateResponses: false
         )
+        let input = #"{"action":"create","scope":"long_term","kind":"project","content":"model write should wait"}"#
 
-        let output = viewModel.memoryToolOutputForTesting(
-            input: #"{"action":"create","scope":"long_term","content":"model write should wait"}"#
-        )
+        let request = try XCTUnwrap(viewModel.memoryApprovalRequestForTesting(input: input))
+        XCTAssertEqual(request.action, "create")
+        XCTAssertEqual(request.title, "保存记忆")
+        XCTAssertEqual(request.scope, "long_term")
+        XCTAssertEqual(request.kind, "project")
+        XCTAssertEqual(request.contentPreview, "model write should wait")
+
+        let output = viewModel.memoryToolOutputForTesting(input: input)
         let payload = try jsonObject(output)
 
         XCTAssertEqual(payload["ok"] as? Bool, false)
         XCTAssertEqual(payload["needs_user_action"] as? Bool, true)
         XCTAssertTrue(IosMemoryFactory.shared.getAllRecords().isEmpty)
+    }
+
+    func testMemoryToolApprovalAllowWritesAndDenyDoesNotWrite() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer {
+            IosMemoryFactory.shared.replaceAll(records: originalRecords)
+        }
+
+        let executor = IOSLocalToolExecutor(
+            permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+            documentStore: DocumentAccessStore()
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: memorySettings(core: true, shortTerm: true, longTerm: true),
+            localToolExecutor: executor,
+            autoGenerateResponses: false
+        )
+        let input = #"{"action":"create","scope":"long_term","content":"approved memory write"}"#
+
+        let deniedOutput = viewModel.memoryToolApprovalOutputForTesting(input: input, allow: false)
+        let deniedPayload = try jsonObject(deniedOutput)
+        XCTAssertEqual(deniedPayload["ok"] as? Bool, false)
+        XCTAssertEqual(deniedPayload["denied"] as? Bool, true)
+        XCTAssertEqual(deniedPayload["policy"] as? String, "user_denied")
+        XCTAssertTrue(IosMemoryFactory.shared.getAllRecords().isEmpty)
+
+        let allowedOutput = viewModel.memoryToolApprovalOutputForTesting(input: input, allow: true)
+        let allowedPayload = try jsonObject(allowedOutput)
+        XCTAssertEqual(allowedPayload["ok"] as? Bool, true)
+        XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().map(\.content), ["approved memory write"])
     }
 
     func testAgentCouncilAndMcpToolCallsCanBeFinishedForResume() throws {

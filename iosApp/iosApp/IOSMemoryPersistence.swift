@@ -6,6 +6,15 @@ enum IOSMemoryToolWritePolicy: Equatable {
     case allow
     case needsUserAction(String)
     case denied(String)
+    case deniedByUser(String)
+}
+
+struct IOSMemoryToolApprovalPreview: Equatable {
+    let action: String
+    let scope: String?
+    let kind: String?
+    let contentPreview: String?
+    let targetId: Int?
 }
 
 enum IOSMemoryToolExecutor {
@@ -50,6 +59,22 @@ enum IOSMemoryToolExecutor {
         default:
             return false
         }
+    }
+
+    static func approvalPreview(input: String) -> IOSMemoryToolApprovalPreview? {
+        guard let args = jsonObject(input) else { return nil }
+        let action = action(from: args)
+        guard ["create", "add", "write", "edit", "update", "delete", "remove"].contains(action) else {
+            return nil
+        }
+
+        return IOSMemoryToolApprovalPreview(
+            action: action,
+            scope: nonEmptyString(args["scope"] ?? args["type"]),
+            kind: nonEmptyString(args["kind"]),
+            contentPreview: nonEmptyString(args["content"]).map { previewText($0) },
+            targetId: int(args["id"])
+        )
     }
 
     @MainActor
@@ -228,6 +253,15 @@ enum IOSMemoryToolExecutor {
                 "policy": "disabled",
                 "reason": reason
             ])
+        case .deniedByUser(let reason):
+            json([
+                "ok": false,
+                "tool": "memory_tool",
+                "action": action,
+                "denied": true,
+                "policy": "user_denied",
+                "reason": reason
+            ])
         }
     }
 
@@ -338,6 +372,14 @@ enum IOSMemoryToolExecutor {
         guard let text = value as? String else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func previewText(_ text: String, maxLength: Int = 180) -> String {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        guard normalized.count > maxLength else { return normalized }
+        return String(normalized.prefix(maxLength)) + "..."
     }
 
     private static func stringArray(_ value: Any?) -> [String] {
