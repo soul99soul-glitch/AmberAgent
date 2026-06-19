@@ -308,7 +308,7 @@ struct BoardView: View {
         if let running = deepReadStore.task(id: task.id) {
             let output = IOSDeepReadDraftGenerator.generate(task: running)
             deepReadStore.complete(id: task.id, markdown: output)
-            try? IOSWorkspaceStore.shared.saveArtifact(
+            _ = try? IOSWorkspaceStore.shared.saveArtifact(
                 title: running.title,
                 content: output,
                 type: .deepRead,
@@ -1009,7 +1009,7 @@ struct IOSDeepReadTaskDetailView: View {
         if let running = store.task(id: task.id) {
             let output = IOSDeepReadDraftGenerator.generate(task: running)
             store.complete(id: task.id, markdown: output)
-            try? IOSWorkspaceStore.shared.saveArtifact(
+            _ = try? IOSWorkspaceStore.shared.saveArtifact(
                 title: running.title,
                 content: output,
                 type: .deepRead,

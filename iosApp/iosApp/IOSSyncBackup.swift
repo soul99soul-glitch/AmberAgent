@@ -343,8 +343,14 @@ struct IOSSyncDatasetSummary: Codable, Equatable, Sendable {
 
 private enum IOSDeviceLabel {
     static var current: String {
-        let device = UIDevice.current
-        return [device.systemName, device.model].filter { !$0.isEmpty }.joined(separator: " ")
+        func label() -> String {
+            let device = UIDevice.current
+            return [device.systemName, device.model].filter { !$0.isEmpty }.joined(separator: " ")
+        }
+        if Thread.isMainThread {
+            return label()
+        }
+        return DispatchQueue.main.sync(execute: label)
     }
 }
 

@@ -1023,7 +1023,7 @@ final class ChatViewModel {
                     sourceMessageId: sourceMessageId
                 )
             }
-            try? IOSWorkspaceStore.shared.saveArtifact(
+            _ = try? IOSWorkspaceStore.shared.saveArtifact(
                 title: record.title,
                 content: record.htmlContent,
                 type: .miniApp,
