@@ -71,6 +71,29 @@ final class IOSSharedSettingsStoreSkillWriteBackTests: XCTestCase {
         )
     }
 
+    func testCapabilityGatesAreAlwaysAvailable() {
+        let store = makeIsolatedStore(suiteName: "CapabilityGatesDefault-\(UUID().uuidString)")
+
+        for gate in IOSCapabilityGate.allCases {
+            XCTAssertTrue(store.isCapabilityGateEnabled(gate), "\(gate.rawValue) should be always available")
+        }
+    }
+
+    func testCapabilityGateWritesDoNotHideFeaturesAcrossRestart() {
+        let suiteName = "CapabilityGatesRestart-\(UUID().uuidString)"
+        let store1 = makeIsolatedStore(suiteName: suiteName)
+
+        store1.setCapabilityGate(.miniApps, enabled: false)
+        store1.setCapabilityGate(.mcp, enabled: true)
+        store1.setCapabilityGate(.remoteRuntime, enabled: false)
+
+        let store2 = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertTrue(store2.isCapabilityGateEnabled(.miniApps))
+        XCTAssertTrue(store2.isCapabilityGateEnabled(.mcp))
+        XCTAssertTrue(store2.isCapabilityGateEnabled(.remoteRuntime))
+        XCTAssertTrue(store2.isCapabilityGateEnabled(.modelCouncil))
+    }
+
     private func makeIsolatedStore(suiteName: String = "SkillWriteBack-\(UUID().uuidString)") -> IOSSharedSettingsStore {
         IOSSharedSettingsStore(userDefaults: UserDefaults(suiteName: suiteName)!)
     }

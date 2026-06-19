@@ -28,6 +28,34 @@ struct ChatContextSnapshot {
     let cachedTokens: Int
 }
 
+enum ChatConfigurationIssue: Equatable {
+    case missingAPIKey
+    case invalidBaseURL
+    case missingModel
+
+    var title: String {
+        switch self {
+        case .missingAPIKey:
+            "还不能聊天"
+        case .invalidBaseURL:
+            "API 地址无效"
+        case .missingModel:
+            "还没有选择模型"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .missingAPIKey:
+            "请先添加服务商 API Key，再发送第一条消息。"
+        case .invalidBaseURL:
+            "当前服务商 API 地址不是有效的 http/https URL，请修正后再试。"
+        case .missingModel:
+            "请选择当前服务商可用的聊天模型，或填写服务商文档中的 Model ID。"
+        }
+    }
+}
+
 struct MemoryToolApprovalRequest: Identifiable, Equatable {
     let id: String
     let action: String
@@ -69,6 +97,34 @@ struct WebMountToolApprovalRequest: Identifiable, Equatable {
     }
 }
 
+struct SearchToolApprovalRequest: Identifiable, Equatable {
+    let id: String
+    let toolName: String
+    let target: String
+    let providerName: String
+    let providerType: String
+    let reason: String
+
+    var title: String {
+        switch toolName {
+        case "scrape_web":
+            "读取网页"
+        default:
+            "执行网络搜索"
+        }
+    }
+}
+
+struct McpToolApprovalRequest: Identifiable, Equatable {
+    let id: String
+    let serverName: String
+    let toolName: String
+    let argumentsPreview: String
+    let reason: String
+
+    var title: String { "执行 MCP 工具" }
+}
+
 private struct PendingMemoryToolApproval {
     let toolCall: UIMessagePart.Tool
     let providerSetting: ProviderSetting.OpenAI
@@ -81,6 +137,28 @@ private struct PendingMemoryToolApproval {
 }
 
 private struct PendingWebMountToolApproval {
+    let toolCall: UIMessagePart.Tool
+    let providerSetting: ProviderSetting.OpenAI
+    let params: TextGenerationParams
+    let runId: String
+    let startedAt: Int64
+    let inputDigest: String
+    let conversationId: KotlinUuid?
+    let baseMessages: [UIMessage]
+}
+
+private struct PendingSearchToolApproval {
+    let toolCall: UIMessagePart.Tool
+    let providerSetting: ProviderSetting.OpenAI
+    let params: TextGenerationParams
+    let runId: String
+    let startedAt: Int64
+    let inputDigest: String
+    let conversationId: KotlinUuid?
+    let baseMessages: [UIMessage]
+}
+
+private struct PendingMcpToolApproval {
     let toolCall: UIMessagePart.Tool
     let providerSetting: ProviderSetting.OpenAI
     let params: TextGenerationParams
@@ -106,7 +184,10 @@ final class ChatViewModel {
     var reasoningLevel: ReasoningLevel = .off
     var messageRevision: Int = 0
     var pendingMemoryApproval: MemoryToolApprovalRequest?
+    var pendingSearchApproval: SearchToolApprovalRequest?
     var pendingWebMountApproval: WebMountToolApprovalRequest?
+    var pendingMcpApproval: McpToolApprovalRequest?
+    var configurationError: String?
 
     /// 持久化存储（由 AppShell 注入）。nil 时退化为纯内存模式（向后兼容旧调用方）。
     weak var conversationStore: IOSConversationStore?
@@ -134,7 +215,7 @@ final class ChatViewModel {
             modelId: currentModelId,
             supportsReasoning: currentModelSupportsReasoning,
             pendingSelectedFileName: pendingSelectedFilePreview?.fileName,
-            pendingSelectedFileBytesText: pendingSelectedFilePreview.map { "\($0.bytesRead) bytes" },
+            pendingSelectedFileBytesText: pendingSelectedFilePreview?.byteSummary,
             promptTokens: prompt,
             completionTokens: completion,
             totalTokens: prompt + completion,
@@ -146,11 +227,20 @@ final class ChatViewModel {
         currentModelAbilities.contains(.reasoning)
     }
 
+    var configurationIssue: ChatConfigurationIssue? {
+        Self.chatConfigurationIssue(
+            baseUrl: settingsStore.baseUrl,
+            apiKey: settingsStore.apiKey,
+            modelId: settingsStore.modelId
+        )
+    }
+
     // MARK: - Private
 
     private let settingsStore: SettingsStore
     private let sharedSettings: IOSSharedSettingsStore
     private let localToolExecutor: IOSLocalToolExecutor?
+    private let searchTransport: any IOSSearchHTTPTransport
     private let miniAppRepository: IOSMiniAppRepository
     private let autoGenerateResponses: Bool
     private let liveActivityController: AgentLiveActivityController
@@ -174,8 +264,7 @@ final class ChatViewModel {
     }
 
     private var currentModelId: String {
-        let trimmed = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "gpt-4o" : trimmed
+        settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var currentModelAbilities: [ModelAbility] {
@@ -196,7 +285,9 @@ final class ChatViewModel {
     private var currentToolResumeCount: Int = 0
     private let maxToolResumeCount = 4
     private var pendingMemoryToolApproval: PendingMemoryToolApproval?
+    private var pendingSearchToolApproval: PendingSearchToolApproval?
     private var pendingWebMountToolApproval: PendingWebMountToolApproval?
+    private var pendingMcpToolApproval: PendingMcpToolApproval?
 
     // MARK: - Init
 
@@ -204,6 +295,7 @@ final class ChatViewModel {
         settingsStore: SettingsStore,
         sharedSettings: IOSSharedSettingsStore = IOSSharedSettingsStore(),
         localToolExecutor: IOSLocalToolExecutor? = nil,
+        searchTransport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport(),
         miniAppRepository: IOSMiniAppRepository? = nil,
         autoGenerateResponses: Bool = true,
         liveActivityController: AgentLiveActivityController? = nil
@@ -211,6 +303,7 @@ final class ChatViewModel {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
         self.localToolExecutor = localToolExecutor
+        self.searchTransport = searchTransport
         self.miniAppRepository = miniAppRepository ?? IOSMiniAppRepository.shared
         self.autoGenerateResponses = autoGenerateResponses
         self.liveActivityController = liveActivityController ?? .shared
@@ -245,7 +338,15 @@ final class ChatViewModel {
         guard !text.isEmpty,
               !isAttachingSelectedFile,
               pendingMemoryApproval == nil,
-              pendingWebMountApproval == nil else { return }
+              pendingSearchApproval == nil,
+              pendingWebMountApproval == nil,
+              pendingMcpApproval == nil else { return }
+
+        if autoGenerateResponses, let configurationIssue {
+            configurationError = configurationIssue.message
+            return
+        }
+        configurationError = nil
 
         let prompt = Self.promptText(userText: text, selectedFilePreview: pendingSelectedFilePreview)
         let digest = Self.inputDigest(for: prompt)
@@ -344,6 +445,18 @@ final class ChatViewModel {
         finishPendingMemoryToolApproval(writePolicy: .deniedByUser("User denied memory write."))
     }
 
+    func approvePendingSearchTool() {
+        Task { @MainActor in
+            await finishPendingSearchToolApproval(allow: true)
+        }
+    }
+
+    func denyPendingSearchTool() {
+        Task { @MainActor in
+            await finishPendingSearchToolApproval(allow: false)
+        }
+    }
+
     func approvePendingWebMountTool() {
         Task { @MainActor in
             await finishPendingWebMountToolApproval(allow: true)
@@ -353,6 +466,18 @@ final class ChatViewModel {
     func denyPendingWebMountTool() {
         Task { @MainActor in
             await finishPendingWebMountToolApproval(allow: false)
+        }
+    }
+
+    func approvePendingMcpTool() {
+        Task { @MainActor in
+            await finishPendingMcpToolApproval(allow: true)
+        }
+    }
+
+    func denyPendingMcpTool() {
+        Task { @MainActor in
+            await finishPendingMcpToolApproval(allow: false)
         }
     }
 
@@ -371,7 +496,9 @@ final class ChatViewModel {
         currentConversationIdForRun = nil
         currentToolResumeCount = 0
         clearPendingMemoryApproval()
+        clearPendingSearchApproval()
         clearPendingWebMountApproval()
+        clearPendingMcpApproval()
         isLoading = false
 
         guard let runId, let startedAt, let digest else { return }
@@ -414,15 +541,21 @@ final class ChatViewModel {
             presentation: .generatingResponse(modelName: params.model.modelId)
         )
 
-        startStreaming(
-            providerSetting: providerSetting,
-            params: params,
-            runId: runId,
-            startedAt: startedAt,
-            inputDigest: inputDigest,
-            conversationId: conversationId,
-            uploadMessages: messages
-        )
+        Task { @MainActor in
+            if self.sharedSettings.isCapabilityGateEnabled(.mcp) {
+                await self.mcpManager.syncAll()
+            }
+            guard self.currentRunId == runId else { return }
+            self.startStreaming(
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                uploadMessages: self.messages
+            )
+        }
     }
 
     private func startStreaming(
@@ -576,10 +709,15 @@ final class ChatViewModel {
             onError: { [weak self] error in
                 Task { @MainActor [weak self] in
                     guard let self, self.currentRunId == runId else { return }
+                    let rawMessage = error.message ?? String(describing: error)
+                    let userFacingMessage = Self.userFacingGenerationError(
+                        rawMessage,
+                        modelId: params.model.modelId
+                    )
                     let errMsg = UIMessage(
                         id: KotlinUuid.companion.random(),
                         role: MessageRole.assistant,
-                        parts: [UIMessagePart.Text(text: "Error: \(error.message ?? String(describing: error))", metadata: nil)],
+                        parts: [UIMessagePart.Text(text: userFacingMessage, metadata: nil)],
                         annotations: [],
                         createdAt: self.nowLocalDateTime(),
                         finishedAt: self.nowLocalDateTime(),
@@ -614,11 +752,33 @@ final class ChatViewModel {
         streamJob = nil
         isLoading = false
         clearPendingMemoryApproval()
+        clearPendingSearchApproval()
         clearPendingWebMountApproval()
+        clearPendingMcpApproval()
     }
 
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
-        messagesByInjectingMemoryContext(messagesByInjectingMiniAppInstruction(messages))
+        messagesByInjectingMemoryContext(messagesByInjectingMcpContext(messagesByInjectingMiniAppInstruction(messages)))
+    }
+
+    private func messagesByInjectingMcpContext(_ messages: [UIMessage]) -> [UIMessage] {
+        guard sharedSettings.isCapabilityGateEnabled(.mcp) else { return messages }
+        let callableTools = mcpManager.tools.filter { $0.tool.enabled }
+        guard !callableTools.isEmpty else { return messages }
+        let lines = callableTools.prefix(40).map { discovered in
+            let description = discovered.tool.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let description, !description.isEmpty {
+                return "- server=\(discovered.serverName), tool=\(discovered.tool.name): \(description)"
+            }
+            return "- server=\(discovered.serverName), tool=\(discovered.tool.name)"
+        }
+        let prompt = """
+        Available MCP tools configured by the user. Treat server/tool names as the only valid values for `mcp_call`; do not invent MCP servers or tool names.
+        <mcp-tools>
+        \(lines.joined(separator: "\n"))
+        </mcp-tools>
+        """
+        return [UIMessage.companion.system(prompt: prompt)] + messages
     }
 
     private func messagesByInjectingMemoryContext(_ messages: [UIMessage]) -> [UIMessage] {
@@ -683,7 +843,7 @@ final class ChatViewModel {
 #endif
 
     private func messagesByInjectingMiniAppInstruction(_ messages: [UIMessage]) -> [UIMessage] {
-        guard sharedSettings.agentRuntime.miniApp.enabled else { return messages }
+        guard isMiniAppRuntimeEnabled else { return messages }
         guard let lastUserIndex = messages.lastIndex(where: { $0.role == MessageRole.user }) else { return messages }
         let message = messages[lastUserIndex]
         guard let textIndex = message.parts.lastIndex(where: { $0 is UIMessagePart.Text }),
@@ -745,7 +905,7 @@ final class ChatViewModel {
     }
 
     private func saveMiniAppIfPresent(in messages: [UIMessage], conversationId: KotlinUuid?) -> UIMessage? {
-        guard sharedSettings.agentRuntime.miniApp.enabled else { return nil }
+        guard isMiniAppRuntimeEnabled else { return nil }
         guard let lastUser = messages.last(where: { $0.role == MessageRole.user }),
               let userText = Self.messageText(lastUser),
               IOSMiniAppOutputParser.isExplicitMiniAppRequest(userText),
@@ -876,7 +1036,7 @@ final class ChatViewModel {
         let slice3Names: Set<String> = ["mcp_call", "subagent_dispatch", "model_council_run"]
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { slice3Names.contains($0.toolName) && $0.output.isEmpty }) {
+                .first(where: { slice3Names.contains($0.toolName) && isSlice3ToolEnabled($0.toolName) && $0.output.isEmpty }) {
                 return toolCall
             }
         }
@@ -884,6 +1044,7 @@ final class ChatViewModel {
     }
 
     private func pendingWebMountToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+        guard isWebMountRuntimeEnabled else { return nil }
         let webMountNames = IOSWebMountToolCatalog.supportedToolNames
             .union(IOSWebMountToolCatalog.unsupportedToolNames)
         for message in messages.reversed() where message.role == MessageRole.assistant {
@@ -916,16 +1077,25 @@ final class ChatViewModel {
         conversationId: KotlinUuid?,
         baseMessages: [UIMessage]
     ) async {
-        let resultText: String
-        do {
-            resultText = try await IOSSearchExecutor.execute(
-                toolName: toolCall.toolName,
-                toolInput: toolCall.input,
-                settings: sharedSettings.snapshot
+        if let request = searchApprovalRequest(
+            for: toolCall,
+            reason: "网络搜索和网页读取会访问外部站点，需要你确认。"
+        ) {
+            await pauseForSearchToolApproval(
+                request,
+                toolCall: toolCall,
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                baseMessages: baseMessages
             )
-        } catch {
-            resultText = "\(toolCall.toolName) failed: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+            return
         }
+
+        let resultText = await dispatchSearchToolCall(toolCall)
 
         guard currentRunId == runId else { return }
         let resumedMessages = messagesByFinishingToolCall(toolCall, outputText: resultText, in: baseMessages)
@@ -940,6 +1110,144 @@ final class ChatViewModel {
             inputDigest: inputDigest,
             conversationId: conversationId,
             uploadMessages: resumedMessages
+        )
+    }
+
+    private func pauseForSearchToolApproval(
+        _ request: SearchToolApprovalRequest,
+        toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        guard currentRunId == runId else { return }
+        pendingSearchToolApproval = PendingSearchToolApproval(
+            toolCall: toolCall,
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            baseMessages: baseMessages
+        )
+        pendingSearchApproval = request
+        messages = baseMessages
+        messageRevision &+= 1
+        isLoading = false
+        await liveActivityController.update(
+            runId: runId,
+            presentation: .waitingForUser(toolTitle: request.toolName == "scrape_web" ? "网页读取" : "网络搜索"),
+            force: true
+        )
+    }
+
+    private func finishPendingSearchToolApproval(allow: Bool) async {
+        guard let pending = pendingSearchToolApproval else { return }
+        clearPendingSearchApproval()
+        guard currentRunId == pending.runId else { return }
+
+        let resultText = allow
+            ? await dispatchSearchToolCall(pending.toolCall)
+            : Self.searchToolFailureJSON(
+                toolName: pending.toolCall.toolName,
+                reason: "User denied network search.",
+                denied: true
+            )
+        let resumedMessages = messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: resultText,
+            in: pending.baseMessages
+        )
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        guard autoGenerateResponses else {
+            persistMessages(conversationId: pending.conversationId)
+            finishStreaming()
+            return
+        }
+
+        isLoading = true
+        startLiveActivity(
+            runId: pending.runId,
+            presentation: .generatingResponse(modelName: pending.params.model.modelId)
+        )
+        startStreaming(
+            providerSetting: pending.providerSetting,
+            params: pending.params,
+            runId: pending.runId,
+            startedAt: pending.startedAt,
+            inputDigest: pending.inputDigest,
+            conversationId: pending.conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func clearPendingSearchApproval() {
+        pendingSearchToolApproval = nil
+        pendingSearchApproval = nil
+    }
+
+    private func dispatchSearchToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
+        guard sharedSettings.snapshot.enableWebSearch else {
+            return Self.searchToolFailureJSON(
+                toolName: toolCall.toolName,
+                reason: "Web search is disabled in settings."
+            )
+        }
+        do {
+            return try await IOSSearchExecutor.execute(
+                toolName: toolCall.toolName,
+                toolInput: toolCall.input,
+                settings: sharedSettings.snapshot,
+                transport: searchTransport
+            )
+        } catch {
+            return Self.searchToolFailureJSON(
+                toolName: toolCall.toolName,
+                reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            )
+        }
+    }
+
+    private func searchApprovalRequest(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> SearchToolApprovalRequest? {
+        let target: String
+        switch toolCall.toolName {
+        case "search_web":
+            guard let request = try? IOSSearchExecutor.searchRequest(
+                from: toolCall.input,
+                defaultMaxResults: Int(sharedSettings.snapshot.searchCommonOptions.resultSize)
+            ) else {
+                return nil
+            }
+            target = request.query
+        case "scrape_web":
+            guard let request = try? IOSSearchExecutor.scrapeRequest(from: toolCall.input) else {
+                return nil
+            }
+            target = request.url.absoluteString
+        default:
+            return nil
+        }
+
+        let selection = IOSSearchExecutor.searchProviderSelection(settings: sharedSettings.snapshot)
+        let rawId = toolCall.toolCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestId = rawId.isEmpty ? Self.inputDigest(for: toolCall.input) : rawId
+        return SearchToolApprovalRequest(
+            id: requestId,
+            toolName: toolCall.toolName,
+            target: Self.truncatedSearchTarget(target),
+            providerName: toolCall.toolName == "scrape_web" ? "公开网页读取" : selection.providerName,
+            providerType: toolCall.toolName == "scrape_web" ? "scrape_web" : selection.providerType,
+            reason: reason
         )
     }
 
@@ -1340,6 +1648,22 @@ final class ChatViewModel {
         conversationId: KotlinUuid?,
         baseMessages: [UIMessage]
     ) async {
+        if toolCall.toolName == "mcp_call",
+           let request = mcpApprovalRequest(for: toolCall, reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。") {
+            await pauseForMcpToolApproval(
+                request,
+                toolCall: toolCall,
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                baseMessages: baseMessages
+            )
+            return
+        }
+
         let resultText = await dispatchSlice3ToolCall(toolCall)
 
         guard currentRunId == runId else { return }
@@ -1358,9 +1682,111 @@ final class ChatViewModel {
         )
     }
 
+    private func pauseForMcpToolApproval(
+        _ request: McpToolApprovalRequest,
+        toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        guard currentRunId == runId else { return }
+        pendingMcpToolApproval = PendingMcpToolApproval(
+            toolCall: toolCall,
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            baseMessages: baseMessages
+        )
+        pendingMcpApproval = request
+        messages = baseMessages
+        messageRevision &+= 1
+        isLoading = false
+        await liveActivityController.update(
+            runId: runId,
+            presentation: .waitingForUser(toolTitle: "MCP 工具"),
+            force: true
+        )
+    }
+
+    private func finishPendingMcpToolApproval(allow: Bool) async {
+        guard let pending = pendingMcpToolApproval else { return }
+        clearPendingMcpApproval()
+        guard currentRunId == pending.runId else { return }
+
+        let resultText: String
+        if allow {
+            resultText = await dispatchSlice3ToolCall(pending.toolCall)
+        } else {
+            resultText = "用户拒绝执行 MCP 工具。"
+        }
+        let resumedMessages = messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: resultText,
+            in: pending.baseMessages
+        )
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        guard autoGenerateResponses else {
+            persistMessages(conversationId: pending.conversationId)
+            finishStreaming()
+            return
+        }
+
+        isLoading = true
+        startLiveActivity(
+            runId: pending.runId,
+            presentation: .generatingResponse(modelName: pending.params.model.modelId)
+        )
+        startStreaming(
+            providerSetting: pending.providerSetting,
+            params: pending.params,
+            runId: pending.runId,
+            startedAt: pending.startedAt,
+            inputDigest: pending.inputDigest,
+            conversationId: pending.conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func clearPendingMcpApproval() {
+        pendingMcpToolApproval = nil
+        pendingMcpApproval = nil
+    }
+
+    private func mcpApprovalRequest(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> McpToolApprovalRequest? {
+        guard let args = jsonObject(toolCall.input),
+              let server = args["server"] as? String,
+              let tool = args["tool"] as? String else {
+            return nil
+        }
+        let rawId = toolCall.toolCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestId = rawId.isEmpty ? Self.inputDigest(for: toolCall.input) : rawId
+        return McpToolApprovalRequest(
+            id: requestId,
+            serverName: server,
+            toolName: tool,
+            argumentsPreview: Self.truncatedMcpArguments(args["arguments"]),
+            reason: reason
+        )
+    }
+
     /// [Slice 3] Routes a Slice-3 tool call to its executor and returns the
     /// result text (or an honest error string — never fabricated success).
     private func dispatchSlice3ToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
+        guard isSlice3ToolEnabled(toolCall.toolName) else {
+            return "\(toolCall.toolName) 未开启。请先在设置中启用对应能力。"
+        }
         switch toolCall.toolName {
         case "subagent_dispatch":
             let objective = jsonObject(toolCall.input)?["objective"] as? String ?? toolCall.input
@@ -1376,8 +1802,6 @@ final class ChatViewModel {
             }
             let arguments = (args["arguments"] as? [String: Any]) ?? [:]
             do {
-                // IOSMcpManager.callTool connects to the server (JSON-RPC) and
-                // invokes the named tool, returning text content.
                 return try await mcpManager.callTool(serverName: server, toolName: tool, arguments: arguments)
             } catch {
                 return "MCP 调用失败（server: \(server)，tool: \(tool)）：\(error.localizedDescription)"
@@ -1548,6 +1972,44 @@ final class ChatViewModel {
         let output = await webMountToolExecutionOutput(toolCall, isUserInitiated: true)
         return webMountResultText(for: toolCall, output: output)
     }
+
+    func searchApprovalRequestForTesting(
+        toolName: String,
+        input: String
+    ) -> SearchToolApprovalRequest? {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "test-search-tool",
+            toolName: toolName,
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        return searchApprovalRequest(for: toolCall, reason: "Test approval")
+    }
+
+    func searchToolApprovalOutputForTesting(
+        toolName: String,
+        input: String,
+        allow: Bool
+    ) async -> String {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "test-search-tool",
+            toolName: toolName,
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        guard allow else {
+            return Self.searchToolFailureJSON(
+                toolName: toolName,
+                reason: "User denied network search.",
+                denied: true
+            )
+        }
+        return await dispatchSearchToolCall(toolCall)
+    }
 #endif
 
     private func handleDetectedToolCalls(_ toolCalls: [UIMessagePart.Tool], runId: String) {
@@ -1575,16 +2037,65 @@ final class ChatViewModel {
         return hash.map { String(format: "%02x", $0) }.joined()
     }
 
+    private static func truncatedMcpArguments(_ value: Any?, maxLength: Int = 360) -> String {
+        guard let value else { return "{}" }
+        let text: String
+        if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+           let serialized = String(data: data, encoding: .utf8) {
+            text = serialized
+        } else {
+            text = String(describing: value)
+        }
+        guard text.count > maxLength else { return text }
+        return String(text.prefix(maxLength)) + "..."
+    }
+
+    private static func truncatedSearchTarget(_ value: String, maxLength: Int = 180) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxLength else { return trimmed }
+        return String(trimmed.prefix(maxLength)) + "..."
+    }
+
+    private static func searchToolFailureJSON(
+        toolName: String,
+        reason: String,
+        denied: Bool = false
+    ) -> String {
+        var payload: [String: Any] = [
+            "ok": false,
+            "tool": toolName,
+            "reason": reason
+        ]
+        if denied {
+            payload["denied"] = true
+            payload["policy"] = "user_denied"
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "\(toolName) failed: \(reason)"
+        }
+        return text
+    }
+
     static func promptText(
         userText: String,
         selectedFilePreview: SelectedDocumentReadResult?
     ) -> String {
         guard let selectedFilePreview else { return userText }
+        let status = selectedFilePreview.statusSummary
         return """
         \(userText)
 
-        [Selected file preview: \(selectedFilePreview.fileName), \(selectedFilePreview.bytesRead) bytes]
+        [文件上下文]
+        来源文件：\(selectedFilePreview.fileName)
+        类型：\(selectedFilePreview.fileType)
+        大小：\(selectedFilePreview.totalBytes) bytes
+        已读取：\(selectedFilePreview.bytesRead) bytes
+        文本字符：\(selectedFilePreview.characterCount)
+        状态：\(status)
+        内容：
         \(selectedFilePreview.preview)
+        [/文件上下文]
         """
     }
 
@@ -1678,7 +2189,7 @@ final class ChatViewModel {
         if IOSMemoryToolExecutor.isEnabled(runtime: sharedSettings.agentRuntime) {
             toolDeclarations.append(ToolKt.createMemoryToolDeclaration())
         }
-        if localToolExecutor != nil, IOSWebMountController.shared.settings.globalEnabled {
+        if localToolExecutor != nil, isWebMountRuntimeEnabled {
             toolDeclarations.append(ToolKt.createWebMountStationsToolDeclaration())
             toolDeclarations.append(ToolKt.createWebMountOpenToolDeclaration())
             toolDeclarations.append(ToolKt.createWebMountStateToolDeclaration())
@@ -1688,7 +2199,9 @@ final class ChatViewModel {
             toolDeclarations.append(ToolKt.createWebMountForwardToolDeclaration())
             toolDeclarations.append(ToolKt.createWebMountClearSessionToolDeclaration())
         }
-        toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
+        if sharedSettings.isCapabilityGateEnabled(.mcp) {
+            toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
+        }
         toolDeclarations.append(ToolKt.createSubAgentDispatchToolDeclaration())
         toolDeclarations.append(ToolKt.createModelCouncilRunToolDeclaration())
         return TextGenerationParams(
@@ -1705,6 +2218,98 @@ final class ChatViewModel {
 
     func currentToolDeclarationNames() -> [String] {
         makeTextGenerationParams().tools.map(\.name)
+    }
+
+    static func chatConfigurationIssue(
+        baseUrl: String,
+        apiKey: String,
+        modelId: String
+    ) -> ChatConfigurationIssue? {
+        if apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .missingAPIKey
+        }
+        if !isValidHTTPBaseURL(baseUrl) {
+            return .invalidBaseURL
+        }
+        if modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .missingModel
+        }
+        return nil
+    }
+
+    static func userFacingGenerationError(_ rawMessage: String, modelId: String? = nil) -> String {
+        let raw = rawMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercased = raw.lowercased()
+        let prefix: String
+        if lowercased.contains("invalid api key") ||
+            lowercased.contains("incorrect api key") ||
+            lowercased.contains("unauthorized") ||
+            lowercased.contains("401") {
+            prefix = "API Key 无效或没有权限。请回到「服务商」确认 Key 是否填写正确，并确认它有访问当前服务商的权限。"
+        } else if lowercased.contains("model_not_found") ||
+                    lowercased.contains("model not found") ||
+                    lowercased.contains("does not exist") ||
+                    lowercased.contains("not found") ||
+                    lowercased.contains("404") {
+            let trimmedModelId = modelId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let suffix = trimmedModelId.isEmpty ? "" : "当前 Model ID：\(trimmedModelId)。"
+            prefix = "模型不可用、模型不存在，或当前 Base URL 不支持这个聊天路径。请在「默认模型」选择当前服务商支持的模型。\(suffix)"
+        } else if lowercased.contains("network") ||
+                    lowercased.contains("internet") ||
+                    lowercased.contains("offline") ||
+                    lowercased.contains("timed out") ||
+                    lowercased.contains("timeout") ||
+                    lowercased.contains("cannot connect") ||
+                    lowercased.contains("could not connect") ||
+                    lowercased.contains("dns") ||
+                    lowercased.contains("connection refused") ||
+                    lowercased.contains("nsurlerror") {
+            prefix = "网络连接失败。请检查网络、Base URL 和服务商状态后重试。"
+        } else {
+            prefix = "请求失败。请检查服务商配置后重试。"
+        }
+
+        guard !raw.isEmpty else { return prefix }
+        return "\(prefix)\n\n原始错误：\(truncatedError(raw))"
+    }
+
+    private static func isValidHTTPBaseURL(_ value: String) -> Bool {
+        guard
+            let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+            let scheme = components.scheme?.lowercased(),
+            scheme == "http" || scheme == "https",
+            let host = components.host,
+            !host.isEmpty
+        else {
+            return false
+        }
+        return true
+    }
+
+    private static func truncatedError(_ value: String, maxLength: Int = 260) -> String {
+        guard value.count > maxLength else { return value }
+        return String(value.prefix(maxLength)) + "..."
+    }
+
+    private var isMiniAppRuntimeEnabled: Bool {
+        true
+    }
+
+    private var isWebMountRuntimeEnabled: Bool {
+        true
+    }
+
+    private func isSlice3ToolEnabled(_ toolName: String) -> Bool {
+        switch toolName {
+        case "mcp_call":
+            sharedSettings.isCapabilityGateEnabled(.mcp)
+        case "subagent_dispatch":
+            true
+        case "model_council_run":
+            true
+        default:
+            false
+        }
     }
 
     private func nowLocalDateTime() -> Kotlinx_datetimeLocalDateTime {

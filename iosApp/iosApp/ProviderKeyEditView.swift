@@ -178,7 +178,7 @@ struct ProviderKeyEditView: View {
             Text("\(providerName) 当前不可编辑 API Key")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(AmberTheme.foreground)
-            Text("这个服务商模板当前不能直接用于聊天，因此暂不开放 API Key 编辑。")
+            Text("这个服务商模板当前不能直接用于聊天，因此当前不可编辑 API Key。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
                 .multilineTextAlignment(.center)

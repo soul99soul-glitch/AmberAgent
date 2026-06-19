@@ -264,6 +264,8 @@ struct AmberFormRow: View {
 }
 
 struct ConversationsView: View {
+    let sharedSettings: IOSSharedSettingsStore
+
     @Environment(RouterPath.self) private var router
     @Environment(IOSConversationStore.self) private var conversationStore
 
@@ -272,13 +274,40 @@ struct ConversationsView: View {
     @State private var renameDraft: String = ""
     @State private var deletingConversationId: KotlinUuid?
 
-    private let shortcuts: [ConversationShortcut] = [
-        .init(title: "今日看板", systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
-        .init(title: "小应用", systemImage: "square.grid.2x2", color: AmberTheme.accent, route: .miniApps),
-        .init(title: "工作区", systemImage: "folder", color: AmberTheme.accentGreen, route: .sandbox),
-        .init(title: "核心记忆", systemImage: "brain.head.profile", color: AmberTheme.accentCyan, route: .memory),
-        .init(title: "模型议会", systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accentIndigo, route: .council)
-    ]
+    private var shortcuts: [ConversationShortcut] {
+        [
+            .init(
+                title: "深度阅读",
+                systemImage: "book.pages",
+                color: AmberTheme.accentAmber,
+                route: .board
+            ),
+            .init(
+                title: "小应用",
+                systemImage: "square.grid.2x2",
+                color: AmberTheme.accent,
+                route: .miniApps
+            ),
+            .init(
+                title: "核心记忆",
+                systemImage: "brain.head.profile",
+                color: AmberTheme.accentCyan,
+                route: .memory
+            ),
+            .init(
+                title: "WebMount",
+                systemImage: "globe",
+                color: AmberTheme.accentGreen,
+                route: .webMount
+            ),
+            .init(
+                title: "模型议会",
+                systemImage: "bubble.left.and.bubble.right",
+                color: AmberTheme.accentIndigo,
+                route: .council
+            )
+        ]
+    }
 
     /// 本地标题过滤后的会话摘要（summaries 已按 updateAt 倒序/置顶优先）。
     private var filteredSummaries: [ConversationSummary] {
@@ -405,11 +434,15 @@ struct ConversationsView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(AmberTheme.muted2)
-            TextField("搜索会话标题", text: $searchQuery)
+            TextField("搜索会话与消息", text: $searchQuery)
                 .font(.body)
                 .foregroundStyle(AmberTheme.foreground)
+                .submitLabel(.search)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .onSubmit {
+                    router.navigate(to: .search(initialQuery: searchQuery))
+                }
             if !searchQuery.isEmpty {
                 Button {
                     searchQuery = ""
@@ -431,17 +464,12 @@ struct ConversationsView: View {
     }
 
     private var shortcutStrip: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(Array(shortcuts.enumerated()), id: \.element.id) { index, shortcut in
+        HStack(spacing: 8) {
+            ForEach(shortcuts) { shortcut in
                 shortcutButton(shortcut)
-
-                if index < shortcuts.count - 1 {
-                    Spacer(minLength: 8)
-                }
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 8)
         .padding(.top, 2)
         .padding(.bottom, 16)
     }
@@ -450,20 +478,20 @@ struct ConversationsView: View {
         Button {
             router.navigate(to: shortcut.route)
         } label: {
-            VStack(alignment: .center, spacing: 7) {
+            VStack(alignment: .center, spacing: 8) {
                 Image(systemName: shortcut.systemImage)
-                    .font(.system(size: 24, weight: .medium))
+                    .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(shortcut.color)
-                    .frame(width: 54, height: 54)
+                    .frame(width: 52, height: 52)
                     .background(shortcut.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
 
                 Text(shortcut.title)
-                    .font(.system(size: 11, weight: .regular))
-                    .foregroundStyle(AmberTheme.muted)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.88)
+                    .minimumScaleFactor(0.72)
             }
-            .frame(width: 54)
+            .frame(maxWidth: .infinity, minHeight: 78)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -601,49 +629,30 @@ private struct ConversationSummaryRow: View {
 
 struct SearchView: View {
     @Environment(RouterPath.self) private var router
+    @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var query = ""
+    @State private var query: String
     @State private var selectedFilter: SearchFilter = .all
+    @State private var results: [IOSConversationSearchResult] = []
+    @State private var isSearching = false
     @FocusState private var searchFocused: Bool
 
-    private let recentSearches = [
-        "iOS 液态玻璃设计",
-        "贪吃蛇应用",
-        "流式输出测试",
-        "威尔史密斯子女"
-    ]
+    init(initialQuery: String = "") {
+        self._query = State(initialValue: initialQuery)
+    }
 
-    private let results: [SearchResultRowModel] = [
-        .init(
-            filter: .conversation,
-            group: "会话",
-            initial: "I",
-            title: "iOS 液态玻璃设计应用推荐",
-            preview: "以下是几款适配 iOS 26 液态玻璃风格的设计参考应用...",
-            highlight: "iOS",
-            time: "刚刚",
-            color: AmberTheme.accent
-        ),
-        .init(
-            filter: .message,
-            group: "消息",
-            initial: "流",
-            title: "流式输出测试",
-            preview: "首字节延迟约 120ms，整体表现正常",
-            highlight: "120ms",
-            time: "上周五",
-            color: AmberTheme.accentCyan
-        )
-    ]
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-    private var visibleResults: [SearchResultRowModel] {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return []
-        }
-        return results.filter { row in
-            selectedFilter.includes(row.filter)
-        }
+    private var visibleResults: [IOSConversationSearchResult] {
+        guard !trimmedQuery.isEmpty else { return [] }
+        return results.filter { selectedFilter.includes($0.kind) }
+    }
+
+    private var recentSummaries: [ConversationSummary] {
+        Array(conversationStore.summaries.prefix(8))
     }
 
     var body: some View {
@@ -654,8 +663,8 @@ struct SearchView: View {
                 searchNavigation
                 filterStrip
 
-                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    recentSearchList
+                if trimmedQuery.isEmpty {
+                    recentConversationList
                 } else {
                     resultList
                 }
@@ -665,6 +674,13 @@ struct SearchView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             searchFocused = true
+            await performSearch()
+        }
+        .task(id: query) {
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            if !Task.isCancelled {
+                await performSearch()
+            }
         }
     }
 
@@ -675,7 +691,7 @@ struct SearchView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(AmberTheme.muted)
 
-                TextField("搜索任何内容...", text: $query)
+                TextField("搜索会话与消息", text: $query)
                     .font(.body)
                     .foregroundStyle(AmberTheme.foreground)
                     .tint(AmberTheme.accent)
@@ -683,6 +699,11 @@ struct SearchView: View {
                     .submitLabel(.search)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .onSubmit {
+                        Task { @MainActor in
+                            await performSearch()
+                        }
+                    }
 
                 Button {
                     query = ""
@@ -755,32 +776,30 @@ struct SearchView: View {
         .padding(.bottom, 10)
     }
 
-    private var recentSearchList: some View {
+    private var recentConversationList: some View {
         ScrollView {
             VStack(spacing: 0) {
-                AmberSectionLabel(text: "最近搜索")
+                AmberSectionLabel(text: "最近会话")
                     .padding(.top, -8)
 
-                ForEach(recentSearches, id: \.self) { term in
-                    Button {
-                        query = term
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "clock")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(AmberTheme.muted2)
-                                .frame(width: 16)
+                if recentSummaries.isEmpty {
+                    ContentUnavailableView("还没有会话", systemImage: "bubble.left.and.bubble.right")
+                        .foregroundStyle(AmberTheme.muted)
+                        .padding(.top, 72)
+                } else {
+                    AmberFormGroup {
+                        ForEach(Array(recentSummaries.enumerated()), id: \.element.id) { index, summary in
+                            RecentConversationSearchRow(summary: summary) {
+                                openConversation(summary.id)
+                            }
 
-                            Text(term)
-                                .font(.body)
-                                .foregroundStyle(AmberTheme.foreground2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if index < recentSummaries.count - 1 {
+                                Divider()
+                                    .overlay(AmberTheme.borderSoft)
+                                    .padding(.leading, 66)
+                            }
                         }
-                        .frame(minHeight: 42)
-                        .padding(.horizontal, 16)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.bottom, 36)
@@ -790,15 +809,19 @@ struct SearchView: View {
 
     private var resultList: some View {
         ScrollView {
-            if visibleResults.isEmpty {
+            if isSearching {
+                ProgressView()
+                    .tint(AmberTheme.accent)
+                    .padding(.top, 72)
+            } else if visibleResults.isEmpty {
                 ContentUnavailableView("没有结果", systemImage: "magnifyingglass", description: Text("换个关键词或筛选范围再试一次"))
                     .foregroundStyle(AmberTheme.muted)
                     .padding(.top, 72)
             } else {
                 VStack(spacing: 0) {
                     ForEach(groupedResults, id: \.group) { group in
-                        SearchResultGroup(title: group.group, rows: group.rows) { _ in
-                            router.navigate(to: .chat)
+                        SearchResultGroup(title: group.group, rows: group.rows) { result in
+                            openConversation(result.conversationId)
                         }
                     }
                 }
@@ -808,11 +831,32 @@ struct SearchView: View {
         .scrollIndicators(.hidden)
     }
 
-    private var groupedResults: [(group: String, rows: [SearchResultRowModel])] {
-        let orderedGroups = ["会话", "消息", "文件"]
-        return orderedGroups.compactMap { group in
-            let rows = visibleResults.filter { $0.group == group }
-            return rows.isEmpty ? nil : (group, rows)
+    private var groupedResults: [(group: String, rows: [IOSConversationSearchResult])] {
+        SearchFilter.resultGroups.compactMap { kind in
+            let rows = visibleResults.filter { $0.kind == kind }
+            return rows.isEmpty ? nil : (kind.title, rows)
+        }
+    }
+
+    @MainActor
+    private func performSearch() async {
+        guard !trimmedQuery.isEmpty else {
+            results = []
+            isSearching = false
+            return
+        }
+        isSearching = true
+        let nextResults = await conversationStore.searchConversations(query: trimmedQuery)
+        if !Task.isCancelled {
+            results = nextResults
+            isSearching = false
+        }
+    }
+
+    private func openConversation(_ id: KotlinUuid) {
+        Task { @MainActor in
+            await conversationStore.selectConversation(id: id)
+            router.navigate(to: .chat)
         }
     }
 }
@@ -821,7 +865,8 @@ private enum SearchFilter: String, CaseIterable, Identifiable {
     case all
     case conversation
     case message
-    case file
+
+    static let resultGroups: [IOSConversationSearchResult.Kind] = [.conversation, .message]
 
     var id: String { rawValue }
 
@@ -830,31 +875,44 @@ private enum SearchFilter: String, CaseIterable, Identifiable {
         case .all: "全部"
         case .conversation: "会话"
         case .message: "消息"
-        case .file: "文件"
         }
     }
 
-    func includes(_ rowFilter: SearchFilter) -> Bool {
-        self == .all || self == rowFilter
+    func includes(_ kind: IOSConversationSearchResult.Kind) -> Bool {
+        switch self {
+        case .all:
+            true
+        case .conversation:
+            kind == .conversation
+        case .message:
+            kind == .message
+        }
     }
 }
 
-private struct SearchResultRowModel: Identifiable {
-    let id = UUID()
-    let filter: SearchFilter
-    let group: String
-    let initial: String
-    let title: String
-    let preview: String
-    let highlight: String
-    let time: String
-    let color: Color
+private struct RecentConversationSearchRow: View {
+    let summary: ConversationSummary
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            SearchRowChrome(
+                systemImage: summary.isPinned ? "pin.fill" : "bubble.left.fill",
+                color: summary.isPinned ? AmberTheme.accentAmber : AmberTheme.accent,
+                title: summary.title.isEmpty ? "新对话" : summary.title,
+                preview: "\(summary.messageCount) 条消息",
+                highlight: "",
+                time: relativeTime(ms: summary.updateAt.toEpochMilliseconds())
+            )
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 private struct SearchResultGroup: View {
     let title: String
-    let rows: [SearchResultRowModel]
-    let action: (SearchResultRowModel) -> Void
+    let rows: [IOSConversationSearchResult]
+    let action: (IOSConversationSearchResult) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -880,39 +938,67 @@ private struct SearchResultGroup: View {
 }
 
 private struct SearchResultRow: View {
-    let row: SearchResultRowModel
+    let row: IOSConversationSearchResult
     let action: () -> Void
+
+    private var systemImage: String {
+        row.kind == .conversation ? "bubble.left.fill" : "text.bubble.fill"
+    }
+
+    private var color: Color {
+        row.kind == .conversation ? AmberTheme.accent : AmberTheme.accentCyan
+    }
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Text(row.initial)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(row.color)
-                    .frame(width: 40, height: 40)
-                    .background(row.color.opacity(0.14), in: Circle())
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(row.title)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(AmberTheme.foreground)
-                        .lineLimit(1)
-
-                    HighlightedPreview(text: row.preview, highlight: row.highlight)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text(row.time)
-                    .font(.footnote)
-                    .foregroundStyle(AmberTheme.muted)
-                    .padding(.top, 1)
-            }
-            .frame(minHeight: 58)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            SearchRowChrome(
+                systemImage: systemImage,
+                color: color,
+                title: row.title,
+                preview: row.preview,
+                highlight: row.highlight,
+                time: relativeTime(ms: row.updateAt)
+            )
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct SearchRowChrome: View {
+    let systemImage: String
+    let color: Color
+    let title: String
+    let preview: String
+    let highlight: String
+    let time: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 40, height: 40)
+                .background(color.opacity(0.14), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+
+                HighlightedPreview(text: preview, highlight: highlight)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(time)
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .padding(.top, 1)
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 }
 
@@ -921,10 +1007,10 @@ private struct HighlightedPreview: View {
     let highlight: String
 
     var body: some View {
-        if let range = text.range(of: highlight), !highlight.isEmpty {
+        if let range = text.range(of: highlight, options: [.caseInsensitive, .diacriticInsensitive]), !highlight.isEmpty {
             HStack(spacing: 0) {
                 Text(String(text[..<range.lowerBound]))
-                Text(highlight)
+                Text(String(text[range]))
                     .foregroundStyle(AmberTheme.accent)
                     .padding(.horizontal, 2)
                     .background(AmberTheme.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
@@ -942,6 +1028,13 @@ private struct HighlightedPreview: View {
     }
 }
 
+private func relativeTime(ms: Int64) -> String {
+    let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000.0)
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    return formatter.localizedString(for: date, relativeTo: Date())
+}
+
 private struct ConversationShortcut: Identifiable {
     let id = UUID()
     let title: String
@@ -952,99 +1045,55 @@ private struct ConversationShortcut: Identifiable {
 
 struct SettingsHomeView: View {
     let settingsStore: SettingsStore
+    let sharedSettings: IOSSharedSettingsStore
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = "light"
-    @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var displayFontScale = 1.0
-    @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var displayChatFont = "default"
-    @AppStorage(IOSExecutionPreferenceKeys.liveActivity) private var executionLiveActivity = true
+    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.light.rawValue
 
-    private var generalRows: [SettingsHomeRow] {
+    private var generalEntries: [SettingsHomeEntry] {
         [
             .init(title: "外观", subtitle: nil, value: appearanceModeTitle, systemImage: "circle.lefthalf.filled", color: AmberTheme.accent, route: .appearance),
-            .init(title: "显示与字体", subtitle: displayFontSummary, value: nil, systemImage: "slider.horizontal.3", color: AmberTheme.accentAmber, route: .displayFont)
+            .init(title: "显示与字体", subtitle: nil, value: nil, systemImage: "slider.horizontal.3", color: AmberTheme.accentAmber, route: .displayFont)
         ]
     }
 
-    private var runtimeRows: [SettingsHomeRow] {
+    private var agentEntries: [SettingsHomeEntry] {
         [
-            .init(title: "核心记忆", subtitle: "保存重要偏好与长期上下文", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
-            .init(title: "技能", subtitle: "管理本机技能与 MCP 工具", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
-            .init(title: "执行与任务", subtitle: executionSummary, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
-            .init(title: "工具权限", subtitle: "系统权限 · 批准策略", value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions),
-            .init(title: "运行环境", subtitle: runtimeSummary, value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentIndigo, route: .sandbox)
+            .init(title: "核心记忆", subtitle: nil, value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
+            .init(title: "执行与任务", subtitle: nil, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
+            .init(title: "权限与批准", subtitle: nil, value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions)
         ]
     }
 
-    private var providerRows: [SettingsHomeRow] {
+    private var modelServiceEntries: [SettingsHomeEntry] {
         [
-            .init(title: "服务商", subtitle: nil, value: "OpenAI-compatible", systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
-            .init(title: "默认模型", subtitle: nil, value: settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
-            .init(title: "搜索服务", subtitle: nil, value: "Bing / DuckDuckGo", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
-            .init(title: "语音 TTS", subtitle: nil, value: "系统 TTS", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
+            .init(title: "服务商", subtitle: nil, value: nil, systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
+            .init(title: "模型与提示词", subtitle: nil, value: nil, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
+            .init(title: "搜索服务", subtitle: nil, value: nil, systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
+            .init(title: "语音服务", subtitle: nil, value: nil, systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
         ]
     }
 
-    private var dataRows: [SettingsHomeRow] {
+    private var advancedFeatureEntries: [SettingsHomeEntry] {
         [
-            .init(title: "同步与备份", subtitle: "导出备份、本机文件夹与 WebDAV", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
-            .init(title: "对话存储", subtitle: nil, value: "本机保存", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
+            .init(title: "WebMount", subtitle: nil, value: nil, systemImage: "globe", color: AmberTheme.accentGreen, route: .webMount),
+            .init(title: "子代理", subtitle: nil, value: nil, systemImage: "person.2", color: AmberTheme.accentRed, route: .subagents),
+            .init(title: "模型议会", subtitle: nil, value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
+            .init(title: "小应用", subtitle: nil, value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
+            .init(title: "深度阅读", subtitle: nil, value: nil, systemImage: "book.pages", color: AmberTheme.accentAmber, route: .board)
         ]
     }
 
-    private var experimentalRows: [SettingsHomeRow] {
+    private var dataEntries: [SettingsHomeEntry] {
         [
-            .init(title: "今日看板", subtitle: "手动生成今日摘要", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
-            .init(title: "模型议会", subtitle: "多席位协作评审", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
-            .init(title: "子代理", subtitle: "按角色分工处理任务", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
-            .init(title: "小应用", subtitle: "管理和运行本地小应用", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
-            .init(title: "WebMount", subtitle: "网页浏览与工具调用", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
+            .init(title: "同步备份", subtitle: nil, value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
+            .init(title: "对话存储", subtitle: nil, value: nil, systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
         ]
     }
 
     private var appearanceModeTitle: String {
         (IOSAppearanceMode(rawValue: appearanceMode) ?? .light).title
-    }
-
-    private var displayFontSummary: String {
-        "字号 \(displayFontScaleTitle) · \(displayChatFontTitle)"
-    }
-
-    private var displayFontScaleTitle: String {
-        switch displayFontScale {
-        case ..<0.95: "较小"
-        case 0.95..<1.08: "标准"
-        case 1.08..<1.20: "较大"
-        default: "特大"
-        }
-    }
-
-    private var displayChatFontTitle: String {
-        switch displayChatFont {
-        case "serif": "衬线体"
-        case "monospace": "等宽字体"
-        default: "默认字体"
-        }
-    }
-
-    private var executionSummary: String {
-        "灵动岛 \(executionLiveActivity ? "开" : "关") · 工具执行"
-    }
-
-    private var runtimeSummary: String {
-        switch settingsStore.terminalDefaultRuntime {
-        case .remoteSSH:
-            if settingsStore.sshProfiles.isEmpty {
-                "Remote SSH · 未配置 Profile"
-            } else {
-                "Remote SSH · \(settingsStore.sshProfiles.count) 个 Profile"
-            }
-        case .localIOSTools:
-            "Local iOS Tools"
-        case .remoteMosh, .ishExperimental:
-            settingsStore.terminalDefaultRuntime.displayName
-        }
     }
 
     var body: some View {
@@ -1054,11 +1103,11 @@ struct SettingsHomeView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     header
-                    settingsSection("通用", rows: generalRows)
-                    settingsSection("Agent 运行时", rows: runtimeRows)
-                    settingsSection("模型与服务", rows: providerRows)
-                    settingsSection("数据", rows: dataRows)
-                    settingsSection("实验性", rows: experimentalRows)
+                    settingsSection("通用设置", entries: generalEntries)
+                    settingsSection("Agent 设置", entries: agentEntries)
+                    settingsSection("模型与服务", entries: modelServiceEntries)
+                    settingsSection("高级功能", entries: advancedFeatureEntries)
+                    settingsSection("数据设置", entries: dataEntries)
                 }
                 .padding(.bottom, 36)
             }
@@ -1090,23 +1139,23 @@ struct SettingsHomeView: View {
         .padding(.bottom, 22)
     }
 
-    private func settingsSection(_ title: String, rows: [SettingsHomeRow]) -> some View {
+    private func settingsSection(_ title: String, entries: [SettingsHomeEntry]) -> some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: title)
             AmberFormGroup {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                     AmberFormRow(
-                        systemImage: row.systemImage,
-                        iconColor: row.color,
-                        title: row.title,
-                        subtitle: row.subtitle,
-                        trailing: row.value,
+                        systemImage: entry.systemImage,
+                        iconColor: entry.color,
+                        title: entry.title,
+                        subtitle: entry.subtitle,
+                        trailing: entry.value,
                         showsChevron: true
                     ) {
-                        router.navigate(to: row.route)
+                        router.navigate(to: entry.route)
                     }
 
-                    if index < rows.count - 1 {
+                    if index < entries.count - 1 {
                         Divider()
                             .overlay(AmberTheme.borderSoft)
                             .padding(.leading, 58)
@@ -1121,7 +1170,7 @@ struct SettingsHomeView: View {
     }
 }
 
-private struct SettingsHomeRow: Identifiable {
+private struct SettingsHomeEntry: Identifiable {
     let id = UUID()
     let title: String
     let subtitle: String?
@@ -1190,5 +1239,43 @@ struct PlaceholderDetailView: View {
     var body: some View {
         ContentUnavailableView(title, systemImage: systemImage, description: Text(subtitle))
             .navigationTitle(title)
+    }
+}
+
+struct CapabilityGateLockedView: View {
+    let gate: IOSCapabilityGate
+
+    var body: some View {
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accentAmber)
+                    .frame(width: 58, height: 58)
+                    .background(AmberTheme.accentAmber.opacity(0.12), in: Circle())
+
+                Text(gate.title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+
+                Text(gate.disabledReason)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 28)
+
+                Text("这是 AmberAgent 的受控能力。默认关闭用于保护工具执行、外部连接和远程操作；可在设置页对应行开启。")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted2)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 28)
+            }
+            .padding(.horizontal, 18)
+        }
+        .navigationBarBackButtonHidden(false)
     }
 }

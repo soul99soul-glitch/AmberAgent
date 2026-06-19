@@ -185,7 +185,7 @@ private struct SubAgentRoleDetail {
             name: name,
             description: "自定义子代理角色。",
             toolSummary: "",
-            routing: "自定义角色暂未开放保存。",
+            routing: "自定义角色保存属于高级功能，当前不可用。",
             isKnownBuiltIn: false
         )
     }

@@ -244,6 +244,16 @@ object IosSettingsMutations {
         return settings.copy(enableWebSearch = enabled)
     }
 
+    /** Enable or disable the built-in DuckDuckGo Lite fallback source. */
+    fun setSearchBuiltinDuckDuckGoEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinDuckDuckGoEnabled = enabled)
+    }
+
+    /** Enable or disable the built-in Bing HTML fallback source. */
+    fun setSearchBuiltinBingEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinBingEnabled = enabled)
+    }
+
     /**
      * Construct a [SearchServiceOptions] by [serviceType] (the @SerialName wire
      * name, e.g. "bing_local"/"tavily"/"zhipu"/"exa"/"brave"/"serper"/

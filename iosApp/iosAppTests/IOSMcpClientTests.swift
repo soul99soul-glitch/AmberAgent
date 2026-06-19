@@ -12,8 +12,41 @@ final class IOSMcpClientTests: XCTestCase {
         let connected = try await client.connect(config: .streamableHTTP(name: "docs", url: "https://example.com/mcp"))
 
         XCTAssertTrue(connected)
-        XCTAssertEqual(transport.sentMethods, ["initialize"])
+        XCTAssertEqual(transport.sentMethods, ["initialize", "notifications/initialized"])
         XCTAssertEqual(client.status, .connected)
+    }
+
+    func testConnectReusesExistingConnectionForSameConfig() async throws {
+        let transport = FakeMcpHTTPTransport(responses: [
+            ["jsonrpc": "2.0", "id": 1, "result": ["protocolVersion": "2024-11-05", "capabilities": [:], "serverInfo": ["name": "fake", "version": "1"]]]
+        ])
+        let client = IOSMcpClient(transport: transport)
+        let config = IOSMcpServerConfig.sse(name: "docs", url: "https://example.com/sse")
+
+        _ = try await client.connect(config: config)
+        _ = try await client.connect(config: config)
+
+        XCTAssertEqual(transport.sentMethods, ["initialize", "notifications/initialized"])
+        XCTAssertTrue(transport.disconnectedServers.isEmpty)
+    }
+
+    func testConnectDisconnectsPreviousConfigWhenServerChanges() async throws {
+        let transport = FakeMcpHTTPTransport(responses: [
+            ["jsonrpc": "2.0", "id": 1, "result": ["protocolVersion": "2024-11-05", "capabilities": [:], "serverInfo": ["name": "fake", "version": "1"]]],
+            ["jsonrpc": "2.0", "id": 2, "result": ["protocolVersion": "2024-11-05", "capabilities": [:], "serverInfo": ["name": "fake", "version": "1"]]]
+        ])
+        let client = IOSMcpClient(transport: transport)
+
+        _ = try await client.connect(config: .sse(name: "docs", url: "https://example.com/sse"))
+        _ = try await client.connect(config: .sse(name: "docs", url: "https://example.com/changed-sse"))
+
+        XCTAssertEqual(transport.sentMethods, [
+            "initialize",
+            "notifications/initialized",
+            "initialize",
+            "notifications/initialized"
+        ])
+        XCTAssertEqual(transport.disconnectedServers, ["docs"])
     }
 
     func testListToolsMapsMcpToolResult() async throws {
@@ -26,7 +59,7 @@ final class IOSMcpClientTests: XCTestCase {
 
         let tools = try await client.listTools()
 
-        XCTAssertEqual(transport.sentMethods, ["initialize", "tools/list"])
+        XCTAssertEqual(transport.sentMethods, ["initialize", "notifications/initialized", "tools/list"])
         XCTAssertEqual(tools, [IOSMcpTool(name: "search", description: "Search docs")])
     }
 
@@ -40,14 +73,41 @@ final class IOSMcpClientTests: XCTestCase {
 
         let output = try await client.callTool(name: "echo", arguments: ["text": "hello"])
 
-        XCTAssertEqual(transport.sentMethods, ["initialize", "tools/call"])
+        XCTAssertEqual(transport.sentMethods, ["initialize", "notifications/initialized", "tools/call"])
         XCTAssertEqual(output, "hello")
+    }
+
+    func testCallToolSerializesNonTextContent() async throws {
+        let transport = FakeMcpHTTPTransport(responses: [
+            ["jsonrpc": "2.0", "id": 1, "result": ["protocolVersion": "2024-11-05", "capabilities": [:], "serverInfo": ["name": "fake", "version": "1"]]],
+            ["jsonrpc": "2.0", "id": 2, "result": ["content": [["type": "image", "mimeType": "image/png"]]]]
+        ])
+        let client = IOSMcpClient(transport: transport)
+        _ = try await client.connect(config: .streamableHTTP(name: "docs", url: "https://example.com/mcp"))
+
+        let output = try await client.callTool(name: "image", arguments: [:])
+
+        XCTAssertTrue(output.contains(#""type":"image""#))
+    }
+
+    func testDisconnectClearsTransportSession() async throws {
+        let transport = FakeMcpHTTPTransport(responses: [
+            ["jsonrpc": "2.0", "id": 1, "result": ["protocolVersion": "2024-11-05", "capabilities": [:], "serverInfo": ["name": "fake", "version": "1"]]]
+        ])
+        let client = IOSMcpClient(transport: transport)
+
+        _ = try await client.connect(config: .sse(name: "docs", url: "https://example.com/sse"))
+        client.disconnect()
+
+        XCTAssertEqual(client.status, .idle)
+        XCTAssertEqual(transport.disconnectedServers, ["docs"])
     }
 }
 
 private final class FakeMcpHTTPTransport: IOSMcpHTTPTransport {
     private var responses: [[String: Any]]
     private(set) var sentMethods: [String] = []
+    private(set) var disconnectedServers: [String] = []
 
     init(responses: [[String: Any]]) {
         self.responses = responses
@@ -58,5 +118,15 @@ private final class FakeMcpHTTPTransport: IOSMcpHTTPTransport {
             sentMethods.append(method)
         }
         return responses.removeFirst()
+    }
+
+    func sendJSONRPCNotification(_ payload: [String: Any], to config: IOSMcpServerConfig) async throws {
+        if let method = payload["method"] as? String {
+            sentMethods.append(method)
+        }
+    }
+
+    func disconnect(config: IOSMcpServerConfig) {
+        disconnectedServers.append(config.name)
     }
 }

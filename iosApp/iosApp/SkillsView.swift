@@ -147,7 +147,7 @@ struct SkillsView: View {
                     iconColor: AmberTheme.accentCyan,
                     title: "MCP 服务器",
                     subtitle: "管理可供聊天使用的外部工具服务器",
-                    trailing: "可用"
+                    trailing: "管理"
                 ) {
                     router.navigate(to: .mcpServers)
                 }

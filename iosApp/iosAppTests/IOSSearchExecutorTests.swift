@@ -2,6 +2,7 @@ import XCTest
 @preconcurrency import Shared
 @testable import iosApp
 
+@MainActor
 final class IOSSearchExecutorTests: XCTestCase {
     func testSearchRequestParsesToolJSON() throws {
         let request = try IOSSearchExecutor.searchRequest(
@@ -104,6 +105,98 @@ final class IOSSearchExecutorTests: XCTestCase {
         XCTAssertTrue(output.contains("Bing snippet with markup."))
     }
 
+    func testTavilyRouteUsesMockTransportAndAPIKey() async throws {
+        let store = makeIsolatedStore()
+        store.addSearchProvider(name: "Tavily", apiKey: "tvly-test", serviceType: "tavily")
+        let transport = MockSearchTransport(responses: [
+            .json("""
+            {
+              "results": [
+                {
+                  "title": "Tavily Result",
+                  "url": "https://example.com/tavily",
+                  "content": "Tavily snippet."
+                }
+              ]
+            }
+            """)
+        ])
+
+        let output = try await IOSSearchExecutor.execute(
+            toolInput: #"{"query":"swift concurrency","max_results":1}"#,
+            settings: store.snapshot,
+            transport: transport
+        )
+        let request = try XCTUnwrap(transport.requests.first)
+        let body = try jsonObject(try XCTUnwrap(request.httpBody))
+
+        XCTAssertEqual(request.url?.host, "api.tavily.com")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tvly-test")
+        XCTAssertEqual(body["query"] as? String, "swift concurrency")
+        XCTAssertEqual(body["max_results"] as? Int, 1)
+        XCTAssertTrue(output.contains("来源：Tavily"))
+        XCTAssertTrue(output.contains("https://example.com/tavily"))
+    }
+
+    func testMissingAPIKeyProviderFallsBackToExecutableSearch() {
+        let store = makeIsolatedStore()
+        store.addSearchProvider(name: "Tavily Without Key", serviceType: "tavily")
+
+        let selection = IOSSearchExecutor.searchProviderSelection(settings: store.snapshot)
+
+        XCTAssertTrue([IOSSearchRoute.duckDuckGoLite, .bingHTML].contains(selection.route))
+        XCTAssertNotEqual(selection.providerType, "tavily")
+        XCTAssertTrue(selection.fallbackReason?.contains("no API key") == true)
+    }
+
+    func testJinaRouteAllowsMissingAPIKey() async throws {
+        let store = makeIsolatedStore()
+        store.addSearchProvider(name: "Jina", serviceType: "jina")
+        let transport = MockSearchTransport(responses: [
+            .json("""
+            {
+              "data": [
+                {
+                  "title": "Jina Result",
+                  "url": "https://example.com/jina",
+                  "description": "Jina snippet."
+                }
+              ]
+            }
+            """)
+        ])
+
+        let output = try await IOSSearchExecutor.execute(
+            toolInput: #"{"query":"amber agent","max_results":1}"#,
+            settings: store.snapshot,
+            transport: transport
+        )
+        let request = try XCTUnwrap(transport.requests.first)
+
+        XCTAssertEqual(request.url?.host, "s.jina.ai")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertTrue(output.contains("来源：Jina"))
+        XCTAssertTrue(output.contains("Jina snippet."))
+    }
+
+    func testAPIHTTPFailureIncludesProviderName() async throws {
+        let store = makeIsolatedStore()
+        store.addSearchProvider(name: "Tavily", apiKey: "tvly-test", serviceType: "tavily")
+        let transport = MockSearchTransport(responses: [.json("{}", status: 500)])
+
+        do {
+            _ = try await IOSSearchExecutor.execute(
+                toolInput: #"{"query":"swift concurrency"}"#,
+                settings: store.snapshot,
+                transport: transport
+            )
+            XCTFail("Expected Tavily HTTP failure")
+        } catch {
+            XCTAssertEqual(error as? IOSSearchExecutorError, .httpStatus("Tavily", 500))
+        }
+    }
+
     func testScrapeWebAllowsPublicHTTPAndExtractsReadableText() async throws {
         let transport = MockSearchTransport(responses: [
             .html("""
@@ -176,6 +269,10 @@ final class IOSSearchExecutorTests: XCTestCase {
         guard let data = string.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
+
+    private func jsonObject(_ data: Data) throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
 }
 
 @MainActor
@@ -229,6 +326,14 @@ private final class MockSearchTransport: IOSSearchHTTPTransport {
             Response(
                 status: status,
                 headers: ["Content-Type": "text/html; charset=utf-8"],
+                body: Data(body.utf8)
+            )
+        }
+
+        static func json(_ body: String, status: Int = 200) -> Response {
+            Response(
+                status: status,
+                headers: ["Content-Type": "application/json"],
                 body: Data(body.utf8)
             )
         }

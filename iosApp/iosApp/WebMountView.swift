@@ -54,10 +54,7 @@ struct WebMountView: View {
                             WebMountBanner(text: banner)
                                 .padding(.top, 4)
                         }
-                        settingsSection
                         stationSection
-                        toolSection
-                        unsupportedSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -83,7 +80,7 @@ struct WebMountView: View {
                 Text("WebMount")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(AmberTheme.foreground)
-                Text("\(registry.sites.count) stations · WKWebView")
+                Text("\(registry.sites.count) 个站点")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -107,48 +104,9 @@ struct WebMountView: View {
         .padding(.bottom, 10)
     }
 
-    private var settingsSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "Agent Gate")
-            AmberFormGroup {
-                WebMountToggleRow(
-                    title: "Global enabled",
-                    subtitle: settings.globalEnabled ? "wm tools can run for enabled, allowlisted stations" : "wm tools are not exposed to unattended execution",
-                    systemImage: "power",
-                    tint: settings.globalEnabled ? AmberTheme.accentGreen : AmberTheme.muted2,
-                    isOn: Binding(
-                        get: { settings.globalEnabled },
-                        set: { settings.globalEnabled = $0 }
-                    )
-                )
-                WebMountDivider()
-                WebMountToggleRow(
-                    title: "JS eval",
-                    subtitle: "Tracked separately; arbitrary eval remains blocked from model tools",
-                    systemImage: "curlybraces",
-                    tint: settings.evalEnabled ? AmberTheme.accentRed : AmberTheme.muted2,
-                    isOn: Binding(
-                        get: { settings.evalEnabled },
-                        set: { settings.evalEnabled = $0 }
-                    )
-                )
-                .disabled(!settings.globalEnabled)
-                .opacity(settings.globalEnabled ? 1 : 0.55)
-                WebMountDivider()
-                WebMountInfoRow(
-                    title: "Allowlist",
-                    subtitle: "\(settings.allowedHosts.count) hosts · \(settings.allowedSchemes.sorted().joined(separator: ", "))",
-                    systemImage: "checkmark.shield",
-                    tint: AmberTheme.accentCyan,
-                    trailing: "active"
-                )
-            }
-        }
-    }
-
     private var stationSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Stations")
+            AmberSectionLabel(text: "站点")
             AmberFormGroup {
                 ForEach(Array(registry.sites.enumerated()), id: \.element.id) { index, site in
                     WebMountStationRow(
@@ -173,9 +131,9 @@ struct WebMountView: View {
                 Button {
                     let restored = registry.restoreMissingSeeds()
                     settings.addAllowedHosts(registry.sites.flatMap(\.allowedHosts))
-                    banner = restored == 0 ? "No missing seed stations." : "Restored \(restored) seed station(s)."
+                    banner = restored == 0 ? "内置站点已是最新。" : "已恢复 \(restored) 个内置站点。"
                 } label: {
-                    Label("Restore Seeds", systemImage: "arrow.clockwise")
+                    Label("恢复内置站点", systemImage: "arrow.clockwise")
                         .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
@@ -184,41 +142,6 @@ struct WebMountView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
-        }
-    }
-
-    private var toolSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "Tool Catalog")
-            AmberFormGroup {
-                ForEach(Array(IOSWebMountToolCatalog.descriptors.enumerated()), id: \.element.name) { index, descriptor in
-                    WebMountInfoRow(
-                        title: descriptor.name,
-                        subtitle: descriptor.description,
-                        systemImage: descriptor.requiresUserAction ? "hand.raised" : "checkmark.circle",
-                        tint: descriptor.requiresUserAction ? AmberTheme.accentAmber : AmberTheme.accentGreen,
-                        trailing: descriptor.requiresUserAction ? "user" : "safe"
-                    )
-                    if index < IOSWebMountToolCatalog.descriptors.count - 1 {
-                        WebMountDivider()
-                    }
-                }
-            }
-        }
-    }
-
-    private var unsupportedSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "Blocked")
-            AmberFormGroup {
-                WebMountInfoRow(
-                    title: "High-risk or adapter-only tools",
-                    subtitle: IOSWebMountToolCatalog.unsupportedToolNames.sorted().joined(separator: ", "),
-                    systemImage: "nosign",
-                    tint: AmberTheme.accentRed,
-                    trailing: "not exposed"
-                )
-            }
         }
     }
 
@@ -234,8 +157,8 @@ struct WebMountView: View {
                             WebMountTextFieldRow(title: "网址", text: $addURL, placeholder: "https://example.com")
                             WebMountDivider()
                             WebMountToggleRow(
-                                title: "Needs login",
-                                subtitle: "Adds a cookie-based login hint; no login is opened automatically",
+                                title: "需要登录",
+                                subtitle: "保存登录提示，不会自动打开登录流程。",
                                 systemImage: "person.badge.key",
                                 tint: AmberTheme.accentAmber,
                                 isOn: $addNeedsLogin
@@ -246,7 +169,7 @@ struct WebMountView: View {
                             }
                         }
 
-                        Text("Custom sites are persisted locally and added to the URL allowlist. Cookie values are never displayed.")
+                        Text("自定义站点会保存在本机，Cookie 内容不会在页面中显示。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted2)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -255,13 +178,13 @@ struct WebMountView: View {
                     .padding(.top, 16)
                 }
             }
-            .navigationTitle("Add Station")
+            .navigationTitle("添加站点")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showAddSite = false }
+                    Button("取消") { showAddSite = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") { addSite() }
+                    Button("添加") { addSite() }
                 }
             }
         }
@@ -281,16 +204,16 @@ struct WebMountView: View {
             addCookieName = ""
             addNeedsLogin = true
             showAddSite = false
-            banner = "Added \(site.displayName)."
+            banner = "已添加 \(site.displayName)。"
         } catch {
-            banner = "Could not add site. Use an http(s) URL and a non-empty name."
+            banner = "添加失败。请填写名称，并使用 http(s) 网址。"
             showAddSite = false
         }
     }
 
     private func delete(_ site: IOSWebMountSite) {
         if registry.remove(id: site.id) {
-            banner = "Removed \(site.displayName). Cookies were not cleared."
+            banner = "已移除 \(site.displayName)。"
         }
     }
 }
@@ -399,7 +322,7 @@ struct WebMountSiteView: View {
 
     private var runtimeSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Runtime")
+            AmberSectionLabel(text: "网页状态")
             AmberFormGroup {
                 WebMountInfoRow(
                     title: runtime.snapshot.status.rawValue,
@@ -413,14 +336,14 @@ struct WebMountSiteView: View {
                     Button {
                         Task { _ = await controller.runtime.back() }
                     } label: {
-                        Label("Back", systemImage: "chevron.left")
+                        Label("后退", systemImage: "chevron.left")
                     }
                     .buttonStyle(.bordered)
 
                     Button {
                         Task { _ = await controller.runtime.forward() }
                     } label: {
-                        Label("Forward", systemImage: "chevron.right")
+                        Label("前进", systemImage: "chevron.right")
                     }
                     .buttonStyle(.bordered)
 
@@ -450,14 +373,6 @@ struct WebMountSiteView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "页面内容")
             AmberFormGroup {
-                WebMountInfoRow(
-                    title: "安全读取",
-                    subtitle: "可读取页面状态、正文和指定元素，不执行任意脚本",
-                    systemImage: "link",
-                    tint: AmberTheme.accentCyan,
-                    trailing: "受限"
-                )
-                WebMountDivider()
                 HStack(spacing: 8) {
                     Button("状态") { Task { await readState() } }
                         .buttonStyle(.bordered)
@@ -498,10 +413,10 @@ struct WebMountSiteView: View {
 
     private var cookieSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Cookies")
+            AmberSectionLabel(text: "登录状态")
             AmberFormGroup {
                 WebMountInfoRow(
-                    title: "Summary",
+                    title: "Cookie",
                     subtitle: cookieSubtitle,
                     systemImage: "circle.grid.cross",
                     tint: AmberTheme.accentAmber,
@@ -513,7 +428,7 @@ struct WebMountSiteView: View {
                 } label: {
                     HStack {
                         Image(systemName: "trash")
-                        Text("Clear This Station Session")
+                        Text("清除本站登录状态")
                         Spacer()
                     }
                     .font(.body.weight(.semibold))
@@ -545,10 +460,10 @@ struct WebMountSiteView: View {
     }
 
     private var cookieSubtitle: String {
-        guard let cookieSummary else { return "Loading redacted cookie metadata" }
-        let names = cookieSummary.cookieNames.isEmpty ? "none" : cookieSummary.cookieNames.joined(separator: ", ")
-        let login = cookieSummary.hasLoginCookie.map { $0 ? "login cookie present" : "login cookie missing" } ?? "login cookie unknown"
-        return "\(login) · names: \(names)"
+        guard let cookieSummary else { return "正在读取 Cookie 摘要" }
+        let names = cookieSummary.cookieNames.isEmpty ? "无" : cookieSummary.cookieNames.joined(separator: ", ")
+        let login = cookieSummary.hasLoginCookie.map { $0 ? "已检测到登录 Cookie" : "未检测到登录 Cookie" } ?? "登录状态未知"
+        return "\(login) · \(names)"
     }
 
     private func openSite() async {
@@ -599,7 +514,7 @@ struct WebMountSiteView: View {
 
     private func clearSession() async {
         let result = await controller.cookieStore.clearSession(for: resolvedSite)
-        banner = "Cleared \(result.deletedCookieCount) cookie(s) and \(result.clearedWebsiteDataRecords) website data record(s)."
+        banner = "已清除 \(result.deletedCookieCount) 个 Cookie 和 \(result.clearedWebsiteDataRecords) 条网页数据。"
         await refreshCookieSummary()
     }
 }

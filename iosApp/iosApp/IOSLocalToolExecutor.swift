@@ -83,6 +83,10 @@ final class IOSLocalToolExecutor {
         self.webMountController = webMountController ?? IOSWebMountController.shared
     }
 
+    var webMountGlobalEnabled: Bool {
+        true
+    }
+
     func execute(
         _ request: IOSLocalToolExecutionRequest,
         now: Date = Date()
@@ -161,9 +165,6 @@ final class IOSLocalToolExecutor {
         }
         if request.toolName == "wm_clear_session", !request.isUserInitiated {
             return .needsUserAction(reason: "Clearing WebMount cookies requires an explicit foreground user action")
-        }
-        if !request.isUserInitiated, !webMountController.settings.globalEnabled {
-            return .needsUserAction(reason: "Enable WebMount in the foreground before using WebMount tools")
         }
         return .allow(capabilityId: capability.id)
     }
@@ -630,7 +631,7 @@ final class IOSWebMountSettings {
         self.evalKey = evalKey
         self.hostsKey = hostsKey
         self.schemesKey = schemesKey
-        self.globalEnabled = userDefaults.object(forKey: globalKey) as? Bool ?? false
+        self.globalEnabled = userDefaults.object(forKey: globalKey) as? Bool ?? true
         self.evalEnabled = userDefaults.object(forKey: evalKey) as? Bool ?? false
         let seedHosts = IOSWebMountSite.seeds().flatMap(\.allowedHosts)
         self.allowedHosts = Set((userDefaults.array(forKey: hostsKey) as? [String]) ?? seedHosts)
@@ -1251,14 +1252,6 @@ final class IOSWebMountController {
         guard IOSWebMountToolCatalog.supportedToolNames.contains(toolName) else {
             return Self.unsupportedToolResult(toolName: toolName)
         }
-        guard settings.globalEnabled else {
-            return Self.json([
-                "ok": false,
-                "tool": toolName,
-                "denied": true,
-                "reason": "WebMount globalEnabled is off"
-            ])
-        }
         let args = Self.parseObject(input)
         do {
             switch toolName {
@@ -1357,7 +1350,7 @@ final class IOSWebMountController {
         }
         return Self.json([
             "ok": true,
-            "global_enabled": settings.globalEnabled,
+            "global_enabled": true,
             "eval_enabled": settings.evalEnabled,
             "count": stations.count,
             "stations": stations

@@ -231,10 +231,9 @@ final class IOSLocalToolExecutorTests: XCTestCase {
     func testWebMountSettingsDefaultsAndEvalGate() {
         let settings = IOSWebMountSettings(userDefaults: isolatedDefaults())
 
-        XCTAssertFalse(settings.globalEnabled)
+        XCTAssertTrue(settings.globalEnabled)
         XCTAssertFalse(settings.evalEnabled)
         XCTAssertTrue(settings.allowedHosts.contains("github.com"))
-        settings.globalEnabled = true
         settings.evalEnabled = true
         XCTAssertTrue(settings.evalEnabled)
         settings.globalEnabled = false
@@ -323,11 +322,11 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertEqual(result["value"] as? String, "Hello from mock")
     }
 
-    func testWebMountExecutorDeniesGlobalOffAndClearWithoutUserAction() async throws {
+    func testWebMountExecutorAllowsGlobalOffCompatibilityAndClearRequiresUserAction() async throws {
         let controller = makeWebMountController(globalEnabled: false)
         let executor = makeExecutor(webMountController: controller)
 
-        let offOutput = await executor.execute(
+        let stationsOutput = await executor.execute(
             IOSLocalToolExecutionRequest(
                 toolName: "wm_stations",
                 operation: "{}",
@@ -336,12 +335,13 @@ final class IOSLocalToolExecutorTests: XCTestCase {
                 isUserInitiated: false
             )
         )
-        guard case .needsUserAction(let offReason) = offOutput else {
-            return XCTFail("Expected needsUserAction, got \(offOutput)")
+        guard case .webMountResult(let stationsText) = stationsOutput else {
+            return XCTFail("Expected WebMount result, got \(stationsOutput)")
         }
-        XCTAssertTrue(offReason.contains("Enable WebMount"))
+        let stationsObject = try jsonObject(stationsText)
+        XCTAssertEqual(stationsObject["ok"] as? Bool, true)
+        XCTAssertEqual(stationsObject["global_enabled"] as? Bool, true)
 
-        controller.settings.globalEnabled = true
         let clearOutput = await executor.execute(
             IOSLocalToolExecutionRequest(
                 toolName: "wm_clear_session",

@@ -72,14 +72,20 @@ struct SearchProviderView: View {
     }
 
     private var draftNotice: some View {
-        SearchProviderNote("当前只开放无需 API Key 的 Bing HTML 搜索服务。")
+        SearchProviderNote("选择一个 iOS 已接入的搜索服务。需要 API Key 的服务会保存在本机设置中，并立即成为聊天默认搜索服务。")
             .padding(.top, 2)
     }
 
     private var providerFields: some View {
         VStack(spacing: 0) {
             AmberFormGroup {
-                SearchProviderPreviewLine(label: "服务类型", value: providerType.title)
+                SearchProviderMenuRow(title: "服务类型", value: providerType.title) {
+                    ForEach(SearchProviderType.executableCases) { type in
+                        Button(type.title) {
+                            applyProviderType(type)
+                        }
+                    }
+                }
 
                 if providerType.requiresAPIKey {
                     SearchProviderDivider()
@@ -157,7 +163,7 @@ struct SearchProviderView: View {
             AmberFormGroup {
                 let providers = sharedSettings.savedSearchProviders
                 if providers.isEmpty {
-                    Text("暂无自定义搜索服务。当前只开放新增 Bing HTML。")
+                    Text("暂无自定义搜索服务。可添加已接入的搜索服务作为聊天默认搜索。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,6 +177,16 @@ struct SearchProviderView: View {
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(AmberTheme.muted2)
                             }.frame(maxWidth: .infinity, alignment: .leading)
+                            if let serviceId = provider["serviceId"] {
+                                Toggle("", isOn: Binding(get: {
+                                    sharedSettings.snapshot.searchEnabledServiceIds.contains { $0.description() == serviceId }
+                                }, set: { enabled in
+                                    sharedSettings.setSearchProviderEnabled(serviceId: serviceId, enabled: enabled)
+                                }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .tint(AmberTheme.accent)
+                            }
                             Button { sharedSettings.removeSearchProvider(at: index) } label: {
                                 Image(systemName: "minus.circle.fill")
                                     .font(.system(size: 18)).foregroundStyle(AmberTheme.accentRed)
@@ -187,11 +203,12 @@ struct SearchProviderView: View {
                 Button {
                     let trimmedName = providerType.title
                     sharedSettings.addSearchProvider(name: trimmedName, apiKey: apiKey, serviceType: providerType.serialName)
+                    sharedSettings.setEnableWebSearch(true)
                     apiKey = ""
                 } label: {
-                    Label("保存服务", systemImage: "plus.circle.fill")
-                        .font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
-                }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading)
+                    Label(canSave ? "保存服务" : "填写 API Key 后保存", systemImage: "plus.circle.fill")
+                        .font(.body.weight(.semibold)).foregroundStyle(canSave ? AmberTheme.accent : AmberTheme.muted2)
+                }.buttonStyle(.plain).disabled(!canSave).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14).padding(.vertical, 8)
             }
 
@@ -208,6 +225,13 @@ struct SearchProviderView: View {
             return hasURL ? "URL 已填写，未保存" : "URL 待填写"
         }
         return apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "API Key 待填写" : "API Key 已填写，未保存"
+    }
+
+    private var canSave: Bool {
+        if providerType.requiresAPIKey {
+            return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
     }
 
     private func applyProviderType(_ type: SearchProviderType) {
@@ -267,7 +291,7 @@ private enum SearchProviderType: String, CaseIterable, Identifiable {
 
     var requiresAPIKey: Bool {
         switch self {
-        case .bing, .searXNG:
+        case .bing, .searXNG, .jina:
             false
         default:
             true
@@ -278,18 +302,39 @@ private enum SearchProviderType: String, CaseIterable, Identifiable {
         switch self {
         case .bing:
             "无需 API Key，保存后即可用于聊天搜索。"
-        case .searXNG:
-            "SearXNG 暂未开放。"
+        case .tavily:
+            "Tavily 使用官方 Search API，支持普通搜索和近期新闻查询。"
+        case .exa:
+            "Exa 使用官方 Search API，适合资料检索和网页内容摘要。"
+        case .zhipu:
+            "智谱使用 BigModel Web Search API。"
+        case .brave:
+            "Brave 使用 Brave Search API。"
+        case .serper:
+            "Serper 使用 Google Serper API，支持普通和新闻搜索。"
+        case .serpAPI:
+            "SerpAPI 使用 Google Search API，支持普通和新闻搜索。"
         case .jina:
-            "Jina 暂未开放。"
+            "Jina 可使用默认搜索端点，API Key 可选。"
+        case .searXNG:
+            "SearXNG 当前不可用。"
         default:
-            "\(title) 暂未开放。"
+            "\(title) 当前不可用。"
         }
     }
 }
 
 private extension SearchProviderType {
-    static let executableCases: [SearchProviderType] = [.bing]
+    static let executableCases: [SearchProviderType] = [
+        .bing,
+        .tavily,
+        .exa,
+        .zhipu,
+        .brave,
+        .serper,
+        .serpAPI,
+        .jina
+    ]
 }
 
 private struct SearchProviderMenuRow<MenuContent: View>: View {

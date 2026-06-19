@@ -65,16 +65,9 @@ struct MiniAppSettingsView: View {
     }
 
     private var presetConfigSection: some View {
-        let m = sharedSettings.agentRuntime.miniApp
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             AmberSectionLabel(text: "小应用权限")
             AmberFormGroup {
-                MiniAppPresetKVRow(title: "启用 MiniApp", value: m.enabled ? "已开" : "已关")
-                MiniAppCapabilityDivider()
-                MiniAppPresetKVRow(title: "AI 能力", value: m.aiEnabled ? "已开" : "已关")
-                MiniAppCapabilityDivider()
-                MiniAppPresetKVRow(title: "网络访问", value: m.networkEnabled ? "已开" : "已关")
-                MiniAppCapabilityDivider()
                 MiniAppPresetToggleRow(
                     title: "读取宿主上下文",
                     subtitle: "允许 host.context 在前台确认后返回最小化上下文。",
@@ -96,10 +89,6 @@ struct MiniAppSettingsView: View {
                         set: { sharedSettings.setMiniAppHostWriteEnabled($0) }
                     )
                 )
-                MiniAppCapabilityDivider()
-                MiniAppPresetKVRow(title: "剪贴板读取", value: m.clipboardReadEnabled ? "已开" : "已关")
-                MiniAppCapabilityDivider()
-                MiniAppPresetKVRow(title: "启动", value: m.launchEnabled ? "已开" : "已关")
             }
         }
     }
@@ -109,28 +98,6 @@ struct MiniAppSettingsView: View {
 #Preview {
     NavigationStack {
         MiniAppSettingsView(sharedSettings: IOSSharedSettingsStore())
-    }
-}
-
-/// Read-only key/value row for a real seeded MiniApp setting.
-private struct MiniAppPresetKVRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AmberTheme.foreground2)
-        }
-        .frame(minHeight: 46)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .accessibilityLabel("\(title)，\(value)")
     }
 }
 

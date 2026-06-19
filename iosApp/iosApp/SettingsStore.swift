@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Security
 
 private struct SettingsData: Codable {
@@ -9,6 +10,42 @@ private struct SettingsData: Codable {
     var terminalExperimentalRuntimesEnabled: Bool?
     var sshProfiles: [IOSSSHProfile]?
     var sshDefaultProfileId: String?
+}
+
+protocol SettingsAPIKeyStore {
+    func loadApiKey() -> String?
+    @discardableResult
+    func saveApiKey(_ key: String) -> Bool
+}
+
+private struct KeychainSettingsAPIKeyStore: SettingsAPIKeyStore {
+    let account: String
+
+    func loadApiKey() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    @discardableResult
+    func saveApiKey(_ key: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+        guard !key.isEmpty else { return true }
+        var attributes = query
+        attributes[kSecValueData as String] = Data(key.utf8)
+        return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
+    }
 }
 
 @Observable
@@ -44,11 +81,21 @@ final class SettingsStore {
 
     private static let storageKey = "app.amber.ios.settings"
     private static let apiKeyKeychainAccount = "app.amber.ios.apiKey"
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let storageKey: String
+    @ObservationIgnored private let apiKeyStore: any SettingsAPIKeyStore
 
-    init() {
+    init(
+        userDefaults: UserDefaults = .standard,
+        storageKey: String = SettingsStore.storageKey,
+        apiKeyStore: (any SettingsAPIKeyStore)? = nil
+    ) {
+        self.defaults = userDefaults
+        self.storageKey = storageKey
+        self.apiKeyStore = apiKeyStore ?? KeychainSettingsAPIKeyStore(account: Self.apiKeyKeychainAccount)
+
         // Load non-sensitive settings from UserDefaults.
-        let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: Self.storageKey),
+        if let data = userDefaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode(SettingsData.self, from: data) {
             baseUrl = decoded.baseUrl
             modelId = decoded.modelId
@@ -74,7 +121,7 @@ final class SettingsStore {
             sshDefaultProfileId = nil
         }
         // Load the API key from Keychain (empty string if not found).
-        apiKey = Self.loadApiKey() ?? ""
+        apiKey = self.apiKeyStore.loadApiKey() ?? ""
     }
 
     private func save() {
@@ -88,12 +135,12 @@ final class SettingsStore {
             sshDefaultProfileId: sshDefaultProfileId
         )
         if let encoded = try? JSONEncoder().encode(data) {
-            UserDefaults.standard.set(encoded, forKey: Self.storageKey)
+            defaults.set(encoded, forKey: storageKey)
         }
     }
 
     private func saveApiKey() {
-        Self.saveApiKey(apiKey)
+        apiKeyStore.saveApiKey(apiKey)
     }
 
     var defaultSSHProfile: IOSSSHProfile? {
@@ -143,34 +190,6 @@ final class SettingsStore {
         IOSSSHSecretStore.deletePassword(profileId: profileId)
     }
 
-    // MARK: - Keychain helpers
-
-    private static func saveApiKey(_ key: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: apiKeyKeychainAccount,
-        ]
-        // Remove any existing item first (upsert semantics).
-        SecItemDelete(query as CFDictionary)
-        guard !key.isEmpty else { return }
-        var attributes = query
-        attributes[kSecValueData as String] = Data(key.utf8)
-        SecItemAdd(attributes as CFDictionary, nil)
-    }
-
-    private static func loadApiKey() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: apiKeyKeychainAccount,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
     /// Public read-only access to the Keychain-stored API key.
-    var currentApiKey: String { Self.loadApiKey() ?? "" }
+    var currentApiKey: String { apiKeyStore.loadApiKey() ?? "" }
 }

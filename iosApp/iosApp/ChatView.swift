@@ -1,5 +1,6 @@
 import SwiftUI
 import Shared
+import UniformTypeIdentifiers
 
 private enum ComposerPanel: String, Identifiable {
     case thinking
@@ -11,21 +12,32 @@ private enum ComposerPanel: String, Identifiable {
 struct ChatView: View {
 
     let settingsStore: SettingsStore
+    let sharedSettings: IOSSharedSettingsStore
+    let documentStore: DocumentAccessStore?
     @State private var viewModel: ChatViewModel
     @State private var activeComposerPanel: ComposerPanel?
     @State private var isModelSheetPresented = false
+    @State private var isImportingSelectedFile = false
     @FocusState private var isInputFocused: Bool
     @Environment(\.dismiss) private var dismiss
+    @Environment(RouterPath.self) private var router
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
-    @State private var sharedSettings = IOSSharedSettingsStore()
     @State private var pasteHintShown = false
     @Environment(IOSConversationStore.self) private var conversationStore
 
-    init(settingsStore: SettingsStore, localToolExecutor: IOSLocalToolExecutor? = nil) {
+    init(
+        settingsStore: SettingsStore,
+        sharedSettings: IOSSharedSettingsStore = IOSSharedSettingsStore(),
+        localToolExecutor: IOSLocalToolExecutor? = nil,
+        documentStore: DocumentAccessStore? = nil
+    ) {
         self.settingsStore = settingsStore
+        self.sharedSettings = sharedSettings
+        self.documentStore = documentStore
         self._viewModel = State(
             initialValue: ChatViewModel(
                 settingsStore: settingsStore,
+                sharedSettings: sharedSettings,
                 localToolExecutor: localToolExecutor
             )
         )
@@ -44,7 +56,7 @@ struct ChatView: View {
             inputBar
         }
         .sheet(isPresented: $isModelSheetPresented) {
-            ComposerModelSheet(currentModel: composerModelLabel) { model in
+            ComposerModelSheet(currentModel: composerCurrentModelID) { model in
                 settingsStore.modelId = model.id
                 isModelSheetPresented = false
             }
@@ -52,6 +64,13 @@ struct ChatView: View {
             .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(AmberTheme.glassStrong)
+        }
+        .fileImporter(
+            isPresented: $isImportingSelectedFile,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            handleSelectedFileImport(result)
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -64,6 +83,31 @@ struct ChatView: View {
         // 用 Int 修订号而非 KotlinUuid——后者是否被 Swift 当作 Equatable 不可靠。
         .onChange(of: conversationStore.currentRevision) { _, _ in
             viewModel.reloadFromStore()
+        }
+    }
+
+    private func handleSelectedFileImport(_ result: Result<[URL], Error>) {
+        guard let documentStore else {
+            viewModel.selectedFileContextError = "文件选择器未连接。"
+            return
+        }
+
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else {
+                let message = "没有选择文件。"
+                documentStore.recordSelectionError(message)
+                viewModel.selectedFileContextError = message
+                return
+            }
+            documentStore.registerPickedFile(url)
+            Task {
+                await viewModel.attachSelectedFilePreviewToNextMessage()
+            }
+        case .failure(let error):
+            let message = "文件选择失败：\(error.localizedDescription)"
+            documentStore.recordSelectionError(message)
+            viewModel.selectedFileContextError = message
         }
     }
 
@@ -101,8 +145,26 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     if viewModel.messages.isEmpty {
-                        ChatEmptyState()
+                        if let configurationIssue {
+                            ChatConfigurationNoticeCard(
+                                issue: configurationIssue,
+                                onPrimary: openPrimaryConfigurationAction,
+                                onModelDefaults: openModelDefaults
+                            )
+                            .padding(.top, 72)
+                            .padding(.bottom, 150)
+                        } else {
+                            ChatEmptyState()
+                        }
                     } else {
+                        if let configurationIssue {
+                            ChatConfigurationNoticeCard(
+                                issue: configurationIssue,
+                                compact: true,
+                                onPrimary: openPrimaryConfigurationAction,
+                                onModelDefaults: openModelDefaults
+                            )
+                        }
                         ForEach(viewModel.messages, id: \.id) { message in
                             MessageBubbleView(message: message, displaySetting: sharedSettings.displaySetting)
                                 .id(message.id)
@@ -141,6 +203,19 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if let request = viewModel.pendingSearchApproval {
+                SearchToolApprovalCard(
+                    request: request,
+                    onApprove: {
+                        viewModel.approvePendingSearchTool()
+                    },
+                    onDeny: {
+                        viewModel.denyPendingSearchTool()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if let request = viewModel.pendingWebMountApproval {
                 WebMountToolApprovalCard(
                     request: request,
@@ -154,12 +229,25 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if let request = viewModel.pendingMcpApproval {
+                McpToolApprovalCard(
+                    request: request,
+                    onApprove: {
+                        viewModel.approvePendingMcpTool()
+                    },
+                    onDeny: {
+                        viewModel.denyPendingMcpTool()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if let preview = viewModel.pendingSelectedFilePreview {
                 HStack(spacing: 8) {
                     Label(preview.fileName, systemImage: "doc.text")
                         .font(.caption)
                         .lineLimit(1)
-                    Text("\(preview.bytesRead) bytes")
+                    Text(preview.isTruncated ? "\(preview.byteSummary) · 已截断" : preview.byteSummary)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -182,11 +270,22 @@ struct ChatView: View {
                     .lineLimit(2)
             }
 
+            if let error = viewModel.configurationError, configurationIssue != nil {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.accentAmber)
+                    .lineLimit(3)
+            }
+
             VStack(spacing: 8) {
                 HStack(alignment: .center, spacing: 8) {
                     Button {
-                        Task {
-                            await viewModel.attachSelectedFilePreviewToNextMessage()
+                        if documentStore != nil {
+                            isImportingSelectedFile = true
+                        } else {
+                            Task {
+                                await viewModel.attachSelectedFilePreviewToNextMessage()
+                            }
                         }
                     } label: {
                         Image(systemName: viewModel.isAttachingSelectedFile ? "paperclip.circle.fill" : "plus")
@@ -202,7 +301,7 @@ struct ChatView: View {
                             hasPendingToolApproval
                     )
 
-                    TextField("发消息给 Amber...", text: $viewModel.inputText, axis: .vertical)
+                    TextField(inputPlaceholder, text: $viewModel.inputText, axis: .vertical)
                         .lineLimit(1...5)
                         .textFieldStyle(.plain)
                         .font(.body)
@@ -215,7 +314,7 @@ struct ChatView: View {
                                 viewModel.sendMessage()
                             }
                         }
-                        .disabled(hasPendingToolApproval)
+                        .disabled(hasPendingToolApproval || configurationIssue != nil)
                         .onChange(of: viewModel.inputText) { _, newText in
                             let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
                             if sharedSettings.displaySetting.pasteLongTextAsFile,
@@ -332,12 +431,36 @@ struct ChatView: View {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !viewModel.isLoading &&
             !viewModel.isAttachingSelectedFile &&
-            !hasPendingToolApproval
+            !hasPendingToolApproval &&
+            configurationIssue == nil
+    }
+
+    private var configurationIssue: ChatConfigurationIssue? {
+        ChatViewModel.chatConfigurationIssue(
+            baseUrl: settingsStore.baseUrl,
+            apiKey: settingsStore.apiKey,
+            modelId: settingsStore.modelId
+        )
+    }
+
+    private var inputPlaceholder: String {
+        switch configurationIssue {
+        case .missingAPIKey:
+            "先添加 API Key"
+        case .invalidBaseURL:
+            "先修正服务商地址"
+        case .missingModel:
+            "先选择模型"
+        case nil:
+            "发消息给 Amber..."
+        }
     }
 
     private var hasPendingToolApproval: Bool {
         viewModel.pendingMemoryApproval != nil ||
-            viewModel.pendingWebMountApproval != nil
+            viewModel.pendingSearchApproval != nil ||
+            viewModel.pendingWebMountApproval != nil ||
+            viewModel.pendingMcpApproval != nil
     }
 
     private var showsComposerMeta: Bool {
@@ -347,8 +470,11 @@ struct ChatView: View {
     }
 
     private var composerModelLabel: String {
-        let trimmed = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "gpt-4o" : trimmed
+        composerCurrentModelID.isEmpty ? "未选择模型" : composerCurrentModelID
+    }
+
+    private var composerCurrentModelID: String {
+        settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var selectedReasoningOption: ComposerReasoningOption {
@@ -368,6 +494,19 @@ struct ChatView: View {
 
     private func toggleComposerPanel(_ panel: ComposerPanel) {
         activeComposerPanel = activeComposerPanel == panel ? nil : panel
+    }
+
+    private func openPrimaryConfigurationAction() {
+        switch configurationIssue {
+        case .missingModel:
+            openModelDefaults()
+        case .missingAPIKey, .invalidBaseURL, nil:
+            router.navigate(to: .providers)
+        }
+    }
+
+    private func openModelDefaults() {
+        router.navigate(to: .modelDefaults)
     }
 
     private func popoverBinding(for panel: ComposerPanel) -> Binding<Bool> {

@@ -171,6 +171,45 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         )
     }
 
+    func testEnableWebSearchToggleSurvivesRestart() {
+        let suiteName = "Slice4-SrchGate-\(UUID().uuidString)"
+        let store1 = makeIsolatedStore(suiteName: suiteName)
+
+        store1.setEnableWebSearch(false)
+        XCTAssertFalse(store1.snapshot.enableWebSearch)
+
+        let store2 = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertFalse(store2.snapshot.enableWebSearch, "web search gate must persist after restart")
+
+        store2.setEnableWebSearch(true)
+        XCTAssertTrue(store2.snapshot.enableWebSearch)
+    }
+
+    func testSearchProviderEnabledToggleSurvivesRestart() {
+        let suiteName = "Slice4-SrchEnabled-\(UUID().uuidString)"
+        let store1 = makeIsolatedStore(suiteName: suiteName)
+        store1.addSearchProvider(name: "Bing", serviceType: "bing_local")
+        let serviceId = store1.snapshot.searchServices.last!.id.description()
+
+        store1.setSearchProviderEnabled(serviceId: serviceId, enabled: false)
+        XCTAssertFalse(
+            store1.snapshot.searchEnabledServiceIds.contains { $0.description() == serviceId },
+            "search provider enabled toggle must update the live snapshot immediately"
+        )
+
+        let store2 = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertFalse(
+            store2.snapshot.searchEnabledServiceIds.contains { $0.description() == serviceId },
+            "disabled search provider must stay disabled after restart"
+        )
+
+        store2.setSearchProviderEnabled(serviceId: serviceId, enabled: true)
+        XCTAssertTrue(
+            store2.snapshot.searchEnabledServiceIds.contains { $0.description() == serviceId },
+            "provider can be re-enabled through the same settings bridge"
+        )
+    }
+
     func testAddedSearchProviderSurvivesRestart() {
         let suiteName = "Slice4-Srch-\(UUID().uuidString)"
         let store1 = makeIsolatedStore(suiteName: suiteName)

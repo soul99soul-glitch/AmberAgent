@@ -7,33 +7,6 @@ struct SubAgentsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var runner = SubAgentRunner()
 
-    private let iOSRows: [SubAgentEvidenceRow] = [
-        .init(
-            title: "聊天分派",
-            subtitle: "聊天中可以把明确的小任务交给专长角色处理；需要可用模型配置。",
-            value: "可用",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "@ 角色调用",
-            subtitle: "输入框里直接 @ 指定角色还没有开放。",
-            value: "未启用",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "实时进度",
-            subtitle: "当前只显示最终结果，暂不展示逐步执行过程。",
-            value: "未开放",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "角色提示词",
-            subtitle: "内置角色的提示词可以编辑并保留；新增自定义角色暂未开放。",
-            value: "可编辑",
-            color: AmberTheme.accentAmber
-        )
-    ]
-
     private let builtInRoles: [SubAgentRoleSummary] = [
         .init(name: "Explorer", handle: "explorer", summary: "跨多源快速并行侦察，速度优先。"),
         .init(name: "Historian", handle: "historian", summary: "历史会话搜索、主题挖掘、跨分片综合。"),
@@ -54,8 +27,6 @@ struct SubAgentsView: View {
                     VStack(spacing: 0) {
                         intro
                         runnerSection
-                        presetConfigSection
-                        iOSStatusSection
                         builtInRolesSection
                     }
                     .padding(.bottom, 36)
@@ -151,36 +122,6 @@ struct SubAgentsView: View {
         }
     }
 
-    private var presetConfigSection: some View {
-        let s = sharedSettings.agentRuntime.subAgent
-        return VStack(spacing: 0) {
-            AmberSectionLabel(text: "默认运行设置")
-            AmberFormGroup {
-                SubAgentPresetKVRow(title: "启用子代理", value: s.enabled ? "默认开" : "默认关")
-                SubAgentDivider()
-                SubAgentPresetKVRow(title: "允许动态子代理", value: s.allowDynamicSubAgents ? "默认开" : "默认关")
-                SubAgentDivider()
-                SubAgentPresetKVRow(title: "最大并发运行", value: "\(s.maxConcurrentRuns)")
-                SubAgentDivider()
-                SubAgentPresetKVRow(title: "最大轮数", value: "\(s.maxTurns)")
-            }
-        }
-    }
-
-    private var iOSStatusSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "当前支持")
-            AmberFormGroup {
-                ForEach(Array(iOSRows.enumerated()), id: \.element.id) { index, row in
-                    SubAgentStatusRow(row: row)
-                    if index < iOSRows.count - 1 {
-                        SubAgentDivider()
-                    }
-                }
-            }
-        }
-    }
-
     private var builtInRolesSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "内置角色")
@@ -198,18 +139,8 @@ struct SubAgentsView: View {
                     }
                 }
             }
-
-            SubAgentFootnote(text: "点开角色可调整提示词；自定义角色会在后续版本开放。")
         }
     }
-}
-
-private struct SubAgentEvidenceRow: Identifiable {
-    let id = UUID()
-    let title: String
-    let subtitle: String
-    let value: String
-    let color: Color
 }
 
 private struct SubAgentRoleSummary: Identifiable {
@@ -217,35 +148,6 @@ private struct SubAgentRoleSummary: Identifiable {
     let name: String
     let handle: String
     let summary: String
-}
-
-private struct SubAgentStatusRow: View {
-    let row: SubAgentEvidenceRow
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                Text(row.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(row.value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(row.color)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(minHeight: 58)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
-    }
 }
 
 private struct SubAgentRoleRowContent: View {
@@ -278,10 +180,6 @@ private struct SubAgentRoleRowContent: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("内置")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.accentGreen)
-
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AmberTheme.muted2)
@@ -298,41 +196,6 @@ private struct SubAgentDivider: View {
         Divider()
             .overlay(AmberTheme.borderSoft)
             .padding(.leading, 14)
-    }
-}
-
-private struct SubAgentPresetKVRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AmberTheme.foreground2)
-        }
-        .frame(minHeight: 46)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .accessibilityLabel("\(title)，\(value)")
-    }
-}
-
-private struct SubAgentFootnote: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.caption)
-            .lineSpacing(3)
-            .foregroundStyle(AmberTheme.muted2)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 16)
-            .padding(.top, 7)
     }
 }
 

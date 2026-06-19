@@ -151,7 +151,7 @@ struct MiniAppRunnerView: View {
                 if let summary = app.boardSummary, !summary.isEmpty {
                     MiniAppCapabilityDivider()
                     MiniAppCapabilityStatusRow(row: .init(
-                        title: "看板摘要",
+                        title: "深度阅读摘要",
                         subtitle: summary,
                         status: "已更新",
                         tint: AmberTheme.accentCyan
@@ -405,7 +405,7 @@ struct MiniAppRunnerView: View {
         }
         let miniApp = sharedSettings.agentRuntime.miniApp
         return IOSMiniAppBridgePolicy(
-            miniAppEnabled: miniApp.enabled,
+            miniAppEnabled: true,
             storageEnabled: true,
             toastEnabled: true,
             themeEnabled: true,
@@ -673,7 +673,7 @@ struct MiniAppRunnerView: View {
         case .clipboardCopy:
             return "只写剪贴板，不读取。"
         case .hostUpdateBoardSummary:
-            return "允许更新这个小应用的看板摘要。"
+            return "允许更新这个小应用的深度阅读摘要。"
         case .hostContext:
             return "允许读取必要的宿主上下文。"
         case .hostSendToConversation:

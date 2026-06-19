@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
 
     @Bindable var settingsStore: SettingsStore
+    let sharedSettings: IOSSharedSettingsStore
     @Environment(RouterPath.self) private var router
     @State private var connectionStatus: ConnectionStatus = .idle
     @State private var terminalSmokeResult: IOSTerminalJobSnapshot?
@@ -12,6 +13,11 @@ struct SettingsView: View {
     @State private var loadedSSHPasswordDraft = ""
     @State private var sshPortDraft = "22"
     @State private var sshStatus: SSHStatus = .idle
+
+    init(settingsStore: SettingsStore, sharedSettings: IOSSharedSettingsStore = IOSSharedSettingsStore()) {
+        self.settingsStore = settingsStore
+        self.sharedSettings = sharedSettings
+    }
 
     enum ConnectionStatus {
         case idle
@@ -132,7 +138,7 @@ struct SettingsView: View {
             } header: {
                 Text("Terminal Runtime")
             } footer: {
-                Text("稳定版会优先使用 SSH 作为远程命令运行环境，本机 iOS 工具用于轻量文件和脚本操作。实验功能会在满足审核要求后开放。")
+                Text("稳定版会优先使用 SSH 作为远程命令运行环境，本机 iOS 工具用于轻量文件和脚本操作。更多高级运行时会在满足审核要求后开放。")
             }
 
             Section {
@@ -278,6 +284,19 @@ struct SettingsView: View {
     }
 
     private func testTerminalRuntime() {
+        guard sharedSettings.isCapabilityGateEnabled(.remoteRuntime) else {
+            terminalSmokeResult = IOSTerminalJobSnapshot(
+                id: "remote-runtime-disabled",
+                runtime: settingsStore.terminalDefaultRuntime,
+                status: IOSTerminalJobStatus.failed.rawValue,
+                exitCode: nil,
+                outputTail: "",
+                startedAt: Date(),
+                updatedAt: Date(),
+                error: IOSCapabilityGate.remoteRuntime.disabledReason
+            )
+            return
+        }
         terminalSmokeResult = nil
         let command = settingsStore.terminalDefaultRuntime == .localIOSTools ? "pwd" : "echo amber-terminal-smoke"
         Task {
@@ -328,6 +347,10 @@ struct SettingsView: View {
     }
 
     private func testSSHConnection() {
+        guard sharedSettings.isCapabilityGateEnabled(.remoteRuntime) else {
+            sshStatus = .failure(IOSCapabilityGate.remoteRuntime.disabledReason)
+            return
+        }
         do {
             var draft = sshProfileDraft
             draft.port = Int(sshPortDraft) ?? 0
@@ -401,6 +424,7 @@ struct SettingsView: View {
     }
 
     private func verifySSHPassword(profile: IOSSSHProfile, password: String) async -> Bool {
+        guard sharedSettings.isCapabilityGateEnabled(.remoteRuntime) else { return false }
         let started = await IOSTerminalRuntime.shared.startJob(
             command: "echo amber-terminal-auth-check",
             runtime: .remoteSSH,

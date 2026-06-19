@@ -42,7 +42,9 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             .compactMap { ($0 as? UIMessagePart.Text)?.text }
             .joined(separator: "\n")
         XCTAssertTrue(content.contains("Summarize this"))
-        XCTAssertTrue(content.contains("[Selected file preview:"))
+        XCTAssertTrue(content.contains("[文件上下文]"))
+        XCTAssertTrue(content.contains("来源文件："))
+        XCTAssertTrue(content.contains("状态：完整读取"))
         XCTAssertTrue(content.contains("Selected file body"))
         XCTAssertNil(viewModel.pendingSelectedFilePreview)
     }
@@ -205,6 +207,25 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             autoGenerateResponses: false
         )
         XCTAssertFalse(Set(disabledViewModel.currentToolDeclarationNames()).contains("memory_tool"))
+    }
+
+    func testMiniAppInstructionIsInjectedByDefault() throws {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        XCTAssertTrue(sharedSettings.isCapabilityGateEnabled(.miniApps))
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: false
+        )
+        viewModel.inputText = "帮我做一个 MiniApp 计时器"
+        viewModel.sendMessage()
+
+        let uploadMessages = viewModel.preparedUploadMessagesForTesting(viewModel.messages)
+        let userText = textContent(of: try XCTUnwrap(uploadMessages.last { $0.role == MessageRole.user }))
+        XCTAssertTrue(userText.contains("AmberAgent MiniApp V3"))
+        XCTAssertTrue(userText.contains("Schema:"))
+        XCTAssertTrue(userText.contains(#""permissions""#))
+        XCTAssertTrue(userText.contains(#""html""#))
     }
 
     func testMemoryToolCreateEditDeletePersistsAndFeedsPrompt() throws {
@@ -390,6 +411,96 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().map(\.content), ["approved memory write"])
     }
 
+    func testSearchToolApprovalRequestAndDenyOutput() async throws {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        sharedSettings.setEnableWebSearch(true)
+        sharedSettings.addSearchProvider(name: "Bing", serviceType: "bing_local")
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: false
+        )
+        let input = #"{"query":"swift concurrency","max_results":2}"#
+
+        let request = try XCTUnwrap(viewModel.searchApprovalRequestForTesting(
+            toolName: "search_web",
+            input: input
+        ))
+        XCTAssertEqual(request.title, "执行网络搜索")
+        XCTAssertEqual(request.target, "swift concurrency")
+        XCTAssertEqual(request.providerName, "Bing HTML")
+        XCTAssertEqual(request.providerType, "bing_local")
+
+        let deniedOutput = await viewModel.searchToolApprovalOutputForTesting(
+            toolName: "search_web",
+            input: input,
+            allow: false
+        )
+        let deniedPayload = try jsonObject(deniedOutput)
+        XCTAssertEqual(deniedPayload["ok"] as? Bool, false)
+        XCTAssertEqual(deniedPayload["tool"] as? String, "search_web")
+        XCTAssertEqual(deniedPayload["denied"] as? Bool, true)
+        XCTAssertEqual(deniedPayload["policy"] as? String, "user_denied")
+    }
+
+    func testSearchApprovalAllowExecutesWithMockTransport() async throws {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        sharedSettings.setEnableWebSearch(true)
+        sharedSettings.addSearchProvider(name: "Bing", serviceType: "bing_local")
+        let transport = ChatSearchTransport(responses: [
+            .html("""
+            <html><body>
+            <ol id="b_results">
+              <li class="b_algo">
+                <h2><a href="https://example.com/bing">Bing Result</a></h2>
+                <p>Bing snippet from chat approval.</p>
+              </li>
+            </ol>
+            </body></html>
+            """)
+        ])
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            searchTransport: transport,
+            autoGenerateResponses: false
+        )
+
+        let output = await viewModel.searchToolApprovalOutputForTesting(
+            toolName: "search_web",
+            input: #"{"query":"amber agent","max_results":1}"#,
+            allow: true
+        )
+
+        XCTAssertEqual(transport.requests.first?.url?.host, "www.bing.com")
+        XCTAssertTrue(output.contains("来源：Bing HTML"))
+        XCTAssertTrue(output.contains("Bing snippet from chat approval."))
+    }
+
+    func testSearchToolOutputReportsDisabledGateWithoutNetwork() async throws {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        sharedSettings.setEnableWebSearch(false)
+        let transport = ChatSearchTransport(responses: [])
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            searchTransport: transport,
+            autoGenerateResponses: false
+        )
+
+        let output = await viewModel.searchToolApprovalOutputForTesting(
+            toolName: "search_web",
+            input: #"{"query":"amber agent"}"#,
+            allow: true
+        )
+        let payload = try jsonObject(output)
+
+        XCTAssertEqual(payload["ok"] as? Bool, false)
+        XCTAssertEqual(payload["tool"] as? String, "search_web")
+        XCTAssertTrue((payload["reason"] as? String)?.contains("disabled") == true)
+        XCTAssertTrue(transport.requests.isEmpty)
+    }
+
     func testWebMountClearSessionApprovalRequiresForegroundAndCanExecute() async throws {
         let defaults = isolatedDefaults()
         let registry = IOSWebMountRegistry(userDefaults: defaults)
@@ -407,8 +518,11 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             documentStore: DocumentAccessStore(),
             webMountController: controller
         )
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        sharedSettings.setCapabilityGate(.webMount, enabled: true)
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
             localToolExecutor: executor,
             autoGenerateResponses: false
         )
@@ -452,17 +566,91 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(cookieStore.clearedSiteIds, ["github"])
     }
 
-    func testAgentCouncilAndMcpToolCallsCanBeFinishedForResume() throws {
+    func testWebMountDirectToolExecutionHelperIsAvailableAfterUserAction() async throws {
+        let defaults = isolatedDefaults()
+        let settings = IOSWebMountSettings(userDefaults: defaults)
+        settings.globalEnabled = false
+        let cookieStore = ChatWebMountCookieStore()
+        let controller = IOSWebMountController(
+            registry: IOSWebMountRegistry(userDefaults: defaults),
+            settings: settings,
+            cookieStore: cookieStore,
+            runtime: ChatWebMountRuntime()
+        )
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: IOSLocalToolExecutor(
+                permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+                documentStore: DocumentAccessStore(),
+                webMountController: controller
+            ),
             autoGenerateResponses: false
         )
-        let declaredNames = Set(viewModel.currentToolDeclarationNames())
-        let resumeToolNames = ["mcp_call", "subagent_dispatch", "model_council_run"]
 
-        for toolName in resumeToolNames {
-            XCTAssertTrue(declaredNames.contains(toolName), "\(toolName) must be declared for model tool calls")
+        let output = await viewModel.webMountToolOutputForTesting(
+            toolName: "wm_clear_session",
+            input: #"{"site_id":"github"}"#,
+            isUserInitiated: true
+        )
+        let payload = try jsonObject(output)
 
+        XCTAssertEqual(payload["ok"] as? Bool, true)
+        XCTAssertEqual(payload["site_id"] as? String, "github")
+        XCTAssertEqual(cookieStore.clearedSiteIds, ["github"])
+    }
+
+    func testAdvancedToolDeclarationsFollowParityRules() throws {
+        let alwaysOnToolNames = ["subagent_dispatch", "model_council_run"]
+
+        let defaultViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: IOSLocalToolExecutor(
+                permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+                documentStore: DocumentAccessStore()
+            ),
+            autoGenerateResponses: false
+        )
+        let defaultNames = Set(defaultViewModel.currentToolDeclarationNames())
+        XCTAssertTrue(defaultNames.contains("mcp_call"), "mcp_call should be declared by default")
+        for toolName in alwaysOnToolNames {
+            XCTAssertTrue(defaultNames.contains(toolName), "\(toolName) should be declared by default")
+        }
+        XCTAssertTrue(defaultNames.contains { $0.hasPrefix("wm_") }, "WebMount tools should be declared by default")
+
+        let webMountDefaults = isolatedDefaults()
+        let webMountSettings = IOSWebMountSettings(userDefaults: webMountDefaults)
+        let webMountExecutor = IOSLocalToolExecutor(
+            permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+            documentStore: DocumentAccessStore(),
+            webMountController: IOSWebMountController(
+                registry: IOSWebMountRegistry(userDefaults: webMountDefaults),
+                settings: webMountSettings,
+                runtime: ChatWebMountRuntime()
+            )
+        )
+        let webMountEnabledSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        let webMountEnabledNames = Set(ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: webMountEnabledSettings,
+            localToolExecutor: webMountExecutor,
+            autoGenerateResponses: false
+        ).currentToolDeclarationNames())
+        XCTAssertTrue(webMountEnabledNames.contains { $0.hasPrefix("wm_") })
+
+        let enabledViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            autoGenerateResponses: false
+        )
+        let enabledNames = Set(enabledViewModel.currentToolDeclarationNames())
+        XCTAssertTrue(enabledNames.contains("mcp_call"), "mcp_call should stay declared without a capability gate")
+        for toolName in alwaysOnToolNames {
+            XCTAssertTrue(enabledNames.contains(toolName), "\(toolName) should stay declared without a capability gate")
+        }
+
+        for toolName in ["mcp_call"] + alwaysOnToolNames {
             let toolCall = UIMessagePart.Tool(
                 toolCallId: "call-\(toolName)",
                 toolName: toolName,
@@ -484,7 +672,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
                 translation: assistantSeed.translation
             )
 
-            let resumed = viewModel.finishedToolCallMessagesForTesting(
+            let resumed = enabledViewModel.finishedToolCallMessagesForTesting(
                 toolCall,
                 outputText: "tool result for \(toolName)",
                 in: [UIMessage.companion.user(prompt: "run tool"), assistant]
@@ -534,6 +722,42 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+}
+
+@MainActor
+private final class ChatSearchTransport: IOSSearchHTTPTransport {
+    struct Response {
+        let status: Int
+        let headers: [String: String]
+        let body: Data
+
+        static func html(_ body: String, status: Int = 200) -> Response {
+            Response(
+                status: status,
+                headers: ["Content-Type": "text/html; charset=utf-8"],
+                body: Data(body.utf8)
+            )
+        }
+    }
+
+    private var responses: [Response]
+    private(set) var requests: [URLRequest] = []
+
+    init(responses: [Response]) {
+        self.responses = responses
+    }
+
+    func send(_ request: URLRequest) async throws -> (HTTPURLResponse, Data) {
+        requests.append(request)
+        let response = responses.isEmpty ? .html("") : responses.removeFirst()
+        let http = HTTPURLResponse(
+            url: request.url ?? URL(string: "https://example.com")!,
+            statusCode: response.status,
+            httpVersion: "HTTP/1.1",
+            headerFields: response.headers
+        )!
+        return (http, response.body)
     }
 }
 

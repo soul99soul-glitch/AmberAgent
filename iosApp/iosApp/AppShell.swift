@@ -45,7 +45,7 @@ struct AppShell: View {
 
     var body: some View {
         NavigationStack(path: Binding(get: { rootRouter.path }, set: { rootRouter.path = $0 })) {
-            ConversationsView()
+            ConversationsView(sharedSettings: sharedSettings)
                 .withAppDestinations(
                     settingsStore: settingsStore,
                     providerRegistry: providerRegistry,
@@ -114,16 +114,34 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     @MainActor
     @ViewBuilder
-    func rootView(settingsStore: SettingsStore, localToolExecutor: IOSLocalToolExecutor) -> some View {
+    func rootView(
+        settingsStore: SettingsStore,
+        sharedSettings: IOSSharedSettingsStore,
+        localToolExecutor: IOSLocalToolExecutor,
+        documentStore: DocumentAccessStore? = nil
+    ) -> some View {
         switch self {
         case .chat:
-            ChatView(settingsStore: settingsStore, localToolExecutor: localToolExecutor)
+            ChatView(
+                settingsStore: settingsStore,
+                sharedSettings: sharedSettings,
+                localToolExecutor: localToolExecutor,
+                documentStore: documentStore
+            )
         case .workspace:
-            WorkspaceView()
+            if sharedSettings.isCapabilityGateEnabled(.workspace) {
+                WorkspaceView()
+            } else {
+                CapabilityGateLockedView(gate: .workspace)
+            }
         case .assistants:
-            AssistantsView()
+            if sharedSettings.isCapabilityGateEnabled(.workspace) {
+                AssistantsView()
+            } else {
+                CapabilityGateLockedView(gate: .workspace)
+            }
         case .settings:
-            SettingsView(settingsStore: settingsStore)
+            SettingsHomeView(settingsStore: settingsStore, sharedSettings: sharedSettings)
         }
     }
 
@@ -191,7 +209,7 @@ final class RouterPath {
 
 enum Route: Hashable {
     case chat
-    case search
+    case search(initialQuery: String)
     case account
     case settings
     case appearance
@@ -225,6 +243,7 @@ enum Route: Hashable {
     case workspace
     case memory
     case council
+    case councilChat
     case councilSettings
     case seatEditor
     case subagents
@@ -264,13 +283,22 @@ private extension View {
         navigationDestination(for: Route.self) { route in
             switch route {
             case .chat:
-                ChatView(settingsStore: settingsStore, localToolExecutor: localToolExecutor)
-            case .search:
-                SearchView()
+                ChatView(
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    localToolExecutor: localToolExecutor,
+                    documentStore: documentStore
+                )
+            case .search(let initialQuery):
+                if sharedSettings.isCapabilityGateEnabled(.standaloneSearch) {
+                    SearchView(initialQuery: initialQuery)
+                } else {
+                    CapabilityGateLockedView(gate: .standaloneSearch)
+                }
             case .account:
                 AccountView(sharedSettings: sharedSettings)
             case .settings:
-                SettingsHomeView(settingsStore: settingsStore)
+                SettingsHomeView(settingsStore: settingsStore, sharedSettings: sharedSettings)
             case .appearance:
                 AppearanceSettingsView()
             case .displayFont:
@@ -289,17 +317,41 @@ private extension View {
             case .memoryEdit(let text, let scope, let pinned):
                 MemoryEditView(initialText: text, initialScope: scope, initialPinned: pinned)
             case .skills:
-                SkillsView(sharedSettings: sharedSettings)
+                if sharedSettings.isCapabilityGateEnabled(.skills) {
+                    SkillsView(sharedSettings: sharedSettings)
+                } else {
+                    CapabilityGateLockedView(gate: .skills)
+                }
             case .skillAdd:
-                SkillAddView(sharedSettings: sharedSettings)
+                if sharedSettings.isCapabilityGateEnabled(.skills) {
+                    SkillAddView(sharedSettings: sharedSettings)
+                } else {
+                    CapabilityGateLockedView(gate: .skills)
+                }
             case .mcpServers:
-                McpServersView(sharedSettings: sharedSettings, configStore: mcpConfigStore)
+                if sharedSettings.isCapabilityGateEnabled(.mcp) {
+                    McpServersView(sharedSettings: sharedSettings, configStore: mcpConfigStore)
+                } else {
+                    CapabilityGateLockedView(gate: .mcp)
+                }
             case .mcpImport:
-                McpImportView(configStore: mcpConfigStore)
+                if sharedSettings.isCapabilityGateEnabled(.mcp) {
+                    McpImportView(configStore: mcpConfigStore)
+                } else {
+                    CapabilityGateLockedView(gate: .mcp)
+                }
             case .mcpAdd:
-                McpAddView(configStore: mcpConfigStore)
+                if sharedSettings.isCapabilityGateEnabled(.mcp) {
+                    McpAddView(configStore: mcpConfigStore)
+                } else {
+                    CapabilityGateLockedView(gate: .mcp)
+                }
             case .skillDetail(let name, let dirName):
-                SkillDetailView(sharedSettings: sharedSettings, skillName: name, dirName: dirName)
+                if sharedSettings.isCapabilityGateEnabled(.skills) {
+                    SkillDetailView(sharedSettings: sharedSettings, skillName: name, dirName: dirName)
+                } else {
+                    CapabilityGateLockedView(gate: .skills)
+                }
             case .execution:
                 ExecutionSettingsView(sharedSettings: sharedSettings)
             case .providers:
@@ -311,7 +363,11 @@ private extension View {
             case .providerKeyEditor(let name):
                 ProviderKeyEditView(providerRegistry: providerRegistry, providerName: name)
             case .modelDefaults:
-                ModelDefaultsView(settingsStore: settingsStore, sharedSettings: sharedSettings)
+                ModelDefaultsView(
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    providerRegistry: providerRegistry
+                )
             case .searchServices:
                 SearchServicesView(sharedSettings: sharedSettings)
             case .searchProvider:
@@ -333,11 +389,17 @@ private extension View {
             case .webMountSite(let site):
                 WebMountSiteView(site: site)
             case .workspace:
-                WorkspaceView()
+                if sharedSettings.isCapabilityGateEnabled(.workspace) {
+                    WorkspaceView()
+                } else {
+                    CapabilityGateLockedView(gate: .workspace)
+                }
             case .memory:
                 MemoryOverviewView(sharedSettings: sharedSettings)
             case .council:
                 CouncilView(sharedSettings: sharedSettings)
+            case .councilChat:
+                CouncilChatRuntimeView(settingsStore: settingsStore, sharedSettings: sharedSettings)
             case .councilSettings:
                 CouncilSettingsView(sharedSettings: sharedSettings)
             case .seatEditor:
@@ -347,17 +409,33 @@ private extension View {
             case .subAgentRole(let name, let roleId):
                 SubAgentRoleView(sharedSettings: sharedSettings, name: name, roleId: roleId)
             case .sandbox:
-                RuntimeEnvironmentView(settingsStore: settingsStore)
+                if sharedSettings.isCapabilityGateEnabled(.remoteRuntime) {
+                    RuntimeEnvironmentView(settingsStore: settingsStore, sharedSettings: sharedSettings)
+                } else {
+                    CapabilityGateLockedView(gate: .remoteRuntime)
+                }
             case .conversation(let id):
                 PlaceholderDetailView(title: "Conversation", subtitle: id, systemImage: "text.bubble")
             case .assistant(let id):
-                PlaceholderDetailView(title: "Assistant", subtitle: id, systemImage: "person.crop.circle")
+                if sharedSettings.isCapabilityGateEnabled(.workspace) {
+                    PlaceholderDetailView(title: "Assistant", subtitle: id, systemImage: "person.crop.circle")
+                } else {
+                    CapabilityGateLockedView(gate: .workspace)
+                }
             case .workspaceItem(let id):
-                PlaceholderDetailView(title: "Workspace Item", subtitle: id, systemImage: "folder")
+                if sharedSettings.isCapabilityGateEnabled(.workspace) {
+                    PlaceholderDetailView(title: "Workspace Item", subtitle: id, systemImage: "folder")
+                } else {
+                    CapabilityGateLockedView(gate: .workspace)
+                }
             case .settingsPlaceholder(let title, let subtitle, let systemImage):
                 PlaceholderDetailView(title: title, subtitle: subtitle, systemImage: systemImage)
             case .providerSettings:
-                SettingsView(settingsStore: settingsStore)
+                if sharedSettings.isCapabilityGateEnabled(.remoteRuntime) {
+                    SettingsView(settingsStore: settingsStore, sharedSettings: sharedSettings)
+                } else {
+                    CapabilityGateLockedView(gate: .remoteRuntime)
+                }
             case .toolPermissions:
                 PermissionsApprovalView(permissionStore: permissionStore)
             }

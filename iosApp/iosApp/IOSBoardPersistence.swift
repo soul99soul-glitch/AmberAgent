@@ -6,7 +6,7 @@ import Observation
 @preconcurrency import EventKit
 #endif
 
-/// [Board MVP] iOS-local persistence for the generated "今日看板内容" (Markdown).
+/// [Board MVP] iOS-local persistence for the generated "深度阅读内容" (Markdown).
 ///
 /// Scope (per product decision): ONLY the generated board content is persisted
 /// — the model's Markdown output for a given date. NOT persisted: the structured

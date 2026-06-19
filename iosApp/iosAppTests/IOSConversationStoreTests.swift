@@ -73,6 +73,58 @@ final class IOSConversationStoreTests: XCTestCase {
         XCTAssertEqual(restartedViewModel.messages.map { $0.toText() }, ["phase2 persistence acceptance"])
     }
 
+    func testSelectedFileContextPersistsAcrossStoreRestart() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreFileContext-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let firstStore = IOSConversationStore(baseDirectory: baseDirectory)
+        await firstStore.bootstrap()
+        let firstConversationId = try XCTUnwrap(firstStore.currentConversation?.id)
+
+        let documentStore = DocumentAccessStore()
+        _ = documentStore.registerPickedFile(try makeTempFile(text: "Persistent selected file body"))
+        let executor = IOSLocalToolExecutor(
+            permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+            documentStore: documentStore
+        )
+        let firstViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            localToolExecutor: executor,
+            autoGenerateResponses: false
+        )
+        firstViewModel.conversationStore = firstStore
+        firstViewModel.reloadFromStore()
+
+        await firstViewModel.attachSelectedFilePreviewToNextMessage()
+        firstViewModel.inputText = "Use this file"
+        firstViewModel.sendMessage()
+
+        let didPersistBeforeRestart = await waitFor {
+            firstStore.currentMessages.first?.toText().contains("[文件上下文]") == true
+        }
+        XCTAssertTrue(didPersistBeforeRestart)
+
+        let restartedStore = IOSConversationStore(baseDirectory: baseDirectory)
+        await restartedStore.bootstrap()
+        XCTAssertEqual(restartedStore.currentConversation?.id, firstConversationId)
+
+        let restartedViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        restartedViewModel.conversationStore = restartedStore
+        restartedViewModel.reloadFromStore()
+
+        let text = try XCTUnwrap(restartedViewModel.messages.first?.toText())
+        XCTAssertTrue(text.contains("Use this file"))
+        XCTAssertTrue(text.contains("[文件上下文]"))
+        XCTAssertTrue(text.contains("来源文件："))
+        XCTAssertTrue(text.contains("Persistent selected file body"))
+    }
+
     private func waitFor(
         timeout: TimeInterval = 2,
         condition: @escaping @MainActor () -> Bool
@@ -83,5 +135,20 @@ final class IOSConversationStoreTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return condition()
+    }
+
+    private func makeTempFile(text: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("txt")
+        try Data(text.utf8).write(to: url)
+        return url
+    }
+
+    private func isolatedDefaults() -> UserDefaults {
+        let suiteName = "app.amber.ios.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 }

@@ -14,6 +14,7 @@ struct ProviderDetailView: View {
 
     @State private var selectedTab: ProviderDetailTab = .config
     @State private var alert: ProviderDetailAlert?
+    @State private var connectionStatus: ProviderConnectionStatus = .idle
 
     var body: some View {
         ZStack {
@@ -107,6 +108,10 @@ struct ProviderDetailView: View {
                 }
 
                 ProviderDetailFooter(connectionFooterText)
+
+                if isCurrentProvider {
+                    connectionTestSection
+                }
 
                 AmberSectionLabel(text: "选项")
                 AmberFormGroup {
@@ -421,6 +426,35 @@ struct ProviderDetailView: View {
         return "API Key 会保存在本机钥匙串。保存后可在列表里设为当前。"
     }
 
+    private var connectionTestSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "验证")
+            AmberFormGroup {
+                Button {
+                    testCurrentConnection()
+                } label: {
+                    ProviderRowContent(
+                        title: "测试连接",
+                        subtitle: "调用模型列表接口，不发送聊天内容",
+                        value: connectionStatus.buttonValue,
+                        valueStyle: .normal,
+                        showsChevron: false
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(connectionStatus.isTesting)
+                .opacity(connectionStatus.isTesting ? 0.65 : 1)
+
+                if let message = connectionStatus.message {
+                    ProviderDetailDivider()
+                    ProviderConnectionResultRow(status: connectionStatus, message: message)
+                }
+            }
+
+            ProviderDetailFooter("测试结果来自服务商真实响应；保存 API Key 不会被当作连接成功。")
+        }
+    }
+
     private func applyPresetBaseURL() {
         guard !requiresProviderBridge else {
             alert = .providerBridgeRequired(providerName)
@@ -439,6 +473,55 @@ struct ProviderDetailView: View {
 
         settingsStore.baseUrl = endpoint
         alert = .presetApplied(providerName)
+    }
+
+    private func testCurrentConnection() {
+        let trimmedKey = settingsStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else {
+            connectionStatus = .failure(ChatConfigurationIssue.missingAPIKey.message)
+            return
+        }
+        guard isBaseUrlValid else {
+            connectionStatus = .failure(ChatConfigurationIssue.invalidBaseURL.message)
+            return
+        }
+
+        connectionStatus = .testing
+        let provider = OpenAIKmpProvider()
+        let setting = ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "OpenAI",
+            models: [],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: trimmedKey,
+            baseUrl: settingsStore.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+
+        Task { @MainActor in
+            do {
+                let models = try await provider.listModels(providerSetting: setting)
+                if models.isEmpty {
+                    connectionStatus = .success("连接成功，但服务商没有返回可列出的模型。")
+                } else {
+                    connectionStatus = .success("连接成功，发现 \(models.count) 个模型。")
+                }
+            } catch {
+                connectionStatus = .failure(
+                    ChatViewModel.userFacingGenerationError(
+                        error.localizedDescription,
+                        modelId: settingsStore.modelId
+                    )
+                )
+            }
+        }
     }
 }
 
@@ -498,6 +581,51 @@ private enum ProviderDetailAlert: Identifiable {
             "\(provider) 的模板地址需要确认，当前不会写入聊天配置。"
         case .responseAPIRequired(let provider):
             "\(provider) 使用不同接口模式，当前不能只套用 Base URL。"
+        }
+    }
+}
+
+private enum ProviderConnectionStatus: Equatable {
+    case idle
+    case testing
+    case success(String)
+    case failure(String)
+
+    var isTesting: Bool {
+        if case .testing = self { return true }
+        return false
+    }
+
+    var buttonValue: String {
+        switch self {
+        case .idle:
+            "开始"
+        case .testing:
+            "测试中"
+        case .success:
+            "成功"
+        case .failure:
+            "失败"
+        }
+    }
+
+    var message: String? {
+        switch self {
+        case .idle, .testing:
+            return nil
+        case .success(let message), .failure(let message):
+            return message
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .success:
+            AmberTheme.accentGreen
+        case .failure:
+            AmberTheme.accentRed
+        case .idle, .testing:
+            AmberTheme.muted
         }
     }
 }
@@ -632,6 +760,21 @@ private struct ProviderInlineWarning: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
             .padding(.bottom, 8)
+    }
+}
+
+private struct ProviderConnectionResultRow: View {
+    let status: ProviderConnectionStatus
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.caption)
+            .foregroundStyle(status.color)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
     }
 }
 

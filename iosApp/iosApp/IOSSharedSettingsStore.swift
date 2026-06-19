@@ -2,6 +2,109 @@ import Foundation
 import Observation
 @preconcurrency import Shared
 
+enum IOSCapabilityGate: String, CaseIterable, Identifiable, Codable {
+    case skills
+    case mcp
+    case webMount
+    case miniApps
+    case subAgents
+    case modelCouncil
+    case remoteRuntime
+    case remoteSync
+    case standaloneSearch
+    case workspace
+    case todayBoard
+
+    var id: String { rawValue }
+
+    var isAlwaysAvailable: Bool {
+        true
+    }
+
+    var title: String {
+        switch self {
+        case .skills: "技能"
+        case .mcp: "MCP"
+        case .webMount: "WebMount"
+        case .miniApps: "小应用"
+        case .subAgents: "子代理"
+        case .modelCouncil: "模型议会"
+        case .remoteRuntime: "远程执行"
+        case .remoteSync: "远端同步"
+        case .standaloneSearch: "全局搜索"
+        case .workspace: "工作区"
+        case .todayBoard: "深度阅读"
+        }
+    }
+
+    var disabledReason: String {
+        switch self {
+        case .skills:
+            "需要开启技能系统后才能管理本机技能。"
+        case .mcp:
+            "需要开启 MCP 后才会连接服务器或向聊天声明 MCP 工具。"
+        case .webMount:
+            "WebMount 是正式高级能力，入口默认可用。"
+        case .miniApps:
+            "小应用是正式高级能力，入口默认可用。"
+        case .subAgents:
+            "子代理是正式高级能力，入口默认可用。"
+        case .modelCouncil:
+            "模型议会是正式高级能力，入口默认可用。"
+        case .remoteRuntime:
+            "需要开启远程执行后才能配置运行环境或创建远程命令任务。"
+        case .remoteSync:
+            "需要开启远端同步后才会显示 WebDAV 和远端快照操作。"
+        case .standaloneSearch:
+            "需要开启全局搜索后才会显示独立搜索页。"
+        case .workspace:
+            "需要开启工作区后才会显示工作区和助手入口。"
+        case .todayBoard:
+            "深度阅读是正式高级能力，入口默认可用。"
+        }
+    }
+}
+
+struct IOSCapabilityGateSettings: Codable, Equatable {
+    var skills = false
+    var mcp = false
+    var webMount = false
+    var miniApps = false
+    var subAgents = false
+    var modelCouncil = false
+    var remoteRuntime = false
+    var remoteSync = false
+    var standaloneSearch = false
+    var workspace = false
+    var todayBoard = false
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.skills = try container.decodeIfPresent(Bool.self, forKey: .skills) ?? false
+        self.mcp = try container.decodeIfPresent(Bool.self, forKey: .mcp) ?? false
+        self.webMount = try container.decodeIfPresent(Bool.self, forKey: .webMount) ?? false
+        self.miniApps = try container.decodeIfPresent(Bool.self, forKey: .miniApps) ?? false
+        self.subAgents = try container.decodeIfPresent(Bool.self, forKey: .subAgents) ?? false
+        self.modelCouncil = try container.decodeIfPresent(Bool.self, forKey: .modelCouncil) ?? false
+        self.remoteRuntime = try container.decodeIfPresent(Bool.self, forKey: .remoteRuntime) ?? false
+        self.remoteSync = try container.decodeIfPresent(Bool.self, forKey: .remoteSync) ?? false
+        self.standaloneSearch = try container.decodeIfPresent(Bool.self, forKey: .standaloneSearch) ?? false
+        self.workspace = try container.decodeIfPresent(Bool.self, forKey: .workspace) ?? false
+        self.todayBoard = try container.decodeIfPresent(Bool.self, forKey: .todayBoard) ?? false
+    }
+
+    func isEnabled(_ gate: IOSCapabilityGate) -> Bool {
+        true
+    }
+
+    mutating func set(_ gate: IOSCapabilityGate, enabled: Bool) {
+        // Capability gates are kept for persisted-data compatibility only.
+        // Product-level visibility is always on; each feature owns its real configuration.
+    }
+}
+
 /// Read-write access to a real, seeded KMP `Settings` snapshot on iOS.
 ///
 /// On init it calls the KMP `IosSettingsDefaults.shared.defaultSeededSettings()`.
@@ -20,9 +123,18 @@ final class IOSSharedSettingsStore {
     private let fullSettingsJsonKey = "app.amber.ios.sharedSettingsJson"
     private let seatsKey = "app.amber.ios.councilSeats"
     private let remoteSyncStatusKey = "app.amber.ios.remoteSyncStatus"
+    private let capabilityGatesKey = "app.amber.ios.capabilityGates.v1"
+
+    private(set) var capabilityGates: IOSCapabilityGateSettings
 
     init(userDefaults: UserDefaults = .standard) {
         self.defaults = userDefaults
+        if let data = defaults.data(forKey: capabilityGatesKey),
+           let decoded = try? JSONDecoder().decode(IOSCapabilityGateSettings.self, from: data) {
+            self.capabilityGates = decoded
+        } else {
+            self.capabilityGates = IOSCapabilityGateSettings()
+        }
         if let json = defaults.string(forKey: fullSettingsJsonKey),
            let decoded = try? Self.decodeSettings(json) {
             self.snapshot = decoded
@@ -34,6 +146,21 @@ final class IOSSharedSettingsStore {
     func restoreSnapshot(_ settings: Settings) {
         snapshot = settings
         defaults.set(IosSettingsJsonBridge.shared.encode(settings: settings), forKey: fullSettingsJsonKey)
+    }
+
+    func isCapabilityGateEnabled(_ gate: IOSCapabilityGate) -> Bool {
+        capabilityGates.isEnabled(gate)
+    }
+
+    func setCapabilityGate(_ gate: IOSCapabilityGate, enabled: Bool) {
+        capabilityGates.set(gate, enabled: enabled)
+        persistCapabilityGates()
+    }
+
+    private func persistCapabilityGates() {
+        if let data = try? JSONEncoder().encode(capabilityGates) {
+            defaults.set(data, forKey: capabilityGatesKey)
+        }
     }
 
     var remoteSyncStatus: IOSRemoteSyncStatus {
@@ -88,6 +215,18 @@ final class IOSSharedSettingsStore {
         updateRemoteSyncStatus { status in
             status.lastError = error.localizedDescription
         }
+    }
+
+    func setMemoryRuntimeEnabled(core: Bool? = nil, shortTerm: Bool? = nil, longTerm: Bool? = nil) {
+        let runtime = snapshot.agentRuntime
+        restoreSnapshot(
+            IosSettingsMutations.shared.setMemoryRuntimeEnabled(
+                settings: snapshot,
+                enableCoreMemory: core ?? runtime.enableCoreMemory,
+                enableShortTermMemory: shortTerm ?? runtime.enableShortTermMemory,
+                enableLongTermMemory: longTerm ?? runtime.enableLongTermMemory
+            )
+        )
     }
 
     private static func currentEpochMillis() -> Int64 {
@@ -275,6 +414,30 @@ final class IOSSharedSettingsStore {
             let merged = IosSettingsMutations.shared.removeSearchService(settings: snapshot, id: serviceId)
             restoreSnapshot(merged)
         }
+    }
+
+    func setEnableWebSearch(_ enabled: Bool) {
+        let merged = IosSettingsMutations.shared.setEnableWebSearch(settings: snapshot, enabled: enabled)
+        restoreSnapshot(merged)
+    }
+
+    func setSearchBuiltinDuckDuckGoEnabled(_ enabled: Bool) {
+        let merged = IosSettingsMutations.shared.setSearchBuiltinDuckDuckGoEnabled(settings: snapshot, enabled: enabled)
+        restoreSnapshot(merged)
+    }
+
+    func setSearchBuiltinBingEnabled(_ enabled: Bool) {
+        let merged = IosSettingsMutations.shared.setSearchBuiltinBingEnabled(settings: snapshot, enabled: enabled)
+        restoreSnapshot(merged)
+    }
+
+    func setSearchProviderEnabled(serviceId: String, enabled: Bool) {
+        let merged = IosSettingsMutations.shared.setSearchServiceEnabled(
+            settings: snapshot,
+            id: serviceId,
+            enabled: enabled
+        )
+        restoreSnapshot(merged)
     }
 
     // MARK: - Custom TTS engines write-back

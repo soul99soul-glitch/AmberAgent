@@ -57,7 +57,7 @@ struct TTSSettingsView: View {
     }
 
     private var intro: some View {
-        Text("当前可使用系统语音进行试听。云端语音服务暂未开放。")
+        Text("当前可使用系统语音进行试听。云端语音服务当前不可用。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -102,7 +102,7 @@ struct TTSSettingsView: View {
                 TTSPresetProviderRow(name: "系统 TTS", isSelected: true)
             }
 
-            TTSSettingsNote("当前仅系统 TTS 可试听；云端 TTS 暂未开放。")
+            TTSSettingsNote("当前仅系统 TTS 可试听；云端 TTS 当前不可用。")
         }
     }
 
@@ -168,7 +168,7 @@ struct TTSSettingsView: View {
             AmberFormGroup {
                 let engines = sharedSettings.savedTtsEngines
                 if engines.isEmpty {
-                    Text("暂无自定义云端引擎。云端 TTS 暂未开放。")
+                    Text("暂无自定义云端引擎。云端 TTS 当前不可用。")
                         .font(.caption).foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 12)

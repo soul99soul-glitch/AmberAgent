@@ -20,6 +20,13 @@ struct IOSSearchResult: Equatable {
 enum IOSSearchRoute: String, Equatable {
     case duckDuckGoLite = "duckduckgo_lite"
     case bingHTML = "bing_html"
+    case tavilyAPI = "tavily_api"
+    case exaAPI = "exa_api"
+    case zhipuAPI = "zhipu_api"
+    case braveAPI = "brave_api"
+    case serperAPI = "serper_api"
+    case serpAPI = "serpapi_api"
+    case jinaAPI = "jina_api"
     case unsupported
 }
 
@@ -31,6 +38,7 @@ struct IOSSearchProviderSelection: Equatable {
     let fallbackReason: String?
 }
 
+@MainActor
 protocol IOSSearchHTTPTransport {
     func send(_ request: URLRequest) async throws -> (HTTPURLResponse, Data)
 }
@@ -54,6 +62,7 @@ enum IOSSearchExecutorError: LocalizedError, Equatable {
     case disallowedURL(String)
     case unsupportedTool(String)
     case unsupportedProvider(String)
+    case missingAPIKey(String)
     case unsupportedContentType(String)
     case invalidHTTPResponse
     case httpStatus(String, Int)
@@ -73,6 +82,8 @@ enum IOSSearchExecutorError: LocalizedError, Equatable {
             return "Unsupported iOS search tool: \(name)."
         case .unsupportedProvider(let reason):
             return reason
+        case .missingAPIKey(let provider):
+            return "\(provider) requires an API key before it can search."
         case .unsupportedContentType(let contentType):
             return "Unsupported content type for scraping: \(contentType)."
         case .invalidHTTPResponse:
@@ -88,6 +99,7 @@ enum IOSSearchExecutorError: LocalizedError, Equatable {
 struct IOSSearchExecutor {
     static let supportedToolNames: Set<String> = ["search_web", "scrape_web"]
 
+    @MainActor
     static func execute(
         toolInput: String,
         maxResults defaultMaxResults: Int = 5,
@@ -103,6 +115,7 @@ struct IOSSearchExecutor {
         )
     }
 
+    @MainActor
     static func execute(
         toolName: String,
         toolInput: String,
@@ -129,6 +142,41 @@ struct IOSSearchExecutor {
                     maxResults: request.maxResults,
                     transport: transport
                 )
+            case .tavilyAPI:
+                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.TavilyOptions else {
+                    throw IOSSearchExecutorError.unsupportedProvider("Selected Tavily service is missing from settings.")
+                }
+                results = try await searchTavily(request: request, service: service, transport: transport)
+            case .exaAPI:
+                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.ExaOptions else {
+                    throw IOSSearchExecutorError.unsupportedProvider("Selected Exa service is missing from settings.")
+                }
+                results = try await searchExa(request: request, service: service, transport: transport)
+            case .zhipuAPI:
+                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.ZhipuOptions else {
+                    throw IOSSearchExecutorError.unsupportedProvider("Selected Zhipu service is missing from settings.")
+                }
+                results = try await searchZhipu(request: request, service: service, transport: transport)
+            case .braveAPI:
+                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.BraveOptions else {
+                    throw IOSSearchExecutorError.unsupportedProvider("Selected Brave service is missing from settings.")
+                }
+                results = try await searchBrave(request: request, service: service, transport: transport)
+            case .serperAPI:
+                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.SerperOptions else {
+                    throw IOSSearchExecutorError.unsupportedProvider("Selected Serper service is missing from settings.")
+                }
+                results = try await searchSerper(request: request, service: service, transport: transport)
+            case .serpAPI:
+                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.SerpApiOptions else {
+                    throw IOSSearchExecutorError.unsupportedProvider("Selected SerpAPI service is missing from settings.")
+                }
+                results = try await searchSerpAPI(request: request, service: service, transport: transport)
+            case .jinaAPI:
+                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.JinaOptions else {
+                    throw IOSSearchExecutorError.unsupportedProvider("Selected Jina service is missing from settings.")
+                }
+                results = try await searchJina(request: request, service: service, transport: transport)
             case .unsupported:
                 throw IOSSearchExecutorError.unsupportedProvider(
                     selection.fallbackReason ?? "\(selection.providerName) is not implemented on iOS search."
@@ -163,13 +211,27 @@ struct IOSSearchExecutor {
             let descriptor = providerDescriptor(for: selectedService)
             let selectedId = uuidString(selectedService.id)
             if enabledIds.contains(selectedId) {
-                if descriptor.route != .unsupported {
+                if descriptor.route != .unsupported, hasRequiredCredential(selectedService) {
                     return IOSSearchProviderSelection(
                         route: descriptor.route,
                         providerName: descriptor.name,
                         providerType: descriptor.type,
                         serviceId: selectedId,
                         fallbackReason: nil
+                    )
+                }
+                if descriptor.route != .unsupported, !hasRequiredCredential(selectedService) {
+                    if let fallback = executableConfiguredFallback(
+                        services: services,
+                        enabledIds: enabledIds,
+                        excluding: selectedId,
+                        reason: "Selected provider \(descriptor.name) is enabled but has no API key."
+                    ) {
+                        return fallback
+                    }
+                    return builtInFallback(
+                        settings: settings,
+                        reason: "Selected provider \(descriptor.name) is enabled but has no API key."
                     )
                 }
                 if let fallback = executableConfiguredFallback(
@@ -214,6 +276,7 @@ struct IOSSearchExecutor {
         )
     }
 
+    @MainActor
     static func searchDuckDuckGoLite(
         query: String,
         maxResults: Int = 5,
@@ -243,6 +306,7 @@ struct IOSSearchExecutor {
         return results
     }
 
+    @MainActor
     static func searchBingHTML(
         query: String,
         maxResults: Int = 5,
@@ -270,6 +334,221 @@ struct IOSSearchExecutor {
         let results = parseBingHTML(html: html, maxResults: maxResults)
         guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Bing HTML") }
         return results
+    }
+
+    @MainActor
+    static func searchTavily(
+        request: IOSSearchRequest,
+        service: SearchServiceOptions.TavilyOptions,
+        transport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport()
+    ) async throws -> [IOSSearchResult] {
+        let apiKey = try requiredAPIKey(service.apiKey, provider: "Tavily")
+        let topic = searchTopic(from: request.query)
+        let httpRequest = try jsonPOST(
+            url: URL(string: "https://api.tavily.com/search")!,
+            body: [
+                "query": request.query,
+                "max_results": request.maxResults,
+                "search_depth": service.depth.isEmpty ? "advanced" : service.depth,
+                "topic": topic,
+                "include_answer": "advanced"
+            ],
+            headers: ["Authorization": "Bearer \(apiKey)"]
+        )
+        let object = try await jsonResponse(httpRequest, provider: "Tavily", transport: transport)
+        let results = array(object["results"]).compactMap {
+            IOSSearchResult(
+                title: string($0["title"]),
+                url: string($0["url"]),
+                snippet: string($0["content"])
+            )
+        }
+        guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Tavily") }
+        return Array(results.prefix(request.maxResults))
+    }
+
+    @MainActor
+    static func searchExa(
+        request: IOSSearchRequest,
+        service: SearchServiceOptions.ExaOptions,
+        transport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport()
+    ) async throws -> [IOSSearchResult] {
+        let apiKey = try requiredAPIKey(service.apiKey, provider: "Exa")
+        let httpRequest = try jsonPOST(
+            url: URL(string: "https://api.exa.ai/search")!,
+            body: [
+                "query": request.query,
+                "numResults": request.maxResults,
+                "type": "auto",
+                "contents": ["text": true]
+            ],
+            headers: ["Authorization": "Bearer \(apiKey)"]
+        )
+        let object = try await jsonResponse(httpRequest, provider: "Exa", transport: transport)
+        let results = array(object["results"]).compactMap {
+            IOSSearchResult(
+                title: string($0["title"]),
+                url: string($0["url"]),
+                snippet: string($0["text"])
+            )
+        }
+        guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Exa") }
+        return Array(results.prefix(request.maxResults))
+    }
+
+    @MainActor
+    static func searchZhipu(
+        request: IOSSearchRequest,
+        service: SearchServiceOptions.ZhipuOptions,
+        transport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport()
+    ) async throws -> [IOSSearchResult] {
+        let apiKey = try requiredAPIKey(service.apiKey, provider: "Zhipu")
+        let httpRequest = try jsonPOST(
+            url: URL(string: "https://open.bigmodel.cn/api/paas/v4/web_search")!,
+            body: [
+                "search_query": request.query,
+                "search_engine": "search_std",
+                "count": request.maxResults
+            ],
+            headers: ["Authorization": "Bearer \(apiKey)"]
+        )
+        let object = try await jsonResponse(httpRequest, provider: "Zhipu", transport: transport)
+        let results = array(object["search_result"]).compactMap {
+            IOSSearchResult(
+                title: string($0["title"]),
+                url: string($0["link"]),
+                snippet: string($0["content"])
+            )
+        }
+        guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Zhipu") }
+        return Array(results.prefix(request.maxResults))
+    }
+
+    @MainActor
+    static func searchBrave(
+        request: IOSSearchRequest,
+        service: SearchServiceOptions.BraveOptions,
+        transport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport()
+    ) async throws -> [IOSSearchResult] {
+        let apiKey = try requiredAPIKey(service.apiKey, provider: "Brave")
+        var components = URLComponents(string: "https://api.search.brave.com/res/v1/web/search")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: request.query),
+            URLQueryItem(name: "count", value: "\(request.maxResults)")
+        ]
+        guard let url = components?.url else { throw IOSSearchExecutorError.invalidURL }
+        var httpRequest = URLRequest(url: url)
+        httpRequest.httpMethod = "GET"
+        httpRequest.timeoutInterval = 20
+        httpRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        httpRequest.setValue(apiKey, forHTTPHeaderField: "X-Subscription-Token")
+
+        let object = try await jsonResponse(httpRequest, provider: "Brave", transport: transport)
+        let web = object["web"] as? [String: Any]
+        let results = array(web?["results"]).compactMap {
+            IOSSearchResult(
+                title: string($0["title"]),
+                url: string($0["url"]),
+                snippet: string($0["description"])
+            )
+        }
+        guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Brave") }
+        return Array(results.prefix(request.maxResults))
+    }
+
+    @MainActor
+    static func searchSerper(
+        request: IOSSearchRequest,
+        service: SearchServiceOptions.SerperOptions,
+        transport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport()
+    ) async throws -> [IOSSearchResult] {
+        let apiKey = try requiredAPIKey(service.apiKey, provider: "Serper")
+        let endpoint = searchTopic(from: request.query) == "news" ? "news" : "search"
+        let httpRequest = try jsonPOST(
+            url: URL(string: "https://google.serper.dev/\(endpoint)")!,
+            body: ["q": request.query, "num": min(request.maxResults, 20)],
+            headers: ["X-API-KEY": apiKey]
+        )
+        let object = try await jsonResponse(httpRequest, provider: "Serper", transport: transport)
+        let rawItems = array(object["news"]).isEmpty ? array(object["organic"]) : array(object["news"])
+        let results = rawItems.compactMap {
+            IOSSearchResult(
+                title: string($0["title"]),
+                url: string($0["link"]),
+                snippet: string($0["snippet"])
+            )
+        }
+        guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Serper") }
+        return Array(results.prefix(request.maxResults))
+    }
+
+    @MainActor
+    static func searchSerpAPI(
+        request: IOSSearchRequest,
+        service: SearchServiceOptions.SerpApiOptions,
+        transport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport()
+    ) async throws -> [IOSSearchResult] {
+        let apiKey = try requiredAPIKey(service.apiKey, provider: "SerpAPI")
+        var items = [
+            URLQueryItem(name: "engine", value: "google"),
+            URLQueryItem(name: "q", value: request.query),
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "num", value: "\(min(request.maxResults, 20))")
+        ]
+        if searchTopic(from: request.query) == "news" {
+            items.append(URLQueryItem(name: "tbm", value: "nws"))
+        }
+        var components = URLComponents(string: "https://serpapi.com/search.json")
+        components?.queryItems = items
+        guard let url = components?.url else { throw IOSSearchExecutorError.invalidURL }
+        var httpRequest = URLRequest(url: url)
+        httpRequest.httpMethod = "GET"
+        httpRequest.timeoutInterval = 20
+        httpRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let object = try await jsonResponse(httpRequest, provider: "SerpAPI", transport: transport)
+        let rawItems = array(object["news_results"]).isEmpty ? array(object["organic_results"]) : array(object["news_results"])
+        let results = rawItems.compactMap {
+            IOSSearchResult(
+                title: string($0["title"]),
+                url: string($0["link"]),
+                snippet: string($0["snippet"])
+            )
+        }
+        guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("SerpAPI") }
+        return Array(results.prefix(request.maxResults))
+    }
+
+    @MainActor
+    static func searchJina(
+        request: IOSSearchRequest,
+        service: SearchServiceOptions.JinaOptions,
+        transport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport()
+    ) async throws -> [IOSSearchResult] {
+        let urlString = service.searchUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "https://s.jina.ai/"
+            : service.searchUrl
+        guard let url = URL(string: urlString) else { throw IOSSearchExecutorError.invalidURL }
+        var headers = ["Accept": "application/json"]
+        let apiKey = service.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !apiKey.isEmpty {
+            headers["Authorization"] = "Bearer \(apiKey)"
+        }
+        let httpRequest = try jsonPOST(
+            url: url,
+            body: ["q": request.query],
+            headers: headers
+        )
+        let object = try await jsonResponse(httpRequest, provider: "Jina", transport: transport)
+        let results = array(object["data"]).compactMap {
+            IOSSearchResult(
+                title: string($0["title"]),
+                url: string($0["url"]),
+                snippet: string($0["description"]).isEmpty ? string($0["content"]) : string($0["description"])
+            )
+        }
+        guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Jina") }
+        return Array(results.prefix(request.maxResults))
     }
 
     static func searchRequest(from toolInput: String, defaultMaxResults: Int = 5) throws -> IOSSearchRequest {
@@ -382,6 +661,7 @@ struct IOSSearchExecutor {
             .map { $0 }
     }
 
+    @MainActor
     private static func scrapeWeb(
         request: IOSScrapeRequest,
         transport: any IOSSearchHTTPTransport
@@ -439,6 +719,91 @@ struct IOSSearchExecutor {
         return lines.joined(separator: "\n")
     }
 
+    private static func searchService(settings: Settings?, selection: IOSSearchProviderSelection) -> SearchServiceOptions? {
+        guard let serviceId = selection.serviceId else { return nil }
+        return settings?.searchServices.first { uuidString($0.id) == serviceId }
+    }
+
+    private static func hasRequiredCredential(_ service: SearchServiceOptions) -> Bool {
+        let descriptor = providerDescriptor(for: service)
+        guard descriptor.requiresAPIKey else { return true }
+        return !apiKey(for: service).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func apiKey(for service: SearchServiceOptions) -> String {
+        switch service {
+        case let service as SearchServiceOptions.TavilyOptions:
+            service.apiKey
+        case let service as SearchServiceOptions.ExaOptions:
+            service.apiKey
+        case let service as SearchServiceOptions.ZhipuOptions:
+            service.apiKey
+        case let service as SearchServiceOptions.BraveOptions:
+            service.apiKey
+        case let service as SearchServiceOptions.SerperOptions:
+            service.apiKey
+        case let service as SearchServiceOptions.SerpApiOptions:
+            service.apiKey
+        case let service as SearchServiceOptions.JinaOptions:
+            service.apiKey
+        default:
+            ""
+        }
+    }
+
+    private static func requiredAPIKey(_ value: String, provider: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw IOSSearchExecutorError.missingAPIKey(provider) }
+        return trimmed
+    }
+
+    private static func searchTopic(from query: String) -> String {
+        let lower = query.lowercased()
+        if lower.contains("news") || lower.contains("新闻") || lower.contains("latest") || lower.contains("最近") {
+            return "news"
+        }
+        return "general"
+    }
+
+    private static func jsonPOST(url: URL, body: [String: Any], headers: [String: String] = [:]) throws -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+        return request
+    }
+
+    @MainActor
+    private static func jsonResponse(
+        _ request: URLRequest,
+        provider: String,
+        transport: any IOSSearchHTTPTransport
+    ) async throws -> [String: Any] {
+        let (response, data) = try await transport.send(request)
+        guard (200...299).contains(response.statusCode) else {
+            throw IOSSearchExecutorError.httpStatus(provider, response.statusCode)
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw IOSSearchExecutorError.emptyResponse(provider)
+        }
+        return object
+    }
+
+    private static func array(_ value: Any?) -> [[String: Any]] {
+        value as? [[String: Any]] ?? []
+    }
+
+    private static func string(_ value: Any?) -> String {
+        if let value = value as? String { return value.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let number = value as? NSNumber { return number.stringValue }
+        return ""
+    }
+
     private static func builtInFallback(settings: Settings, reason: String) -> IOSSearchProviderSelection {
         if settings.searchBuiltinDuckDuckGoEnabled {
             return IOSSearchProviderSelection(
@@ -477,7 +842,7 @@ struct IOSSearchExecutor {
             let id = uuidString(service.id)
             guard id != excludedId, enabledIds.contains(id) else { continue }
             let descriptor = providerDescriptor(for: service)
-            guard descriptor.route != .unsupported else { continue }
+            guard descriptor.route != .unsupported, hasRequiredCredential(service) else { continue }
             return IOSSearchProviderSelection(
                 route: descriptor.route,
                 providerName: descriptor.name,
@@ -492,41 +857,46 @@ struct IOSSearchExecutor {
     private static func providerDescriptor(for service: SearchServiceOptions) -> IOSSearchProviderDescriptor {
         switch service {
         case is SearchServiceOptions.BingLocalOptions:
-            return IOSSearchProviderDescriptor(name: "Bing HTML", type: "bing_local", route: .bingHTML)
+            return IOSSearchProviderDescriptor(name: "Bing HTML", type: "bing_local", route: .bingHTML, requiresAPIKey: false)
         case is SearchServiceOptions.TavilyOptions:
-            return IOSSearchProviderDescriptor(name: "Tavily", type: "tavily", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Tavily", type: "tavily", route: .tavilyAPI, requiresAPIKey: true)
         case is SearchServiceOptions.ExaOptions:
-            return IOSSearchProviderDescriptor(name: "Exa", type: "exa", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Exa", type: "exa", route: .exaAPI, requiresAPIKey: true)
         case is SearchServiceOptions.ZhipuOptions:
-            return IOSSearchProviderDescriptor(name: "Zhipu", type: "zhipu", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Zhipu", type: "zhipu", route: .zhipuAPI, requiresAPIKey: true)
         case is SearchServiceOptions.SearXNGOptions:
-            return IOSSearchProviderDescriptor(name: "SearXNG", type: "searxng", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "SearXNG", type: "searxng", route: .unsupported, requiresAPIKey: false)
         case is SearchServiceOptions.LinkUpOptions:
-            return IOSSearchProviderDescriptor(name: "LinkUp", type: "linkup", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "LinkUp", type: "linkup", route: .unsupported, requiresAPIKey: true)
         case is SearchServiceOptions.BraveOptions:
-            return IOSSearchProviderDescriptor(name: "Brave", type: "brave", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Brave", type: "brave", route: .braveAPI, requiresAPIKey: true)
         case is SearchServiceOptions.SerperOptions:
-            return IOSSearchProviderDescriptor(name: "Serper", type: "serper", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Serper", type: "serper", route: .serperAPI, requiresAPIKey: true)
         case is SearchServiceOptions.SerpApiOptions:
-            return IOSSearchProviderDescriptor(name: "SerpAPI", type: "serpapi", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "SerpAPI", type: "serpapi", route: .serpAPI, requiresAPIKey: true)
         case is SearchServiceOptions.MetasoOptions:
-            return IOSSearchProviderDescriptor(name: "Metaso", type: "metaso", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Metaso", type: "metaso", route: .unsupported, requiresAPIKey: true)
         case is SearchServiceOptions.OllamaOptions:
-            return IOSSearchProviderDescriptor(name: "Ollama", type: "ollama", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Ollama", type: "ollama", route: .unsupported, requiresAPIKey: true)
         case is SearchServiceOptions.PerplexityOptions:
-            return IOSSearchProviderDescriptor(name: "Perplexity", type: "perplexity", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Perplexity", type: "perplexity", route: .unsupported, requiresAPIKey: true)
         case is SearchServiceOptions.FirecrawlOptions:
-            return IOSSearchProviderDescriptor(name: "Firecrawl", type: "firecrawl", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Firecrawl", type: "firecrawl", route: .unsupported, requiresAPIKey: true)
         case is SearchServiceOptions.JinaOptions:
-            return IOSSearchProviderDescriptor(name: "Jina", type: "jina", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Jina", type: "jina", route: .jinaAPI, requiresAPIKey: false)
         case is SearchServiceOptions.BochaOptions:
-            return IOSSearchProviderDescriptor(name: "Bocha", type: "bocha", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Bocha", type: "bocha", route: .unsupported, requiresAPIKey: true)
         case is SearchServiceOptions.AmberAgentSearchOptions:
-            return IOSSearchProviderDescriptor(name: "AmberAgent", type: "amber_agent", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "AmberAgent", type: "amber_agent", route: .unsupported, requiresAPIKey: true)
         case is SearchServiceOptions.GrokOptions:
-            return IOSSearchProviderDescriptor(name: "Grok", type: "grok", route: .unsupported)
+            return IOSSearchProviderDescriptor(name: "Grok", type: "grok", route: .unsupported, requiresAPIKey: true)
         default:
-            return IOSSearchProviderDescriptor(name: "Search provider", type: String(describing: type(of: service)), route: .unsupported)
+            return IOSSearchProviderDescriptor(
+                name: "Search provider",
+                type: String(describing: type(of: service)),
+                route: .unsupported,
+                requiresAPIKey: false
+            )
         }
     }
 
@@ -738,6 +1108,7 @@ private struct IOSSearchProviderDescriptor {
     let name: String
     let type: String
     let route: IOSSearchRoute
+    let requiresAPIKey: Bool
 }
 
 private extension Array where Element == IOSSearchResult {

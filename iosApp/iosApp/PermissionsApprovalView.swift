@@ -24,7 +24,7 @@ struct PermissionsApprovalView: View {
                 VStack(spacing: 0) {
                     header
 
-                    Text("控制已实现 iOS Agent 工具的使用策略，并进入完整能力页申请系统权限。")
+                    Text("管理 Agent 使用文件、记忆和网页会话前是否需要确认。")
                         .font(.footnote)
                         .foregroundStyle(AmberTheme.muted)
                         .lineSpacing(3)
@@ -87,7 +87,7 @@ struct PermissionsApprovalView: View {
 
     private var approvalPolicySection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已实现工具策略")
+            AmberSectionLabel(text: "工具批准")
             AmberFormGroup {
                 ForEach(Array(approvalCapabilities.enumerated()), id: \.element.id) { index, capability in
                     PermissionPolicyRow(
@@ -107,13 +107,6 @@ struct PermissionsApprovalView: View {
                 }
             }
 
-            Text("当前 file_read_selected、memory_tool 写入与 WebMount 的安全 wm_* 工具会读取这里的策略。memory_tool list 自动执行；create/edit/delete 需要前台批准。WebMount 仍受自己的全局开关、站点启用状态和 URL allowlist 限制；清除 session 必须来自前台用户动作。")
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted2)
-                .lineSpacing(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 7)
         }
     }
 
@@ -129,11 +122,11 @@ struct PermissionsApprovalView: View {
     private func displayedDecisionSummary(for capability: IOSPlatformCapability) -> String {
         switch displayedPolicy(for: capability) {
         case .disabled:
-            "Agent use disabled"
+            "已禁用"
         case .askEveryTime:
-            "Foreground user action required"
+            "使用前询问"
         case .allowOncePerRun:
-            "Foreground user action required"
+            "使用前询问"
         }
     }
 
@@ -214,10 +207,16 @@ private struct PermissionPolicyRow: View {
     }
 
     private var permissionSummary: String {
-        let base = capability.modelToolNames.isEmpty
-            ? capability.requestKind.title
-            : capability.modelToolNames.joined(separator: ", ")
-        return "\(base) · \(decisionSummary)"
+        switch capability.id {
+        case "ios.files.selected_read":
+            return "读取你主动选择的文件 · \(decisionSummary)"
+        case "ios.agent.memory_write":
+            return "新增、修改或删除记忆 · \(decisionSummary)"
+        case "ios.webmount.browser":
+            return "读取或操作已打开的网页会话 · \(decisionSummary)"
+        default:
+            return "\(capability.requestKind.title) · \(decisionSummary)"
+        }
     }
 }
 

@@ -17,60 +17,6 @@ struct BoardView: View {
     @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.dismiss) private var dismiss
 
-    private let handlingRows: [BoardCapabilityRow] = [
-        .init(
-            title: "看板内容",
-            subtitle: "生成后的看板会保存在本机，下次打开继续显示。",
-            value: "可用",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "刷新",
-            subtitle: "当前支持手动刷新；后台定时刷新暂未开放。",
-            value: "手动",
-            color: AmberTheme.muted
-        ),
-        .init(
-            title: "任务与机会",
-            subtitle: "本页聚焦今日摘要，不生成可派发任务或机会卡片。",
-            value: "未开放",
-            color: .gray
-        ),
-        .init(
-            title: "深度阅读",
-            subtitle: "长文深度阅读和专题整理还没有放进今日看板。",
-            value: "未开放",
-            color: AmberTheme.accentAmber
-        )
-    ]
-
-    private let sourceRows: [BoardCapabilityRow] = [
-        .init(
-            title: "通知 / 日历",
-            subtitle: "可读取日历和提醒事项；通知内容暂不读取。",
-            value: "日历可用",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "飞书消息 / 文档",
-            subtitle: "需要先接入账号授权，当前不会读取。",
-            value: "未开放",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "聊天记录",
-            subtitle: "会从最近会话中提取少量与今日相关的线索。",
-            value: "可用",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "热榜",
-            subtitle: "可拉取轻量热榜；网络失败时会显示真实错误。",
-            value: "可用",
-            color: AmberTheme.accentAmber
-        )
-    ]
-
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
@@ -83,9 +29,6 @@ struct BoardView: View {
                         intro
                         manualGenerationSection
                         collectionStatusSection
-                        presetConfigSection
-                        handlingSection
-                        sourceSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -113,7 +56,7 @@ struct BoardView: View {
                let output = recent.markdown.isEmpty ? nil : recent.markdown {
                 generationState = BoardGenerationState(
                     isRunning: false,
-                    message: "上次生成的今日看板（\(recent.boardDate)，\(recent.signalCount) 条信号）— 重启后恢复显示。",
+                    message: "上次生成的深度阅读（\(recent.boardDate)，\(recent.signalCount) 条信号）— 重启后恢复显示。",
                     signals: [],
                     output: output,
                     isError: false
@@ -131,7 +74,7 @@ struct BoardView: View {
             Spacer()
 
             VStack(spacing: 2) {
-                Text("今日看板")
+                Text("深度阅读")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
@@ -144,9 +87,8 @@ struct BoardView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "info.circle", accessibilityLabel: "看板设置", size: 44, symbolSize: 17) {
-                router.navigate(to: .boardSettings)
-            }
+            Color.clear
+                .frame(width: 44, height: 44)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -154,7 +96,7 @@ struct BoardView: View {
     }
 
     private var intro: some View {
-        Text("今日看板会汇总最近聊天、日历提醒、时间线索和轻量热榜，生成一份可保存的今日摘要。需要账号或更高权限的来源不会自动读取。")
+        Text("深度阅读会汇总最近聊天、日历提醒、时间线索和轻量热榜，生成一份可保存的今日摘要。需要账号或更高权限的来源不会自动读取。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -173,11 +115,11 @@ struct BoardView: View {
                         Image(systemName: generationState.isRunning ? "clock.arrow.circlepath" : "sparkles")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(AmberTheme.accent)
-                            .frame(width: 34, height: 34)
+                        .frame(width: 34, height: 34)
                             .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("生成今日看板")
+                            Text("生成深度阅读")
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(AmberTheme.foreground)
                             Text("汇总本机可用线索，并用当前模型配置生成摘要。")
@@ -196,7 +138,7 @@ struct BoardView: View {
                                 ProgressView()
                                     .controlSize(.small)
                             }
-                            Text(generationState.isRunning ? "正在生成…" : "生成今日看板")
+                            Text(generationState.isRunning ? "正在生成…" : "生成深度阅读")
                                 .font(.subheadline.weight(.semibold))
                         }
                         .frame(maxWidth: .infinity)
@@ -244,7 +186,7 @@ struct BoardView: View {
             AmberSectionLabel(text: "采集状态")
             AmberFormGroup {
                 if collectionSnapshot.statuses.isEmpty {
-                    Text(collectionSnapshot.pendingCount > 0 ? "已有 \(collectionSnapshot.pendingCount) 条待使用线索。点击“生成今日看板”开始整理。" : "尚未生成今日看板。点击“生成今日看板”开始整理。")
+                    Text(collectionSnapshot.pendingCount > 0 ? "已有 \(collectionSnapshot.pendingCount) 条待使用线索。点击“生成深度阅读”开始整理。" : "尚未生成深度阅读。点击“生成深度阅读”开始整理。")
                         .font(.caption)
                         .lineSpacing(3)
                         .foregroundStyle(AmberTheme.foreground2)
@@ -306,7 +248,7 @@ struct BoardView: View {
 
                 if collected.isEmpty {
                     repository.markSignalsProcessed(ids: run.batch.consideredIds)
-                    let output = "今日暂无可用于生成看板的本地信号。"
+                    let output = "今日暂无可用于生成深度阅读的本地信号。"
                     IOSBoardPersistence.shared.save(board: .init(
                         boardDate: IOSBoardPersistence.shared.todayBoardDate(),
                         markdown: output,
@@ -348,7 +290,7 @@ struct BoardView: View {
                 let output = try await generateBoard(agent: agent, signals: collected, setting: setting)
                 repository.markSignalsProcessed(ids: run.batch.consideredIds)
                 // [Board MVP] Persist the generated board Markdown by date so it
-                // survives restart and redisplay on next launch. Scope = 今日看板
+                // survives restart and redisplay on next launch. Scope = 深度阅读
                 // 内容 only (no task-flow / BoardItemEntity / dispatch).
                 IOSBoardPersistence.shared.save(board: .init(
                     boardDate: IOSBoardPersistence.shared.todayBoardDate(),
@@ -366,7 +308,7 @@ struct BoardView: View {
                         lastRunError: run.snapshot.lastRunError
                     )
                     generationState = .finished(
-                        message: "已生成今日看板，并保存到本机。",
+                        message: "已生成深度阅读，并保存到本机。",
                         signals: BoardSignalPreviewItem.from(collected),
                         output: output
                     )
@@ -428,62 +370,12 @@ struct BoardView: View {
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
-                    continuation.resume(returning: output ?? "模型未返回今日看板内容。")
+                    continuation.resume(returning: output ?? "模型未返回深度阅读内容。")
                 }
             }
         }
     }
 
-    /// Read-only view of the REAL seeded TodayBoard defaults from
-    /// `IOSSharedSettingsStore.agentRuntime.todayBoard`. Proves the read path;
-    /// does NOT enable board collection/generation.
-    private var presetConfigSection: some View {
-        let b = sharedSettings.agentRuntime.todayBoard
-        return VStack(spacing: 0) {
-            AmberSectionLabel(text: "默认设置")
-            AmberFormGroup {
-                BoardPresetKVRow(title: "启用看板", value: b.enabled ? "默认开" : "默认关")
-                BoardCapabilityDivider()
-                BoardPresetKVRow(title: "启用数据源数", value: "\(b.enabledSources.count)")
-                BoardCapabilityDivider()
-                BoardPresetKVRow(title: "热榜启用数据源数", value: "\(b.hotListEnabledSources.count)")
-                BoardCapabilityDivider()
-                BoardPresetKVRow(title: "热榜刷新间隔（分钟）", value: "\(b.hotListRefreshIntervalMinutes)")
-                BoardCapabilityDivider()
-                BoardPresetKVRow(title: "热榜仅 WiFi", value: b.hotListWifiOnly ? "默认开" : "默认关")
-            }
-        }
-    }
-
-    private var handlingSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "当前支持")
-            AmberFormGroup {
-                ForEach(Array(handlingRows.enumerated()), id: \.element.id) { index, row in
-                    BoardCapabilityStatusRow(row: row)
-                    if index < handlingRows.count - 1 {
-                        BoardCapabilityDivider()
-                    }
-                }
-            }
-        }
-    }
-
-    private var sourceSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "信号来源")
-            AmberFormGroup {
-                ForEach(Array(sourceRows.enumerated()), id: \.element.id) { index, row in
-                    BoardCapabilityStatusRow(row: row)
-                    if index < sourceRows.count - 1 {
-                        BoardCapabilityDivider()
-                    }
-                }
-            }
-
-            BoardCapabilityNote("更多来源会在对应账号和权限接入后开放。")
-        }
-    }
 }
 
 private struct BoardGenerationState {
@@ -557,71 +449,12 @@ private struct BoardSignalPreview: View {
     }
 }
 
-struct BoardCapabilityRow: Identifiable {
-    let id = UUID()
-    let title: String
-    let subtitle: String
-    let value: String
-    let color: Color
-}
-
-struct BoardCapabilityStatusRow: View {
-    let row: BoardCapabilityRow
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                Text(row.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(row.value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(row.color)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(minHeight: 58)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
-    }
-}
-
 struct BoardCapabilityDivider: View {
     var body: some View {
         Rectangle()
             .fill(AmberTheme.borderSoft)
             .frame(height: 0.5)
             .padding(.leading, 14)
-    }
-}
-
-/// Read-only key/value row for a real seeded TodayBoard setting.
-struct BoardPresetKVRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AmberTheme.foreground2)
-        }
-        .frame(minHeight: 46)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .accessibilityLabel("\(title)，\(value)")
     }
 }
 

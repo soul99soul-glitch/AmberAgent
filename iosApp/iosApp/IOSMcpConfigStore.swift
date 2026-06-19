@@ -26,6 +26,14 @@ final class IOSMcpConfigStore {
         persist()
     }
 
+    func upsert(_ server: IOSMcpServerConfig, replacing originalName: String? = nil) {
+        servers.removeAll { existing in
+            existing.name == server.name || (originalName != nil && existing.name == originalName)
+        }
+        servers.append(server)
+        persist()
+    }
+
     @discardableResult
     func importServers(json: String) -> Int {
         let parsed = McpImportParserKt.parseMcpServersFromJson(json: json).compactMap(IOSMcpServerConfig.init)
@@ -38,6 +46,42 @@ final class IOSMcpConfigStore {
     func remove(named name: String) {
         servers.removeAll { $0.name == name }
         persist()
+    }
+
+    @discardableResult
+    func setEnabled(named name: String, enabled: Bool) -> Bool {
+        guard let index = servers.firstIndex(where: { $0.name == name }) else { return false }
+        servers[index] = servers[index].withEnabled(enabled)
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func mergeDiscoveredTools(named name: String, tools discoveredTools: [IOSMcpTool]) -> [IOSMcpTool]? {
+        guard let index = servers.firstIndex(where: { $0.name == name }) else { return nil }
+        let existingByName = Dictionary(uniqueKeysWithValues: servers[index].tools.map { ($0.name, $0) })
+        let merged = discoveredTools.map { discovered in
+            guard let existing = existingByName[discovered.name] else { return discovered }
+            return IOSMcpTool(
+                name: discovered.name,
+                description: discovered.description ?? existing.description,
+                enabled: existing.enabled
+            )
+        }
+        servers[index] = servers[index].withTools(merged)
+        persist()
+        return merged
+    }
+
+    @discardableResult
+    func setToolEnabled(serverName: String, toolName: String, enabled: Bool) -> Bool {
+        guard let index = servers.firstIndex(where: { $0.name == serverName }) else { return false }
+        var tools = servers[index].tools
+        guard let toolIndex = tools.firstIndex(where: { $0.name == toolName }) else { return false }
+        tools[toolIndex] = tools[toolIndex].withEnabled(enabled)
+        servers[index] = servers[index].withTools(tools)
+        persist()
+        return true
     }
 
     private func persist() {

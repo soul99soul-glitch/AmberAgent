@@ -4,6 +4,28 @@ import Observation
 
 // MARK: - IOSConversationStore
 
+struct IOSConversationSearchResult: Identifiable {
+    enum Kind: String {
+        case conversation
+        case message
+
+        var title: String {
+            switch self {
+            case .conversation: "会话"
+            case .message: "消息"
+            }
+        }
+    }
+
+    let id: String
+    let conversationId: KotlinUuid
+    let kind: Kind
+    let title: String
+    let preview: String
+    let highlight: String
+    let updateAt: Int64
+}
+
 /// iOS 端会话生命周期管理器。把 [JsonConversationStorage]（KMP 文件 JSON 存储）包成
 /// SwiftUI 可观察的状态：持有当前会话 + 会话摘要列表。
 ///
@@ -223,6 +245,60 @@ final class IOSConversationStore {
         currentConversation?.currentMessages as? [UIMessage] ?? []
     }
 
+    /// Global search over persisted conversation titles and message text.
+    ///
+    /// Read-only by design: it does not switch current conversation, bump revision,
+    /// or mutate metadata. SearchView decides whether to open a result.
+    func searchConversations(query rawQuery: String, limit: Int = 60) async -> [IOSConversationSearchResult] {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, limit > 0 else { return [] }
+
+        let sourceSummaries: [ConversationSummary]
+        if summaries.isEmpty {
+            sourceSummaries = (try? await storage.listSummaries()) ?? []
+        } else {
+            sourceSummaries = summaries
+        }
+
+        var results: [IOSConversationSearchResult] = []
+        for summary in sourceSummaries {
+            let title = summary.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "新对话" : summary.title
+            let updateAt = summary.updateAt.toEpochMilliseconds()
+
+            if title.localizedCaseInsensitiveContains(query) {
+                results.append(IOSConversationSearchResult(
+                    id: "\(summary.id)-title",
+                    conversationId: summary.id,
+                    kind: .conversation,
+                    title: title,
+                    preview: "\(summary.messageCount) 条消息",
+                    highlight: query,
+                    updateAt: updateAt
+                ))
+                if results.count >= limit { break }
+            }
+
+            guard let conversation = try? await storage.loadConversation(id: summary.id) else { continue }
+            let messages = Self.searchableMessages(in: conversation)
+            for (messageIndex, message) in messages.enumerated() {
+                let text = message.toText().trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty, text.localizedCaseInsensitiveContains(query) else { continue }
+                results.append(IOSConversationSearchResult(
+                    id: "\(summary.id)-message-\(messageIndex)",
+                    conversationId: summary.id,
+                    kind: .message,
+                    title: title,
+                    preview: Self.searchPreview(from: text, around: query),
+                    highlight: query,
+                    updateAt: updateAt
+                ))
+                if results.count >= limit { break }
+            }
+            if results.count >= limit { break }
+        }
+        return results
+    }
+
     /// Read-only export for iOS Board chat-history collection.
     ///
     /// This does not switch `currentConversation`, bump `currentRevision`, mutate metadata,
@@ -242,16 +318,14 @@ final class IOSConversationStore {
             let title = conversation.title.isEmpty ? summary.title : conversation.title
             let tailNodes = Array(conversation.messageNodes.suffix(6))
             let tailTexts = tailNodes.flatMap { node in
-                let messages = node.messages as? [UIMessage] ?? []
-                return messages.compactMap { message -> String? in
+                node.messages.compactMap { message -> String? in
                     let text = message.toText().trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return nil }
                     return "\(Self.boardRoleName(message.role)): \(String(text.prefix(500)))"
                 }
             }
 
-            let fallbackMessages = conversation.currentMessages as? [UIMessage] ?? []
-            let fallbackTexts = fallbackMessages.compactMap { message -> String? in
+            let fallbackTexts = conversation.currentMessages.compactMap { message -> String? in
                 let text = message.toText().trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { return nil }
                 return "\(Self.boardRoleName(message.role)): \(String(text.prefix(500)))"
@@ -276,6 +350,34 @@ final class IOSConversationStore {
         if role == MessageRole.system { return "system" }
         if role == MessageRole.tool { return "tool" }
         return String(describing: role).lowercased()
+    }
+
+    private static func searchableMessages(in conversation: Conversation) -> [UIMessage] {
+        let nodeMessages = conversation.messageNodes.flatMap { node in
+            node.messages
+        }
+        if !nodeMessages.isEmpty {
+            return nodeMessages
+        }
+        return conversation.currentMessages
+    }
+
+    private static func searchPreview(from text: String, around query: String, maxLength: Int = 96) -> String {
+        let compact = text
+            .split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+        guard compact.count > maxLength else { return compact }
+
+        guard let range = compact.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) else {
+            return String(compact.prefix(maxLength)) + "..."
+        }
+
+        let prefix = String(compact[..<range.lowerBound].suffix(28))
+        let remainingLength = max(maxLength - prefix.count, 24)
+        let suffix = String(compact[range.lowerBound...].prefix(remainingLength))
+        let leading = compact.distance(from: compact.startIndex, to: range.lowerBound) > prefix.count ? "..." : ""
+        let trailing = compact.distance(from: range.lowerBound, to: compact.endIndex) > suffix.count ? "..." : ""
+        return leading + prefix + suffix + trailing
     }
 
     /// 替换 currentConversation 并 bump 修订号（驱动 SwiftUI onChange reload）。

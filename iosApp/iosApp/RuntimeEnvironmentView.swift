@@ -3,6 +3,7 @@ import UIKit
 
 struct RuntimeEnvironmentView: View {
     @Bindable var settingsStore: SettingsStore
+    let sharedSettings: IOSSharedSettingsStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var terminalSmokeResult: IOSTerminalJobSnapshot?
@@ -76,7 +77,7 @@ struct RuntimeEnvironmentView: View {
     }
 
     private var intro: some View {
-        Text("终端任务会通过远程 SSH 在你的机器上执行单条命令。当前支持密码认证和命令执行，交互式 shell、私钥和文件同步暂不开放。")
+        Text("终端任务会通过远程 SSH 在你的机器上执行单条命令。当前支持密码认证和命令执行，交互式 shell、私钥和文件同步当前不可用。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(3)
@@ -110,8 +111,8 @@ struct RuntimeEnvironmentView: View {
 
             AmberFormGroup {
                 RuntimeToggleRow(
-                    title: "启用实验性运行时",
-                    subtitle: IOSTerminalBuildPolicy.experimentalRuntimesLinked ? "允许选择 Remote Mosh / iSH 等实验性运行时" : "此稳定版本未链接实验性运行时代码",
+                    title: "启用可选运行时",
+                    subtitle: IOSTerminalBuildPolicy.experimentalRuntimesLinked ? "允许选择 Remote Mosh / iSH 等可选运行时" : "此稳定版本未链接可选运行时代码",
                     isOn: settingsStore.terminalExperimentalRuntimesEnabled,
                     isEnabled: IOSTerminalBuildPolicy.experimentalRuntimesLinked
                 ) {
@@ -249,7 +250,7 @@ struct RuntimeEnvironmentView: View {
                 RuntimeMatrixCard(capability: capability)
                     .padding(.bottom, 8)
             }
-            Text("当前推荐使用 Remote SSH。它支持密码认证和单条命令执行；交互式终端、安装器与文件同步暂不开放。")
+            Text("当前推荐使用 Remote SSH。它支持密码认证和单条命令执行；交互式终端、安装器与文件同步当前不可用。")
                 .font(.caption)
                 .foregroundStyle(AmberTheme.muted2)
                 .lineSpacing(2)
@@ -259,6 +260,19 @@ struct RuntimeEnvironmentView: View {
     }
 
     private func testTerminalRuntime() {
+        guard sharedSettings.isCapabilityGateEnabled(.remoteRuntime) else {
+            terminalSmokeResult = IOSTerminalJobSnapshot(
+                id: "remote-runtime-disabled",
+                runtime: settingsStore.terminalDefaultRuntime,
+                status: IOSTerminalJobStatus.failed.rawValue,
+                exitCode: nil,
+                outputTail: "",
+                startedAt: Date(),
+                updatedAt: Date(),
+                error: IOSCapabilityGate.remoteRuntime.disabledReason
+            )
+            return
+        }
         terminalSmokeResult = nil
         let command = settingsStore.terminalDefaultRuntime == .localIOSTools ? "pwd" : "echo amber-terminal-smoke"
         Task {
@@ -309,6 +323,10 @@ struct RuntimeEnvironmentView: View {
     }
 
     private func testSSHConnection() {
+        guard sharedSettings.isCapabilityGateEnabled(.remoteRuntime) else {
+            sshStatus = .failure(IOSCapabilityGate.remoteRuntime.disabledReason)
+            return
+        }
         do {
             var draft = sshProfileDraft
             draft.port = Int(sshPortDraft) ?? 0
@@ -382,6 +400,7 @@ struct RuntimeEnvironmentView: View {
     }
 
     private func verifySSHPassword(profile: IOSSSHProfile, password: String) async -> Bool {
+        guard sharedSettings.isCapabilityGateEnabled(.remoteRuntime) else { return false }
         let started = await IOSTerminalRuntime.shared.startJob(
             command: "echo amber-terminal-auth-check",
             runtime: .remoteSSH,
@@ -462,8 +481,8 @@ private struct RuntimeChoiceRow: View {
         switch runtime {
         case .remoteSSH: "在远程机器上通过 SSH 执行单条命令"
         case .localIOSTools: "轻量本地能力验证，不是 Termux 替代品"
-        case .remoteMosh: "实验性，默认不可作为稳定执行环境"
-        case .ishExperimental: "实验性，不进入 Stable 主推路径"
+        case .remoteMosh: "可选运行时，默认不可作为稳定执行环境"
+        case .ishExperimental: "可选运行时，不进入 Stable 主推路径"
         }
     }
 }

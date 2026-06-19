@@ -31,39 +31,8 @@ struct SyncBackupView: View {
         self._remoteStatus = State(initialValue: sharedSettings.remoteSyncStatus)
     }
 
-    private var sync: SyncSettings { sharedSettings.snapshot.syncSettings }
-
-    private var evidenceRows: [SyncBackupRow] {
-        [
-            .init(
-                title: "自动同步",
-                subtitle: "自动定时同步暂未开放，当前需要手动上传或恢复。",
-                value: sync.autoSyncEnabled ? "已开启" : "未开启",
-                color: AmberTheme.accentGreen
-            ),
-            .init(
-                title: "同步模式",
-                subtitle: "当前应用保存的同步模式。",
-                value: sync.autoSyncEnabled ? "启用" : "关闭",
-                color: sync.autoSyncEnabled ? AmberTheme.accentGreen : AmberTheme.muted2
-            ),
-            .init(
-                title: "模式",
-                subtitle: "用于恢复时判断配置来源。",
-                value: String(describing: sync.mode),
-                color: AmberTheme.foreground2
-            ),
-            .init(
-                title: "设备",
-                subtitle: "用于区分不同设备生成的备份。",
-                value: sync.deviceId.isEmpty ? "(空)" : String(sync.deviceId.prefix(12)) + "…",
-                color: AmberTheme.foreground2
-            ),
-        ]
-    }
-
     private var headerSubtitle: String {
-        "本地备份 · 文件夹同步 · WebDAV"
+        sharedSettings.isCapabilityGateEnabled(.remoteSync) ? "本地备份 · 文件夹同步 · WebDAV" : "本地设置备份"
     }
 
     private var currentRows: [SyncBackupRow] {
@@ -97,45 +66,16 @@ struct SyncBackupView: View {
                 subtitle: "上传、下载或恢复失败时会显示在这里。",
                 value: remoteStatus.lastError.isEmpty ? "无" : "有错误",
                 color: remoteStatus.lastError.isEmpty ? AmberTheme.accentGreen : AmberTheme.accentRed
-            ),
-            .init(
-                title: "加密口令",
-                subtitle: "可设置口令保护备份；留空也可以导出。",
-                value: "可用",
-                color: AmberTheme.accentGreen
             )
         ]
     }
 
-    private let archiveRows: [SyncBackupRow] = [
-        .init(
-            title: "设置与偏好",
-            subtitle: "包含模型、提供商、搜索、记忆、权限策略等应用设置。",
-            value: "包含",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "聊天记录",
-            subtitle: "当前备份不包含历史会话内容。",
-            value: "不包含",
-            color: AmberTheme.muted2
-        ),
-        .init(
-            title: "本地文件",
-            subtitle: "当前备份不包含附件、图片、技能文件或缓存。",
-            value: "不包含",
-            color: AmberTheme.muted2
-        ),
-        .init(
-            title: "恢复方式",
-            subtitle: "恢复前必须先预览，确认后才会写入当前设置。",
-            value: "手动",
-            color: AmberTheme.accentGreen
-        )
-    ]
-
     private var providerRemoteRevision: String {
         remoteStatus.remoteRevision(for: providerKind)
+    }
+
+    private var selectableRemoteProviders: [IOSRemoteProviderKind] {
+        [.localFolder, .webDAV]
     }
 
     var body: some View {
@@ -149,11 +89,13 @@ struct SyncBackupView: View {
                     VStack(spacing: 0) {
                         intro
                         localBackupSection
-                        remoteStatusSection
-                        remoteProviderSection
-                        remoteSnapshotSection
-                        restorePreviewSection
-                        archiveScopeSection
+                        remoteSyncGateSection
+                        if sharedSettings.isCapabilityGateEnabled(.remoteSync) {
+                            remoteStatusSection
+                            remoteProviderSection
+                            remoteSnapshotSection
+                            restorePreviewSection
+                        }
                     }
                     .padding(.bottom, 36)
                 }
@@ -224,7 +166,7 @@ struct SyncBackupView: View {
     }
 
     private var intro: some View {
-        Text("导出一份加密备份，或把备份上传到本机文件夹和 WebDAV。恢复前会先展示预览，确认后才会应用到当前设置。")
+        Text("导出一份加密设置备份，或预览本地备份文件后手动恢复。远端同步是高级功能，需要单独开启。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -268,6 +210,48 @@ struct SyncBackupView: View {
         }
     }
 
+    private var remoteSyncGateSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "远端同步")
+            AmberFormGroup {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(AmberTheme.accentCyan)
+                        .frame(width: 28, height: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("启用远端同步")
+                            .font(.body)
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text(sharedSettings.isCapabilityGateEnabled(.remoteSync) ? "已开启 · 可使用本机文件夹和 WebDAV" : "未开启 · 仅保留本地备份")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { sharedSettings.isCapabilityGateEnabled(.remoteSync) },
+                            set: { sharedSettings.setCapabilityGate(.remoteSync, enabled: $0) }
+                        )
+                    )
+                    .labelsHidden()
+                    .tint(AmberTheme.accent)
+                    .accessibilityLabel("启用远端同步")
+                }
+                .frame(minHeight: 58)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 5)
+            }
+            if !sharedSettings.isCapabilityGateEnabled(.remoteSync) {
+                SyncBackupNote("关闭时不会显示 WebDAV、远端快照或上传下载操作。Google Drive 和 S3 当前不可用。")
+            }
+        }
+    }
+
     private var remoteStatusSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "远端同步状态")
@@ -291,7 +275,7 @@ struct SyncBackupView: View {
             AmberFormGroup {
                 VStack(alignment: .leading, spacing: 12) {
                     Picker("同步位置", selection: $providerKind) {
-                        ForEach(IOSRemoteProviderKind.allCases) { kind in
+                        ForEach(selectableRemoteProviders) { kind in
                             Text(kind.displayName).tag(kind)
                         }
                     }
@@ -320,13 +304,13 @@ struct SyncBackupView: View {
                         }
                         .textFieldStyle(.roundedBorder)
                     } else {
-                        Text("\(providerKind.displayName) 暂未开放。请先使用本机文件夹或 WebDAV。")
+                        Text("\(providerKind.displayName) 当前不可用。请使用本机文件夹或 WebDAV。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    if let conflict = pendingConflict {
+                    if pendingConflict != nil {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("检测到远端冲突")
                                 .font(.caption.weight(.semibold))
@@ -498,35 +482,6 @@ struct SyncBackupView: View {
         }
     }
 
-    private var currentHandlingSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "iOS 当前处理")
-            AmberFormGroup {
-                ForEach(Array(currentRows.enumerated()), id: \.element.id) { index, row in
-                    SyncBackupStatusRow(row: row)
-                    if index < currentRows.count - 1 {
-                        SyncBackupDivider()
-                    }
-                }
-            }
-        }
-    }
-
-    private var archiveScopeSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "归档范围")
-            AmberFormGroup {
-                ForEach(Array(archiveRows.enumerated()), id: \.element.id) { index, row in
-                    SyncBackupStatusRow(row: row)
-                    if index < archiveRows.count - 1 {
-                        SyncBackupDivider()
-                    }
-                }
-            }
-
-        }
-    }
-
     private func exportSettingsBackup() {
         do {
             let data = try IOSSyncBackup.export(settings: sharedSettings.snapshot, passphrase: passphrase)
@@ -682,9 +637,9 @@ struct SyncBackupView: View {
             }
             return IOSWebDAVSyncProvider(config: config)
         case .googleDrive:
-            return IOSUnavailableRemoteSyncProvider(kind: .googleDrive, reason: "Google Drive 暂未开放")
+            return IOSUnavailableRemoteSyncProvider(kind: .googleDrive, reason: "Google Drive 当前不可用")
         case .s3:
-            return IOSUnavailableRemoteSyncProvider(kind: .s3, reason: "S3 暂未开放")
+            return IOSUnavailableRemoteSyncProvider(kind: .s3, reason: "S3 当前不可用")
         }
     }
 

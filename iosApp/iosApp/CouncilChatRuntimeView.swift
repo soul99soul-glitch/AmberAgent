@@ -4,15 +4,20 @@ import Observation
 
 struct CouncilChatRuntimeView: View {
     let settingsStore: SettingsStore
+    let sharedSettings: IOSSharedSettingsStore
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: CouncilChatViewModel
     @FocusState private var isComposerFocused: Bool
 
-    init(settingsStore: SettingsStore) {
+    init(settingsStore: SettingsStore, sharedSettings: IOSSharedSettingsStore) {
         self.settingsStore = settingsStore
-        self._viewModel = State(initialValue: CouncilChatViewModel(settingsStore: settingsStore))
+        self.sharedSettings = sharedSettings
+        self._viewModel = State(initialValue: CouncilChatViewModel(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettings
+        ))
     }
 
     var body: some View {
@@ -47,12 +52,12 @@ struct CouncilChatRuntimeView: View {
             }
 
             VStack(spacing: 2) {
-                Text("Council Chat")
+                Text("实时议会")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
                 HStack(spacing: 5) {
-                    Text("Host · \(viewModel.hostDisplayName)")
+                    Text("主持 · \(viewModel.hostDisplayName)")
                     Text("·")
                     Text(viewModel.roomStateText)
                 }
@@ -166,7 +171,7 @@ struct CouncilChatRuntimeView: View {
                 .buttonStyle(.plain)
                 .disabled(viewModel.isRunning)
 
-                TextField("Message the council...", text: $viewModel.inputText, axis: .vertical)
+                TextField("发给模型议会...", text: $viewModel.inputText, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.plain)
                     .font(.body)
@@ -227,19 +232,19 @@ struct CouncilChatRuntimeView: View {
     private var controlStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                CouncilComposerChip(title: "@Host", systemImage: "crown") {
+                CouncilComposerChip(title: "@主持", systemImage: "crown") {
                     viewModel.insertHostMention()
                     isComposerFocused = true
                 }
-                CouncilComposerChip(title: "Invite model", systemImage: "person.badge.plus") {
+                CouncilComposerChip(title: "邀请席位", systemImage: "person.badge.plus") {
                     viewModel.insertInviteTemplate()
                     isComposerFocused = true
                 }
-                CouncilComposerChip(title: "Let guests respond", systemImage: "arrow.triangle.branch") {
+                CouncilComposerChip(title: "席位回应", systemImage: "arrow.triangle.branch") {
                     viewModel.insertGuestResponseTemplate()
                     isComposerFocused = true
                 }
-                CouncilComposerChip(title: "Synthesize", systemImage: "checkmark.seal") {
+                CouncilComposerChip(title: "主持总结", systemImage: "checkmark.seal") {
                     viewModel.requestSynthesis()
                     isComposerFocused = true
                 }
@@ -305,7 +310,7 @@ private struct CouncilParticipantChip: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Mention \(participant.displayName)")
+        .accessibilityLabel("提及 \(participant.displayName)")
     }
 }
 
@@ -411,7 +416,7 @@ private struct CouncilDiscussionDetailSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Discussion Detail")
+                    Text("议会详情")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
                     Text(detail.statusLine)
@@ -419,10 +424,10 @@ private struct CouncilDiscussionDetailSheet: View {
                         .foregroundStyle(AmberTheme.muted)
                 }
 
-                CouncilDetailGroup(title: "Objective", bodyText: detail.objective)
-                CouncilDetailGroup(title: "Participants", bodyText: detail.participantSummary)
-                CouncilDetailGroup(title: "Budget", bodyText: detail.budgetSummary)
-                CouncilDetailGroup(title: "Transcript", bodyText: detail.transcript)
+                CouncilDetailGroup(title: "目标", bodyText: detail.objective)
+                CouncilDetailGroup(title: "席位", bodyText: detail.participantSummary)
+                CouncilDetailGroup(title: "运行", bodyText: detail.budgetSummary)
+                CouncilDetailGroup(title: "记录", bodyText: detail.transcript)
             }
             .padding(20)
         }
@@ -439,7 +444,7 @@ private struct CouncilDetailGroup: View {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AmberTheme.muted)
-            Text(bodyText.isEmpty ? "None" : bodyText)
+            Text(bodyText.isEmpty ? "暂无" : bodyText)
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.foreground2)
                 .textSelection(.enabled)
@@ -463,6 +468,7 @@ final class CouncilChatViewModel {
     let participants: [CouncilParticipant]
 
     @ObservationIgnored private let settingsStore: SettingsStore
+    @ObservationIgnored private let sharedSettings: IOSSharedSettingsStore
     @ObservationIgnored private lazy var provider = OpenAIKmpProvider()
     @ObservationIgnored private let streamJobBox = CouncilStreamJobBox()
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
@@ -472,17 +478,19 @@ final class CouncilChatViewModel {
     private var activeSpeakerId: String?
     private var invitedSpeakerIds: Set<String> = []
 
-    init(settingsStore: SettingsStore) {
+    init(settingsStore: SettingsStore, sharedSettings: IOSSharedSettingsStore) {
         self.settingsStore = settingsStore
+        self.sharedSettings = sharedSettings
         self.participants = CouncilParticipant.defaults(hostName: Self.hostName(for: settingsStore.modelId))
+            + CouncilParticipant.customSeats(from: sharedSettings.savedCouncilSeats)
         self.messages = [
             CouncilChatMessage(
                 kind: .system,
-                author: "Council",
+                author: "议会",
                 body: "模型议会已就绪。输入一个问题后，我会邀请不同视角的席位接力讨论。",
                 systemImage: "person.3.sequence",
                 tint: AmberTheme.accentIndigo,
-                subtitle: "ready"
+                subtitle: "就绪"
             )
         ]
     }
@@ -504,7 +512,7 @@ final class CouncilChatViewModel {
         if isRunning {
             return selectedMode.runningState
         }
-        return "Ready"
+        return "就绪"
     }
 
     var lastMessageBody: String {
@@ -552,7 +560,7 @@ final class CouncilChatViewModel {
         currentObjective = text
         appendMessage(
             kind: .user,
-            author: "You",
+            author: "你",
             body: text,
             systemImage: "person.fill",
             tint: AmberTheme.accent,
@@ -576,20 +584,20 @@ final class CouncilChatViewModel {
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         isRunning = false
-        appendDivider("Stopped")
+        appendDivider("已停止")
         appendMessage(
             kind: .system,
-            author: "Council",
+            author: "议会",
             body: "本轮议会已停止。",
             systemImage: "stop.circle",
             tint: AmberTheme.accentRed,
-            subtitle: "cancelled"
+            subtitle: "已取消"
         )
-        updateDetail(status: "Cancelled")
+        updateDetail(status: "已停止")
     }
 
     func showCurrentDetail() {
-        selectedDetail = selectedDetail ?? makeDetail(status: isRunning ? "Running" : "Ready")
+        selectedDetail = selectedDetail ?? makeDetail(status: isRunning ? selectedMode.runningState : "就绪")
     }
 
     private func runDiscussion(objective: String, guests: [CouncilParticipant]) async {
@@ -604,7 +612,7 @@ final class CouncilChatViewModel {
             isRunning = false
             streamJobBox.job = nil
             activeContinuation = nil
-            updateDetail(status: "Ready")
+            updateDetail(status: "就绪")
         }
 
         let host = participants.first(where: \.isHost) ?? participants[0]
@@ -612,7 +620,7 @@ final class CouncilChatViewModel {
         if selectedMode != .synthesize {
             let openingId = appendSpeakingMessage(
                 speaker: host,
-                subtitle: "host · \(currentModelId)"
+                subtitle: "主持 · \(currentModelId)"
             )
             _ = await generateIntoMessage(
                 messageId: openingId,
@@ -632,12 +640,12 @@ final class CouncilChatViewModel {
                 body: directive,
                 systemImage: host.systemImage,
                 tint: host.tint,
-                subtitle: "inviting \(guest.displayName)"
+                subtitle: "邀请 \(guest.displayName)"
             )
 
             let messageId = appendSpeakingMessage(
                 speaker: guest,
-                subtitle: "\(guest.modelHint) · invited by \(host.displayName)"
+                subtitle: "\(modelLabel(for: guest)) · \(host.displayName) 邀请"
             )
             _ = await generateIntoMessage(
                 messageId: messageId,
@@ -648,10 +656,10 @@ final class CouncilChatViewModel {
             if Task.isCancelled { return }
         }
 
-        appendDivider("Host synthesis")
+        appendDivider("主持总结")
         let synthesisId = appendSpeakingMessage(
             speaker: host,
-            subtitle: "synthesis · \(currentModelId)"
+            subtitle: "总结 · \(currentModelId)"
         )
         _ = await generateIntoMessage(
             messageId: synthesisId,
@@ -668,13 +676,17 @@ final class CouncilChatViewModel {
         userPrompt: String
     ) async -> String {
         activeSpeakerId = speaker.id
-        let result = await streamText(systemPrompt: systemPrompt, userPrompt: userPrompt) { [weak self] text in
-            self?.updateMessage(messageId, body: text.isEmpty ? "Thinking..." : text, status: .speaking)
+        let result = await streamText(
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            modelId: modelId(for: speaker)
+        ) { [weak self] text in
+            self?.updateMessage(messageId, body: text.isEmpty ? "思考中..." : text, status: .speaking)
         }
         activeContinuation = nil
         streamJobBox.job = nil
         if !Task.isCancelled {
-            updateMessage(messageId, body: result.isEmpty ? "No output." : result, status: .completed)
+            updateMessage(messageId, body: result.isEmpty ? "没有输出。" : result, status: .completed)
         }
         activeSpeakerId = nil
         updateDetail(status: selectedMode.runningState)
@@ -684,10 +696,11 @@ final class CouncilChatViewModel {
     private func streamText(
         systemPrompt: String,
         userPrompt: String,
+        modelId: String,
         onChunk: @escaping @MainActor (String) -> Void
     ) async -> String {
         let providerSetting = makeProviderSetting()
-        let params = makeTextGenerationParams()
+        let params = makeTextGenerationParams(modelId: modelId)
         let initialMessages = [
             UIMessage.companion.system(prompt: systemPrompt),
             UIMessage.companion.user(prompt: userPrompt)
@@ -760,7 +773,7 @@ final class CouncilChatViewModel {
             status: status
         )
         messages.append(message)
-        updateDetail(status: isRunning ? selectedMode.runningState : "Ready")
+        updateDetail(status: isRunning ? selectedMode.runningState : "就绪")
         return message.id
     }
 
@@ -768,7 +781,7 @@ final class CouncilChatViewModel {
         appendMessage(
             kind: speaker.isHost ? .host : .guest,
             author: speaker.displayName,
-            body: "Thinking...",
+            body: "思考中...",
             systemImage: speaker.systemImage,
             tint: speaker.tint,
             subtitle: subtitle,
@@ -780,7 +793,7 @@ final class CouncilChatViewModel {
         messages.append(
             CouncilChatMessage(
                 kind: .divider,
-                author: "Council",
+                author: "议会",
                 body: text,
                 systemImage: "circle.grid.cross",
                 tint: AmberTheme.muted,
@@ -916,10 +929,12 @@ final class CouncilChatViewModel {
             participantSummary: participants
                 .filter { $0.isHost || invitedSpeakerIds.contains($0.id) }
                 .map { participant in
-                    participant.isHost ? "Host: \(participant.displayName) (\(currentModelId))" : "\(participant.displayName): \(participant.roleDescription)"
+                    participant.isHost
+                        ? "主持：\(participant.displayName)（\(currentModelId)）"
+                        : "\(participant.displayName)：\(participant.roleDescription)（\(modelLabel(for: participant))）"
                 }
                 .joined(separator: "\n"),
-            budgetSummary: "Mode: \(selectedMode.title)\nMax guest turns: 3\nProvider path: iOS OpenAI-compatible provider\nCurrent model setting: \(currentModelId)",
+            budgetSummary: "模式：\(selectedMode.title)\n最多席位轮次：3\n提供商：当前 OpenAI-compatible 配置\n主持模型：\(currentModelId)",
             transcript: roomTranscript(limit: 80)
         )
     }
@@ -948,8 +963,7 @@ final class CouncilChatViewModel {
         )
     }
 
-    private func makeTextGenerationParams() -> TextGenerationParams {
-        let modelId = currentModelId
+    private func makeTextGenerationParams(modelId: String) -> TextGenerationParams {
         let abilities = ModelRegistry.shared.MODEL_ABILITIES.getData(modelId: modelId) as? [ModelAbility] ?? []
         let model = Model(
             modelId: modelId,
@@ -975,6 +989,14 @@ final class CouncilChatViewModel {
             customHeaders: [],
             customBody: []
         )
+    }
+
+    private func modelId(for participant: CouncilParticipant) -> String {
+        participant.modelId?.trimmedNilIfBlank ?? currentModelId
+    }
+
+    private func modelLabel(for participant: CouncilParticipant) -> String {
+        participant.modelId?.trimmedNilIfBlank ?? participant.modelHint
     }
 
     private static func hostName(for modelId: String) -> String {
@@ -1006,9 +1028,9 @@ enum CouncilDiscussionMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .explore: "Explore"
-        case .debate: "Debate"
-        case .synthesize: "Synthesize"
+        case .explore: "探索"
+        case .debate: "辩论"
+        case .synthesize: "总结"
         }
     }
 
@@ -1022,25 +1044,25 @@ enum CouncilDiscussionMode: String, CaseIterable, Identifiable {
 
     var intent: String {
         switch self {
-        case .explore: "broaden information, discover options, and brainstorm early directions"
-        case .debate: "challenge assumptions, find blind spots, and reduce decision risk"
-        case .synthesize: "host synthesizes the room into a decision and next step"
+        case .explore: "扩展信息面、发现选项、形成早期方向"
+        case .debate: "挑战假设、发现盲区、降低决策风险"
+        case .synthesize: "由主持人综合讨论，给出决策与下一步"
         }
     }
 
     var runningState: String {
         switch self {
-        case .explore: "Exploring"
-        case .debate: "Debating"
-        case .synthesize: "Finalizing"
+        case .explore: "探索中"
+        case .debate: "辩论中"
+        case .synthesize: "总结中"
         }
     }
 
     var openingDivider: String {
         switch self {
-        case .explore: "Explore · Opening"
-        case .debate: "Debate · Cross-response"
-        case .synthesize: "Host synthesis"
+        case .explore: "探索 · 开场"
+        case .debate: "辩论 · 交叉回应"
+        case .synthesize: "主持总结"
         }
     }
 
@@ -1079,6 +1101,31 @@ struct CouncilParticipant: Identifiable {
     let tint: Color
     let isHost: Bool
     let modelHint: String
+    let modelId: String?
+
+    init(
+        id: String,
+        handle: String,
+        displayName: String,
+        roleDescription: String,
+        shortLens: String,
+        systemImage: String,
+        tint: Color,
+        isHost: Bool,
+        modelHint: String,
+        modelId: String? = nil
+    ) {
+        self.id = id
+        self.handle = handle
+        self.displayName = displayName
+        self.roleDescription = roleDescription
+        self.shortLens = shortLens
+        self.systemImage = systemImage
+        self.tint = tint
+        self.isHost = isHost
+        self.modelHint = modelHint
+        self.modelId = modelId?.trimmedNilIfBlank
+    }
 
     static func defaults(hostName: String) -> [CouncilParticipant] {
         [
@@ -1086,69 +1133,103 @@ struct CouncilParticipant: Identifiable {
                 id: "host",
                 handle: "host",
                 displayName: "Host · \(hostName)",
-                roleDescription: "room owner, facilitator, moderator, and synthesizer",
+                roleDescription: "主持、串联、追问和综合",
                 shortLens: "主持与综合",
                 systemImage: "crown",
                 tint: AmberTheme.accent,
                 isHost: true,
-                modelHint: "main assistant"
+                modelHint: "主模型"
             ),
             CouncilParticipant(
                 id: "deepseek",
                 handle: "DeepSeek",
                 displayName: "DeepSeek",
-                roleDescription: "structured reasoning, assumptions, and first-principles analysis",
+                roleDescription: "结构化推理、假设拆解和第一性原理分析",
                 shortLens: "结构化推理",
                 systemImage: "brain.head.profile",
                 tint: AmberTheme.accentIndigo,
                 isHost: false,
-                modelHint: "reasoning lens"
+                modelHint: "推理视角"
             ),
             CouncilParticipant(
                 id: "glm",
                 handle: "GLM",
                 displayName: "GLM",
-                roleDescription: "Chinese user intuition, expression, and product framing",
+                roleDescription: "中文用户直觉、表达和产品叙事",
                 shortLens: "中文用户心智",
                 systemImage: "text.bubble",
                 tint: AmberTheme.accentGreen,
                 isHost: false,
-                modelHint: "language lens"
+                modelHint: "语言视角"
             ),
             CouncilParticipant(
                 id: "gemini",
                 handle: "Gemini",
                 displayName: "Gemini",
-                roleDescription: "multimodal, UX, and mobile interaction perspective",
+                roleDescription: "多模态、用户体验和移动端交互视角",
                 shortLens: "多模态与交互",
                 systemImage: "camera.metering.matrix",
                 tint: AmberTheme.accentCyan,
                 isHost: false,
-                modelHint: "multimodal lens"
+                modelHint: "多模态视角"
             ),
             CouncilParticipant(
                 id: "risk",
                 handle: "Risk",
                 displayName: "Risk",
-                roleDescription: "risk review, failure modes, privacy, cost, loops, and safety boundaries",
+                roleDescription: "风险复核、失败模式、隐私、成本、循环和安全边界",
                 shortLens: "风险与边界",
                 systemImage: "exclamationmark.shield",
                 tint: AmberTheme.accentRed,
                 isHost: false,
-                modelHint: "risk lens"
+                modelHint: "风险视角"
             ),
             CouncilParticipant(
                 id: "opponent",
                 handle: "Opponent",
                 displayName: "Opponent",
-                roleDescription: "deliberate opposition, counterexamples, and tradeoff pressure",
+                roleDescription: "反方质询、反例和取舍压力测试",
                 shortLens: "反方质询",
                 systemImage: "hand.raised",
                 tint: AmberTheme.accentAmber,
                 isHost: false,
-                modelHint: "critique lens"
+                modelHint: "质询视角"
             )
         ]
+    }
+
+    static func customSeats(from savedSeats: [[String: String]]) -> [CouncilParticipant] {
+        let palette = [
+            AmberTheme.accentCyan,
+            AmberTheme.accentGreen,
+            AmberTheme.accentAmber,
+            AmberTheme.accentIndigo,
+            AmberTheme.accentRed
+        ]
+
+        return savedSeats.enumerated().compactMap { index, seat in
+            guard let name = seat["name"]?.trimmedNilIfBlank else { return nil }
+            let role = seat["role"]?.trimmedNilIfBlank ?? "自定义视角"
+            let modelId = seat["modelId"]?.trimmedNilIfBlank
+            return CouncilParticipant(
+                id: seat["seatId"]?.trimmedNilIfBlank ?? "custom-\(index)",
+                handle: makeHandle(from: name, fallback: "seat\(index + 1)"),
+                displayName: name,
+                roleDescription: role,
+                shortLens: role,
+                systemImage: "person.crop.circle.badge.checkmark",
+                tint: palette[index % palette.count],
+                isHost: false,
+                modelHint: modelId ?? "当前模型",
+                modelId: modelId
+            )
+        }
+    }
+
+    private static func makeHandle(from name: String, fallback: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutSpaces = trimmed.filter { !$0.isWhitespace }
+        return withoutSpaces.isEmpty ? fallback : withoutSpaces
     }
 }
 
@@ -1159,9 +1240,9 @@ enum CouncilParticipantState: String {
 
     var label: String {
         switch self {
-        case .idle: "idle"
-        case .invited: "invited"
-        case .speaking: "speaking"
+        case .idle: "待命"
+        case .invited: "已邀请"
+        case .speaking: "发言中"
         }
     }
 }
@@ -1198,7 +1279,7 @@ struct CouncilChatMessage: Identifiable {
 
     var displayBody: String {
         if status == .speaking && body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Thinking..."
+            return "思考中..."
         }
         return body
     }
@@ -1249,9 +1330,16 @@ struct CouncilDiscussionDetail: Identifiable {
     let transcript: String
 }
 
+private extension String {
+    var trimmedNilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 #Preview {
     NavigationStack {
-        CouncilChatRuntimeView(settingsStore: SettingsStore())
+        CouncilChatRuntimeView(settingsStore: SettingsStore(), sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
     }
 }

@@ -39,6 +39,61 @@ final class IOSMcpConfigStoreTests: XCTestCase {
         XCTAssertEqual(store.servers, [.sse(name: "search", url: "https://example.com/sse")])
     }
 
+    func testSetEnabledPersistsServerToggle() {
+        let defaults = isolatedDefaults()
+        let store = IOSMcpConfigStore(userDefaults: defaults)
+        store.add(.streamableHTTP(name: "docs", url: "https://example.com/mcp", headers: ["Authorization": "Bearer token"]))
+
+        XCTAssertTrue(store.setEnabled(named: "docs", enabled: false))
+        XCTAssertFalse(store.setEnabled(named: "missing", enabled: true))
+
+        let expected = IOSMcpServerConfig.streamableHTTP(
+            name: "docs",
+            url: "https://example.com/mcp",
+            headers: ["Authorization": "Bearer token"],
+            enabled: false
+        )
+        XCTAssertEqual(store.servers, [expected])
+        XCTAssertEqual(IOSMcpConfigStore(userDefaults: defaults).servers, [expected])
+    }
+
+    func testUpsertCanRenameExistingServer() {
+        let store = IOSMcpConfigStore(userDefaults: isolatedDefaults())
+        store.add(.streamableHTTP(name: "docs", url: "https://example.com/mcp"))
+
+        store.upsert(.streamableHTTP(name: "docs-v2", url: "https://example.com/v2"), replacing: "docs")
+
+        XCTAssertEqual(store.servers, [.streamableHTTP(name: "docs-v2", url: "https://example.com/v2")])
+    }
+
+    func testMergeDiscoveredToolsPersistsAndPreservesToolSwitch() {
+        let defaults = isolatedDefaults()
+        let store = IOSMcpConfigStore(userDefaults: defaults)
+        store.add(.streamableHTTP(
+            name: "docs",
+            url: "https://example.com/mcp",
+            tools: [IOSMcpTool(name: "search", description: "Old", enabled: false)]
+        ))
+
+        let merged = store.mergeDiscoveredTools(named: "docs", tools: [
+            IOSMcpTool(name: "search", description: "New"),
+            IOSMcpTool(name: "read", description: "Read docs")
+        ])
+
+        XCTAssertEqual(merged, [
+            IOSMcpTool(name: "search", description: "New", enabled: false),
+            IOSMcpTool(name: "read", description: "Read docs", enabled: true)
+        ])
+        XCTAssertTrue(store.setToolEnabled(serverName: "docs", toolName: "read", enabled: false))
+        XCTAssertFalse(store.setToolEnabled(serverName: "docs", toolName: "missing", enabled: true))
+
+        let reloaded = IOSMcpConfigStore(userDefaults: defaults)
+        XCTAssertEqual(reloaded.servers.first?.tools, [
+            IOSMcpTool(name: "search", description: "New", enabled: false),
+            IOSMcpTool(name: "read", description: "Read docs", enabled: false)
+        ])
+    }
+
     private func isolatedDefaults() -> UserDefaults {
         let suiteName = "IOSMcpConfigStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
