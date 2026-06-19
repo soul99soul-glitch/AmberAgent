@@ -326,8 +326,11 @@ final class IOSLocalToolExecutorTests: XCTestCase {
     }
 
     func testWebMountToolCatalogAndUnsupportedResult() {
-        XCTAssertEqual(IOSWebMountToolCatalog.supportedToolNames.count, 8)
+        // 8 base tools + 6 interaction tools (wm_click/type/scroll/select/find/wait).
+        XCTAssertEqual(IOSWebMountToolCatalog.supportedToolNames.count, 14)
         XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_open"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_click"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_type"))
         XCTAssertTrue(IOSWebMountToolCatalog.unsupportedToolNames.contains("wm_eval"))
         XCTAssertTrue(IOSWebMountController.unsupportedToolResult(toolName: "wm_eval").contains("unsupported"))
     }
@@ -862,6 +865,10 @@ private final class MockWebMountRuntime: IOSWebMountRuntimeServicing {
             "kind": kind,
             "value": "Hello from mock"
         ]
+    }
+
+    func interact(method: String, selector: String?, text: String?, options: [String: Any]) async throws -> [String: Any] {
+        ["ok": true, "method": method, "found": true, "message": "mock interaction"]
     }
 
     func back() async -> IOSWebMountRuntimeSnapshot {

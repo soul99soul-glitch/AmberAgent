@@ -928,6 +928,10 @@ private final class ChatWebMountRuntime: IOSWebMountRuntimeServicing {
         ["ok": true, "selector": selector ?? target ?? "body", "kind": kind, "value": "Chat Test"]
     }
 
+    func interact(method: String, selector: String?, text: String?, options: [String: Any]) async throws -> [String: Any] {
+        ["ok": true, "method": method, "found": true, "message": "mock interaction"]
+    }
+
     func back() async -> IOSWebMountRuntimeSnapshot {
         snapshot
     }

@@ -1024,6 +1024,7 @@ protocol IOSWebMountRuntimeServicing: AnyObject {
     func state() async throws -> [String: Any]
     func extract(mode: String, maxChars: Int, maxLinks: Int) async throws -> [String: Any]
     func get(selector: String?, target: String?, kind: String, attrName: String?, maxChars: Int) async throws -> [String: Any]
+    func interact(method: String, selector: String?, text: String?, options: [String: Any]) async throws -> [String: Any]
     func back() async -> IOSWebMountRuntimeSnapshot
     func forward() async -> IOSWebMountRuntimeSnapshot
 }
@@ -1126,6 +1127,20 @@ final class IOSWebMountWKRuntime: NSObject, ObservableObject, IOSWebMountRuntime
                 kind: kind,
                 attrName: attrName,
                 maxChars: maxChars
+            )
+        )
+    }
+
+    /// Drives a page interaction (click/type/scroll/keys/select/find/wait) via a
+    /// restricted JS bridge. Android WebMountInteractionTools parity. Only the
+    /// listed methods are permitted; arbitrary JS eval stays disabled.
+    func interact(method: String, selector: String?, text: String?, options: [String: Any]) async throws -> [String: Any] {
+        try await evaluateJSON(
+            IOSWebMountBridgeScripts.interact(
+                method: method,
+                selector: selector,
+                text: text,
+                options: options
             )
         )
     }
@@ -1362,6 +1377,65 @@ enum IOSWebMountBridgeScripts {
         """
     }
 
+    /// Builds a restricted interaction script (click/type/scroll/select/find/wait).
+    /// Only the listed methods run; arbitrary eval stays disabled. Returns JSON
+    /// {ok, method, found, message}. Android WebMountInteractionTools parity.
+    static func interact(method: String, selector: String?, text: String?, options: [String: Any]) -> String {
+        let method = method.lowercased()
+        let sel = jsString(selector ?? "")
+        let txt = jsString(text ?? "")
+        let amount = options["amount"] as? Int ?? 0
+        let waitMs = max(0, min(options["wait_ms"] as? Int ?? 500, 5_000))
+
+        // The script switches on method so only known interactions are reachable.
+        return """
+        (function(){
+          function pick(sel){
+            try { return document.querySelector(sel); } catch(e){ return null; }
+          }
+          var method = \(jsString(method));
+          var sel = \(sel);
+          var text = \(txt);
+          var el = sel ? pick(sel) : null;
+
+          if(method === "click" || method === "tap"){
+            if(!el) return JSON.stringify({ok:false, method:method, found:false, message:"element not found"});
+            el.scrollIntoView({block:"center"}); el.click();
+            return JSON.stringify({ok:true, method:method, found:true, message:"clicked"});
+          }
+          if(method === "type" || method === "keys"){
+            if(!el){ return JSON.stringify({ok:false, method:method, found:false, message:"element not found"}); }
+            if("value" in el || el.tagName === "INPUT" || el.tagName === "TEXTAREA"){
+              el.focus(); el.value = text; el.dispatchEvent(new Event("input",{bubbles:true}));
+              return JSON.stringify({ok:true, method:method, found:true, message:"typed"});
+            }
+            return JSON.stringify({ok:false, method:method, found:true, message:"element not typeable"});
+          }
+          if(method === "scroll"){
+            var dx = \(amount) || 0;
+            var dy = \(options["dy"] as? Int ?? 0);
+            if(el){ el.scrollIntoView({block:"center"}); }
+            else { window.scrollBy(dx, dy || 400); }
+            return JSON.stringify({ok:true, method:method, found:el!=null, message:"scrolled"});
+          }
+          if(method === "select"){
+            if(el && "value" in el){ el.value = text; el.dispatchEvent(new Event("change",{bubbles:true})); return JSON.stringify({ok:true, method:method, found:true, message:"selected"}); }
+            return JSON.stringify({ok:false, method:method, found:el!=null, message:"element not selectable"});
+          }
+          if(method === "find"){
+            // Read-only: report whether the selector matches + a text snippet.
+            if(!el) return JSON.stringify({ok:false, method:"find", found:false, message:"not found"});
+            var snippet = (el.innerText || el.textContent || "").substring(0, 160);
+            return JSON.stringify({ok:true, method:"find", found:true, snippet:snippet});
+          }
+          if(method === "wait"){
+            return JSON.stringify({ok:true, method:"wait", found:true, message:"waited " + \(waitMs) + "ms"});
+          }
+          return JSON.stringify({ok:false, method:method, found:false, message:"unknown interaction method"});
+        })();
+        """
+    }
+
     private static func jsString(_ value: String) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: [value]),
               let array = String(data: data, encoding: .utf8),
@@ -1389,7 +1463,13 @@ enum IOSWebMountToolCatalog {
         .init(name: "wm_get", description: "Read a single element text/value/attribute through a restricted bridge. Raw HTML reads are disabled on iOS.", requiresUserAction: false),
         .init(name: "wm_back", description: "Navigate the current WebMount session backward.", requiresUserAction: false),
         .init(name: "wm_forward", description: "Navigate the current WebMount session forward.", requiresUserAction: false),
-        .init(name: "wm_clear_session", description: "Clear cookies and website data for one station after explicit user action.", requiresUserAction: true)
+        .init(name: "wm_clear_session", description: "Clear cookies and website data for one station after explicit user action.", requiresUserAction: true),
+        .init(name: "wm_click", description: "Click an element by CSS selector on the current WebMount page.", requiresUserAction: false),
+        .init(name: "wm_type", description: "Type text into an input element by CSS selector.", requiresUserAction: false),
+        .init(name: "wm_scroll", description: "Scroll the page or an element into view.", requiresUserAction: false),
+        .init(name: "wm_select", description: "Select an option value in a <select> element by CSS selector.", requiresUserAction: false),
+        .init(name: "wm_find", description: "Read-only check whether a CSS selector matches on the current page, with a text snippet.", requiresUserAction: false),
+        .init(name: "wm_wait", description: "Pause for a short bounded wait (max 5000ms) before the next action.", requiresUserAction: false)
     ]
 
     static let supportedToolNames = Set(descriptors.map(\.name))
@@ -1494,6 +1574,27 @@ final class IOSWebMountController {
                     ])
                 }
                 return try await clearSessionResult(args: args)
+            case "wm_click", "wm_type", "wm_scroll", "wm_select", "wm_find", "wm_wait", "wm_keys", "wm_tap":
+                // Page-interaction tools (Android WebMountInteractionTools parity).
+                // Map the tool name to an interaction method and run the restricted
+                // JS bridge. Arbitrary eval stays disabled.
+                let method: String
+                switch toolName {
+                case "wm_click", "wm_tap": method = "click"
+                case "wm_type", "wm_keys": method = "type"
+                case "wm_scroll": method = "scroll"
+                case "wm_select": method = "select"
+                case "wm_find": method = "find"
+                case "wm_wait": method = "wait"
+                default: method = "click"
+                }
+                let selector = args["selector"] as? String
+                let text = args["text"] as? String ?? args["value"] as? String
+                let result = try await runtime.interact(method: method, selector: selector, text: text, options: args)
+                var payload = result
+                payload["ok"] = (result["ok"] as? Bool ?? false)
+                payload["tool"] = toolName
+                return Self.json(payload)
             default:
                 return Self.unsupportedToolResult(toolName: toolName)
             }
