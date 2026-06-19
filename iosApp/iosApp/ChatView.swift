@@ -141,6 +141,19 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if let request = viewModel.pendingWebMountApproval {
+                WebMountToolApprovalCard(
+                    request: request,
+                    onApprove: {
+                        viewModel.approvePendingWebMountTool()
+                    },
+                    onDeny: {
+                        viewModel.denyPendingWebMountTool()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if let preview = viewModel.pendingSelectedFilePreview {
                 HStack(spacing: 8) {
                     Label(preview.fileName, systemImage: "doc.text")
@@ -186,7 +199,7 @@ struct ChatView: View {
                     .disabled(
                         viewModel.isLoading ||
                             viewModel.isAttachingSelectedFile ||
-                            viewModel.pendingMemoryApproval != nil
+                            hasPendingToolApproval
                     )
 
                     TextField("发消息给 Amber...", text: $viewModel.inputText, axis: .vertical)
@@ -202,7 +215,7 @@ struct ChatView: View {
                                 viewModel.sendMessage()
                             }
                         }
-                        .disabled(viewModel.pendingMemoryApproval != nil)
+                        .disabled(hasPendingToolApproval)
                         .onChange(of: viewModel.inputText) { _, newText in
                             let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
                             if sharedSettings.displaySetting.pasteLongTextAsFile,
@@ -319,7 +332,12 @@ struct ChatView: View {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !viewModel.isLoading &&
             !viewModel.isAttachingSelectedFile &&
-            viewModel.pendingMemoryApproval == nil
+            !hasPendingToolApproval
+    }
+
+    private var hasPendingToolApproval: Bool {
+        viewModel.pendingMemoryApproval != nil ||
+            viewModel.pendingWebMountApproval != nil
     }
 
     private var showsComposerMeta: Bool {

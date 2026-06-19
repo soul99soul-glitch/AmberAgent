@@ -1,4 +1,5 @@
 import XCTest
+import WebKit
 @preconcurrency import Shared
 @testable import iosApp
 
@@ -389,6 +390,68 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().map(\.content), ["approved memory write"])
     }
 
+    func testWebMountClearSessionApprovalRequiresForegroundAndCanExecute() async throws {
+        let defaults = isolatedDefaults()
+        let registry = IOSWebMountRegistry(userDefaults: defaults)
+        let settings = IOSWebMountSettings(userDefaults: defaults)
+        settings.globalEnabled = true
+        let cookieStore = ChatWebMountCookieStore()
+        let controller = IOSWebMountController(
+            registry: registry,
+            settings: settings,
+            cookieStore: cookieStore,
+            runtime: ChatWebMountRuntime()
+        )
+        let executor = IOSLocalToolExecutor(
+            permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+            documentStore: DocumentAccessStore(),
+            webMountController: controller
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            localToolExecutor: executor,
+            autoGenerateResponses: false
+        )
+        let input = #"{"site_id":"github"}"#
+
+        let maybeRequest = await viewModel.webMountApprovalRequestForTesting(
+            toolName: "wm_clear_session",
+            input: input
+        )
+        let request = try XCTUnwrap(maybeRequest)
+        XCTAssertEqual(request.toolName, "wm_clear_session")
+        XCTAssertEqual(request.title, "清除 WebMount Session")
+        XCTAssertEqual(request.siteId, "github")
+        XCTAssertEqual(request.host, "github.com")
+
+        let pendingOutput = await viewModel.webMountToolOutputForTesting(toolName: "wm_clear_session", input: input)
+        let pendingPayload = try jsonObject(pendingOutput)
+        XCTAssertEqual(pendingPayload["ok"] as? Bool, false)
+        XCTAssertEqual(pendingPayload["needs_user_action"] as? Bool, true)
+        XCTAssertTrue(cookieStore.clearedSiteIds.isEmpty)
+
+        let deniedOutput = await viewModel.webMountToolApprovalOutputForTesting(
+            toolName: "wm_clear_session",
+            input: input,
+            allow: false
+        )
+        let deniedPayload = try jsonObject(deniedOutput)
+        XCTAssertEqual(deniedPayload["ok"] as? Bool, false)
+        XCTAssertEqual(deniedPayload["denied"] as? Bool, true)
+        XCTAssertEqual(deniedPayload["policy"] as? String, "user_denied")
+        XCTAssertTrue(cookieStore.clearedSiteIds.isEmpty)
+
+        let approvedOutput = await viewModel.webMountToolApprovalOutputForTesting(
+            toolName: "wm_clear_session",
+            input: input,
+            allow: true
+        )
+        let approvedPayload = try jsonObject(approvedOutput)
+        XCTAssertEqual(approvedPayload["ok"] as? Bool, true)
+        XCTAssertEqual(approvedPayload["site_id"] as? String, "github")
+        XCTAssertEqual(cookieStore.clearedSiteIds, ["github"])
+    }
+
     func testAgentCouncilAndMcpToolCallsCanBeFinishedForResume() throws {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -471,5 +534,76 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+}
+
+@MainActor
+private final class ChatWebMountCookieStore: IOSWebMountCookieStoreProtocol {
+    var clearedSiteIds: [String] = []
+
+    func summary(for site: IOSWebMountSite) async -> IOSWebMountCookieSummary {
+        IOSWebMountCookieSummary(
+            siteId: site.id,
+            cookieCount: site.id == "github" ? 1 : 0,
+            cookieNames: site.id == "github" ? ["user_session"] : [],
+            domains: site.id == "github" ? ["github.com"] : [],
+            hasLoginCookie: site.loginCookieName.map { $0 == "user_session" },
+            redacted: true
+        )
+    }
+
+    func clearSession(for site: IOSWebMountSite) async -> IOSWebMountCookieClearResult {
+        clearedSiteIds.append(site.id)
+        return IOSWebMountCookieClearResult(
+            siteId: site.id,
+            deletedCookieCount: 1,
+            clearedWebsiteDataRecords: 1
+        )
+    }
+}
+
+@MainActor
+private final class ChatWebMountRuntime: IOSWebMountRuntimeServicing {
+    var snapshot = IOSWebMountRuntimeSnapshot.idle(sessionId: "chat-test")
+    var webView: WKWebView? { nil }
+
+    func open(_ url: URL, timeoutMillis: UInt64) async -> IOSWebMountRuntimeSnapshot {
+        snapshot = IOSWebMountRuntimeSnapshot(
+            sessionId: "chat-test",
+            status: .ready,
+            requestedURL: IOSWebMountRedactor.redactedURL(url.absoluteString),
+            currentURL: IOSWebMountRedactor.redactedURL(url.absoluteString),
+            title: "Chat Test",
+            estimatedProgress: 1,
+            error: nil,
+            updatedAtMillis: 123
+        )
+        return snapshot
+    }
+
+    func state() async throws -> [String: Any] {
+        ["title": "Chat Test"]
+    }
+
+    func extract(mode: String, maxChars: Int, maxLinks: Int) async throws -> [String: Any] {
+        ["mode": mode, "text": "Chat Test"]
+    }
+
+    func get(
+        selector: String?,
+        target: String?,
+        kind: String,
+        attrName: String?,
+        maxChars: Int
+    ) async throws -> [String: Any] {
+        ["ok": true, "selector": selector ?? target ?? "body", "kind": kind, "value": "Chat Test"]
+    }
+
+    func back() async -> IOSWebMountRuntimeSnapshot {
+        snapshot
+    }
+
+    func forward() async -> IOSWebMountRuntimeSnapshot {
+        snapshot
     }
 }

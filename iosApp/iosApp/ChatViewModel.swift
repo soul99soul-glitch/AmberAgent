@@ -51,7 +51,36 @@ struct MemoryToolApprovalRequest: Identifiable, Equatable {
     }
 }
 
+struct WebMountToolApprovalRequest: Identifiable, Equatable {
+    let id: String
+    let toolName: String
+    let siteId: String
+    let siteName: String
+    let host: String
+    let reason: String
+
+    var title: String {
+        switch toolName {
+        case "wm_clear_session":
+            "清除 WebMount Session"
+        default:
+            "执行 WebMount 前台动作"
+        }
+    }
+}
+
 private struct PendingMemoryToolApproval {
+    let toolCall: UIMessagePart.Tool
+    let providerSetting: ProviderSetting.OpenAI
+    let params: TextGenerationParams
+    let runId: String
+    let startedAt: Int64
+    let inputDigest: String
+    let conversationId: KotlinUuid?
+    let baseMessages: [UIMessage]
+}
+
+private struct PendingWebMountToolApproval {
     let toolCall: UIMessagePart.Tool
     let providerSetting: ProviderSetting.OpenAI
     let params: TextGenerationParams
@@ -77,6 +106,7 @@ final class ChatViewModel {
     var reasoningLevel: ReasoningLevel = .off
     var messageRevision: Int = 0
     var pendingMemoryApproval: MemoryToolApprovalRequest?
+    var pendingWebMountApproval: WebMountToolApprovalRequest?
 
     /// 持久化存储（由 AppShell 注入）。nil 时退化为纯内存模式（向后兼容旧调用方）。
     weak var conversationStore: IOSConversationStore?
@@ -166,6 +196,7 @@ final class ChatViewModel {
     private var currentToolResumeCount: Int = 0
     private let maxToolResumeCount = 4
     private var pendingMemoryToolApproval: PendingMemoryToolApproval?
+    private var pendingWebMountToolApproval: PendingWebMountToolApproval?
 
     // MARK: - Init
 
@@ -211,7 +242,10 @@ final class ChatViewModel {
 
     func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isAttachingSelectedFile, pendingMemoryApproval == nil else { return }
+        guard !text.isEmpty,
+              !isAttachingSelectedFile,
+              pendingMemoryApproval == nil,
+              pendingWebMountApproval == nil else { return }
 
         let prompt = Self.promptText(userText: text, selectedFilePreview: pendingSelectedFilePreview)
         let digest = Self.inputDigest(for: prompt)
@@ -310,6 +344,18 @@ final class ChatViewModel {
         finishPendingMemoryToolApproval(writePolicy: .deniedByUser("User denied memory write."))
     }
 
+    func approvePendingWebMountTool() {
+        Task { @MainActor in
+            await finishPendingWebMountToolApproval(allow: true)
+        }
+    }
+
+    func denyPendingWebMountTool() {
+        Task { @MainActor in
+            await finishPendingWebMountToolApproval(allow: false)
+        }
+    }
+
     func cancelGeneration() {
         // Capture run info before clearing state so we can record the interruption.
         let runId = currentRunId
@@ -325,6 +371,7 @@ final class ChatViewModel {
         currentConversationIdForRun = nil
         currentToolResumeCount = 0
         clearPendingMemoryApproval()
+        clearPendingWebMountApproval()
         isLoading = false
 
         guard let runId, let startedAt, let digest else { return }
@@ -567,6 +614,7 @@ final class ChatViewModel {
         streamJob = nil
         isLoading = false
         clearPendingMemoryApproval()
+        clearPendingWebMountApproval()
     }
 
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
@@ -905,7 +953,24 @@ final class ChatViewModel {
         conversationId: KotlinUuid?,
         baseMessages: [UIMessage]
     ) async {
-        let resultText = await dispatchWebMountToolCall(toolCall)
+        let output = await webMountToolExecutionOutput(toolCall, isUserInitiated: false)
+        if case .needsUserAction(let reason) = output,
+           let request = webMountApprovalRequest(for: toolCall, reason: reason) {
+            await pauseForWebMountToolApproval(
+                request,
+                toolCall: toolCall,
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                baseMessages: baseMessages
+            )
+            return
+        }
+
+        let resultText = webMountResultText(for: toolCall, output: output)
 
         guard currentRunId == runId else { return }
         let resumedMessages = messagesByFinishingToolCall(toolCall, outputText: resultText, in: baseMessages)
@@ -924,22 +989,32 @@ final class ChatViewModel {
     }
 
     private func dispatchWebMountToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
+        let output = await webMountToolExecutionOutput(toolCall, isUserInitiated: false)
+        return webMountResultText(for: toolCall, output: output)
+    }
+
+    private func webMountToolExecutionOutput(
+        _ toolCall: UIMessagePart.Tool,
+        isUserInitiated: Bool
+    ) async -> IOSLocalToolExecutionOutput {
         guard let localToolExecutor else {
-            return IOSWebMountController.json([
-                "ok": false,
-                "tool": toolCall.toolName,
-                "error": "Local iOS tool executor is unavailable."
-            ])
+            return .failed("Local iOS tool executor is unavailable.")
         }
-        let output = await localToolExecutor.execute(
+        return await localToolExecutor.execute(
             IOSLocalToolExecutionRequest(
                 toolName: toolCall.toolName,
                 operation: toolCall.input,
                 scopeDigest: "webmount",
                 payloadDigest: Self.inputDigest(for: toolCall.input),
-                isUserInitiated: false
+                isUserInitiated: isUserInitiated
             )
         )
+    }
+
+    private func webMountResultText(
+        for toolCall: UIMessagePart.Tool,
+        output: IOSLocalToolExecutionOutput
+    ) -> String {
         switch output {
         case .webMountResult(let result):
             return result
@@ -976,6 +1051,93 @@ final class ChatViewModel {
                 "platform": snapshot.platform
             ])
         }
+    }
+
+    private func pauseForWebMountToolApproval(
+        _ request: WebMountToolApprovalRequest,
+        toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        guard currentRunId == runId else { return }
+        pendingWebMountToolApproval = PendingWebMountToolApproval(
+            toolCall: toolCall,
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            baseMessages: baseMessages
+        )
+        pendingWebMountApproval = request
+        messages = baseMessages
+        messageRevision &+= 1
+        isLoading = false
+        await liveActivityController.update(
+            runId: runId,
+            presentation: .waitingForUser(toolTitle: "WebMount"),
+            force: true
+        )
+    }
+
+    private func finishPendingWebMountToolApproval(allow: Bool) async {
+        guard let pending = pendingWebMountToolApproval else { return }
+        clearPendingWebMountApproval()
+        guard currentRunId == pending.runId else { return }
+
+        let resultText: String
+        if allow {
+            let output = await webMountToolExecutionOutput(pending.toolCall, isUserInitiated: true)
+            resultText = webMountResultText(for: pending.toolCall, output: output)
+        } else {
+            resultText = IOSWebMountController.json([
+                "ok": false,
+                "tool": pending.toolCall.toolName,
+                "denied": true,
+                "policy": "user_denied",
+                "reason": "User denied WebMount foreground action."
+            ])
+        }
+
+        let resumedMessages = messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: resultText,
+            in: pending.baseMessages
+        )
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        guard autoGenerateResponses else {
+            persistMessages(conversationId: pending.conversationId)
+            finishStreaming()
+            return
+        }
+
+        isLoading = true
+        startLiveActivity(
+            runId: pending.runId,
+            presentation: .generatingResponse(modelName: pending.params.model.modelId)
+        )
+        startStreaming(
+            providerSetting: pending.providerSetting,
+            params: pending.params,
+            runId: pending.runId,
+            startedAt: pending.startedAt,
+            inputDigest: pending.inputDigest,
+            conversationId: pending.conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func clearPendingWebMountApproval() {
+        pendingWebMountToolApproval = nil
+        pendingWebMountApproval = nil
     }
 
     private func executeMemoryToolCall(
@@ -1141,6 +1303,28 @@ final class ChatViewModel {
         )
     }
 
+    private func webMountApprovalRequest(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> WebMountToolApprovalRequest? {
+        guard let preview = localToolExecutor?.webMountApprovalPreview(
+            toolName: toolCall.toolName,
+            input: toolCall.input
+        ) else {
+            return nil
+        }
+        let rawId = toolCall.toolCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestId = rawId.isEmpty ? Self.inputDigest(for: toolCall.input) : rawId
+        return WebMountToolApprovalRequest(
+            id: requestId,
+            toolName: preview.toolName,
+            siteId: preview.siteId,
+            siteName: preview.siteName,
+            host: preview.host,
+            reason: reason
+        )
+    }
+
     /// [Slice 3] Executes an MCP / sub-agent / council tool call and resumes the
     /// stream with the result. Mirrors executeSearchToolCall but dispatches to
     /// IOSMcpManager.callTool / SubAgentRunner.run / CouncilRunner.run based on
@@ -1300,6 +1484,69 @@ final class ChatViewModel {
             runtime: sharedSettings.agentRuntime,
             writePolicy: allow ? .allow : .deniedByUser("User denied memory write.")
         )
+    }
+
+    func webMountToolOutputForTesting(
+        toolName: String,
+        input: String,
+        isUserInitiated: Bool = false
+    ) async -> String {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "test-webmount-tool",
+            toolName: toolName,
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        if !isUserInitiated {
+            return await dispatchWebMountToolCall(toolCall)
+        }
+        let output = await webMountToolExecutionOutput(toolCall, isUserInitiated: isUserInitiated)
+        return webMountResultText(for: toolCall, output: output)
+    }
+
+    func webMountApprovalRequestForTesting(
+        toolName: String,
+        input: String
+    ) async -> WebMountToolApprovalRequest? {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "test-webmount-tool",
+            toolName: toolName,
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        let output = await webMountToolExecutionOutput(toolCall, isUserInitiated: false)
+        guard case .needsUserAction(let reason) = output else { return nil }
+        return webMountApprovalRequest(for: toolCall, reason: reason)
+    }
+
+    func webMountToolApprovalOutputForTesting(
+        toolName: String,
+        input: String,
+        allow: Bool
+    ) async -> String {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "test-webmount-tool",
+            toolName: toolName,
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        guard allow else {
+            return IOSWebMountController.json([
+                "ok": false,
+                "tool": toolName,
+                "denied": true,
+                "policy": "user_denied",
+                "reason": "User denied WebMount foreground action."
+            ])
+        }
+        let output = await webMountToolExecutionOutput(toolCall, isUserInitiated: true)
+        return webMountResultText(for: toolCall, output: output)
     }
 #endif
 

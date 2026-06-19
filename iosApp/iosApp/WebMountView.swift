@@ -124,7 +124,7 @@ struct WebMountView: View {
                 WebMountDivider()
                 WebMountToggleRow(
                     title: "JS eval",
-                    subtitle: "Independent high-risk switch; unsupported in iOS MVP even when on",
+                    subtitle: "Tracked separately; arbitrary eval remains blocked from model tools",
                     systemImage: "curlybraces",
                     tint: settings.evalEnabled ? AmberTheme.accentRed : AmberTheme.muted2,
                     isOn: Binding(
@@ -209,14 +209,14 @@ struct WebMountView: View {
 
     private var unsupportedSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Unsupported")
+            AmberSectionLabel(text: "Blocked")
             AmberFormGroup {
                 WebMountInfoRow(
-                    title: "wm_eval / OAuth / signed fetch / adapters",
+                    title: "High-risk or adapter-only tools",
                     subtitle: IOSWebMountToolCatalog.unsupportedToolNames.sorted().joined(separator: ", "),
                     systemImage: "nosign",
                     tint: AmberTheme.accentRed,
-                    trailing: "honest"
+                    trailing: "not exposed"
                 )
             }
         }

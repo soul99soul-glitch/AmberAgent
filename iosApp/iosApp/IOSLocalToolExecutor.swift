@@ -20,6 +20,13 @@ enum IOSLocalToolExecutionOutput: Equatable {
     case failed(String)
 }
 
+struct IOSWebMountToolApprovalPreview: Equatable {
+    let toolName: String
+    let siteId: String
+    let siteName: String
+    let host: String
+}
+
 struct IOSPermissionsStatusSnapshot: Equatable {
     let generatedAt: Date
     let platform: String
@@ -226,6 +233,30 @@ final class IOSLocalToolExecutor {
             }
             return .needsUserAction("Memory writes require explicit foreground approval before the model can change saved memories.")
         }
+    }
+
+    func webMountApprovalPreview(toolName: String, input: String) -> IOSWebMountToolApprovalPreview? {
+        guard toolName == "wm_clear_session",
+              let siteId = Self.siteId(fromWebMountInput: input),
+              let site = webMountController.registry.site(id: siteId) else {
+            return nil
+        }
+        return IOSWebMountToolApprovalPreview(
+            toolName: toolName,
+            siteId: site.id,
+            siteName: site.displayName,
+            host: site.homepageHost
+        )
+    }
+
+    private static func siteId(fromWebMountInput input: String) -> String? {
+        guard let data = input.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let siteId = object["site_id"] as? String else {
+            return nil
+        }
+        let trimmed = siteId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func snapshotId(for capability: IOSPlatformCapability) -> String {
