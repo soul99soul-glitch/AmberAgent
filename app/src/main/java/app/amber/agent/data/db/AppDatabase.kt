@@ -119,7 +119,7 @@ import app.amber.core.utils.JsonInstant
         OpportunityEntity::class,
         ReferenceAnchorEntity::class,
     ],
-    version = 6
+    version = 7
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -417,6 +417,19 @@ abstract class AppDatabase : RoomDatabase() {
                 // 'undefined', which fails Room's post-migration schema validation
                 // (crash on first launch when upgrading an existing pre-council DB).
                 db.execSQL("ALTER TABLE `conversationentity` ADD COLUMN `council_state` TEXT DEFAULT NULL")
+            }
+        }
+
+        // Adds the `pinned` column to deep_read_cache for manual retention of
+        // magazine articles (Deep Read quality hardening, cluster B). BOOLEAN is
+        // stored as INTEGER. SQLite allows NOT NULL on ADD COLUMN only with a
+        // non-null DEFAULT; DEFAULT 0 backfills existing rows as unpinned.
+        // Pattern follows MIGRATION_4_5 (NOT NULL DEFAULT), not MIGRATION_5_6.
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `deep_read_cache` ADD COLUMN `pinned` INTEGER NOT NULL DEFAULT 0"
+                )
             }
         }
     }
