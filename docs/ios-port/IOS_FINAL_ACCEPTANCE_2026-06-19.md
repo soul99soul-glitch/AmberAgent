@@ -1,19 +1,22 @@
 # AmberAgent iOS Final Acceptance 2026-06-19
 
 Branch: `codex/ios-port-wip`  
-Baseline: `2802c7fb4` (handoff doc) + warning cleanup commits on same branch  
+HEAD: `a81876885` — iOS parity final acceptance: warning cleanup and report  
+Prior baseline: `2802c7fb4` (handoff doc), `68192b345` (test regressions)  
 Scope: parity closure **验收与发布前收口**（不扩大功能范围）
 
-## Automated verification (this session)
+## Automated verification (re-run 2026-06-19, this agent)
 
 | Check | Command | Result |
 | --- | --- | --- |
 | Whitespace | `git diff --check` | Pass |
 | iOS build | `xcodebuild … generic/platform=iOS Simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build` | Pass (AmberNative 26.5→26.0 linker warnings only) |
 | KMP iOS | `./gradlew :shared:compileKotlinIosSimulatorArm64 :shared:linkDebugFrameworkIosSimulatorArm64` | Pass |
-| Full tests | `xcodebuild … -destination "platform=iOS Simulator,name=iPhone 17" … test` | Pass (before and after warning fixes) |
+| Full tests | `xcodebuild … -destination "platform=iOS Simulator,name=iPhone 17" -derivedDataPath /tmp/amberagent-test-full-final … test` | **Pass** — 289 passed, 1 skipped, 0 failed (`xcresult` summary) |
 
 Gradle did not require elevated `~/.gradle` permissions on this machine.
+
+Simulator launch smoke: build to `/tmp/amberagent-smoke-launch`, install + `simctl launch` on **iPhone 17** → `app.amber.ios` started (no crash on cold launch).
 
 ## Code changes in this acceptance pass
 
@@ -59,6 +62,12 @@ Automated launch: app installs/launches on **iPhone 17** simulator when built to
 13. **Permissions** — `PermissionsApprovalView` surfaces file / memory / WebMount.
 
 Record pass/fail per row before PR / push.
+
+| # | Path | This session |
+| --- | --- | --- |
+| 1–13 | Full UX checklist | **Not filled** — cold launch OK; route-by-route needs human pass on simulator |
+
+Static checks: `SettingsHomeView` uses **高级功能** (not 实验区); `ConversationsView` shortcuts match product list; no `实验区`/`实验性` strings under `iosApp/iosApp/*.swift`.
 
 ## Issue classification
 
