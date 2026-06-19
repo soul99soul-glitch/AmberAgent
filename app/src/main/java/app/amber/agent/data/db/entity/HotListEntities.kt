@@ -75,7 +75,7 @@ data class DeepReadCacheEntity(
     val expiresAt: Long,
     @ColumnInfo("updated_at")
     val updatedAt: Long,
-    @ColumnInfo("pinned")
+    @ColumnInfo(name = "pinned", defaultValue = "0")
     val pinned: Boolean = false,
 )
 

@@ -64,7 +64,7 @@ class DeepReadWorker(
         return coroutineScope {
             val progressJob = launchProgressNotifications(repository, notifier, topicId, title, sourceUrl)
             try {
-                runGeneration(route, topicId, title, sourceUrl, force, repository, notifier)
+                runGeneration(route, topicId, title, sourceUrl, force, repository, notifier, ttlDays)
             } finally {
                 progressJob.cancelAndJoin()
             }
@@ -79,6 +79,7 @@ class DeepReadWorker(
         force: Boolean,
         repository: HotListRepository,
         notifier: DeepReadNotifier,
+        ttlDays: Int,
     ): Result {
         return try {
             val manager = get<DeepReadAgentRunManager>()

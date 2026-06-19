@@ -636,7 +636,7 @@ private class FakeHotListDao : HotListDAO {
 
     override suspend fun getFreshDeepReadByTitle(title: String, now: Long): DeepReadCacheEntity? =
         deepReads.values
-            .filter { it.title == title && it.expiresAt >= now }
+            .filter { it.title == title && (it.expiresAt >= now || it.pinned) }
             .maxByOrNull { it.updatedAt }
 
     override fun observeDeepRead(topicId: String): Flow<DeepReadCacheEntity?> =
@@ -645,7 +645,7 @@ private class FakeHotListDao : HotListDAO {
     override fun observeDeepReadHistory(limit: Int): Flow<List<DeepReadCacheEntity>> =
         deepReadFlowsSnapshot.map {
             deepReads.values
-                .sortedByDescending { it.updatedAt }
+                .sortedWith(compareByDescending<DeepReadCacheEntity> { it.pinned }.thenByDescending { it.updatedAt })
                 .take(limit)
         }
 
@@ -661,8 +661,13 @@ private class FakeHotListDao : HotListDAO {
         deepReadFlowsSnapshot.value++
     }
 
+    override suspend fun setDeepReadPinned(topicId: String, pinned: Boolean) {
+        val current = deepReads[topicId] ?: return
+        upsertDeepRead(current.copy(pinned = pinned))
+    }
+
     override suspend fun pruneExpiredDeepReads(historyCutoff: Long): Int {
-        val expired = deepReads.values.filter { it.expiresAt < historyCutoff }
+        val expired = deepReads.values.filter { !it.pinned && it.expiresAt < historyCutoff }
         expired.forEach { deleteDeepRead(it.topicId) }
         return expired.size
     }
