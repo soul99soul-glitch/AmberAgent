@@ -136,6 +136,101 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         XCTAssertEqual(repo.auditLogs(appId: app.id).first?.method, "ai.generate")
     }
 
+    func testHostMethodsCheckPolicyHandlerThenAudit() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: [
+            "host.context",
+            "host.sendToConversation",
+            "host.createArtifact",
+        ]))
+        try repo.setGrant(appId: app.id, permission: "host.context", decision: .allow)
+        try repo.setGrant(appId: app.id, permission: "host.sendToConversation", decision: .allow)
+        try repo.setGrant(appId: app.id, permission: "host.createArtifact", decision: .allow)
+        var callCount = 0
+
+        let disabledRuntime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(hostContextEnabled: false, hostWriteEnabled: true),
+            hostHandler: { _ in
+                callCount += 1
+                return .bool(true)
+            }
+        )
+        let disabled = await disabledRuntime.dispatch(method: "host.getConversationContext", params: [:])
+        XCTAssertEqual(disabled.errorMessage, "Permission 'host.context' is disabled in MiniApp settings.")
+        XCTAssertEqual(callCount, 0)
+
+        let noHandlerRuntime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(hostContextEnabled: true, hostWriteEnabled: true)
+        )
+        let noHandler = await noHandlerRuntime.dispatch(method: "host.getConversationContext", params: [:])
+        XCTAssertEqual(noHandler.errorMessage, "MiniApp host confirmation is not available in this runner.")
+
+        var captured: [IOSMiniAppHostRequest] = []
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(hostContextEnabled: true, hostWriteEnabled: true),
+            hostHandler: { request in
+                captured.append(request)
+                switch request {
+                case .getConversationContext:
+                    return .object(["ok": .bool(true), "kind": .string("context")])
+                case .sendToConversation(let request):
+                    return .object(["accepted": .bool(true), "mode": .string(request.mode), "text": .string(request.text)])
+                case .createArtifact(let request):
+                    return .object(["accepted": .bool(true), "title": .string(request.title), "type": .string(request.type)])
+                }
+            }
+        )
+
+        let context = await runtime.dispatch(method: "host.getConversationContext", params: ["maxChars": 9_000])
+        XCTAssertEqual(context, .success(.object(["ok": .bool(true), "kind": .string("context")])))
+
+        let send = await runtime.dispatch(
+            method: "host.sendToConversation",
+            params: ["text": String(repeating: "x", count: 9_000), "mode": "send"]
+        )
+        guard case .success(.object(let sendObject)) = send else {
+            return XCTFail("expected host.sendToConversation success")
+        }
+        XCTAssertEqual(sendObject["mode"], .string("draft"))
+        XCTAssertEqual(sendObject["text"]?.stringValue?.count, 8_000)
+
+        let artifact = await runtime.dispatch(
+            method: "host.createArtifact",
+            params: [
+                "title": String(repeating: "t", count: 90),
+                "content": String(repeating: "c", count: 13_000),
+                "type": "note",
+            ]
+        )
+        guard case .success(.object(let artifactObject)) = artifact else {
+            return XCTFail("expected host.createArtifact success")
+        }
+        XCTAssertEqual(artifactObject["title"]?.stringValue?.count, 80)
+        XCTAssertEqual(artifactObject["type"], .string("note"))
+
+        XCTAssertEqual(captured.count, 3)
+        if case .getConversationContext(let request) = captured[0] {
+            XCTAssertEqual(request.maxChars, 8_000)
+        } else {
+            XCTFail("expected context request")
+        }
+        if case .createArtifact(let request) = captured[2] {
+            XCTAssertEqual(request.content.count, 12_000)
+        } else {
+            XCTFail("expected artifact request")
+        }
+        let methods = Set(repo.auditLogs(appId: app.id).map(\.method))
+        XCTAssertTrue(methods.contains("host.getConversationContext"))
+        XCTAssertTrue(methods.contains("host.sendToConversation"))
+        XCTAssertTrue(methods.contains("host.createArtifact"))
+    }
+
     func testSharedStoreRejectsCrossAppNamespace() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: ["sharedStore"]))

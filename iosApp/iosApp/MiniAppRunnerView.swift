@@ -17,6 +17,8 @@ struct MiniAppRunnerView: View {
     @State private var bridgeLog: [String] = []
     @State private var didInitialLoad = false
     @State private var didMarkRun = false
+    @State private var pendingHostConfirmation: MiniAppHostConfirmation?
+    @State private var pendingHostContinuation: CheckedContinuation<Bool, Never>?
 
     init(appId: String, settingsStore: SettingsStore? = nil, sharedSettings: IOSSharedSettingsStore? = nil) {
         self.appId = appId
@@ -73,6 +75,18 @@ struct MiniAppRunnerView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: appId) {
             loadApp(markRun: true)
+        }
+        .alert(item: $pendingHostConfirmation) { confirmation in
+            Alert(
+                title: Text(confirmation.title),
+                message: Text(confirmation.message),
+                primaryButton: .default(Text("允许")) {
+                    resolveHostConfirmation(allow: true)
+                },
+                secondaryButton: .destructive(Text("拒绝")) {
+                    resolveHostConfirmation(allow: false)
+                }
+            )
         }
     }
 
@@ -215,6 +229,7 @@ struct MiniAppRunnerView: View {
                     policy: bridgePolicy,
                     apiKeyProvider: { settingsStore?.currentApiKey ?? "" },
                     aiGenerateHandler: miniAppAIGenerateHandler,
+                    hostHandler: miniAppHostHandler,
                     onValidationError: { runnerError = $0 },
                     onBridgeLog: { bridgeLog = $0 },
                     onToast: { message in
@@ -400,7 +415,9 @@ struct MiniAppRunnerView: View {
             boardSummaryUpdateEnabled: miniApp.boardSummaryUpdateEnabled,
             aiEnabled: miniApp.aiEnabled,
             sharedStoreEnabled: miniApp.sharedStoreEnabled,
-            eventBusEnabled: miniApp.eventBusEnabled
+            eventBusEnabled: miniApp.eventBusEnabled,
+            hostContextEnabled: miniApp.hostContextEnabled,
+            hostWriteEnabled: miniApp.hostWriteEnabled
         )
     }
 
@@ -492,6 +509,75 @@ struct MiniAppRunnerView: View {
             }
             .compactMap { ($0 as? UIMessagePart.Text)?.text }
             .joined(separator: "")
+    }
+
+    private var miniAppHostHandler: IOSMiniAppBridgeRuntime.HostHandler {
+        { request in
+            let allowed = try await requestHostConfirmation(request)
+            guard allowed else {
+                throw MiniAppRunnerHostError.denied("User denied MiniApp host request.")
+            }
+            return try handleConfirmedHostRequest(request)
+        }
+    }
+
+    private func requestHostConfirmation(_ request: IOSMiniAppHostRequest) async throws -> Bool {
+        guard pendingHostContinuation == nil else {
+            throw MiniAppRunnerHostError.denied("Another MiniApp host request is waiting for confirmation.")
+        }
+        return await withCheckedContinuation { continuation in
+            pendingHostContinuation = continuation
+            pendingHostConfirmation = MiniAppHostConfirmation(
+                appTitle: app?.title ?? "MiniApp",
+                request: request
+            )
+        }
+    }
+
+    private func resolveHostConfirmation(allow: Bool) {
+        let continuation = pendingHostContinuation
+        pendingHostContinuation = nil
+        pendingHostConfirmation = nil
+        continuation?.resume(returning: allow)
+    }
+
+    private func handleConfirmedHostRequest(_ request: IOSMiniAppHostRequest) throws -> IOSMiniAppJSONValue {
+        switch request {
+        case .getConversationContext(let request):
+            let value = try miniAppHostContext(maxChars: request.maxChars)
+            actionMessage = "已向 MiniApp 提供最小化上下文。"
+            return value
+        case .sendToConversation(let request):
+            actionMessage = "MiniApp 已生成聊天草稿：\(request.text.truncated(to: 180))"
+            return .object([
+                "accepted": .bool(true),
+                "mode": .string(request.mode),
+                "text": .string(request.text),
+            ])
+        case .createArtifact(let request):
+            let summary = "\(request.title)\n\(request.content.truncated(to: 420))"
+            try repository.updateBoardSummary(id: appId, summary: summary)
+            actionMessage = "MiniApp 已创建内容卡片：\(request.title)"
+            return .object([
+                "accepted": .bool(true),
+                "title": .string(request.title),
+                "type": .string(request.type),
+            ])
+        }
+    }
+
+    private func miniAppHostContext(maxChars: Int) throws -> IOSMiniAppJSONValue {
+        guard let app else { throw MiniAppRunnerHostError.denied("MiniApp not found: \(appId)") }
+        return .object([
+            "untrustedContext": .bool(true),
+            "appId": .string(app.id),
+            "title": .string(app.title.truncated(to: 80)),
+            "description": .string(app.description.truncated(to: 200)),
+            "boardSummary": .string((app.boardSummary ?? "").truncated(to: maxChars)),
+            "sourceConversationId": .string(app.sourceConversationId ?? ""),
+            "sourceMessageId": .string(app.sourceMessageId ?? ""),
+            "note": .string("MiniApp host context is minimized. Full chat history, system prompts, provider settings, credentials, and hidden tool outputs are not exposed."),
+        ])
     }
 
     private func loadApp(markRun: Bool) {
@@ -588,6 +674,12 @@ struct MiniAppRunnerView: View {
             return "只写剪贴板，不读取。"
         case .hostUpdateBoardSummary:
             return "写入当前 MiniApp 的 boardSummary metadata。"
+        case .hostContext:
+            return "读取最小化宿主上下文；需要全局开关、grant 和前台确认。"
+        case .hostSendToConversation:
+            return "生成聊天草稿，不自动发送；需要全局开关、grant 和前台确认。"
+        case .hostCreateArtifact:
+            return "创建内容卡片并写入 boardSummary；需要全局开关、grant 和前台确认。"
         case .sharedStore:
             return "只允许自身 appId namespace。"
         case .eventBus:
@@ -605,7 +697,44 @@ struct MiniAppRunnerView: View {
     }
 }
 
+private struct MiniAppHostConfirmation: Identifiable {
+    let id = UUID()
+    let appTitle: String
+    let request: IOSMiniAppHostRequest
+
+    var title: String {
+        switch request {
+        case .getConversationContext:
+            return "允许读取上下文？"
+        case .sendToConversation:
+            return "允许写回聊天草稿？"
+        case .createArtifact:
+            return "允许创建内容卡片？"
+        }
+    }
+
+    var message: String {
+        switch request {
+        case .getConversationContext(let request):
+            return "「\(appTitle)」想读取最小化会话上下文，最多 \(request.maxChars) 字。完整聊天记录、系统提示词、provider 设置、凭证和隐藏工具输出不会暴露。"
+        case .sendToConversation(let request):
+            return request.text.truncated(to: 300)
+        case .createArtifact(let request):
+            return "\(request.title)\n\n\(request.content.truncated(to: 260))"
+        }
+    }
+}
+
 private enum MiniAppRunnerAIError: LocalizedError {
+    case denied(String)
+
+    var errorDescription: String? {
+        if case .denied(let message) = self { return message }
+        return nil
+    }
+}
+
+private enum MiniAppRunnerHostError: LocalizedError {
     case denied(String)
 
     var errorDescription: String? {

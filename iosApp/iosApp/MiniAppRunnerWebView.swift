@@ -21,6 +21,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
     let policy: IOSMiniAppBridgePolicy
     let apiKeyProvider: () -> String
     let aiGenerateHandler: IOSMiniAppBridgeRuntime.AIGenerateHandler?
+    let hostHandler: IOSMiniAppBridgeRuntime.HostHandler?
     let onValidationError: (String) -> Void
     let onBridgeLog: ([String]) -> Void
     let onToast: (String) -> Void
@@ -47,6 +48,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
             policy: policy,
             apiKeyProvider: apiKeyProvider,
             aiGenerateHandler: aiGenerateHandler,
+            hostHandler: hostHandler,
             toastHandler: onToast
         )
         let bridge = MiniAppBridge(runtime: runtime)
@@ -126,6 +128,15 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
               getTheme: function() { return call('host.getTheme', {}); },
               updateBoardSummary: function(summary) {
                 return call('host.updateBoardSummary', typeof summary === 'string' ? {summary: summary} : summary);
+              },
+              getConversationContext: function(req) {
+                return call('host.getConversationContext', req || {});
+              },
+              sendToConversation: function(req) {
+                return call('host.sendToConversation', typeof req === 'string' ? {text: req} : req);
+              },
+              createArtifact: function(req) {
+                return call('host.createArtifact', req);
               }
             },
             clipboard: {

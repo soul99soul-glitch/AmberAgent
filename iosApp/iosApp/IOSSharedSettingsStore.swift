@@ -433,6 +433,28 @@ final class IOSSharedSettingsStore {
         restoreSnapshot(merged)
     }
 
+    // MARK: - MiniApp host access write-back
+
+    func setMiniAppHostContextEnabled(_ enabled: Bool) {
+        let miniApp = snapshot.agentRuntime.miniApp
+        let merged = IosSettingsMutations.shared.setMiniAppHostAccess(
+            settings: snapshot,
+            hostContextEnabled: enabled,
+            hostWriteEnabled: miniApp.hostWriteEnabled
+        )
+        restoreSnapshot(merged)
+    }
+
+    func setMiniAppHostWriteEnabled(_ enabled: Bool) {
+        let miniApp = snapshot.agentRuntime.miniApp
+        let merged = IosSettingsMutations.shared.setMiniAppHostAccess(
+            settings: snapshot,
+            hostContextEnabled: miniApp.hostContextEnabled,
+            hostWriteEnabled: enabled
+        )
+        restoreSnapshot(merged)
+    }
+
     // MARK: - Real seeded collections (for UI display)
 
     /// Real KMP default TTS providers (DEFAULT_TTS_PROVIDERS), seeded + de-duplicated.

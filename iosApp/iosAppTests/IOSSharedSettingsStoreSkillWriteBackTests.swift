@@ -50,6 +50,27 @@ final class IOSSharedSettingsStoreSkillWriteBackTests: XCTestCase {
         )
     }
 
+    func testMiniAppHostAccessPersistsAcrossRestart() {
+        let suiteName = "MiniAppHostAccess-\(UUID().uuidString)"
+        let store1 = makeIsolatedStore(suiteName: suiteName)
+
+        store1.setMiniAppHostContextEnabled(true)
+        store1.setMiniAppHostWriteEnabled(true)
+
+        XCTAssertTrue(store1.agentRuntime.miniApp.hostContextEnabled)
+        XCTAssertTrue(store1.agentRuntime.miniApp.hostWriteEnabled)
+
+        let store2 = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertTrue(
+            store2.agentRuntime.miniApp.hostContextEnabled,
+            "MiniApp hostContextEnabled must persist in the full Settings snapshot"
+        )
+        XCTAssertTrue(
+            store2.agentRuntime.miniApp.hostWriteEnabled,
+            "MiniApp hostWriteEnabled must persist in the full Settings snapshot"
+        )
+    }
+
     private func makeIsolatedStore(suiteName: String = "SkillWriteBack-\(UUID().uuidString)") -> IOSSharedSettingsStore {
         IOSSharedSettingsStore(userDefaults: UserDefaults(suiteName: suiteName)!)
     }

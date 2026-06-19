@@ -15,6 +15,8 @@ struct IOSMiniAppBridgePolicy: Equatable {
     var aiEnabled: Bool = false
     var sharedStoreEnabled: Bool = true
     var eventBusEnabled: Bool = true
+    var hostContextEnabled: Bool = false
+    var hostWriteEnabled: Bool = false
 }
 
 enum IOSMiniAppBridgeDispatchResult: Equatable {
@@ -55,10 +57,32 @@ struct IOSMiniAppAIGenerateRequest: Equatable {
     var temperature: Double?
 }
 
+struct IOSMiniAppHostContextRequest: Equatable {
+    var maxChars: Int
+}
+
+struct IOSMiniAppHostSendRequest: Equatable {
+    var text: String
+    var mode: String
+}
+
+struct IOSMiniAppHostArtifactRequest: Equatable {
+    var title: String
+    var content: String
+    var type: String
+}
+
+enum IOSMiniAppHostRequest: Equatable {
+    case getConversationContext(IOSMiniAppHostContextRequest)
+    case sendToConversation(IOSMiniAppHostSendRequest)
+    case createArtifact(IOSMiniAppHostArtifactRequest)
+}
+
 @MainActor
 final class IOSMiniAppBridgeRuntime {
     typealias EventEmitter = (_ type: String, _ subscriptionId: String?, _ payload: IOSMiniAppJSONValue) -> Void
     typealias AIGenerateHandler = (_ request: IOSMiniAppAIGenerateRequest) async throws -> IOSMiniAppJSONValue
+    typealias HostHandler = (_ request: IOSMiniAppHostRequest) async throws -> IOSMiniAppJSONValue
 
     let appId: String
 
@@ -66,6 +90,7 @@ final class IOSMiniAppBridgeRuntime {
     private let policy: IOSMiniAppBridgePolicy
     private let apiKeyProvider: () -> String
     private let aiGenerateHandler: AIGenerateHandler?
+    private let hostHandler: HostHandler?
     private let toastHandler: (String) -> Void
     private let clipboardCopyHandler: (String) -> Void
     private let themeProvider: () -> IOSMiniAppThemePayload
@@ -78,6 +103,7 @@ final class IOSMiniAppBridgeRuntime {
         policy: IOSMiniAppBridgePolicy = IOSMiniAppBridgePolicy(),
         apiKeyProvider: @escaping () -> String = { "" },
         aiGenerateHandler: AIGenerateHandler? = nil,
+        hostHandler: HostHandler? = nil,
         toastHandler: @escaping (String) -> Void = { _ in },
         clipboardCopyHandler: @escaping (String) -> Void = {
             #if canImport(UIKit)
@@ -96,6 +122,7 @@ final class IOSMiniAppBridgeRuntime {
         self.policy = policy
         self.apiKeyProvider = apiKeyProvider
         self.aiGenerateHandler = aiGenerateHandler
+        self.hostHandler = hostHandler
         self.toastHandler = toastHandler
         self.clipboardCopyHandler = clipboardCopyHandler
         self.themeProvider = themeProvider
@@ -241,8 +268,34 @@ final class IOSMiniAppBridgeRuntime {
                 }
                 try audit(method: method, permission: .aiGenerate, summary: "ai.generate", payload: ["prompt": request.prompt])
                 return .success(try await aiGenerateHandler(request))
-            case "host.getConversationContext", "host.sendToConversation", "host.createArtifact",
-                 "launch", "clipboard.read", "location.getCurrent", "sensor.subscribe", "sensor.unsubscribe":
+            case "host.getConversationContext":
+                try require(.hostContext, method: method)
+                let request = hostContextRequest(params)
+                guard let hostHandler else {
+                    throw BridgeError.denied("MiniApp host confirmation is not available in this runner.")
+                }
+                let value = try await hostHandler(.getConversationContext(request))
+                try audit(method: method, permission: .hostContext, summary: "host.context", payload: ["maxChars": request.maxChars])
+                return .success(value)
+            case "host.sendToConversation":
+                try require(.hostSendToConversation, method: method)
+                let request = try hostSendRequest(params)
+                guard let hostHandler else {
+                    throw BridgeError.denied("MiniApp host confirmation is not available in this runner.")
+                }
+                let value = try await hostHandler(.sendToConversation(request))
+                try audit(method: method, permission: .hostSendToConversation, summary: "host.sendToConversation", payload: ["text": request.text])
+                return .success(value)
+            case "host.createArtifact":
+                try require(.hostCreateArtifact, method: method)
+                let request = try hostArtifactRequest(params)
+                guard let hostHandler else {
+                    throw BridgeError.denied("MiniApp host confirmation is not available in this runner.")
+                }
+                let value = try await hostHandler(.createArtifact(request))
+                try audit(method: method, permission: .hostCreateArtifact, summary: "host.createArtifact", payload: ["title": request.title, "content": request.content])
+                return .success(value)
+            case "launch", "clipboard.read", "location.getCurrent", "sensor.subscribe", "sensor.unsubscribe":
                 throw BridgeError.denied("Method '\(method)' requires sensitive host/system permission that is not implemented on iOS yet.")
             default:
                 throw BridgeError.denied("Unknown MiniApp bridge method: \(method)")
@@ -320,8 +373,11 @@ final class IOSMiniAppBridgeRuntime {
             return policy.sharedStoreEnabled
         case .eventBus:
             return policy.eventBusEnabled
-        case .externalImages, .hostContext, .hostSendToConversation, .hostCreateArtifact,
-             .launch, .sensor, .location, .clipboardRead:
+        case .hostContext:
+            return policy.hostContextEnabled
+        case .hostSendToConversation, .hostCreateArtifact:
+            return policy.hostWriteEnabled
+        case .externalImages, .launch, .sensor, .location, .clipboardRead:
             return false
         }
     }
@@ -383,6 +439,29 @@ final class IOSMiniAppBridgeRuntime {
             system: (stringParamOrNil("system", params) ?? "").truncated(to: 2_000),
             maxOutputChars: intParam("maxOutputChars", params, defaultValue: 6_000, range: 1...16_000),
             temperature: doubleParam("temperature", params)?.clamped(to: 0...2)
+        )
+    }
+
+    private func hostContextRequest(_ params: [String: Any]) -> IOSMiniAppHostContextRequest {
+        IOSMiniAppHostContextRequest(
+            maxChars: intParam("maxChars", params, defaultValue: 6_000, range: 200...8_000)
+        )
+    }
+
+    private func hostSendRequest(_ params: [String: Any]) throws -> IOSMiniAppHostSendRequest {
+        let rawMode = stringParamOrNil("mode", params)?.lowercased() ?? "draft"
+        let mode = rawMode == "insert" ? "insert" : "draft"
+        return IOSMiniAppHostSendRequest(
+            text: try stringParam("text", params).truncated(to: 8_000),
+            mode: mode
+        )
+    }
+
+    private func hostArtifactRequest(_ params: [String: Any]) throws -> IOSMiniAppHostArtifactRequest {
+        IOSMiniAppHostArtifactRequest(
+            title: try stringParam("title", params).truncated(to: 80),
+            content: try stringParam("content", params).truncated(to: 12_000),
+            type: (stringParamOrNil("type", params) ?? "note").truncated(to: 40)
         )
     }
 

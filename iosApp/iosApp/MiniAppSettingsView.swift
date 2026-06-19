@@ -8,7 +8,7 @@ struct MiniAppSettingsView: View {
     private let coreRows: [MiniAppCapabilityRow] = [
         .init(
             title: "enabled",
-            subtitle: "iOS ChatViewModel、Runner 和 bridge policy 已读取 KMP 默认 MiniAppSetting；本页仍是只读展示。",
+            subtitle: "iOS ChatViewModel、Runner 和 bridge policy 已读取 KMP MiniAppSetting；host 开关可在本页保存。",
             status: "已消费",
             tint: AmberTheme.accentGreen
         ),
@@ -20,8 +20,8 @@ struct MiniAppSettingsView: View {
         ),
         .init(
             title: "ai.generate / host.context / host.write",
-            subtitle: "ai.generate 已接当前聊天模型调用，并检查 grant、设置和 API Key；host.context/send/createArtifact 仍因敏感确认链缺失返回错误。",
-            status: "部分接入",
+            subtitle: "ai.generate 已接当前聊天模型；host.context/send/createArtifact 需要全局开关、per-app grant 和前台确认。",
+            status: "已接",
             tint: .purple
         ),
         .init(
@@ -62,8 +62,8 @@ struct MiniAppSettingsView: View {
     private let persistenceRows: [MiniAppCapabilityRow] = [
         .init(
             title: "Settings.agentRuntime.miniApp",
-            subtitle: "iOS 已读取 KMP seed/default snapshot；本页还没有编辑并保存这些开关的 UI。",
-            status: "只读",
+            subtitle: "iOS 已读取 KMP snapshot；hostContextEnabled / hostWriteEnabled 可在本页写回并持久化。",
+            status: "部分可写",
             tint: AmberTheme.accentAmber
         ),
         .init(
@@ -94,7 +94,7 @@ struct MiniAppSettingsView: View {
                         coreSection
                         advancedSection
                         persistenceSection
-                        MiniAppCapabilityNote("本页仍不写 MiniAppSetting 开关；真实小应用记录、grant、版本和 sharedData 请在小应用列表与 Runner 中管理。")
+                        MiniAppCapabilityNote("本页只写 hostContextEnabled / hostWriteEnabled；真实小应用记录、grant、版本和 sharedData 请在小应用列表与 Runner 中管理。")
                             .padding(.top, 14)
                     }
                     .padding(.bottom, 36)
@@ -134,7 +134,7 @@ struct MiniAppSettingsView: View {
     }
 
     private var intro: some View {
-        Text("Android 设置页会直接写 Settings.agentRuntime.miniApp。iOS 当前读取 KMP 默认值并由 MiniApp Runner/bridge 消费，但本页仍不提供保存这些全局开关的编辑入口。")
+        Text("Android 设置页会直接写 Settings.agentRuntime.miniApp。iOS 当前读取 KMP snapshot 并由 MiniApp Runner/bridge 消费；本页只开放宿主上下文和宿主写回两个敏感开关。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -150,17 +150,39 @@ struct MiniAppSettingsView: View {
     private var presetConfigSection: some View {
         let m = sharedSettings.agentRuntime.miniApp
         return VStack(spacing: 0) {
-            AmberSectionLabel(text: "KMP 默认 MiniApp 配置（只读）")
+            AmberSectionLabel(text: "KMP MiniApp 配置")
             AmberFormGroup {
-                MiniAppPresetKVRow(title: "启用 MiniApp", value: m.enabled ? "默认开" : "默认关")
+                MiniAppPresetKVRow(title: "启用 MiniApp", value: m.enabled ? "已开" : "已关")
                 MiniAppCapabilityDivider()
-                MiniAppPresetKVRow(title: "AI 能力", value: m.aiEnabled ? "默认开" : "默认关")
+                MiniAppPresetKVRow(title: "AI 能力", value: m.aiEnabled ? "已开" : "已关")
                 MiniAppCapabilityDivider()
-                MiniAppPresetKVRow(title: "网络访问", value: m.networkEnabled ? "默认开" : "默认关")
+                MiniAppPresetKVRow(title: "网络访问", value: m.networkEnabled ? "已开" : "已关")
                 MiniAppCapabilityDivider()
-                MiniAppPresetKVRow(title: "剪贴板读取", value: m.clipboardReadEnabled ? "默认开" : "默认关")
+                MiniAppPresetToggleRow(
+                    title: "读取宿主上下文",
+                    subtitle: "允许 host.context 在前台确认后返回最小化上下文。",
+                    systemImage: "text.bubble",
+                    tint: AmberTheme.accentCyan,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.hostContextEnabled },
+                        set: { sharedSettings.setMiniAppHostContextEnabled($0) }
+                    )
+                )
                 MiniAppCapabilityDivider()
-                MiniAppPresetKVRow(title: "启动", value: m.launchEnabled ? "默认开" : "默认关")
+                MiniAppPresetToggleRow(
+                    title: "宿主写回",
+                    subtitle: "允许 host.sendToConversation / host.createArtifact 在前台确认后写入草稿或内容卡片。",
+                    systemImage: "square.and.pencil",
+                    tint: .purple,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.hostWriteEnabled },
+                        set: { sharedSettings.setMiniAppHostWriteEnabled($0) }
+                    )
+                )
+                MiniAppCapabilityDivider()
+                MiniAppPresetKVRow(title: "剪贴板读取", value: m.clipboardReadEnabled ? "已开" : "已关")
+                MiniAppCapabilityDivider()
+                MiniAppPresetKVRow(title: "启动", value: m.launchEnabled ? "已开" : "已关")
             }
         }
     }
@@ -233,5 +255,40 @@ private struct MiniAppPresetKVRow: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
         .accessibilityLabel("\(title)，\(value)")
+    }
+}
+
+private struct MiniAppPresetToggleRow: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let tint: Color
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+        .frame(minHeight: 54)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 }

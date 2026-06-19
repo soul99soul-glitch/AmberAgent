@@ -334,6 +334,24 @@ object IosSettingsMutations {
         )
     }
 
+    // ---- MiniApp host access switches (settings.agentRuntime.miniApp) ----
+
+    fun setMiniAppHostAccess(
+        settings: Settings,
+        hostContextEnabled: Boolean,
+        hostWriteEnabled: Boolean,
+    ): Settings {
+        val miniApp = settings.agentRuntime.miniApp
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                miniApp = miniApp.copy(
+                    hostContextEnabled = hostContextEnabled,
+                    hostWriteEnabled = hostWriteEnabled,
+                )
+            )
+        )
+    }
+
     // ---- Skills (assistant.enabledSkills) ----
 
     /** Swift-friendly read for the current assistant's enabled skill names. */
