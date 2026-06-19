@@ -709,7 +709,7 @@ class DeepReadSourcePrefetcher(
         private const val SOURCE_EXCERPT_LIMIT = 2_400
         private const val MIN_SOURCE_CHARS = 280
         private const val MIN_SEARCH_SNIPPET_SOURCE_CHARS = 80
-        private const val MIN_SEED_SOURCE_CHARS = 15
+        private const val MIN_SEED_SOURCE_CHARS = 60
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
 

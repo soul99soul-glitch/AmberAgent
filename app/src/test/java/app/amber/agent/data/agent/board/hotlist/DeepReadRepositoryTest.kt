@@ -29,6 +29,7 @@ import app.amber.agent.data.db.entity.HotListCacheEntity
 import app.amber.agent.data.db.entity.HotListSourceEntity
 import app.amber.agent.data.db.entity.HotTopicCacheEntity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -204,7 +205,7 @@ class DeepReadRepositoryTest {
     }
 
     @Test
-    fun fallbackSectionWriteTurnsMissingToolOutputIntoReadySection() = runTest {
+    fun fallbackSectionPreservesSourceLinksButDoesNotMarkReady() = runTest {
         val repo = HotListRepository(FakeHotListDao(), json)
         val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
         val sources = listOf(
@@ -224,14 +225,17 @@ class DeepReadRepositoryTest {
             sources = sources,
         )
 
-        assertEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.NARRATIVE))
-        assertEquals(DeepReadSectionQuality.BASIC, output.sectionQualities[DeepReadGenerationStage.NARRATIVE])
-        assertTrue(output.timeline.orEmpty().isNotEmpty())
+        // Links-only fallback (spec A1): section stays non-READY (no body synthesized),
+        // no BASIC quality stamp, no fabricated timeline, but real source links preserved.
+        assertNotEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.NARRATIVE))
+        assertNull(output.sectionQualities[DeepReadGenerationStage.NARRATIVE])
+        assertTrue(output.timeline.orEmpty().isEmpty())
+        assertTrue(output.corePoints.orEmpty().isEmpty())
         assertEquals("https://example.com/source", output.references.single().url)
     }
 
     @Test
-    fun fallbackSectionWriteTurnsExtendedReadingTimeoutIntoSourceLinks() = runTest {
+    fun fallbackSectionPreservesExtendedReadingLinksButDoesNotMarkReady() = runTest {
         val repo = HotListRepository(FakeHotListDao(), json)
         val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
         val sources = listOf(
@@ -251,14 +255,14 @@ class DeepReadRepositoryTest {
             sources = sources,
         )
 
-        assertEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.EXTENDED_READING))
-        assertEquals(DeepReadSectionQuality.BASIC, output.sectionQualities[DeepReadGenerationStage.EXTENDED_READING])
+        assertNotEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.EXTENDED_READING))
+        assertNull(output.sectionQualities[DeepReadGenerationStage.EXTENDED_READING])
         assertEquals("https://example.com/official", output.extendedReading.single().url)
         assertEquals("https://example.com/official", output.references.single().url)
     }
 
     @Test
-    fun fallbackSectionCanSupplementReadySectionDuringCoverageRepair() = runTest {
+    fun fallbackSectionPreservesLinksDuringCoverageRepairWithoutDegradingQuality() = runTest {
         val repo = HotListRepository(FakeHotListDao(), json)
         val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
         val tools = writer.tools().associateBy { it.name }
@@ -289,9 +293,13 @@ class DeepReadRepositoryTest {
             allowReadyRewrite = true,
         )
 
+        // allowReadyRewrite lets the link merge proceed even though ANALYSIS is already READY,
+        // but the section stays READY/STANDARD (from the tool write) — fallback never downgrades
+        // to BASIC and never overwrites the tool-written body.
         assertEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.ANALYSIS))
-        assertEquals(DeepReadSectionQuality.BASIC, output.sectionQualities[DeepReadGenerationStage.ANALYSIS])
-        assertTrue(output.analysis.implications.orEmpty().contains("用户成本"))
+        assertEquals(DeepReadSectionQuality.STANDARD, output.sectionQualities[DeepReadGenerationStage.ANALYSIS])
+        // Tool-written implications preserved; fallback did NOT inject "用户成本" placeholder text.
+        assertEquals("旧影响分析。", output.analysis.implications)
         assertTrue(output.references.any { it.url == "https://example.com/supplement" })
     }
 

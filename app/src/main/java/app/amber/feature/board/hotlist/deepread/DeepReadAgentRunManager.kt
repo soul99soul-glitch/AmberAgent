@@ -638,24 +638,26 @@ class DeepReadAgentRunManager(
         allowReadyRewrite: Boolean,
     ): Boolean {
         if (writer.currentOutput().statusOf(stage) == DeepReadSectionStatus.READY) return true
-        val fallback = try {
+        // writeFallbackSection is now links-only (spec A1): it merges real source links but
+        // never synthesizes占位 body and never marks the section READY. So a failing stage
+        // can no longer "recover" via fallback — we only preserve the genuine links, then
+        // the caller (runStageSupervisorLoop timeout/other branches) marks the stage FAILED.
+        // Returning false here is by design: markFailed on an already-failed stage is a no-op.
+        return try {
             writer.writeFallbackSection(
                 stage = stage,
                 assistantText = messages.latestAssistantText(),
                 sources = sources,
                 allowReadyRewrite = allowReadyRewrite,
             )
+            Log.i(TAG, "deep read stage ${stage.label} preserved source links after $reason")
+            false
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: Throwable) {
-            Log.w(TAG, "deep read stage ${stage.label} fallback failed after $reason", error)
-            return false
+            Log.w(TAG, "deep read stage ${stage.label} link preservation failed after $reason", error)
+            false
         }
-        val ready = fallback.statusOf(stage) == DeepReadSectionStatus.READY
-        if (ready) {
-            Log.w(TAG, "deep read stage ${stage.label} auto-filled after $reason")
-        }
-        return ready
     }
 
     private fun buildPrompt(

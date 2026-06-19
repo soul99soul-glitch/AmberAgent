@@ -28,7 +28,7 @@ private const val DIAGRAM_NODE_LABEL_MAX_CHARS = 34
 private const val DIAGRAM_NODE_NOTE_MAX_CHARS = 96
 private const val DIAGRAM_NODE_GROUP_MAX_CHARS = 40
 private const val DIAGRAM_EDGE_LABEL_MAX_CHARS = 42
-private const val OVERVIEW_SUMMARY_MIN_CHARS = 24
+private const val OVERVIEW_SUMMARY_MIN_CHARS = 80
 
 private data class WriterFeedback(
     val accepted: Map<String, Int> = emptyMap(),
@@ -91,6 +91,17 @@ class DeepReadSectionWriterTools(
             }
         }
 
+    /**
+     * Links-only fallback: merges real source links into references / extended_reading but
+     * does NOT synthesize placeholder body text and does NOT mark the section READY.
+     *
+     * Previously this produced占位正文 ("围绕xxx，当前来源已提供可继续阅读的基础事实…") and
+     * stamped READY+BASIC, which disguised a failed section as a thin success — directly
+     * contradicting the playbook's ban on占位话术. Body fallback is abolished (spec A1):
+     * failed sections now surface as FAILED. Real source links are still worth keeping
+     * (they are genuine, not伪装), so we preserve them here. The caller (RunManager)
+     * then calls markFailed(stage, ...) — this function never changes section status.
+     */
     suspend fun writeFallbackSection(
         stage: DeepReadGenerationStage,
         assistantText: String,
@@ -100,44 +111,17 @@ class DeepReadSectionWriterTools(
         update { current ->
             if (!allowReadyRewrite && current.statusOf(stage) == DeepReadSectionStatus.READY) return@update current
             val links = sources.toReadingLinks()
-            val fallbackText = assistantText.fallbackBody(stage, sources, topicTitle)
-            val next = when (stage) {
-                DeepReadGenerationStage.OVERVIEW -> current.copy(
-                    summary = fallbackText.cleanText(OVERVIEW_SUMMARY_STORAGE_MAX_CHARS).takeIf { it.isNotBlank() }
-                        ?: current.summary,
-                    references = mergeReadingLinks(current.references, links, limit = 12),
-                )
-
-                DeepReadGenerationStage.NARRATIVE -> {
-                    val timeline = sources.toFallbackTimeline().takeIf { it.isNotEmpty() }
-                    current.copy(
-                        timeline = timeline ?: current.timeline,
-                        corePoints = fallbackText.toFallbackCorePoints().takeIf { it.isNotEmpty() } ?: current.corePoints,
-                        references = mergeReadingLinks(current.references, links, limit = 12),
-                    )
-                }
-
-                DeepReadGenerationStage.ANALYSIS -> current.copy(
-                    analysis = current.analysis.copy(
-                        implications = fallbackText.cleanText(1_600).takeIf { it.isNotBlank() }
-                            ?: current.analysis.implications,
-                    ),
-                    references = mergeReadingLinks(current.references, links, limit = 12),
-                )
-
-                DeepReadGenerationStage.EXTENDED_READING -> current.copy(
-                    extendedReading = mergeReadingLinks(current.extendedReading, links, limit = 10),
-                    references = mergeReadingLinks(current.references, links, limit = 12),
-                )
-            }
-            if (next.statusReadyFor(stage)) {
-                markRequiredWrite()
-                next
-                    .withSectionStatus(stage, DeepReadSectionStatus.READY)
-                    .withSectionQuality(stage, DeepReadSectionQuality.BASIC)
+            // Merge real source links for every stage — they are genuine, and the failing
+            // section should not discard them. EXTENDED_READING additionally feeds extendedReading.
+            val withExtended = if (stage == DeepReadGenerationStage.EXTENDED_READING) {
+                mergeReadingLinks(current.extendedReading, links, limit = 10)
             } else {
-                current
+                current.extendedReading
             }
+            current.copy(
+                extendedReading = withExtended,
+                references = mergeReadingLinks(current.references, links, limit = 12),
+            )
         }
 
     suspend fun currentOutput(): DeepReadOutput =
@@ -946,107 +930,6 @@ private fun List<DeepReadSource>.toReadingLinks(): List<ReadingLink> =
         .distinctBy { it.url.trim().trimEnd('/') }
         .take(8)
         .toList()
-
-private fun List<DeepReadSource>.toFallbackTimeline(): List<TimelineEvent> =
-    asSequence()
-        .filter { it.title.isNotBlank() || it.content.isNotBlank() }
-        .take(4)
-        .mapIndexed { index, source ->
-            val date = source.publishedAt?.takeIf { it.isNotBlank() }
-                ?: source.source?.takeIf { it.isNotBlank() }
-                ?: "来源 ${index + 1}"
-            val excerpt = source.content
-                .fallbackSentences(limit = 1)
-                .firstOrNull()
-                .orEmpty()
-            TimelineEvent(
-                date = date.cleanText(40),
-                event = listOf(source.title, excerpt)
-                    .filter { it.isNotBlank() }
-                    .joinToString("：")
-                    .cleanText(260),
-            )
-        }
-        .filter { it.event.isNotBlank() }
-        .toList()
-
-private fun String.fallbackBody(
-    stage: DeepReadGenerationStage,
-    sources: List<DeepReadSource>,
-    topicTitle: String,
-): String {
-    val cleaned = cleanAssistantFallback(stage.fallbackTextMax())
-    if (cleaned.isUsefulFallbackText()) return cleaned
-    val sourceText = sources.asSequence()
-        .mapNotNull { source ->
-            source.content
-                .fallbackSentences(limit = 2)
-                .joinToString(" ")
-                .ifBlank { null }
-        }
-        .firstOrNull()
-    if (!sourceText.isNullOrBlank()) return sourceText.cleanText(stage.fallbackTextMax())
-    return when (stage) {
-        DeepReadGenerationStage.OVERVIEW ->
-            "围绕「$topicTitle」，当前来源已经提供了可继续阅读的基础事实，但模型未按约定写入结构化概览。"
-
-        DeepReadGenerationStage.NARRATIVE ->
-            "围绕「$topicTitle」，现有来源显示事件已有多个公开节点，后续应优先沿时间线补齐关键进展。"
-
-        DeepReadGenerationStage.ANALYSIS ->
-            "围绕「$topicTitle」，核心分析应聚焦已公开事实、各方立场和可能影响，避免把未证实推断写成定论。"
-
-        DeepReadGenerationStage.EXTENDED_READING -> ""
-    }
-}
-
-private fun String.cleanAssistantFallback(max: Int): String {
-    val withoutFences = replace(Regex("(?s)```.*?```"), " ")
-    return withoutFences
-        .lines()
-        .map { it.trim().trimStart('#', '-', '*', ' ') }
-        .filterNot { line ->
-            line.contains("deep_read_") ||
-                (line.contains("调用") && line.contains("工具")) ||
-                line.equals("好的", ignoreCase = true)
-        }
-        .joinToString(" ")
-        .cleanText(max)
-}
-
-private fun String.isUsefulFallbackText(): Boolean {
-    val cjk = count { it in '\u4e00'..'\u9fff' }
-    return length >= 24 && cjk >= 12
-}
-
-private fun String.fallbackSentences(limit: Int): List<String> =
-    split(Regex("[。！？!?]\\s*|\\n+"))
-        .map { it.cleanText(220) }
-        .filter { it.isNotBlank() }
-        .take(limit)
-
-private fun String.toFallbackCorePoints(): List<CorePoint> =
-    fallbackSentences(limit = 4)
-        .map { sentence ->
-            CorePoint(
-                point = sentence.safeTake(42),
-                supporting = sentence.takeIf { it.length > 42 }?.cleanText(240),
-            )
-        }
-
-private fun DeepReadGenerationStage.fallbackTextMax(): Int = when (this) {
-    DeepReadGenerationStage.OVERVIEW -> OVERVIEW_SUMMARY_STORAGE_MAX_CHARS
-    DeepReadGenerationStage.NARRATIVE -> 1_200
-    DeepReadGenerationStage.ANALYSIS -> 1_600
-    DeepReadGenerationStage.EXTENDED_READING -> 600
-}
-
-private fun DeepReadOutput.statusReadyFor(stage: DeepReadGenerationStage): Boolean = when (stage) {
-    DeepReadGenerationStage.OVERVIEW -> hasOverviewContent()
-    DeepReadGenerationStage.NARRATIVE -> hasNarrativeContent()
-    DeepReadGenerationStage.ANALYSIS -> hasAnalysisContent()
-    DeepReadGenerationStage.EXTENDED_READING -> hasExtendedReadingContent()
-}
 
 private fun DeepReadImageCandidate.selectionReason(topicTitle: String): String =
     when (confidence) {
