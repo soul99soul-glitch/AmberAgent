@@ -105,6 +105,32 @@ final class IOSPermissionsStatusSnapshotTests: XCTestCase {
         XCTAssertFalse(terminal.executable)
     }
 
+    func testAdvancedExecutionCapabilitiesExposeApprovalState() throws {
+        let defaults = isolatedDefaults()
+        let permissionStore = IOSPermissionStore(userDefaults: defaults, taskStore: nil)
+        permissionStore.recordApproval(
+            capabilityId: "ios.remote.command",
+            toolName: "remote_command_run",
+            action: .allowed,
+            reason: "User confirmed remote run for token=secret",
+            runId: "task-1"
+        )
+        let snapshot = makeSnapshot(permissionStore: permissionStore)
+        let subAgent = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.agent.subagent_dispatch" })
+        let council = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.agent.model_council_run" })
+        let remote = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.remote.command" })
+
+        XCTAssertTrue(subAgent.executable)
+        XCTAssertTrue(subAgent.modelToolNames.contains("subagent_dispatch"))
+        XCTAssertTrue(council.executable)
+        XCTAssertTrue(council.modelToolNames.contains("model_council_run"))
+        XCTAssertTrue(remote.executable)
+        XCTAssertTrue(remote.modelToolNames.isEmpty)
+        XCTAssertTrue(remote.uiActionNames.contains("remote_command_run"))
+        XCTAssertEqual(remote.lastApprovalAction, IOSToolApprovalAction.allowed.title)
+        XCTAssertFalse(remote.lastApprovalReason?.contains("secret") == true)
+    }
+
     func testSnapshotDoesNotContainAndroidPermissionInstructions() {
         let snapshot = makeSnapshot()
         let text = snapshot.capabilities
@@ -136,10 +162,10 @@ final class IOSPermissionsStatusSnapshotTests: XCTestCase {
         XCTAssertFalse(text.contains("android."))
     }
 
-    private func makeSnapshot() -> IOSPermissionsStatusSnapshot {
+    private func makeSnapshot(permissionStore: IOSPermissionStore? = nil) -> IOSPermissionsStatusSnapshot {
         let coordinator = IOSSystemPermissionCoordinator()
         let executor = IOSLocalToolExecutor(
-            permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+            permissionStore: permissionStore ?? IOSPermissionStore(userDefaults: isolatedDefaults()),
             documentStore: DocumentAccessStore(),
             systemPermissionCoordinator: coordinator
         )

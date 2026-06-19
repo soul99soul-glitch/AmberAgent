@@ -192,6 +192,58 @@ struct IOSCapabilityRegistry {
             gate: freshHighRiskGate
         ),
         capability(
+            id: "ios.agent.subagent_dispatch",
+            title: "SubAgent dispatch",
+            summary: "Let the model delegate a bounded task to a configured SubAgent role. iOS SubAgents use narrowed tool scopes and persisted task records.",
+            domain: .networkAndConnectivity,
+            status: .supported,
+            risk: .sensitive,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Chat subagent_dispatch tool",
+            modelToolNames: ["subagent_dispatch"],
+            defaultEnabled: true,
+            gate: reusableSensitiveGate
+        ),
+        capability(
+            id: "ios.agent.model_council_run",
+            title: "Model Council run",
+            summary: "Let the model start a bounded Model Council discussion and return a persisted discussion result.",
+            domain: .networkAndConnectivity,
+            status: .supported,
+            risk: .sensitive,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Chat model_council_run tool",
+            modelToolNames: ["model_council_run"],
+            defaultEnabled: true,
+            gate: reusableSensitiveGate
+        ),
+        capability(
+            id: "ios.network.search_tools",
+            title: "Search and webpage reads",
+            summary: "Allow model-dispatched public web search and webpage scrape calls through configured iOS search providers.",
+            domain: .networkAndConnectivity,
+            status: .supported,
+            risk: .sensitive,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Chat search approval",
+            modelToolNames: ["search_web", "scrape_web"],
+            defaultEnabled: true,
+            gate: reusableSensitiveGate
+        ),
+        capability(
+            id: "ios.mcp.tool_call",
+            title: "MCP tool calls",
+            summary: "Allow model-dispatched MCP calls to configured servers. Server tools may reach external services and require per-call approval.",
+            domain: .networkAndConnectivity,
+            status: .supported,
+            risk: .high,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Chat MCP approval",
+            modelToolNames: ["mcp_call"],
+            defaultEnabled: true,
+            gate: freshHighRiskGate
+        ),
+        capability(
             id: "ios.files.selected_read",
             title: "Selected file read",
             summary: "Read a single file selected by the user through the foreground document picker.",
@@ -205,6 +257,32 @@ struct IOSCapabilityRegistry {
             requiredInfoPlistKeys: [],
             defaultEnabled: true,
             gate: reusableSensitiveGate
+        ),
+        capability(
+            id: "ios.workspace.file_read",
+            title: "Workspace reads",
+            summary: "Allow the model to read user-imported Workspace files and saved artifacts after foreground approval.",
+            domain: .filesAndPhotos,
+            status: .supported,
+            risk: .sensitive,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Chat Workspace read approval",
+            modelToolNames: ["workspace_file_read", "workspace_artifact_read"],
+            defaultEnabled: true,
+            gate: reusableSensitiveGate
+        ),
+        capability(
+            id: "ios.workspace.file_write",
+            title: "Workspace writes",
+            summary: "Allow the model to write local Workspace files or delete saved artifacts only after explicit approval.",
+            domain: .filesAndPhotos,
+            status: .supported,
+            risk: .high,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Chat Workspace write approval",
+            modelToolNames: ["workspace_file_write", "workspace_artifact_delete"],
+            defaultEnabled: true,
+            gate: freshHighRiskGate
         ),
         capability(
             id: "ios.files.security_scoped",
@@ -1338,6 +1416,19 @@ struct IOSCapabilityRegistry {
             defaultEnabled: true,
             gate: freshHighRiskGate
         ),
+        capability(
+            id: "ios.remote.command",
+            title: "Remote command tasks",
+            summary: "Run a single command on a trusted Remote SSH profile from foreground UI. Model-dispatched terminal tools remain blocked on iOS.",
+            domain: .networkAndConnectivity,
+            status: .supported,
+            risk: .high,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Remote Execution screen",
+            uiActionNames: ["remote_command_run", "remote_command_cancel"],
+            defaultEnabled: true,
+            gate: freshHighRiskGate
+        ),
 
         unsupported(
             id: "android.sms.read",
@@ -1563,22 +1654,57 @@ private extension IOSPlatformCapability {
     }
 }
 
+enum IOSToolApprovalAction: String, Codable, Equatable, Identifiable {
+    case allowed
+    case denied
+    case asked
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .allowed: "Allowed"
+        case .denied: "Denied"
+        case .asked: "Asked"
+        }
+    }
+}
+
+struct IOSToolApprovalRecord: Codable, Equatable, Identifiable {
+    var id: String
+    var capabilityId: String
+    var toolName: String
+    var action: IOSToolApprovalAction
+    var reason: String
+    var runId: String
+    var scopeDigest: String
+    var payloadDigest: String
+    var createdAt: Date
+}
+
 @MainActor
 @Observable
 final class IOSPermissionStore {
     var policies: [String: IOSAgentPermissionPolicy]
+    var approvalRecords: [IOSToolApprovalRecord]
     private let capabilities: [IOSPlatformCapability]
     private let userDefaults: UserDefaults
     private let storageKey: String
+    private let approvalStorageKey: String
+    @ObservationIgnored private let taskStore: IOSAdvancedTaskStore?
 
     init(
         capabilities: [IOSPlatformCapability] = IOSCapabilityRegistry.capabilities,
         userDefaults: UserDefaults = .standard,
-        storageKey: String = "app.amber.ios.permissionPolicies.v2"
+        storageKey: String = "app.amber.ios.permissionPolicies.v2",
+        approvalStorageKey: String = "app.amber.ios.toolApprovalRecords.v1",
+        taskStore: IOSAdvancedTaskStore? = IOSAdvancedTaskStore.shared
     ) {
         self.capabilities = capabilities
         self.userDefaults = userDefaults
         self.storageKey = storageKey
+        self.approvalStorageKey = approvalStorageKey
+        self.taskStore = taskStore
 
         let defaults = Dictionary(
             uniqueKeysWithValues: capabilities.map { capability in
@@ -1608,6 +1734,7 @@ final class IOSPermissionStore {
         }
 
         policies = loaded
+        approvalRecords = Self.loadApprovalRecords(from: userDefaults, key: approvalStorageKey)
         if didDropUnknown || savedRaw.isEmpty == false {
             persist()
         }
@@ -1622,6 +1749,58 @@ final class IOSPermissionStore {
         guard let normalizedPolicy = Self.normalizedPolicy(policy, for: capability) else { return }
         policies[capability.id] = normalizedPolicy
         persist()
+    }
+
+    @discardableResult
+    func recordApproval(
+        capabilityId: String,
+        toolName: String,
+        action: IOSToolApprovalAction,
+        reason: String,
+        runId: String = "",
+        scopeDigest: String = "",
+        payloadDigest: String = "",
+        now: Date = Date()
+    ) -> IOSToolApprovalRecord {
+        let record = IOSToolApprovalRecord(
+            id: UUID().uuidString,
+            capabilityId: capabilityId,
+            toolName: IOSAdvancedTaskStore.redacted(toolName),
+            action: action,
+            reason: IOSAdvancedTaskStore.redacted(reason),
+            runId: IOSAdvancedTaskStore.redacted(runId),
+            scopeDigest: IOSAdvancedTaskStore.redacted(scopeDigest),
+            payloadDigest: IOSAdvancedTaskStore.redacted(payloadDigest),
+            createdAt: now
+        )
+        approvalRecords.insert(record, at: 0)
+        approvalRecords = Array(approvalRecords.prefix(120))
+        persistApprovalRecords()
+        let task = taskStore?.startTask(
+            kind: .toolApproval,
+            title: "Approval · \(record.toolName)",
+            objective: record.reason,
+            toolScope: [record.toolName],
+            sourceToolName: record.toolName,
+            metadata: [
+                "capability_id": capabilityId,
+                "action": action.rawValue
+            ],
+            now: now
+        )
+        _ = taskStore?.updateTask(
+            id: task?.id ?? record.id,
+            status: action == .denied ? .failed : .completed,
+            resultSummary: "\(action.title): \(record.reason)",
+            retryable: false,
+            cancelCapability: false,
+            now: now
+        )
+        return record
+    }
+
+    func latestApproval(for capability: IOSPlatformCapability) -> IOSToolApprovalRecord? {
+        approvalRecords.first { $0.capabilityId == capability.id }
     }
 
     func availablePolicies(for capability: IOSPlatformCapability) -> [IOSAgentPermissionPolicy] {
@@ -1698,5 +1877,19 @@ final class IOSPermissionStore {
             .filter { currentCapabilityIds.contains($0.key) }
             .mapValues(\.rawValue)
         userDefaults.set(raw, forKey: storageKey)
+    }
+
+    private func persistApprovalRecords() {
+        if let data = try? JSONEncoder().encode(approvalRecords) {
+            userDefaults.set(data, forKey: approvalStorageKey)
+        }
+    }
+
+    private static func loadApprovalRecords(from defaults: UserDefaults, key: String) -> [IOSToolApprovalRecord] {
+        guard let data = defaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([IOSToolApprovalRecord].self, from: data) else {
+            return []
+        }
+        return Array(decoded.sorted { $0.createdAt > $1.createdAt }.prefix(120))
     }
 }

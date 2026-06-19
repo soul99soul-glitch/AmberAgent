@@ -62,6 +62,40 @@ final class IOSPermissionStoreTests: XCTestCase {
         XCTAssertEqual(persisted[fileCapability.id], IOSAgentPermissionPolicy.askEveryTime.rawValue)
     }
 
+    func testApprovalRecordsPersistAndRedactSensitiveValues() throws {
+        let defaults = isolatedDefaults()
+        let store = IOSPermissionStore(userDefaults: defaults, taskStore: nil)
+
+        store.recordApproval(
+            capabilityId: "ios.remote.command",
+            toolName: "remote_command_run",
+            action: .allowed,
+            reason: "password=secret token=abc123",
+            runId: "run-1",
+            payloadDigest: "payload"
+        )
+
+        let reloaded = IOSPermissionStore(userDefaults: defaults, taskStore: nil)
+        let record = try XCTUnwrap(reloaded.latestApproval(
+            for: try XCTUnwrap(IOSCapabilityRegistry.capabilities.first { $0.id == "ios.remote.command" })
+        ))
+
+        XCTAssertEqual(record.action, .allowed)
+        XCTAssertEqual(record.toolName, "remote_command_run")
+        XCTAssertFalse(record.reason.contains("secret"))
+        XCTAssertFalse(record.reason.contains("abc123"))
+    }
+
+    func testHighRiskAdvancedCapabilitiesDoNotOfferRunScopedReuse() throws {
+        let mcp = try XCTUnwrap(IOSCapabilityRegistry.capabilities.first { $0.id == "ios.mcp.tool_call" })
+        let remote = try XCTUnwrap(IOSCapabilityRegistry.capabilities.first { $0.id == "ios.remote.command" })
+
+        XCTAssertEqual(mcp.risk, .high)
+        XCTAssertEqual(remote.risk, .high)
+        XCTAssertFalse(IOSPermissionStore.availablePolicies(for: mcp).contains(.allowOncePerRun))
+        XCTAssertFalse(IOSPermissionStore.availablePolicies(for: remote).contains(.allowOncePerRun))
+    }
+
     private func isolatedDefaults() -> UserDefaults {
         let suiteName = "app.amber.ios.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

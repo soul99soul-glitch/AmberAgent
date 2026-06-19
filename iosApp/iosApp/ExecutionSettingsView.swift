@@ -8,6 +8,7 @@ struct ExecutionSettingsView: View {
     @Environment(RouterPath.self) private var router
 
     @AppStorage(IOSExecutionPreferenceKeys.liveActivity) private var liveActivity = true
+    @State private var taskStore = IOSAdvancedTaskStore.shared
 
     var body: some View {
         ZStack {
@@ -17,6 +18,7 @@ struct ExecutionSettingsView: View {
                 VStack(spacing: 0) {
                     header
                     runSection
+                    recentTasksSection
                     liveActivitySection
                 }
                 .padding(.bottom, 36)
@@ -84,6 +86,84 @@ struct ExecutionSettingsView: View {
         }
     }
 
+    private var recentTasksSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "最近任务")
+            AmberFormGroup {
+                let tasks = taskStore.recent(limit: 6)
+                if tasks.isEmpty {
+                    Text("暂无高级执行任务。SubAgent、模型议会和远程命令运行后会出现在这里。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
+                        ExecutionTaskRow(task: task)
+                        if index < tasks.count - 1 {
+                            Divider()
+                                .overlay(AmberTheme.borderSoft)
+                                .padding(.leading, 58)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+}
+
+private struct ExecutionTaskRow: View {
+    let task: IOSAdvancedTaskRecord
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(task.title)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text("\(task.kind.title) · \(task.status.title) · \(task.compactSummary)")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(task.status.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(iconColor)
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+    }
+
+    private var iconName: String {
+        switch task.kind {
+        case .subAgent: "person.2.wave.2.fill"
+        case .modelCouncil: "bubble.left.and.bubble.right.fill"
+        case .remoteCommand: "terminal.fill"
+        case .toolApproval: "hand.raised.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        switch task.status {
+        case .completed: AmberTheme.accentGreen
+        case .failed, .timedOut, .interrupted: AmberTheme.accentRed
+        case .cancelled: AmberTheme.muted2
+        case .approvalRequired: AmberTheme.accentAmber
+        default: AmberTheme.accent
+        }
+    }
 }
 
 private struct ExecutionNavigationRow: View {

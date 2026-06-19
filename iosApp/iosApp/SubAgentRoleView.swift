@@ -6,10 +6,13 @@ struct SubAgentRoleView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let detail: SubAgentRoleDetail
+    @State private var promptDraft: String
 
     init(sharedSettings: IOSSharedSettingsStore, name: String, roleId: String) {
         self.sharedSettings = sharedSettings
-        detail = SubAgentRoleDetail.resolve(name: name, roleId: roleId)
+        let resolved = SubAgentRoleDetail.resolve(name: name, roleId: roleId)
+        detail = resolved
+        _promptDraft = State(initialValue: resolved.description)
     }
 
     var body: some View {
@@ -100,7 +103,7 @@ struct SubAgentRoleView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "可用范围")
             AmberFormGroup {
-                Text("该角色会根据任务需要使用搜索、文件、会话和 MCP 等工具；涉及敏感数据或写入动作时仍会按权限策略确认。")
+                Text(detail.toolSummary.isEmpty ? "无外部工具。该角色只能返回模型自身结果。" : detail.toolSummary)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.foreground2)
                     .lineSpacing(4)
@@ -109,8 +112,7 @@ struct SubAgentRoleView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 13)
             }
-
-            SubAgentRoleFootnote(text: "自定义每个角色的工具和预算会在后续版本开放。")
+            SubAgentRoleFootnote(text: "工具范围由 iOS 端只读安全 allowlist 限制；敏感动作仍走权限与批准策略。")
         }
     }
 
@@ -120,19 +122,34 @@ struct SubAgentRoleView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "角色提示词")
             AmberFormGroup {
-                let overrides = sharedSettings.savedSubAgentOverrides.filter { $0["roleId"] == detail.roleId }
+                TextField("角色提示词", text: $promptDraft, axis: .vertical)
+                    .font(.caption)
+                    .lineLimit(3...8)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
+
+                let overrides = Array(sharedSettings.savedSubAgentOverrides.enumerated())
+                    .filter { $0.element["roleId"] == detail.roleId }
                 ForEach(Array(overrides.enumerated()), id: \.offset) { index, override in
                     HStack(spacing: 10) {
-                        Text(override["systemPrompt"] ?? "?").font(.caption).foregroundStyle(AmberTheme.muted)
+                        Text(override.element["systemPrompt"] ?? "?").font(.caption).foregroundStyle(AmberTheme.muted)
                             .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-                        Button { sharedSettings.removeSubAgentOverride(at: index) } label: {
+                        Button { sharedSettings.removeSubAgentOverride(at: override.offset) } label: {
                             Image(systemName: "minus.circle.fill").font(.system(size: 16)).foregroundStyle(AmberTheme.accentRed)
                         }.buttonStyle(.plain)
                     }.frame(minHeight: 40).padding(.horizontal, 14).padding(.vertical, 4)
+                    if index < overrides.count - 1 {
+                        SubAgentRoleDivider()
+                    }
                 }
                 Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
                 Button {
-                    sharedSettings.addSubAgentOverride(roleId: detail.roleId, systemPrompt: detail.description)
+                    let prompt = promptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !prompt.isEmpty else { return }
+                    sharedSettings.addSubAgentOverride(roleId: detail.roleId, systemPrompt: prompt)
                 } label: {
                     Label("保存角色覆盖", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
                 }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
@@ -177,6 +194,16 @@ private struct SubAgentRoleDetail {
     }
 
     static func resolve(name: String, roleId: String) -> SubAgentRoleDetail {
+        if let role = IOSSubAgentRoleCatalog.builtIns.first(where: { $0.id == roleId }) {
+            return SubAgentRoleDetail(
+                roleId: role.id,
+                name: role.name,
+                description: role.summary,
+                toolSummary: role.toolAllowlist.joined(separator: "\n"),
+                routing: role.routing,
+                isKnownBuiltIn: true
+            )
+        }
         if let builtIn = builtIns[roleId] {
             return builtIn
         }

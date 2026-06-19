@@ -2,6 +2,94 @@ import Foundation
 import Observation
 @preconcurrency import Shared
 
+struct IOSSubAgentRoleDescriptor: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let summary: String
+    let systemPrompt: String
+    let routing: String
+    let toolAllowlist: [String]
+    let maxTurns: Int
+    let timeoutSeconds: Int
+    let outputBudgetChars: Int
+}
+
+enum IOSSubAgentRoleCatalog {
+    static let builtIns: [IOSSubAgentRoleDescriptor] = [
+        .init(
+            id: "explorer",
+            name: "Explorer",
+            summary: "跨多源快速并行侦察，速度优先。",
+            systemPrompt: "快速侦察范围、列出证据和未知数，优先用只读来源。",
+            routing: "范围广、不确定、需要先摸清有哪些信息时调用。",
+            toolAllowlist: ["tools_list", "search_web", "scrape_web", "file_read_selected", "permissions_status"],
+            maxTurns: 4,
+            timeoutSeconds: 300,
+            outputBudgetChars: 12_000
+        ),
+        .init(
+            id: "historian",
+            name: "Historian",
+            summary: "历史会话搜索、主题挖掘、跨分片综合。",
+            systemPrompt: "聚合历史上下文，明确哪些结论来自过往记录。",
+            routing: "需要回忆过去对话、决策或跨会话主题时调用。",
+            toolAllowlist: ["tools_list", "permissions_status"],
+            maxTurns: 4,
+            timeoutSeconds: 300,
+            outputBudgetChars: 12_000
+        ),
+        .init(
+            id: "oracle",
+            name: "Oracle",
+            summary: "架构取舍、风险复议、提交前评审。",
+            systemPrompt: "进行高判断力复议，重点给出风险、反例和取舍。",
+            routing: "长期影响大的决定、高风险重构、提交前二次复议时调用。",
+            toolAllowlist: ["tools_list", "file_read_selected", "permissions_status"],
+            maxTurns: 4,
+            timeoutSeconds: 300,
+            outputBudgetChars: 12_000
+        ),
+        .init(
+            id: "designer",
+            name: "Designer",
+            summary: "视觉产出规格、版式、配色和信息密度审查。",
+            systemPrompt: "从视觉质量、信息层级和移动端可用性评审输出。",
+            routing: "生成或评审视觉产物，并且在意版式和信息密度时调用。",
+            toolAllowlist: ["tools_list", "file_read_selected"],
+            maxTurns: 3,
+            timeoutSeconds: 240,
+            outputBudgetChars: 8_000
+        ),
+        .init(
+            id: "writer",
+            name: "Writer",
+            summary: "中文写作、文案润色、故事与风格改写。",
+            systemPrompt: "以中文表达质量为第一目标，保留事实边界。",
+            routing: "中文写作、润色、邮件、文案或故事表达时调用。",
+            toolAllowlist: ["tools_list", "file_read_selected"],
+            maxTurns: 3,
+            timeoutSeconds: 240,
+            outputBudgetChars: 8_000
+        ),
+        .init(
+            id: "fixer",
+            name: "Fixer",
+            summary: "边界清晰的机械执行：翻译、格式转换、抽取。",
+            systemPrompt: "完成边界清晰的机械任务，不扩大范围。",
+            routing: "翻译、格式化、抽取、命名等明确任务时调用。",
+            toolAllowlist: ["tools_list"],
+            maxTurns: 2,
+            timeoutSeconds: 180,
+            outputBudgetChars: 6_000
+        )
+    ]
+
+    static func resolve(roleId: String?) -> IOSSubAgentRoleDescriptor {
+        let normalized = roleId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return builtIns.first { $0.id == normalized } ?? builtIns[0]
+    }
+}
+
 /// iOS entry point for calling SubAgentManager.start/read/wait/cancel.
 /// Uses IosSubAgentFactory (KMP iosMain). Real provider if API key configured;
 /// otherwise falls back to an honest stub runner for call-chain validation.
@@ -10,11 +98,20 @@ import Observation
 final class SubAgentRunner {
     @ObservationIgnored private var manager: SubAgentManager?
     @ObservationIgnored private var currentRunId: String?
+    @ObservationIgnored private let taskStore: IOSAdvancedTaskStore
+    @ObservationIgnored private var currentTaskId: String?
 
     var lastRunResult: String = "(未运行)"
     var isRunning: Bool = false
+    var lastTask: IOSAdvancedTaskRecord?
 
-    init() {}
+    init(taskStore: IOSAdvancedTaskStore = .shared) {
+        self.taskStore = taskStore
+    }
+
+    var recentTasks: [IOSAdvancedTaskRecord] {
+        taskStore.recent(kind: .subAgent, limit: 5)
+    }
 
     private func ensureManager() -> SubAgentManager? {
         if let manager { return manager }
@@ -44,80 +141,11 @@ final class SubAgentRunner {
     }
 
     func runTestCycle() {
-        guard let m = ensureManager() else {
-            lastRunResult = "无法构造 Manager（文档目录不可用）"
-            return
-        }
-        isRunning = true
-        lastRunResult = "正在启动 SubAgent…"
-
-        let input = IosSubAgentFactory.shared.startInput(
-            objective: "验证 iOS SubAgentManager start/read/wait/cancel 调用链",
-            subagentId: "ios-smoke-runner",
-            outputFormat: "返回简短 Markdown 摘要。",
-            toolsAndSources: "不使用外部工具，仅验证调用链。",
-            boundaries: "不要请求用户输入，不要伪造真实工具结果。",
-            context: "iOS SubAgentsView 手动触发的运行验证。"
-        )
-
-        m.start(parentConversationId: KotlinUuid.companion.random(), input: input, parentTools: []) { [weak self] result, error in
-            if let error {
-                DispatchQueue.main.async {
-                    self?.isRunning = false
-                    self?.lastRunResult = "start 错误: \(error.localizedDescription)"
-                }
-                return
-            }
-            guard let result else {
-                DispatchQueue.main.async {
-                    self?.isRunning = false
-                    self?.lastRunResult = "start 返回空结果"
-                }
-                return
-            }
-
-            let runId = IosSubAgentFactory.shared.extractRunId(result: result)
-            let startStatus = IosSubAgentFactory.shared.extractStatus(result: result)
-            guard runId != "(unknown)", startStatus == "running" || startStatus == "completed" else {
-                let resultDescription = String(describing: result)
-                DispatchQueue.main.async {
-                    self?.isRunning = false
-                    self?.lastRunResult = "start 失败\nstatus: \(startStatus)\nresult: \(resultDescription)"
-                }
-                return
-            }
-            DispatchQueue.main.async { self?.currentRunId = runId }
-
-            m.wait(runId: runId, waitTimeoutMs: 15_000) { waitResult, waitError in
-                if let waitError {
-                    DispatchQueue.main.async {
-                        guard let self else { return }
-                        self.isRunning = false
-                        self.lastRunResult = "✅ start 成功，wait 错误: \(waitError.localizedDescription)\nrunId: \(runId)"
-                    }
-                    return
-                }
-
-                m.read(runId: runId) { readResult, readError in
-                    let summary: String
-                    if let readError {
-                        summary = "✅ start/wait 成功，read 错误: \(readError.localizedDescription)\nrunId: \(runId)"
-                    } else if let readResult {
-                        let status = IosSubAgentFactory.shared.extractStatus(result: readResult)
-                        summary = "子代理已完成试运行\nrunId: \(runId)\nstatus: \(status)\n\n已成功启动并读取结果。配置 API Key 后会使用真实模型生成。"
-                    } else if let waitResult {
-                        let status = IosSubAgentFactory.shared.extractStatus(result: waitResult)
-                        summary = "✅ start/wait 成功，read 返回空结果\nrunId: \(runId)\nstatus: \(status)"
-                    } else {
-                        summary = "✅ start 成功，但 wait/read 返回空结果\nrunId: \(runId)"
-                    }
-                    DispatchQueue.main.async {
-                        guard let self else { return }
-                        self.isRunning = false
-                        self.lastRunResult = summary
-                    }
-                }
-            }
+        Task {
+            lastRunResult = await run(
+                objective: "验证 iOS SubAgentManager start/read/wait/cancel 调用链",
+                roleId: "explorer"
+            )
         }
     }
 
@@ -127,17 +155,41 @@ final class SubAgentRunner {
     /// tool-call output that the model can read to continue the conversation.
     /// Failures (no manager, start/wait/read error, timeout) return an honest
     /// error string — never empty/fabricated success.
-    func run(objective: String) async -> String {
+    func run(objective: String, roleId: String = "explorer", requestedToolScope: [String] = []) async -> String {
         guard let m = ensureManager() else {
             return "SubAgent 不可用：无法构造 Manager（文档目录不可用）。"
         }
+        let role = IOSSubAgentRoleCatalog.resolve(roleId: roleId)
+        let scopedTools = requestedToolScope.isEmpty
+            ? role.toolAllowlist
+            : requestedToolScope.filter { role.toolAllowlist.contains($0) }
+        let tools = scopedTools.isEmpty ? role.toolAllowlist : scopedTools
+        let providerMode = SettingsStore().currentApiKey.isEmpty ? "stub_fallback" : "real_provider"
+        let task = taskStore.startTask(
+            kind: .subAgent,
+            title: "\(role.name) · \(objective.prefix(36))",
+            objective: objective,
+            roleId: role.id,
+            toolScope: tools,
+            budgetSummary: "turns \(role.maxTurns) · timeout \(role.timeoutSeconds)s · output \(role.outputBudgetChars) chars",
+            sourceToolName: "subagent_dispatch",
+            metadata: [
+                "provider_mode": providerMode,
+                "role_name": role.name
+            ]
+        )
+        currentTaskId = task.id
+        lastTask = task
+        isRunning = true
+        defer { isRunning = false }
+
         let input = IosSubAgentFactory.shared.startInput(
             objective: objective,
-            subagentId: "ios-chat-dispatch",
+            subagentId: role.id,
             outputFormat: "返回针对 objective 的最终 Markdown 回答。",
-            toolsAndSources: "不使用外部工具，仅完成委派任务。",
-            boundaries: "不要请求用户输入，不要伪造真实工具结果。",
-            context: "聊天中的子代理委派任务。"
+            toolsAndSources: tools.joined(separator: ", "),
+            boundaries: "只使用列出的工具范围。不要请求用户输入，不要伪造真实工具结果。\(role.systemPrompt)",
+            context: "iOS SubAgent task. Role: \(role.name). Routing: \(role.routing). Provider mode: \(providerMode)."
         )
 
         // start
@@ -156,11 +208,25 @@ final class SubAgentRunner {
             }
         }
         guard startResult.runId != "(unknown)" else {
-            return "SubAgent 启动失败：\(startResult.status)"
+            let message = "SubAgent 启动失败：\(startResult.status)"
+            lastTask = taskStore.updateTask(
+                id: task.id,
+                status: .failed,
+                resultSummary: message,
+                error: startResult.status,
+                retryable: true,
+                cancelCapability: false
+            )
+            return message
         }
+        currentRunId = startResult.runId
+        lastTask = taskStore.updateTask(
+            id: task.id,
+            metadata: ["kmp_run_id": startResult.runId, "start_status": startResult.status]
+        )
 
         // wait (15s budget, matches runTestCycle)
-        let _: String = await withCheckedContinuation { cont in
+        let waitStatus: String = await withCheckedContinuation { cont in
             m.wait(runId: startResult.runId, waitTimeoutMs: 15_000) { waitResult, waitError in
                 if let waitError {
                     cont.resume(returning: "wait 错误: \(waitError.localizedDescription)")
@@ -184,7 +250,30 @@ final class SubAgentRunner {
                 }
             }
         }
-        return "子代理已执行（runId: \(startResult.runId)，状态: \(finalStatus)）。任务：\(objective)。配置 API Key 后会使用真实模型生成。"
+        let mappedStatus = mapStatus(finalStatus)
+        let summary = "SubAgent \(role.name) 已执行。runId: \(startResult.runId)，start: \(startResult.status)，wait: \(waitStatus)，final: \(finalStatus)。"
+        lastTask = taskStore.updateTask(
+            id: task.id,
+            status: mappedStatus,
+            resultSummary: summary,
+            logTail: "role=\(role.id)\ntools=\(tools.joined(separator: ", "))\nobjective=\(objective)",
+            error: mappedStatus == .failed ? finalStatus : "",
+            retryable: mappedStatus != .completed,
+            cancelCapability: false,
+            metadata: ["final_status": finalStatus]
+        )
+        lastRunResult = summary
+        return Self.json([
+            "ok": mappedStatus == .completed,
+            "task_id": task.id,
+            "kind": IOSAdvancedTaskKind.subAgent.rawValue,
+            "role_id": role.id,
+            "role_name": role.name,
+            "run_id": startResult.runId,
+            "status": mappedStatus.rawValue,
+            "tool_scope": tools,
+            "summary": summary
+        ])
     }
 
     func cancelCurrentRun() {
@@ -202,7 +291,38 @@ final class SubAgentRunner {
             } else {
                 summary = "cancel 返回空结果"
             }
-            DispatchQueue.main.async { self?.lastRunResult = summary }
+            DispatchQueue.main.async {
+                self?.lastRunResult = summary
+                if let taskId = self?.currentTaskId {
+                    self?.lastTask = self?.taskStore.updateTask(
+                        id: taskId,
+                        status: .cancelled,
+                        resultSummary: summary,
+                        retryable: true,
+                        cancelCapability: false
+                    )
+                }
+            }
         }
+    }
+
+    private func mapStatus(_ status: String) -> IOSAdvancedTaskStatus {
+        let normalized = status.lowercased()
+        if normalized.contains("completed") { return .completed }
+        if normalized.contains("cancel") { return .cancelled }
+        if normalized.contains("timed") || normalized.contains("timeout") { return .timedOut }
+        if normalized.contains("interrupt") { return .interrupted }
+        if normalized.contains("error") || normalized.contains("fail") { return .failed }
+        if normalized.contains("running") { return .running }
+        return .completed
+    }
+
+    private static func json(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return String(describing: object)
+        }
+        return text
     }
 }

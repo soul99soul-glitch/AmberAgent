@@ -469,11 +469,13 @@ final class CouncilChatViewModel {
 
     @ObservationIgnored private let settingsStore: SettingsStore
     @ObservationIgnored private let sharedSettings: IOSSharedSettingsStore
+    @ObservationIgnored private let taskStore = IOSAdvancedTaskStore.shared
     @ObservationIgnored private lazy var provider = OpenAIKmpProvider()
     @ObservationIgnored private let streamJobBox = CouncilStreamJobBox()
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
     @ObservationIgnored private var activeContinuation: CheckedContinuation<String, Never>?
     @ObservationIgnored private var currentObjective = ""
+    @ObservationIgnored private var currentTaskId: String?
 
     private var activeSpeakerId: String?
     private var invitedSpeakerIds: Set<String> = []
@@ -594,6 +596,15 @@ final class CouncilChatViewModel {
             subtitle: "已取消"
         )
         updateDetail(status: "已停止")
+        if let currentTaskId {
+            _ = taskStore.updateTask(
+                id: currentTaskId,
+                status: .cancelled,
+                resultSummary: "模型议会已取消。",
+                retryable: true,
+                cancelCapability: false
+            )
+        }
     }
 
     func showCurrentDetail() {
@@ -605,8 +616,36 @@ final class CouncilChatViewModel {
         invitedSpeakerIds = Set(guests.map(\.id))
         selectedDetail = makeDetail(status: selectedMode.runningState)
         appendDivider(selectedMode.openingDivider)
+        let task = taskStore.startTask(
+            kind: .modelCouncil,
+            title: "\(selectedMode.title) · \(objective.prefix(34))",
+            objective: objective,
+            budgetSummary: "mode \(selectedMode.rawValue) · seats \(max(1, guests.count + 1)) · max rounds 3",
+            sourceToolName: "council_chat",
+            metadata: [
+                "host": hostDisplayName,
+                "guests": guests.map(\.displayName).joined(separator: ", ")
+            ]
+        )
+        currentTaskId = task.id
+        var generatedOutputs: [String] = []
 
         defer {
+            let cancelled = Task.isCancelled
+            let transcript = roomTranscript(limit: 80)
+            let hadError = generatedOutputs.contains { $0.lowercased().hasPrefix("error:") }
+            _ = taskStore.updateTask(
+                id: task.id,
+                status: cancelled ? .cancelled : .completed,
+                resultSummary: cancelled
+                    ? "模型议会已取消。"
+                    : (hadError ? "模型议会已完成，但至少一个席位降级或失败。" : "模型议会已完成讨论并生成结论。"),
+                logTail: transcript,
+                error: hadError ? generatedOutputs.filter { $0.lowercased().hasPrefix("error:") }.joined(separator: "\n") : "",
+                retryable: cancelled || hadError,
+                cancelCapability: false,
+                metadata: ["message_count": "\(messages.count)"]
+            )
             activeSpeakerId = nil
             invitedSpeakerIds.removeAll()
             isRunning = false
@@ -628,6 +667,7 @@ final class CouncilChatViewModel {
                 systemPrompt: hostSystemPrompt,
                 userPrompt: hostOpeningPrompt(objective: objective, guests: guests)
             )
+            generatedOutputs.append(messages.first(where: { $0.id == openingId })?.body ?? "")
         }
 
         if Task.isCancelled { return }
@@ -647,12 +687,13 @@ final class CouncilChatViewModel {
                 speaker: guest,
                 subtitle: "\(modelLabel(for: guest)) · \(host.displayName) 邀请"
             )
-            _ = await generateIntoMessage(
+            let guestOutput = await generateIntoMessage(
                 messageId: messageId,
                 speaker: guest,
                 systemPrompt: guestSystemPrompt(for: guest),
                 userPrompt: guestPrompt(objective: objective, guest: guest, hostDirective: directive)
             )
+            generatedOutputs.append(guestOutput)
             if Task.isCancelled { return }
         }
 
@@ -661,12 +702,13 @@ final class CouncilChatViewModel {
             speaker: host,
             subtitle: "总结 · \(currentModelId)"
         )
-        _ = await generateIntoMessage(
+        let synthesis = await generateIntoMessage(
             messageId: synthesisId,
             speaker: host,
             systemPrompt: hostSystemPrompt,
             userPrompt: hostSynthesisPrompt(objective: objective)
         )
+        generatedOutputs.append(synthesis)
     }
 
     private func generateIntoMessage(

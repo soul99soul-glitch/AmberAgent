@@ -1,0 +1,36 @@
+{
+  "status": "implemented-with-external-build-blocker",
+  "gitBaseline": {
+    "branch": "codex/ios-port-wip",
+    "ahead": 16,
+    "untracked": [".workflow/"]
+  },
+  "packets": {
+    "A": "complete:019ee017-121a-7f22-b8e7-352024f46164",
+    "B": "complete:019ee017-12d5-77d3-8b9c-bbd6e964e8c2",
+    "C": "complete:019ee017-139c-7512-88eb-dc6fe0dbe6ce",
+    "D": "complete:019ee017-148a-7f53-a63c-b89d10265a0b"
+  },
+  "lanes": {
+    "gateMatrix": "complete",
+    "taskState": "complete",
+    "subAgent": "complete",
+    "council": "complete",
+    "remoteExecution": "complete",
+    "toolApproval": "complete",
+    "chatRefill": "complete",
+    "tests": "added-not-run-due-existing-miniapp-build-error"
+  },
+  "verification": {
+    "gitStatus": "complete",
+    "gitLog": "complete",
+    "diffCheck": "pass: git diff --check",
+    "xcodebuild": "blocked: env JAVA_HOME=/opt/homebrew/opt/openjdk@17 xcodebuild -quiet -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination \"generic/platform=iOS Simulator\" build fails in iosApp/iosApp/MiniAppSettingsView.swift lines 78, 89, 100, 111, 122, 133, 144, 155, 166 with anonymous closure arguments cannot be used inside a closure that has explicit arguments",
+    "iosAppTests": "not-run: app target does not compile before tests due MiniAppSettingsView.swift blocker outside allowed edit boundary"
+  },
+  "notes": [
+    "Initial sandboxed xcodebuild also hit SwiftPM cache/CoreSimulator permission errors; rerun with require_escalated resolved those.",
+    "Unqualified xcodebuild failed without Java; rerun with JAVA_HOME=/opt/homebrew/opt/openjdk@17 passed the KMP script and reached Swift compile.",
+    "MiniAppSettingsView.swift was intentionally not modified because the task boundary forbids MiniApp mainline changes."
+  ]
+}

@@ -6,6 +6,7 @@ struct CouncilView: View {
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
+    @State private var taskStore = IOSAdvancedTaskStore.shared
 
     init(sharedSettings: IOSSharedSettingsStore) {
         self.sharedSettings = sharedSettings
@@ -22,6 +23,7 @@ struct CouncilView: View {
                     VStack(spacing: 0) {
                         intro
                         runnerSection
+                        recentTasksSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -111,6 +113,85 @@ struct CouncilView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var recentTasksSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "最近讨论")
+            AmberFormGroup {
+                let tasks = taskStore.recent(kind: .modelCouncil, limit: 5)
+                if tasks.isEmpty {
+                    Text("暂无模型议会任务。开始议会后，这里会显示席位、预算、状态和结论。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
+                        CouncilTaskRow(task: task)
+                        if index < tasks.count - 1 {
+                            CouncilTaskDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct CouncilTaskRow: View {
+    let task: IOSAdvancedTaskRecord
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(task.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text("\(task.status.title) · \(task.budgetSummary)\n\(task.compactSummary)")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 62)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+    }
+
+    private var iconName: String {
+        switch task.status {
+        case .completed: "checkmark.seal.fill"
+        case .failed, .timedOut, .interrupted: "exclamationmark.triangle.fill"
+        case .cancelled: "xmark.circle.fill"
+        default: "bubble.left.and.bubble.right.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        switch task.status {
+        case .completed: AmberTheme.accentGreen
+        case .failed, .timedOut, .interrupted: AmberTheme.accentRed
+        case .cancelled: AmberTheme.muted2
+        default: AmberTheme.accent
+        }
+    }
+}
+
+private struct CouncilTaskDivider: View {
+    var body: some View {
+        Divider()
+            .overlay(AmberTheme.borderSoft)
+            .padding(.leading, 14)
     }
 }
 

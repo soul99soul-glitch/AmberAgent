@@ -6,15 +6,14 @@ struct SubAgentsView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
     @State private var runner = SubAgentRunner()
+    @State private var taskObjective = "请用只读方式快速审计当前任务，并返回要点。"
+    @State private var selectedRoleId = "explorer"
 
-    private let builtInRoles: [SubAgentRoleSummary] = [
-        .init(name: "Explorer", handle: "explorer", summary: "跨多源快速并行侦察，速度优先。"),
-        .init(name: "Historian", handle: "historian", summary: "历史会话搜索、主题挖掘、跨分片综合。"),
-        .init(name: "Oracle", handle: "oracle", summary: "高判断力评审、架构取舍、风险复议。"),
-        .init(name: "Designer", handle: "designer", summary: "视觉产出规格、版式、配色和信息密度审查。"),
-        .init(name: "Writer", handle: "writer", summary: "中文写作、文案润色、故事与风格改写。"),
-        .init(name: "Fixer", handle: "fixer", summary: "边界清晰的机械执行：翻译、格式转换、抽取。")
-    ]
+    private var builtInRoles: [SubAgentRoleSummary] {
+        IOSSubAgentRoleCatalog.builtIns.map {
+            .init(name: $0.name, handle: $0.id, summary: $0.summary)
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -27,6 +26,7 @@ struct SubAgentsView: View {
                     VStack(spacing: 0) {
                         intro
                         runnerSection
+                        recentTasksSection
                         builtInRolesSection
                     }
                     .padding(.bottom, 36)
@@ -81,9 +81,38 @@ struct SubAgentsView: View {
 
     private var runnerSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "试运行")
+            AmberSectionLabel(text: "任务")
             AmberFormGroup {
                 VStack(alignment: .leading, spacing: 8) {
+                    Menu {
+                        ForEach(IOSSubAgentRoleCatalog.builtIns) { role in
+                            Button(role.name) {
+                                selectedRoleId = role.id
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text("角色")
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground)
+                            Spacer()
+                            Text(IOSSubAgentRoleCatalog.resolve(roleId: selectedRoleId).name)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AmberTheme.accent)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AmberTheme.muted2)
+                        }
+                        .frame(minHeight: 38)
+                    }
+                    .buttonStyle(.plain)
+                    Divider().overlay(AmberTheme.borderSoft)
+
+                    TextField("输入要委派的任务", text: $taskObjective, axis: .vertical)
+                        .font(.body)
+                        .lineLimit(2...5)
+                        .textFieldStyle(.plain)
+
                     HStack(spacing: 12) {
                         if runner.isRunning {
                             ProgressView()
@@ -91,8 +120,14 @@ struct SubAgentsView: View {
                                 .font(.body)
                                 .foregroundStyle(AmberTheme.foreground)
                         } else {
-                            Button { runner.runTestCycle() } label: {
-                                Label("启动子代理", systemImage: "person.2.wave.2.fill")
+                            Button {
+                                let objective = taskObjective.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !objective.isEmpty else { return }
+                                Task {
+                                    runner.lastRunResult = await runner.run(objective: objective, roleId: selectedRoleId)
+                                }
+                            } label: {
+                                Label("启动任务", systemImage: "person.2.wave.2.fill")
                                     .font(.body.weight(.semibold))
                                     .foregroundStyle(AmberTheme.accent)
                             }
@@ -118,6 +153,39 @@ struct SubAgentsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
+            }
+        }
+    }
+
+    private var recentTasksSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "最近任务")
+            AmberFormGroup {
+                let tasks = runner.recentTasks
+                if tasks.isEmpty {
+                    Text("暂无 SubAgent 任务。启动上方任务后，这里会显示状态、角色、工具范围和结果。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
+                        SubAgentTaskRow(task: task) {
+                            selectedRoleId = task.roleId ?? "explorer"
+                            taskObjective = task.objective
+                            Task {
+                                runner.lastRunResult = await runner.run(
+                                    objective: task.objective,
+                                    roleId: task.roleId ?? "explorer"
+                                )
+                            }
+                        }
+                        if index < tasks.count - 1 {
+                            SubAgentDivider()
+                        }
+                    }
+                }
             }
         }
     }
@@ -188,6 +256,74 @@ private struct SubAgentRoleRowContent: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
         .contentShape(Rectangle())
+    }
+}
+
+private struct SubAgentTaskRow: View {
+    let task: IOSAdvancedTaskRecord
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(task.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if task.canRetry {
+                Button(action: onRetry) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("重试 SubAgent 任务")
+            } else {
+                Text(task.status.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(iconColor)
+            }
+        }
+        .frame(minHeight: 62)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+    }
+
+    private var summary: String {
+        let scope = task.toolScope.isEmpty ? "无外部工具" : task.toolScope.joined(separator: ", ")
+        return "\(task.status.title) · @\(task.roleId ?? "subagent") · \(scope)\n\(task.compactSummary)"
+    }
+
+    private var iconName: String {
+        switch task.status {
+        case .completed: "checkmark.circle.fill"
+        case .failed, .timedOut, .interrupted: "exclamationmark.triangle.fill"
+        case .cancelled: "xmark.circle.fill"
+        default: "clock.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        switch task.status {
+        case .completed: AmberTheme.accentGreen
+        case .failed, .timedOut, .interrupted: AmberTheme.accentRed
+        case .cancelled: AmberTheme.muted2
+        default: AmberTheme.accentAmber
+        }
     }
 }
 

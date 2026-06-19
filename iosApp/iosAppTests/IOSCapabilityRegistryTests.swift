@@ -12,6 +12,13 @@ final class IOSCapabilityRegistryTests: XCTestCase {
         [
             "ios.location.when_in_use",
             "ios.agent.memory_write",
+            "ios.agent.subagent_dispatch",
+            "ios.agent.model_council_run",
+            "ios.network.search_tools",
+            "ios.mcp.tool_call",
+            "ios.workspace.file_read",
+            "ios.workspace.file_write",
+            "ios.remote.command",
             "ios.location.always",
             "ios.location.temporary_precise",
             "ios.camera.capture",
@@ -68,8 +75,75 @@ final class IOSCapabilityRegistryTests: XCTestCase {
     }
 
     func testExecutableModelToolsIncludeSelectedFileAndWebMountSafeTools() {
-        let expected = Set(["file_read_selected", "memory_tool"]).union(IOSWebMountToolCatalog.supportedToolNames)
+        let expected = Set([
+            "file_read_selected",
+            "memory_tool",
+            "subagent_dispatch",
+            "model_council_run",
+            "search_web",
+            "scrape_web",
+            "mcp_call",
+            "workspace_file_read",
+            "workspace_artifact_read",
+            "workspace_file_write",
+            "workspace_artifact_delete"
+        ]).union(IOSWebMountToolCatalog.supportedToolNames)
         XCTAssertEqual(IOSCapabilityRegistry.executableToolNames, expected)
+    }
+
+    func testAdvancedExecutionCapabilitiesKeepRemoteCommandForegroundOnly() throws {
+        let subAgent = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.agent.subagent_dispatch" }
+        )
+        let council = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.agent.model_council_run" }
+        )
+        let remote = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.remote.command" }
+        )
+
+        XCTAssertEqual(subAgent.modelToolNames, ["subagent_dispatch"])
+        XCTAssertEqual(council.modelToolNames, ["model_council_run"])
+        XCTAssertTrue(remote.uiActionNames.contains("remote_command_run"))
+        XCTAssertTrue(remote.modelToolNames.isEmpty)
+        XCTAssertFalse(IOSCapabilityRegistry.executableToolNames.contains("terminal_execute"))
+        XCTAssertEqual(IOSCapabilityRegistry.capability(forUIActionName: "remote_command_run")?.id, "ios.remote.command")
+    }
+
+    @MainActor
+    func testSubAgentRolesAndCouncilTaskMetadataAreBounded() throws {
+        let role = IOSSubAgentRoleCatalog.resolve(roleId: "oracle")
+        XCTAssertEqual(role.id, "oracle")
+        XCTAssertTrue(role.toolAllowlist.contains("file_read_selected"))
+        XCTAssertFalse(role.toolAllowlist.contains("terminal_execute"))
+        XCTAssertGreaterThan(role.outputBudgetChars, 0)
+
+        let defaults = isolatedDefaults()
+        let store = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "advanced")
+        let subAgentTask = store.startTask(
+            kind: .subAgent,
+            title: "Oracle task",
+            objective: "Review plan",
+            roleId: role.id,
+            toolScope: role.toolAllowlist,
+            budgetSummary: "turns \(role.maxTurns) · output \(role.outputBudgetChars) chars",
+            sourceToolName: "subagent_dispatch"
+        )
+        let councilTask = store.startTask(
+            kind: .modelCouncil,
+            title: "Council task",
+            objective: "Choose fallback",
+            budgetSummary: "mode compare · seats 3 · output 12000 chars",
+            sourceToolName: "model_council_run",
+            metadata: ["seat_names": "Host, Risk, Opponent"]
+        )
+
+        XCTAssertEqual(subAgentTask.roleId, "oracle")
+        XCTAssertEqual(subAgentTask.sourceToolName, "subagent_dispatch")
+        XCTAssertTrue(subAgentTask.toolScope.allSatisfy { role.toolAllowlist.contains($0) })
+        XCTAssertEqual(councilTask.kind, .modelCouncil)
+        XCTAssertTrue(councilTask.budgetSummary.contains("seats 3"))
+        XCTAssertEqual(councilTask.metadata["seat_names"], "Host, Risk, Opponent")
     }
 
     @MainActor
@@ -98,7 +172,8 @@ final class IOSCapabilityRegistryTests: XCTestCase {
             "contacts_search",
             "calendar_create",
             "wm_eval",
-            "wm_signed_fetch"
+            "wm_signed_fetch",
+            "wm_visual_snapshot"
         ]
 
         for toolName in blocked {
@@ -134,6 +209,14 @@ final class IOSCapabilityRegistryTests: XCTestCase {
         XCTAssertEqual(Set(capability.modelToolNames), IOSWebMountToolCatalog.supportedToolNames)
         XCTAssertTrue(capability.blockedToolNames.contains("wm_eval"))
         XCTAssertTrue(capability.blockedToolNames.contains("wm_signed_fetch"))
+        XCTAssertTrue(capability.blockedToolNames.contains("wm_visual_read"))
         XCTAssertEqual(capability.risk, .high)
+    }
+
+    private func isolatedDefaults() -> UserDefaults {
+        let suiteName = "app.amber.ios.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 }

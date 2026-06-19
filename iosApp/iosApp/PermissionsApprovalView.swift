@@ -9,8 +9,15 @@ struct PermissionsApprovalView: View {
     private var approvalCapabilities: [IOSPlatformCapability] {
         [
             "ios.files.selected_read",
+            "ios.workspace.file_read",
+            "ios.workspace.file_write",
             "ios.agent.memory_write",
-            "ios.webmount.browser"
+            "ios.network.search_tools",
+            "ios.mcp.tool_call",
+            "ios.webmount.browser",
+            "ios.remote.command",
+            "ios.agent.subagent_dispatch",
+            "ios.agent.model_council_run"
         ].compactMap { id in
             IOSCapabilityRegistry.capabilities.first { $0.id == id }
         }
@@ -94,7 +101,8 @@ struct PermissionsApprovalView: View {
                         capability: capability,
                         policy: displayedPolicy(for: capability),
                         availablePolicies: displayedPolicies(for: capability),
-                        decisionSummary: displayedDecisionSummary(for: capability)
+                        decisionSummary: displayedDecisionSummary(for: capability),
+                        lastApprovalSummary: displayedLastApprovalSummary(for: capability)
                     ) { policy in
                         permissionStore.setPolicy(policy, for: capability)
                     }
@@ -130,6 +138,11 @@ struct PermissionsApprovalView: View {
         }
     }
 
+    private func displayedLastApprovalSummary(for capability: IOSPlatformCapability) -> String? {
+        guard let record = permissionStore.latestApproval(for: capability) else { return nil }
+        return "最近：\(record.action.title) · \(record.toolName)"
+    }
+
     private func normalizeDisplayedPolicies() {
         for capability in approvalCapabilities where permissionStore.policy(for: capability) == .allowOncePerRun {
             permissionStore.setPolicy(.askEveryTime, for: capability)
@@ -142,6 +155,7 @@ private struct PermissionPolicyRow: View {
     let policy: IOSAgentPermissionPolicy
     let availablePolicies: [IOSAgentPermissionPolicy]
     let decisionSummary: String
+    let lastApprovalSummary: String?
     let onSelect: (IOSAgentPermissionPolicy) -> Void
 
     var body: some View {
@@ -210,13 +224,34 @@ private struct PermissionPolicyRow: View {
         switch capability.id {
         case "ios.files.selected_read":
             return "读取你主动选择的文件 · \(decisionSummary)"
+        case "ios.workspace.file_read":
+            return approvalAware("读取 Workspace 文件和 Artifact")
+        case "ios.workspace.file_write":
+            return approvalAware("写入 Workspace 文件或删除 Artifact")
         case "ios.agent.memory_write":
             return "新增、修改或删除记忆 · \(decisionSummary)"
+        case "ios.network.search_tools":
+            return approvalAware("搜索和网页读取")
+        case "ios.mcp.tool_call":
+            return approvalAware("外部 MCP 工具调用")
         case "ios.webmount.browser":
-            return "读取或操作已打开的网页会话 · \(decisionSummary)"
+            return approvalAware("读取或操作已打开的网页会话")
+        case "ios.remote.command":
+            return approvalAware("Remote SSH 单条命令")
+        case "ios.agent.subagent_dispatch":
+            return approvalAware("委派给受限工具范围的角色")
+        case "ios.agent.model_council_run":
+            return approvalAware("启动多席位讨论")
         default:
             return "\(capability.requestKind.title) · \(decisionSummary)"
         }
+    }
+
+    private func approvalAware(_ prefix: String) -> String {
+        if let lastApprovalSummary {
+            return "\(prefix) · \(decisionSummary) · \(lastApprovalSummary)"
+        }
+        return "\(prefix) · \(decisionSummary)"
     }
 }
 

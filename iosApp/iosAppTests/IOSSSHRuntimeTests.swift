@@ -203,6 +203,51 @@ final class IOSTerminalSSHRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.readJob(id: started.id)?.status, IOSTerminalJobStatus.timedOut.rawValue)
     }
 
+    func testRemoteCommandPolicyRejectsDangerousCommands() {
+        switch IOSRemoteCommandPolicy.validate("echo amber") {
+        case .success(let command):
+            XCTAssertEqual(command, "echo amber")
+        case .failure(let message):
+            XCTFail("Expected safe command, got \(message)")
+        }
+
+        switch IOSRemoteCommandPolicy.validate("rm -rf /") {
+        case .success:
+            XCTFail("Expected dangerous command to be blocked")
+        case .failure(let message):
+            XCTAssertTrue(message.contains("Blocked"))
+        }
+    }
+
+    func testAdvancedTaskStorePersistsAndRedactsRemoteTaskState() {
+        let defaults = isolatedDefaults()
+        let store = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let task = store.startTask(
+            kind: .remoteCommand,
+            title: "Remote task",
+            objective: "Run command",
+            connectionSummary: "dev.example.com",
+            commandPreview: "echo token=secret",
+            sourceToolName: "remote_command_run"
+        )
+        store.appendLog(id: task.id, chunk: "Authorization: Bearer abcdef123456")
+        _ = store.updateTask(
+            id: task.id,
+            status: .completed,
+            resultSummary: "password=secret finished",
+            retryable: false
+        )
+
+        let reloaded = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let restored = reloaded.recent(kind: .remoteCommand, limit: 1).first
+
+        XCTAssertEqual(restored?.status, .completed)
+        XCTAssertFalse(restored?.commandPreview.contains("secret") == true)
+        XCTAssertFalse(restored?.logTail.contains("abcdef123456") == true)
+        XCTAssertFalse(restored?.resultSummary.contains("secret") == true)
+        XCTAssertFalse(restored?.canRetry == true)
+    }
+
     private func trustedProfile() -> IOSSSHProfile {
         IOSSSHProfile(
             name: "Test",
@@ -213,6 +258,13 @@ final class IOSTerminalSSHRuntimeTests: XCTestCase {
             knownHostHost: "example.com",
             knownHostPort: 22
         )
+    }
+
+    private func isolatedDefaults() -> UserDefaults {
+        let suiteName = "app.amber.ios.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 }
 

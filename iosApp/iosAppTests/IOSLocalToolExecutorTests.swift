@@ -32,6 +32,40 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertEqual(selectedFile?.policy, IOSAgentPermissionPolicy.disabled.title)
     }
 
+    func testPermissionsStatusIncludesAdvancedExecutionApprovals() async throws {
+        let permissionStore = IOSPermissionStore(userDefaults: isolatedDefaults(), taskStore: nil)
+        permissionStore.recordApproval(
+            capabilityId: "ios.agent.subagent_dispatch",
+            toolName: "subagent_dispatch",
+            action: .allowed,
+            reason: "role=explorer token=secret",
+            runId: "run-subagent"
+        )
+        let executor = makeExecutor(permissionStore: permissionStore)
+
+        let output = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "permissions_status",
+                operation: "status",
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+
+        guard case .permissionsStatus(let snapshot) = output else {
+            return XCTFail("Expected permissions status, got \(output)")
+        }
+        let subAgent = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.agent.subagent_dispatch" })
+        let remote = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.remote.command" })
+
+        XCTAssertTrue(subAgent.modelToolNames.contains("subagent_dispatch"))
+        XCTAssertEqual(subAgent.lastApprovalAction, IOSToolApprovalAction.allowed.title)
+        XCTAssertFalse(subAgent.lastApprovalReason?.contains("secret") == true)
+        XCTAssertTrue(remote.uiActionNames.contains("remote_command_cancel"))
+        XCTAssertTrue(remote.modelToolNames.isEmpty)
+    }
+
     func testFilePickIsDeniedBecauseItIsUIOnly() async {
         let output = await makeExecutor().execute(
             IOSLocalToolExecutionRequest(
@@ -234,6 +268,8 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertTrue(settings.globalEnabled)
         XCTAssertFalse(settings.evalEnabled)
         XCTAssertTrue(settings.allowedHosts.contains("github.com"))
+        XCTAssertTrue(settings.allowedSchemes.contains("http"))
+        XCTAssertTrue(settings.allowedSchemes.contains("https"))
         settings.evalEnabled = true
         XCTAssertTrue(settings.evalEnabled)
         settings.globalEnabled = false
@@ -248,6 +284,10 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertEqual(
             policy.validate("javascript:alert(1)").failure,
             .unsupportedScheme("javascript")
+        )
+        XCTAssertEqual(
+            policy.validate("data:text/html,hi").failure,
+            .unsupportedScheme("data")
         )
         XCTAssertEqual(
             policy.validate("https://evil.example.com/").failure,
@@ -273,6 +313,16 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertFalse(json.contains("auth=secret"))
         XCTAssertFalse(json.contains("sid=secret"))
         XCTAssertFalse(json.contains("Bearer secret"))
+    }
+
+    func testWebMountRedactionScrubsSensitivePlainStrings() {
+        let text = IOSWebMountRedactor.redactedText(
+            "Visit https://example.com/callback?token=secret and use Authorization: Bearer abcdef123456"
+        )
+
+        XCTAssertFalse(text.contains("token=secret"))
+        XCTAssertFalse(text.contains("abcdef123456"))
+        XCTAssertTrue(text.contains("https://example.com/callback"))
     }
 
     func testWebMountToolCatalogAndUnsupportedResult() {
@@ -322,7 +372,7 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertEqual(result["value"] as? String, "Hello from mock")
     }
 
-    func testWebMountExecutorAllowsGlobalOffCompatibilityAndClearRequiresUserAction() async throws {
+    func testWebMountExecutorRequiresApprovalAndClearRequiresUserAction() async throws {
         let controller = makeWebMountController(globalEnabled: false)
         let executor = makeExecutor(webMountController: controller)
 
@@ -335,12 +385,10 @@ final class IOSLocalToolExecutorTests: XCTestCase {
                 isUserInitiated: false
             )
         )
-        guard case .webMountResult(let stationsText) = stationsOutput else {
-            return XCTFail("Expected WebMount result, got \(stationsOutput)")
+        guard case .needsUserAction(let stationsReason) = stationsOutput else {
+            return XCTFail("Expected needsUserAction, got \(stationsOutput)")
         }
-        let stationsObject = try jsonObject(stationsText)
-        XCTAssertEqual(stationsObject["ok"] as? Bool, true)
-        XCTAssertEqual(stationsObject["global_enabled"] as? Bool, true)
+        XCTAssertTrue(stationsReason.contains("WebMount browser tools"))
 
         let clearOutput = await executor.execute(
             IOSLocalToolExecutionRequest(
@@ -357,7 +405,7 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertTrue(clearReason.contains("Clearing WebMount cookies"))
     }
 
-    func testWebMountExecutorAllowsModelToolsAfterForegroundSessionEnabled() async throws {
+    func testWebMountExecutorAllowsToolsAfterForegroundApproval() async throws {
         let controller = makeWebMountController(globalEnabled: true)
         let executor = makeExecutor(webMountController: controller)
 
@@ -367,7 +415,7 @@ final class IOSLocalToolExecutorTests: XCTestCase {
                 operation: "{}",
                 scopeDigest: "",
                 payloadDigest: "",
-                isUserInitiated: false
+                isUserInitiated: true
             )
         )
 
@@ -406,6 +454,82 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertTrue(reason.contains("Disabled"))
     }
 
+    func testWebMountOpenRequiresRegisteredEnabledStation() async throws {
+        let controller = makeWebMountController(globalEnabled: true)
+
+        let missing = await controller.execute(
+            toolName: "wm_open",
+            input: #"{"url":"https://removed.example.com/path?token=secret"}"#,
+            isUserInitiated: true
+        )
+        let missingObject = try jsonObject(missing)
+        XCTAssertEqual(missingObject["denied"] as? Bool, true)
+        XCTAssertFalse(missing.contains("token=secret"))
+
+        let disabled = await controller.execute(
+            toolName: "wm_open",
+            input: #"{"site_id":"github"}"#,
+            isUserInitiated: true
+        )
+        let disabledObject = try jsonObject(disabled)
+        XCTAssertEqual(disabledObject["denied"] as? Bool, true)
+        XCTAssertEqual(disabledObject["site_id"] as? String, "github")
+    }
+
+    func testWebMountGetDeniesHtmlAndSensitiveValueSelectors() async throws {
+        let controller = makeWebMountController(globalEnabled: true)
+
+        let html = await controller.execute(
+            toolName: "wm_get",
+            input: #"{"selector":"body","kind":"html"}"#,
+            isUserInitiated: true
+        )
+        let htmlObject = try jsonObject(html)
+        XCTAssertEqual(htmlObject["denied"] as? Bool, true)
+
+        let token = await controller.execute(
+            toolName: "wm_get",
+            input: #"{"selector":"input[name=csrf_token]","kind":"value"}"#,
+            isUserInitiated: true
+        )
+        let tokenObject = try jsonObject(token)
+        XCTAssertEqual(tokenObject["denied"] as? Bool, true)
+    }
+
+    func testWebMountContentHandoffRedactsAndBuildsChatAndBoardPayloads() throws {
+        let site = try XCTUnwrap(IOSWebMountSite.seeds(nowMillis: 1).first { $0.id == "github" })
+        let snapshot = IOSWebMountRuntimeSnapshot(
+            sessionId: "handoff",
+            status: .ready,
+            requestedURL: "https://github.com/login",
+            currentURL: "https://github.com/settings",
+            title: "Settings",
+            estimatedProgress: 1,
+            canGoBack: true,
+            canGoForward: false,
+            error: nil,
+            updatedAtMillis: 2
+        )
+
+        let handoff = try XCTUnwrap(IOSWebMountContentHandoff.from(
+            site: site,
+            snapshot: snapshot,
+            extraction: [
+                "title": "Account",
+                "url": "https://github.com/settings?token=secret",
+                "text": "Profile link https://github.com/settings?token=secret Authorization: Bearer abcdef123456",
+                "links": [
+                    ["href": "https://github.com/settings?token=secret"]
+                ]
+            ]
+        ))
+
+        XCTAssertFalse(handoff.text.contains("token=secret"))
+        XCTAssertFalse(handoff.chatPrompt.contains("abcdef123456"))
+        XCTAssertEqual(handoff.boardSignal.sourceType, IOSBoardSignalSourceType.webmount)
+        XCTAssertTrue(handoff.boardSignal.metadataJson.contains(#""redacted":true"#))
+    }
+
     func testMemoryToolWritePolicyRequiresForegroundAndRespectsDisabled() throws {
         let defaults = isolatedDefaults()
         let permissionStore = IOSPermissionStore(userDefaults: defaults)
@@ -438,14 +562,169 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertTrue(disabledReason.contains("disabled"))
     }
 
+    func testWorkspaceReadRequiresApprovalAndReturnsImportedText() async throws {
+        let workspaceStore = makeWorkspaceStore()
+        let file = try makeTempFile(text: "# Workspace\nReadable file context.", extension: "md")
+        let record = try await workspaceStore.importFile(url: file, source: "test")
+        let executor = makeExecutor(workspaceStore: workspaceStore)
+
+        let blocked = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_file_read",
+                operation: #"{"file_id":"\#(record.id)"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+        guard case .needsUserAction(let reason) = blocked else {
+            return XCTFail("Expected approval requirement, got \(blocked)")
+        }
+        XCTAssertTrue(reason.contains("Workspace reads"))
+
+        let allowed = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_file_read",
+                operation: #"{"path":"/workspace/\#(record.workspacePath)"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: true
+            )
+        )
+        guard case .workspaceResult(let text) = allowed else {
+            return XCTFail("Expected Workspace result, got \(allowed)")
+        }
+        let object = try jsonObject(text)
+        XCTAssertEqual(object["ok"] as? Bool, true)
+        XCTAssertTrue((object["text"] as? String)?.contains("Readable file context") == true)
+    }
+
+    func testWorkspaceWriteRequiresApprovalAndRejectsTraversal() async throws {
+        let workspaceStore = makeWorkspaceStore()
+        let executor = makeExecutor(workspaceStore: workspaceStore)
+        let input = #"{"path":"/workspace/notes/summary.md","content":"hello workspace"}"#
+
+        let blocked = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_file_write",
+                operation: input,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+        guard case .needsUserAction(let reason) = blocked else {
+            return XCTFail("Expected write approval requirement, got \(blocked)")
+        }
+        XCTAssertTrue(reason.contains("writes"))
+
+        let written = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_file_write",
+                operation: input,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: true
+            )
+        )
+        guard case .workspaceResult(let writeText) = written else {
+            return XCTFail("Expected write result, got \(written)")
+        }
+        XCTAssertEqual(try jsonObject(writeText)["ok"] as? Bool, true)
+
+        let traversal = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_file_write",
+                operation: #"{"path":"../secrets.txt","content":"nope"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: true
+            )
+        )
+        guard case .workspaceResult(let traversalText) = traversal else {
+            return XCTFail("Expected traversal failure result, got \(traversal)")
+        }
+        let traversalObject = try jsonObject(traversalText)
+        XCTAssertEqual(traversalObject["ok"] as? Bool, false)
+        XCTAssertTrue((traversalObject["error"] as? String)?.contains("traversal") == true)
+    }
+
+    func testWorkspaceArtifactReadAndDeleteUseApproval() async throws {
+        let workspaceStore = makeWorkspaceStore()
+        let artifact = try workspaceStore.saveArtifact(
+            title: "Report",
+            content: "artifact body",
+            type: .chat,
+            sourceKind: "test"
+        )
+        let executor = makeExecutor(workspaceStore: workspaceStore)
+
+        let blockedRead = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_artifact_read",
+                operation: #"{"artifact_id":"\#(artifact.id)"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+        guard case .needsUserAction = blockedRead else {
+            return XCTFail("Expected read approval, got \(blockedRead)")
+        }
+
+        let read = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_artifact_read",
+                operation: #"{"artifact_id":"\#(artifact.id)"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: true
+            )
+        )
+        guard case .workspaceResult(let readText) = read else {
+            return XCTFail("Expected artifact read, got \(read)")
+        }
+        XCTAssertEqual(try jsonObject(readText)["content"] as? String, "artifact body")
+
+        let blockedDelete = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_artifact_delete",
+                operation: #"{"artifact_id":"\#(artifact.id)"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+        guard case .needsUserAction = blockedDelete else {
+            return XCTFail("Expected delete approval, got \(blockedDelete)")
+        }
+
+        let deleted = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "workspace_artifact_delete",
+                operation: #"{"artifact_id":"\#(artifact.id)"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: true
+            )
+        )
+        guard case .workspaceResult(let deleteText) = deleted else {
+            return XCTFail("Expected artifact delete, got \(deleted)")
+        }
+        XCTAssertEqual(try jsonObject(deleteText)["deleted"] as? Bool, true)
+        XCTAssertThrowsError(try workspaceStore.artifactContent(id: artifact.id))
+    }
+
     private func makeExecutor(
         permissionStore: IOSPermissionStore? = nil,
         documentStore: DocumentAccessStore = DocumentAccessStore(),
+        workspaceStore: IOSWorkspaceStore = IOSWorkspaceStore(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
         webMountController: IOSWebMountController? = nil
     ) -> IOSLocalToolExecutor {
         IOSLocalToolExecutor(
             permissionStore: permissionStore ?? IOSPermissionStore(userDefaults: isolatedDefaults()),
             documentStore: documentStore,
+            workspaceStore: workspaceStore,
             webMountController: webMountController
         )
     }
@@ -474,6 +753,21 @@ final class IOSLocalToolExecutorTests: XCTestCase {
             .appendingPathExtension("txt")
         try Data(repeating: 65, count: size).write(to: url)
         return url
+    }
+
+    private func makeTempFile(text: String, extension fileExtension: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(fileExtension)
+        try Data(text.utf8).write(to: url)
+        return url
+    }
+
+    private func makeWorkspaceStore() -> IOSWorkspaceStore {
+        IOSWorkspaceStore(
+            baseDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        )
     }
 
     private func isolatedDefaults() -> UserDefaults {
@@ -535,6 +829,8 @@ private final class MockWebMountRuntime: IOSWebMountRuntimeServicing {
             currentURL: IOSWebMountRedactor.redactedURL(url.absoluteString),
             title: "Mock Page",
             estimatedProgress: 1,
+            canGoBack: openedURLs.count > 1,
+            canGoForward: false,
             error: nil,
             updatedAtMillis: 123
         )

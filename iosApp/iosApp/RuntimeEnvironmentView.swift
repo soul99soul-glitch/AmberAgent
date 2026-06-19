@@ -12,6 +12,12 @@ struct RuntimeEnvironmentView: View {
     @State private var loadedSSHPasswordDraft = ""
     @State private var sshPortDraft = "22"
     @State private var sshStatus: SSHStatus = .idle
+    @State private var remoteCommand = "echo amber-remote-task"
+    @State private var remoteCommandResult: IOSTerminalJobSnapshot?
+    @State private var remoteCommandJobId: String?
+    @State private var remoteCommandTaskId: String?
+    @State private var taskStore = IOSAdvancedTaskStore.shared
+    @State private var permissionStore = IOSPermissionStore()
 
     enum SSHStatus {
         case idle
@@ -39,6 +45,7 @@ struct RuntimeEnvironmentView: View {
                     runtimeSection
                     sshProfileSection
                     hostFingerprintSection
+                    remoteCommandSection
                     runtimeMatrixSection
                 }
                 .padding(.bottom, 36)
@@ -259,6 +266,72 @@ struct RuntimeEnvironmentView: View {
         }
     }
 
+    private var remoteCommandSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "远程命令任务")
+            AmberFormGroup {
+                RuntimeTextFieldRow(
+                    title: "命令",
+                    text: $remoteCommand,
+                    placeholder: "echo amber-remote-task",
+                    monospace: true
+                )
+                RuntimeDivider()
+                RuntimeValueRow(
+                    title: "连接",
+                    subtitle: "只使用默认 Remote SSH profile",
+                    value: settingsStore.defaultSSHProfile?.displayName ?? "未选择",
+                    systemImage: "terminal"
+                )
+                RuntimeDivider()
+                RuntimeActionRow(
+                    title: isRemoteCommandRunning ? "运行中..." : "运行命令",
+                    color: isRemoteCommandRunning ? AmberTheme.muted : AmberTheme.accent
+                ) {
+                    guard !isRemoteCommandRunning else { return }
+                    runRemoteCommand()
+                }
+                if isRemoteCommandRunning {
+                    RuntimeDivider()
+                    RuntimeActionRow(title: "取消命令", color: AmberTheme.accentRed) {
+                        cancelRemoteCommand()
+                    }
+                }
+            }
+
+            if let remoteCommandResult {
+                SmokeResultCard(result: remoteCommandResult)
+                    .padding(.top, 10)
+            }
+
+            let recent = taskStore.recent(kind: .remoteCommand, limit: 3)
+            if !recent.isEmpty {
+                AmberFormGroup {
+                    ForEach(Array(recent.enumerated()), id: \.element.id) { index, task in
+                        RemoteTaskRow(task: task)
+                        if index < recent.count - 1 {
+                            RuntimeDivider()
+                        }
+                    }
+                }
+                .padding(.top, 10)
+            }
+
+            Text("远程命令只在前台按钮触发；未信任 host、缺少密码或命中危险命令片段时会失败并记录原因。")
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted2)
+                .lineSpacing(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 7)
+        }
+    }
+
+    private var isRemoteCommandRunning: Bool {
+        guard let remoteCommandResult else { return false }
+        return remoteCommandResult.status == IOSTerminalJobStatus.running.rawValue
+    }
+
     private func testTerminalRuntime() {
         guard sharedSettings.isCapabilityGateEnabled(.remoteRuntime) else {
             terminalSmokeResult = IOSTerminalJobSnapshot(
@@ -288,6 +361,149 @@ struct RuntimeEnvironmentView: View {
             } else {
                 terminalSmokeResult = started
             }
+        }
+    }
+
+    private func runRemoteCommand() {
+        let validatedCommand: String
+        switch IOSRemoteCommandPolicy.validate(remoteCommand) {
+        case .success(let command):
+            validatedCommand = command
+        case .failure(let message):
+            let now = Date()
+            let task = taskStore.startTask(
+                kind: .remoteCommand,
+                title: "Remote SSH · blocked",
+                objective: remoteCommand,
+                connectionSummary: settingsStore.defaultSSHProfile?.displayName ?? "no profile",
+                commandPreview: remoteCommand,
+                sourceToolName: "remote_command_run"
+            )
+            remoteCommandTaskId = task.id
+            remoteCommandResult = IOSTerminalJobSnapshot(
+                id: task.id,
+                runtime: .remoteSSH,
+                status: IOSTerminalJobStatus.failed.rawValue,
+                exitCode: nil,
+                outputTail: message,
+                startedAt: now,
+                updatedAt: now,
+                error: message
+            )
+            _ = taskStore.updateTask(
+                id: task.id,
+                status: .failed,
+                resultSummary: message,
+                logTail: message,
+                error: message,
+                retryable: true,
+                cancelCapability: false
+            )
+            return
+        }
+
+        let profile = settingsStore.defaultSSHProfile
+        let password = profile.flatMap { settingsStore.passwordForSSHProfile(id: $0.id) }
+        let task = taskStore.startTask(
+            kind: .remoteCommand,
+            title: "Remote SSH · \(validatedCommand.prefix(34))",
+            objective: validatedCommand,
+            connectionSummary: profile?.displayName ?? "no profile",
+            commandPreview: validatedCommand,
+            sourceToolName: "remote_command_run",
+            metadata: ["runtime": IOSTerminalRuntimeKind.remoteSSH.rawValue]
+        )
+        remoteCommandTaskId = task.id
+        permissionStore.recordApproval(
+            capabilityId: "ios.remote.command",
+            toolName: "remote_command_run",
+            action: .allowed,
+            reason: "User started a foreground Remote SSH command.",
+            runId: task.id,
+            payloadDigest: "\(validatedCommand.hashValue)"
+        )
+
+        Task {
+            let started = await IOSTerminalRuntime.shared.startJob(
+                command: validatedCommand,
+                runtime: .remoteSSH,
+                experimentalEnabled: false,
+                sshProfile: profile,
+                sshPassword: password,
+                timeoutSeconds: 60
+            )
+            remoteCommandResult = started
+            remoteCommandJobId = started.id
+            _ = taskStore.updateTask(
+                id: task.id,
+                status: mapTerminalStatus(started.status),
+                resultSummary: started.error ?? started.status,
+                logTail: started.outputTail,
+                error: started.error ?? "",
+                retryable: started.status != IOSTerminalJobStatus.completed.rawValue,
+                cancelCapability: started.status == IOSTerminalJobStatus.running.rawValue,
+                metadata: ["terminal_job_id": started.id]
+            )
+            guard started.status == IOSTerminalJobStatus.running.rawValue else { return }
+
+            let finished = await IOSTerminalRuntime.shared.waitJob(id: started.id, timeoutSeconds: 65)
+            if let finished {
+                remoteCommandResult = finished
+                _ = taskStore.updateTask(
+                    id: task.id,
+                    status: mapTerminalStatus(finished.status),
+                    resultSummary: finished.error ?? "Remote command finished with status \(finished.status).",
+                    logTail: finished.outputTail,
+                    error: finished.error ?? "",
+                    retryable: finished.status != IOSTerminalJobStatus.completed.rawValue,
+                    cancelCapability: false
+                )
+            }
+        }
+    }
+
+    private func cancelRemoteCommand() {
+        guard let jobId = remoteCommandJobId else { return }
+        let stopped = IOSTerminalRuntime.shared.stopJob(id: jobId)
+        if let stopped {
+            remoteCommandResult = stopped
+        }
+        if let remoteCommandTaskId {
+            _ = taskStore.updateTask(
+                id: remoteCommandTaskId,
+                status: .cancelled,
+                resultSummary: "Remote command cancelled.",
+                logTail: stopped?.outputTail ?? "",
+                error: stopped?.error ?? IOSSSHError.commandCancelled.localizedDescription,
+                retryable: true,
+                cancelCapability: false
+            )
+            permissionStore.recordApproval(
+                capabilityId: "ios.remote.command",
+                toolName: "remote_command_cancel",
+                action: .allowed,
+                reason: "User cancelled a foreground Remote SSH command.",
+                runId: remoteCommandTaskId
+            )
+        }
+    }
+
+    private func mapTerminalStatus(_ status: String) -> IOSAdvancedTaskStatus {
+        switch IOSTerminalJobStatus(rawValue: status) {
+        case .queued:
+            return .queued
+        case .running:
+            return .running
+        case .completed:
+            return .completed
+        case .failed:
+            return .failed
+        case .cancelled:
+            return .cancelled
+        case .timedOut:
+            return .timedOut
+        case nil:
+            return .failed
         }
     }
 
@@ -555,6 +771,53 @@ private struct RuntimeValueRow: View {
         .frame(minHeight: 52)
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
+    }
+}
+
+private struct RemoteTaskRow: View {
+    let task: IOSAdvancedTaskRecord
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(task.commandPreview.isEmpty ? task.title : task.commandPreview)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text("\(task.status.title) · \(task.connectionSummary)\n\(task.compactSummary)")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 62)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+    }
+
+    private var iconName: String {
+        switch task.status {
+        case .completed: "checkmark.circle.fill"
+        case .failed, .timedOut, .interrupted: "exclamationmark.triangle.fill"
+        case .cancelled: "xmark.circle.fill"
+        default: "terminal.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        switch task.status {
+        case .completed: AmberTheme.accentGreen
+        case .failed, .timedOut, .interrupted: AmberTheme.accentRed
+        case .cancelled: AmberTheme.muted2
+        default: AmberTheme.accentAmber
+        }
     }
 }
 

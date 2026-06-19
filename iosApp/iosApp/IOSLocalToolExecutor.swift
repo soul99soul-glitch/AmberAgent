@@ -15,6 +15,7 @@ enum IOSLocalToolExecutionOutput: Equatable {
     case selectedFilePreview(SelectedDocumentReadResult)
     case permissionsStatus(IOSPermissionsStatusSnapshot)
     case webMountResult(String)
+    case workspaceResult(String)
     case needsUserAction(String)
     case denied(String)
     case failed(String)
@@ -25,6 +26,13 @@ struct IOSWebMountToolApprovalPreview: Equatable {
     let siteId: String
     let siteName: String
     let host: String
+}
+
+struct IOSWorkspaceToolApprovalPreview: Equatable {
+    let toolName: String
+    let action: String
+    let target: String
+    let isWrite: Bool
 }
 
 struct IOSPermissionsStatusSnapshot: Equatable {
@@ -60,6 +68,9 @@ struct IOSCapabilityStatusItem: Equatable, Identifiable {
     let requiredExtensionTargets: [String]
     let reason: String?
     let executable: Bool
+    let lastApprovalAction: String?
+    let lastApprovalReason: String?
+    let lastApprovalAt: Date?
 }
 
 @MainActor
@@ -69,15 +80,18 @@ final class IOSLocalToolExecutor {
     private let systemPermissionCoordinator: IOSSystemPermissionCoordinator
     private let runtime: IOSToolRuntime
     private let webMountController: IOSWebMountController
+    private let workspaceStore: IOSWorkspaceStore
 
     init(
         permissionStore: IOSPermissionStore,
         documentStore: DocumentAccessStore,
+        workspaceStore: IOSWorkspaceStore = .shared,
         systemPermissionCoordinator: IOSSystemPermissionCoordinator? = nil,
         webMountController: IOSWebMountController? = nil
     ) {
         self.permissionStore = permissionStore
         self.documentStore = documentStore
+        self.workspaceStore = workspaceStore
         self.systemPermissionCoordinator = systemPermissionCoordinator ?? IOSSystemPermissionCoordinator()
         self.runtime = IOSToolRuntime(permissionStore: permissionStore, documentStore: documentStore)
         self.webMountController = webMountController ?? IOSWebMountController.shared
@@ -93,6 +107,23 @@ final class IOSLocalToolExecutor {
     ) async -> IOSLocalToolExecutionOutput {
         if request.toolName == "permissions_status" {
             return .permissionsStatus(permissionsStatus(now: now))
+        }
+        if IOSWorkspaceToolCatalog.supportedToolNames.contains(request.toolName) {
+            guard let capability = IOSCapabilityRegistry.capability(forToolName: request.toolName) else {
+                return .denied("Unknown iOS Workspace tool: \(request.toolName)")
+            }
+            switch resolveWorkspace(request: request, capability: capability) {
+            case .allow:
+                let output = await workspaceStore.executeTool(
+                    toolName: request.toolName,
+                    input: request.operation
+                )
+                return .workspaceResult(output)
+            case .needsUserAction(let reason):
+                return .needsUserAction(reason)
+            case .deny(let reason):
+                return .denied(reason)
+            }
         }
         if IOSWebMountToolCatalog.unsupportedToolNames.contains(request.toolName) {
             return .webMountResult(IOSWebMountController.unsupportedToolResult(toolName: request.toolName))
@@ -163,8 +194,32 @@ final class IOSLocalToolExecutor {
         if policy == .disabled {
             return .deny(reason: "Disabled by AmberAgent policy")
         }
-        if request.toolName == "wm_clear_session", !request.isUserInitiated {
-            return .needsUserAction(reason: "Clearing WebMount cookies requires an explicit foreground user action")
+        if !request.isUserInitiated {
+            if request.toolName == "wm_clear_session" {
+                return .needsUserAction(reason: "Clearing WebMount cookies requires an explicit foreground user action")
+            }
+            if policy == .askEveryTime || capability.gate.requiresFreshUserPresence {
+                return .needsUserAction(reason: "WebMount browser tools require explicit foreground approval before the model can use the page session.")
+            }
+        }
+        return .allow(capabilityId: capability.id)
+    }
+
+    private func resolveWorkspace(
+        request: IOSLocalToolExecutionRequest,
+        capability: IOSPlatformCapability
+    ) -> IOSPlatformGateDecision {
+        let policy = permissionStore.policy(for: capability)
+        if policy == .disabled {
+            return .deny(reason: "Disabled by AmberAgent Workspace tool policy")
+        }
+        if !request.isUserInitiated {
+            if IOSWorkspaceToolCatalog.writeToolNames.contains(request.toolName) {
+                return .needsUserAction(reason: "Workspace writes and deletes require explicit foreground approval.")
+            }
+            if policy == .askEveryTime || capability.gate.requiresFreshUserPresence {
+                return .needsUserAction(reason: "Workspace reads require explicit foreground approval before the model can use saved files or artifacts.")
+            }
         }
         return .allow(capabilityId: capability.id)
     }
@@ -176,6 +231,7 @@ final class IOSLocalToolExecutor {
             capabilities: IOSCapabilityRegistry.capabilities.map { capability in
                 let policy = permissionStore.policy(for: capability)
                 let systemStatus = systemPermissionCoordinator.cachedStatus(for: capability, now: now)
+                let latestApproval = permissionStore.latestApproval(for: capability)
                 let canRequestInApp = IOSSystemPermissionCoordinator.canRequestInApp(
                     for: capability,
                     systemStatus: systemStatus.status
@@ -208,9 +264,35 @@ final class IOSLocalToolExecutor {
                     reason: capability.unavailableReason,
                     executable: capability.status == .supported &&
                         policy != .disabled &&
-                        !capability.modelToolNames.isEmpty
+                        (!capability.modelToolNames.isEmpty || !capability.uiActionNames.isEmpty),
+                    lastApprovalAction: latestApproval?.action.title,
+                    lastApprovalReason: latestApproval?.reason,
+                    lastApprovalAt: latestApproval?.createdAt
                 )
             }
+        )
+    }
+
+    @discardableResult
+    func recordApproval(
+        capabilityId: String,
+        toolName: String,
+        action: IOSToolApprovalAction,
+        reason: String,
+        runId: String = "",
+        scopeDigest: String = "",
+        payloadDigest: String = "",
+        now: Date = Date()
+    ) -> IOSToolApprovalRecord {
+        permissionStore.recordApproval(
+            capabilityId: capabilityId,
+            toolName: toolName,
+            action: action,
+            reason: reason,
+            runId: runId,
+            scopeDigest: scopeDigest,
+            payloadDigest: payloadDigest,
+            now: now
         )
     }
 
@@ -237,27 +319,98 @@ final class IOSLocalToolExecutor {
     }
 
     func webMountApprovalPreview(toolName: String, input: String) -> IOSWebMountToolApprovalPreview? {
-        guard toolName == "wm_clear_session",
-              let siteId = Self.siteId(fromWebMountInput: input),
-              let site = webMountController.registry.site(id: siteId) else {
+        guard IOSWebMountToolCatalog.supportedToolNames.contains(toolName) else {
             return nil
         }
+        let object = Self.webMountInputObject(input)
+        if let siteId = (object["site_id"] as? String)?.nilIfBlank,
+           let site = webMountController.registry.site(id: siteId) {
+            return IOSWebMountToolApprovalPreview(
+                toolName: toolName,
+                siteId: site.id,
+                siteName: site.displayName,
+                host: site.homepageHost
+            )
+        }
+        if let rawURL = object["url"] as? String,
+           let url = URL(string: rawURL),
+           let site = webMountController.registry.site(for: url) {
+            return IOSWebMountToolApprovalPreview(
+                toolName: toolName,
+                siteId: site.id,
+                siteName: site.displayName,
+                host: site.homepageHost
+            )
+        }
+        let host = Self.redactedHost(from: object["url"] as? String)
+            ?? Self.redactedHost(from: webMountController.runtime.snapshot.currentURL)
+            ?? "WebMount"
         return IOSWebMountToolApprovalPreview(
             toolName: toolName,
-            siteId: site.id,
-            siteName: site.displayName,
-            host: site.homepageHost
+            siteId: "current",
+            siteName: "当前 WebMount 会话",
+            host: host
+        )
+    }
+
+    func workspaceApprovalPreview(toolName: String, input: String) -> IOSWorkspaceToolApprovalPreview? {
+        guard IOSWorkspaceToolCatalog.supportedToolNames.contains(toolName) else {
+            return nil
+        }
+        let object = Self.toolInputObject(input)
+        let target = ((object["file_id"] as? String)?.nilIfBlank
+            ?? (object["artifact_id"] as? String)?.nilIfBlank
+            ?? (object["id"] as? String)?.nilIfBlank
+            ?? (object["path"] as? String)?.nilIfBlank
+            ?? "Workspace").trimmingCharacters(in: .whitespacesAndNewlines)
+        let action: String
+        switch toolName {
+        case "workspace_file_read":
+            action = "读取文件"
+        case "workspace_file_write":
+            action = "写入文件"
+        case "workspace_artifact_read":
+            action = "读取 Artifact"
+        case "workspace_artifact_delete":
+            action = "删除 Artifact"
+        default:
+            action = toolName
+        }
+        return IOSWorkspaceToolApprovalPreview(
+            toolName: toolName,
+            action: action,
+            target: target.isEmpty ? "Workspace" : target,
+            isWrite: IOSWorkspaceToolCatalog.writeToolNames.contains(toolName)
         )
     }
 
     private static func siteId(fromWebMountInput input: String) -> String? {
-        guard let data = input.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let siteId = object["site_id"] as? String else {
+        guard let siteId = webMountInputObject(input)["site_id"] as? String else {
             return nil
         }
         let trimmed = siteId.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func webMountInputObject(_ input: String) -> [String: Any] {
+        toolInputObject(input)
+    }
+
+    private static func toolInputObject(_ input: String) -> [String: Any] {
+        guard let data = input.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return object
+    }
+
+    private static func redactedHost(from rawURL: String?) -> String? {
+        guard let rawURL,
+              let components = URLComponents(string: rawURL),
+              let host = components.host?.nilIfBlank else {
+            return nil
+        }
+        return host
     }
 
     private static func snapshotId(for capability: IOSPlatformCapability) -> String {
@@ -635,7 +788,7 @@ final class IOSWebMountSettings {
         self.evalEnabled = userDefaults.object(forKey: evalKey) as? Bool ?? false
         let seedHosts = IOSWebMountSite.seeds().flatMap(\.allowedHosts)
         self.allowedHosts = Set((userDefaults.array(forKey: hostsKey) as? [String]) ?? seedHosts)
-        self.allowedSchemes = Set((userDefaults.array(forKey: schemesKey) as? [String]) ?? ["https"])
+        self.allowedSchemes = Set((userDefaults.array(forKey: schemesKey) as? [String]) ?? ["http", "https"])
         self.isLoading = false
         if !globalEnabled, evalEnabled {
             self.evalEnabled = false
@@ -647,6 +800,11 @@ final class IOSWebMountSettings {
         let normalized = hosts.compactMap { IOSWebMountURLPolicy.normalizedHost($0) }
         guard !normalized.isEmpty else { return }
         allowedHosts.formUnion(normalized)
+    }
+
+    func syncAllowedHosts(_ hosts: [String]) {
+        let normalized = hosts.compactMap { IOSWebMountURLPolicy.normalizedHost($0) }
+        allowedHosts = Set(normalized)
     }
 
     private func persist() {
@@ -837,6 +995,8 @@ struct IOSWebMountRuntimeSnapshot: Codable, Equatable, Sendable {
     var currentURL: String?
     var title: String?
     var estimatedProgress: Double
+    var canGoBack: Bool
+    var canGoForward: Bool
     var error: String?
     var updatedAtMillis: Int64
 
@@ -848,6 +1008,8 @@ struct IOSWebMountRuntimeSnapshot: Codable, Equatable, Sendable {
             currentURL: nil,
             title: nil,
             estimatedProgress: 0,
+            canGoBack: false,
+            canGoForward: false,
             error: nil,
             updatedAtMillis: 0
         )
@@ -912,6 +1074,8 @@ final class IOSWebMountWKRuntime: NSObject, ObservableObject, IOSWebMountRuntime
             currentURL: IOSWebMountRedactor.redactedURL(webView.url?.absoluteString),
             title: webView.title,
             estimatedProgress: webView.estimatedProgress,
+            canGoBack: webView.canGoBack,
+            canGoForward: webView.canGoForward,
             error: nil,
             updatedAtMillis: IOSWebMountClock.nowMillis()
         )
@@ -967,15 +1131,31 @@ final class IOSWebMountWKRuntime: NSObject, ObservableObject, IOSWebMountRuntime
     }
 
     func back() async -> IOSWebMountRuntimeSnapshot {
-        webView?.goBack()
+        guard let webView, webView.canGoBack else {
+            snapshot.canGoBack = webView?.canGoBack ?? false
+            snapshot.canGoForward = webView?.canGoForward ?? false
+            snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
+            return snapshot
+        }
+        webView.goBack()
         snapshot.status = .loading
+        snapshot.canGoBack = webView.canGoBack
+        snapshot.canGoForward = webView.canGoForward
         snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
         return snapshot
     }
 
     func forward() async -> IOSWebMountRuntimeSnapshot {
-        webView?.goForward()
+        guard let webView, webView.canGoForward else {
+            snapshot.canGoBack = webView?.canGoBack ?? false
+            snapshot.canGoForward = webView?.canGoForward ?? false
+            snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
+            return snapshot
+        }
+        webView.goForward()
         snapshot.status = .loading
+        snapshot.canGoBack = webView.canGoBack
+        snapshot.canGoForward = webView.canGoForward
         snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
         return snapshot
     }
@@ -994,13 +1174,15 @@ final class IOSWebMountWKRuntime: NSObject, ObservableObject, IOSWebMountRuntime
         case .success:
             decisionHandler(.allow)
         case .failure(let error):
-            snapshot.status = .failed
-            snapshot.requestedURL = IOSWebMountRedactor.redactedURL(url.absoluteString)
-            snapshot.currentURL = IOSWebMountRedactor.redactedURL(webView.url?.absoluteString)
-            snapshot.title = webView.title
-            snapshot.error = error.localizedDescription
-            snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
-            completePendingLoad()
+        snapshot.status = .failed
+        snapshot.requestedURL = IOSWebMountRedactor.redactedURL(url.absoluteString)
+        snapshot.currentURL = IOSWebMountRedactor.redactedURL(webView.url?.absoluteString)
+        snapshot.title = webView.title
+        snapshot.canGoBack = webView.canGoBack
+        snapshot.canGoForward = webView.canGoForward
+        snapshot.error = error.localizedDescription
+        snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
+        completePendingLoad()
             decisionHandler(.cancel)
         }
     }
@@ -1009,6 +1191,8 @@ final class IOSWebMountWKRuntime: NSObject, ObservableObject, IOSWebMountRuntime
         snapshot.status = .loading
         snapshot.currentURL = IOSWebMountRedactor.redactedURL(webView.url?.absoluteString)
         snapshot.estimatedProgress = webView.estimatedProgress
+        snapshot.canGoBack = webView.canGoBack
+        snapshot.canGoForward = webView.canGoForward
         snapshot.error = nil
         snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
     }
@@ -1016,6 +1200,8 @@ final class IOSWebMountWKRuntime: NSObject, ObservableObject, IOSWebMountRuntime
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         snapshot.currentURL = IOSWebMountRedactor.redactedURL(webView.url?.absoluteString)
         snapshot.estimatedProgress = webView.estimatedProgress
+        snapshot.canGoBack = webView.canGoBack
+        snapshot.canGoForward = webView.canGoForward
         snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
     }
 
@@ -1024,6 +1210,8 @@ final class IOSWebMountWKRuntime: NSObject, ObservableObject, IOSWebMountRuntime
         snapshot.currentURL = IOSWebMountRedactor.redactedURL(webView.url?.absoluteString)
         snapshot.title = webView.title
         snapshot.estimatedProgress = 1
+        snapshot.canGoBack = webView.canGoBack
+        snapshot.canGoForward = webView.canGoForward
         snapshot.error = nil
         snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
         completePendingLoad()
@@ -1042,6 +1230,8 @@ final class IOSWebMountWKRuntime: NSObject, ObservableObject, IOSWebMountRuntime
         snapshot.currentURL = IOSWebMountRedactor.redactedURL(webView?.url?.absoluteString)
         snapshot.title = webView?.title
         snapshot.estimatedProgress = webView?.estimatedProgress ?? 0
+        snapshot.canGoBack = webView?.canGoBack ?? false
+        snapshot.canGoForward = webView?.canGoForward ?? false
         snapshot.error = error.localizedDescription
         snapshot.updatedAtMillis = IOSWebMountClock.nowMillis()
         completePendingLoad()
@@ -1123,9 +1313,21 @@ enum IOSWebMountBridgeScripts {
           var mode=\(mode);
           var body=document.body;
           if(mode==="interactive" || mode==="snapshot"){
-            var nodes=Array.prototype.slice.call(document.querySelectorAll("a,button,input,textarea,select,[role='button'],[role='link'],[role='tab'],[role='menuitem']"),0,80).map(function(el,idx){
-              var rect=el.getBoundingClientRect();
-              return { ref:"css:"+cssPath(el), tag:(el.tagName||"").toLowerCase(), text:(el.innerText||el.value||el.getAttribute("aria-label")||"").slice(0,240), href: el.href ? cleanUrl(el.href) : "", visible: !!(rect.width && rect.height) };
+              var nodes=Array.prototype.slice.call(document.querySelectorAll("a,button,input,textarea,select,[role='button'],[role='link'],[role='tab'],[role='menuitem']"),0,80).map(function(el,idx){
+                var rect=el.getBoundingClientRect();
+              return {
+                ref:"css:"+cssPath(el),
+                tag:(el.tagName||"").toLowerCase(),
+                text:(el.innerText||el.value||el.getAttribute("aria-label")||"").slice(0,240),
+                href: el.href ? cleanUrl(el.href) : "",
+                visible: !!(rect.width && rect.height),
+                rect: {
+                  x: Math.round(rect.x || 0),
+                  y: Math.round(rect.y || 0),
+                  width: Math.round(rect.width || 0),
+                  height: Math.round(rect.height || 0)
+                }
+              };
             });
             return JSON.stringify({ mode: mode, url: cleanUrl(location.href), nodes: nodes });
           }
@@ -1184,7 +1386,7 @@ enum IOSWebMountToolCatalog {
         .init(name: "wm_open", description: "Open an allowlisted URL in a local WKWebView session.", requiresUserAction: false),
         .init(name: "wm_state", description: "Read current WKWebView status, title, redacted URL, and page state.", requiresUserAction: false),
         .init(name: "wm_extract", description: "Extract readable or interactive page content through a read-only bridge.", requiresUserAction: false),
-        .init(name: "wm_get", description: "Read a single element text/value/attribute/html through a restricted bridge.", requiresUserAction: false),
+        .init(name: "wm_get", description: "Read a single element text/value/attribute through a restricted bridge. Raw HTML reads are disabled on iOS.", requiresUserAction: false),
         .init(name: "wm_back", description: "Navigate the current WebMount session backward.", requiresUserAction: false),
         .init(name: "wm_forward", description: "Navigate the current WebMount session forward.", requiresUserAction: false),
         .init(name: "wm_clear_session", description: "Clear cookies and website data for one station after explicit user action.", requiresUserAction: true)
@@ -1198,7 +1400,10 @@ enum IOSWebMountToolCatalog {
         "wm_oauth_connect",
         "wm_oauth_refresh",
         "wm_profile_synthesize",
-        "wm_site_adapter"
+        "wm_site_adapter",
+        "wm_screenshot",
+        "wm_visual_snapshot",
+        "wm_visual_read"
     ]
 }
 
@@ -1225,7 +1430,7 @@ final class IOSWebMountController {
         self.settings = settings ?? IOSWebMountSettings()
         self.cookieStore = cookieStore ?? IOSWebMountCookieStore()
         self.runtime = runtime ?? IOSWebMountWKRuntime()
-        self.settings.addAllowedHosts(self.registry.sites.flatMap(\.allowedHosts))
+        self.settings.syncAllowedHosts(self.registry.sites.flatMap(\.allowedHosts))
     }
 
     func openForUser(site: IOSWebMountSite) async -> IOSWebMountRuntimeSnapshot {
@@ -1242,6 +1447,8 @@ final class IOSWebMountController {
                 currentURL: runtime.snapshot.currentURL,
                 title: runtime.snapshot.title,
                 estimatedProgress: runtime.snapshot.estimatedProgress,
+                canGoBack: runtime.snapshot.canGoBack,
+                canGoForward: runtime.snapshot.canGoForward,
                 error: error.localizedDescription,
                 updatedAtMillis: IOSWebMountClock.nowMillis()
             )
@@ -1359,18 +1566,22 @@ final class IOSWebMountController {
 
     private func openResult(args: [String: Any]) async throws -> String {
         let site = siteFromArgs(args)
-        guard site?.enabled ?? true else {
+        guard let site else {
+            return Self.json([
+                "ok": false,
+                "denied": true,
+                "reason": "wm_open requires a registered WebMount station. Add or restore the site before opening this URL."
+            ])
+        }
+        guard site.enabled else {
             return Self.json([
                 "ok": false,
                 "denied": true,
                 "reason": "WebMount station is disabled",
-                "site_id": site?.id ?? ""
+                "site_id": site.id
             ])
         }
-        let rawURL = (args["url"] as? String)?.nilIfBlank ?? site?.homepageURL
-        guard let rawURL else {
-            return Self.json(["ok": false, "error": "wm_open requires url or site_id"])
-        }
+        let rawURL = (args["url"] as? String)?.nilIfBlank ?? site.homepageURL
         let policy = IOSWebMountURLPolicy(settings: settings, extraAllowedHosts: registry.sites.flatMap(\.allowedHosts))
         switch policy.validate(rawURL, site: site) {
         case .failure(let error):
@@ -1419,7 +1630,23 @@ final class IOSWebMountController {
     }
 
     private func getResult(args: [String: Any]) async throws -> String {
-        let kind = (args["kind"] as? String)?.nilIfBlank ?? "text"
+        let kind = ((args["kind"] as? String)?.nilIfBlank ?? "text").lowercased()
+        if kind == "html" {
+            return Self.json([
+                "ok": false,
+                "denied": true,
+                "reason": "wm_get kind=html is disabled on iOS because raw DOM can contain hidden tokens. Use text, value, or attr."
+            ])
+        }
+        if kind == "value",
+           Self.looksSensitiveSelector(args["selector"] as? String) ||
+            Self.looksSensitiveSelector(args["target"] as? String) {
+            return Self.json([
+                "ok": false,
+                "denied": true,
+                "reason": "wm_get refused a value read from a selector that looks like a token, password, cookie, or secret field."
+            ])
+        }
         let maxChars = ((args["max_chars"] as? Int) ?? 20_000).clamped(to: 0...100_000)
         let result = try await runtime.get(
             selector: args["selector"] as? String,
@@ -1461,6 +1688,14 @@ final class IOSWebMountController {
         return nil
     }
 
+    private static func looksSensitiveSelector(_ value: String?) -> Bool {
+        guard let value else { return false }
+        let lowercased = value.lowercased()
+        return ["password", "passwd", "token", "csrf", "xsrf", "secret", "cookie", "authorization", "auth"].contains { marker in
+            lowercased.contains(marker)
+        }
+    }
+
     private static func parseObject(_ input: String) -> [String: Any] {
         guard let data = input.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1469,7 +1704,7 @@ final class IOSWebMountController {
         return object
     }
 
-    static func json(_ object: Any) -> String {
+    nonisolated static func json(_ object: Any) -> String {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let string = String(data: data, encoding: .utf8) else {
@@ -1494,13 +1729,12 @@ enum IOSWebMountRedactor {
         if let dict = value as? [String: Any] {
             var redacted: [String: Any] = [:]
             for (key, item) in dict {
-                if key.lowercased().contains("url") || key.lowercased() == "href" || key.lowercased() == "src",
-                   let string = item as? String {
-                    redacted[key] = redactedURL(string) ?? string
-                } else if key.lowercased().contains("authorization") ||
-                            key.lowercased().contains("token") ||
-                            key.lowercased().contains("cookie") {
+                let loweredKey = key.lowercased()
+                if isSensitiveKey(loweredKey) {
                     redacted[key] = "***redacted***"
+                } else if loweredKey.contains("url") || loweredKey == "href" || loweredKey == "src",
+                          let string = item as? String {
+                    redacted[key] = redactedURL(string) ?? string
                 } else {
                     redacted[key] = redactedJSONObject(item)
                 }
@@ -1510,7 +1744,68 @@ enum IOSWebMountRedactor {
         if let array = value as? [Any] {
             return array.map(redactedJSONObject)
         }
+        if let string = value as? String {
+            return redactedText(string)
+        }
         return value
+    }
+
+    static func redactedText(_ value: String) -> String {
+        var output = value
+        output = replacingMatches(
+            in: output,
+            pattern: #"https?://[^\s"'<>)]+"#,
+            options: [.caseInsensitive]
+        ) { match in
+            redactedURL(match) ?? "[redacted-url]"
+        }
+        output = replacingMatches(
+            in: output,
+            pattern: #"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{6,}"#
+        ) { _ in
+            "Bearer ***redacted***"
+        }
+        output = replacingMatches(
+            in: output,
+            pattern: #"(?i)\b(authorization|token|access_token|refresh_token|auth_token|csrf|xsrf|session|secret|password)=([^&\s"'<>)]*)"#,
+            options: [.caseInsensitive]
+        ) { match in
+            let key = match.split(separator: "=", maxSplits: 1).first.map(String.init) ?? "secret"
+            return "\(key)=***redacted***"
+        }
+        return output
+    }
+
+    private static func isSensitiveKey(_ key: String) -> Bool {
+        if ["authorization", "auth", "token", "access_token", "refresh_token", "auth_token", "cookie", "secret", "password"].contains(key) {
+            return true
+        }
+        return key.hasSuffix("_token") ||
+            key.hasSuffix("token") ||
+            key.hasSuffix("_secret") ||
+            key.hasSuffix("_password")
+    }
+
+    private static func replacingMatches(
+        in value: String,
+        pattern: String,
+        options: NSRegularExpression.Options = [],
+        transform: (String) -> String
+    ) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+            return value
+        }
+        let nsValue = value as NSString
+        let matches = regex.matches(in: value, range: NSRange(location: 0, length: nsValue.length))
+        guard !matches.isEmpty else { return value }
+        var output = value
+        for match in matches.reversed() {
+            let original = nsValue.substring(with: match.range)
+            if let range = Range(match.range, in: output) {
+                output.replaceSubrange(range, with: transform(original))
+            }
+        }
+        return output
     }
 }
 
@@ -1529,6 +1824,8 @@ private extension IOSWebMountRuntimeSnapshot {
             "current_url": redactURLs ? (currentURL ?? "") : (currentURL ?? ""),
             "title": title ?? "",
             "estimated_progress": estimatedProgress,
+            "can_go_back": canGoBack,
+            "can_go_forward": canGoForward,
             "error": error ?? "",
             "updated_at_ms": updatedAtMillis
         ]

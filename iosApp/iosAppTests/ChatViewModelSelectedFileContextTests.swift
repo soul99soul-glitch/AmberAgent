@@ -566,6 +566,53 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(cookieStore.clearedSiteIds, ["github"])
     }
 
+    func testWebMountOpenApprovalRequestAndTimelineRedactsInput() async throws {
+        let defaults = isolatedDefaults()
+        let registry = IOSWebMountRegistry(userDefaults: defaults)
+        registry.setEnabled(id: "github", enabled: true)
+        let controller = IOSWebMountController(
+            registry: registry,
+            settings: IOSWebMountSettings(userDefaults: defaults),
+            runtime: ChatWebMountRuntime()
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: IOSLocalToolExecutor(
+                permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+                documentStore: DocumentAccessStore(),
+                webMountController: controller
+            ),
+            autoGenerateResponses: false
+        )
+        let input = #"{"site_id":"github","url":"https://github.com/login?token=secret"}"#
+
+        let approvalRequest = await viewModel.webMountApprovalRequestForTesting(
+            toolName: "wm_open",
+            input: input
+        )
+        let request = try XCTUnwrap(approvalRequest)
+        XCTAssertEqual(request.toolName, "wm_open")
+        XCTAssertEqual(request.siteId, "github")
+        XCTAssertEqual(request.host, "github.com")
+
+        let pendingOutput = await viewModel.webMountToolOutputForTesting(toolName: "wm_open", input: input)
+        let pendingPayload = try jsonObject(pendingOutput)
+        XCTAssertEqual(pendingPayload["needs_user_action"] as? Bool, true)
+
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "wm-open",
+            toolName: "wm_open",
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        let step = ChatToolStepModel(tool: toolCall)
+        XCTAssertFalse(step.detail?.contains("token=secret") == true)
+        XCTAssertTrue(step.detail?.contains("https://github.com/login") == true)
+    }
+
     func testWebMountDirectToolExecutionHelperIsAvailableAfterUserAction() async throws {
         let defaults = isolatedDefaults()
         let settings = IOSWebMountSettings(userDefaults: defaults)
@@ -685,6 +732,55 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         }
     }
 
+    func testFinishedAdvancedToolCallMessagesMatchExactCallId() throws {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            autoGenerateResponses: false
+        )
+        let subAgentCall = UIMessagePart.Tool(
+            toolCallId: "advanced-subagent",
+            toolName: "subagent_dispatch",
+            input: #"{"objective":"audit runtime","role_id":"explorer"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        let councilCall = UIMessagePart.Tool(
+            toolCallId: "advanced-council",
+            toolName: "model_council_run",
+            input: #"{"objective":"decide fallback","mode":"parallel"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        let seed = UIMessage.companion.assistant(prompt: "")
+        let assistant = UIMessage(
+            id: seed.id,
+            role: seed.role,
+            parts: [subAgentCall, councilCall],
+            annotations: seed.annotations,
+            createdAt: seed.createdAt,
+            finishedAt: seed.finishedAt,
+            modelId: seed.modelId,
+            usage: seed.usage,
+            translation: seed.translation
+        )
+
+        let resumed = viewModel.finishedToolCallMessagesForTesting(
+            councilCall,
+            outputText: "council conclusion",
+            in: [UIMessage.companion.user(prompt: "run advanced tools"), assistant]
+        )
+        let tools = resumed.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }
+        let subAgentOutput = try XCTUnwrap(tools.first { $0.toolCallId == "advanced-subagent" }).output
+        let councilOutput = try XCTUnwrap(tools.first { $0.toolCallId == "advanced-council" }).output
+        let councilText = councilOutput.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+
+        XCTAssertTrue(subAgentOutput.isEmpty)
+        XCTAssertEqual(councilText, "council conclusion")
+    }
+
     private func textContent(of message: UIMessage) -> String {
         message.parts
             .compactMap { ($0 as? UIMessagePart.Text)?.text }
@@ -799,6 +895,8 @@ private final class ChatWebMountRuntime: IOSWebMountRuntimeServicing {
             currentURL: IOSWebMountRedactor.redactedURL(url.absoluteString),
             title: "Chat Test",
             estimatedProgress: 1,
+            canGoBack: false,
+            canGoForward: false,
             error: nil,
             updatedAtMillis: 123
         )

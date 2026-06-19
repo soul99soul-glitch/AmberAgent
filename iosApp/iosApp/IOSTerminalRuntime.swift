@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 enum IOSTerminalRuntimeKind: String, CaseIterable, Codable, Identifiable {
     case remoteSSH = "remote_ssh"
@@ -150,6 +151,319 @@ enum IOSTerminalJobStatus: String {
         case .queued, .running:
             false
         }
+    }
+}
+
+enum IOSAdvancedTaskKind: String, Codable, CaseIterable, Identifiable {
+    case subAgent = "sub_agent"
+    case modelCouncil = "model_council"
+    case remoteCommand = "remote_command"
+    case toolApproval = "tool_approval"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .subAgent: "SubAgent"
+        case .modelCouncil: "模型议会"
+        case .remoteCommand: "远程执行"
+        case .toolApproval: "工具审批"
+        }
+    }
+}
+
+enum IOSAdvancedTaskStatus: String, Codable, CaseIterable, Identifiable {
+    case queued
+    case running
+    case approvalRequired = "approval_required"
+    case completed
+    case failed
+    case cancelled
+    case timedOut = "timed_out"
+    case interrupted
+
+    var id: String { rawValue }
+
+    var isTerminal: Bool {
+        switch self {
+        case .completed, .failed, .cancelled, .timedOut, .interrupted:
+            true
+        case .queued, .running, .approvalRequired:
+            false
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .queued: "排队中"
+        case .running: "运行中"
+        case .approvalRequired: "等待确认"
+        case .completed: "已完成"
+        case .failed: "失败"
+        case .cancelled: "已取消"
+        case .timedOut: "已超时"
+        case .interrupted: "已中断"
+        }
+    }
+}
+
+struct IOSAdvancedTaskRecord: Codable, Equatable, Identifiable {
+    var id: String
+    var kind: IOSAdvancedTaskKind
+    var title: String
+    var objective: String
+    var status: IOSAdvancedTaskStatus
+    var roleId: String?
+    var toolScope: [String]
+    var budgetSummary: String
+    var connectionSummary: String
+    var commandPreview: String
+    var resultSummary: String
+    var logTail: String
+    var error: String
+    var retryable: Bool
+    var cancelCapability: Bool
+    var sourceToolName: String
+    var metadata: [String: String]
+    var createdAt: Date
+    var updatedAt: Date
+
+    var canRetry: Bool {
+        retryable && status.isTerminal
+    }
+
+    var compactSummary: String {
+        if !resultSummary.isEmpty { return resultSummary }
+        if !error.isEmpty { return error }
+        if !logTail.isEmpty { return logTail }
+        return objective
+    }
+}
+
+@MainActor
+@Observable
+final class IOSAdvancedTaskStore {
+    static let shared = IOSAdvancedTaskStore()
+
+    private static let defaultStorageKey = "app.amber.ios.advancedTasks.v1"
+    private static let maxPersistedTasks = 80
+    private static let maxFieldLength = 4_000
+    private static let maxLogLength = 24_000
+
+    var tasks: [IOSAdvancedTaskRecord]
+
+    @ObservationIgnored private let userDefaults: UserDefaults
+    @ObservationIgnored private let storageKey: String
+    @ObservationIgnored private let encoder = JSONEncoder()
+    @ObservationIgnored private let decoder = JSONDecoder()
+
+    init(
+        userDefaults: UserDefaults = .standard,
+        storageKey: String = IOSAdvancedTaskStore.defaultStorageKey
+    ) {
+        self.userDefaults = userDefaults
+        self.storageKey = storageKey
+        self.tasks = Self.load(from: userDefaults, key: storageKey, decoder: decoder)
+    }
+
+    @discardableResult
+    func startTask(
+        kind: IOSAdvancedTaskKind,
+        title: String,
+        objective: String,
+        roleId: String? = nil,
+        toolScope: [String] = [],
+        budgetSummary: String = "",
+        connectionSummary: String = "",
+        commandPreview: String = "",
+        sourceToolName: String = "",
+        metadata: [String: String] = [:],
+        now: Date = Date()
+    ) -> IOSAdvancedTaskRecord {
+        let record = IOSAdvancedTaskRecord(
+            id: UUID().uuidString,
+            kind: kind,
+            title: Self.redacted(title),
+            objective: Self.redacted(objective),
+            status: .running,
+            roleId: roleId,
+            toolScope: toolScope.map(Self.redacted),
+            budgetSummary: Self.redacted(budgetSummary),
+            connectionSummary: Self.redacted(connectionSummary),
+            commandPreview: Self.redactedCommand(commandPreview),
+            resultSummary: "",
+            logTail: "",
+            error: "",
+            retryable: false,
+            cancelCapability: true,
+            sourceToolName: sourceToolName,
+            metadata: metadata.mapValues(Self.redacted),
+            createdAt: now,
+            updatedAt: now
+        )
+        upsert(record)
+        return record
+    }
+
+    @discardableResult
+    func updateTask(
+        id: String,
+        status: IOSAdvancedTaskStatus? = nil,
+        resultSummary: String? = nil,
+        logTail: String? = nil,
+        error: String? = nil,
+        retryable: Bool? = nil,
+        cancelCapability: Bool? = nil,
+        metadata: [String: String]? = nil,
+        now: Date = Date()
+    ) -> IOSAdvancedTaskRecord? {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return nil }
+        if let status { tasks[index].status = status }
+        if let resultSummary { tasks[index].resultSummary = Self.redacted(resultSummary) }
+        if let logTail { tasks[index].logTail = Self.redactedLog(logTail) }
+        if let error { tasks[index].error = Self.redacted(error) }
+        if let retryable { tasks[index].retryable = retryable }
+        if let cancelCapability { tasks[index].cancelCapability = cancelCapability }
+        if let metadata {
+            for (key, value) in metadata {
+                tasks[index].metadata[key] = Self.redacted(value)
+            }
+        }
+        tasks[index].updatedAt = now
+        persist()
+        return tasks[index]
+    }
+
+    func appendLog(id: String, chunk: String, now: Date = Date()) {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        tasks[index].logTail = Self.redactedLog(tasks[index].logTail + chunk)
+        tasks[index].updatedAt = now
+        persist()
+    }
+
+    @discardableResult
+    func markRetryRequested(id: String, now: Date = Date()) -> IOSAdvancedTaskRecord? {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return nil }
+        tasks[index].status = .queued
+        tasks[index].retryable = false
+        tasks[index].cancelCapability = false
+        tasks[index].error = ""
+        tasks[index].updatedAt = now
+        persist()
+        return tasks[index]
+    }
+
+    func recent(kind: IOSAdvancedTaskKind? = nil, limit: Int = 8) -> [IOSAdvancedTaskRecord] {
+        tasks
+            .filter { kind == nil || $0.kind == kind }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    @discardableResult
+    func upsert(_ record: IOSAdvancedTaskRecord) -> IOSAdvancedTaskRecord {
+        var sanitized = record
+        sanitized.title = Self.redacted(record.title)
+        sanitized.objective = Self.redacted(record.objective)
+        sanitized.commandPreview = Self.redactedCommand(record.commandPreview)
+        sanitized.logTail = Self.redactedLog(record.logTail)
+        sanitized.resultSummary = Self.redacted(record.resultSummary)
+        sanitized.error = Self.redacted(record.error)
+        sanitized.metadata = record.metadata.mapValues(Self.redacted)
+
+        if let index = tasks.firstIndex(where: { $0.id == sanitized.id }) {
+            tasks[index] = sanitized
+        } else {
+            tasks.insert(sanitized, at: 0)
+        }
+        tasks = Array(tasks.sorted { $0.updatedAt > $1.updatedAt }.prefix(Self.maxPersistedTasks))
+        persist()
+        return sanitized
+    }
+
+    func replaceAll(_ records: [IOSAdvancedTaskRecord]) {
+        tasks = Array(records.sorted { $0.updatedAt > $1.updatedAt }.prefix(Self.maxPersistedTasks))
+        persist()
+    }
+
+    private func persist() {
+        if let data = try? encoder.encode(tasks) {
+            userDefaults.set(data, forKey: storageKey)
+        }
+    }
+
+    private static func load(from defaults: UserDefaults, key: String, decoder: JSONDecoder) -> [IOSAdvancedTaskRecord] {
+        guard let data = defaults.data(forKey: key),
+              let decoded = try? decoder.decode([IOSAdvancedTaskRecord].self, from: data) else {
+            return []
+        }
+        return Array(decoded.sorted { $0.updatedAt > $1.updatedAt }.prefix(maxPersistedTasks))
+    }
+
+    static func redactedCommand(_ value: String) -> String {
+        redacted(value)
+    }
+
+    static func redactedLog(_ value: String) -> String {
+        let redacted = redacted(value)
+        guard redacted.count > maxLogLength else { return redacted }
+        return String(redacted.suffix(maxLogLength))
+    }
+
+    static func redacted(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let patterns = [
+            #"(?i)(api[_-]?key|token|password|passwd|secret|authorization)\s*[:=]\s*["']?[^"'\s]+["']?"#,
+            #"(?i)bearer\s+[A-Za-z0-9._\-]+"#,
+            #"sk-[A-Za-z0-9_\-]{12,}"#,
+            #"(?i)(ssh-rsa|ssh-ed25519)\s+[A-Za-z0-9+/=]+"#
+        ]
+        var output = trimmed
+        for pattern in patterns {
+            output = output.replacingOccurrences(
+                of: pattern,
+                with: "[redacted]",
+                options: .regularExpression
+            )
+        }
+        guard output.count > maxFieldLength else { return output }
+        return String(output.prefix(maxFieldLength)) + "..."
+    }
+}
+
+enum IOSRemoteCommandPolicyResult {
+    case success(String)
+    case failure(String)
+}
+
+enum IOSRemoteCommandPolicy {
+    static func validate(_ command: String) -> IOSRemoteCommandPolicyResult {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .failure("Command is required.")
+        }
+        guard trimmed.count <= 2_000 else {
+            return .failure("Command is too long for a single remote execution task.")
+        }
+
+        let lowercased = trimmed.lowercased()
+        let blockedFragments = [
+            "rm -rf /",
+            "mkfs",
+            "diskutil erase",
+            "shutdown",
+            "reboot",
+            ":(){",
+            "dd if=",
+            ">:",
+            "chmod -r 777 /"
+        ]
+        if let fragment = blockedFragments.first(where: { lowercased.contains($0) }) {
+            return .failure("Blocked potentially destructive command fragment: \(fragment)")
+        }
+        return .success(trimmed)
     }
 }
 

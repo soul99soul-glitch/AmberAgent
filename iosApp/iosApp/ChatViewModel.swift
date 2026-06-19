@@ -97,6 +97,19 @@ struct WebMountToolApprovalRequest: Identifiable, Equatable {
     }
 }
 
+struct WorkspaceToolApprovalRequest: Identifiable, Equatable {
+    let id: String
+    let toolName: String
+    let action: String
+    let target: String
+    let isWrite: Bool
+    let reason: String
+
+    var title: String {
+        isWrite ? "修改 Workspace" : "读取 Workspace"
+    }
+}
+
 struct SearchToolApprovalRequest: Identifiable, Equatable {
     let id: String
     let toolName: String
@@ -147,6 +160,17 @@ private struct PendingWebMountToolApproval {
     let baseMessages: [UIMessage]
 }
 
+private struct PendingWorkspaceToolApproval {
+    let toolCall: UIMessagePart.Tool
+    let providerSetting: ProviderSetting.OpenAI
+    let params: TextGenerationParams
+    let runId: String
+    let startedAt: Int64
+    let inputDigest: String
+    let conversationId: KotlinUuid?
+    let baseMessages: [UIMessage]
+}
+
 private struct PendingSearchToolApproval {
     let toolCall: UIMessagePart.Tool
     let providerSetting: ProviderSetting.OpenAI
@@ -186,6 +210,7 @@ final class ChatViewModel {
     var pendingMemoryApproval: MemoryToolApprovalRequest?
     var pendingSearchApproval: SearchToolApprovalRequest?
     var pendingWebMountApproval: WebMountToolApprovalRequest?
+    var pendingWorkspaceApproval: WorkspaceToolApprovalRequest?
     var pendingMcpApproval: McpToolApprovalRequest?
     var configurationError: String?
 
@@ -287,6 +312,7 @@ final class ChatViewModel {
     private var pendingMemoryToolApproval: PendingMemoryToolApproval?
     private var pendingSearchToolApproval: PendingSearchToolApproval?
     private var pendingWebMountToolApproval: PendingWebMountToolApproval?
+    private var pendingWorkspaceToolApproval: PendingWorkspaceToolApproval?
     private var pendingMcpToolApproval: PendingMcpToolApproval?
 
     // MARK: - Init
@@ -340,6 +366,7 @@ final class ChatViewModel {
               pendingMemoryApproval == nil,
               pendingSearchApproval == nil,
               pendingWebMountApproval == nil,
+              pendingWorkspaceApproval == nil,
               pendingMcpApproval == nil else { return }
 
         if autoGenerateResponses, let configurationIssue {
@@ -429,6 +456,13 @@ final class ChatViewModel {
                 presentation: .selectedFileReadFailed,
                 dismissalDelay: 6
             )
+        case .workspaceResult:
+            selectedFileContextError = "Workspace tool output cannot be attached to a chat message."
+            await liveActivityController.end(
+                runId: activityRunId,
+                presentation: .selectedFileReadFailed,
+                dismissalDelay: 6
+            )
         }
     }
 
@@ -469,6 +503,18 @@ final class ChatViewModel {
         }
     }
 
+    func approvePendingWorkspaceTool() {
+        Task { @MainActor in
+            await finishPendingWorkspaceToolApproval(allow: true)
+        }
+    }
+
+    func denyPendingWorkspaceTool() {
+        Task { @MainActor in
+            await finishPendingWorkspaceToolApproval(allow: false)
+        }
+    }
+
     func approvePendingMcpTool() {
         Task { @MainActor in
             await finishPendingMcpToolApproval(allow: true)
@@ -498,6 +544,7 @@ final class ChatViewModel {
         clearPendingMemoryApproval()
         clearPendingSearchApproval()
         clearPendingWebMountApproval()
+        clearPendingWorkspaceApproval()
         clearPendingMcpApproval()
         isLoading = false
 
@@ -625,6 +672,25 @@ final class ChatViewModel {
                         return
                     }
 
+                    if let workspaceToolCall = self.pendingWorkspaceToolCall(in: snapshot),
+                       self.currentToolResumeCount < self.maxToolResumeCount {
+                        self.currentToolResumeCount += 1
+                        self.streamJob = nil
+                        Task { @MainActor in
+                            await self.executeWorkspaceToolCall(
+                                workspaceToolCall,
+                                providerSetting: providerSetting,
+                                params: params,
+                                runId: runId,
+                                startedAt: startedAt,
+                                inputDigest: inputDigest,
+                                conversationId: conversationId,
+                                baseMessages: snapshot
+                            )
+                        }
+                        return
+                    }
+
                     if let webMountToolCall = self.pendingWebMountToolCall(in: snapshot),
                        self.currentToolResumeCount < self.maxToolResumeCount {
                         self.currentToolResumeCount += 1
@@ -651,6 +717,25 @@ final class ChatViewModel {
                         Task { @MainActor in
                             await self.executeMemoryToolCall(
                                 memoryToolCall,
+                                providerSetting: providerSetting,
+                                params: params,
+                                runId: runId,
+                                startedAt: startedAt,
+                                inputDigest: inputDigest,
+                                conversationId: conversationId,
+                                baseMessages: snapshot
+                            )
+                        }
+                        return
+                    }
+
+                    if let imageToolCall = self.pendingImageToolCall(in: snapshot),
+                       self.currentToolResumeCount < self.maxToolResumeCount {
+                        self.currentToolResumeCount += 1
+                        self.streamJob = nil
+                        Task { @MainActor in
+                            await self.executeImageToolCall(
+                                imageToolCall,
                                 providerSetting: providerSetting,
                                 params: params,
                                 runId: runId,
@@ -754,6 +839,7 @@ final class ChatViewModel {
         clearPendingMemoryApproval()
         clearPendingSearchApproval()
         clearPendingWebMountApproval()
+        clearPendingWorkspaceApproval()
         clearPendingMcpApproval()
     }
 
@@ -937,6 +1023,13 @@ final class ChatViewModel {
                     sourceMessageId: sourceMessageId
                 )
             }
+            try? IOSWorkspaceStore.shared.saveArtifact(
+                title: record.title,
+                content: record.htmlContent,
+                type: .miniApp,
+                sourceKind: "miniapp",
+                sourceId: record.id
+            )
             let notice = """
             已保存 MiniApp「\(record.title)」v\(record.version)。
             appId: \(record.id)
@@ -1029,6 +1122,17 @@ final class ChatViewModel {
         return nil
     }
 
+    private func pendingWorkspaceToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+        guard localToolExecutor != nil else { return nil }
+        for message in messages.reversed() where message.role == MessageRole.assistant {
+            if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
+                .first(where: { IOSWorkspaceToolCatalog.supportedToolNames.contains($0.toolName) && $0.output.isEmpty }) {
+                return toolCall
+            }
+        }
+        return nil
+    }
+
     /// [Slice 3] Detects a pending MCP / sub-agent / council tool call (one
     /// whose output is still empty) so onComplete can dispatch it. Mirrors
     /// pendingSearchToolCall but matches the Slice-3 tool names.
@@ -1061,6 +1165,19 @@ final class ChatViewModel {
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
                 .first(where: { $0.toolName == "memory_tool" && $0.output.isEmpty }) {
+                return toolCall
+            }
+        }
+        return nil
+    }
+
+    private func pendingImageToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+        guard IOSImageGenerationSettingsStore.shared.configurationIssue(settingsStore: settingsStore) == nil else {
+            return nil
+        }
+        for message in messages.reversed() where message.role == MessageRole.assistant {
+            if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
+                .first(where: { $0.toolName == "generate_image" && $0.output.isEmpty }) {
                 return toolCall
             }
         }
@@ -1150,6 +1267,13 @@ final class ChatViewModel {
         guard let pending = pendingSearchToolApproval else { return }
         clearPendingSearchApproval()
         guard currentRunId == pending.runId else { return }
+        recordToolApproval(
+            capabilityId: "ios.network.search_tools",
+            toolCall: pending.toolCall,
+            action: allow ? .allowed : .denied,
+            reason: allow ? "User approved network search." : "User denied network search.",
+            runId: pending.runId
+        )
 
         let resultText = allow
             ? await dispatchSearchToolCall(pending.toolCall)
@@ -1247,6 +1371,226 @@ final class ChatViewModel {
             target: Self.truncatedSearchTarget(target),
             providerName: toolCall.toolName == "scrape_web" ? "公开网页读取" : selection.providerName,
             providerType: toolCall.toolName == "scrape_web" ? "scrape_web" : selection.providerType,
+            reason: reason
+        )
+    }
+
+    private func executeWorkspaceToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        let output = await workspaceToolExecutionOutput(toolCall, isUserInitiated: false)
+        if case .needsUserAction(let reason) = output,
+           let request = workspaceApprovalRequest(for: toolCall, reason: reason) {
+            await pauseForWorkspaceToolApproval(
+                request,
+                toolCall: toolCall,
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                baseMessages: baseMessages
+            )
+            return
+        }
+
+        let resultText = workspaceResultText(for: toolCall, output: output)
+
+        guard currentRunId == runId else { return }
+        let resumedMessages = messagesByFinishingToolCall(toolCall, outputText: resultText, in: baseMessages)
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        startStreaming(
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func workspaceToolExecutionOutput(
+        _ toolCall: UIMessagePart.Tool,
+        isUserInitiated: Bool
+    ) async -> IOSLocalToolExecutionOutput {
+        guard let localToolExecutor else {
+            return .failed("Local iOS tool executor is unavailable.")
+        }
+        return await localToolExecutor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: toolCall.toolName,
+                operation: toolCall.input,
+                scopeDigest: "workspace",
+                payloadDigest: Self.inputDigest(for: toolCall.input),
+                isUserInitiated: isUserInitiated
+            )
+        )
+    }
+
+    private func workspaceResultText(
+        for toolCall: UIMessagePart.Tool,
+        output: IOSLocalToolExecutionOutput
+    ) -> String {
+        switch output {
+        case .workspaceResult(let result):
+            return result
+        case .needsUserAction(let reason):
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "needs_user_action": true,
+                "reason": reason
+            ])
+        case .denied(let reason):
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "denied": true,
+                "reason": reason
+            ])
+        case .failed(let message):
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "error": message
+            ])
+        case .selectedFilePreview:
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "error": "Unexpected selected-file output for Workspace tool."
+            ])
+        case .permissionsStatus(let snapshot):
+            return IOSWorkspaceStore.json([
+                "ok": true,
+                "tool": toolCall.toolName,
+                "platform": snapshot.platform
+            ])
+        case .webMountResult:
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "error": "Unexpected WebMount output for Workspace tool."
+            ])
+        }
+    }
+
+    private func pauseForWorkspaceToolApproval(
+        _ request: WorkspaceToolApprovalRequest,
+        toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        guard currentRunId == runId else { return }
+        pendingWorkspaceToolApproval = PendingWorkspaceToolApproval(
+            toolCall: toolCall,
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            baseMessages: baseMessages
+        )
+        pendingWorkspaceApproval = request
+        messages = baseMessages
+        messageRevision &+= 1
+        isLoading = false
+        await liveActivityController.update(
+            runId: runId,
+            presentation: .waitingForUser(toolTitle: "Workspace"),
+            force: true
+        )
+    }
+
+    private func finishPendingWorkspaceToolApproval(allow: Bool) async {
+        guard let pending = pendingWorkspaceToolApproval else { return }
+        clearPendingWorkspaceApproval()
+        guard currentRunId == pending.runId else { return }
+
+        let resultText: String
+        if allow {
+            let output = await workspaceToolExecutionOutput(pending.toolCall, isUserInitiated: true)
+            resultText = workspaceResultText(for: pending.toolCall, output: output)
+        } else {
+            resultText = IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": pending.toolCall.toolName,
+                "denied": true,
+                "policy": "user_denied",
+                "reason": "User denied Workspace tool access."
+            ])
+        }
+
+        let resumedMessages = messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: resultText,
+            in: pending.baseMessages
+        )
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        guard autoGenerateResponses else {
+            persistMessages(conversationId: pending.conversationId)
+            finishStreaming()
+            return
+        }
+
+        isLoading = true
+        startLiveActivity(
+            runId: pending.runId,
+            presentation: .generatingResponse(modelName: pending.params.model.modelId)
+        )
+        startStreaming(
+            providerSetting: pending.providerSetting,
+            params: pending.params,
+            runId: pending.runId,
+            startedAt: pending.startedAt,
+            inputDigest: pending.inputDigest,
+            conversationId: pending.conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func clearPendingWorkspaceApproval() {
+        pendingWorkspaceToolApproval = nil
+        pendingWorkspaceApproval = nil
+    }
+
+    private func workspaceApprovalRequest(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> WorkspaceToolApprovalRequest? {
+        guard let preview = localToolExecutor?.workspaceApprovalPreview(
+            toolName: toolCall.toolName,
+            input: toolCall.input
+        ) else {
+            return nil
+        }
+        let rawId = toolCall.toolCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestId = rawId.isEmpty ? Self.inputDigest(for: toolCall.input) : rawId
+        return WorkspaceToolApprovalRequest(
+            id: requestId,
+            toolName: preview.toolName,
+            action: preview.action,
+            target: preview.target,
+            isWrite: preview.isWrite,
             reason: reason
         )
     }
@@ -1352,6 +1696,12 @@ final class ChatViewModel {
                 "tool": toolCall.toolName,
                 "error": "Unexpected selected-file output for WebMount tool."
             ])
+        case .workspaceResult:
+            return IOSWebMountController.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "error": "Unexpected Workspace output for WebMount tool."
+            ])
         case .permissionsStatus(let snapshot):
             return IOSWebMountController.json([
                 "ok": true,
@@ -1398,6 +1748,13 @@ final class ChatViewModel {
         guard let pending = pendingWebMountToolApproval else { return }
         clearPendingWebMountApproval()
         guard currentRunId == pending.runId else { return }
+        recordToolApproval(
+            capabilityId: "ios.webmount.browser",
+            toolCall: pending.toolCall,
+            action: allow ? .allowed : .denied,
+            reason: allow ? "User approved WebMount foreground action." : "User denied WebMount foreground action.",
+            runId: pending.runId
+        )
 
         let resultText: String
         if allow {
@@ -1493,6 +1850,60 @@ final class ChatViewModel {
         )
     }
 
+    private func executeImageToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        let resultParts = await dispatchImageToolCall(toolCall)
+
+        guard currentRunId == runId else { return }
+        let resumedMessages = messagesByFinishingToolCall(toolCall, outputParts: resultParts, in: baseMessages)
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        startStreaming(
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func dispatchImageToolCall(_ toolCall: UIMessagePart.Tool) async -> [UIMessagePart] {
+        do {
+            let imageSettings = IOSImageGenerationSettingsStore.shared
+            let request = try IOSImageGenerationRepository.shared.toolRequest(from: toolCall.input, settings: imageSettings)
+            let record = try await IOSImageGenerationRepository.shared.generate(
+                request: request,
+                settingsStore: settingsStore
+            )
+            var parts: [UIMessagePart] = record.files.map { file in
+                UIMessagePart.Image(
+                    url: URL(fileURLWithPath: file.path).absoluteString,
+                    metadata: nil
+                )
+            }
+            parts.append(UIMessagePart.Text(text: IOSImageGenerationRepository.shared.toolResultJSON(record: record), metadata: nil))
+            return parts
+        } catch {
+            return [
+                UIMessagePart.Text(
+                    text: Self.imageToolFailureJSON(reason: error.localizedDescription),
+                    metadata: nil
+                )
+            ]
+        }
+    }
+
     private func pauseForMemoryToolApproval(
         _ request: MemoryToolApprovalRequest,
         toolCall: UIMessagePart.Tool,
@@ -1530,6 +1941,19 @@ final class ChatViewModel {
         guard let pending = pendingMemoryToolApproval else { return }
         clearPendingMemoryApproval()
         guard currentRunId == pending.runId else { return }
+        let allowed: Bool
+        if case .allow = writePolicy {
+            allowed = true
+        } else {
+            allowed = false
+        }
+        recordToolApproval(
+            capabilityId: "ios.agent.memory_write",
+            toolCall: pending.toolCall,
+            action: allowed ? .allowed : .denied,
+            reason: allowed ? "User approved memory write." : "User denied memory write.",
+            runId: pending.runId
+        )
 
         let resultText = IOSMemoryToolExecutor.execute(
             input: pending.toolCall.input,
@@ -1719,6 +2143,13 @@ final class ChatViewModel {
         guard let pending = pendingMcpToolApproval else { return }
         clearPendingMcpApproval()
         guard currentRunId == pending.runId else { return }
+        recordToolApproval(
+            capabilityId: "ios.mcp.tool_call",
+            toolCall: pending.toolCall,
+            action: allow ? .allowed : .denied,
+            reason: allow ? "User approved MCP tool call." : "User denied MCP tool call.",
+            runId: pending.runId
+        )
 
         let resultText: String
         if allow {
@@ -1781,6 +2212,24 @@ final class ChatViewModel {
         )
     }
 
+    private func recordToolApproval(
+        capabilityId: String,
+        toolCall: UIMessagePart.Tool,
+        action: IOSToolApprovalAction,
+        reason: String,
+        runId: String
+    ) {
+        localToolExecutor?.recordApproval(
+            capabilityId: capabilityId,
+            toolName: toolCall.toolName,
+            action: action,
+            reason: reason,
+            runId: runId,
+            scopeDigest: Self.toolCallKey(toolCall),
+            payloadDigest: Self.inputDigest(for: toolCall.input)
+        )
+    }
+
     /// [Slice 3] Routes a Slice-3 tool call to its executor and returns the
     /// result text (or an honest error string — never fabricated success).
     private func dispatchSlice3ToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
@@ -1789,11 +2238,17 @@ final class ChatViewModel {
         }
         switch toolCall.toolName {
         case "subagent_dispatch":
-            let objective = jsonObject(toolCall.input)?["objective"] as? String ?? toolCall.input
-            return await subAgentRunner.run(objective: objective)
+            let args = jsonObject(toolCall.input)
+            let objective = args?["objective"] as? String ?? toolCall.input
+            let roleId = args?["role_id"] as? String ?? args?["subagent_id"] as? String ?? "explorer"
+            let scope = Self.stringArray(args?["tool_scope"]) ?? Self.stringArray(args?["tools"]) ?? []
+            return await subAgentRunner.run(objective: objective, roleId: roleId, requestedToolScope: scope)
         case "model_council_run":
-            let objective = jsonObject(toolCall.input)?["objective"] as? String ?? toolCall.input
-            return await councilRunner.run(objective: objective)
+            let args = jsonObject(toolCall.input)
+            let objective = args?["objective"] as? String ?? toolCall.input
+            let mode = args?["mode"] as? String ?? "compare"
+            let budget = args?["output_budget_chars"] as? Int ?? 12_000
+            return await councilRunner.run(objective: objective, mode: mode, outputBudgetChars: budget)
         case "mcp_call":
             guard let args = jsonObject(toolCall.input),
                   let server = args["server"] as? String,
@@ -1818,12 +2273,36 @@ final class ChatViewModel {
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
+    private static func stringArray(_ value: Any?) -> [String]? {
+        if let values = value as? [String] {
+            return values
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+        if let text = value as? String {
+            let values = text
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            return values.isEmpty ? nil : values
+        }
+        return nil
+    }
+
     private func messagesByFinishingToolCall(
         _ targetToolCall: UIMessagePart.Tool,
         outputText: String,
         in messages: [UIMessage]
     ) -> [UIMessage] {
         let outputPart = UIMessagePart.Text(text: outputText, metadata: nil)
+        return messagesByFinishingToolCall(targetToolCall, outputParts: [outputPart], in: messages)
+    }
+
+    private func messagesByFinishingToolCall(
+        _ targetToolCall: UIMessagePart.Tool,
+        outputParts: [UIMessagePart],
+        in messages: [UIMessage]
+    ) -> [UIMessage] {
         var didFinishToolCall = false
 
         return messages.map { message in
@@ -1842,7 +2321,7 @@ final class ChatViewModel {
                     toolCallId: toolPart.toolCallId,
                     toolName: toolPart.toolName,
                     input: toolPart.input,
-                    output: [outputPart],
+                    output: outputParts,
                     approvalState: toolPart.approvalState,
                     metadata: toolPart.metadata
                 )
@@ -2014,10 +2493,13 @@ final class ChatViewModel {
 
     private func handleDetectedToolCalls(_ toolCalls: [UIMessagePart.Tool], runId: String) {
         for toolCall in toolCalls where IOSSearchExecutor.supportedToolNames.contains(toolCall.toolName) {
-            print("[ChatViewModel] Detected search tool call runId=\(runId) tool=\(toolCall.toolName) toolCallId=\(toolCall.toolCallId) input=\(toolCall.input)")
+            print("[ChatViewModel] Detected search tool call runId=\(runId) tool=\(toolCall.toolName) toolCallId=\(toolCall.toolCallId) inputDigest=\(Self.inputDigest(for: toolCall.input))")
         }
         for toolCall in toolCalls where IOSWebMountToolCatalog.supportedToolNames.contains(toolCall.toolName) {
             print("[ChatViewModel] Detected WebMount tool call runId=\(runId) toolCallId=\(toolCall.toolCallId) tool=\(toolCall.toolName)")
+        }
+        for toolCall in toolCalls where IOSWorkspaceToolCatalog.supportedToolNames.contains(toolCall.toolName) {
+            print("[ChatViewModel] Detected Workspace tool call runId=\(runId) toolCallId=\(toolCall.toolCallId) tool=\(toolCall.toolName)")
         }
         for toolCall in toolCalls where toolCall.toolName == "memory_tool" {
             print("[ChatViewModel] Detected memory_tool call runId=\(runId) toolCallId=\(toolCall.toolCallId)")
@@ -2073,6 +2555,19 @@ final class ChatViewModel {
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               let text = String(data: data, encoding: .utf8) else {
             return "\(toolName) failed: \(reason)"
+        }
+        return text
+    }
+
+    private static func imageToolFailureJSON(reason: String) -> String {
+        let payload: [String: Any] = [
+            "ok": false,
+            "tool": "generate_image",
+            "reason": reason
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "generate_image failed: \(reason)"
         }
         return text
     }
@@ -2164,6 +2659,10 @@ final class ChatViewModel {
         let modelId = currentModelId
         let modelAbilities = currentModelAbilities
         let searchEnabled = sharedSettings.snapshot.enableWebSearch
+        let imageGenerationConfigured = IOSImageGenerationSettingsStore.shared.configurationIssue(settingsStore: settingsStore) == nil
+        var builtInTools: [BuiltInTools] = []
+        if searchEnabled { builtInTools.append(BuiltInTools.Search.shared) }
+        if imageGenerationConfigured { builtInTools.append(BuiltInTools.ImageGeneration.shared) }
         let model = Model(
             modelId: modelId,
             displayName: modelId,
@@ -2174,7 +2673,7 @@ final class ChatViewModel {
             inputModalities: [],
             outputModalities: [],
             abilities: modelAbilities,
-            tools: searchEnabled ? Set([BuiltInTools.Search.shared]) : Set<BuiltInTools>(),
+            tools: Set(builtInTools),
             contextWindowTokens: nil,
             providerOverwrite: nil
         )
@@ -2188,6 +2687,15 @@ final class ChatViewModel {
         }
         if IOSMemoryToolExecutor.isEnabled(runtime: sharedSettings.agentRuntime) {
             toolDeclarations.append(ToolKt.createMemoryToolDeclaration())
+        }
+        if imageGenerationConfigured {
+            toolDeclarations.append(ToolKt.createImageGenToolDeclaration())
+        }
+        if localToolExecutor != nil {
+            toolDeclarations.append(ToolKt.createWorkspaceFileReadToolDeclaration())
+            toolDeclarations.append(ToolKt.createWorkspaceFileWriteToolDeclaration())
+            toolDeclarations.append(ToolKt.createWorkspaceArtifactReadToolDeclaration())
+            toolDeclarations.append(ToolKt.createWorkspaceArtifactDeleteToolDeclaration())
         }
         if localToolExecutor != nil, isWebMountRuntimeEnabled {
             toolDeclarations.append(ToolKt.createWebMountStationsToolDeclaration())
@@ -2304,12 +2812,18 @@ final class ChatViewModel {
         case "mcp_call":
             sharedSettings.isCapabilityGateEnabled(.mcp)
         case "subagent_dispatch":
-            true
+            isCapabilityPolicyEnabled("ios.agent.subagent_dispatch")
         case "model_council_run":
-            true
+            isCapabilityPolicyEnabled("ios.agent.model_council_run")
         default:
             false
         }
+    }
+
+    private func isCapabilityPolicyEnabled(_ capabilityId: String) -> Bool {
+        guard let localToolExecutor else { return true }
+        let snapshot = localToolExecutor.permissionsStatus()
+        return snapshot.capabilities.first { $0.id == capabilityId }?.policy != IOSAgentPermissionPolicy.disabled.title
     }
 
     private func nowLocalDateTime() -> Kotlinx_datetimeLocalDateTime {
