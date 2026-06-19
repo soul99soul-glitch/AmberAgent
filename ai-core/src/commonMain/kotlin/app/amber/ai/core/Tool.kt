@@ -40,6 +40,72 @@ fun createSearchWebToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createScrapeWebToolDeclaration(): Tool = Tool(
+    name = "scrape_web",
+    description = """
+        Fetch a public http/https URL and extract readable page text through AmberAgent iOS search execution.
+        Use this when search snippets are not enough or when the user asks about a specific page.
+        iOS blocks local/private URLs and returns an honest error when content cannot be safely fetched.
+    """.trimIndent(),
+    parameters = { scrapeWebParameters() },
+    execute = { emptyList() }
+)
+
+fun createWebMountStationsToolDeclaration(): Tool = webMountTool(
+    name = "wm_stations",
+    description = "List configured iOS WebMount stations, enabled state, auth kind, and redacted cookie summary.",
+    parameters = webMountStationsParameters()
+)
+
+fun createWebMountOpenToolDeclaration(): Tool = webMountTool(
+    name = "wm_open",
+    description = """
+        Open an allowlisted URL or station in the local iOS WKWebView WebMount session.
+        Use `site_id` from wm_stations when possible. URLs outside the WebMount allowlist are rejected.
+    """.trimIndent(),
+    parameters = webMountOpenParameters()
+)
+
+fun createWebMountStateToolDeclaration(): Tool = webMountTool(
+    name = "wm_state",
+    description = "Read current iOS WebMount WKWebView status, title, redacted URL, and basic page state.",
+    parameters = emptyObjectParameters()
+)
+
+fun createWebMountExtractToolDeclaration(): Tool = webMountTool(
+    name = "wm_extract",
+    description = "Extract readable text, links, or interactive element summaries from the current iOS WebMount page.",
+    parameters = webMountExtractParameters()
+)
+
+fun createWebMountGetToolDeclaration(): Tool = webMountTool(
+    name = "wm_get",
+    description = "Read one element's text, value, HTML, or attribute from the current iOS WebMount page.",
+    parameters = webMountGetParameters()
+)
+
+fun createWebMountBackToolDeclaration(): Tool = webMountTool(
+    name = "wm_back",
+    description = "Navigate the current iOS WebMount WKWebView session backward.",
+    parameters = emptyObjectParameters()
+)
+
+fun createWebMountForwardToolDeclaration(): Tool = webMountTool(
+    name = "wm_forward",
+    description = "Navigate the current iOS WebMount WKWebView session forward.",
+    parameters = emptyObjectParameters()
+)
+
+fun createWebMountClearSessionToolDeclaration(): Tool = webMountTool(
+    name = "wm_clear_session",
+    description = """
+        Clear cookies and website data for one iOS WebMount station.
+        This requires an explicit foreground user action.
+    """.trimIndent(),
+    parameters = webMountClearSessionParameters(),
+    needsApproval = true
+)
+
 /**
  * [Slice 3] Tool declaration for dispatching a sub-agent task.
  *
@@ -190,6 +256,135 @@ private fun searchWebParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("query")
+)
+
+private fun scrapeWebParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("url", buildJsonObject {
+            put("type", "string")
+            put("description", "public http/https URL to fetch and extract")
+        })
+        put("max_chars", buildJsonObject {
+            put("type", "integer")
+            put("description", "maximum extracted characters to return")
+        })
+        put("service", buildJsonObject {
+            put("type", "string")
+            put("description", "optional provider hint; iOS MVP uses safe direct fetch and may ignore unsupported services")
+        })
+    },
+    required = listOf("url")
+)
+
+private fun webMountTool(
+    name: String,
+    description: String,
+    parameters: InputSchema,
+    needsApproval: Boolean = false
+): Tool = Tool(
+    name = name,
+    description = description,
+    parameters = { parameters },
+    needsApproval = needsApproval,
+    allowsAutoApproval = !needsApproval,
+    mandatoryApproval = needsApproval,
+    execute = { emptyList() }
+)
+
+private fun emptyObjectParameters(): InputSchema = InputSchema.Obj(properties = buildJsonObject { })
+
+private fun webMountStationsParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("auth_kind_filter", buildJsonObject {
+            put("type", "string")
+            put("description", "optional filter: anonymous, cookie, or oauth")
+            put("enum", buildJsonArray {
+                add("anonymous")
+                add("cookie")
+                add("oauth")
+            })
+        })
+    }
+)
+
+private fun webMountOpenParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("site_id", buildJsonObject {
+            put("type", "string")
+            put("description", "optional station id from wm_stations, e.g. github")
+        })
+        put("url", buildJsonObject {
+            put("type", "string")
+            put("description", "optional https URL; must match WebMount allowlist")
+        })
+        put("timeout_ms", buildJsonObject {
+            put("type", "integer")
+            put("description", "load timeout in milliseconds, clamped by iOS")
+        })
+    }
+)
+
+private fun webMountExtractParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("mode", buildJsonObject {
+            put("type", "string")
+            put("description", "readable text, interactive element summary, or snapshot")
+            put("enum", buildJsonArray {
+                add("readable")
+                add("interactive")
+                add("snapshot")
+            })
+        })
+        put("max_chars", buildJsonObject {
+            put("type", "integer")
+            put("description", "maximum text characters to return")
+        })
+        put("max_links", buildJsonObject {
+            put("type", "integer")
+            put("description", "maximum links to return")
+        })
+    }
+)
+
+private fun webMountGetParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("selector", buildJsonObject {
+            put("type", "string")
+            put("description", "CSS selector to read")
+        })
+        put("target", buildJsonObject {
+            put("type", "string")
+            put("description", "optional target ref such as css:body")
+        })
+        put("kind", buildJsonObject {
+            put("type", "string")
+            put("description", "value to read from the target")
+            put("enum", buildJsonArray {
+                add("text")
+                add("value")
+                add("attr")
+                add("html")
+            })
+        })
+        put("attr_name", buildJsonObject {
+            put("type", "string")
+            put("description", "attribute name when kind is attr")
+        })
+        put("max_chars", buildJsonObject {
+            put("type", "integer")
+            put("description", "maximum characters to return")
+        })
+    }
+)
+
+private fun webMountClearSessionParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("site_id", buildJsonObject {
+            put("type", "string")
+            put("description", "station id from wm_stations")
+        })
+    },
+    required = listOf("site_id")
 )
 
 @Serializable

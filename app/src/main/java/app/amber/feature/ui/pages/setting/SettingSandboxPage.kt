@@ -43,6 +43,7 @@ import app.amber.agent.R
 import app.amber.feature.terminal.AlpineRuntimeInstaller
 import app.amber.feature.terminal.InstallStatus
 import app.amber.feature.terminal.TerminalRuntime
+import app.amber.feature.terminal.TerminalRuntimeCapabilities
 import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.feature.terminal.TermuxRuntimeStatus
 import app.amber.feature.workspace.WorkspaceManager
@@ -81,7 +82,23 @@ fun SettingSandboxPage(
     val termuxStatus by produceState<TermuxRuntimeStatus?>(initialValue = null, termuxProbeKey) {
         value = terminalRuntime.probeTermuxRuntime()
     }
-    val runtimeOptions = remember { TerminalRuntimeKind.entries }
+    val runtimeOptions = remember {
+        TerminalRuntimeCapabilities.androidRuntimes
+    }
+    val selectedTerminalRuntime = remember(settings.agentRuntime.terminalDefaultRuntime) {
+        TerminalRuntimeCapabilities.androidDefaultOrFallback(settings.agentRuntime.terminalDefaultRuntime)
+    }
+    LaunchedEffect(settings.agentRuntime.terminalDefaultRuntime) {
+        if (selectedTerminalRuntime != settings.agentRuntime.terminalDefaultRuntime) {
+            vm.updateSettings(
+                settings.copy(
+                    agentRuntime = settings.agentRuntime.copy(
+                        terminalDefaultRuntime = selectedTerminalRuntime
+                    )
+                )
+            )
+        }
+    }
     val concurrentJobOptions = remember { listOf(1, 2, 3, 4) }
     val outputTailOptions = remember { listOf(64, 128, 256, 512).map { it * 1024 } }
     val installTimeoutOptions = remember { listOf(5, 15, 30).map { it * 60_000L } }
@@ -201,7 +218,7 @@ fun SettingSandboxPage(
                         trailingContent = {
                             Select(
                                 options = runtimeOptions,
-                                selectedOption = settings.agentRuntime.terminalDefaultRuntime,
+                                selectedOption = selectedTerminalRuntime,
                                 onOptionSelected = { runtime ->
                                     vm.updateSettings(
                                         settings.copy(
@@ -221,6 +238,12 @@ fun SettingSandboxPage(
 
                                         TerminalRuntimeKind.TERMUX_EXTERNAL ->
                                             stringResource(R.string.setting_sandbox_terminal_runtime_termux)
+
+                                        TerminalRuntimeKind.REMOTE_SSH,
+                                        TerminalRuntimeKind.LOCAL_IOS_TOOLS,
+                                        TerminalRuntimeKind.REMOTE_MOSH,
+                                        TerminalRuntimeKind.ISH_EXPERIMENTAL ->
+                                            runtime.wireName
                                     }
                                 },
                                 // V3 ValueChip 内容自适应,

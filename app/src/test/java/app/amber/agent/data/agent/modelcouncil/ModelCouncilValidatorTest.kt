@@ -499,6 +499,32 @@ class ModelCouncilValidatorTest {
 
         assertTrue(unsupportedTool is IllegalArgumentException)
         assertTrue(unsupportedTool!!.message!!.contains("Unsupported external_tool"))
+
+        val unsupportedRuntime = runCatching {
+            ModelCouncilValidator.parseTask(
+                input = taskInput(
+                    seatStrategy = "agent_planned",
+                    allowExternalCli = true,
+                    plannedSeats = buildJsonArray {
+                        add(
+                            plannedSeat(
+                                "Gemini",
+                                "external",
+                                runnerType = "external_cli",
+                                externalTool = "gemini_cli",
+                                externalRuntime = "local_ios_tools",
+                            )
+                        )
+                        add(plannedSeat("Judge", "judge"))
+                    },
+                ),
+                settings = settings(council),
+                councilSetting = council,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(unsupportedRuntime is IllegalArgumentException)
+        assertTrue(unsupportedRuntime!!.message!!.contains("not available for Android external CLI"))
     }
 
     @Test
