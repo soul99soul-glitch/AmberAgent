@@ -1069,6 +1069,8 @@ struct SettingsHomeView: View {
         [
             .init(title: "核心记忆", subtitle: nil, value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
             .init(title: "执行与任务", subtitle: nil, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
+            .init(title: "技能", subtitle: nil, value: nil, systemImage: "wrench.and.screwdriver", color: AmberTheme.accentAmber, route: .skills),
+            .init(title: "MCP", subtitle: nil, value: nil, systemImage: "network", color: AmberTheme.accentRed, route: .mcpServers),
             .init(title: "权限与批准", subtitle: nil, value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions)
         ]
     }
@@ -1095,6 +1097,7 @@ struct SettingsHomeView: View {
 
     private var dataEntries: [SettingsHomeEntry] {
         [
+            .init(title: "Workspace", subtitle: nil, value: nil, systemImage: "folder.badge.gearshape", color: AmberTheme.accentIndigo, route: .workspace),
             .init(title: "同步备份", subtitle: nil, value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
             .init(title: "对话存储", subtitle: nil, value: nil, systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
         ]

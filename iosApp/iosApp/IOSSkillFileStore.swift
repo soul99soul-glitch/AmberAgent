@@ -108,6 +108,25 @@ struct IOSSkillFileStore {
         return directory
     }
 
+    /// Lists the directory names of every skill that has a SKILL.md on disk.
+    /// Used by chat skill-context injection to map enabled skill names → their
+    /// markdown bodies. Best-effort: skips unreadable / malformed entries.
+    func listSkillDirNames() -> [String] {
+        guard let entries = try? fileManager.contentsOfDirectory(at: skillsDirectory, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        var result: [String] = []
+        for entry in entries {
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: entry.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            let skillMd = entry.appendingPathComponent("SKILL.md")
+            if fileManager.fileExists(atPath: skillMd.path) {
+                result.append(entry.lastPathComponent)
+            }
+        }
+        return result
+    }
+
     private static func frontmatterName(in content: String) -> String? {
         guard content.hasPrefix("---"),
               let endRange = content.range(of: "\n---", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else {

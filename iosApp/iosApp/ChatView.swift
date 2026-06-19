@@ -77,6 +77,16 @@ struct ChatView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .alert(item: Binding(
+            get: { conversationStore.lastIOError },
+            set: { newValue in if newValue == nil { conversationStore.clearIOError() } }
+        )) { error in
+            Alert(
+                title: Text("会话存储出错"),
+                message: Text(error.message),
+                dismissButton: .default(Text("好")) { conversationStore.clearIOError() }
+            )
+        }
         .onAppear {
             // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
             viewModel.conversationStore = conversationStore

@@ -956,10 +956,60 @@ final class ChatViewModel {
     }
 
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
-        // Order: system prompt (assistant-defined) → MCP → memory → mini-app.
+        // Order: system prompt (assistant-defined) → skills → MCP → memory → mini-app.
         // The assistant system prompt goes first so it frames everything after,
         // mirroring Android GenerationHandler's system-message construction.
-        messagesByInjectingSystemPrompt(messagesByInjectingMemoryContext(messagesByInjectingMcpContext(messagesByInjectingMiniAppInstruction(messages))))
+        messagesByInjectingSystemPrompt(messagesByInjectingSkillContext(messagesByInjectingMemoryContext(messagesByInjectingMcpContext(messagesByInjectingMiniAppInstruction(messages)))))
+    }
+
+    /// Injects the current assistant's enabled skills as a system message
+    /// (Android enabled-skills → prompt parity). Reads each enabled skill's
+    /// SKILL.md body and exposes them so the model knows what skills are
+    /// available and their instructions. No-op when no skills are enabled.
+    private func messagesByInjectingSkillContext(_ messages: [UIMessage]) -> [UIMessage] {
+        let enabledNames = Array(sharedSettings.currentAssistantEnabledSkillNames).sorted()
+        guard !enabledNames.isEmpty else { return messages }
+
+        let store = IOSSkillFileStore()
+        // Map skill name → dir name via the on-disk listing (name is normalized
+        // to the dir name at creation time, but be defensive).
+        let dirByName: [String: String] = Dictionary(
+            uniqueKeysWithValues: store.listSkillDirNames().map { ($0, $0) }
+        )
+
+        var bodies: [String] = []
+        for name in enabledNames {
+            let dirName = dirByName[name] ?? name
+            guard let markdown = try? store.readSkillMarkdown(dirName: dirName) else { continue }
+            // Strip the YAML frontmatter so only the human/agent-readable body
+            // reaches the model (the frontmatter is metadata, not instructions).
+            let body = Self.skillBodyFromMarkdown(markdown)
+            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            bodies.append("### \(name)\n\(trimmed)")
+        }
+        guard !bodies.isEmpty else { return messages }
+
+        let prompt = """
+        The following skills are enabled for this conversation. Follow each skill's instructions when relevant.
+        <skills>
+        \(bodies.joined(separator: "\n\n"))
+        </skills>
+        """
+        return [UIMessage.companion.system(prompt: prompt)] + messages
+    }
+
+    /// Extracts the markdown body (everything after the YAML frontmatter) from
+    /// a SKILL.md. If there is no frontmatter, returns the whole content.
+    /// Internal so tests can verify frontmatter stripping.
+    static func skillBodyFromMarkdown(_ content: String) -> String {
+        guard content.hasPrefix("---") else { return content }
+        let afterOpen = content.index(content.startIndex, offsetBy: 3)
+        guard let endRange = content.range(of: "\n---", range: afterOpen..<content.endIndex) else {
+            return content
+        }
+        let bodyStart = content.index(after: endRange.upperBound)
+        return String(content[bodyStart...])
     }
 
     /// Injects the current Amber Assistant's user-defined system prompt as a

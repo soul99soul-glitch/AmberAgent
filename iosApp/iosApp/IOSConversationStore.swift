@@ -2,6 +2,21 @@ import Foundation
 import Observation
 @preconcurrency import Shared
 
+// MARK: - IOSConversationIOError
+
+/// A storage I/O failure surfaced to the UI (disk full / write failed /
+/// corruption). Bound to a top-level `.alert(item:)` so the user learns a
+/// save/delete/rename failed instead of silently believing it succeeded.
+struct IOSConversationIOError: Identifiable, Equatable {
+    let id = UUID()
+    let operation: String        // e.g. "save", "delete", "rename"
+    let detail: String           // human-readable summary
+
+    var message: String {
+        "会话存储「\(operation)」失败：\(detail)。请检查存储空间后重试。"
+    }
+}
+
 // MARK: - IOSConversationStore
 
 struct IOSConversationSearchResult: Identifiable {
@@ -51,6 +66,16 @@ final class IOSConversationStore {
     /// 用 Int 修订号保证切换会话一定能触发 reload。
     private(set) var currentRevision: Int = 0
 
+    /// 最近一次存储 I/O 错误（磁盘满/写失败/损坏）。绑定到顶层 `.alert(item:)`
+    /// 让用户看到失败，避免"以为保存了实际没保存"的静默丢数据。nil = 无未读错误。
+    /// 成功的 refreshSummaries 会清空它。
+    private(set) var lastIOError: IOSConversationIOError?
+
+    /// Dismiss the current IO error (called by the alert's OK action).
+    func clearIOError() {
+        lastIOError = nil
+    }
+
     // MARK: - Private
 
     private let storage: JsonConversationStorage
@@ -81,7 +106,7 @@ final class IOSConversationStore {
         } catch {
             // listSummaries 内部已对损坏 index 做了 rebuild 兜底；到这里的 error 是更底层
             // 的 I/O 故障。不致命：降级为空列表，下面会新建会话，内存里仍可用。
-            print("[IOSConversationStore] listSummaries failed: \(error)")
+            lastIOError = IOSConversationIOError(operation: "读取列表", detail: "\(error)")
             summaries = []
         }
 
@@ -114,7 +139,7 @@ final class IOSConversationStore {
         do {
             loaded = try await storage.loadConversation(id: id)
         } catch {
-            print("[IOSConversationStore] loadConversation failed for \(id): \(error)")
+            lastIOError = IOSConversationIOError(operation: "加载会话", detail: "\(id): \(error)")
             loaded = nil
         }
         if let loaded {
@@ -140,7 +165,7 @@ final class IOSConversationStore {
             do {
                 conversation = try await storage.loadConversation(id: id)
             } catch {
-                print("[IOSConversationStore] loadConversation failed for save target \(id): \(error)")
+                lastIOError = IOSConversationIOError(operation: "保存会话", detail: "目标 \(id): \(error)")
                 conversation = nil
             }
         }
@@ -197,7 +222,7 @@ final class IOSConversationStore {
         do {
             try await storage.deleteConversation(id: id)
         } catch {
-            print("[IOSConversationStore] deleteConversation failed for \(id): \(error)")
+            lastIOError = IOSConversationIOError(operation: "删除会话", detail: "\(id): \(error)")
         }
         await refreshSummaries()
 
@@ -215,7 +240,7 @@ final class IOSConversationStore {
         do {
             try await storage.updateMetadata(id: id, title: title, isPinned: nil)
         } catch {
-            print("[IOSConversationStore] rename failed for \(id): \(error)")
+            lastIOError = IOSConversationIOError(operation: "重命名", detail: "\(id): \(error)")
         }
         await refreshSummaries()
         if currentConversation?.id == id, let refreshed = try? await storage.loadConversation(id: id) {
@@ -230,7 +255,7 @@ final class IOSConversationStore {
         do {
             try await storage.updateMetadata(id: id, title: nil, isPinned: newPinned)
         } catch {
-            print("[IOSConversationStore] togglePin failed for \(id): \(error)")
+            lastIOError = IOSConversationIOError(operation: "置顶", detail: "\(id): \(error)")
         }
         await refreshSummaries()
         if currentConversation?.id == id, let refreshed = try? await storage.loadConversation(id: id) {
@@ -564,16 +589,18 @@ final class IOSConversationStore {
             try await storage.saveConversation(conversation: conversation)
         } catch {
             // 写盘失败：不丢内存会话（currentConversation 仍由调用方更新），
-            // 仅打印——PLAN 阶段4的「磁盘满降级」留待后续。
-            print("[IOSConversationStore] saveConversation failed: \(error)")
+            // 但上抛给用户，避免"以为保存了实际没保存"的静默丢数据。
+            lastIOError = IOSConversationIOError(operation: "保存会话", detail: "\(error)")
         }
     }
 
     private func refreshSummaries() async {
         do {
             summaries = try await storage.listSummaries()
+            // A successful refresh clears any stale IO error (the store is healthy again).
+            lastIOError = nil
         } catch {
-            print("[IOSConversationStore] refreshSummaries failed: \(error)")
+            lastIOError = IOSConversationIOError(operation: "刷新列表", detail: "\(error)")
         }
     }
 }
