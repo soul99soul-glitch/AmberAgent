@@ -68,9 +68,8 @@ struct ProviderDetailView: View {
                             .frame(width: 58, height: 36)
                             .accessibilityLabel(isCurrentProvider ? "自动保存" : "预置模板")
                     case .models:
-                        AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加模型", size: 44, symbolSize: 17) {
-                            router.navigate(to: .modelAdd)
-                        }
+                        Color.clear
+                            .frame(width: 44, height: 44)
                     }
                 }
                 .frame(width: 58, alignment: .trailing)
@@ -88,9 +87,11 @@ struct ProviderDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 AmberFormGroup {
-                    ProviderValueRow(title: "接口协议", value: protocolLabel, showsChevron: true) {
-                        alert = .protocolPicker
-                    }
+                    ProviderStaticRow(
+                        title: "接口协议",
+                        subtitle: "当前不可切换；iOS 聊天链只按已接入的 Provider 类型构造请求。",
+                        value: protocolLabel
+                    )
                     ProviderDetailDivider()
                     ProviderStaticRow(
                         title: "使用范围",

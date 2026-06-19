@@ -178,18 +178,13 @@ struct ModelDefaultsView: View {
 
                 ModelDefaultsDivider()
 
-                Button {
-                    alert = .groupDefaults
-                } label: {
-                    ModelDefaultRowContent(
-                        systemImage: "point.3.connected.trianglepath.dotted",
-                        iconColor: AmberTheme.accentGreen,
-                        title: "模型组默认规则",
-                        subtitle: "Android modelGroupSessionDefaults 尚未桥接到 iOS",
-                        value: "缺设置桥"
-                    )
-                }
-                .buttonStyle(.plain)
+                ModelDefaultStaticRow(
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    iconColor: AmberTheme.accentGreen,
+                    title: "模型组默认规则",
+                    subtitle: "Android modelGroupSessionDefaults 尚未桥接到 iOS",
+                    value: "缺设置桥"
+                )
             }
         }
     }

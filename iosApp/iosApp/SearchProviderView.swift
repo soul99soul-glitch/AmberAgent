@@ -74,20 +74,14 @@ struct SearchProviderView: View {
     }
 
     private var draftNotice: some View {
-        SearchProviderNote("iOS 会把新增服务保存到 snapshot.searchServices，并同步设为 searchServiceSelected + searchEnabledServiceIds。当前执行器支持 Bing HTML、DuckDuckGo Lite fallback 和 scrape_web 安全直抓；其它 API provider 会被读取但返回 unsupported/fallback，不伪造成功。")
+        SearchProviderNote("本页只允许新增 iOS 当前能真实执行的搜索服务。API provider 模板仍可从 KMP snapshot 读取展示，但不会再从 iOS UI 新增为默认服务，避免保存后 search_web 返回 unsupported。")
             .padding(.top, 2)
     }
 
     private var providerFields: some View {
         VStack(spacing: 0) {
             AmberFormGroup {
-                SearchProviderMenuRow(title: "服务类型", value: providerType.title) {
-                    ForEach(SearchProviderType.allCases) { type in
-                        Button(type.title) {
-                            applyProviderType(type)
-                        }
-                    }
-                }
+                SearchProviderPreviewLine(label: "服务类型", value: providerType.title)
 
                 if providerType.requiresAPIKey {
                     SearchProviderDivider()
@@ -165,8 +159,8 @@ struct SearchProviderView: View {
                 SearchProviderDivider()
                 SearchProviderStatusRow(
                     title: "抓取 / 多 provider",
-                    subtitle: "新增服务会成为选中/启用 provider；IOSSearchExecutor 读取该选择，支持 Bing HTML 与 DuckDuckGo fallback，未实现 provider 诚实返回 unsupported。",
-                    value: "MVP 已接",
+                    subtitle: "IOSSearchExecutor 当前可真实执行 Bing HTML；DuckDuckGo Lite 作为内置 fallback。其它 API provider 不再从 iOS 添加页暴露。",
+                    value: "收口",
                     valueColor: AmberTheme.accentGreen
                 )
             }
@@ -179,8 +173,8 @@ struct SearchProviderView: View {
             AmberFormGroup {
                 SearchProviderStatusRow(
                     title: "服务启用",
-                    subtitle: "保存新服务时会同步写入 searchEnabledServiceIds，并设为默认 selected provider。",
-                    value: "新增即启用",
+                    subtitle: "保存 Bing HTML 时会同步写入 searchEnabledServiceIds，并设为默认 selected provider。",
+                    value: "Bing 可新增",
                     valueColor: AmberTheme.accentGreen
                 )
             }
@@ -196,7 +190,7 @@ struct SearchProviderView: View {
             AmberFormGroup {
                 let providers = sharedSettings.savedSearchProviders
                 if providers.isEmpty {
-                    Text("暂无自定义搜索服务。选择类型后点「保存服务」。")
+                    Text("暂无自定义搜索服务。当前只开放新增 Bing HTML。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -336,13 +330,17 @@ private enum SearchProviderType: String, CaseIterable, Identifiable {
         case .bing:
             "Bing HTML 是 Android 默认 SearchServiceOptions.DEFAULT；iOS 保存后会选中并用 Bing HTML 执行 search_web。"
         case .searXNG:
-            "SearXNG 在 Android/KMP 中保存 URL、引擎、语言、用户名和密码；iOS 当前会保存类型并进入选择，但原生 SearXNG 执行器未实现。"
+            "SearXNG 在 Android/KMP 中保存 URL、引擎、语言、用户名和密码；iOS 当前不从添加页暴露，避免保存后返回 unsupported。"
         case .jina:
-            "Jina 在 Android/KMP 中有 apiKey、searchUrl 和 scrapeUrl；iOS 当前只保存类型/apiKey，search_web 会 fallback，scrape_web 使用安全直抓 MVP。"
+            "Jina 在 Android/KMP 中有 apiKey、searchUrl 和 scrapeUrl；iOS 当前不从添加页暴露，scrape_web 仍使用安全直抓 MVP。"
         default:
-            "\(title) 在仓库里有 SearchServiceOptions 类型；iOS 会保存类型/apiKey 并进入选择，但不会测试连接，原生 provider 执行器未实现时会返回 unsupported/fallback。"
+            "\(title) 在仓库里有 SearchServiceOptions 类型；iOS 当前不从添加页暴露，直到原生执行器接上。"
         }
     }
+}
+
+private extension SearchProviderType {
+    static let executableCases: [SearchProviderType] = [.bing]
 }
 
 private struct SearchProviderMenuRow<MenuContent: View>: View {

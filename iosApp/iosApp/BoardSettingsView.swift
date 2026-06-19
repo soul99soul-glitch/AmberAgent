@@ -102,7 +102,7 @@ struct BoardSettingsView: View {
             Spacer()
 
             VStack(spacing: 2) {
-                Text("今日看板设置")
+                Text("看板字段映射")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 

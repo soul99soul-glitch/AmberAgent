@@ -29,8 +29,7 @@ struct SeatEditorView: View {
                     VStack(spacing: 0) {
                         noticeSection
                         identitySection
-                        runnerSection
-                        promptSection
+                        modelSection
                         previewSection
                         deleteSection
                     }
@@ -103,7 +102,7 @@ struct SeatEditorView: View {
     }
 
     private var noticeSection: some View {
-        SeatEditorFootnote(text: "自定义席位会保存到 UserDefaults，重启后保留；modelId 为 UUID 时同步写入 KMP snapshot.defaultSeats。席位 prompt 文件桥仍未接。")
+        SeatEditorFootnote(text: "自定义席位只保存名称、角色和模型 ID，重启后保留；modelId 为 UUID 时同步写入 KMP snapshot.defaultSeats。")
             .padding(.bottom, 10)
     }
 
@@ -149,41 +148,16 @@ struct SeatEditorView: View {
                 }
                 .buttonStyle(.plain)
             }
-            SeatEditorFootnote(text: "名称、角色、模型 ID 会保存到自定义席位；只有合法 UUID modelId 会同步成 KMP ModelCouncilSeat。")
+            SeatEditorFootnote(text: "名称和角色会保存到自定义席位；内置预设席位仍为只读。")
         }
     }
 
-    private var runnerSection: some View {
+    private var modelSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行方式")
+            AmberSectionLabel(text: "模型")
+            providerRunnerGroup
 
-            HStack(spacing: 4) {
-                ForEach(SeatRunnerType.allCases) { type in
-                    Button {
-                        runner = type
-                    } label: {
-                        Text(type.title)
-                            .font(.system(size: 14, weight: runner == type ? .semibold : .regular))
-                            .foregroundStyle(runner == type ? AmberTheme.accent : AmberTheme.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
-                            .background(runner == type ? AmberTheme.background : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(3)
-            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-
-            if runner == .provider {
-                providerRunnerGroup
-            } else {
-                cliRunnerGroup
-            }
-
-            SeatEditorFootnote(text: "Android/KMP 支持 provider_model 和 external_cli；自定义席位的名称、角色、模型 ID 会保存到 UserDefaults。")
+            SeatEditorFootnote(text: "当前 iOS 自定义席位只保存 provider modelId。external_cli、思考档位和席位 prompt 文件不再展示为可编辑项。")
         }
     }
 
@@ -203,88 +177,6 @@ struct SeatEditorView: View {
                 )
             }
             .buttonStyle(.plain)
-
-            SeatEditorDivider()
-
-            Menu {
-                ForEach(["默认", "低", "中", "高"], id: \.self) { option in
-                    Button(option) { reasoning = option }
-                }
-            } label: {
-                SeatEditorRow(
-                    systemImage: "brain.head.profile",
-                    iconColor: AmberTheme.muted,
-                    title: "思考档位",
-                    subtitle: "推理强度，越高越慢",
-                    trailing: reasoning,
-                    showsChevron: true
-                )
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var cliRunnerGroup: some View {
-        AmberFormGroup {
-            Menu {
-                ForEach(["Codex", "Claude Code", "Gemini CLI"], id: \.self) { option in
-                    Button(option) { cliTool = option }
-                }
-            } label: {
-                SeatEditorRow(
-                    systemImage: "terminal",
-                    iconColor: AmberTheme.muted,
-                    title: "CLI 工具",
-                    trailing: cliTool,
-                    showsChevron: true
-                )
-            }
-            .buttonStyle(.plain)
-
-            SeatEditorDivider()
-
-            HStack(spacing: 12) {
-                Text("模型参数")
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                    .frame(width: 88, alignment: .leading)
-
-                TextField("默认（可选）", text: $cliModel)
-                    .font(.system(size: 15))
-                    .foregroundStyle(AmberTheme.foreground)
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.plain)
-            }
-            .frame(minHeight: 56)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
-        }
-    }
-
-    private var promptSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "席位提示词")
-            AmberFormGroup {
-                TextEditor(text: $prompt)
-                    .font(.system(size: 14))
-                    .foregroundStyle(AmberTheme.foreground)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                    .frame(minHeight: 104)
-                    .overlay(alignment: .topLeading) {
-                        if prompt.isEmpty {
-                            Text("留空则使用角色预设的默认提示词…")
-                                .font(.system(size: 14))
-                                .foregroundStyle(AmberTheme.muted2)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 8)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-            }
-            SeatEditorFootnote(text: "填写内容当前仍只在本页预览；不会写入 AgentPromptConfigRepository 的 modelCouncilPromptFile。")
         }
     }
 
@@ -294,7 +186,7 @@ struct SeatEditorView: View {
             AmberFormGroup {
                 let seats = sharedSettings.savedCouncilSeats
                 if seats.isEmpty {
-                    Text("暂无自定义席位。填写上方名称/角色/模型后点「保存席位」添加。")
+                    Text("暂无自定义席位。填写上方名称、角色和模型后点「保存席位」添加。")
                         .font(.caption).foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 12)

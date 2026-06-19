@@ -188,7 +188,7 @@ struct BoardView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "看板设置", size: 44, symbolSize: 17) {
+            AmberGlassCircleButton(systemImage: "info.circle", accessibilityLabel: "看板字段映射", size: 44, symbolSize: 17) {
                 router.navigate(to: .boardSettings)
             }
         }
@@ -539,7 +539,7 @@ struct BoardView: View {
                 }
             }
 
-            BoardCapabilityNote("设置按钮保留为字段映射入口；它不会保存 enabled、模型、后台策略、热榜源或关注规则。")
+            BoardCapabilityNote("右上角信息入口只展示字段映射；它不会保存 enabled、模型、后台策略、热榜源或关注规则。")
         }
     }
 }

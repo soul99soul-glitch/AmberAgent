@@ -218,7 +218,7 @@ struct CouncilView: View {
                 CouncilStatusRow(
                     row: .init(
                         title: "成员配置",
-                        subtitle: "席位编辑页会保存自定义席位并重启保留；席位 prompt 文件与内置预设编辑仍未接。",
+                        subtitle: "席位编辑页只保存自定义席位的名称、角色和模型 ID，并在重启后保留。",
                         value: "席位已接",
                         color: AmberTheme.accentGreen
                     )
@@ -272,7 +272,7 @@ struct CouncilView: View {
                             Text("成员设置")
                                 .font(.body.weight(.medium))
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("管理自定义席位；prompt 文件和内置预设编辑仍未接。")
+                            Text("管理自定义席位；只编辑会持久化的名称、角色和模型 ID。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)

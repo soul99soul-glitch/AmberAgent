@@ -6,31 +6,9 @@ struct TTSSettingsView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var ttsPlayer = IOSTTSPlayer()
-    @Environment(RouterPath.self) private var router
-
-    @State private var selectedEngine: TTSEngine = .system
     @State private var alert: TTSSettingsAlert?
 
-    @State private var miniMaxName = "MiniMax TTS"
-    @State private var miniMaxAPIKey = ""
-    @State private var miniMaxModel = "speech-2.6-turbo"
-    @State private var miniMaxVoice = "female-shaonv"
-    @State private var miniMaxEmotion: TTSEmotion = .calm
-    @State private var miniMaxSpeed: TTSSpeed = .normal
-
-    @State private var systemName = "系统 TTS"
     @State private var systemSpeechRate: TTSSpeed = .normal
-    @State private var systemPitch: TTSSpeed = .normal
-
-    @State private var openAIName = "OpenAI TTS"
-    @State private var openAIAPIKey = ""
-    @State private var openAIModel = "gpt-4o-mini-tts"
-    @State private var openAIVoice = "alloy"
-
-    @State private var geminiName = "Gemini TTS"
-    @State private var geminiAPIKey = ""
-    @State private var geminiModel = "2.5-flash-tts"
-    @State private var geminiVoice = "Kore"
 
     var body: some View {
         ZStack {
@@ -44,7 +22,7 @@ struct TTSSettingsView: View {
                         intro
                         presetProvidersSection
                         engineSection
-                        configurationSection
+                        systemSettingsSection
                         previewSection
                         deleteSection
                     }
@@ -78,10 +56,8 @@ struct TTSSettingsView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加 TTS 提供商", size: 44, symbolSize: 17) {
-                router.navigate(to: .ttsAdd)
-            }
-            .foregroundStyle(AmberTheme.accent)
+            Color.clear
+                .frame(width: 44, height: 44)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -89,7 +65,7 @@ struct TTSSettingsView: View {
     }
 
     private var intro: some View {
-        Text("KMP 默认提供系统 TTS；当前 iOS 页面仅确认系统 TTS 作为真实默认。云端引擎字段保留为本地预览，不会保存或请求。")
+        Text("KMP 默认提供系统 TTS；当前 iOS 页面仅保留真实可试听的系统 TTS。云端 TTS provider 在执行链接通前不再提供新增入口。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -123,7 +99,7 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("这些行来自 Android/KMP DEFAULT_TTS_PROVIDERS，经 IosSettingsDefaults 真实 seed/去重后只读展示。当前选中的默认是 \(sharedSettings.ttsProviders.first { $0.id == sharedSettings.selectedTTSProviderId }?.name ?? "系统 TTS")。下方引擎编辑区仍是本地预览，不保存。")
+            TTSSettingsNote("这些行来自 Android/KMP DEFAULT_TTS_PROVIDERS，经 IosSettingsDefaults 真实 seed/去重后只读展示。当前选中的默认是 \(sharedSettings.ttsProviders.first { $0.id == sharedSettings.selectedTTSProviderId }?.name ?? "系统 TTS")。")
         }
     }
 
@@ -131,81 +107,25 @@ struct TTSSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "语音引擎")
             AmberFormGroup {
-                ForEach(Array(TTSEngine.allCases.enumerated()), id: \.element.id) { index, engine in
-                    TTSEngineRow(engine: engine, isSelected: selectedEngine == engine) {
-                        selectedEngine = engine
-                    }
-
-                    if index < TTSEngine.allCases.count - 1 {
-                        TTSSettingsDivider()
-                    }
-                }
+                TTSPresetProviderRow(name: "系统 TTS", isSelected: true)
             }
 
-            TTSSettingsNote("当前 iOS 仅确认系统 TTS 为真实默认。点按云端引擎只查看本地预览字段，不会切换默认、保存配置或写入 Keychain。")
+            TTSSettingsNote("当前 iOS 仅系统 TTS 可真实试听。云端 TTS 引擎未接执行链，因此不再暴露为可选项。")
         }
     }
 
-    @ViewBuilder
-    private var configurationSection: some View {
+    private var systemSettingsSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "\(selectedEngine.displayName) 设置")
+            AmberSectionLabel(text: "系统 TTS 设置")
             AmberFormGroup {
-                switch selectedEngine {
-                case .system:
-                    TTSTextFieldRow(title: "名称", text: $systemName, placeholder: "输入提供商名称")
-                    TTSSettingsDivider()
-                    TTSMenuRow(title: "语速", value: systemSpeechRate.title) {
-                        ForEach(TTSSpeed.allCases) { speed in
-                            Button(speed.title) { systemSpeechRate = speed }
-                        }
+                TTSMenuRow(title: "试听语速", value: systemSpeechRate.title) {
+                    ForEach(TTSSpeed.allCases) { speed in
+                        Button(speed.title) { systemSpeechRate = speed }
                     }
-                    TTSSettingsDivider()
-                    TTSMenuRow(title: "音调", value: systemPitch.title) {
-                        ForEach(TTSSpeed.allCases) { pitch in
-                            Button(pitch.title) { systemPitch = pitch }
-                        }
-                    }
-                case .miniMax:
-                    TTSTextFieldRow(title: "名称", text: $miniMaxName, placeholder: "输入提供商名称")
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "API Key", text: $miniMaxAPIKey, placeholder: "粘贴 API Key", monospace: true, isSecure: true)
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "模型", text: $miniMaxModel, placeholder: "要使用的 TTS 模型", monospace: true)
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "语音 ID", text: $miniMaxVoice, placeholder: "语音合成使用的语音 ID", monospace: true)
-                    TTSSettingsDivider()
-                    TTSMenuRow(title: "情感", value: miniMaxEmotion.title) {
-                        ForEach(TTSEmotion.allCases) { emotion in
-                            Button(emotion.title) { miniMaxEmotion = emotion }
-                        }
-                    }
-                    TTSSettingsDivider()
-                    TTSMenuRow(title: "语速", value: miniMaxSpeed.title) {
-                        ForEach(TTSSpeed.allCases) { speed in
-                            Button(speed.title) { miniMaxSpeed = speed }
-                        }
-                    }
-                case .openAI:
-                    TTSTextFieldRow(title: "名称", text: $openAIName, placeholder: "输入提供商名称")
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "API Key", text: $openAIAPIKey, placeholder: "粘贴 API Key", monospace: true, isSecure: true)
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "模型", text: $openAIModel, placeholder: "要使用的 TTS 模型", monospace: true)
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "语音", text: $openAIVoice, placeholder: "语音名称或 ID", monospace: true)
-                case .gemini:
-                    TTSTextFieldRow(title: "名称", text: $geminiName, placeholder: "输入提供商名称")
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "API Key", text: $geminiAPIKey, placeholder: "粘贴 API Key", monospace: true, isSecure: true)
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "模型", text: $geminiModel, placeholder: "要使用的 TTS 模型", monospace: true)
-                    TTSSettingsDivider()
-                    TTSTextFieldRow(title: "语音名称", text: $geminiVoice, placeholder: "语音名称", monospace: true)
                 }
             }
 
-            TTSSettingsNote(configurationNote)
+            TTSSettingsNote("语速会直接传入 AVSpeechSynthesizer 试听；本页不展示尚未接入的音调、音色或云端参数。")
         }
     }
 
@@ -215,7 +135,11 @@ struct TTSSettingsView: View {
                 if ttsPlayer.isSpeaking {
                     ttsPlayer.stop()
                 } else {
-                    ttsPlayer.speak(text: "你好，这是 AmberAgent 的语音试听。系统 TTS 已接入。", language: "zh-CN")
+                    ttsPlayer.speak(
+                        text: "你好，这是 AmberAgent 的语音试听。系统 TTS 已接入。",
+                        language: "zh-CN",
+                        rate: systemSpeechRate.avSpeechRate
+                    )
                 }
             } label: {
                 HStack(spacing: 12) {
@@ -248,15 +172,11 @@ struct TTSSettingsView: View {
 
     private var deleteSection: some View {
         VStack(spacing: 0) {
-            // [Slice 4] add/remove for OpenAI-type engines now merge a real
-            // TTSProviderSetting.OpenAI into snapshot.ttsProviders via
-            // IosSettingsMutations + restoreSnapshot — survives restart.
-            // (Non-OpenAI types still mirror-only; honest.)
-            AmberSectionLabel(text: "已保存云端引擎（OpenAI 类型持久化到 snapshot.ttsProviders）")
+            AmberSectionLabel(text: "已有自定义 TTS 配置")
             AmberFormGroup {
                 let engines = sharedSettings.savedTtsEngines
                 if engines.isEmpty {
-                    Text("暂无自定义云端引擎。选择引擎类型后点保存引擎添加。")
+                    Text("暂无自定义云端引擎。新增入口已收起，等 iOS TTS 执行链接通后再开放。")
                         .font(.caption).foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -275,27 +195,13 @@ struct TTSSettingsView: View {
                         if index < engines.count - 1 { TTSSettingsDivider() }
                     }
                 }
-                TTSSettingsDivider()
-                Button {
-                    let name: String
-                    switch selectedEngine { case .system: name = "System"; case .miniMax: name = "MiniMax"; case .openAI: name = "OpenAI"; case .gemini: name = "Gemini" }
-                    sharedSettings.addTtsEngine(name: name, engineType: name)
-                } label: {
-                    Label("保存引擎", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
-                }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
             }
+
+            TTSSettingsNote("本页只允许删除历史自定义记录；不会新增无法执行的云端 TTS 配置。")
         }
         .padding(.top, 20)
     }
 
-    private var configurationNote: String {
-        switch selectedEngine {
-        case .system:
-            "系统 TTS 是 KMP 默认提供商，当前 iOS 页面只展示本地预览参数；还没有真实 iOS TTS settings store。"
-        case .miniMax, .openAI, .gemini:
-            "云端 TTS 配置需要 Provider 持久化；这些字段不会保存、不会写入 Keychain，也不会用于试听或朗读。"
-        }
-    }
 }
 
 struct TTSAddView: View {
@@ -322,9 +228,6 @@ struct TTSAddView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
-                        typeSection
-                        configurationSection
-                        previewSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -343,7 +246,7 @@ struct TTSAddView: View {
 
             Spacer()
 
-            Text("添加引擎")
+            Text("云端 TTS")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -369,7 +272,7 @@ struct TTSAddView: View {
     }
 
     private var intro: some View {
-        Text("先填写 TTS Provider 本地预览。当前页面不会保存引擎、不会写入 Keychain，也不会发起试听请求。")
+        Text("云端 TTS 执行链、凭据写入和试听请求尚未接到 iOS。添加入口已收口；当前请使用语音合成页的系统 TTS 试听。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -582,6 +485,27 @@ private enum TTSSpeed: String, CaseIterable, Identifiable {
         case .fast: "1.5×"
         case .double: "2.0×"
         }
+    }
+
+    var avSpeechRate: Float {
+        let defaultRate = AVSpeechUtteranceDefaultSpeechRate
+        let rate: Float
+        switch self {
+        case .half:
+            rate = defaultRate * 0.5
+        case .slow:
+            rate = defaultRate * 0.75
+        case .normal:
+            rate = defaultRate
+        case .quick:
+            rate = defaultRate * 1.25
+        case .fast:
+            rate = defaultRate * 1.5
+        case .double:
+            rate = defaultRate * 2
+        }
+
+        return min(max(rate, AVSpeechUtteranceMinimumSpeechRate), AVSpeechUtteranceMaximumSpeechRate)
     }
 }
 

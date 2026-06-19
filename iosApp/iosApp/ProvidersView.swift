@@ -443,7 +443,6 @@ struct ProviderAddView: View {
                         introSection
                         connectionSection
                         credentialSection
-                        optionSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -539,16 +538,7 @@ struct ProviderAddView: View {
                     placeholder: "例如 DeepSeek"
                 )
                 ProviderDivider()
-                Menu {
-                    ForEach(ProviderProtocolOption.allCases) { option in
-                        Button(option.title) {
-                            protocolOption = option
-                            path = option.defaultPath
-                        }
-                    }
-                } label: {
-                    ProviderDraftPickerRow(title: "接口协议", value: protocolOption.title)
-                }
+                ProviderDraftValueRow(title: "接口协议", value: "OpenAI-compatible")
                 ProviderDivider()
                 ProviderDraftTextFieldRow(
                     title: "API 地址",
@@ -557,15 +547,14 @@ struct ProviderAddView: View {
                     monospace: true
                 )
                 ProviderDivider()
-                ProviderDraftTextFieldRow(
+                ProviderDraftValueRow(
                     title: "路径",
-                    text: $path,
-                    placeholder: protocolOption.defaultPath,
+                    value: "/chat/completions",
                     monospace: true
                 )
             }
 
-            ProviderDraftNote("当前 iOS 聊天链路只消费 OpenAI-compatible base URL，并固定使用 /chat/completions。其它协议或自定义路径需要后续 Provider bridge。")
+            ProviderDraftNote("当前 iOS 聊天链路只消费 OpenAI-compatible base URL，并固定使用 /chat/completions；其它协议、自定义路径和 Response API 不再作为可选项展示。")
         }
     }
 
@@ -583,29 +572,6 @@ struct ProviderAddView: View {
             }
 
             ProviderDraftNote("API Key 留空时只保存服务商模板，不会设为当前；填写后会保存到该 provider id 对应的 Keychain 项。")
-        }
-    }
-
-    private var optionSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "选项")
-            AmberFormGroup {
-                ProviderDraftToggleRow(
-                    title: "Response API",
-                    subtitle: "iOS 当前聊天链路不支持 useResponseApi；模板预设如 xAI 需要此开关但被阻断",
-                    isOn: responseAPI
-                ) {
-                    responseAPI.toggle()
-                }
-                ProviderDivider()
-                ProviderDraftToggleRow(
-                    title: "余额刷新",
-                    subtitle: "iOS 不发起网络请求测试余额；此开关当前不保存",
-                    isOn: balanceRefresh
-                ) {
-                    balanceRefresh.toggle()
-                }
-            }
         }
     }
 
@@ -793,6 +759,30 @@ private struct ProviderDraftPickerRow: View {
         .padding(.horizontal, 15)
         .padding(.vertical, 8)
         .contentShape(Rectangle())
+    }
+}
+
+private struct ProviderDraftValueRow: View {
+    let title: String
+    let value: String
+    var monospace = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+
+            Text(value)
+                .font(monospace ? .system(size: 14, weight: .regular, design: .monospaced) : .body)
+                .foregroundStyle(AmberTheme.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 58)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
     }
 }
 

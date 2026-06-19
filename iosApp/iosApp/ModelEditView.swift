@@ -46,10 +46,6 @@ struct ModelEditView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         basicSection
-                        abilitiesSection
-                        modalitiesSection
-                        builtInToolsSection
-                        advancedSection
                         savedModelsSection
                         footerSection
                     }
@@ -118,144 +114,20 @@ struct ModelEditView: View {
                     text: $modelName,
                     placeholder: "用于界面显示"
                 )
-                ModelEditDivider()
-                ModelTextFieldRow(
-                    title: "上下文长度",
-                    text: $contextLength,
-                    placeholder: "留空自动识别，例如 128K / 1M",
-                    monospace: true
-                )
-                ModelEditDivider()
-                Menu {
-                    ForEach(ModelEditType.allCases) { option in
-                        Button(option.title) {
-                            modelType = option
-                        }
-                    }
-                } label: {
-                    ModelPickerRow(title: "模型类型", value: modelType.title)
-                }
             }
 
-            ModelEditNote("当前只编辑本地预览；真实聊天请求只读取 SettingsStore.modelId。")
-        }
-    }
-
-    private var abilitiesSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "能力")
-            AmberFormGroup {
-                ModelChipField(
-                    title: "该模型支持的能力",
-                    chips: ModelEditAbility.allCases,
-                    selection: $abilities
-                )
-            }
-
-            ModelEditNote("能力标记尚未写入 KMP Model；ChatViewModel 当前不读取这些本地预览能力。")
-        }
-    }
-
-    private var modalitiesSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "模态")
-            AmberFormGroup {
-                ModelChipField(
-                    title: "输入模态",
-                    chips: ModelEditModality.allCases,
-                    selection: $inputModalities
-                )
-                ModelEditDivider()
-                ModelChipField(
-                    title: "输出模态",
-                    chips: ModelEditModality.allCases,
-                    selection: $outputModalities
-                )
-            }
-        }
-    }
-
-    private var builtInToolsSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "内置工具")
-            AmberFormGroup {
-                ModelToggleRow(
-                    title: "搜索",
-                    subtitle: "启用 Google 搜索集成",
-                    isOn: searchEnabled
-                ) {
-                    searchEnabled.toggle()
-                }
-                ModelEditDivider()
-                ModelToggleRow(
-                    title: "URL 上下文",
-                    subtitle: "启用 URL 内容处理",
-                    isOn: urlContextEnabled
-                ) {
-                    urlContextEnabled.toggle()
-                }
-                ModelEditDivider()
-                ModelToggleRow(
-                    title: "图像生成",
-                    subtitle: "启用图像生成功能",
-                    isOn: imageGenerationEnabled
-                ) {
-                    imageGenerationEnabled.toggle()
-                }
-            }
-
-            ModelEditNote("内置工具配置尚未写入真实 Model；当前不会改变 Provider 请求体。")
-        }
-    }
-
-    private var advancedSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "高级")
-            AmberFormGroup {
-                ModelValueRow(
-                    title: "自定义 Headers",
-                    subtitle: "附加到该模型的请求头",
-                    value: "需字段桥"
-                ) {
-                    router.navigate(to: .modelCustomHeaders)
-                }
-                ModelEditDivider()
-                ModelValueRow(
-                    title: "自定义 Body",
-                    subtitle: "合并进请求体的 JSON 字段",
-                    value: "需字段桥"
-                ) {
-                    router.navigate(to: .modelCustomBody)
-                }
-            }
+            ModelEditNote("本页只保存模型 ID 和显示名称。能力、模态、内置工具和自定义请求字段尚未进入 iOS 请求链，因此不再提供可编辑选项。")
         }
     }
 
     @ViewBuilder
     private var footerSection: some View {
         if isAdding {
-            // [Slice 4] "保存模型" above now creates a real ProviderSetting.OpenAI
-            // (merged into snapshot.providers, persisted). The per-row delete in
-            // savedModelsSection also persists. The bottom "删除模型" button below
-            // is an info-only stub for the non-add flow.
-            ModelEditNote("上方\"保存模型\"会创建真实 ProviderSetting.OpenAI 并持久化（重启保留）；下方\"删除模型\"按钮仍为说明态。")
+            ModelEditNote("\"保存模型\"会创建真实 ProviderSetting.OpenAI 并持久化（重启保留）；列表中的删除按钮也会持久化。")
                 .padding(.top, 4)
         } else {
-            AmberFormGroup {
-                Button {
-                    alert = .delete
-                } label: {
-                    Text("删除模型 · 需删除桥")
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(AmberTheme.accentRed)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 52)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.top, 20)
-            ModelEditNote("当前不会保存或删除真实模型配置；请在默认模型页修改实际使用的模型 ID。")
+            ModelEditNote("非新增入口只展示当前默认模型草稿；未接删除桥时不提供删除按钮。")
+                .padding(.top, 4)
         }
     }
 
@@ -282,7 +154,10 @@ struct ModelEditView: View {
                 }
                 Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
                 Button {
-                    guard !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    guard
+                        !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    else { return }
                     sharedSettings.addCustomModel(name: modelName, modelId: modelID)
                     modelName = ""; modelID = ""
                 } label: {

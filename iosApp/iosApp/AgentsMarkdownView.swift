@@ -3,8 +3,6 @@ import SwiftUI
 struct AgentsMarkdownView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var content = ""
-
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
@@ -16,10 +14,7 @@ struct AgentsMarkdownView: View {
                     AgentsNote("Android/KMP 有 Settings.agentRuntime.agentSoulMarkdown，并由 GenerationPrompts 注入；iOS 当前没有把该设置接入 ChatViewModel。")
                         .padding(.bottom, 10)
 
-                    editor
-
-                    AgentsNote("当前内容只保留在本页本地预览状态；关闭页面会丢弃，不会写入 UserDefaults、SettingsStore 或下一次对话请求。")
-                        .padding(.top, 7)
+                    unavailableState
                 }
                 .padding(.bottom, 36)
             }
@@ -37,7 +32,7 @@ struct AgentsMarkdownView: View {
 
             Spacer()
 
-            Text("agents.md 本地预览")
+            Text("agents.md")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -52,32 +47,31 @@ struct AgentsMarkdownView: View {
         .padding(.bottom, 18)
     }
 
-    private var editor: some View {
-        ZStack(alignment: .topLeading) {
-            TextEditor(text: $content)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(AmberTheme.foreground2)
-                .lineSpacing(3)
-                .scrollContentBackground(.hidden)
-                .padding(12)
-                .frame(minHeight: 340)
+    private var unavailableState: some View {
+        AmberFormGroup {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(AmberTheme.accentAmber)
+                    .frame(width: 32, height: 32)
+                    .background(AmberTheme.accentAmber.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-            if content.isEmpty {
-                Text("本地预览 Markdown；当前不会注入 System Prompt")
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.muted2)
-                    .padding(.horizontal, 17)
-                    .padding(.vertical, 20)
-                    .allowsHitTesting(false)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("编辑入口未开放")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+
+                    Text("等 iOS ChatViewModel 消费 agentSoulMarkdown 后再开放编辑和持久化；当前不提供只在本页生效的假预览。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
         }
-        .background(AmberTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
-                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-        }
-        .padding(.horizontal, 16)
     }
 }
 

@@ -135,9 +135,7 @@ struct MemoryOverviewView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "agents.md")
 
-            Button {
-                router.navigate(to: .agentsMd)
-            } label: {
+            AmberFormGroup {
                 VStack(alignment: .leading, spacing: 11) {
                     HStack(spacing: 9) {
                         Image(systemName: "doc.text")
@@ -146,7 +144,7 @@ struct MemoryOverviewView: View {
                             .frame(width: 30, height: 30)
                             .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                        Text("agents.md 本地预览")
+                        Text("agents.md")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
@@ -158,13 +156,9 @@ struct MemoryOverviewView: View {
                             .background(AmberTheme.accentAmber.opacity(0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                         Spacer(minLength: 8)
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AmberTheme.muted2)
                     }
 
-                    Text("Android/KMP Settings.agentRuntime.agentSoulMarkdown 会通过 GenerationPrompts 注入；iOS 当前页面只保留预览入口，不会影响 ChatViewModel 请求。")
+                    Text("Android/KMP Settings.agentRuntime.agentSoulMarkdown 会通过 GenerationPrompts 注入；iOS 尚未接入 ChatViewModel 请求链，因此暂不提供本地编辑入口。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.foreground2)
                         .lineSpacing(2)
@@ -178,16 +172,7 @@ struct MemoryOverviewView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
             }
-            .buttonStyle(.plain)
-            .background(AmberTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
-                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-            }
-            .padding(.horizontal, 16)
         }
     }
 

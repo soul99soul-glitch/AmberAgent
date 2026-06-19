@@ -17,12 +17,12 @@ struct SearchServicesView: View {
     ]
 
     private let repositorySearchTypes: [SearchConfiguredProvider] = [
-        .init(name: "Bing HTML 兜底", detail: "SearchServiceOptions.DEFAULT，可作为 Android 默认服务。", badge: "默认类型", badgeStyle: .free),
-        .init(name: "Jina", detail: "SearchServiceOptions.JinaOptions，含 Search / Reader URL。", badge: "可无 Key", badgeStyle: .noKey),
-        .init(name: "Tavily / Exa / Brave", detail: "仓库已有对应 SearchService 与 API Key 字段。", badge: "需 Key", badgeStyle: .plain),
-        .init(name: "Serper / SerpAPI", detail: "仓库已有 Google 结果服务类型与编辑器。", badge: "需 Key", badgeStyle: .plain),
-        .init(name: "SearXNG", detail: "仓库已有自托管 URL、引擎、语言、用户名和密码字段。", badge: "自托管", badgeStyle: .free),
-        .init(name: "Perplexity / Firecrawl / Grok", detail: "仓库已有服务类型；iOS 会读取选中 provider，但这些 API provider 暂返回 unsupported/fallback。", badge: "未实现", badgeStyle: .plain)
+        .init(name: "Bing HTML 兜底", detail: "SearchServiceOptions.DEFAULT；iOS 添加页仅开放这个可执行类型。", badge: "可新增", badgeStyle: .free),
+        .init(name: "Jina", detail: "SearchServiceOptions.JinaOptions，含 Search / Reader URL；iOS 暂只读展示。", badge: "只读", badgeStyle: .noKey),
+        .init(name: "Tavily / Exa / Brave", detail: "仓库已有对应 SearchService 与 API Key 字段；iOS 原生执行器未接。", badge: "未开放", badgeStyle: .plain),
+        .init(name: "Serper / SerpAPI", detail: "仓库已有 Google 结果服务类型与编辑器；iOS 原生执行器未接。", badge: "未开放", badgeStyle: .plain),
+        .init(name: "SearXNG", detail: "仓库已有自托管 URL、引擎、语言、用户名和密码字段；iOS 添加页不开放。", badge: "只读", badgeStyle: .free),
+        .init(name: "Perplexity / Firecrawl / Grok", detail: "仓库已有服务类型；iOS 不再允许从添加页保存为默认服务。", badge: "未开放", badgeStyle: .plain)
     ]
 
     var body: some View {
@@ -150,7 +150,7 @@ struct SearchServicesView: View {
             .padding(.top, 18)
 
             SearchServicesNote {
-                Text("新增搜索服务会写入 snapshot.searchServices，并成为默认选中/启用服务；执行器会读取该选择，不会伪造未实现 API provider 的成功结果。")
+                Text("新增搜索服务当前只开放 Bing HTML：保存后写入 snapshot.searchServices，并成为默认选中/启用服务。其它 provider 只读展示，等原生执行器接上再开放。")
             }
         }
     }
@@ -208,7 +208,7 @@ struct SearchServicesView: View {
             }
 
             SearchServicesNote {
-                Text("这些是 KMP Settings 真实 seed 的 SearchServiceOptions 实例（只读展示类型与 DEFAULT 单例）。新增服务请用右上角 +，保存后会进入执行选择。")
+                Text("这些是 KMP Settings 真实 seed 的 SearchServiceOptions 实例（只读展示类型与 DEFAULT 单例）。右上角 + 目前只允许新增 iOS 能真实执行的 Bing HTML。")
             }
         }
     }
@@ -227,7 +227,7 @@ struct SearchServicesView: View {
             }
 
             SearchServicesNote {
-                Text("右上角 + 会创建 SearchServiceOptions 并保存到本机设置；不会发起 provider 连通性测试，也不会把未实现 API provider 当成可用。")
+                Text("右上角 + 只开放 Bing HTML；其它类型等 iOS 原生执行器接上后再从添加页放开。")
             }
         }
     }
@@ -395,6 +395,8 @@ private struct SearchTypeRow: View {
     let provider: SearchConfiguredProvider
 
     var body: some View {
+        let isAddable = provider.badge == "可新增"
+
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -420,9 +422,9 @@ private struct SearchTypeRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(provider.badge == "未实现" ? "fallback" : "可配置")
+            Text(isAddable ? "可新增" : "只读")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(provider.badge == "未实现" ? AmberTheme.accentAmber : AmberTheme.accentGreen)
+                .foregroundStyle(isAddable ? AmberTheme.accentGreen : AmberTheme.accentAmber)
         }
         .frame(minHeight: 58)
         .padding(.horizontal, 14)
