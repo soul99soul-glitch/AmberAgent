@@ -199,7 +199,6 @@ enum Route: Hashable {
     case conversationStorage
     case syncBackup
     case capabilities
-    case agentsMd
     case memoryEdit(text: String, scope: String, pinned: Bool)
     case skills
     case skillAdd
@@ -212,15 +211,10 @@ enum Route: Hashable {
     case providerAdd
     case providerDetail(name: String, endpoint: String, kind: ProviderRouteKind)
     case providerKeyEditor(name: String)
-    case modelAdd
-    case modelEdit
-    case modelCustomHeaders
-    case modelCustomBody
     case modelDefaults
     case searchServices
     case searchProvider
     case ttsSettings
-    case ttsAdd
     case board
     case boardSettings
     case miniApps
@@ -292,8 +286,6 @@ private extension View {
                     systemPermissionCoordinator: systemPermissionCoordinator,
                     localToolExecutor: localToolExecutor
                 )
-            case .agentsMd:
-                AgentsMarkdownView()
             case .memoryEdit(let text, let scope, let pinned):
                 MemoryEditView(initialText: text, initialScope: scope, initialPinned: pinned)
             case .skills:
@@ -318,14 +310,6 @@ private extension View {
                 ProviderDetailView(settingsStore: settingsStore, providerRegistry: providerRegistry, providerName: name, endpoint: endpoint, providerKind: kind)
             case .providerKeyEditor(let name):
                 ProviderKeyEditView(providerRegistry: providerRegistry, providerName: name)
-            case .modelAdd:
-                ModelEditView(sharedSettings: sharedSettings, isAdding: true)
-            case .modelEdit:
-                ModelEditView(sharedSettings: sharedSettings)
-            case .modelCustomHeaders:
-                ModelCustomFieldsView(kind: .headers)
-            case .modelCustomBody:
-                ModelCustomFieldsView(kind: .body)
             case .modelDefaults:
                 ModelDefaultsView(settingsStore: settingsStore, sharedSettings: sharedSettings)
             case .searchServices:
@@ -334,8 +318,6 @@ private extension View {
                 SearchProviderView(sharedSettings: sharedSettings)
             case .ttsSettings:
                 TTSSettingsView(sharedSettings: sharedSettings)
-            case .ttsAdd:
-                TTSAddView()
             case .board:
                 BoardView(settingsStore: settingsStore, sharedSettings: sharedSettings)
             case .boardSettings:
