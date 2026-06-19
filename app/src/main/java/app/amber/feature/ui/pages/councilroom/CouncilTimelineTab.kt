@@ -287,16 +287,20 @@ fun CouncilTimelineTab(
             // Streaming just ended. Mirror the chat page's "generation-end"
             // settle: if we were following, fire one last bottom-follow so the
             // final chunk's tail (often left 1-2 lines below the fold by the
-            // last incremental scrollBy) gets pulled fully into view. Only THEN
-            // relax to Idle — emitting before the mode flip keeps
-            // bottomFollowAllowed() true for the collector. Without this, the
-            // last lines of a finished turn can sit partially hidden until the
-            // user scrolls manually.
-            val wasFollowing = followMode == CouncilFollowMode.FollowingBottom
-            if (wasFollowing) {
+            // last incremental scrollBy) gets pulled fully into view.
+            //
+            // CRITICAL: do NOT flip to Idle here. tryEmit only enqueues the
+            // event; the collector consumes it asynchronously on a later
+            // frame. If we set Idle now, the collector would see
+            // bottomFollowAllowed()==false and drop the generation-end scroll
+            // — leaving the last lines hidden, the exact symptom this fixes.
+            // Instead we keep FollowingBottom and let the collector flip to
+            // Idle after it has serviced the generation-end scroll (see the
+            // collector below). This matches the chat page, which does NOT
+            // enter Idle on generation-end either.
+            if (followMode == CouncilFollowMode.FollowingBottom) {
                 followEvents.tryEmit("generation-end")
             }
-            followMode = CouncilFollowMode.Idle
         }
     }
 
@@ -309,6 +313,14 @@ fun CouncilTimelineTab(
             withFrameNanos { }
             if (bottomFollowAllowed()) {
                 scrollToBottom()
+            }
+            // After servicing the generation-end settle, relax to Idle so a
+            // finished council stops fighting the user's scroll position. This
+            // is the only place we transition out of FollowingBottom on
+            // generation end — doing it here (post-scroll) guarantees the
+            // scroll ran while the mode was still FollowingBottom.
+            if (reason == "generation-end") {
+                followMode = CouncilFollowMode.Idle
             }
         }
     }

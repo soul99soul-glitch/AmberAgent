@@ -9,6 +9,7 @@ import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.modelcouncil.CouncilRoom
 import app.amber.feature.modelcouncil.CouncilRoomManager
+import app.amber.feature.modelcouncil.CouncilRoomOpResult
 import app.amber.feature.modelcouncil.CouncilRoomMode
 import app.amber.feature.modelcouncil.HostAction
 import app.amber.feature.modelcouncil.toCouncilParticipant
@@ -183,8 +184,21 @@ class CouncilRoomVM(
                     )
                 }
                 android.util.Log.i("CouncilRestart", "restart(): openRoom returned $openResult; room before reopen bump = ${manager.peekRoom(cid)?.let { "status=${it.status} msgs=${it.messages.size}" }}")
+                // openRoom can fail two ways: throw (caught by runCatching) or
+                // return a structured CouncilRoomOpResult.Err (e.g. room_already_open).
+                // Previously only the throw path aborted; an Err was treated as
+                // success, reopen was bumped, and the UI re-subscribed to a slot
+                // that re-cold-loaded the closed terminal room — so the user saw
+                // the old finished council reappear with no error. Now treat Err
+                // the same as a throw: skip the reopen bump (keeps the UI bound
+                // to the pre-restart flow) and let finally clear isRestarting.
                 if (openResult.isFailure) {
                     android.util.Log.e("CouncilRestart", "restart(): openRoom threw, aborting restart", openResult.exceptionOrNull())
+                    return@launch
+                }
+                val openValue = openResult.getOrNull()
+                if (openValue is CouncilRoomOpResult.Err) {
+                    android.util.Log.e("CouncilRestart", "restart(): openRoom returned Err(${openValue.code}: ${openValue.message}), aborting restart")
                     return@launch
                 }
                 val beforeBump = reopen.value
