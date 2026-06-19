@@ -166,7 +166,7 @@ struct SyncBackupView: View {
     }
 
     private var intro: some View {
-        Text("导出一份加密设置备份，或预览本地备份文件后手动恢复。远端同步是高级功能，需要单独开启。")
+        Text("导出一份加密备份（设置 + 会话历史），或预览本地备份文件后手动恢复。远端同步是高级功能，需要单独开启。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -484,7 +484,17 @@ struct SyncBackupView: View {
 
     private func exportSettingsBackup() {
         do {
-            let data = try IOSSyncBackup.export(settings: sharedSettings.snapshot, passphrase: passphrase)
+            // Include conversations when present (Android SyncArchiveManager
+            // parity). The conversations dir is Documents/conversations (the
+            // same path IOSConversationStore uses by default).
+            let conversationsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("conversations")
+            let conversationsZip = conversationsDir.flatMap { IOSSyncBackup.conversationsZip(fromDirectory: $0) }
+            let data = try IOSSyncBackup.export(
+                settings: sharedSettings.snapshot,
+                passphrase: passphrase,
+                conversationsZip: conversationsZip
+            )
             exportedFile = IOSSyncBackupDocument(data: data)
             isExportingFile = true
         } catch {
@@ -535,10 +545,14 @@ struct SyncBackupView: View {
                 return
             }
 
+            let conversationsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("conversations")
+            let conversationsZip = conversationsDir.flatMap { IOSSyncBackup.conversationsZip(fromDirectory: $0) }
             let data = try IOSSyncBackup.export(
                 settings: sharedSettings.snapshot,
                 passphrase: passphrase,
-                remoteRevision: scopedStatus.remoteRevision
+                remoteRevision: scopedStatus.remoteRevision,
+                conversationsZip: conversationsZip
             )
             let preview = try IOSSyncBackup.restorePreview(data: data, passphrase: passphrase)
             let fileName = IOSRemoteSnapshot.fileName(for: preview.manifest)

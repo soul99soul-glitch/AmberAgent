@@ -47,18 +47,39 @@ struct IOSSyncBackup {
     private static let payloadEntry = "payload.enc"
     private static let settingsEntry = "settings.json"
     private static let payloadManifestEntry = "payload_manifest.json"
+    private static let conversationsEntry = "conversations.zip"
 
-    static func export(settings: Settings, passphrase: String?, remoteRevision: String? = nil) throws -> Data {
+    /// Exports an encrypted backup archive. Includes settings (always) plus an
+    /// optional conversations bundle (Android SyncArchiveManager parity — iOS
+    /// was settings-only before, so iOS→iOS conversation continuity was
+    /// impossible). The conversations bundle is a zip of the on-disk
+    /// `conversations/` directory passed by the caller.
+    static func export(
+        settings: Settings,
+        passphrase: String?,
+        remoteRevision: String? = nil,
+        conversationsZip: Data? = nil
+    ) throws -> Data {
         let settingsJson = IosSettingsJsonBridge.shared.encode(settings: settings)
         let settingsData = Data(settingsJson.utf8)
-        let payloadManifest = IOSSyncPayloadManifest(datasets: [
+        var datasets: [IOSSyncDatasetSummary] = [
             IOSSyncDatasetSummary(id: "settings", recordCount: 1, byteCount: Int64(settingsData.count))
-        ])
+        ]
+        var zipEntries: [IOSStoredZipArchive.Entry] = [
+            .init(name: settingsEntry, data: settingsData)
+        ]
+        if let conversationsZip {
+            zipEntries.append(.init(name: conversationsEntry, data: conversationsZip))
+            datasets.append(IOSSyncDatasetSummary(
+                id: "conversations",
+                recordCount: -1, // count unknown without parsing; -1 = "all"
+                byteCount: Int64(conversationsZip.count)
+            ))
+        }
+        let payloadManifest = IOSSyncPayloadManifest(datasets: datasets)
         let payloadManifestData = try JSONEncoder().encode(payloadManifest)
-        let payloadZip = try IOSStoredZipArchive.write(entries: [
-            .init(name: settingsEntry, data: settingsData),
-            .init(name: payloadManifestEntry, data: payloadManifestData),
-        ])
+        zipEntries.append(.init(name: payloadManifestEntry, data: payloadManifestData))
+        let payloadZip = try IOSStoredZipArchive.write(entries: zipEntries)
 
         let salt = Data.secureRandom(count: saltBytes)
         let iv = Data.secureRandom(count: ivBytes)
@@ -94,6 +115,44 @@ struct IOSSyncBackup {
     static func `import`(data: Data, passphrase: String?) throws -> (settings: Settings, preview: IOSSyncPreview) {
         let decoded = try decodeArchive(data: data, passphrase: passphrase, fileName: nil)
         return (decoded.settings, decoded.preview)
+    }
+
+    /// Bundles every `{id}.json` conversation file in the given directory into a
+    /// zip for inclusion in the backup payload. Returns nil if the directory
+    /// is missing or empty (the caller then exports settings-only, honestly).
+    static func conversationsZip(fromDirectory directoryURL: URL) -> Data? {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil) else {
+            return nil
+        }
+        let jsonFiles = entries.filter { $0.pathExtension.lowercased() == "json" }
+        guard !jsonFiles.isEmpty else { return nil }
+        var zipEntries: [IOSStoredZipArchive.Entry] = []
+        for file in jsonFiles {
+            guard let data = try? Data(contentsOf: file) else { continue }
+            zipEntries.append(.init(name: file.lastPathComponent, data: data))
+        }
+        guard !zipEntries.isEmpty else { return nil }
+        return try? IOSStoredZipArchive.write(entries: zipEntries)
+    }
+
+    /// Extracts a conversations bundle (from a restored backup) into the given
+    /// directory. Returns the number of conversation files written. Used by the
+    /// restore path to rehydrate conversation history.
+    @discardableResult
+    static func restoreConversations(zipData: Data, intoDirectory directoryURL: URL) throws -> Int {
+        let entries = try IOSStoredZipArchive.read(data: zipData)
+        let fm = FileManager.default
+        try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        var written = 0
+        for (name, data) in entries where name.hasSuffix(".json") {
+            // Sanitize the name to a single component (no path traversal).
+            let safeName = (name as NSString).lastPathComponent
+            guard !safeName.isEmpty else { continue }
+            try data.write(to: directoryURL.appendingPathComponent(safeName), options: [.atomic])
+            written += 1
+        }
+        return written
     }
 
     static func restorePreview(data: Data, passphrase: String?, fileName: String? = nil) throws -> IOSSyncPreview {
