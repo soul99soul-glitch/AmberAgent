@@ -106,7 +106,7 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "terminal",
                     title: "工具执行",
-                    subtitle: "已注入 mcp_call / subagent_dispatch / model_council_run 工具；onComplete dispatch + resume。真链路验证需 API key",
+                    subtitle: "已注入 search/scrape、memory_tool、WebMount、mcp_call、subagent_dispatch、model_council_run；onComplete dispatch + resume。真链路验证需 API key",
                     value: "已接(逻辑)",
                     valueColor: AmberTheme.accentGreen
                 )
@@ -116,8 +116,8 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "checkmark.shield",
                     title: "批准策略",
-                    subtitle: "selected-file read 使用 IOSPermissionStore；其他工具策略等 executor 存在后再开放",
-                    value: "已接一项",
+                    subtitle: "selected-file read、memory_tool 写入与 WebMount 使用 iOS 本地 gate；记忆读/list 自动，写入需前台批准",
+                    value: "已接",
                     valueColor: AmberTheme.accentGreen
                 )
             }

@@ -406,6 +406,38 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertTrue(reason.contains("Disabled"))
     }
 
+    func testMemoryToolWritePolicyRequiresForegroundAndRespectsDisabled() throws {
+        let defaults = isolatedDefaults()
+        let permissionStore = IOSPermissionStore(userDefaults: defaults)
+        let executor = makeExecutor(permissionStore: permissionStore)
+        let input = #"{"action":"create","content":"remember this"}"#
+
+        XCTAssertEqual(
+            executor.memoryToolWritePolicy(input: #"{"action":"list"}"#, isUserInitiated: false),
+            .allow
+        )
+        guard case .needsUserAction(let reason) = executor.memoryToolWritePolicy(
+            input: input,
+            isUserInitiated: false
+        ) else {
+            return XCTFail("Expected foreground approval requirement")
+        }
+        XCTAssertTrue(reason.contains("foreground approval"))
+        XCTAssertEqual(executor.memoryToolWritePolicy(input: input, isUserInitiated: true), .allow)
+
+        let capability = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.agent.memory_write" }
+        )
+        permissionStore.setPolicy(.disabled, for: capability)
+        guard case .denied(let disabledReason) = executor.memoryToolWritePolicy(
+            input: input,
+            isUserInitiated: true
+        ) else {
+            return XCTFail("Expected disabled policy to deny")
+        }
+        XCTAssertTrue(disabledReason.contains("disabled"))
+    }
+
     private func makeExecutor(
         permissionStore: IOSPermissionStore? = nil,
         documentStore: DocumentAccessStore = DocumentAccessStore(),

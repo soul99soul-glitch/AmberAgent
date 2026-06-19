@@ -11,6 +11,7 @@ final class IOSCapabilityRegistryTests: XCTestCase {
         let ids = Set(IOSCapabilityRegistry.capabilities.map(\.id))
         [
             "ios.location.when_in_use",
+            "ios.agent.memory_write",
             "ios.location.always",
             "ios.location.temporary_precise",
             "ios.camera.capture",
@@ -67,8 +68,20 @@ final class IOSCapabilityRegistryTests: XCTestCase {
     }
 
     func testExecutableModelToolsIncludeSelectedFileAndWebMountSafeTools() {
-        let expected = Set(["file_read_selected"]).union(IOSWebMountToolCatalog.supportedToolNames)
+        let expected = Set(["file_read_selected", "memory_tool"]).union(IOSWebMountToolCatalog.supportedToolNames)
         XCTAssertEqual(IOSCapabilityRegistry.executableToolNames, expected)
+    }
+
+    @MainActor
+    func testMemoryWriteCapabilityIsHighRiskAndPolicyManaged() throws {
+        let capability = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.agent.memory_write" }
+        )
+
+        XCTAssertEqual(capability.modelToolNames, ["memory_tool"])
+        XCTAssertEqual(capability.risk, .high)
+        XCTAssertEqual(capability.requestKind, .foregroundSession)
+        XCTAssertFalse(IOSPermissionStore.availablePolicies(for: capability).contains(.allowOncePerRun))
     }
 
     func testBlockedIOSAndAndroidToolsAreNotExecutable() {

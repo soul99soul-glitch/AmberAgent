@@ -9,6 +9,7 @@ struct PermissionsApprovalView: View {
     private var approvalCapabilities: [IOSPlatformCapability] {
         [
             "ios.files.selected_read",
+            "ios.agent.memory_write",
             "ios.webmount.browser"
         ].compactMap { id in
             IOSCapabilityRegistry.capabilities.first { $0.id == id }
@@ -106,7 +107,7 @@ struct PermissionsApprovalView: View {
                 }
             }
 
-            Text("当前 file_read_selected 与 WebMount 的安全 wm_* 工具会读取这里的策略。WebMount 仍受自己的全局开关、站点启用状态和 URL allowlist 限制；清除 session 必须来自前台用户动作。")
+            Text("当前 file_read_selected、memory_tool 写入与 WebMount 的安全 wm_* 工具会读取这里的策略。memory_tool list 自动执行；create/edit/delete 需要前台批准。WebMount 仍受自己的全局开关、站点启用状态和 URL allowlist 限制；清除 session 必须来自前台用户动作。")
                 .font(.caption)
                 .foregroundStyle(AmberTheme.muted2)
                 .lineSpacing(2)

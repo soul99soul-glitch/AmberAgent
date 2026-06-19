@@ -206,6 +206,28 @@ final class IOSLocalToolExecutor {
         )
     }
 
+    func memoryToolWritePolicy(
+        input: String,
+        isUserInitiated: Bool
+    ) -> IOSMemoryToolWritePolicy {
+        guard IOSMemoryToolExecutor.requiresWriteApproval(input: input) else {
+            return .allow
+        }
+        guard let capability = IOSCapabilityRegistry.capabilities.first(where: { $0.id == "ios.agent.memory_write" }) else {
+            return .needsUserAction("Memory writes require foreground approval.")
+        }
+
+        switch permissionStore.policy(for: capability) {
+        case .disabled:
+            return .denied("Memory writes are disabled in AmberAgent tool policy.")
+        case .askEveryTime, .allowOncePerRun:
+            if isUserInitiated {
+                return .allow
+            }
+            return .needsUserAction("Memory writes require explicit foreground approval before the model can change saved memories.")
+        }
+    }
+
     private static func snapshotId(for capability: IOSPlatformCapability) -> String {
         guard capability.id.hasPrefix("android.") else {
             return capability.id

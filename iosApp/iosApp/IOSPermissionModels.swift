@@ -39,6 +39,7 @@ enum IOSCapabilityRisk: String, CaseIterable, Identifiable {
 }
 
 enum IOSCapabilityDomain: String, CaseIterable, Identifiable {
+    case agentMemory
     case filesAndPhotos
     case healthAndMotion
     case location
@@ -58,6 +59,7 @@ enum IOSCapabilityDomain: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .agentMemory: "Agent Memory"
         case .filesAndPhotos: "Files & Photos"
         case .healthAndMotion: "Health & Motion"
         case .location: "Location"
@@ -176,6 +178,19 @@ struct IOSPlatformCapability: Identifiable, Hashable {
 
 struct IOSCapabilityRegistry {
     static let capabilities: [IOSPlatformCapability] = [
+        capability(
+            id: "ios.agent.memory_write",
+            title: "Agent memory writes",
+            summary: "Allow the model to create, edit, or delete AmberAgent local memories. Listing memories stays read-only.",
+            domain: .agentMemory,
+            status: .supported,
+            risk: .high,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Chat memory_tool write approval",
+            modelToolNames: ["memory_tool"],
+            defaultEnabled: true,
+            gate: freshHighRiskGate
+        ),
         capability(
             id: "ios.files.selected_read",
             title: "Selected file read",

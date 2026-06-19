@@ -961,7 +961,15 @@ final class ChatViewModel {
     }
 
     private func dispatchMemoryToolCall(_ toolCall: UIMessagePart.Tool) -> String {
-        IOSMemoryToolExecutor.execute(input: toolCall.input, runtime: sharedSettings.agentRuntime)
+        let writePolicy = localToolExecutor?.memoryToolWritePolicy(
+            input: toolCall.input,
+            isUserInitiated: false
+        ) ?? .needsUserAction("Memory writes require foreground approval.")
+        return IOSMemoryToolExecutor.execute(
+            input: toolCall.input,
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: writePolicy
+        )
     }
 
     /// [Slice 3] Executes an MCP / sub-agent / council tool call and resumes the
@@ -1085,6 +1093,18 @@ final class ChatViewModel {
         in messages: [UIMessage]
     ) -> [UIMessage] {
         messagesByFinishingToolCall(targetToolCall, outputText: outputText, in: messages)
+    }
+
+    func memoryToolOutputForTesting(input: String) -> String {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "test-memory-tool",
+            toolName: "memory_tool",
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        return dispatchMemoryToolCall(toolCall)
     }
 #endif
 

@@ -2,23 +2,33 @@ import Foundation
 import Observation
 @preconcurrency import Shared
 
+enum IOSMemoryToolWritePolicy: Equatable {
+    case allow
+    case needsUserAction(String)
+    case denied(String)
+}
+
 enum IOSMemoryToolExecutor {
     @MainActor
-    static func execute(input: String, runtime: AgentRuntimeSetting) -> String {
+    static func execute(
+        input: String,
+        runtime: AgentRuntimeSetting,
+        writePolicy: IOSMemoryToolWritePolicy
+    ) -> String {
         guard let args = jsonObject(input) else {
             return json(["ok": false, "tool": "memory_tool", "error": "memory_tool input must be a JSON object"])
         }
 
-        let action = ((args["action"] ?? args["operation"] ?? args["op"]) as? String ?? "list").lowercased()
+        let action = action(from: args)
         switch action {
         case "list", "read", "search", "query", "status":
             return list(args: args, runtime: runtime)
         case "create", "add", "write":
-            return create(args: args, runtime: runtime)
+            return create(args: args, runtime: runtime, writePolicy: writePolicy)
         case "edit", "update":
-            return edit(args: args, runtime: runtime)
+            return edit(args: args, runtime: runtime, writePolicy: writePolicy)
         case "delete", "remove":
-            return delete(args: args)
+            return delete(args: args, writePolicy: writePolicy)
         default:
             return json([
                 "ok": false,
@@ -30,6 +40,16 @@ enum IOSMemoryToolExecutor {
 
     static func isEnabled(runtime: AgentRuntimeSetting) -> Bool {
         runtime.enableCoreMemory || runtime.enableShortTermMemory || runtime.enableLongTermMemory
+    }
+
+    static func requiresWriteApproval(input: String) -> Bool {
+        guard let args = jsonObject(input) else { return false }
+        switch action(from: args) {
+        case "create", "add", "write", "edit", "update", "delete", "remove":
+            return true
+        default:
+            return false
+        }
     }
 
     @MainActor
@@ -57,7 +77,14 @@ enum IOSMemoryToolExecutor {
     }
 
     @MainActor
-    private static func create(args: [String: Any], runtime: AgentRuntimeSetting) -> String {
+    private static func create(
+        args: [String: Any],
+        runtime: AgentRuntimeSetting,
+        writePolicy: IOSMemoryToolWritePolicy
+    ) -> String {
+        guard case .allow = writePolicy else {
+            return writeBlockedResult(action: "create", writePolicy: writePolicy)
+        }
         guard let content = nonEmptyString(args["content"]) else {
             return json(["ok": false, "tool": "memory_tool", "action": "create", "error": "content is required"])
         }
@@ -91,7 +118,14 @@ enum IOSMemoryToolExecutor {
     }
 
     @MainActor
-    private static func edit(args: [String: Any], runtime: AgentRuntimeSetting) -> String {
+    private static func edit(
+        args: [String: Any],
+        runtime: AgentRuntimeSetting,
+        writePolicy: IOSMemoryToolWritePolicy
+    ) -> String {
+        guard case .allow = writePolicy else {
+            return writeBlockedResult(action: "edit", writePolicy: writePolicy)
+        }
         guard let id = int(args["id"]) else {
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "id is required"])
         }
@@ -151,7 +185,10 @@ enum IOSMemoryToolExecutor {
     }
 
     @MainActor
-    private static func delete(args: [String: Any]) -> String {
+    private static func delete(args: [String: Any], writePolicy: IOSMemoryToolWritePolicy) -> String {
+        guard case .allow = writePolicy else {
+            return writeBlockedResult(action: "delete", writePolicy: writePolicy)
+        }
         guard let id = int(args["id"]) else {
             return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "id is required"])
         }
@@ -167,6 +204,31 @@ enum IOSMemoryToolExecutor {
             "action": "delete",
             "id": id
         ])
+    }
+
+    private static func writeBlockedResult(action: String, writePolicy: IOSMemoryToolWritePolicy) -> String {
+        switch writePolicy {
+        case .allow:
+            json(["ok": false, "tool": "memory_tool", "action": action, "error": "unexpected write policy"])
+        case .needsUserAction(let reason):
+            json([
+                "ok": false,
+                "tool": "memory_tool",
+                "action": action,
+                "needs_user_action": true,
+                "policy": "foreground_required",
+                "reason": reason
+            ])
+        case .denied(let reason):
+            json([
+                "ok": false,
+                "tool": "memory_tool",
+                "action": action,
+                "denied": true,
+                "policy": "disabled",
+                "reason": reason
+            ])
+        }
     }
 
     private static func disabledScopeResult(_ scope: MemoryScope, action: String) -> String {
@@ -257,6 +319,10 @@ enum IOSMemoryToolExecutor {
     private static func jsonObject(_ string: String) -> [String: Any]? {
         guard let data = string.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private static func action(from args: [String: Any]) -> String {
+        ((args["action"] ?? args["operation"] ?? args["op"]) as? String ?? "list").lowercased()
     }
 
     private static func json(_ object: [String: Any]) -> String {

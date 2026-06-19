@@ -217,7 +217,8 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let sharedSettings = memorySettings(core: true, shortTerm: true, longTerm: true)
         let createOutput = IOSMemoryToolExecutor.execute(
             input: #"{"action":"create","scope":"long_term","kind":"user","content":"用户喜欢先做端到端验证","pinned":true,"confidence":0.8}"#,
-            runtime: sharedSettings.agentRuntime
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: .allow
         )
         let createPayload = try jsonObject(createOutput)
         XCTAssertEqual(createPayload["ok"] as? Bool, true)
@@ -232,7 +233,8 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let editedText = "用户喜欢先做端到端验证，再提交小批量改动"
         let editOutput = IOSMemoryToolExecutor.execute(
             input: #"{"action":"edit","id":\#(id),"scope":"short_term","kind":"project","content":"\#(editedText)","pinned":false}"#,
-            runtime: sharedSettings.agentRuntime
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: .allow
         )
         let editPayload = try jsonObject(editOutput)
         XCTAssertEqual(editPayload["ok"] as? Bool, true)
@@ -258,7 +260,8 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
 
         let deleteOutput = IOSMemoryToolExecutor.execute(
             input: #"{"action":"delete","id":\#(id)}"#,
-            runtime: sharedSettings.agentRuntime
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: .allow
         )
         let deletePayload = try jsonObject(deleteOutput)
         XCTAssertEqual(deletePayload["ok"] as? Bool, true)
@@ -275,12 +278,76 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let sharedSettings = memorySettings(core: false, shortTerm: false, longTerm: true)
         let output = IOSMemoryToolExecutor.execute(
             input: #"{"action":"create","scope":"core","content":"disabled scope should not save"}"#,
-            runtime: sharedSettings.agentRuntime
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: .allow
         )
         let payload = try jsonObject(output)
 
         XCTAssertEqual(payload["ok"] as? Bool, false)
         XCTAssertEqual(payload["scope"] as? String, "core")
+        XCTAssertTrue(IosMemoryFactory.shared.getAllRecords().isEmpty)
+    }
+
+    func testMemoryToolWritePolicyBlocksMutationButAllowsList() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer {
+            IosMemoryFactory.shared.replaceAll(records: originalRecords)
+        }
+
+        let sharedSettings = memorySettings(core: true, shortTerm: true, longTerm: true)
+        IosMemoryFactory.shared.addMemory(
+            scope: MemoryScope.longTerm,
+            kind: MemoryKind.note,
+            content: "list should remain readable",
+            assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+        )
+
+        let listOutput = IOSMemoryToolExecutor.execute(
+            input: #"{"action":"list","scope":"long_term"}"#,
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: .needsUserAction("writes blocked")
+        )
+        let listPayload = try jsonObject(listOutput)
+        XCTAssertEqual(listPayload["ok"] as? Bool, true)
+        XCTAssertEqual(listPayload["count"] as? Int, 1)
+
+        let createOutput = IOSMemoryToolExecutor.execute(
+            input: #"{"action":"create","scope":"long_term","content":"should not save"}"#,
+            runtime: sharedSettings.agentRuntime,
+            writePolicy: .needsUserAction("Memory writes require foreground approval.")
+        )
+        let createPayload = try jsonObject(createOutput)
+        XCTAssertEqual(createPayload["ok"] as? Bool, false)
+        XCTAssertEqual(createPayload["needs_user_action"] as? Bool, true)
+        XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().count, 1)
+    }
+
+    func testChatMemoryToolModelWriteRequiresForegroundApproval() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer {
+            IosMemoryFactory.shared.replaceAll(records: originalRecords)
+        }
+
+        let executor = IOSLocalToolExecutor(
+            permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+            documentStore: DocumentAccessStore()
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: memorySettings(core: true, shortTerm: true, longTerm: true),
+            localToolExecutor: executor,
+            autoGenerateResponses: false
+        )
+
+        let output = viewModel.memoryToolOutputForTesting(
+            input: #"{"action":"create","scope":"long_term","content":"model write should wait"}"#
+        )
+        let payload = try jsonObject(output)
+
+        XCTAssertEqual(payload["ok"] as? Bool, false)
+        XCTAssertEqual(payload["needs_user_action"] as? Bool, true)
         XCTAssertTrue(IosMemoryFactory.shared.getAllRecords().isEmpty)
     }
 
