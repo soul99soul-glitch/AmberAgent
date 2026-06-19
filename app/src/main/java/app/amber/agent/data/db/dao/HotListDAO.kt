@@ -52,7 +52,7 @@ interface HotListDAO {
     @Query(
         """
         SELECT * FROM deep_read_cache
-        WHERE title = :title AND expires_at >= :now
+        WHERE title = :title AND (expires_at >= :now OR pinned = 1)
         ORDER BY updated_at DESC
         LIMIT 1
         """
@@ -62,7 +62,7 @@ interface HotListDAO {
     @Query("SELECT * FROM deep_read_cache WHERE topic_id = :topicId")
     fun observeDeepRead(topicId: String): Flow<DeepReadCacheEntity?>
 
-    @Query("SELECT * FROM deep_read_cache ORDER BY updated_at DESC LIMIT :limit")
+    @Query("SELECT * FROM deep_read_cache ORDER BY pinned DESC, updated_at DESC LIMIT :limit")
     fun observeDeepReadHistory(limit: Int = 100): Flow<List<DeepReadCacheEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -71,7 +71,10 @@ interface HotListDAO {
     @Query("DELETE FROM deep_read_cache WHERE topic_id = :topicId")
     suspend fun deleteDeepRead(topicId: String)
 
-    @Query("DELETE FROM deep_read_cache WHERE expires_at < :historyCutoff")
+    @Query("UPDATE deep_read_cache SET pinned = :pinned WHERE topic_id = :topicId")
+    suspend fun setDeepReadPinned(topicId: String, pinned: Boolean)
+
+    @Query("DELETE FROM deep_read_cache WHERE expires_at < :historyCutoff AND pinned = 0")
     suspend fun pruneExpiredDeepReads(historyCutoff: Long): Int
 
     @Query("SELECT * FROM hot_list_source ORDER BY sort_order ASC, display_name ASC")

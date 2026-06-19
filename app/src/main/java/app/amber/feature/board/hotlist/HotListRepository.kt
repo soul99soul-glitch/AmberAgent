@@ -179,20 +179,29 @@ class HotListRepository(
         title: String,
         output: DeepReadOutput,
         now: Long = System.currentTimeMillis(),
+        ttlDays: Int = DEFAULT_TTL_DAYS,
     ) {
+        // Preserve existing pinned state across regeneration: upsert uses REPLACE, so a
+        // freshly-built entity with pinned=false (default) would clobber a user's pin.
+        val existingPinned = dao.getDeepRead(topicId)?.pinned == true
+        val expiresAt = if (ttlDays <= 0) Long.MAX_VALUE else now + ttlDays * DAY_MS
         dao.upsertDeepRead(
             DeepReadCacheEntity(
                 topicId = topicId,
                 title = title,
                 outputJson = json.encodeToString(output),
                 createdAt = now,
-                expiresAt = now + DEEP_READ_TTL_MS,
+                expiresAt = expiresAt,
                 updatedAt = now,
+                pinned = existingPinned,
             )
         )
     }
 
     suspend fun clearDeepRead(topicId: String) = dao.deleteDeepRead(topicId)
+
+    suspend fun setDeepReadPinned(topicId: String, pinned: Boolean) =
+        dao.setDeepReadPinned(topicId, pinned)
 
     suspend fun pruneExpiredDeepReads(now: Long = System.currentTimeMillis()): Int =
         dao.pruneExpiredDeepReads(now - DEEP_READ_HISTORY_RETENTION_MS)
@@ -204,6 +213,8 @@ class HotListRepository(
     companion object {
         const val DEEP_READ_TTL_MS = 24L * 60L * 60L * 1000L
         const val DEEP_READ_HISTORY_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L
+        const val DEFAULT_TTL_DAYS = 7
+        private const val DAY_MS = 24L * 60L * 60L * 1000L
 
         fun topicId(title: String): String = sha256(
             title.lowercase()
@@ -226,6 +237,7 @@ data class DeepReadHistoryItem(
     val expiresAt: Long,
     val updatedAt: Long,
     val expired: Boolean,
+    val pinned: Boolean = false,
 )
 
 private fun HotListCacheEntity.toSnapshot(json: Json): HotListProviderSnapshot =
@@ -253,7 +265,7 @@ private fun HotTopicCacheEntity.toTopic(json: Json): HotTopic =
     )
 
 private fun DeepReadCacheEntity.toFreshDeepRead(json: Json, now: Long = System.currentTimeMillis()): DeepReadOutput? {
-    if (!DeepReadCachePolicy.isFresh(expiresAt, now)) return null
+    if (!DeepReadCachePolicy.isFresh(expiresAt, now, pinned)) return null
     return toDeepReadOutput(json)
 }
 
@@ -268,7 +280,8 @@ private fun DeepReadCacheEntity.toHistoryItem(
         createdAt = createdAt,
         expiresAt = expiresAt,
         updatedAt = updatedAt,
-        expired = !DeepReadCachePolicy.isFresh(expiresAt, now),
+        expired = !DeepReadCachePolicy.isFresh(expiresAt, now, pinned),
+        pinned = pinned,
     )
 
 private fun DeepReadCacheEntity.toDeepReadOutput(json: Json): DeepReadOutput? =

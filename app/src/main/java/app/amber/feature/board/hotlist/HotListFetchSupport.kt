@@ -49,5 +49,9 @@ class HotListSafeFetcher(
 }
 
 object DeepReadCachePolicy {
-    fun isFresh(expiresAt: Long, now: Long = System.currentTimeMillis()): Boolean = expiresAt > now
+    fun isFresh(
+        expiresAt: Long,
+        now: Long = System.currentTimeMillis(),
+        pinned: Boolean = false,
+    ): Boolean = pinned || expiresAt > now
 }

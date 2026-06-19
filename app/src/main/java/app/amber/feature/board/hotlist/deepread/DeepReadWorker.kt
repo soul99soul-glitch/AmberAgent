@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.board.hotlist.HotListRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -32,6 +33,8 @@ class DeepReadWorker(
         if (route is DeepReadWorkerRoute.Invalid) return Result.failure()
         val notifier = get<DeepReadNotifier>()
         val repository = get<HotListRepository>()
+        val ttlDays = get<SettingsAggregator>()
+            .settingsFlow.value.agentRuntime.todayBoard.deepReadCacheTtlDays
 
         try {
             setForeground(createForegroundInfo(notifier, topicId, title, sourceUrl))
@@ -45,6 +48,7 @@ class DeepReadWorker(
                 topicId = topicId,
                 title = title,
                 output = failureOutput(cached, reason),
+                ttlDays = ttlDays,
             )
             runCatching {
                 notifier.notifyFailed(
@@ -117,6 +121,7 @@ class DeepReadWorker(
                     topicId = topicId,
                     title = title,
                     output = retryableOutput(cached),
+                    ttlDays = ttlDays,
                 )
                 return Result.retry()
             }
@@ -129,6 +134,7 @@ class DeepReadWorker(
                 } else {
                     idleOutput(cached)
                 },
+                ttlDays = ttlDays,
             )
             notifier.notifyFailed(
                 topicId = topicId,

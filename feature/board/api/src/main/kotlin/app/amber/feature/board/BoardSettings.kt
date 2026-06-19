@@ -180,6 +180,11 @@ data class TodayBoardSetting(
     val hotListFocusKeywords: List<String> = DEFAULT_HOT_LIST_FOCUS_KEYWORDS,
     val hotListFilterMode: TodayBoardHotListFilterMode = TodayBoardHotListFilterMode.FOCUS_FIRST,
     val deepReadFirstUseConfirmed: Boolean = false,
+    /**
+     * Deep Read 缓存有效期（天）。0 = 永不过期（仅手动删除）。
+     * 默认 7 天，对齐杂志档案定位。
+     */
+    val deepReadCacheTtlDays: Int = 7,
     val boardReadingFontMode: TodayBoardReadingFontMode = TodayBoardReadingFontMode.SERIF,
     val boardReadingFontPackId: String? = null,
     val deepReadFontScale: Float = 1.0f,

@@ -42,6 +42,7 @@ class DeepReadSectionWriterTools(
     private val topicTitle: String,
     private val imageCandidates: List<DeepReadImageCandidate> = emptyList(),
     private val allowTitleFallback: Boolean = true,
+    private val ttlDays: Int = HotListRepository.DEFAULT_TTL_DAYS,
 ) {
     private val _writeCount = AtomicInteger(0)
     private val _requiredWriteCount = AtomicInteger(0)
@@ -548,7 +549,7 @@ class DeepReadSectionWriterTools(
     private suspend fun update(transform: (DeepReadOutput) -> DeepReadOutput): DeepReadOutput = writeMutex.withLock {
         val current = currentOutput()
         val next = transform(current)
-        repository.saveDeepRead(topicId, topicTitle, next)
+        repository.saveDeepRead(topicId, topicTitle, next, ttlDays = ttlDays)
         next
     }
 

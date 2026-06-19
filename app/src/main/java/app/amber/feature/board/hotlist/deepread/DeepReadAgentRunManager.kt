@@ -110,7 +110,7 @@ class DeepReadAgentRunManager(
                 generationPhase = DeepReadGenerationPhase.COMPLETE,
                 generationComplete = true,
             )
-            hotListRepository.saveDeepRead(topicId, topicTitle, completed)
+            hotListRepository.saveDeepRead(topicId, topicTitle, completed, ttlDays = currentDeepReadTtlDays())
             return@withLock Result.success(completed)
         }
 
@@ -188,6 +188,7 @@ class DeepReadAgentRunManager(
             topicId = topicId,
             title = topicTitle,
             output = next,
+            ttlDays = currentDeepReadTtlDays(),
         )
     }
 
@@ -312,6 +313,7 @@ class DeepReadAgentRunManager(
                         generationPhase = DeepReadGenerationPhase.COLLECTING,
                         generationComplete = false,
                     ),
+                    ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
                 )
             }
             val prefetchedSources = sourcePrefetcher.collect(
@@ -330,6 +332,7 @@ class DeepReadAgentRunManager(
                         output = (fresh(topicId, topicTitle, seedUrl) ?: DeepReadOutput()).copy(
                             generationPhase = DeepReadGenerationPhase.IDLE,
                         ),
+                        ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
                     )
                 }
                 return Result.failure(IllegalStateException(message))
@@ -344,6 +347,7 @@ class DeepReadAgentRunManager(
                 topicTitle = topicTitle,
                 imageCandidates = prefetchedSources.flatMap { it.imageCandidates },
                 allowTitleFallback = seedUrl.isNullOrBlank(),
+                ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
             )
             val hiddenSettings = settings.toIsolatedSubAgentSettings()
             val assistant = DeepReadHiddenAssistantFactory.create(settings)
@@ -951,6 +955,9 @@ class DeepReadAgentRunManager(
             }
         }
     }
+
+    private fun currentDeepReadTtlDays(): Int =
+        settingsStore.settingsFlow.value.agentRuntime.todayBoard.deepReadCacheTtlDays
 
     private fun resolveModel(settings: Settings): Model? {
         val boardModelId = settings.agentRuntime.todayBoard.boardModelId
