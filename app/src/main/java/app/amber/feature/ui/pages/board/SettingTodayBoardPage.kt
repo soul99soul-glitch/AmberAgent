@@ -345,6 +345,8 @@ fun SettingTodayBoardPage(
                         ExperimentSectionCard(title = "深度阅读") {
                             ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
                             ExperimentDivider()
+                            DeepReadCacheTtlRow(board = board, update = ::update)
+                            ExperimentDivider()
                             DeepReadTemplateSettingsRow(
                                 board = board,
                                 customTemplates = customDeepReadTemplates,
@@ -581,6 +583,33 @@ private fun HotListFocusKeywordEditor(
                 if (keywords.size > 16) {
                     Text("+${keywords.size - 16}", style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DeepReadCacheTtlRow(
+    board: TodayBoardSetting,
+    update: (block: (TodayBoardSetting) -> TodayBoardSetting) -> Unit,
+) {
+    // TTL options: 1 / 3 / 7 (default) / 0 (never expire). 0 keeps expiresAt at Long.MAX_VALUE.
+    val options = listOf(1 to "24 小时", 3 to "3 天", 7 to "7 天", 0 to "永久")
+    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("缓存有效期", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "已生成的深读在此期间内不会重复计费。收藏的条目永不过期。",
+            style = MaterialTheme.typography.bodySmall,
+            color = workspaceColors().muted,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { (days, label) ->
+                ChoiceChip(
+                    selected = board.deepReadCacheTtlDays == days,
+                    label = label,
+                    onClick = { update { it.copy(deepReadCacheTtlDays = days) } },
+                )
             }
         }
     }

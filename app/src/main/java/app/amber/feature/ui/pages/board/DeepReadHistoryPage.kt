@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import app.amber.feature.ui.theme.LocalAmberType
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -89,6 +90,9 @@ fun DeepReadHistoryPage(
                             )
                         )
                     },
+                    onTogglePin = { pinned ->
+                        repository.setDeepReadPinned(item.topicId, pinned)
+                    },
                 )
                 if (index != history.lastIndex) {
                     HorizontalDivider(color = colors.hairline)
@@ -102,6 +106,7 @@ fun DeepReadHistoryPage(
 private fun DeepReadHistoryRow(
     item: DeepReadHistoryItem,
     onClick: () -> Unit,
+    onTogglePin: (Boolean) -> Unit,
 ) {
     val colors = workspaceColors()
     Row(
@@ -131,10 +136,27 @@ private fun DeepReadHistoryRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        WorkspaceStatusPill(
-            text = if (item.expired) "已失效" else "有效",
-            tone = if (item.expired) WorkspaceTone.Warning else WorkspaceTone.Success,
-        )
+        TextButton(
+            onClick = { onTogglePin(!item.pinned) },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            Text(
+                if (item.pinned) "取消收藏" else "收藏",
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        // Pinned items are always fresh; only show expired/valid for unpinned ones.
+        if (!item.pinned) {
+            WorkspaceStatusPill(
+                text = if (item.expired) "已失效" else "有效",
+                tone = if (item.expired) WorkspaceTone.Warning else WorkspaceTone.Success,
+            )
+        } else {
+            WorkspaceStatusPill(
+                text = "已收藏",
+                tone = WorkspaceTone.Accent,
+            )
+        }
     }
 }
 
