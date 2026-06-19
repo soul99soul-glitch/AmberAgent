@@ -479,7 +479,7 @@ final class CouncilChatViewModel {
             CouncilChatMessage(
                 kind: .system,
                 author: "Council",
-                body: "这是 iOS 第一版 Council Chat：主 Assistant 作为 Host，邀请临时 Assistant 从不同视角接力讨论。当前先通过 iOS 的现有模型设置执行，完整 KMP ModelCouncilManager 桥接会在后续抽取。",
+                body: "模型议会已就绪。输入一个问题后，我会邀请不同视角的席位接力讨论。",
                 systemImage: "person.3.sequence",
                 tint: AmberTheme.accentIndigo,
                 subtitle: "ready"

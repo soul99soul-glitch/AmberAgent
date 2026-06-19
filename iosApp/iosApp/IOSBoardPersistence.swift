@@ -637,7 +637,7 @@ final class IOSKMPTimeSignalCollector: IOSBoardSignalCollector {
                 let collected = try await collectSignals(collector: collector, context: context)
                 signals.append(contentsOf: collected.map(IOSRawBoardSignal.init(signal:)))
             }
-            return IOSBoardCollectorOutput(signals: signals, statusMessage: "KMP 时间锚点")
+            return IOSBoardCollectorOutput(signals: signals, statusMessage: "时间锚点")
         } catch {
             return IOSBoardCollectorOutput(errorMessage: "时间锚点采集失败：\(error.localizedDescription)")
         }

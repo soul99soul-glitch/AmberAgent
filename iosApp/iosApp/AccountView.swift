@@ -150,7 +150,7 @@ private struct AccountStatsPanel: View {
 
     private var detailStats: [AccountStatItem] {
         [
-            .init(systemImage: "server.rack", label: "Provider 模板", value: "\(sharedSettings.snapshot.providers.count)"),
+            .init(systemImage: "server.rack", label: "服务商模板", value: "\(sharedSettings.snapshot.providers.count)"),
             .init(systemImage: "speaker.wave.2", label: "TTS 引擎", value: "\(sharedSettings.snapshot.ttsProviders.count)"),
             .init(systemImage: "magnifyingglass", label: "搜索服务", value: "\(sharedSettings.snapshot.searchServices.count)"),
             .init(systemImage: "power", label: "启动次数", value: "\(sharedSettings.snapshot.launchCount)"),

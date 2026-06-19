@@ -65,7 +65,7 @@ struct SkillDetailView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("会删除 Documents/skills/\(dirName ?? "") 目录，并从所有 assistant.enabledSkills 中移除该技能。")
+            Text("会删除这个本机技能，并从已启用它的助手中移除。")
         }
         .task(id: dirName ?? skillName) {
             loadSnapshot()
@@ -150,7 +150,7 @@ struct SkillDetailView: View {
                 .padding(.vertical, 4)
             }
 
-            SkillDetailFooter("启用状态写入当前 assistant.enabledSkills；聊天工具选择会读取这个集合。")
+            SkillDetailFooter("启用后，聊天可以按这个技能的触发说明使用它。")
         }
     }
 
@@ -170,7 +170,7 @@ struct SkillDetailView: View {
                 }
                 .padding(.horizontal, 16)
 
-            SkillDetailFooter(snapshot == nil ? "未能读取真实 SKILL.md；请从技能扫描列表进入详情。" : "内容来自 Documents/skills/\(snapshot?.dirName ?? "")/SKILL.md。")
+            SkillDetailFooter(snapshot == nil ? "未能读取这个技能；请从技能列表重新进入。" : "触发说明来自本机技能文件。")
         }
     }
 
@@ -181,7 +181,7 @@ struct SkillDetailView: View {
                 SkillStaticValueRow(title: "允许的工具", value: allowedToolsSummary)
             }
 
-            SkillDetailFooter("权限来自 SKILL.md frontmatter 中的 allowed-tools / tools 字段；可通过编辑 SKILL.md 修改。")
+            SkillDetailFooter("可通过右上角编辑按钮修改技能说明和权限。")
         }
     }
 
@@ -191,12 +191,12 @@ struct SkillDetailView: View {
             AmberFormGroup {
                 SkillStaticValueRow(title: "版本", value: snapshot?.version ?? "未声明", monospace: true)
                 SkillDetailDivider()
-                SkillStaticValueRow(title: "来源", value: snapshot?.dirName ?? "未读取")
+                SkillStaticValueRow(title: "本机目录", value: snapshot?.dirName ?? "未读取")
                 SkillDetailDivider()
                 SkillStaticValueRow(title: "文件", value: snapshot?.relativePath ?? "SKILL.md", monospace: true)
             }
 
-            SkillDetailFooter(loadError ?? "已读取真实本地 SKILL.md；编辑按钮会直接写回主文件。")
+            SkillDetailFooter(loadError ?? "编辑按钮会保存到这个本机技能。")
         }
     }
 
@@ -217,22 +217,22 @@ struct SkillDetailView: View {
             }
             .padding(.top, 20)
 
-            SkillDetailFooter("删除会移除本地 Skill 目录，并同步清理所有 assistant.enabledSkills。")
+            SkillDetailFooter("删除后，聊天不会再使用这个技能。")
         }
     }
 
     private var triggerText: String {
         snapshot?.description.nonEmpty
             ?? snapshot?.bodyPreview.nonEmpty
-            ?? "未能读取 \(skillName) 的真实触发说明。"
+            ?? "未能读取 \(skillName) 的触发说明。"
     }
 
     private var statusText: String {
         if snapshot != nil {
-            return isEnabled ? "已启用 · 已读取 SKILL.md" : "未启用 · 已读取 SKILL.md"
+            return isEnabled ? "已启用" : "未启用"
         }
         if loadError != nil {
-            return "未读取 SKILL.md"
+            return "读取失败"
         }
         return "读取中"
     }
@@ -262,7 +262,7 @@ struct SkillDetailView: View {
             isEnabled = sharedSettings.isSkillEnabled(next.name ?? skillName)
         } catch {
             snapshot = nil
-            loadError = "读取 Documents/skills/\(dirName)/SKILL.md 失败：\(error.localizedDescription)"
+            loadError = "读取技能失败：\(error.localizedDescription)"
             isEnabled = false
         }
     }

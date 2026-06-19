@@ -37,7 +37,7 @@ struct MiniAppRunnerView: View {
     static func missingAppHtml(appId: String) -> String {
         """
         <!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system;padding:16px;color:#555}</style></head>
-        <body><h3>MiniApp 未找到</h3><p>repository 中没有 appId：<code>\(appId)</code></p></body></html>
+        <body><h3>小应用未找到</h3><p>这个小应用可能已被删除：<code>\(appId)</code></p></body></html>
         """
     }
 
@@ -99,12 +99,12 @@ struct MiniAppRunnerView: View {
             Spacer()
 
             VStack(spacing: 2) {
-                Text(app?.title ?? "MiniApp 未找到")
+                Text(app?.title ?? "小应用未找到")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
-                Text(app.map { "v\($0.version) · \($0.runCount) 次运行" } ?? "appId 未找到")
+                Text(app.map { "v\($0.version) · \($0.runCount) 次运行" } ?? "小应用不存在")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -120,7 +120,7 @@ struct MiniAppRunnerView: View {
     }
 
     private func intro(_ app: IOSMiniAppRecord) -> some View {
-        Text("Runner 正在读取 Documents 持久化记录。HTML 每次加载前都会经过 MiniAppHtmlValidator；bridge 调用会检查声明权限、grant 决策和 iOS 设置。")
+        Text("编辑并运行这个小应用。保存后会创建新版本，权限请求会在运行时确认。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -133,11 +133,11 @@ struct MiniAppRunnerView: View {
 
     private func metadataSection(_ app: IOSMiniAppRecord) -> some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "记录状态")
+            AmberSectionLabel(text: "状态")
             AmberFormGroup {
                 MiniAppCapabilityStatusRow(row: .init(
                     title: app.description,
-                    subtitle: "category: \(app.category) · hash: \(app.htmlHash.prefix(12)) · updated: \(dateText(app.updatedAt))",
+                    subtitle: "\(app.category) · 更新于 \(dateText(app.updatedAt))",
                     status: app.pinned ? "已置顶" : "普通",
                     tint: app.pinned ? AmberTheme.accentAmber : AmberTheme.accent
                 ))
@@ -151,9 +151,9 @@ struct MiniAppRunnerView: View {
                 if let summary = app.boardSummary, !summary.isEmpty {
                     MiniAppCapabilityDivider()
                     MiniAppCapabilityStatusRow(row: .init(
-                        title: "Board Summary",
+                        title: "看板摘要",
                         subtitle: summary,
-                        status: "host 写回",
+                        status: "已更新",
                         tint: AmberTheme.accentCyan
                     ))
                 }
@@ -168,7 +168,7 @@ struct MiniAppRunnerView: View {
 
     private func runnerSection(_ app: IOSMiniAppRecord) -> some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "MiniApp Runner")
+            AmberSectionLabel(text: "运行")
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("HTML（保存会创建新版本）")
@@ -246,12 +246,12 @@ struct MiniAppRunnerView: View {
 
     private func grantsSection(_ app: IOSMiniAppRecord) -> some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Grant 状态")
+            AmberSectionLabel(text: "权限")
             AmberFormGroup {
                 if app.permissions.isEmpty {
                     MiniAppCapabilityStatusRow(row: .init(
                         title: "未声明权限",
-                        subtitle: "bridge 只能使用 app.info、log、echo 这类无需 grant 的能力。",
+                        subtitle: "这个小应用没有申请额外权限。",
                         status: "无",
                         tint: AmberTheme.muted
                     ))
@@ -308,7 +308,7 @@ struct MiniAppRunnerView: View {
                             Text("v\(version.versionNumber)")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("\(version.changeNote ?? "MiniApp version") · \(dateText(version.createdAt)) · hash \(version.htmlHash.prefix(12))")
+                            Text("\(version.changeNote ?? "小应用版本") · \(dateText(version.createdAt))")
                                 .font(.system(size: 12.5))
                                 .foregroundStyle(AmberTheme.muted)
                         }
@@ -338,12 +338,12 @@ struct MiniAppRunnerView: View {
     private func auditSection(_ app: IOSMiniAppRecord) -> some View {
         let logs = repository.auditLogs(appId: app.id, limit: 6)
         return VStack(spacing: 0) {
-            AmberSectionLabel(text: "Audit metadata")
+            AmberSectionLabel(text: "活动记录")
             AmberFormGroup {
                 if logs.isEmpty {
                     MiniAppCapabilityStatusRow(row: .init(
-                        title: "暂无 bridge audit",
-                        subtitle: "storage/sharedStore/search/fetch/host 写回等调用会记录 method、permission、payloadHash。",
+                        title: "暂无活动记录",
+                        subtitle: "小应用运行和权限调用会显示在这里。",
                         status: "空",
                         tint: AmberTheme.muted
                     ))
@@ -351,7 +351,7 @@ struct MiniAppRunnerView: View {
                     ForEach(Array(logs.enumerated()), id: \.element.id) { index, log in
                         MiniAppCapabilityStatusRow(row: .init(
                             title: log.method,
-                            subtitle: "\(log.summary) · \(dateText(log.createdAt)) · payload \(log.payloadHash.prefix(12))",
+                            subtitle: "\(log.summary) · \(dateText(log.createdAt))",
                             status: log.permission,
                             tint: AmberTheme.accentCyan
                         ))
@@ -366,9 +366,9 @@ struct MiniAppRunnerView: View {
 
     private var bridgeLogSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Bridge 日志")
+            AmberSectionLabel(text: "运行日志")
             if bridgeLog.isEmpty {
-                MiniAppCapabilityNote("暂无 bridge 消息。点击 WebView 中的小应用按钮后会显示最近日志。")
+                MiniAppCapabilityNote("暂无运行日志。与小应用交互后会显示最近消息。")
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(bridgeLog.suffix(8).enumerated()), id: \.offset) { _, line in
@@ -386,7 +386,7 @@ struct MiniAppRunnerView: View {
 
     private var missingSection: some View {
         VStack(spacing: 0) {
-            MiniAppCapabilityNote("repository 中没有 appId：\(appId)。它可能已被删除，或 store 读取失败。")
+            MiniAppCapabilityNote("这个小应用可能已被删除，或本机记录读取失败。")
                 .padding(.top, 12)
             TextEditor(text: .constant(Self.missingAppHtml(appId: appId)))
                 .font(.system(size: 11, design: .monospaced))
@@ -665,29 +665,29 @@ struct MiniAppRunnerView: View {
     private func grantDescription(_ permission: String) -> String {
         switch IOSMiniAppPermission(rawValue: permission) {
         case .network:
-            return "仅 HTTPS fetch，受 MiniApp 设置控制。"
+            return "允许访问 HTTPS 网络。"
         case .search:
-            return "使用 iOS DuckDuckGo Lite 搜索执行器，受全局搜索开关控制。"
+            return "允许使用网页搜索。"
         case .aiGenerate:
-            return "调用当前聊天模型；需要 API Key、MiniApp 设置开启和 per-app grant。"
+            return "允许调用当前聊天模型。"
         case .clipboardCopy:
             return "只写剪贴板，不读取。"
         case .hostUpdateBoardSummary:
-            return "写入当前 MiniApp 的 boardSummary metadata。"
+            return "允许更新这个小应用的看板摘要。"
         case .hostContext:
-            return "读取最小化宿主上下文；需要全局开关、grant 和前台确认。"
+            return "允许读取必要的宿主上下文。"
         case .hostSendToConversation:
-            return "生成聊天草稿，不自动发送；需要全局开关、grant 和前台确认。"
+            return "允许生成聊天草稿，不会自动发送。"
         case .hostCreateArtifact:
-            return "创建内容卡片并写入 boardSummary；需要全局开关、grant 和前台确认。"
+            return "允许创建内容卡片。"
         case .sharedStore:
-            return "只允许自身 appId namespace。"
+            return "允许使用这个小应用自己的本地存储。"
         case .eventBus:
-            return "仅 Runner 生命周期内的本地事件。"
+            return "允许在运行期间发送本地事件。"
         case nil:
-            return "未知权限会被 bridge 拒绝。"
+            return "未知权限会被拒绝。"
         default:
-            return "调用前必须显式允许；拒绝后 bridge 会返回错误。"
+            return "使用前需要你明确允许。"
         }
     }
 

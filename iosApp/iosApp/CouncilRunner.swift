@@ -55,7 +55,7 @@ final class CouncilRunner {
     /// string — never empty/fabricated success.
     func run(objective: String) async -> String {
         guard let m = ensureManager() else {
-            return "ModelCouncil 不可用：无法构造 Manager（文档目录不可用）。"
+            return "模型议会暂不可用：无法准备运行环境。"
         }
         let input = IosCouncilFactory.shared.startInput(objective: objective)
 
@@ -73,7 +73,7 @@ final class CouncilRunner {
                 }
             }
         }
-        return "ModelCouncil 已执行（runId: \(outcome.runId)，状态: \(outcome.status)）。objective: \(objective)。配置 API Key 时为真实多模型推理；无 Key 时为诚实 stub。"
+        return "模型议会已执行（runId: \(outcome.runId)，状态: \(outcome.status)）。任务：\(objective)。配置 API Key 后会使用真实模型生成。"
     }
 
     func runTestCycle() {
@@ -84,7 +84,7 @@ final class CouncilRunner {
         isRunning = true
         lastRunResult = "正在启动…"
 
-        let input = IosCouncilFactory.shared.startInput(objective: "验证 iOS ModelCouncilManager 调用链")
+        let input = IosCouncilFactory.shared.startInput(objective: "试运行模型议会")
 
         m.start(input: input) { [weak self] result, error in
             let summary: String
@@ -93,7 +93,7 @@ final class CouncilRunner {
             } else if let result = result {
                 let runId = IosCouncilFactory.shared.extractRunId(result: result)
                 let status = IosCouncilFactory.shared.extractStatus(result: result)
-                summary = "✅ start 调用链验证成功\nrunId: \(runId)\nstatus: \(status)\n\n注意：这是 stub runner，不产生真实议会推理。ModelCouncilManager 已在 iOS 端成功构造并执行了 start()。"
+                summary = "模型议会已完成试运行\nrunId: \(runId)\nstatus: \(status)\n\n配置 API Key 后会使用真实模型生成。"
             } else {
                 summary = "start 返回空结果"
             }

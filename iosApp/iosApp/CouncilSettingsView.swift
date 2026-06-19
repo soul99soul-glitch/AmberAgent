@@ -12,14 +12,14 @@ struct CouncilSettingsView: View {
     private var runtimeRows: [CouncilSettingsEvidence] {
         [
             .init(
-                title: "enabled",
-                subtitle: "KMP Settings.agentRuntime.modelCouncil.enabled 控制 ChatService 是否注入 model_council_* 工具。",
+                title: "议会功能",
+                subtitle: "是否允许在聊天和本页中启动模型议会。",
                 value: mc.enabled ? "启用" : "关闭",
                 color: mc.enabled ? AmberTheme.accentGreen : AmberTheme.muted2
             ),
             .init(
-                title: "showSeatOutputs",
-                subtitle: "KMP modelCouncil.showSeatOutputs 控制席位输出是否展示。",
+                title: "显示各席位输出",
+                subtitle: "生成结果中是否展开每个席位的发言。",
                 value: mc.showSeatOutputs ? "显示" : "隐藏",
                 color: AmberTheme.foreground2
             ),
@@ -30,19 +30,19 @@ struct CouncilSettingsView: View {
         [
             .init(
                 title: "核心席位",
-                subtitle: "ModelCouncilRolePresets.coreSeats 包含支持者、反对者、裁判，运行时会自动注入。",
-                value: "存在",
+                subtitle: "包含支持者、反对者和裁判，用来快速形成正反评审。",
+                value: "内置",
                 color: AmberTheme.accentGreen
             ),
             .init(
                 title: "领域视角",
-                subtitle: "ModelCouncilRolePresets.lensPresets 包含产品、营销、公关、工程、用户体验、风险等可选视角。",
-                value: "存在",
+                subtitle: "包含产品、工程、用户体验、风险等可选视角。",
+                value: "内置",
                 color: AmberTheme.accentGreen
             ),
             .init(
                 title: "默认席位列表",
-                subtitle: "KMP modelCouncil.defaultSeats 真实种子值，只读展示。",
+                subtitle: "当前默认会启用的席位数量。",
                 value: "\(mc.defaultSeats.count) 席",
                 color: AmberTheme.foreground2
             ),
@@ -52,14 +52,14 @@ struct CouncilSettingsView: View {
     private var limitRows: [CouncilSettingsEvidence] {
         [
             .init(
-                title: "maxSeats / rounds",
-                subtitle: "KMP modelCouncil 真实种子值，只读展示。",
+                title: "人数与轮数",
+                subtitle: "一次议会最多可使用的人数和轮次。",
                 value: "最多 \(mc.maxSeats) 席 · 默认 \(mc.defaultRounds) 轮 · 最多 \(mc.maxRounds) 轮",
                 color: AmberTheme.foreground2
             ),
             .init(
-                title: "timeout / outputBudget",
-                subtitle: "KMP modelCouncil 真实种子值，只读展示。",
+                title: "超时与输出长度",
+                subtitle: "单个席位的等待时间和输出长度限制。",
                 value: "席位超时 \(mc.seatTimeoutMs / 1000)s · 输出预算 \(mc.outputBudgetChars) 字",
                 color: AmberTheme.foreground2
             ),
@@ -76,7 +76,6 @@ struct CouncilSettingsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
-                        masterSection
                         runtimeSection
                         rolePresetSection
                         seatDraftSection
@@ -114,7 +113,7 @@ struct CouncilSettingsView: View {
     }
 
     private var intro: some View {
-        Text("以下字段来自 KMP Settings.agentRuntime.modelCouncil 真实种子值（只读展示）。席位编辑保存到 UserDefaults，重启后保留。")
+        Text("管理模型议会的默认限制和自定义席位。内置席位不可直接修改，自定义席位会保存在本机。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -124,26 +123,9 @@ struct CouncilSettingsView: View {
             .padding(.bottom, 16)
     }
 
-    private var masterSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行状态")
-            AmberFormGroup {
-                CouncilSettingsStatusRow(
-                    row: .init(
-                        title: "iOS 模型议会",
-                        subtitle: "ChatViewModel 已注入 model_council_run；IosCouncilFactory 可构造 Manager 并验证调用链。",
-                        value: "Chat 链路已接",
-                        color: AmberTheme.accentAmber
-                    )
-                )
-            }
-            CouncilFootnote(text: "议会席位只做纯文本生成，不继承工具或完整聊天记录。配置 API Key 时可走真实 OpenAI-compatible provider；无 Key 时只使用诚实 stub 验证调用链。")
-        }
-    }
-
     private var runtimeSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "设置字段")
+            AmberSectionLabel(text: "运行设置")
             AmberFormGroup {
                 ForEach(Array(runtimeRows.enumerated()), id: \.element.id) { index, row in
                     CouncilSettingsStatusRow(row: row)
@@ -166,13 +148,13 @@ struct CouncilSettingsView: View {
                     }
                 }
             }
-            CouncilFootnote(text: "这些预设是真实 Android/KMP 数据模型证据；iOS 当前不会把预设选择写入 defaultSeats。")
+            CouncilFootnote(text: "内置预设用于快速启动议会；需要调整成员时请添加自定义席位。")
         }
     }
 
     private var seatDraftSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "自定义席位（UserDefaults · 可读写）")
+            AmberSectionLabel(text: "自定义席位")
             AmberFormGroup {
                 let seats = sharedSettings.savedCouncilSeats
                 if seats.isEmpty {
@@ -203,7 +185,7 @@ struct CouncilSettingsView: View {
                 }.frame(minHeight: 56).padding(.horizontal, 14).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            CouncilFootnote(text: "自定义席位保存到 UserDefaults，重启后保留。KMP seed 席位不可编辑。")
+            CouncilFootnote(text: "自定义席位会保存在本机，重启后仍然保留。")
         }
     }
 

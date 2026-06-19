@@ -1373,7 +1373,7 @@ struct IOSCapabilityRegistry {
             id: "android.manage_all_files",
             title: "All files access",
             toolNames: ["external_file_list", "external_file_read", "external_file_write", "external_file_delete"],
-            reason: "iOS requires user-selected documents, providers, or exported copies; it does not expose Android-style all-files access."
+            reason: "需要用户选择文件或导出副本后才能访问。"
         ),
         unsupported(
             id: "android.terminal",

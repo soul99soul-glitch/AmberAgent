@@ -229,9 +229,9 @@ struct WebMountView: View {
                 ScrollView {
                     VStack(spacing: 14) {
                         AmberFormGroup {
-                            WebMountTextFieldRow(title: "Name", text: $addName, placeholder: "Example")
+                            WebMountTextFieldRow(title: "名称", text: $addName, placeholder: "示例")
                             WebMountDivider()
-                            WebMountTextFieldRow(title: "URL", text: $addURL, placeholder: "https://example.com")
+                            WebMountTextFieldRow(title: "网址", text: $addURL, placeholder: "https://example.com")
                             WebMountDivider()
                             WebMountToggleRow(
                                 title: "Needs login",
@@ -242,7 +242,7 @@ struct WebMountView: View {
                             )
                             if addNeedsLogin {
                                 WebMountDivider()
-                                WebMountTextFieldRow(title: "Cookie hint", text: $addCookieName, placeholder: "optional")
+                                WebMountTextFieldRow(title: "Cookie 提示", text: $addCookieName, placeholder: "可选")
                             }
                         }
 
@@ -434,7 +434,7 @@ struct WebMountSiteView: View {
 
     private var webViewSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "WKWebView")
+            AmberSectionLabel(text: "网页")
             WebMountRuntimeWebView(runtime: runtime)
                 .frame(height: 420)
                 .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous))
@@ -448,20 +448,20 @@ struct WebMountSiteView: View {
 
     private var bridgeSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Bridge")
+            AmberSectionLabel(text: "页面内容")
             AmberFormGroup {
                 WebMountInfoRow(
-                    title: "Read-only bridge",
-                    subtitle: "state / extract / get only; arbitrary eval is not exposed",
+                    title: "安全读取",
+                    subtitle: "可读取页面状态、正文和指定元素，不执行任意脚本",
                     systemImage: "link",
                     tint: AmberTheme.accentCyan,
-                    trailing: "restricted"
+                    trailing: "受限"
                 )
                 WebMountDivider()
                 HStack(spacing: 8) {
-                    Button("State") { Task { await readState() } }
+                    Button("状态") { Task { await readState() } }
                         .buttonStyle(.bordered)
-                    Button("Extract") { Task { await extractReadable() } }
+                    Button("提取正文") { Task { await extractReadable() } }
                         .buttonStyle(.bordered)
                     Spacer()
                 }
@@ -477,14 +477,14 @@ struct WebMountSiteView: View {
                     WebMountDivider()
                 }
                 HStack(spacing: 8) {
-                    TextField("selector", text: $getSelector)
+                    TextField("选择器", text: $getSelector)
                         .font(.system(size: 13, design: .monospaced))
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
                         .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
                         .autocorrectionDisabled()
-                    Button("Get") { Task { await getElement() } }
+                    Button("读取") { Task { await getElement() } }
                         .buttonStyle(.bordered)
                 }
                 .padding(.horizontal, 14)

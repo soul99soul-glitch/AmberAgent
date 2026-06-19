@@ -76,7 +76,7 @@ struct RuntimeEnvironmentView: View {
     }
 
     private var intro: some View {
-        Text("iOS 上 Agent 的终端能力以远程 SSH 为主：在你的远程机器上执行单条命令。本地工具仅做轻量验证。当前 MVP 仅支持密码认证、单条 exec 命令，不支持交互式 shell / PTY / 私钥 / 文件同步。")
+        Text("终端任务会通过远程 SSH 在你的机器上执行单条命令。当前支持密码认证和命令执行，交互式 shell、私钥和文件同步暂不开放。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(3)
@@ -201,7 +201,7 @@ struct RuntimeEnvironmentView: View {
             }
             .padding(.top, 10)
 
-            Text("当前 MVP 仅支持密码认证。密码存入 Keychain；留空保存不会覆盖已存密码。新建 Profile 会清空表单并生成新的 profile id，避免误覆盖。")
+            Text("密码会保存在本机钥匙串。留空保存不会覆盖已存密码；新建 Profile 会清空表单，避免误覆盖。")
                 .font(.caption)
                 .foregroundStyle(AmberTheme.muted2)
                 .lineSpacing(2)
@@ -249,7 +249,7 @@ struct RuntimeEnvironmentView: View {
                 RuntimeMatrixCard(capability: capability)
                     .padding(.bottom, 8)
             }
-            Text("能力边界说明：Remote SSH 当前为推荐的 Stable 运行时，仅密码认证、仅单条 exec 命令，MVP 不含 PTY、安装器与文件同步。")
+            Text("当前推荐使用 Remote SSH。它支持密码认证和单条命令执行；交互式终端、安装器与文件同步暂不开放。")
                 .font(.caption)
                 .foregroundStyle(AmberTheme.muted2)
                 .lineSpacing(2)

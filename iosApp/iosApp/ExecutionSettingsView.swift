@@ -16,10 +16,8 @@ struct ExecutionSettingsView: View {
                 VStack(spacing: 0) {
                     header
                     intro
-                    operationPreviewSection
                     runSection
                     liveActivitySection
-                    stabilitySection
                 }
                 .padding(.bottom, 36)
             }
@@ -52,7 +50,7 @@ struct ExecutionSettingsView: View {
     }
 
     private var intro: some View {
-        Text("这里仅保留已经被 iOS Chat 运行链消费的实时活动开关；其他 Android/KMP 执行字段先作为只读缺口映射展示。")
+        Text("管理聊天生成时的执行展示、工具调用和实时活动。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -61,53 +59,15 @@ struct ExecutionSettingsView: View {
             .padding(.bottom, 3)
     }
 
-    private var operationPreviewSection: some View {
-        let rt = sharedSettings.agentRuntime
-        return VStack(spacing: 0) {
-            AmberSectionLabel(text: "执行字段（KMP 默认值 · 只读）")
-            AmberFormGroup {
-                ExecutionStatusRow(
-                    systemImage: "rectangle.stack",
-                    title: "操作预览模式",
-                    subtitle: "KMP agentRuntime.operationPreviewMode；iOS 工具运行时间线 UI 尚未消费",
-                    value: rt.operationPreviewMode.name
-                )
-
-                ExecutionDivider(leading: 54)
-
-                ExecutionStatusRow(
-                    systemImage: "sparkles",
-                    title: "生成式 UI",
-                    subtitle: "KMP agentRuntime.generativeUi；iOS Chat widget 渲染链尚未消费",
-                    value: rt.generativeUi.enabled ? "启用" : "关闭"
-                )
-
-                ExecutionDivider(leading: 54)
-
-                ExecutionStatusRow(
-                    systemImage: "arrow.clockwise",
-                    title: "工具循环上限",
-                    subtitle: "KMP agentRuntime.maxToolLoopSteps；iOS 工具循环调度器未消费",
-                    value: "\(rt.maxToolLoopSteps)"
-                )
-            }
-        }
-    }
-
     private var runSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行链路")
+            AmberSectionLabel(text: "工具执行")
             AmberFormGroup {
-                // [Slice 3] 工具执行已接：ChatViewModel.makeTextGenerationParams 注入
-                // mcp_call/subagent_dispatch/model_council_run 工具声明，onComplete 检测
-                // pending 调用后 dispatch（IOSMcpManager.callTool/SubAgentRunner.run/
-                // CouncilRunner.run），结果回填并 resume stream。逻辑闭环；真链路运行时
-                // 验证需 API key（编译级+逻辑已就绪）。
                 ExecutionStatusRow(
                     systemImage: "terminal",
-                    title: "工具执行",
-                    subtitle: "已注入 search/scrape、memory_tool、WebMount、mcp_call、subagent_dispatch、model_council_run；onComplete dispatch + resume。真链路验证需 API key",
-                    value: "已接(逻辑)",
+                    title: "可用工具",
+                    subtitle: "聊天可以使用搜索、记忆、网页、MCP、模型议会和子代理工具。",
+                    value: "可用",
                     valueColor: AmberTheme.accentGreen
                 )
 
@@ -116,8 +76,8 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "checkmark.shield",
                     title: "批准策略",
-                    subtitle: "selected-file read、memory_tool 写入与 WebMount 使用 iOS 本地 gate；记忆读/list 自动，写入需前台批准",
-                    value: "已接",
+                    subtitle: "涉及文件、记忆写入和网页会话的动作会在前台请求确认。",
+                    value: "可用",
                     valueColor: AmberTheme.accentGreen
                 )
             }
@@ -131,7 +91,7 @@ struct ExecutionSettingsView: View {
                 ExecutionToggleRow(
                     systemImage: "capsule",
                     title: "灵动岛实时活动",
-                    subtitle: "Chat 生成与 selected-file 读取会读取这个开关",
+                    subtitle: "生成中在系统实时活动里显示简短状态。",
                     isOn: liveActivity
                 ) {
                     liveActivity.toggle()
@@ -147,7 +107,7 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "lock",
                     title: "隐藏敏感内容",
-                    subtitle: "AgentActivityPresentation 只允许白名单状态文案；没有正文暴露开关",
+                    subtitle: "实时活动只显示概览，不显示完整聊天正文。",
                     value: "默认脱敏",
                     valueColor: AmberTheme.accentGreen
                 )
@@ -157,38 +117,6 @@ struct ExecutionSettingsView: View {
         }
     }
 
-    private var stabilitySection: some View {
-        let rt = sharedSettings.agentRuntime
-        return VStack(spacing: 0) {
-            AmberSectionLabel(text: "生成稳定性（KMP 默认值 · 只读）")
-            AmberFormGroup {
-                ExecutionStatusRow(
-                    systemImage: "clock.arrow.circlepath",
-                    title: "自动重试生成",
-                    subtitle: "KMP agentRuntime.generationRetry；iOS provider streaming 未消费重试策略",
-                    value: rt.generationRetry.enabled ? "启用" : "关闭"
-                )
-
-                ExecutionDivider(leading: 54)
-
-                ExecutionStatusRow(
-                    systemImage: "arrow.triangle.2.circlepath",
-                    title: "重试上限",
-                    subtitle: "KMP generationRetry.maxRetries；iOS GenerationHandler 尚未消费",
-                    value: "\(rt.generationRetry.maxRetries)"
-                )
-
-                ExecutionDivider(leading: 54)
-
-                ExecutionStatusRow(
-                    systemImage: "bell",
-                    title: "后台生成保活",
-                    subtitle: "KMP keepGenerationAliveInBackground；iOS 前台通知保活尚未实现",
-                    value: rt.keepGenerationAliveInBackground ? "启用" : "关闭"
-                )
-            }
-        }
-    }
 }
 
 private struct ExecutionStatusRow: View {

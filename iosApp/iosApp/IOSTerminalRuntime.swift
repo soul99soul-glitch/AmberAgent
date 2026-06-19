@@ -57,7 +57,7 @@ enum IOSTerminalRuntimeCapabilities {
             appStoreSafeByDefault: true,
             supportsExternalCLIByDefault: false,
             licenseClass: .permissive,
-            summary: "Recommended remote exec runner. Password auth only in this MVP."
+            summary: "推荐的远程命令运行环境。当前支持密码认证。"
         ),
         IOSTerminalRuntimeCapability(
             runtime: .localIOSTools,

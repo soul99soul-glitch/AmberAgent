@@ -27,7 +27,7 @@ struct ConversationStorageView: View {
     private var usageItems: [StorageUsageItem] {
         [
             .init(title: "助手条目", detail: "\(sharedSettings.snapshot.assistants.count) 个", color: AmberTheme.accent),
-            .init(title: "Provider 模板", detail: "\(sharedSettings.snapshot.providers.count) 个", color: AmberTheme.accentAmber),
+            .init(title: "服务商模板", detail: "\(sharedSettings.snapshot.providers.count) 个", color: AmberTheme.accentAmber),
             .init(title: "快捷消息", detail: "\(sharedSettings.snapshot.quickMessages.count) 条", color: AmberTheme.accentCyan),
             .init(title: "对话文件", detail: "\(conversationCount) 个", color: AmberTheme.accentGreen)
         ]
@@ -103,7 +103,7 @@ struct ConversationStorageView: View {
     }
 
     private var intro: some View {
-        Text("对话通过 IOSConversationStore 真实持久化在 Documents/conversations/（index.json + 每个会话一个 {id}.json）。本页显示真实文件数与磁盘占用，并支持按时间清理和删除全部。v1 无独立附件缓存。")
+        Text("查看本机对话占用，并清理过期或不再需要的会话。删除操作会先要求确认。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -143,7 +143,7 @@ struct ConversationStorageView: View {
                 StorageActionRow(
                     systemImage: "arrow.clockwise",
                     title: "清除缓存",
-                    subtitle: "v1 无独立附件缓存，无需清理",
+                    subtitle: "当前没有可单独清理的附件缓存",
                     trailing: "无需清理"
                 ) {
                     pendingAlert = .cache
@@ -156,7 +156,7 @@ struct ConversationStorageView: View {
                 StorageActionRow(
                     systemImage: "calendar.badge.clock",
                     title: "清理 30 天前的对话",
-                    subtitle: "删除 updateAt 早于 30 天的非置顶会话（\(staleConversationTargetCount) 个候选）",
+                    subtitle: "删除 30 天前且未置顶的会话（\(staleConversationTargetCount) 个候选）",
                     trailing: isProcessing ? "处理中…" : nil
                 ) {
                     requestTimeBasedCleanup()
@@ -199,7 +199,7 @@ struct ConversationStorageView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 7)
             } else {
-                StorageNote("删除全部会清空 Documents/conversations/ 下所有会话文件；不可恢复，删除前会二次确认。")
+                StorageNote("删除全部会移除本机保存的所有对话；不可恢复，删除前会二次确认。")
             }
         }
     }
@@ -451,7 +451,7 @@ private enum StorageAlert: Identifiable {
     var message: String {
         switch self {
         case .cache:
-            "v1 无独立附件缓存（图片/文档以 base64 或本地引用存在消息体里），无需清理。"
+            "当前没有单独的附件缓存目录，因此无需清理。"
         case .noStaleConversations:
             "没有早于 30 天的非置顶会话。"
         }
@@ -486,9 +486,9 @@ private enum StorageConfirmation: Identifiable {
     var message: String {
         switch self {
         case .timeCleanup:
-            return "将删除 updateAt 早于 30 天的非置顶会话。此操作不可恢复。"
+            return "将删除 30 天前且未置顶的会话。此操作不可恢复。"
         case .deleteAll:
-            return "将清空 Documents/conversations/ 下所有会话文件。此操作不可恢复。"
+            return "将删除本机保存的所有对话。此操作不可恢复。"
         }
     }
 

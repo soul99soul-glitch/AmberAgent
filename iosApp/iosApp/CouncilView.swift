@@ -8,36 +8,6 @@ struct CouncilView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var runner = CouncilRunner()
 
-    private let evidenceRows: [CouncilCapabilityEvidence] = [
-        .init(
-            title: "ModelCouncilRuntimeSetting",
-            subtitle: "Android/KMP 通过 Settings.agentRuntime.modelCouncil 保存 enabled、席位、轮数、超时和输出预算。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "ModelCouncilManager",
-            subtitle: "Android/KMP 可启动、读取、等待、取消议会 run，并记录 transcript 与 AgentTask 状态。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "model_council_* 工具",
-            subtitle: "ChatService 在 modelCouncil.enabled 时注入 start/read/wait/cancel/report 工具。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "iOS 运行桥",
-            // [Slice 1] 标记已升级为"已接"：CouncilRunner.swift:38(IosCouncilFactory.createWithRealProvider)
-            // 在有 API key 时走真 OpenAI-compatible 推理；CouncilRunner.swift:60(startInput)+:62(m.start)
-            // 构成完整 start 调用链。无 key 时回退 stub（仅验证调用链）。
-            subtitle: "CouncilRunner 通过 IosCouncilFactory.createWithRealProvider 构造 ModelCouncilManager 并执行 start()。有 API key 时真推理；无 key 时 stub。",
-            value: "已接",
-            color: AmberTheme.accentGreen
-        )
-    ]
-
     init(sharedSettings: IOSSharedSettingsStore) {
         self.sharedSettings = sharedSettings
     }
@@ -54,8 +24,6 @@ struct CouncilView: View {
                         intro
                         presetConfigSection
                         rolePresetsSection
-                        evidenceSection
-                        iOSStatusSection
                         runnerSection
                         draftActionSection
                     }
@@ -81,7 +49,7 @@ struct CouncilView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 运行链已通（带 key 真推理；无 key stub）")
+                Text("多模型协作评审")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -100,7 +68,7 @@ struct CouncilView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 通过下方\"执行（真实调用链）\"区可手动启动议会，且聊天里模型可调用 model_council_run 工具触发（Slice 3 已接：onComplete dispatch → CouncilRunner.run → resume，逻辑闭环；真链路需 API key）。席位增删已持久化。实时 liveText/transcript 快照来源仍缺。")
+        Text("模型议会会让多个席位从不同角度评审同一个问题。你可以手动启动一次，也可以管理自定义席位。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -110,13 +78,10 @@ struct CouncilView: View {
             .padding(.bottom, 16)
     }
 
-    /// Read-only view of the REAL seeded ModelCouncil runtime defaults from
-    /// `IOSSharedSettingsStore.agentRuntime.modelCouncil`. Runtime execution is
-    /// handled by CouncilRunner; this section stays read-only for global settings.
     private var presetConfigSection: some View {
         let c = sharedSettings.agentRuntime.modelCouncil
         return VStack(spacing: 0) {
-            AmberSectionLabel(text: "KMP 默认议会配置（只读）")
+            AmberSectionLabel(text: "默认运行设置")
             AmberFormGroup {
                 CouncilPresetKVRow(title: "启用议会", value: c.enabled ? "默认开" : "默认关")
                 CouncilStatusDivider()
@@ -133,16 +98,11 @@ struct CouncilView: View {
         }
     }
 
-    /// Real KMP council role presets (coreSeats + lensPresets), read live from
-    /// `ModelCouncilRolePresets.shared` (already exported, pure commonMain data).
-    /// Shows the actual default council roles — supporters/opponents/judge + lens
-    /// roles — instead of prose descriptions. Read-only; execution can use these
-    /// roles through CouncilRunner, while editing built-in presets is not exposed.
     private var rolePresetsSection: some View {
         let coreSeats = ModelCouncilRolePresets.shared.coreSeats
         let lensPresets = ModelCouncilRolePresets.shared.lensPresets
         return VStack(spacing: 0) {
-            AmberSectionLabel(text: "真实议会角色预设（KMP · 只读）")
+            AmberSectionLabel(text: "内置席位")
 
             AmberFormGroup {
                 ForEach(Array(coreSeats.enumerated()), id: \.offset) { index, preset in
@@ -165,7 +125,7 @@ struct CouncilView: View {
                 }
             }
 
-            Text("这些角色来自 Android/KMP ModelCouncilRolePresets 真实默认预设（只读展示）。iOS 已可通过下方按钮或聊天工具触发议会运行；修改预设与实时 transcript 展示仍未接。")
+            Text("内置席位不可直接修改；需要自己的角色时，可在成员设置里添加自定义席位。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
                 .lineSpacing(2)
@@ -176,61 +136,9 @@ struct CouncilView: View {
         }
     }
 
-    private var evidenceSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "能力证据")
-            AmberFormGroup {
-                ForEach(Array(evidenceRows.enumerated()), id: \.element.id) { index, row in
-                    CouncilStatusRow(row: row)
-                    if index < evidenceRows.count - 1 {
-                        CouncilStatusDivider()
-                    }
-                }
-            }
-        }
-    }
-
-    private var iOSStatusSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "iOS 当前处理")
-            AmberFormGroup {
-                CouncilStatusRow(
-                    row: .init(
-                        // [Slice 3] 已接：ChatViewModel.makeTextGenerationParams 注入
-                        // model_council_run 工具，onComplete dispatch → CouncilRunner.run
-                        // → resume stream。逻辑闭环；真链路需 API key。
-                        title: "从聊天触发议会",
-                        subtitle: "已接：聊天里模型可调用 model_council_run 工具，经 CouncilRunner.run 触发议会并 resume（逻辑闭环；真链路需 API key）。手动按钮仍可用。",
-                        value: "已接(逻辑)",
-                        color: AmberTheme.accentGreen
-                    )
-                )
-                CouncilStatusDivider()
-                CouncilStatusRow(
-                    row: .init(
-                        title: "实时席位 / 转录",
-                        subtitle: "手动 run 只能读 start() 返回的 runId/status；聊天里实时 liveTextFlow/transcriptPath 快照来源仍缺。",
-                        value: "缺实时",
-                        color: AmberTheme.accentAmber
-                    )
-                )
-                CouncilStatusDivider()
-                CouncilStatusRow(
-                    row: .init(
-                        title: "成员配置",
-                        subtitle: "席位编辑页只保存自定义席位的名称、角色和模型 ID，并在重启后保留。",
-                        value: "席位已接",
-                        color: AmberTheme.accentGreen
-                    )
-                )
-            }
-        }
-    }
-    /// Council execution entry — calls CouncilRunner.runTestCycle() to start
-    /// a council via IosCouncilFactory. Real provider if API key configured.
     private var runnerSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "执行（真实调用链）")
+            AmberSectionLabel(text: "启动")
             AmberFormGroup {
                 VStack(alignment: .leading, spacing: 8) {
                     if runner.isRunning {
@@ -272,7 +180,7 @@ struct CouncilView: View {
                             Text("成员设置")
                                 .font(.body.weight(.medium))
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("管理自定义席位；只编辑会持久化的名称、角色和模型 ID。")
+                            Text("添加或删除自定义席位，调整每个席位使用的模型。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -339,7 +247,6 @@ private struct CouncilStatusDivider: View {
     }
 }
 
-/// Read-only key/value row for a real seeded ModelCouncil setting.
 private struct CouncilPresetKVRow: View {
     let title: String
     let value: String
@@ -361,7 +268,6 @@ private struct CouncilPresetKVRow: View {
     }
 }
 
-/// Read-only row for a real KMP council role preset (coreSeat or lens).
 private struct CouncilRolePresetRow: View {
     let name: String
     let id: String
@@ -390,9 +296,6 @@ private struct CouncilRolePresetRow: View {
                 .foregroundStyle(AmberTheme.muted)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("id: \(id)")
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundStyle(AmberTheme.muted2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)

@@ -74,7 +74,7 @@ final class IOSSearchExecutorTests: XCTestCase {
         )
 
         XCTAssertEqual(transport.requests.first?.url?.host, "lite.duckduckgo.com")
-        XCTAssertTrue(output.contains("Source: DuckDuckGo Lite"))
+        XCTAssertTrue(output.contains("来源：DuckDuckGo Lite"))
         XCTAssertTrue(output.contains("https://example.com/one"))
     }
 
@@ -100,7 +100,7 @@ final class IOSSearchExecutorTests: XCTestCase {
         )
 
         XCTAssertEqual(transport.requests.first?.url?.host, "www.bing.com")
-        XCTAssertTrue(output.contains("Source: Bing HTML"))
+        XCTAssertTrue(output.contains("来源：Bing HTML"))
         XCTAssertTrue(output.contains("Bing snippet with markup."))
     }
 

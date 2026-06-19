@@ -135,7 +135,7 @@ struct ProvidersView: View {
     // and a Keychain key already exists for that provider id.
     private var savedProvidersSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "Provider 模板与密钥状态")
+            AmberSectionLabel(text: "服务商模板")
 
             AmberFormGroup {
                 ForEach(Array(providerRegistry.providers.enumerated()), id: \.offset) { index, provider in
@@ -155,7 +155,7 @@ struct ProvidersView: View {
                 }
             }
 
-            ProviderDraftNote("这些行来自 Android/KMP DEFAULT_PROVIDERS，并叠加本机 Keychain 是否已有该 provider id 的密钥。只有当前 iOS 聊天链路能表达、且已有 Key 的 OpenAI-compatible 模板可以设为当前；列表不含明文 API Key。Gemini、xAI、MiMo 等类型仍等待完整 ProviderSetting bridge。在服务商详情页可编辑某个 activatable 模板的 API Key，只写入该 provider 的 Keychain；保存后即可「设为当前」。")
+            ProviderDraftNote("保存 API Key 后，可把支持的模板设为当前聊天服务商。暂不支持的模板会保持灰色。")
         }
         // hasStoredKey/canSelect read the Keychain via a static helper (not an
         // observable property), so tying this section's identity to keyRevision
@@ -649,9 +649,9 @@ private enum ProviderAddAlert: Identifiable {
 
     var title: String {
         switch self {
-        case .unsupportedProtocol: "协议暂未桥接"
-        case .unsupportedResponseAPI: "Response API 暂未接入"
-        case .unsupportedPath: "路径暂未接入"
+        case .unsupportedProtocol: "暂不支持这个协议"
+        case .unsupportedResponseAPI: "暂不支持 Response API"
+        case .unsupportedPath: "暂不支持自定义路径"
         case .invalidBaseURL: "API 地址无效"
         case .activationFailed: "服务商未激活"
         }
@@ -660,15 +660,15 @@ private enum ProviderAddAlert: Identifiable {
     var message: String {
         switch self {
         case .unsupportedProtocol(let name):
-            "\(name) 还没有进入 iOS ProviderSetting 执行桥。当前只能保存 OpenAI-compatible 服务商。"
+            "\(name) 当前不能直接用于聊天。请先添加 OpenAI 兼容服务商。"
         case .unsupportedResponseAPI:
-            "当前 ChatViewModel 使用 Chat Completions 链路，不能把 Response API 配置伪装成可用。"
+            "当前版本只支持 Chat Completions 路径。"
         case .unsupportedPath:
-            "当前 iOS 请求构造固定使用 /chat/completions。自定义路径需要先接入 Provider bridge。"
+            "当前版本使用默认 /chat/completions 路径。"
         case .invalidBaseURL:
             "请填写包含 http 或 https scheme 且带 host 的 base URL，例如 https://api.openai.com/v1。"
         case .activationFailed:
-            "API Key 没有成功写入本机 Keychain，当前聊天服务商未切换。请重新保存一次。"
+            "API Key 没有成功保存到本机钥匙串，当前聊天服务商未切换。请重新保存一次。"
         }
     }
 }

@@ -969,8 +969,8 @@ struct SettingsHomeView: View {
 
     private var runtimeRows: [SettingsHomeRow] {
         [
-            .init(title: "核心记忆", subtitle: "CRUD + 文件持久化已接 · recall/worker 缺口", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
-            .init(title: "技能", subtitle: "扫描 + MCP 已接 · 详情只读", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
+            .init(title: "核心记忆", subtitle: "保存重要偏好与长期上下文", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
+            .init(title: "技能", subtitle: "管理本机技能与 MCP 工具", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
             .init(title: "执行与任务", subtitle: executionSummary, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
             .init(title: "工具权限", subtitle: "系统权限 · 批准策略", value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions),
             .init(title: "运行环境", subtitle: runtimeSummary, value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentIndigo, route: .sandbox)
@@ -981,25 +981,25 @@ struct SettingsHomeView: View {
         [
             .init(title: "服务商", subtitle: nil, value: "OpenAI-compatible", systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
             .init(title: "默认模型", subtitle: nil, value: settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
-            .init(title: "搜索服务", subtitle: nil, value: "真实默认只读", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
+            .init(title: "搜索服务", subtitle: nil, value: "Bing / DuckDuckGo", systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
             .init(title: "语音 TTS", subtitle: nil, value: "系统 TTS", systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
         ]
     }
 
     private var dataRows: [SettingsHomeRow] {
         [
-            .init(title: "同步与备份", subtitle: "本机/WebDAV 闭环已接 · Google/S3 缺配置", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
-            .init(title: "对话存储", subtitle: nil, value: "已接", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
+            .init(title: "同步与备份", subtitle: "导出备份、本机文件夹与 WebDAV", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
+            .init(title: "对话存储", subtitle: nil, value: "本机保存", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
         ]
     }
 
     private var experimentalRows: [SettingsHomeRow] {
         [
-            .init(title: "今日看板", subtitle: "内容 + 本地采集已接 · 后台/飞书缺口", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
-            .init(title: "模型议会", subtitle: "手动运行 + chat 工具已接 · liveText 缺口", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
-            .init(title: "SubAgent", subtitle: "运行 + chat 工具已接 · 总开关缺口", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
-            .init(title: "小应用", subtitle: "本地仓库 + Runner + grant bridge 已接", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
-            .init(title: "WebMount", subtitle: "Registry + WKWebView + wm tools 已接", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
+            .init(title: "今日看板", subtitle: "手动生成今日摘要", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
+            .init(title: "模型议会", subtitle: "多席位协作评审", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
+            .init(title: "子代理", subtitle: "按角色分工处理任务", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
+            .init(title: "小应用", subtitle: "管理和运行本地小应用", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
+            .init(title: "WebMount", subtitle: "网页浏览与工具调用", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
         ]
     }
 
@@ -1029,7 +1029,7 @@ struct SettingsHomeView: View {
     }
 
     private var executionSummary: String {
-        "灵动岛 \(executionLiveActivity ? "开" : "关") · 执行字段只读"
+        "灵动岛 \(executionLiveActivity ? "开" : "关") · 工具执行"
     }
 
     private var runtimeSummary: String {

@@ -102,7 +102,7 @@ final class IOSMiniAppRepositoryTests: XCTestCase {
         let app = try repo.saveGenerated(output(html: html("runner")))
 
         XCTAssertEqual(MiniAppRunnerView.initialHtml(appId: app.id, repository: repo), html("runner"))
-        XCTAssertTrue(MiniAppRunnerView.initialHtml(appId: "missing", repository: repo).contains("MiniApp 未找到"))
+        XCTAssertTrue(MiniAppRunnerView.initialHtml(appId: "missing", repository: repo).contains("小应用未找到"))
     }
 
     private func tempRoot() -> URL {

@@ -6,50 +6,23 @@ struct MemoryOverviewView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
 
-    private let memoryEvidence: [MemoryCapabilityEvidence] = [
-        .init(
-            title: "MemoryRepository",
-            subtitle: "Android/KMP 通过 MemoryDAO、MemoryCandidateDAO、MemoryEventDAO 读写真正记忆库。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "记忆召回",
-            subtitle: "MemoryRecallStore 按 enableCoreMemory / enableShortTermMemory / enableLongTermMemory 选择记录并构造提示词。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "memory_tool",
-            subtitle: "ChatService 可创建、编辑、删除核心 / 短期 / 长期记忆。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "iOS 记忆桥",
-            subtitle: "IosMemoryFactory + IOSMemoryPersistence 已读写本地 JSON；ChatViewModel 已按 memory 开关注入提示词并执行 memory_tool。",
-            value: "部分已接",
-            color: AmberTheme.accentAmber
-        )
-    ]
-
     private let settingsRows: [MemoryCapabilityEvidence] = [
         .init(
             title: "核心 / 短期 / 长期记忆开关",
-            subtitle: "iOS 已读取 KMP agentRuntime 开关，并在 ChatViewModel 注入记忆前按 scope 过滤；本页仍不提供写回。",
-            value: "读取已接",
+            subtitle: "聊天会按记忆范围选择可用条目。",
+            value: "可用",
             color: AmberTheme.accentGreen
         ),
         .init(
             title: "最近会话参考 / 时间提醒",
-            subtitle: "Android Settings.agentRuntime 有 enableRecentChatsReference 和 enableTimeReminder。",
-            value: "只读缺口",
+            subtitle: "还没有作为独立设置开放。",
+            value: "未开放",
             color: AmberTheme.accentAmber
         ),
         .init(
-            title: "选择性召回 / 自动整理 / 上下文压缩",
-            subtitle: "Android 有 memoryRecall、memoryWorker、contextCompaction；iOS 当前没有设置桥。",
-            value: "缺设置桥",
+            title: "自动整理 / 上下文压缩",
+            subtitle: "自动整理、候选审核和上下文压缩还没有开放。",
+            value: "未开放",
             color: AmberTheme.accentAmber
         )
     ]
@@ -63,8 +36,6 @@ struct MemoryOverviewView: View {
                     header
                     intro
                     presetConfigSection
-                    soulSection
-                    evidenceSection
                     configurationSection
                     recordsSection
                 }
@@ -100,7 +71,7 @@ struct MemoryOverviewView: View {
     }
 
     private var intro: some View {
-        Text("iOS 已接本地记忆增删、Documents 持久化、ChatViewModel 注入过滤和 memory_tool create/edit/delete/list；自动整理、最近会话参考和时间提醒仍未接。")
+        Text("把重要偏好、事实或上下文保存为记忆。聊天时会自动参考已启用范围内的记忆。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -109,14 +80,10 @@ struct MemoryOverviewView: View {
             .padding(.bottom, 3)
     }
 
-    /// Read-only view of the REAL seeded memory settings from
-    /// `IOSSharedSettingsStore.agentRuntime` (enableCoreMemory / short / long /
-    /// recentChats / timeReminder). ChatViewModel consumes the three memory
-    /// scope switches; this page remains read-only for settings writes.
     private var presetConfigSection: some View {
         let rt = sharedSettings.agentRuntime
         return VStack(spacing: 0) {
-            AmberSectionLabel(text: "KMP 默认记忆配置（只读）")
+            AmberSectionLabel(text: "记忆开关")
             AmberFormGroup {
                 MemoryPresetRow(title: "核心记忆", isOn: rt.enableCoreMemory)
                 MemoryDivider()
@@ -131,68 +98,9 @@ struct MemoryOverviewView: View {
         }
     }
 
-    private var soulSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "agents.md")
-
-            AmberFormGroup {
-                VStack(alignment: .leading, spacing: 11) {
-                    HStack(spacing: 9) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(AmberTheme.accent)
-                            .frame(width: 30, height: 30)
-                            .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                        Text("agents.md")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(AmberTheme.foreground)
-
-                        Text("iOS 缺桥")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(AmberTheme.accentAmber)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(AmberTheme.accentAmber.opacity(0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-                        Spacer(minLength: 8)
-                    }
-
-                    Text("Android/KMP Settings.agentRuntime.agentSoulMarkdown 会通过 GenerationPrompts 注入；iOS 尚未接入 ChatViewModel 请求链，因此暂不提供本地编辑入口。")
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.foreground2)
-                        .lineSpacing(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(11)
-                        .background(AmberTheme.background, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
-                                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-                        }
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private var evidenceSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "能力证据")
-            AmberFormGroup {
-                ForEach(Array(memoryEvidence.enumerated()), id: \.element.id) { index, row in
-                    MemoryStatusRow(row: row)
-                    if index < memoryEvidence.count - 1 {
-                        MemoryDivider()
-                    }
-                }
-            }
-        }
-    }
-
     private var configurationSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "记忆配置")
+            AmberSectionLabel(text: "更多记忆选项")
             AmberFormGroup {
                 ForEach(Array(settingsRows.enumerated()), id: \.element.id) { index, row in
                     MemoryStatusRow(row: row)
@@ -202,7 +110,7 @@ struct MemoryOverviewView: View {
                 }
             }
 
-            MemoryNote("记忆 scope 开关已被聊天注入链消费；其它行仍是只读缺口映射，不写本地假开关。")
+            MemoryNote("暂未开放的选项不会显示假开关；开放后会变成可操作设置。")
         }
     }
 
@@ -213,8 +121,8 @@ struct MemoryOverviewView: View {
                 MemoryStatusRow(
                     row: .init(
                         title: "核心 / 短期 / 长期条目",
-                        subtitle: "iOS 通过 IosMemoryFactory 读写，并由 IOSMemoryPersistence 持久化到 Documents/memories/memories.json。",
-                        value: "已接",
+                        subtitle: "可以新增并在聊天中使用，重启后仍然保留。",
+                        value: "可用",
                         color: AmberTheme.accentGreen
                     )
                 )
@@ -222,19 +130,18 @@ struct MemoryOverviewView: View {
                 MemoryStatusRow(
                     row: .init(
                         title: "新增 / 编辑 / 删除",
-                        subtitle: "详情页已支持新增和删除记忆并持久化；逐条编辑内容仍未接。",
-                        value: "增删已接",
+                        subtitle: "当前支持新增和删除；编辑现有条目稍后开放。",
+                        value: "部分可用",
                         color: AmberTheme.accentGreen
                     )
                 )
             }
 
-            MemoryNote("iOS 当前是本地 JSON 记忆库，不是 Android Room；自动整理和候选审核仍是缺口。")
+            MemoryNote("自动整理和候选审核暂未开放。")
         }
     }
 }
 
-/// Read-only toggle row for a real seeded memory setting. Display-only.
 private struct MemoryPresetRow: View {
     let title: String
     let isOn: Bool

@@ -132,7 +132,7 @@ struct SettingsView: View {
             } header: {
                 Text("Terminal Runtime")
             } footer: {
-                Text("Stable builds treat SSH as the full CLI runtime and local iOS tools as lightweight file/script helpers. Mosh and iSH stay behind the experimental gate until license and review requirements are satisfied.")
+                Text("稳定版会优先使用 SSH 作为远程命令运行环境，本机 iOS 工具用于轻量文件和脚本操作。实验功能会在满足审核要求后开放。")
             }
 
             Section {
@@ -149,16 +149,16 @@ struct SettingsView: View {
                 SecureField("Password", text: $sshPasswordDraft)
                     .textInputAutocapitalization(.never)
 
-                Text("Password only in this MVP.")
+                Text("当前仅支持密码认证。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Button("Save SSH Profile") {
+                Button("保存 SSH Profile") {
                     saveSSHProfile()
                 }
 
                 HStack {
-                    Button("New Profile") {
+                    Button("新建 Profile") {
                         resetSSHProfileDraft()
                     }
 

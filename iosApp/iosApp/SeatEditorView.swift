@@ -46,7 +46,7 @@ struct SeatEditorView: View {
             }
             Button("取消", role: .cancel) { }
         } message: {
-            Text("将从快照 agentRuntime.modelCouncil.defaultSeats 与 UserDefaults 删除全部 \(customSeatCount) 个自定义席位。KMP seed 席位不可删除。此操作不可恢复。")
+            Text("将删除全部 \(customSeatCount) 个自定义席位。内置席位不会被删除。此操作不可恢复。")
         }
         .alert("移除结果", isPresented: Binding(
             get: { removeResultMessage != nil },
@@ -102,7 +102,7 @@ struct SeatEditorView: View {
     }
 
     private var noticeSection: some View {
-        SeatEditorFootnote(text: "自定义席位只保存名称、角色和模型 ID，重启后保留；modelId 为 UUID 时同步写入 KMP snapshot.defaultSeats。")
+        SeatEditorFootnote(text: "自定义席位会保存名称、角色和模型，重启后保留。")
             .padding(.bottom, 10)
     }
 
@@ -148,7 +148,7 @@ struct SeatEditorView: View {
                 }
                 .buttonStyle(.plain)
             }
-            SeatEditorFootnote(text: "名称和角色会保存到自定义席位；内置预设席位仍为只读。")
+            SeatEditorFootnote(text: "名称和角色会保存到自定义席位；内置预设席位不可直接修改。")
         }
     }
 
@@ -157,7 +157,7 @@ struct SeatEditorView: View {
             AmberSectionLabel(text: "模型")
             providerRunnerGroup
 
-            SeatEditorFootnote(text: "当前 iOS 自定义席位只保存 provider modelId。external_cli、思考档位和席位 prompt 文件不再展示为可编辑项。")
+            SeatEditorFootnote(text: "当前自定义席位只保存模型选择。")
         }
     }
 
@@ -182,7 +182,7 @@ struct SeatEditorView: View {
 
     private var previewSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已保存席位（UserDefaults · 可读写）")
+            AmberSectionLabel(text: "已保存席位")
             AmberFormGroup {
                 let seats = sharedSettings.savedCouncilSeats
                 if seats.isEmpty {
@@ -215,7 +215,7 @@ struct SeatEditorView: View {
                     Label("保存席位", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
                 }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
             }
-            SeatEditorFootnote(text: "自定义席位保存到 UserDefaults，重启后保留；合法 UUID modelId 会同步到 snapshot。KMP seed 席位（\(sharedSettings.agentRuntime.modelCouncil.defaultSeats.count) 席）仍为只读。")
+            SeatEditorFootnote(text: "自定义席位会保存在本机，重启后仍然保留。内置席位不可删除。")
         }
     }
 

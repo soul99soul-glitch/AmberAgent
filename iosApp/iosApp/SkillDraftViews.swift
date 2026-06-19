@@ -69,7 +69,7 @@ struct SkillAddView: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("填写触发说明和权限边界后，会写入 Documents/skills/ 下的真实 SKILL.md。")
+                    Text("填写触发说明和权限边界后，会创建一个本机技能。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                         .lineSpacing(2)
@@ -89,7 +89,7 @@ struct SkillAddView: View {
             AmberFormGroup {
                 SkillDraftTextFieldRow(title: "技能名称", text: $skillName, placeholder: "skill-name", monospace: true)
                 SkillDraftDivider()
-                SkillDraftMultilineRow(title: "触发说明", text: $triggerText, placeholder: "Use when...")
+                SkillDraftMultilineRow(title: "触发说明", text: $triggerText, placeholder: "说明什么时候使用这个技能")
                 SkillDraftDivider()
                 Menu {
                     ForEach(SkillDraftCategory.allCases) { option in
@@ -112,7 +112,7 @@ struct SkillAddView: View {
             AmberFormGroup {
                 SkillDraftToggleRow(
                     title: "创建后启用",
-                    subtitle: "写入当前 assistant.enabledSkills；关闭后只创建文件，不启用。",
+                    subtitle: "关闭后只创建技能，不立即启用。",
                     isOn: enabled
                 ) {
                     enabled.toggle()
@@ -121,7 +121,7 @@ struct SkillAddView: View {
                 SkillDraftTextFieldRow(title: "允许的工具", text: $allowedTools, placeholder: "留空表示未限制", monospace: true)
             }
 
-            SkillDraftNote("创建会生成 Documents/skills/\(normalizedName.isEmpty ? "skill-name" : normalizedName)/SKILL.md。")
+            SkillDraftNote("创建后可在技能详情里继续编辑或删除。")
         }
     }
 

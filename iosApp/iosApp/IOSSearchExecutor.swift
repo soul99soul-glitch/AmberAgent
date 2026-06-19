@@ -422,12 +422,12 @@ struct IOSSearchExecutor {
         selection: IOSSearchProviderSelection
     ) -> String {
         var lines = [
-            "Search results for: \(query)",
-            "Source: \(selection.providerName)",
-            "Provider route: \(selection.providerType)"
+            "搜索结果：\(query)",
+            "来源：\(selection.providerName)",
+            "服务类型：\(selection.providerType)"
         ]
         if let fallbackReason = selection.fallbackReason {
-            lines.append("Fallback: \(fallbackReason)")
+            lines.append("已自动改用：\(fallbackReason)")
         }
         for (index, result) in results.enumerated() {
             lines.append("\n[\(index + 1)] \(result.title)")
@@ -460,10 +460,10 @@ struct IOSSearchExecutor {
         }
         return IOSSearchProviderSelection(
             route: .unsupported,
-            providerName: "No iOS search provider",
+            providerName: "没有可用搜索服务",
             providerType: "none",
             serviceId: nil,
-            fallbackReason: "\(reason) No executable built-in iOS fallback is enabled."
+            fallbackReason: "\(reason) 当前没有可用的内置搜索服务。"
         )
     }
 

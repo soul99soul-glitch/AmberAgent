@@ -15,7 +15,7 @@ struct ContentView: View {
                 Text("Amber Agent")
                     .font(.largeTitle)
                     .fontWeight(.bold)
-                Text("iOS app skeleton — shared KMP framework linked.")
+                Text("你的本机 AI 助手")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

@@ -57,7 +57,7 @@ struct TTSSettingsView: View {
     }
 
     private var intro: some View {
-        Text("KMP 默认提供系统 TTS；当前 iOS 页面仅保留真实可试听的系统 TTS。云端 TTS provider 在执行链接通前不再提供新增入口。")
+        Text("当前可使用系统语音进行试听。云端语音服务暂未开放。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -76,7 +76,7 @@ struct TTSSettingsView: View {
     /// engines editable/playable — the cloud engine editing below stays draft-only.
     private var presetProvidersSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "预置 TTS（KMP 默认 · 只读）")
+            AmberSectionLabel(text: "语音服务")
 
             AmberFormGroup {
                 ForEach(Array(sharedSettings.ttsProviders.enumerated()), id: \.offset) { index, provider in
@@ -91,7 +91,7 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("这些行来自 Android/KMP DEFAULT_TTS_PROVIDERS，经 IosSettingsDefaults 真实 seed/去重后只读展示。当前选中的默认是 \(sharedSettings.ttsProviders.first { $0.id == sharedSettings.selectedTTSProviderId }?.name ?? "系统 TTS")。")
+            TTSSettingsNote("当前默认使用 \(sharedSettings.ttsProviders.first { $0.id == sharedSettings.selectedTTSProviderId }?.name ?? "系统 TTS")。")
         }
     }
 
@@ -102,7 +102,7 @@ struct TTSSettingsView: View {
                 TTSPresetProviderRow(name: "系统 TTS", isSelected: true)
             }
 
-            TTSSettingsNote("当前 iOS 仅系统 TTS 可真实试听。云端 TTS 引擎未接执行链，因此不再暴露为可选项。")
+            TTSSettingsNote("当前仅系统 TTS 可试听；云端 TTS 暂未开放。")
         }
     }
 
@@ -117,7 +117,7 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("语速会直接传入 AVSpeechSynthesizer 试听；本页不展示尚未接入的音调、音色或云端参数。")
+            TTSSettingsNote("语速只影响本机试听。")
         }
     }
 
@@ -128,7 +128,7 @@ struct TTSSettingsView: View {
                     ttsPlayer.stop()
                 } else {
                     ttsPlayer.speak(
-                        text: "你好，这是 AmberAgent 的语音试听。系统 TTS 已接入。",
+                        text: "你好，这是 AmberAgent 的语音试听。系统 TTS 可用。",
                         language: "zh-CN",
                         rate: systemSpeechRate.avSpeechRate
                     )
@@ -168,7 +168,7 @@ struct TTSSettingsView: View {
             AmberFormGroup {
                 let engines = sharedSettings.savedTtsEngines
                 if engines.isEmpty {
-                    Text("暂无自定义云端引擎。新增入口已收起，等 iOS TTS 执行链接通后再开放。")
+                    Text("暂无自定义云端引擎。云端 TTS 暂未开放。")
                         .font(.caption).foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -189,7 +189,7 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("本页只允许删除历史自定义记录；不会新增无法执行的云端 TTS 配置。")
+            TTSSettingsNote("这里仅管理历史自定义记录。")
         }
         .padding(.top, 20)
     }

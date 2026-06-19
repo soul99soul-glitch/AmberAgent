@@ -7,93 +7,30 @@ struct SubAgentsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var runner = SubAgentRunner()
 
-    private let evidenceRows: [SubAgentEvidenceRow] = [
-        .init(
-            title: "SubAgentRuntimeSetting",
-            subtitle: "Android/KMP 通过 Settings.agentRuntime.subAgent 保存 enabled、mode、并发、超时、预算、overrides 与 customDefinitions。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "SubAgentDefinitions",
-            subtitle: "KMP 内置 explorer、historian、oracle、designer、writer、fixer 六个只读/专项角色。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "SubAgentTools",
-            subtitle: "Android ChatService 在 conversationId 存在且 subAgent.enabled 时注入 list/start/read/wait/cancel 工具。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "iOS 运行桥",
-            subtitle: "IosSubAgentFactory 可构造 SubAgentManager，并从 SwiftUI 手动触发 start/read/wait/cancel 调用链。",
-            value: "已接",
-            color: AmberTheme.accentGreen
-        )
-    ]
-
     private let iOSRows: [SubAgentEvidenceRow] = [
         .init(
-            // [Slice 3] subagent_dispatch 工具已注入聊天（onComplete dispatch →
-            // SubAgentRunner.run → resume）。但 subAgent.enabled 总开关仍缺写回。
-            title: "启用子代理",
-            subtitle: "聊天已注入 subagent_dispatch 工具（Slice 3，dispatch+resume 逻辑闭环；真链路需 API key）；但 SettingsStore 的 subAgent.enabled 总开关仍缺写回。",
-            value: "部分接",
+            title: "聊天分派",
+            subtitle: "聊天中可以把明确的小任务交给专长角色处理；需要可用模型配置。",
+            value: "可用",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "@ 角色调用",
-            subtitle: "iOS 输入框没有 SubAgentDefinitions.extractMentions 或 SubAgentTools system prompt 注入路径。",
+            subtitle: "输入框里直接 @ 指定角色还没有开放。",
             value: "未启用",
             color: AmberTheme.accentAmber
         ),
         .init(
-            title: "运行结果 / 实时面板",
-            subtitle: "dispatch 仅返回最终 runId/status；没有实时 liveTextFlow、livePartsFlow、transcriptPath 或 AgentTask 快照来源。",
-            value: "缺实时",
+            title: "实时进度",
+            subtitle: "当前只显示最终结果，暂不展示逐步执行过程。",
+            value: "未开放",
             color: AmberTheme.accentAmber
         ),
         .init(
-            // [Slice 4] systemPrompt 覆盖已持久化到 snapshot.agentRuntime.subAgent.overrides。
-            title: "角色覆盖与自定义角色",
-            subtitle: "systemPrompt 覆盖已持久化（Slice 4，重启保留）；customDefinitions / prompt markdown 仍缺写入桥。",
-            value: "部分接",
+            title: "角色提示词",
+            subtitle: "内置角色的提示词可以编辑并保留；新增自定义角色暂未开放。",
+            value: "可编辑",
             color: AmberTheme.accentAmber
-        )
-    ]
-
-    private let settingRows: [SubAgentEvidenceRow] = [
-        .init(
-            title: "enabled / mode",
-            subtitle: "Android/KMP 支持 ROSTER 与 SMART_DYNAMIC；iOS 当前只读展示，尚未提供写回。",
-            value: "缺写回",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "allowDynamicSubAgents",
-            subtitle: "动态角色需要 SubAgentValidator 校验边界、工具白名单和预算；iOS 未接该校验/保存链。",
-            value: "缺校验",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "maxConcurrentRuns / maxTurns",
-            subtitle: "KMP 默认并发 2、单任务 4 轮；SubAgentManager admissionLock 会按真实设置限流。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "timeout / outputBudget",
-            subtitle: "KMP 默认 5 分钟、12k 字符，并有扩展档位；iOS 当前不会保存选择。",
-            value: "存在",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "overrides / customDefinitions",
-            subtitle: "KMP 支持角色 prompt、modelId、temperature、reasoning、预算覆盖和自定义角色。",
-            value: "存在",
-            color: AmberTheme.accentGreen
         )
     ]
 
@@ -118,11 +55,8 @@ struct SubAgentsView: View {
                         intro
                         runnerSection
                         presetConfigSection
-                        evidenceSection
                         iOSStatusSection
-                        settingMapSection
                         builtInRolesSection
-                        customDefinitionsSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -142,11 +76,11 @@ struct SubAgentsView: View {
             Spacer()
 
             VStack(spacing: 2) {
-                Text("SubAgent")
+                Text("子代理")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 可手动启动运行桥")
+                Text("多角色分工处理任务")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -164,7 +98,7 @@ struct SubAgentsView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实 SubAgent 设置、内置角色、运行管理器和 subagent_* 工具；iOS 现在可从本页手动构造 IosSubAgentFactory 并启动 start/read/wait/cancel 调用链。ChatViewModel 已注入 subagent_dispatch；customDefinitions 与动态角色写回仍未接。")
+        Text("子代理可以把任务拆给不同专长的角色处理。你可以在这里试运行一次，也可以进入角色详情调整提示词。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -176,18 +110,18 @@ struct SubAgentsView: View {
 
     private var runnerSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "执行（真实调用链）")
+            AmberSectionLabel(text: "试运行")
             AmberFormGroup {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
                         if runner.isRunning {
                             ProgressView()
-                            Text("正在启动 SubAgent…")
+                            Text("正在启动子代理…")
                                 .font(.body)
                                 .foregroundStyle(AmberTheme.foreground)
                         } else {
                             Button { runner.runTestCycle() } label: {
-                                Label("启动 SubAgent", systemImage: "person.2.wave.2.fill")
+                                Label("启动子代理", systemImage: "person.2.wave.2.fill")
                                     .font(.body.weight(.semibold))
                                     .foregroundStyle(AmberTheme.accent)
                             }
@@ -217,15 +151,12 @@ struct SubAgentsView: View {
         }
     }
 
-    /// Read-only view of the REAL seeded SubAgent runtime defaults from
-    /// `IOSSharedSettingsStore.agentRuntime.subAgent`. Execution is handled by
-    /// SubAgentRunner and ChatViewModel; this section stays read-only for settings.
     private var presetConfigSection: some View {
         let s = sharedSettings.agentRuntime.subAgent
         return VStack(spacing: 0) {
-            AmberSectionLabel(text: "KMP 默认 SubAgent 配置（只读）")
+            AmberSectionLabel(text: "默认运行设置")
             AmberFormGroup {
-                SubAgentPresetKVRow(title: "启用 SubAgent", value: s.enabled ? "默认开" : "默认关")
+                SubAgentPresetKVRow(title: "启用子代理", value: s.enabled ? "默认开" : "默认关")
                 SubAgentDivider()
                 SubAgentPresetKVRow(title: "允许动态子代理", value: s.allowDynamicSubAgents ? "默认开" : "默认关")
                 SubAgentDivider()
@@ -236,23 +167,9 @@ struct SubAgentsView: View {
         }
     }
 
-    private var evidenceSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "能力证据")
-            AmberFormGroup {
-                ForEach(Array(evidenceRows.enumerated()), id: \.element.id) { index, row in
-                    SubAgentStatusRow(row: row)
-                    if index < evidenceRows.count - 1 {
-                        SubAgentDivider()
-                    }
-                }
-            }
-        }
-    }
-
     private var iOSStatusSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "iOS 当前处理")
+            AmberSectionLabel(text: "当前支持")
             AmberFormGroup {
                 ForEach(Array(iOSRows.enumerated()), id: \.element.id) { index, row in
                     SubAgentStatusRow(row: row)
@@ -261,22 +178,6 @@ struct SubAgentsView: View {
                     }
                 }
             }
-        }
-    }
-
-    private var settingMapSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "设置字段")
-            AmberFormGroup {
-                ForEach(Array(settingRows.enumerated()), id: \.element.id) { index, row in
-                    SubAgentStatusRow(row: row)
-                    if index < settingRows.count - 1 {
-                        SubAgentDivider()
-                    }
-                }
-            }
-
-            SubAgentFootnote(text: "iOS 已能保存 systemPrompt 覆盖；enabled/mode、动态角色、prompt markdown 同步和预算编辑仍未接。")
         }
     }
 
@@ -298,25 +199,7 @@ struct SubAgentsView: View {
                 }
             }
 
-            SubAgentFootnote(text: "这些角色来自 KMP SubAgentDefinitions；iOS 已能保存 systemPrompt 覆盖，per-role 模型、推理强度和预算仍未接。")
-        }
-    }
-
-    private var customDefinitionsSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "自定义角色")
-            AmberFormGroup {
-                SubAgentStatusRow(
-                    row: .init(
-                        title: "customDefinitions",
-                        subtitle: "KMP 支持持久化自定义角色，但必须先通过 SubAgentValidator 校验边界、工具白名单和预算。",
-                        value: "未读取",
-                        color: AmberTheme.accentAmber
-                    )
-                )
-            }
-
-            SubAgentFootnote(text: "本页不再展示 ReleaseNotes、MeetingNotes、SqlExplain 等本地假自定义角色，避免误导为已保存配置。")
+            SubAgentFootnote(text: "点开角色可调整提示词；自定义角色会在后续版本开放。")
         }
     }
 }
@@ -395,7 +278,7 @@ private struct SubAgentRoleRowContent: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("KMP 存在")
+            Text("内置")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AmberTheme.accentGreen)
 
@@ -418,7 +301,6 @@ private struct SubAgentDivider: View {
     }
 }
 
-/// Read-only key/value row for a real seeded SubAgent setting.
 private struct SubAgentPresetKVRow: View {
     let title: String
     let value: String

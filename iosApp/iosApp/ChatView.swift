@@ -761,7 +761,7 @@ private struct ComposerThinkingPanel: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("当前模型未在 KMP ModelRegistry 标记 Reasoning 能力")
+                    Text("当前模型未标记支持 Reasoning")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -815,13 +815,13 @@ private struct ComposerContextPanel: View {
                 VStack(spacing: 0) {
                     ComposerContextStatRow(label: "当前消息", value: "\(snapshot.messageCount) 条")
                     ComposerContextStatRow(label: "当前模型", value: snapshot.modelId)
-                    ComposerContextStatRow(label: "Reasoning", value: snapshot.supportsReasoning ? "可用" : "未标记")
+                    ComposerContextStatRow(label: "推理", value: snapshot.supportsReasoning ? "可用" : "不可用")
                     ComposerContextStatRow(label: "待附加文件", value: pendingFileValue)
                     // [Slice 5] 拆分 token 统计（来自 messages.usage）。
-                    ComposerContextStatRow(label: "Prompt", value: "\(snapshot.promptTokens)")
-                    ComposerContextStatRow(label: "Completion", value: "\(snapshot.completionTokens)")
+                    ComposerContextStatRow(label: "输入", value: "\(snapshot.promptTokens)")
+                    ComposerContextStatRow(label: "输出", value: "\(snapshot.completionTokens)")
                     if snapshot.cachedTokens > 0 {
-                        ComposerContextStatRow(label: "Cached", value: "\(snapshot.cachedTokens)")
+                        ComposerContextStatRow(label: "缓存", value: "\(snapshot.cachedTokens)")
                     }
                 }
                 .padding(.vertical, 4)
@@ -1355,8 +1355,7 @@ private struct SampleAssistantTurn: View {
             ToolTimelineSample()
             ChatReasoningCard(
                 title: "思考了 3.0 秒 · auto",
-                bodyText: "iOS 界面不应直接继承 Android 的 ViewModel。共享的 KMP 在消息模型、" +
-                    "持久化基础、事件类型和 Rust 桥接包装器方面最为强大。"
+                bodyText: "我正在整理界面状态、消息记录和工具结果，确保这次回复能继续当前上下文。"
             )
             ChatAssistantText {
                 Text("已经实现了。代码里 `mutableStateOf(false)` 就是默认折叠，点击箭头展开。")

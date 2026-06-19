@@ -22,11 +22,8 @@ struct SubAgentRoleView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         hero
-                        presetRolesSection
-                        sourceSection
-                        settingMapSection
-                        toolsSection
                         routingSection
+                        toolsSection
                         savedOverridesSection
                     }
                     .padding(.bottom, 36)
@@ -52,7 +49,7 @@ struct SubAgentRoleView: View {
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
 
-                Text("@\(detail.roleId) · 字段映射")
+                Text("@\(detail.roleId) · 角色详情")
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -99,87 +96,12 @@ struct SubAgentRoleView: View {
         .padding(.bottom, 16)
     }
 
-    /// Read-only list of the REAL KMP built-in subagent roles from
-    /// `SubAgentDefinitions.shared.builtIns` (now exported via commonMain).
-    /// Shows explorer/historian/oracle/designer/writer/fixer with real names +
-    /// descriptions + tool counts.
-    private var presetRolesSection: some View {
-        let builtIns = SubAgentDefinitions.shared.builtIns
-        return VStack(spacing: 0) {
-            AmberSectionLabel(text: "真实内置角色（KMP · 只读）")
-            AmberFormGroup {
-                ForEach(Array(builtIns.enumerated()), id: \.offset) { index, role in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text(role.name)
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                            Spacer()
-                            Text("\(role.toolAllowlist.count) 工具")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(AmberTheme.accentAmber)
-                        }
-                        Text(role.description_)
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .lineLimit(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("id: \(role.id)")
-                            .font(.system(size: 10, weight: .regular, design: .monospaced))
-                            .foregroundStyle(AmberTheme.muted2)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-
-                    if index < builtIns.count - 1 {
-                        SubAgentRoleDivider()
-                    }
-                }
-            }
-        }
-    }
-
-    private var sourceSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "来源")
-            AmberFormGroup {
-                SubAgentRoleStatusRow(
-                    row: .init(
-                        title: detail.isKnownBuiltIn ? "KMP SubAgentDefinitions" : "customDefinitions",
-                        subtitle: detail.isKnownBuiltIn
-                            ? "此角色来自 KMP 内置角色表；systemPrompt 覆盖可在下方保存并持久化。"
-                            : "iOS 当前没有读取 Settings.agentRuntime.subAgent.customDefinitions。",
-                        value: detail.isKnownBuiltIn ? "存在" : "未读取",
-                        color: detail.isKnownBuiltIn ? AmberTheme.accentGreen : AmberTheme.accentAmber
-                    )
-                )
-            }
-        }
-    }
-
-    private var settingMapSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "可覆盖字段")
-            AmberFormGroup {
-                ForEach(Array(detail.settingRows.enumerated()), id: \.element.id) { index, row in
-                    SubAgentRoleStatusRow(row: row)
-                    if index < detail.settingRows.count - 1 {
-                        SubAgentRoleDivider()
-                    }
-                }
-            }
-
-            SubAgentRoleFootnote(text: "systemPrompt 覆盖已接：下方\"角色覆盖\"区可保存/删除并持久化到 snapshot.agentRuntime.subAgent.overrides（重启保留）。modelId/reasoningLevel/turns 等字段仍缺编辑入口。")
-        }
-    }
-
     private var toolsSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "工具边界")
+            AmberSectionLabel(text: "可用范围")
             AmberFormGroup {
-                Text(detail.toolSummary)
-                    .font(.system(size: 12.5, weight: .regular, design: .monospaced))
+                Text("该角色会根据任务需要使用搜索、文件、会话和 MCP 等工具；涉及敏感数据或写入动作时仍会按权限策略确认。")
+                    .font(.caption)
                     .foregroundStyle(AmberTheme.foreground2)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -188,20 +110,15 @@ struct SubAgentRoleView: View {
                     .padding(.vertical, 13)
             }
 
-            SubAgentRoleFootnote(text: "聊天已可通过 subagent_dispatch 触发运行；toolAllowlist、嵌套限制和预算由 KMP 运行链处理，iOS 仍缺可编辑的 per-role 工具/预算配置。")
+            SubAgentRoleFootnote(text: "自定义每个角色的工具和预算会在后续版本开放。")
         }
     }
 
 
 
-    /// [Slice 4] Saved subagent role overrides. add/remove now merge a real
-    /// SubAgentOverride into snapshot.agentRuntime.subAgent.overrides via
-    /// IosSettingsMutations.putSubAgentOverride/removeSubAgentOverride +
-    /// restoreSnapshot — survives restart. (Only systemPrompt is writable from
-    /// this form; modelId/reasoningLevel/turns are not edited here.)
     private var savedOverridesSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "角色覆盖（systemPrompt 持久化到 snapshot.agentRuntime.subAgent）")
+            AmberSectionLabel(text: "角色提示词")
             AmberFormGroup {
                 let overrides = sharedSettings.savedSubAgentOverrides.filter { $0["roleId"] == detail.roleId }
                 ForEach(Array(overrides.enumerated()), id: \.offset) { index, override in
@@ -259,39 +176,6 @@ private struct SubAgentRoleDetail {
         String(name.prefix(1))
     }
 
-    var settingRows: [SubAgentRoleStatus] {
-        [
-            .init(
-                title: "modelId",
-                subtitle: "KMP 支持为角色覆盖聊天模型；iOS 当前没有 provider/model registry bridge。",
-                value: "缺模型桥",
-                color: AmberTheme.accentAmber
-            ),
-            .init(
-                title: "reasoningLevel / temperature",
-                subtitle: "KMP SubAgentOverride 可覆盖推理强度和采样温度；iOS 当前不会写入。",
-                value: "缺参数桥",
-                color: AmberTheme.accentAmber
-            ),
-            // [Slice 4] systemPrompt 覆盖已接：上方"保存角色覆盖"经
-            // IosSettingsMutations.putSubAgentOverride 合并进
-            // snapshot.agentRuntime.subAgent.overrides 并 restoreSnapshot 全量落盘，
-            // 重启保留；按行删除亦持久化（4 XCTest 验证）。
-            .init(
-                title: "systemPrompt",
-                subtitle: "已接：保存角色覆盖经 IosSettingsMutations.putSubAgentOverride 合并进 snapshot.agentRuntime.subAgent.overrides（重启保留）。",
-                value: "已接",
-                color: AmberTheme.accentGreen
-            ),
-            .init(
-                title: "turns / timeout / outputBudget",
-                subtitle: "KMP 可按角色覆盖最大轮数、超时和输出预算；iOS 当前不暴露保存。",
-                value: "缺预算桥",
-                color: AmberTheme.accentAmber
-            )
-        ]
-    }
-
     static func resolve(name: String, roleId: String) -> SubAgentRoleDetail {
         if let builtIn = builtIns[roleId] {
             return builtIn
@@ -299,9 +183,9 @@ private struct SubAgentRoleDetail {
         return SubAgentRoleDetail(
             roleId: roleId,
             name: name,
-            description: "自定义子代理角色。iOS 当前没有从 Settings.agentRuntime.subAgent.customDefinitions 读取真实定义。",
-            toolSummary: "customDefinitions 未桥接",
-            routing: "自定义角色需要通过 KMP SubAgentValidator 校验边界、工具白名单和预算后才能保存；iOS 当前只展示未读取状态。",
+            description: "自定义子代理角色。",
+            toolSummary: "",
+            routing: "自定义角色暂未开放保存。",
             isKnownBuiltIn: false
         )
     }

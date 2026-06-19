@@ -17,8 +17,6 @@ struct AppearanceSettingsView: View {
                 VStack(spacing: 0) {
                     header
                     appearanceModeSection
-                    accentSection
-                    backgroundSection
                 }
                 .padding(.bottom, 36)
             }
@@ -66,33 +64,6 @@ struct AppearanceSettingsView: View {
         }
     }
 
-    private var accentSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "强调色")
-            AmberFormGroup {
-                AppearanceStatusRow(
-                    systemImage: "paintpalette",
-                    title: "强调色 Token",
-                    subtitle: "当前 iOS AmberTheme 仍是静态 token；动态强调色桥未实现",
-                    value: "未实现"
-                )
-            }
-        }
-    }
-
-    private var backgroundSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "背景色调")
-            AmberFormGroup {
-                AppearanceStatusRow(
-                    systemImage: "rectangle.fill",
-                    title: "背景色调 Token",
-                    subtitle: "背景/表面色仍来自静态 AmberTheme；动态背景桥未实现",
-                    value: "未实现"
-                )
-            }
-        }
-    }
 }
 
 private struct AppearanceSegmentedControl: View {

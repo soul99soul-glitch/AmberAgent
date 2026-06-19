@@ -36,26 +36,26 @@ struct SyncBackupView: View {
     private var evidenceRows: [SyncBackupRow] {
         [
             .init(
-                title: "SyncSettings",
-                subtitle: "commonMain 模型保存 Google 账号、mode、autoSync、deviceId 等。iOS 只读展示种子值。",
-                value: "只读可用",
+                title: "自动同步",
+                subtitle: "自动定时同步暂未开放，当前需要手动上传或恢复。",
+                value: sync.autoSyncEnabled ? "已开启" : "未开启",
                 color: AmberTheme.accentGreen
             ),
             .init(
-                title: "autoSync",
-                subtitle: "KMP syncSettings.autoSyncEnabled 真实种子值。",
+                title: "同步模式",
+                subtitle: "当前应用保存的同步模式。",
                 value: sync.autoSyncEnabled ? "启用" : "关闭",
                 color: sync.autoSyncEnabled ? AmberTheme.accentGreen : AmberTheme.muted2
             ),
             .init(
-                title: "mode",
-                subtitle: "KMP syncSettings.mode（同步模式）。",
+                title: "模式",
+                subtitle: "用于恢复时判断配置来源。",
                 value: String(describing: sync.mode),
                 color: AmberTheme.foreground2
             ),
             .init(
-                title: "deviceId",
-                subtitle: "KMP syncSettings.deviceId。",
+                title: "设备",
+                subtitle: "用于区分不同设备生成的备份。",
                 value: sync.deviceId.isEmpty ? "(空)" : String(sync.deviceId.prefix(12)) + "…",
                 color: AmberTheme.foreground2
             ),
@@ -63,45 +63,45 @@ struct SyncBackupView: View {
     }
 
     private var headerSubtitle: String {
-        "Settings JSON 加密归档 · Local/WebDAV 远端同步闭环"
+        "本地备份 · 文件夹同步 · WebDAV"
     }
 
     private var currentRows: [SyncBackupRow] {
         [
             .init(
-                title: "远端 provider",
-                subtitle: "Swift 原生 provider 协议已接：本机文件夹端到端；WebDAV 使用 URLSession/mockable transport；Google/S3 诚实未配置。",
+                title: "同步位置",
+                subtitle: "本机文件夹可直接使用；WebDAV 需要填写地址和账号。",
                 value: providerKind.displayName,
                 color: providerKind == .localFolder || providerKind == .webDAV ? AmberTheme.accentGreen : AmberTheme.accentAmber
             ),
             .init(
-                title: "lastUploadAt",
-                subtitle: "iOS 侧 IOSRemoteSyncStatus 持久化镜像；不伪装成 KMP shared mutation。",
+                title: "上次上传",
+                subtitle: "最近一次成功上传备份的时间。",
                 value: formatEpoch(remoteStatus.lastUploadAt),
                 color: remoteStatus.lastUploadAt > 0 ? AmberTheme.accentGreen : AmberTheme.muted2
             ),
             .init(
-                title: "lastDownloadAt",
-                subtitle: "只有显式 apply restore 成功后才更新；preview 不写 sharedSettings。",
+                title: "上次恢复",
+                subtitle: "只有手动应用恢复成功后才会更新。",
                 value: formatEpoch(remoteStatus.lastDownloadAt),
                 color: remoteStatus.lastDownloadAt > 0 ? AmberTheme.accentGreen : AmberTheme.muted2
             ),
             .init(
-                title: "remoteRevision",
-                subtitle: "Local folder 用 SHA-256；WebDAV 优先 ETag，上传后写回本机状态。",
+                title: "远端版本",
+                subtitle: "用于判断远端备份是否比本机记录更新。",
                 value: providerRemoteRevision.isEmpty ? "(空)" : String(providerRemoteRevision.prefix(12)) + "...",
                 color: providerRemoteRevision.isEmpty ? AmberTheme.muted2 : AmberTheme.foreground2
             ),
             .init(
-                title: "lastError",
-                subtitle: "远端操作错误持久化，成功上传/恢复会清空。",
+                title: "最近错误",
+                subtitle: "上传、下载或恢复失败时会显示在这里。",
                 value: remoteStatus.lastError.isEmpty ? "无" : "有错误",
                 color: remoteStatus.lastError.isEmpty ? AmberTheme.accentGreen : AmberTheme.accentRed
             ),
             .init(
                 title: "加密口令",
-                subtitle: "PBKDF2WithHmacSHA256 210,000 次 + AES/GCM/NoPadding；留空时使用 Android NO_PASSPHRASE_FALLBACK。",
-                value: "已接通",
+                subtitle: "可设置口令保护备份；留空也可以导出。",
+                value: "可用",
                 color: AmberTheme.accentGreen
             )
         ]
@@ -109,27 +109,27 @@ struct SyncBackupView: View {
 
     private let archiveRows: [SyncBackupRow] = [
         .init(
-            title: "Settings JSON",
-            subtitle: "iOS 阶段 1 写入真实 KMP Settings JSON；secrets、Room tables 和 file roots 后续阶段再接。",
-            value: "iOS 已接",
+            title: "设置与偏好",
+            subtitle: "包含模型、提供商、搜索、记忆、权限策略等应用设置。",
+            value: "包含",
             color: AmberTheme.accentGreen
         ),
         .init(
-            title: "Room tables",
-            subtitle: "同步 conversations、messages、memory、files、board、mini_app、daily_review、hot_list_source 等表。",
-            value: "Android 实现",
-            color: AmberTheme.accentGreen
+            title: "聊天记录",
+            subtitle: "当前备份不包含历史会话内容。",
+            value: "不包含",
+            color: AmberTheme.muted2
         ),
         .init(
-            title: "File roots",
-            subtitle: "同步 upload、skills、images、chat_images；恢复时校验安全相对路径。",
-            value: "Android 实现",
-            color: AmberTheme.accentGreen
+            title: "本地文件",
+            subtitle: "当前备份不包含附件、图片、技能文件或缓存。",
+            value: "不包含",
+            color: AmberTheme.muted2
         ),
         .init(
-            title: "RestoreScope",
-            subtitle: "支持 CONFIG_ONLY / EVERYTHING，并可保留本机 conversations 与 generated media。",
-            value: "Android 实现",
+            title: "恢复方式",
+            subtitle: "恢复前必须先预览，确认后才会写入当前设置。",
+            value: "手动",
             color: AmberTheme.accentGreen
         )
     ]
@@ -153,9 +153,7 @@ struct SyncBackupView: View {
                         remoteProviderSection
                         remoteSnapshotSection
                         restorePreviewSection
-                        evidenceSection
                         archiveScopeSection
-                        blockedSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -172,7 +170,7 @@ struct SyncBackupView: View {
         ) { result in
             switch result {
             case .success:
-                alert = .success("已导出加密 Settings 备份")
+                alert = .success("已导出加密备份")
             case .failure(let error):
                 alert = .error("导出文件失败：\(error.localizedDescription)")
             }
@@ -226,7 +224,7 @@ struct SyncBackupView: View {
     }
 
     private var intro: some View {
-        Text("iOS 现在使用 Android 兼容 .amberbackup 结构加密 Settings JSON，并在 Swift 侧接入远端 provider 协议。本机文件夹 provider 可端到端验证；WebDAV 需要用户自行填写测试配置并点击操作；Google Drive / S3 只显示未配置骨架。恢复必须先预览，再显式应用。")
+        Text("导出一份加密备份，或把备份上传到本机文件夹和 WebDAV。恢复前会先展示预览，确认后才会应用到当前设置。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -238,10 +236,10 @@ struct SyncBackupView: View {
 
     private var localBackupSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "本地 Settings 备份")
+            AmberSectionLabel(text: "本地备份")
             AmberFormGroup {
                 VStack(alignment: .leading, spacing: 10) {
-                    SecureField("加密口令（留空使用 Android 兼容 fallback）", text: $passphrase)
+                    SecureField("加密口令（可留空）", text: $passphrase)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.body)
@@ -266,7 +264,7 @@ struct SyncBackupView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
             }
-            SyncBackupNote("导出内容是真实 KMP Settings JSON。选择本地文件后只进入恢复预览；点击“应用恢复”才会写回 iOS sharedSettings。")
+            SyncBackupNote("选择本地文件后会先进入恢复预览；点击“应用恢复”才会写入当前设置。")
         }
     }
 
@@ -289,10 +287,10 @@ struct SyncBackupView: View {
 
     private var remoteProviderSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "远端 provider")
+            AmberSectionLabel(text: "同步位置")
             AmberFormGroup {
                 VStack(alignment: .leading, spacing: 12) {
-                    Picker("Provider", selection: $providerKind) {
+                    Picker("同步位置", selection: $providerKind) {
                         ForEach(IOSRemoteProviderKind.allCases) { kind in
                             Text(kind.displayName).tag(kind)
                         }
@@ -322,7 +320,7 @@ struct SyncBackupView: View {
                         }
                         .textFieldStyle(.roundedBorder)
                     } else {
-                        Text("\(providerKind.displayName) provider skeleton 已保留，但没有 OAuth / S3 key 配置；不会伪装成可用云同步。")
+                        Text("\(providerKind.displayName) 暂未开放。请先使用本机文件夹或 WebDAV。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -333,7 +331,7 @@ struct SyncBackupView: View {
                             Text("检测到远端冲突")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(AmberTheme.accentAmber)
-                            Text("本机记录 \(String(conflict.localRevision.prefix(12)))...，远端最新 \(String(conflict.remoteSnapshot.remoteRevision.prefix(12)))...。继续上传会覆盖当前 provider 的最新快照。")
+                            Text("远端已有更新的备份。继续上传会覆盖当前同步位置里的最新快照。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -384,7 +382,7 @@ struct SyncBackupView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
             }
-            SyncBackupNote("本机文件夹 provider 只写入本机 Documents/AmberRemoteSyncLocal。WebDAV 只有填写配置并点击操作时才发起请求；本轮不会自动上传任何真实数据。")
+            SyncBackupNote("WebDAV 只有在你填写配置并点击操作时才会发起网络请求。")
         }
     }
 
@@ -495,21 +493,7 @@ struct SyncBackupView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 13)
                 }
-                SyncBackupNote("预览阶段只解密读取 manifest、payload_manifest 和 Settings JSON；不会写入 sharedSettings。")
-            }
-        }
-    }
-
-    private var evidenceSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "能力证据")
-            AmberFormGroup {
-                ForEach(Array(evidenceRows.enumerated()), id: \.element.id) { index, row in
-                    SyncBackupStatusRow(row: row)
-                    if index < evidenceRows.count - 1 {
-                        SyncBackupDivider()
-                    }
-                }
+                SyncBackupNote("预览阶段不会修改当前设置。确认内容无误后再应用恢复。")
             }
         }
     }
@@ -540,23 +524,6 @@ struct SyncBackupView: View {
                 }
             }
 
-            SyncBackupNote("Android BackupVM 写回 KMP SyncSettings；iOS 本轮在 IOSRemoteSyncStatus 做本地持久化镜像，避免没有 shared mutation 时伪造 KMP 写回。")
-        }
-    }
-
-    private var blockedSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "后续阶段")
-            AmberFormGroup {
-                Text("本轮远端同步覆盖 Settings JSON 快照闭环：本机文件夹可端到端验证，WebDAV 支持 PROPFIND/PUT/GET/DELETE 和 mockable transport。Google Drive OAuth、S3 签名配置、自动同步、Room tables、secrets 与文件树恢复仍未接通。")
-                    .font(.caption)
-                    .lineSpacing(4)
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 13)
-            }
         }
     }
 
@@ -669,7 +636,7 @@ struct SyncBackupView: View {
             }
             refreshRemoteStatus()
             self.pendingRestore = nil
-            alert = .success("已应用 Settings 恢复：\(result.preview.manifest.appVersionName)")
+            alert = .success("已应用备份恢复：\(result.preview.manifest.appVersionName)")
         } catch {
             sharedSettings.recordRemoteSyncError(error)
             refreshRemoteStatus()
@@ -715,9 +682,9 @@ struct SyncBackupView: View {
             }
             return IOSWebDAVSyncProvider(config: config)
         case .googleDrive:
-            return IOSUnavailableRemoteSyncProvider(kind: .googleDrive, reason: "iOS Google OAuth / Drive AppData 未配置")
+            return IOSUnavailableRemoteSyncProvider(kind: .googleDrive, reason: "Google Drive 暂未开放")
         case .s3:
-            return IOSUnavailableRemoteSyncProvider(kind: .s3, reason: "iOS S3 endpoint、bucket 与签名密钥未配置")
+            return IOSUnavailableRemoteSyncProvider(kind: .s3, reason: "S3 暂未开放")
         }
     }
 
@@ -736,7 +703,7 @@ struct SyncBackupView: View {
             "模式 \(preview.manifest.mode)",
             formatEpoch(preview.manifest.createdAt),
             ByteCountFormatter.string(fromByteCount: preview.sizeBytes, countStyle: .file),
-            preview.manifest.passphraseProtected ? "需要口令" : "无口令 fallback",
+            preview.manifest.passphraseProtected ? "需要口令" : "未设置口令",
         ].joined(separator: " · ")
     }
 

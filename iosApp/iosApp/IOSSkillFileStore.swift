@@ -147,9 +147,9 @@ enum IOSSkillFileStoreError: LocalizedError, Equatable {
         case .emptyDescription:
             "触发说明不能为空。"
         case .skillAlreadyExists(let name):
-            "Documents/skills/\(name) 已存在。"
+            "技能 \(name) 已存在。"
         case .skillMissing(let name):
-            "Documents/skills/\(name) 不存在。"
+            "技能 \(name) 不存在。"
         case .skillNameChanged(let expected):
             "不允许修改技能名称（name 字段必须为 \(expected)）。"
         }

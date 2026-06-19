@@ -104,7 +104,7 @@ final class SubAgentRunner {
                         summary = "✅ start/wait 成功，read 错误: \(readError.localizedDescription)\nrunId: \(runId)"
                     } else if let readResult {
                         let status = IosSubAgentFactory.shared.extractStatus(result: readResult)
-                        summary = "✅ SubAgent 调用链验证成功\nrunId: \(runId)\nstatus: \(status)\n\n已通过 IosSubAgentFactory → SubAgentManager.start → runner.run → wait → read 状态返回。无 API Key 时使用诚实 stub；配置 API Key 时会调用真实 OpenAI-compatible provider。"
+                        summary = "子代理已完成试运行\nrunId: \(runId)\nstatus: \(status)\n\n已成功启动并读取结果。配置 API Key 后会使用真实模型生成。"
                     } else if let waitResult {
                         let status = IosSubAgentFactory.shared.extractStatus(result: waitResult)
                         summary = "✅ start/wait 成功，read 返回空结果\nrunId: \(runId)\nstatus: \(status)"
@@ -137,7 +137,7 @@ final class SubAgentRunner {
             outputFormat: "返回针对 objective 的最终 Markdown 回答。",
             toolsAndSources: "不使用外部工具，仅完成委派任务。",
             boundaries: "不要请求用户输入，不要伪造真实工具结果。",
-            context: "iOS ChatViewModel subagent_dispatch 工具调用。"
+            context: "聊天中的子代理委派任务。"
         )
 
         // start
@@ -184,7 +184,7 @@ final class SubAgentRunner {
                 }
             }
         }
-        return "SubAgent 已执行（runId: \(startResult.runId)，状态: \(finalStatus)）。objective: \(objective)。配置 API Key 时为真实推理；无 Key 时为诚实 stub。"
+        return "子代理已执行（runId: \(startResult.runId)，状态: \(finalStatus)）。任务：\(objective)。配置 API Key 后会使用真实模型生成。"
     }
 
     func cancelCurrentRun() {

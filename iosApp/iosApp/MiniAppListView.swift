@@ -9,54 +9,6 @@ struct MiniAppListView: View {
     @State private var renameTarget: IOSMiniAppRecord?
     @State private var deleteTarget: IOSMiniAppRecord?
 
-    private let evidenceRows: [MiniAppCapabilityRow] = [
-        .init(
-            title: "iOS repository",
-            subtitle: "小应用记录、HTML、版本、grant、sharedData 和 audit metadata 已落到 Documents/miniapps/miniapps.json。",
-            status: "本地已接",
-            tint: AmberTheme.accent
-        ),
-        .init(
-            title: "MiniAppRepository / DAOs",
-            subtitle: "Android 使用 Room；iOS 先用原子 JSON store 对齐 list/get/saveRevision/rename/pin/delete/markRun 等语义。",
-            status: "对齐中",
-            tint: .blue
-        ),
-        .init(
-            title: "Prompt / Output transformers",
-            subtitle: "显式 MiniApp 请求会追加生成格式，完成后解析符合格式的 assistant 输出并保存。",
-            status: "最小链路",
-            tint: .purple
-        ),
-        .init(
-            title: "Runner / WebView bridge",
-            subtitle: "Runner 从 repository 读取 appId、校验 HTML、加载 WKWebView，并通过 grant-gated bridge dispatch。",
-            status: "本地已接",
-            tint: .green
-        )
-    ]
-
-    private let handlingRows: [MiniAppCapabilityRow] = [
-        .init(
-            title: "持久化位置",
-            subtitle: "Documents/miniapps/miniapps.json；解码失败会阻止覆盖，避免清空用户数据。",
-            status: "原子写入",
-            tint: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "Runner",
-            subtitle: "打开真实 appId 后会 markRun，支持保存新版本、恢复历史版本和修改 grant。",
-            status: "已接",
-            tint: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "受限能力",
-            subtitle: "search/fetch/ai/clipboard/host 写回必须过 grant 和设置；无凭证或未实现时返回明确错误。",
-            status: "诚实错误",
-            tint: AmberTheme.accentAmber
-        )
-    ]
-
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
@@ -68,10 +20,6 @@ struct MiniAppListView: View {
                     VStack(spacing: 0) {
                         intro
                         repositorySection
-                        evidenceSection
-                        handlingSection
-                        MiniAppCapabilityNote("设置页仍以 KMP 默认字段展示为主；本页的列表、管理动作、grant 和版本历史来自 iOS 本地 MiniApp repository。")
-                            .padding(.top, 14)
                     }
                     .padding(.bottom, 36)
                 }
@@ -132,7 +80,7 @@ struct MiniAppListView: View {
                 Text("小应用")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(AmberTheme.foreground)
-                Text("\(repository.apps.count) 个本地小应用 · Documents 持久化")
+                Text("\(repository.apps.count) 个本地小应用")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -150,7 +98,7 @@ struct MiniAppListView: View {
     }
 
     private var intro: some View {
-        Text("这里展示 iOS 本地 MiniApp repository 中的真实记录。首次启动会 seed 一个样例；聊天生成或 Runner 保存的新版本会写入同一份 Documents 数据，并在重启后恢复。")
+        Text("这里展示保存在本机的小应用。你可以打开、置顶、重命名或删除它们。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -181,7 +129,7 @@ struct MiniAppListView: View {
                 AmberFormGroup {
                     MiniAppCapabilityStatusRow(row: .init(
                         title: "暂无小应用",
-                        subtitle: "聊天中明确要求生成 MiniApp，或恢复可读的 Documents/miniapps 数据后会出现在这里。",
+                        subtitle: "聊天中生成的小应用会出现在这里。",
                         status: "空",
                         tint: AmberTheme.muted
                     ))
@@ -205,34 +153,6 @@ struct MiniAppListView: View {
                         if index < repository.apps.count - 1 {
                             MiniAppCapabilityDivider()
                         }
-                    }
-                }
-            }
-        }
-    }
-
-    private var evidenceSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "真实能力证据")
-            AmberFormGroup {
-                ForEach(Array(evidenceRows.enumerated()), id: \.element.id) { index, row in
-                    MiniAppCapabilityStatusRow(row: row)
-                    if index < evidenceRows.count - 1 {
-                        MiniAppCapabilityDivider()
-                    }
-                }
-            }
-        }
-    }
-
-    private var handlingSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "iOS 当前处理")
-            AmberFormGroup {
-                ForEach(Array(handlingRows.enumerated()), id: \.element.id) { index, row in
-                    MiniAppCapabilityStatusRow(row: row)
-                    if index < handlingRows.count - 1 {
-                        MiniAppCapabilityDivider()
                     }
                 }
             }

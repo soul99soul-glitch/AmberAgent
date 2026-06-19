@@ -32,7 +32,6 @@ struct DisplayFontSettingsView: View {
                     header
                     fontSection
                     messageSection
-                    codeSection
                     interactionSection
                 }
                 .padding(.bottom, 36)
@@ -124,49 +123,6 @@ struct DisplayFontSettingsView: View {
             AmberSectionLabel(text: "消息显示")
             AmberFormGroup {
                 DisplayToggleRow(title: "显示 Agent 名字", isOn: agentName) { agentName.toggle() }
-                DisplayDivider()
-                DisplayStatusRow(
-                    title: "显示助手消息气泡",
-                    subtitle: "当前 Chat 渲染器没有助手气泡模式",
-                    value: "未实现"
-                )
-                DisplayDivider()
-                DisplayStatusRow(
-                    title: "昵称下方显示日期",
-                    subtitle: "消息模型/时间格式桥未实现",
-                    value: "未实现"
-                )
-                DisplayDivider()
-                DisplayStatusRow(
-                    title: "助手状态点 / 思考折叠",
-                    subtitle: "KMP 默认值（autoCloseThinking）；状态点与生成结束折叠策略还没有进入 Chat 状态机",
-                    value: sharedSettings.displaySetting.autoCloseThinking ? "默认开" : "默认关"
-                )
-            }
-        }
-    }
-
-    private var codeSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "代码块")
-            AmberFormGroup {
-                DisplayStatusRow(
-                    title: "自动换行",
-                    subtitle: "KMP 默认值（codeBlockAutoWrap）；iOS 渲染器尚未消费",
-                    value: sharedSettings.displaySetting.codeBlockAutoWrap ? "默认开" : "默认关"
-                )
-                DisplayDivider()
-                DisplayStatusRow(
-                    title: "自动折叠",
-                    subtitle: "KMP 默认值（codeBlockAutoCollapse）；iOS 渲染器尚未消费",
-                    value: sharedSettings.displaySetting.codeBlockAutoCollapse ? "默认开" : "默认关"
-                )
-                DisplayDivider()
-                DisplayStatusRow(
-                    title: "显示行号",
-                    subtitle: "当前 iOS Markdown renderer 不生成行号",
-                    value: "未实现"
-                )
             }
         }
     }
@@ -175,31 +131,7 @@ struct DisplayFontSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "渲染与交互")
             AmberFormGroup {
-                DisplayStatusRow(
-                    title: "启用 LaTeX 渲染",
-                    subtitle: "KMP 默认值（enableLatexRendering）；iOS LaTeX renderer 尚未消费",
-                    value: sharedSettings.displaySetting.enableLatexRendering ? "默认开" : "默认关"
-                )
-                DisplayDivider()
                 DisplayToggleRow(title: "生成时跟随滚动", isOn: followGeneration) { followGeneration.toggle() }
-                DisplayDivider()
-                DisplayStatusRow(
-                    title: "按 Enter 发送",
-                    subtitle: "KMP 默认值（sendOnEnter）；移动端输入器没有硬件键盘提交策略",
-                    value: sharedSettings.displaySetting.sendOnEnter ? "默认开" : "默认关"
-                )
-                DisplayDivider()
-                DisplayStatusRow(
-                    title: "粘贴长文本为文件",
-                    subtitle: "KMP 默认值（pasteLongTextAsFile，阈值 \(sharedSettings.displaySetting.pasteLongTextThreshold)）；iOS 粘贴管线未实现",
-                    value: sharedSettings.displaySetting.pasteLongTextAsFile ? "默认开" : "默认关"
-                )
-                DisplayDivider()
-                DisplayStatusRow(
-                    title: "启动入口",
-                    subtitle: "App 启动路由目前固定进入 Home",
-                    value: "未实现"
-                )
             }
         }
     }

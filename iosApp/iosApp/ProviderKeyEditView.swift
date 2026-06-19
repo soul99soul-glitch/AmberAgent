@@ -153,13 +153,13 @@ struct ProviderKeyEditView: View {
     private var noteSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             if didSave {
-                Label("已保存到该 provider 的 Keychain account。返回列表可在「设为当前」激活该服务商。",
+                Label("API Key 已保存。返回列表可将这个服务商设为当前。",
                       systemImage: "checkmark.seal")
                     .font(.footnote)
                     .foregroundStyle(AmberTheme.accentGreen)
             }
 
-            Text("本页只写入本机 Keychain（account app.amber.ios.provider.<id>），不写入 UserDefaults、不修改当前聊天服务商、不发起任何网络请求、不测试连接或余额。需在服务商列表里再次「设为当前」后，base URL 与 Key 才会投影到 ChatViewModel 实际消费的 SettingsStore。")
+            Text("API Key 只保存在本机钥匙串。保存不会自动切换当前服务商，也不会发起测试请求。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
         }
@@ -178,7 +178,7 @@ struct ProviderKeyEditView: View {
             Text("\(providerName) 当前不可编辑 API Key")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(AmberTheme.foreground)
-            Text("该 Provider 类型（如 Gemini 的 Google ProviderSetting、xAI 的 Response API、MiMo 占位 Base）无法被当前 iOS scalar 聊天链路真实表达，因此不接受单纯写入 API Key。")
+            Text("这个服务商模板当前不能直接用于聊天，因此暂不开放 API Key 编辑。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
                 .multilineTextAlignment(.center)
@@ -208,9 +208,9 @@ struct ProviderKeyEditView: View {
 
     private var saveFooterText: String {
         if hasExistingKey {
-            return "该 provider 已有 Keychain Key；输入新值并保存会替换它。清除会删除该 provider 的 Key，使其重新需要 Key 才能设为当前。"
+            return "已保存 API Key。输入新值并保存会替换它；清除后需要重新填写才能设为当前。"
         }
-        return "保存后该模板即可在服务商列表「设为当前」。当前 iOS 聊天链路只能表达 OpenAI-compatible、非 Response API、非 MiMo 的 provider。"
+        return "保存后即可在服务商列表将该模板设为当前。"
     }
 
     // MARK: - Actions

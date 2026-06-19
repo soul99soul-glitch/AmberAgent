@@ -24,10 +24,8 @@ struct MemoryEditView: View {
                 VStack(spacing: 0) {
                     header
                     iosMemorySection
-                    noticeSection
                     contentSection
                     classificationSection
-                    previewSection
                     deleteSection
                 }
                 .padding(.bottom, 36)
@@ -48,7 +46,7 @@ struct MemoryEditView: View {
             }
             Button("取消", role: .cancel) { }
         } message: {
-            Text("将删除全部 \(iosRecords.count) 条记忆并写入 Documents/memories/。此操作不可恢复。")
+            Text("将删除全部 \(iosRecords.count) 条记忆。此操作不可恢复。")
         }
     }
 
@@ -75,12 +73,9 @@ struct MemoryEditView: View {
         .padding(.bottom, 18)
     }
 
-    /// Real iOS memory store backed by KMP IosMemoryFactory plus Swift JSON
-    /// persistence in Documents/memories/memories.json. This is not Android Room,
-    /// but it survives app restart through AppShell load/persist hooks.
     private var iosMemorySection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "记忆库（iOS 本地持久化）")
+            AmberSectionLabel(text: "记忆库")
 
             AmberFormGroup {
                 ForEach(Array(iosRecords.enumerated()), id: \.offset) { index, record in
@@ -167,7 +162,7 @@ struct MemoryEditView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
-            Text("注意：这是 iOS 本地 JSON 记忆库，可读写并随 AppShell 启动恢复；不是 Android Room。")
+            Text("记忆会保存在本机，重启后仍然保留。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -177,13 +172,6 @@ struct MemoryEditView: View {
         .onAppear {
             iosRecords = IosMemoryFactory.shared.getAllRecords()
         }
-    }
-
-    private var noticeSection: some View {
-        // [Slice 6] 增删已持久化：addMemory/deleteMemory 经 IOSMemoryPersistence
-        // 写入 Documents/memories/memories.json，重启后由 AppShell 启动时 load() 恢复。
-        MemoryEditNote("记忆增删已持久化到 Documents/memories/memories.json（重启保留）。KMP 端为内存 StateFlow + Swift 持久化层；非 Room。")
-            .padding(.bottom, 10)
     }
 
     private var contentSection: some View {
@@ -231,7 +219,7 @@ struct MemoryEditView: View {
                 } label: {
                     MemoryValueRow(
                         title: "记忆层级",
-                        subtitle: "保存时写入 MemoryScope，并影响 ChatViewModel 的 scope 过滤。",
+                        subtitle: "决定聊天参考这条记忆的场景。",
                         value: scope.title
                     )
                 }
@@ -246,7 +234,7 @@ struct MemoryEditView: View {
                             Text("置顶")
                                 .font(.body)
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("保存时会写入 MemoryRecord.pinned，并影响聊天注入排序。")
+                            Text("置顶记忆会更优先被聊天参考。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -265,21 +253,6 @@ struct MemoryEditView: View {
 
             MemoryEditNote(text.isEmpty ? "待保存 · 空内容" : "待保存 · \(scope.title) · \(pinned ? "置顶" : "未置顶")")
                 .padding(.top, 2)
-        }
-    }
-
-    private var previewSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "处理方式")
-            AmberFormGroup {
-                // [Slice 6] 保存已接：addMemory 后 IOSMemoryPersistence.persist()
-                // 写入 Documents/memories/memories.json（原子写），重启后 load() 恢复。
-                MemoryPreviewLine(label: "保存", value: "已接（持久化）")
-                MemoryEditDivider()
-                MemoryPreviewLine(label: "写入位置", value: "Documents/memories/")
-                MemoryEditDivider()
-                MemoryPreviewLine(label: "真实后端", value: "iOS 本地 JSON（非 Room）")
-            }
         }
     }
 

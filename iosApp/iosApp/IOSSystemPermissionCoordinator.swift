@@ -334,7 +334,7 @@ final class IOSSystemPermissionCoordinator {
             return result(capability, .requiresEntitlement, "Requires entitlement: \(missingEntitlements(for: capability).joined(separator: ", "))", now)
         }
         if capability.requestKind == .settingsOnly {
-            return result(capability, .requiresSystemSettings, "This capability is managed in system Settings.", now)
+            return result(capability, .requiresSystemSettings, "需要在系统设置中管理。", now)
         }
         return nil
     }
@@ -435,7 +435,7 @@ final class IOSSystemPermissionCoordinator {
         case .entitlementAndExtensionRequired:
             result(capability, .requiresExtensionTarget, "Requires entitlement and extension target before this capability can be used.", now)
         case .settingsOnly:
-            result(capability, .requiresSystemSettings, "This capability is controlled in system Settings.", now)
+            result(capability, .requiresSystemSettings, "需要在系统设置中管理。", now)
         case .foregroundSystemUI, .foregroundSession, .authenticationOperation, .picker:
             result(capability, .unknown, "Requires foreground system UI: \(capability.requestEntryPoint)", now)
         case .directSystemPrompt, .diagnosticOnly:
@@ -937,7 +937,7 @@ private extension IOSSystemPermissionCoordinator {
     func liveActivitiesStatus(for capability: IOSPlatformCapability, now: Date) -> IOSSystemPermissionResult {
         #if canImport(ActivityKit)
         let info = ActivityAuthorizationInfo()
-        return result(capability, info.areActivitiesEnabled ? .authorized : .denied, info.areActivitiesEnabled ? "Live Activities are enabled." : "Live Activities are disabled in Settings.", now)
+        return result(capability, info.areActivitiesEnabled ? .authorized : .denied, info.areActivitiesEnabled ? "实时活动已开启。" : "实时活动已在系统设置中关闭。", now)
         #else
         return result(capability, .unavailableOnDevice, "ActivityKit is unavailable.", now)
         #endif

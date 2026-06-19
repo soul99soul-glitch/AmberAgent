@@ -25,10 +25,8 @@ struct SearchProviderView: View {
                     VStack(spacing: 0) {
                         draftNotice
                         providerFields
-                        capabilitiesSection
                         enabledSection
                         draftPreviewSection
-                        deleteSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -74,7 +72,7 @@ struct SearchProviderView: View {
     }
 
     private var draftNotice: some View {
-        SearchProviderNote("本页只允许新增 iOS 当前能真实执行的搜索服务。API provider 模板仍可从 KMP snapshot 读取展示，但不会再从 iOS UI 新增为默认服务，避免保存后 search_web 返回 unsupported。")
+        SearchProviderNote("当前只开放无需 API Key 的 Bing HTML 搜索服务。")
             .padding(.top, 2)
     }
 
@@ -120,14 +118,14 @@ struct SearchProviderView: View {
                     SearchProviderTextFieldRow(
                         title: "Username",
                         text: $searXNGUsername,
-                        placeholder: "可选（暂不写入）",
+                        placeholder: "可选用户名",
                         monospace: true
                     )
                     SearchProviderDivider()
                     SearchProviderTextFieldRow(
                         title: "Password",
                         text: $searXNGPassword,
-                        placeholder: "可选（暂不写入）",
+                        placeholder: "可选密码",
                         monospace: true,
                         isSecure: true
                     )
@@ -139,42 +137,14 @@ struct SearchProviderView: View {
         }
     }
 
-    private var capabilitiesSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "能力链路")
-            AmberFormGroup {
-                SearchProviderStatusRow(
-                    title: "Android/KMP 服务",
-                    subtitle: "SearchService.getService(...) 能按 SearchServiceOptions 分派真实搜索实现。",
-                    value: "存在",
-                    valueColor: AmberTheme.accentGreen
-                )
-                SearchProviderDivider()
-                SearchProviderStatusRow(
-                    title: "iOS 工具调用",
-                    subtitle: "ChatViewModel 会在 enableWebSearch 开启时声明 search_web/scrape_web，并把 Tool 输出回填后 resume。",
-                    value: "工具已接",
-                    valueColor: AmberTheme.accentGreen
-                )
-                SearchProviderDivider()
-                SearchProviderStatusRow(
-                    title: "抓取 / 多 provider",
-                    subtitle: "IOSSearchExecutor 当前可真实执行 Bing HTML；DuckDuckGo Lite 作为内置 fallback。其它 API provider 不再从 iOS 添加页暴露。",
-                    value: "收口",
-                    valueColor: AmberTheme.accentGreen
-                )
-            }
-        }
-    }
-
     private var enabledSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "启用状态")
             AmberFormGroup {
                 SearchProviderStatusRow(
                     title: "服务启用",
-                    subtitle: "保存 Bing HTML 时会同步写入 searchEnabledServiceIds，并设为默认 selected provider。",
-                    value: "Bing 可新增",
+                    subtitle: "保存后会成为聊天搜索可用服务。",
+                    value: "可新增",
                     valueColor: AmberTheme.accentGreen
                 )
             }
@@ -183,10 +153,7 @@ struct SearchProviderView: View {
 
     private var draftPreviewSection: some View {
         VStack(spacing: 0) {
-            // [Slice 4] add/remove now merge a real SearchServiceOptions subtype
-            // into snapshot.searchServices via IosSettingsMutations +
-            // restoreSnapshot — survives restart.
-            AmberSectionLabel(text: "已保存搜索服务（持久化到 snapshot.searchServices）")
+            AmberSectionLabel(text: "已保存搜索服务")
             AmberFormGroup {
                 let providers = sharedSettings.savedSearchProviders
                 if providers.isEmpty {
@@ -228,25 +195,7 @@ struct SearchProviderView: View {
                 .padding(.horizontal, 14).padding(.vertical, 8)
             }
 
-            SearchProviderNote("搜索服务保存到 UserDefaults，重启后保留。这是真实的 iOS 本地持久化。")
-        }
-    }
-
-    private var deleteSection: some View {
-        VStack(spacing: 0) {
-            AmberFormGroup {
-                // [Slice 4] 删除单条服务已在上方"已保存搜索服务"区按行真删
-                //（removeSearchProvider 现持久化到 snapshot.searchServices）。
-                // 此底部入口为信息占位（未接批量删），按行删请用上方列表。
-                Text("删除单条请用上方列表的 ⊖ 按钮")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(AmberTheme.muted)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 52)
-            }
-            .padding(.top, 20)
-
-            SearchProviderNote("按行删除已持久化到 snapshot.searchServices（重启生效）。批量清空入口暂未接。")
+            SearchProviderNote("保存后重启仍然保留。删除单条请使用列表右侧按钮。")
         }
     }
 
@@ -328,13 +277,13 @@ private enum SearchProviderType: String, CaseIterable, Identifiable {
     var note: String {
         switch self {
         case .bing:
-            "Bing HTML 是 Android 默认 SearchServiceOptions.DEFAULT；iOS 保存后会选中并用 Bing HTML 执行 search_web。"
+            "无需 API Key，保存后即可用于聊天搜索。"
         case .searXNG:
-            "SearXNG 在 Android/KMP 中保存 URL、引擎、语言、用户名和密码；iOS 当前不从添加页暴露，避免保存后返回 unsupported。"
+            "SearXNG 暂未开放。"
         case .jina:
-            "Jina 在 Android/KMP 中有 apiKey、searchUrl 和 scrapeUrl；iOS 当前不从添加页暴露，scrape_web 仍使用安全直抓 MVP。"
+            "Jina 暂未开放。"
         default:
-            "\(title) 在仓库里有 SearchServiceOptions 类型；iOS 当前不从添加页暴露，直到原生执行器接上。"
+            "\(title) 暂未开放。"
         }
     }
 }

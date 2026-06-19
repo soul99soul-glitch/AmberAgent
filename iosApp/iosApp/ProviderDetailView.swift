@@ -89,7 +89,7 @@ struct ProviderDetailView: View {
                 AmberFormGroup {
                     ProviderStaticRow(
                         title: "接口协议",
-                        subtitle: "当前不可切换；iOS 聊天链只按已接入的 Provider 类型构造请求。",
+                        subtitle: "当前聊天使用 OpenAI 兼容接口。",
                         value: protocolLabel
                     )
                     ProviderDetailDivider()
@@ -112,14 +112,14 @@ struct ProviderDetailView: View {
                 AmberFormGroup {
                     ProviderStaticRow(
                         title: "Response API",
-                        subtitle: "ChatViewModel 当前固定 useResponseApi = false；需要 Response API 的模板不会自动套用",
+                        subtitle: "当前聊天使用 Chat Completions 路径。",
                         value: responseAPIValue
                     )
                     ProviderDetailDivider()
                     ProviderStaticRow(
                         title: "账户余额",
-                        subtitle: "余额读取会触发外部请求，iOS 不做例行测试",
-                        value: "未实现"
+                        subtitle: "不会自动向服务商查询余额。",
+                        value: "未查询"
                     )
                 }
             }
@@ -138,13 +138,13 @@ struct ProviderDetailView: View {
                             systemImage: "cpu",
                             name: currentModelID,
                             badge: "当前聊天模型",
-                            summary: "SettingsStore.modelId · 当前唯一接入的模型"
+                            summary: "当前聊天会默认使用这个模型"
                         ) {
                             router.navigate(to: .modelDefaults)
                         }
                     }
 
-                    Text("当前聊天请求仍只消费 SettingsStore.modelId 字符串。Provider registry 已可持久化 OpenAI-compatible 服务商；每个模型的能力、模态、上下文和 custom headers/body 仍未桥接到请求链。")
+                    Text("需要更换模型时，请到默认模型页选择。")
                         .font(.footnote)
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -154,15 +154,15 @@ struct ProviderDetailView: View {
                     AmberFormGroup {
                         if presetSeededModels.isEmpty {
                             ProviderStaticRow(
-                                title: "种子模型",
-                                subtitle: "Android/KMP DEFAULT_PROVIDERS 中此预置不含种子模型",
+                                title: "内置模型",
+                                subtitle: "这个模板暂未提供模型列表",
                                 value: "无"
                             )
                         } else {
                             ForEach(Array(presetSeededModels.enumerated()), id: \.offset) { index, model in
                                 ProviderStaticRow(
                                     title: model.displayName,
-                                    subtitle: "Android/KMP 预置种子模型 · 只读",
+                                    subtitle: "模板提供的模型",
                                     value: model.modelId,
                                     valueStyle: .mono
                                 )
@@ -173,7 +173,7 @@ struct ProviderDetailView: View {
                         }
                     }
 
-                    Text("这些是 Android/KMP 在该预置 Provider 上的种子模型，仅只读展示。本页不拉取模型；自定义 OpenAI-compatible 服务商/模型请从添加入口创建，当前聊天模型仍由默认模型页选择。")
+                    Text("模板模型仅用于参考；当前聊天模型请在默认模型页选择。")
                         .font(.footnote)
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -247,27 +247,27 @@ struct ProviderDetailView: View {
     }
 
     private var protocolLabel: String {
-        requiresProviderBridge ? "Google ProviderSetting" : "OpenAI-compatible"
+        requiresProviderBridge ? "Google 专用接口" : "OpenAI 兼容"
     }
 
     private var scopeSubtitle: String {
         if isCurrentProvider {
-            return "ChatViewModel.makeProviderSetting() 会读取此配置"
+            return "当前聊天正在使用这组配置"
         }
 
         if requiresProviderBridge {
-            return "来自 Android/KMP DEFAULT_PROVIDERS；iOS 尚未桥接该 Provider 类型"
+            return "这个服务商类型暂不支持直接设为当前"
         }
 
         if requiresEndpointConfirmation {
-            return "来自 Android/KMP DEFAULT_PROVIDERS；该默认 Base URL 在源码中标记为可由用户覆盖"
+            return "模板地址需要你确认后再使用"
         }
 
         if requiresResponseAPIBridge {
-            return "来自 Android/KMP DEFAULT_PROVIDERS；需要 useResponseApi=true 才能完整表达"
+            return "这个模板需要不同的接口模式"
         }
 
-        return "来自 Android/KMP DEFAULT_PROVIDERS；可安全套用 Base URL"
+        return "保存 API Key 后可设为当前"
     }
 
     private var scopeValue: String {
@@ -289,7 +289,7 @@ struct ProviderDetailView: View {
                 monospace: true
             )
             if !isBaseUrlValid {
-                ProviderInlineWarning("URL 格式无效；ChatViewModel 会使用该值发起请求，发送前请修正。")
+                ProviderInlineWarning("URL 格式无效，请修正后再发送消息。")
             }
             ProviderDetailDivider()
             ProviderStaticRow(
@@ -303,7 +303,7 @@ struct ProviderDetailView: View {
             ProviderDetailDivider()
             ProviderStaticRow(
                 title: "预置 API 地址",
-                subtitle: "来自 Android/KMP DEFAULT_PROVIDERS",
+                subtitle: "服务商模板地址",
                 value: endpoint,
                 valueStyle: .mono
             )
@@ -351,7 +351,7 @@ struct ProviderDetailView: View {
         } else {
             ProviderStaticRow(
                 title: "API Key",
-                subtitle: "DEFAULT_PROVIDERS 不包含凭据",
+                subtitle: "模板不会自带你的密钥",
                 value: "未预置"
             )
         }
@@ -359,15 +359,15 @@ struct ProviderDetailView: View {
 
     private var presetApplyValue: String {
         if requiresProviderBridge {
-            return "需桥接"
+            return "暂不支持"
         }
 
         if requiresEndpointConfirmation {
-            return "Base 待确认"
+            return "需要确认"
         }
 
         if requiresResponseAPIBridge {
-            return "需 Response API"
+            return "暂不支持"
         }
 
         return settingsStore.baseUrl == endpoint ? "已是当前地址" : "写入当前配置"
@@ -375,14 +375,14 @@ struct ProviderDetailView: View {
 
     private var presetPathSubtitle: String {
         if requiresProviderBridge {
-            return "需要 Google Provider bridge"
+            return "该服务商使用专用接口"
         }
 
         if requiresResponseAPIBridge {
-            return "Android 默认 useResponseApi = true；iOS 未保存该开关"
+            return "该模板使用不同接口模式"
         }
 
-        return "当前 ChatViewModel 固定使用"
+        return "当前聊天使用"
     }
 
     private var presetPathValue: String {
@@ -403,22 +403,22 @@ struct ProviderDetailView: View {
 
     private var connectionFooterText: String {
         if isCurrentProvider {
-            return "本页编辑 legacy 当前聊天配置：API 地址写入 UserDefaults，API Key 绑定 SettingsStore 的既有 Keychain account。新增多服务商请从服务商列表右上角 + 创建。"
+            return "这里编辑当前聊天服务商。新增服务商请从服务商列表右上角 + 创建。"
         }
 
         if requiresProviderBridge {
-            return "此模板只展示 Android/KMP 预置 Provider 信息；iOS 当前不会把它保存为 Google ProviderSetting，也不会写入 API Key 或发起请求。"
+            return "这个模板当前仅供查看，暂不能设为聊天服务商。"
         }
 
         if requiresEndpointConfirmation {
-            return "此模板在 Android/KMP 中存在，但默认 Base URL 被源码注释标记为占位/可覆盖。iOS 当前不一键写入，避免把待确认地址当作可用配置。"
+            return "这个模板的地址需要确认，当前不会一键写入聊天配置。"
         }
 
         if requiresResponseAPIBridge {
-            return "此模板在 Android/KMP 中要求 useResponseApi=true；iOS 当前无法保存该开关，所以不只套用 Base URL。"
+            return "这个模板需要不同接口模式，当前不会只套用地址。"
         }
 
-        return "API Key 行进入真实 Key 编辑页，只写入该 provider 的 Keychain account（不写入 UserDefaults、不改当前服务商、不发网络请求）。保存 Key 后该模板即可在列表里「设为当前」。套用地址只写入 SettingsStore.baseUrl。"
+        return "API Key 会保存在本机钥匙串。保存后可在列表里设为当前。"
     }
 
     private func applyPresetBaseURL() {
@@ -474,30 +474,30 @@ private enum ProviderDetailAlert: Identifiable {
     var title: String {
         switch self {
         case .protocolPicker:
-            "接口协议选择未实现"
+            "暂不能切换接口协议"
         case .presetApplied:
             "API 地址已套用"
         case .providerBridgeRequired:
-            "Provider 类型尚未桥接"
+            "暂不支持这个服务商类型"
         case .endpointConfirmationRequired:
             "Base URL 需要确认"
         case .responseAPIRequired:
-            "Response API 未实现"
+            "暂不支持这个接口模式"
         }
     }
 
     var message: String {
         switch self {
         case .protocolPicker:
-            "iOS 当前聊天链路只构造 ProviderSetting.OpenAI，暂不切换 Google / Claude / 其他 ProviderSetting 类型。"
+            "当前版本只支持 OpenAI 兼容接口。"
         case .presetApplied(let provider):
             "\(provider) 的预置 Base URL 已写入当前聊天配置。API Key 仍为空或保持你已有的 Keychain 值；本操作没有发起网络请求。"
         case .providerBridgeRequired(let provider):
-            "\(provider) 使用的 ProviderSetting 类型还没有接到 iOS 当前聊天链路；这里只展示预置模板，不会保存或请求。"
+            "\(provider) 使用专用接口，当前版本还不能直接设为聊天服务商。"
         case .endpointConfirmationRequired(let provider):
-            "\(provider) 的 Android 默认 Base URL 在源码中标记为占位/可覆盖。iOS 当前不会把它写入真实聊天配置。"
+            "\(provider) 的模板地址需要确认，当前不会写入聊天配置。"
         case .responseAPIRequired(let provider):
-            "\(provider) 的 Android 默认 Provider 使用 Response API。iOS 当前 ChatViewModel 固定 chat/completions，不能只套用 Base URL。"
+            "\(provider) 使用不同接口模式，当前不能只套用 Base URL。"
         }
     }
 }

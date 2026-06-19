@@ -490,8 +490,8 @@ enum IOSMiniAppFixtures {
     static let sampleId = "ios-miniapp-mvp-sample"
 
     static let sampleOutput = IOSMiniAppGeneratedOutput(
-        title: "iOS MiniApp MVP",
-        description: "本地样例：验证 appId、持久化、HTML 校验、WKWebView 和 Amber bridge。",
+        title: "Amber 小应用示例",
+        description: "本地样例：试用按钮、提示、主题和存储能力。",
         icon: "🧩",
         category: "tool",
         permissions: [
@@ -509,8 +509,8 @@ enum IOSMiniAppFixtures {
     static let sampleHtml = """
     <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;padding:14px;color:#1f2937}button{font-size:15px;padding:8px 12px;margin:4px;border:0;border-radius:9px;background:#2563eb;color:white}pre{white-space:pre-wrap;background:#f3f4f6;padding:10px;border-radius:10px}</style></head>
     <body>
-    <h3>iOS MiniApp MVP</h3>
-    <p>这个样例来自 Documents/miniapps 持久化仓库，按钮会调用原生 Amber bridge。</p>
+    <h3>Amber 小应用示例</h3>
+    <p>点击按钮试用小应用提供的本机能力。</p>
     <p>
       <button onclick="callInfo()">app.info</button>
       <button onclick="saveStorage()">storage.set</button>
