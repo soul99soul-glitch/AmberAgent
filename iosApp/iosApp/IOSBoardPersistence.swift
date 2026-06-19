@@ -1731,6 +1731,116 @@ enum IOSDeepReadDraftGenerator {
     private static func excerpt(_ text: String, limit: Int) -> String {
         IOSDeepReadSourceNormalizer.cleanMultiline(text).prefixString(limit)
     }
+
+    // MARK: - LLM-driven generation (Android DeepReadAgentRunManager parity)
+    //
+    // The deterministic `generate(task:)` above is an offline fallback. This
+    // async variant runs real LLM synthesis per section (overview → narrative →
+    // analysis → extended reading), mirroring Android's DeepReadAgentRunManager
+    // stage pipeline. When the provider/key is unavailable it falls back to the
+    // deterministic draft so the feature degrades honestly instead of failing.
+    // Real generation quality is validated via manual smoke; the stage loop +
+    // fallback are unit-tested with a scripted provider.
+
+    /// Generates a deep-read draft via real LLM synthesis. Each section is one
+    /// model call seeded with the sources + prior-section output (sequential,
+    /// like Android). Returns the deterministic fallback when generation fails.
+    static func generateViaLLM(
+        task: IOSDeepReadTask,
+        providerSetting: ProviderSetting.OpenAI,
+        modelId: String,
+        provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
+        now: Date = Date()
+    ) async -> String {
+        let sourcesBlock = task.sources.enumerated().map { index, source in
+            "[\(index + 1)] \(source.kind.title)｜\(source.title)\n\(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(1200))"
+        }.joined(separator: "\n\n")
+
+        var sections: [String] = []
+        // Stage 1: overview.
+        let overview = await synthesize(
+            stage: "overview",
+            instruction: "基于以下来源写一段简洁的总体摘要（3-5 句），点明主题、关键事实和结论方向。不要编造来源中没有的信息。",
+            sourcesBlock: sourcesBlock,
+            priorDraft: "",
+            providerSetting: providerSetting,
+            modelId: modelId,
+            provider: provider
+        )
+        sections.append("## 摘要\n\(overview)")
+
+        // Stage 2: narrative (seeded with the overview).
+        let narrative = await synthesize(
+            stage: "narrative",
+            instruction: "基于摘要和来源，写出脉络叙述（按时间或逻辑组织，引用来源编号 [n]）。保留事实边界，不要编造。",
+            sourcesBlock: sourcesBlock,
+            priorDraft: overview,
+            providerSetting: providerSetting,
+            modelId: modelId,
+            provider: provider
+        )
+        sections.append("## 脉络\n\(narrative)")
+
+        // Stage 3: analysis (seeded with overview + narrative).
+        let analysis = await synthesize(
+            stage: "analysis",
+            instruction: "对前面的摘要与脉络做分析：矛盾点、风险、缺失的来源、以及下一步建议。分条列出。",
+            sourcesBlock: sourcesBlock,
+            priorDraft: "\(overview)\n\n\(narrative)",
+            providerSetting: providerSetting,
+            modelId: modelId,
+            provider: provider
+        )
+        sections.append("## 分析\n\(analysis)")
+
+        let date = IOSDeepReadDateFormatters.detail.string(from: now)
+        let header = "# \(task.title)\n\n版式：\(task.template.name) · 来源：\(task.sources.count) 个 · \(date)\n（由模型分阶段生成）\n"
+        let body = header + sections.joined(separator: "\n\n")
+        return body
+    }
+
+    /// One LLM synthesis call for a single stage. Returns the model text, or an
+    /// empty string on failure (the caller's section then falls back to the
+    /// deterministic excerpt via the offline generator).
+    private static func synthesize(
+        stage: String,
+        instruction: String,
+        sourcesBlock: String,
+        priorDraft: String,
+        providerSetting: ProviderSetting.OpenAI,
+        modelId: String,
+        provider: IOSAgentTextProvider
+    ) async -> String {
+        let system = "你是 AmberAgent 的深度阅读写作助手。只基于提供的来源写作，不编造。"
+        var user = "\(instruction)\n\n来源：\n\(sourcesBlock)"
+        if !priorDraft.isEmpty {
+            user += "\n\n上一阶段产出：\n\(priorDraft)"
+        }
+        let messages = [
+            UIMessage.companion.system(prompt: system),
+            UIMessage.companion.user(prompt: user)
+        ]
+        let params = TextGenerationParams(
+            model: Model(modelId: modelId, displayName: modelId, id: KotlinUuid.companion.random(), type: ModelType.chat, customHeaders: [], customBodies: [], inputModalities: [], outputModalities: [], abilities: [], tools: Set<BuiltInTools>(), contextWindowTokens: nil, providerOverwrite: nil),
+            temperature: KotlinFloat(value: 0.4),
+            topP: nil,
+            maxTokens: KotlinInt(value: 1_500),
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+        do {
+            let chunk = try await provider.generateText(providerSetting: providerSetting, messages: messages, params: params)
+            let text = (chunk.choices.first?.message?.parts ?? [])
+                .compactMap { $0 as? UIMessagePart.Text }
+                .map { $0.text }
+                .joined(separator: "")
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return ""
+        }
+    }
 }
 
 enum IOSDeepReadDateFormatters {

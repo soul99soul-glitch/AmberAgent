@@ -305,9 +305,41 @@ struct BoardView: View {
             templateId: selectedTemplateId
         )
         deepReadStore.markRunning(id: task.id)
-        if let running = deepReadStore.task(id: task.id) {
-            let output = IOSDeepReadDraftGenerator.generate(task: running)
-            deepReadStore.complete(id: task.id, markdown: output)
+        guard let running = deepReadStore.task(id: task.id) else { return }
+
+        Task { @MainActor in
+            // Real LLM pipeline when a provider/key is configured; deterministic
+            // offline draft otherwise (honest degradation, no fabricated output).
+            let store = SettingsStore()
+            let output: String
+            if !store.currentApiKey.isEmpty {
+                let providerSetting = ProviderSetting.OpenAI(
+                    id: KotlinUuid.companion.random(),
+                    enabled: true,
+                    name: "DeepRead",
+                    models: [],
+                    balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+                    builtIn: false,
+                    descriptionText: nil,
+                    shortDescriptionText: nil,
+                    apiKey: store.apiKey,
+                    baseUrl: store.baseUrl,
+                    chatCompletionsPath: "/chat/completions",
+                    useResponseApi: false,
+                    authMode: OpenAIAuthMode.apiKey,
+                    brand: OpenAIBrand.generic
+                )
+                let llmDraft = await IOSDeepReadDraftGenerator.generateViaLLM(
+                    task: running,
+                    providerSetting: providerSetting,
+                    modelId: store.modelId
+                )
+                output = llmDraft.isEmpty ? IOSDeepReadDraftGenerator.generate(task: running) : llmDraft
+            } else {
+                output = IOSDeepReadDraftGenerator.generate(task: running)
+            }
+
+            self.deepReadStore.complete(id: task.id, markdown: output)
             _ = try? IOSWorkspaceStore.shared.saveArtifact(
                 title: running.title,
                 content: output,
@@ -315,11 +347,11 @@ struct BoardView: View {
                 sourceKind: "deep_read",
                 sourceId: running.id
             )
+            self.deepReadMessage = "已生成并保存深度阅读。"
+            self.deepReadMessageIsError = false
+            self.deepReadTitle = ""
+            self.router.navigate(to: .deepReadTask(id: task.id))
         }
-        deepReadMessage = "已生成并保存深度阅读。"
-        deepReadMessageIsError = false
-        deepReadTitle = ""
-        router.navigate(to: .deepReadTask(id: task.id))
     }
 
     private func createFromWebMount() async {
