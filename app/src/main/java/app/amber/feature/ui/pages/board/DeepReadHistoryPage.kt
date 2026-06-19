@@ -28,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import app.amber.agent.Screen
 import app.amber.feature.board.hotlist.DeepReadHistoryItem
 import app.amber.feature.board.hotlist.HotListRepository
@@ -50,6 +52,7 @@ fun DeepReadHistoryPage(
     val navController = LocalNavController.current
     val history by repository.observeDeepReadHistory().collectAsStateWithLifecycle(initialValue = emptyList())
     val colors = workspaceColors()
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -91,7 +94,7 @@ fun DeepReadHistoryPage(
                         )
                     },
                     onTogglePin = { pinned ->
-                        repository.setDeepReadPinned(item.topicId, pinned)
+                        scope.launch { repository.setDeepReadPinned(item.topicId, pinned) }
                     },
                 )
                 if (index != history.lastIndex) {
