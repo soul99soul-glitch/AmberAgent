@@ -39,6 +39,17 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         XCTAssertEqual(openAI?.models.first?.modelId, "test-model-1")
     }
 
+    func testChatModelIdsExposeAddedCustomModelForSelection() {
+        let store = makeIsolatedStore()
+
+        store.addCustomModel(name: "可选模型", modelId: "selectable-chat-model", providerName: "可选Provider")
+
+        XCTAssertTrue(
+            store.chatModelIds.contains("selectable-chat-model"),
+            "ModelDefaultsView must be able to offer user-added chat models for SettingsStore.modelId"
+        )
+    }
+
     func testAddedProviderSurvivesRestart() {
         let suiteName = "Slice4-Prov-\(UUID().uuidString)"
         let store1 = makeIsolatedStore(suiteName: suiteName)

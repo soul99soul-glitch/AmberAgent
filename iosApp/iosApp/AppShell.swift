@@ -313,7 +313,7 @@ private extension View {
             case .providers:
                 ProvidersView(settingsStore: settingsStore, providerRegistry: providerRegistry)
             case .providerAdd:
-                ProviderAddView()
+                ProviderAddView(providerRegistry: providerRegistry)
             case .providerDetail(let name, let endpoint, let kind):
                 ProviderDetailView(settingsStore: settingsStore, providerRegistry: providerRegistry, providerName: name, endpoint: endpoint, providerKind: kind)
             case .providerKeyEditor(let name):

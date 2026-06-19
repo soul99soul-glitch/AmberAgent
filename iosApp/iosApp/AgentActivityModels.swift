@@ -224,7 +224,7 @@ extension AgentActivityPresentation {
         }
     }
 
-    private static func sanitize(_ raw: String, fallback: String, maxLength: Int) -> String {
+    private static func sanitize(_ raw: String, fallback: String, maxLength _: Int) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return fallback }
 
@@ -236,9 +236,7 @@ extension AgentActivityPresentation {
             .joined(separator: " ")
 
         guard isAllowedPublicSummary(collapsed) else { return fallback }
-        guard collapsed.count > maxLength else { return collapsed }
-        let endIndex = collapsed.index(collapsed.startIndex, offsetBy: maxLength)
-        return String(collapsed[..<endIndex])
+        return collapsed
     }
 
     private static func isAllowedPublicSummary(_ text: String) -> Bool {
@@ -289,6 +287,14 @@ extension AgentActivityPresentation {
 
     private static func genericPrivateSummary(for text: String) -> String? {
         let lowercased = text.lowercased()
+        if lowercased.contains("/users/") ||
+            lowercased.contains("/var/") ||
+            lowercased.contains("/private/") ||
+            lowercased.contains("~/") ||
+            lowercased.contains("file://") ||
+            lowercased.contains("\\") {
+            return "读取文件"
+        }
         if lowercased.contains("api_key") ||
             lowercased.contains("apikey") ||
             lowercased.contains("bearer ") ||
@@ -304,14 +310,6 @@ extension AgentActivityPresentation {
         }
         if lowercased.contains("http://") || lowercased.contains("https://") {
             return "阅读网页"
-        }
-        if lowercased.contains("/users/") ||
-            lowercased.contains("/var/") ||
-            lowercased.contains("/private/") ||
-            lowercased.contains("~/") ||
-            lowercased.contains("file://") ||
-            lowercased.contains("\\") {
-            return "读取文件"
         }
         if looksLikeEmail(lowercased) || looksLikeIPAddress(lowercased) {
             return "处理私密信息"

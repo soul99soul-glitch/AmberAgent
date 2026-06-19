@@ -164,7 +164,7 @@ struct SubAgentsView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实 SubAgent 设置、内置角色、运行管理器和 subagent_* 工具；iOS 现在可从本页手动构造 IosSubAgentFactory 并启动 start/read/wait/cancel 调用链。ChatViewModel 自动注入 subagent_* 工具、SettingsStore 写回和角色持久化仍未接。")
+        Text("Android/KMP 已有真实 SubAgent 设置、内置角色、运行管理器和 subagent_* 工具；iOS 现在可从本页手动构造 IosSubAgentFactory 并启动 start/read/wait/cancel 调用链。ChatViewModel 已注入 subagent_dispatch；动态角色写回和角色持久化仍未接。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)

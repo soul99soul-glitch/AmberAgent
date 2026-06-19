@@ -123,6 +123,26 @@ object IosSettingsMutations {
         )
     }
 
+    /**
+     * Construct a key-less OpenAI-compatible provider with a stable id supplied
+     * by iOS. Used by the Provider registry so a custom provider can survive
+     * app restarts while its API key remains in the matching iOS Keychain slot.
+     */
+    fun buildOpenAIProviderWithId(
+        id: String,
+        name: String,
+        baseUrl: String,
+    ): ProviderSetting.OpenAI {
+        return ProviderSetting.OpenAI(
+            id = kotlin.uuid.Uuid.parse(id),
+            name = name,
+            apiKey = "",
+            baseUrl = baseUrl,
+            models = emptyList(),
+            builtIn = false,
+        )
+    }
+
     // ---- TTS providers (settings.ttsProviders: List<TTSProviderSetting>) ----
 
     /** Append a fully-constructed [provider] to `settings.ttsProviders`. */
@@ -293,6 +313,23 @@ object IosSettingsMutations {
                 subAgent = sub.copy(
                     overrides = sub.overrides.filterKeys { it != roleId }
                 )
+            )
+        )
+    }
+
+    // ---- Memory runtime switches (settings.agentRuntime.enable*Memory) ----
+
+    fun setMemoryRuntimeEnabled(
+        settings: Settings,
+        enableCoreMemory: Boolean,
+        enableShortTermMemory: Boolean,
+        enableLongTermMemory: Boolean,
+    ): Settings {
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                enableCoreMemory = enableCoreMemory,
+                enableShortTermMemory = enableShortTermMemory,
+                enableLongTermMemory = enableLongTermMemory,
             )
         )
     }

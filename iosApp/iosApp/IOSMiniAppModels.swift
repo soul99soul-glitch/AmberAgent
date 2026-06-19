@@ -303,7 +303,7 @@ enum IOSMiniAppJSONValue: Codable, Equatable, Hashable {
     }
 
     var byteCount: Int {
-        (try? JSONSerialization.data(withJSONObject: anyValue)).map(\.count) ?? 0
+        (try? JSONEncoder().encode(self)).map(\.count) ?? 0
     }
 }
 

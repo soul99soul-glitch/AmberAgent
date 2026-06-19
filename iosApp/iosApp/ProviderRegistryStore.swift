@@ -3,6 +3,55 @@ import Observation
 import Security
 @preconcurrency import Shared
 
+private struct StoredProviderRecord: Codable, Equatable {
+    var id: String
+    var name: String
+    var baseUrl: String
+}
+
+protocol ProviderRegistryKeyStore {
+    func loadKey(id: String) -> String?
+    @discardableResult
+    func saveKey(_ key: String, id: String) -> Bool
+}
+
+private struct KeychainProviderRegistryKeyStore: ProviderRegistryKeyStore {
+    let keychainPrefix: String
+
+    func loadKey(id: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainPrefix,
+            kSecAttrAccount as String: account(for: id),
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    @discardableResult
+    func saveKey(_ key: String, id: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainPrefix,
+            kSecAttrAccount as String: account(for: id),
+        ]
+        let deleteStatus = SecItemDelete(query as CFDictionary)
+        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else { return false }
+        guard !key.isEmpty else { return true }
+        var attributes = query
+        attributes[kSecValueData as String] = Data(key.utf8)
+        return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
+    }
+
+    private func account(for id: String) -> String {
+        keychainPrefix + id
+    }
+}
+
 /// Real, persisted multi-provider registry for iOS.
 ///
 /// Design (additive, Chat-safe):
@@ -34,26 +83,42 @@ final class ProviderRegistryStore {
     private(set) var keyRevision: Int = 0
 
     @ObservationIgnored private let settingsStore: SettingsStore
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let selectedKey: String
+    @ObservationIgnored private let migratedKey: String
+    @ObservationIgnored private let customProvidersKey: String
+    @ObservationIgnored private let keyStore: any ProviderRegistryKeyStore
 
-    private static let selectedKey = "app.amber.ios.providerRegistry.selectedId"
-    private static let migratedKey = "app.amber.ios.providerRegistry.migratedV1"
-    private static let keychainPrefix = "app.amber.ios.provider."
+    private static let defaultKeyNamespace = "app.amber.ios.providerRegistry"
+    private static let defaultKeychainPrefix = "app.amber.ios.provider."
 
-    init(settingsStore: SettingsStore) {
+    init(
+        settingsStore: SettingsStore,
+        userDefaults: UserDefaults = .standard,
+        keyNamespace: String = ProviderRegistryStore.defaultKeyNamespace,
+        keychainPrefix: String = ProviderRegistryStore.defaultKeychainPrefix,
+        keyStore: (any ProviderRegistryKeyStore)? = nil
+    ) {
         self.settingsStore = settingsStore
+        self.defaults = userDefaults
+        self.selectedKey = "\(keyNamespace).selectedId"
+        self.migratedKey = "\(keyNamespace).migratedV2"
+        self.customProvidersKey = "\(keyNamespace).customProviders"
+        self.keyStore = keyStore ?? KeychainProviderRegistryKeyStore(keychainPrefix: keychainPrefix)
 
-        let defaults = UserDefaults.standard
         // Always read the live KMP defaults. Decoding persisted ProviderSetting JSON
         // would need a safe KMP wrapper because Kotlin serialization failures can
         // cross the Swift boundary as process-fatal exceptions.
-        self.providers = DefaultProvidersKt.DEFAULT_PROVIDERS
-        self.selectedProviderId = defaults.string(forKey: Self.selectedKey) ?? ""
+        let storedProviders = Self.loadStoredProviderRecords(defaults: userDefaults, key: customProvidersKey)
+            .compactMap(Self.makeOpenAIProvider(record:))
+        self.providers = storedProviders.map { $0 as ProviderSetting } + DefaultProvidersKt.DEFAULT_PROVIDERS
+        self.selectedProviderId = defaults.string(forKey: selectedKey) ?? ""
 
         // One-time migration: represent the user's existing single-config values as
         // a real selected provider without changing what Chat currently reads.
-        if !defaults.bool(forKey: Self.migratedKey) {
+        if !defaults.bool(forKey: migratedKey) {
             migrateExistingConfig()
-            defaults.set(true, forKey: Self.migratedKey)
+            defaults.set(true, forKey: migratedKey)
         }
 
         // Ensure the selected row is both present and usable by the current chat chain.
@@ -63,10 +128,10 @@ final class ProviderRegistryStore {
             canSelect($0) && Self.baseURL(of: $0).trimmingCharacters(in: .whitespacesAndNewlines) == settingsStore.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         }) {
             selectedProviderId = Self.id(of: match)
-            defaults.set(selectedProviderId, forKey: Self.selectedKey)
+            defaults.set(selectedProviderId, forKey: selectedKey)
         } else {
             selectedProviderId = ""
-            defaults.removeObject(forKey: Self.selectedKey)
+            defaults.removeObject(forKey: selectedKey)
         }
     }
 
@@ -106,20 +171,53 @@ final class ProviderRegistryStore {
         guard providers.contains(where: { Self.id(of: $0) == id }) else { return }
         syncCurrentKeyToSelectedProvider()
         selectedProviderId = id
-        UserDefaults.standard.set(id, forKey: Self.selectedKey)
+        defaults.set(id, forKey: selectedKey)
         project()
+    }
+
+    /// Persist a user-added OpenAI-compatible provider and optionally activate it.
+    /// Returns true only when the new provider became the current chat provider.
+    @discardableResult
+    func addOpenAICompatibleProvider(
+        name: String,
+        baseUrl: String,
+        apiKey: String,
+        activate: Bool = true
+    ) -> Bool {
+        let trimmedBase = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBase.isEmpty else { return false }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let record = StoredProviderRecord(
+            id: UUID().uuidString.lowercased(),
+            name: trimmedName.isEmpty ? "OpenAI-compatible" : trimmedName,
+            baseUrl: trimmedBase
+        )
+        guard let provider = appendStoredProvider(record) else { return false }
+
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedKey.isEmpty {
+            guard saveKey(trimmedKey, for: provider) else { return false }
+        }
+
+        guard activate, canSelect(provider) else { return false }
+        syncCurrentKeyToSelectedProvider()
+        selectedProviderId = record.id
+        defaults.set(record.id, forKey: selectedKey)
+        project()
+        return true
     }
 
     /// Whether this provider has a stored Keychain key (for honest UI status only).
     func hasStoredKey(_ provider: ProviderSetting) -> Bool {
-        !(Self.loadKey(id: Self.id(of: provider)) ?? "").isEmpty
+        !(loadKey(id: Self.id(of: provider)) ?? "").isEmpty
     }
 
     /// The real per-provider Keychain key for `provider`, or nil if none is stored.
     /// Used only to seed the Key editor and to show honest status. Never returns the
     /// key for a provider that is not the current selection into SettingsStore.
     func storedKey(for provider: ProviderSetting) -> String? {
-        Self.loadKey(id: Self.id(of: provider))
+        loadKey(id: Self.id(of: provider))
     }
 
     /// Write a per-provider API key into the real Keychain account for `provider`.
@@ -133,9 +231,11 @@ final class ProviderRegistryStore {
     /// A provider becomes selectable as the current chat provider only after this
     /// stores a non-empty key AND the user taps "设为当前" (which runs `select()` and
     /// projects). Writing a key alone never activates the provider.
-    func saveKey(_ key: String, for provider: ProviderSetting) {
-        Self.saveKey(key, id: Self.id(of: provider))
+    @discardableResult
+    func saveKey(_ key: String, for provider: ProviderSetting) -> Bool {
+        let saved = saveKey(key, id: Self.id(of: provider))
         keyRevision &+= 1
+        return saved
     }
 
     // MARK: - Projection into SettingsStore (the surface Chat reads)
@@ -145,7 +245,7 @@ final class ProviderRegistryStore {
     private func project() {
         guard let selected = selectedProvider else { return }
         settingsStore.baseUrl = Self.baseURL(of: selected)
-        settingsStore.apiKey = Self.loadKey(id: selectedProviderId) ?? ""
+        settingsStore.apiKey = loadKey(id: selectedProviderId) ?? ""
     }
 
     /// Before switching away, preserve the currently active scalar key under the
@@ -154,7 +254,7 @@ final class ProviderRegistryStore {
     private func syncCurrentKeyToSelectedProvider() {
         guard !selectedProviderId.isEmpty else { return }
         guard let selected = selectedProvider, canActivate(selected) else { return }
-        Self.saveKey(settingsStore.apiKey, id: selectedProviderId)
+        saveKey(settingsStore.apiKey, id: selectedProviderId)
     }
 
     // MARK: - Migration
@@ -175,15 +275,20 @@ final class ProviderRegistryStore {
             selectedProviderId = Self.id(of: match)
         } else if !currentBase.isEmpty {
             // Otherwise create a real custom OpenAI-compatible provider carrying the
-            // current Base URL (key-less) and select it.
-            let custom = Self.makeOpenAIProvider(name: "当前配置", baseUrl: currentBase)
-            providers.insert(custom, at: 0)
-            selectedProviderId = Self.id(of: custom)
+            // current Base URL (key-less), persist it, and select it.
+            let record = StoredProviderRecord(
+                id: UUID().uuidString.lowercased(),
+                name: "当前配置",
+                baseUrl: currentBase
+            )
+            if let custom = appendStoredProvider(record) {
+                selectedProviderId = Self.id(of: custom)
+            }
         }
 
         if !selectedProviderId.isEmpty {
-            Self.saveKey(currentKey, id: selectedProviderId)
-            UserDefaults.standard.set(selectedProviderId, forKey: Self.selectedKey)
+            saveKey(currentKey, id: selectedProviderId)
+            defaults.set(selectedProviderId, forKey: selectedKey)
         }
     }
 
@@ -200,51 +305,62 @@ final class ProviderRegistryStore {
         return ""
     }
 
-    private static func makeOpenAIProvider(name: String, baseUrl: String) -> ProviderSetting.OpenAI {
-        ProviderSetting.OpenAI(
-            id: KotlinUuid.companion.random(),
-            enabled: true,
-            name: name,
-            models: [],
-            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-            builtIn: false,
-            descriptionText: nil,
-            shortDescriptionText: nil,
-            apiKey: "",
-            baseUrl: baseUrl,
-            chatCompletionsPath: "/chat/completions",
-            useResponseApi: false,
-            authMode: OpenAIAuthMode.apiKey,
-            brand: OpenAIBrand.generic
+    private func appendStoredProvider(_ record: StoredProviderRecord) -> ProviderSetting.OpenAI? {
+        guard let provider = Self.makeOpenAIProvider(record: record) else { return nil }
+        var records = Self.loadStoredProviderRecords(defaults: defaults, key: customProvidersKey)
+        records.removeAll { $0.id == record.id }
+        records.append(record)
+        Self.saveStoredProviderRecords(records, defaults: defaults, key: customProvidersKey)
+        providers.insert(provider, at: 0)
+        return provider
+    }
+
+    private static func makeOpenAIProvider(record: StoredProviderRecord) -> ProviderSetting.OpenAI? {
+        let trimmedName = record.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBase = record.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard UUID(uuidString: record.id) != nil else { return nil }
+        guard !trimmedName.isEmpty, !trimmedBase.isEmpty else { return nil }
+        return IosSettingsMutations.shared.buildOpenAIProviderWithId(
+            id: record.id,
+            name: trimmedName,
+            baseUrl: trimmedBase
         )
+    }
+
+    private static func loadStoredProviderRecords(defaults: UserDefaults, key: String) -> [StoredProviderRecord] {
+        guard let data = defaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([StoredProviderRecord].self, from: data) else {
+            return []
+        }
+        var seen = Set<String>()
+        return decoded.compactMap { record in
+            let trimmedId = record.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let trimmedName = record.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedBase = record.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard UUID(uuidString: trimmedId) != nil else { return nil }
+            guard !trimmedName.isEmpty, !trimmedBase.isEmpty else { return nil }
+            guard seen.insert(trimmedId).inserted else { return nil }
+            return StoredProviderRecord(id: trimmedId, name: trimmedName, baseUrl: trimmedBase)
+        }
+    }
+
+    private static func saveStoredProviderRecords(
+        _ records: [StoredProviderRecord],
+        defaults: UserDefaults,
+        key: String
+    ) {
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        defaults.set(data, forKey: key)
     }
 
     // MARK: - Keychain (per-provider api key)
 
-    private static func account(for id: String) -> String { keychainPrefix + id }
-
-    static func loadKey(id: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: account(for: id),
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+    private func loadKey(id: String) -> String? {
+        keyStore.loadKey(id: id)
     }
 
-    static func saveKey(_ key: String, id: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: account(for: id),
-        ]
-        SecItemDelete(query as CFDictionary)
-        guard !key.isEmpty else { return }
-        var attributes = query
-        attributes[kSecValueData as String] = Data(key.utf8)
-        SecItemAdd(attributes as CFDictionary, nil)
+    @discardableResult
+    private func saveKey(_ key: String, id: String) -> Bool {
+        keyStore.saveKey(key, id: id)
     }
 }

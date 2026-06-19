@@ -131,13 +131,13 @@ struct CouncilSettingsView: View {
                 CouncilSettingsStatusRow(
                     row: .init(
                         title: "iOS 模型议会",
-                        subtitle: "ChatViewModel 当前不会注入 model_council_* 工具；IosCouncilFactory 可构造 Manager（stub runner）验证调用链。",
-                        value: "调用链已通（stub）",
+                        subtitle: "ChatViewModel 已注入 model_council_run；IosCouncilFactory 可构造 Manager 并验证调用链。",
+                        value: "Chat 链路已接",
                         color: AmberTheme.accentAmber
                     )
                 )
             }
-            CouncilFootnote(text: "议会席位只做纯文本生成，不继承工具、记忆或完整聊天记录。IosCouncilFactory 用 stub runner 验证了 start 调用链，真实推理需 ProviderManager KMP 化。")
+            CouncilFootnote(text: "议会席位只做纯文本生成，不继承工具或完整聊天记录。配置 API Key 时可走真实 OpenAI-compatible provider；无 Key 时只使用诚实 stub 验证调用链。")
         }
     }
 

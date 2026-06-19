@@ -78,7 +78,7 @@ struct ProvidersView: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(AmberTheme.muted.opacity(0.72))
 
-            Text("预置模板；搜索待 Provider registry 接线")
+            Text("预置模板；可添加 OpenAI 兼容服务商")
                 .font(.subheadline)
                 .foregroundStyle(AmberTheme.muted)
 
@@ -418,6 +418,8 @@ private struct ProviderStatusRow: View {
 }
 
 struct ProviderAddView: View {
+    let providerRegistry: ProviderRegistryStore
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = "New Provider"
@@ -427,6 +429,7 @@ struct ProviderAddView: View {
     @State private var path = "/chat/completions"
     @State private var responseAPI = false
     @State private var balanceRefresh = false
+    @State private var alert: ProviderAddAlert?
 
     var body: some View {
         ZStack {
@@ -449,6 +452,13 @@ struct ProviderAddView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .alert(item: $alert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("知道了"))
+            )
+        }
     }
 
     private var header: some View {
@@ -471,9 +481,9 @@ struct ProviderAddView: View {
             Spacer()
 
             Button {
-                dismiss()
+                save()
             } label: {
-                Text("关闭")
+                Text("保存")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.accent)
                     .frame(height: 36)
@@ -482,7 +492,7 @@ struct ProviderAddView: View {
             }
             .buttonStyle(.plain)
             .amberGlass(cornerRadius: AmberTheme.radiusPill)
-            .accessibilityLabel("关闭")
+            .accessibilityLabel("保存服务商")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -500,11 +510,11 @@ struct ProviderAddView: View {
                         .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("本地预览")
+                        Text("OpenAI-compatible")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(AmberTheme.foreground)
 
-                        Text("填写新服务商的协议、API 地址和凭据。当前页面只验证表单结构，不保存配置或发起网络请求。")
+                        Text("保存后会加入服务商列表；API Key 写入本机 Keychain。填写 Key 时会立即设为当前聊天服务商，不发起网络测试。")
                             .font(.caption)
                             .foregroundStyle(AmberTheme.muted)
                             .lineSpacing(2)
@@ -555,7 +565,7 @@ struct ProviderAddView: View {
                 )
             }
 
-            ProviderDraftNote("API 地址不应包含具体 chat 路径；路径会按所选协议预填，可按服务商文档调整。")
+            ProviderDraftNote("当前 iOS 聊天链路只消费 OpenAI-compatible base URL，并固定使用 /chat/completions。其它协议或自定义路径需要后续 Provider bridge。")
         }
     }
 
@@ -572,7 +582,7 @@ struct ProviderAddView: View {
                 )
             }
 
-            ProviderDraftNote("当前不会写入 Keychain，也不会尝试连接服务商。需要真实接入时再绑定 SettingsStore。")
+            ProviderDraftNote("API Key 留空时只保存服务商模板，不会设为当前；填写后会保存到该 provider id 对应的 Keychain 项。")
         }
     }
 
@@ -590,12 +600,109 @@ struct ProviderAddView: View {
                 ProviderDivider()
                 ProviderDraftToggleRow(
                     title: "余额刷新",
-                    subtitle: "iOS 不发起网络请求测试余额；此开关仅记录本地预览意图",
+                    subtitle: "iOS 不发起网络请求测试余额；此开关当前不保存",
                     isOn: balanceRefresh
                 ) {
                     balanceRefresh.toggle()
                 }
             }
+        }
+    }
+
+    private func save() {
+        guard protocolOption == .openAI else {
+            alert = .unsupportedProtocol(protocolOption.title)
+            return
+        }
+        guard !responseAPI else {
+            alert = .unsupportedResponseAPI
+            return
+        }
+
+        let normalizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedPath == "/chat/completions" else {
+            alert = .unsupportedPath
+            return
+        }
+
+        let normalizedBase = Self.normalizedBaseURL(apiBase)
+        guard Self.isValidHTTPBaseURL(normalizedBase) else {
+            alert = .invalidBaseURL
+            return
+        }
+
+        let activated = providerRegistry.addOpenAICompatibleProvider(
+            name: name,
+            baseUrl: normalizedBase,
+            apiKey: apiKey,
+            activate: true
+        )
+        guard activated || apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            alert = .activationFailed
+            return
+        }
+        dismiss()
+    }
+
+    private static func normalizedBaseURL(_ value: String) -> String {
+        var baseURL = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        while baseURL.hasSuffix("/") {
+            baseURL.removeLast()
+        }
+        return baseURL
+    }
+
+    private static func isValidHTTPBaseURL(_ value: String) -> Bool {
+        guard let components = URLComponents(string: value),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host,
+              !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        return true
+    }
+}
+
+private enum ProviderAddAlert: Identifiable {
+    case unsupportedProtocol(String)
+    case unsupportedResponseAPI
+    case unsupportedPath
+    case invalidBaseURL
+    case activationFailed
+
+    var id: String {
+        switch self {
+        case .unsupportedProtocol(let name): "unsupported-\(name)"
+        case .unsupportedResponseAPI: "response-api"
+        case .unsupportedPath: "path"
+        case .invalidBaseURL: "base-url"
+        case .activationFailed: "activation"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .unsupportedProtocol: "协议暂未桥接"
+        case .unsupportedResponseAPI: "Response API 暂未接入"
+        case .unsupportedPath: "路径暂未接入"
+        case .invalidBaseURL: "API 地址无效"
+        case .activationFailed: "服务商未激活"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .unsupportedProtocol(let name):
+            "\(name) 还没有进入 iOS ProviderSetting 执行桥。当前只能保存 OpenAI-compatible 服务商。"
+        case .unsupportedResponseAPI:
+            "当前 ChatViewModel 使用 Chat Completions 链路，不能把 Response API 配置伪装成可用。"
+        case .unsupportedPath:
+            "当前 iOS 请求构造固定使用 /chat/completions。自定义路径需要先接入 Provider bridge。"
+        case .invalidBaseURL:
+            "请填写包含 http 或 https scheme 且带 host 的 base URL，例如 https://api.openai.com/v1。"
+        case .activationFailed:
+            "API Key 没有成功写入本机 Keychain，当前聊天服务商未切换。请重新保存一次。"
         }
     }
 }

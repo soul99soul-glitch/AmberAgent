@@ -452,6 +452,23 @@ final class IOSSharedSettingsStore {
         snapshot.providers
     }
 
+    /// Chat-capable model ids from the real KMP providers snapshot. This is the
+    /// list the iOS default-model menu can safely offer because ChatViewModel
+    /// already consumes `SettingsStore.modelId` as the request model id.
+    var chatModelIds: [String] {
+        var seen = Set<String>()
+        var ids: [String] = []
+        for provider in snapshot.providers {
+            for model in provider.models where model.type == ModelType.chat {
+                let modelId = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !modelId.isEmpty else { continue }
+                guard seen.insert(modelId).inserted else { continue }
+                ids.append(modelId)
+            }
+        }
+        return ids
+    }
+
     /// Real KMP default assistants (DEFAULT_ASSISTANTS), with branding applied.
     var assistants: [Assistant] {
         snapshot.assistants

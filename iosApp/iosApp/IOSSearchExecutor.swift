@@ -642,9 +642,11 @@ struct IOSSearchExecutor {
     private static func cleanHTML(_ html: String) -> String {
         let withoutTags = regexReplace(pattern: #"<[^>]+>"#, in: html, with: " ")
         let decoded = decodeHTMLEntities(withoutTags)
-        return decoded
+        let collapsed = decoded
             .replacingOccurrences(of: #"[ \t\r\f\v]+"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\n\s*\n+"#, with: "\n", options: .regularExpression)
+        return collapsed
+            .replacingOccurrences(of: #"\s+([.,!?;:])"#, with: "$1", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

@@ -310,6 +310,17 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         let extract = await controller.execute(toolName: "wm_extract", input: #"{"mode":"readable"}"#, isUserInitiated: false)
         XCTAssertTrue(extract.contains("Hello from mock"))
         XCTAssertFalse(extract.contains("secret"))
+
+        let get = await controller.execute(
+            toolName: "wm_get",
+            input: #"{"selector":"h1","kind":"text"}"#,
+            isUserInitiated: false
+        )
+        let getObject = try jsonObject(get)
+        XCTAssertEqual(getObject["ok"] as? Bool, true)
+        let result = try XCTUnwrap(getObject["result"] as? [String: Any])
+        XCTAssertEqual(result["selector"] as? String, "h1")
+        XCTAssertEqual(result["value"] as? String, "Hello from mock")
     }
 
     func testWebMountExecutorDeniesGlobalOffAndClearWithoutUserAction() async throws {

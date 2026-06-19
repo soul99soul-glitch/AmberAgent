@@ -67,7 +67,9 @@ struct IOSSSHProfile: Codable, Identifiable, Equatable, Sendable {
         guard !copy.host.isEmpty else { throw IOSSSHError.invalidProfile("Host is required.") }
         guard !copy.username.isEmpty else { throw IOSSSHError.invalidProfile("Username is required.") }
         guard (1...65535).contains(copy.port) else { throw IOSSSHError.invalidProfile("Port must be between 1 and 65535.") }
-        if copy.knownHostSHA256 != nil &&
+        let hasBoundKnownHostEndpoint = copy.knownHostHost != nil || copy.knownHostPort != nil
+        if copy.knownHostSHA256 != nil,
+            hasBoundKnownHostEndpoint,
             (copy.knownHostHost != copy.host || copy.knownHostPort != copy.port) {
             copy.knownHostSHA256 = nil
             copy.knownHostHost = nil

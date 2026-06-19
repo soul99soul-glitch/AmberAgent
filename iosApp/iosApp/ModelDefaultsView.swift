@@ -8,8 +8,6 @@ struct ModelDefaultsView: View {
 
     @State private var alert: ModelDefaultsAlert?
 
-    private let chatModelIDs = ["gpt-4o"]
-
     /// Render a real seeded modelId pointer (Uuid) as a short prefix so the row
     /// shows actual KMP data (not a hardcoded label). The seed value is a random
     /// Uuid that does not resolve to a readable model name — shown as a prefix
@@ -152,7 +150,7 @@ struct ModelDefaultsView: View {
                 )
             }
 
-            ModelDefaultsNote("这些 modelId 指针来自 KMP Settings 真实 seed（只读展示上方前缀），种子值是随机 Uuid，不保证映射到某 provider 的可读模型名。iOS 当前没有对应的执行入口，因此不保存本地预览选择。")
+            ModelDefaultsNote("聊天模型菜单读取真实 Provider 模型并写回 SettingsStore.modelId。辅助任务 modelId 来自 KMP Settings seed（只读展示前缀），当前没有对应的 iOS 执行入口。")
         }
     }
 
@@ -219,7 +217,7 @@ struct ModelDefaultsView: View {
     }
 
     private var chatModelOptions: [String] {
-        ([currentChatModel] + chatModelIDs).reduce(into: [String]()) { result, modelID in
+        ([currentChatModel] + sharedSettings.chatModelIds + ["gpt-4o"]).reduce(into: [String]()) { result, modelID in
             if !result.contains(modelID) {
                 result.append(modelID)
             }

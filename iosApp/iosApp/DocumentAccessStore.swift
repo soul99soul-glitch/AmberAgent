@@ -203,9 +203,10 @@ final class DocumentAccessStore {
             isReading = false
             return .success(readResult)
         case .failure(let error):
-            errorMessage = "Failed to read selected file: \(error.localizedDescription)"
+            let accessError = (error as? DocumentAccessError) ?? .readFailed(error.localizedDescription)
+            errorMessage = accessError.userMessage
             isReading = false
-            return .failure(.readFailed(error.localizedDescription))
+            return .failure(accessError)
         }
     }
 
@@ -223,11 +224,11 @@ final class DocumentAccessStore {
             }
 
             do {
-                let values = try url.resourceValues(forKeys: [.fileSizeKey])
-                guard let fileSize = values.fileSize else {
+                let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                guard let fileSize = (attributes[.size] as? NSNumber)?.int64Value else {
                     return Result<SelectedDocumentReadResult, Error>.failure(DocumentAccessError.unknownFileSize)
                 }
-                guard Int64(fileSize) <= maxReadableBytes else {
+                guard fileSize <= maxReadableBytes else {
                     return Result<SelectedDocumentReadResult, Error>.failure(DocumentAccessError.fileTooLarge)
                 }
 
