@@ -419,6 +419,25 @@ final class ChatViewModel {
                         return
                     }
 
+                    if let memoryToolCall = self.pendingMemoryToolCall(in: snapshot),
+                       self.currentToolResumeCount < self.maxToolResumeCount {
+                        self.currentToolResumeCount += 1
+                        self.streamJob = nil
+                        Task { @MainActor in
+                            await self.executeMemoryToolCall(
+                                memoryToolCall,
+                                providerSetting: providerSetting,
+                                params: params,
+                                runId: runId,
+                                startedAt: startedAt,
+                                inputDigest: inputDigest,
+                                conversationId: conversationId,
+                                baseMessages: snapshot
+                            )
+                        }
+                        return
+                    }
+
                     // [Slice 3] MCP / sub-agent / council dispatch: if the model
                     // invoked one of these tools, run its executor and resume the
                     // stream with the result (same resume pattern as search_web).
@@ -782,6 +801,17 @@ final class ChatViewModel {
         return nil
     }
 
+    private func pendingMemoryToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+        guard IOSMemoryToolExecutor.isEnabled(runtime: sharedSettings.agentRuntime) else { return nil }
+        for message in messages.reversed() where message.role == MessageRole.assistant {
+            if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
+                .first(where: { $0.toolName == "memory_tool" && $0.output.isEmpty }) {
+                return toolCall
+            }
+        }
+        return nil
+    }
+
     private func executeSearchToolCall(
         _ toolCall: UIMessagePart.Tool,
         providerSetting: ProviderSetting.OpenAI,
@@ -900,6 +930,38 @@ final class ChatViewModel {
                 "platform": snapshot.platform
             ])
         }
+    }
+
+    private func executeMemoryToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        baseMessages: [UIMessage]
+    ) async {
+        let resultText = dispatchMemoryToolCall(toolCall)
+
+        guard currentRunId == runId else { return }
+        let resumedMessages = messagesByFinishingToolCall(toolCall, outputText: resultText, in: baseMessages)
+        messages = resumedMessages
+        messageRevision &+= 1
+
+        startStreaming(
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    private func dispatchMemoryToolCall(_ toolCall: UIMessagePart.Tool) -> String {
+        IOSMemoryToolExecutor.execute(input: toolCall.input, runtime: sharedSettings.agentRuntime)
     }
 
     /// [Slice 3] Executes an MCP / sub-agent / council tool call and resumes the
@@ -1033,6 +1095,9 @@ final class ChatViewModel {
         for toolCall in toolCalls where IOSWebMountToolCatalog.supportedToolNames.contains(toolCall.toolName) {
             print("[ChatViewModel] Detected WebMount tool call runId=\(runId) toolCallId=\(toolCall.toolCallId) tool=\(toolCall.toolName)")
         }
+        for toolCall in toolCalls where toolCall.toolName == "memory_tool" {
+            print("[ChatViewModel] Detected memory_tool call runId=\(runId) toolCallId=\(toolCall.toolCallId)")
+        }
     }
 
     private func startLiveActivity(runId: String, presentation: AgentActivityPresentation) {
@@ -1140,13 +1205,16 @@ final class ChatViewModel {
             contextWindowTokens: nil,
             providerOverwrite: nil
         )
-        // [Slice 3] Tool declarations: iOS search/scrape + MCP dispatch +
-        // sub-agent dispatch + model-council run. The model decides which to
+        // Tool declarations: iOS search/scrape, memory, WebMount, MCP,
+        // sub-agent dispatch, and model-council run. The model decides which to
         // call; the iOS onComplete dispatch routes each to its executor.
         var toolDeclarations: [Tool] = []
         if searchEnabled {
             toolDeclarations.append(ToolKt.createSearchWebToolDeclaration())
             toolDeclarations.append(ToolKt.createScrapeWebToolDeclaration())
+        }
+        if IOSMemoryToolExecutor.isEnabled(runtime: sharedSettings.agentRuntime) {
+            toolDeclarations.append(ToolKt.createMemoryToolDeclaration())
         }
         if localToolExecutor != nil, IOSWebMountController.shared.settings.globalEnabled {
             toolDeclarations.append(ToolKt.createWebMountStationsToolDeclaration())

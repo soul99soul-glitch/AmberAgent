@@ -27,7 +27,7 @@ struct MemoryOverviewView: View {
         ),
         .init(
             title: "iOS 记忆桥",
-            subtitle: "IosMemoryFactory + IOSMemoryPersistence 已读写本地 JSON；ChatViewModel 已按 memory 开关注入提示词。memory_tool executor 仍缺。",
+            subtitle: "IosMemoryFactory + IOSMemoryPersistence 已读写本地 JSON；ChatViewModel 已按 memory 开关注入提示词并执行 memory_tool。",
             value: "部分已接",
             color: AmberTheme.accentAmber
         )
@@ -100,7 +100,7 @@ struct MemoryOverviewView: View {
     }
 
     private var intro: some View {
-        Text("iOS 已接本地记忆增删、Documents 持久化和 ChatViewModel 注入过滤；自动整理、memory_tool executor、最近会话参考和时间提醒仍未接。")
+        Text("iOS 已接本地记忆增删、Documents 持久化、ChatViewModel 注入过滤和 memory_tool create/edit/delete/list；自动整理、最近会话参考和时间提醒仍未接。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -244,7 +244,7 @@ struct MemoryOverviewView: View {
                 )
             }
 
-            MemoryNote("iOS 当前是本地 JSON 记忆库，不是 Android Room；memory_tool、自动整理和候选审核仍是缺口。")
+            MemoryNote("iOS 当前是本地 JSON 记忆库，不是 Android Room；自动整理和候选审核仍是缺口。")
         }
     }
 }

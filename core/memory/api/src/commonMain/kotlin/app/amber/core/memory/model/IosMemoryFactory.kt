@@ -34,6 +34,32 @@ object IosMemoryFactory {
         kind: MemoryKind,
         content: String,
         assistantId: String = bucketForScope(scope),
+    ): MemoryRecord = addDetailedMemory(
+        scope = scope,
+        kind = kind,
+        content = content,
+        assistantId = assistantId,
+        sourceConversationId = null,
+        sourceMessageIds = emptyList(),
+        supersedesIds = emptyList(),
+        expiresAt = null,
+        confidence = 1f,
+        pinned = false,
+        archived = false,
+    )
+
+    fun addDetailedMemory(
+        scope: MemoryScope,
+        kind: MemoryKind,
+        content: String,
+        assistantId: String = bucketForScope(scope),
+        sourceConversationId: String? = null,
+        sourceMessageIds: List<String> = emptyList(),
+        supersedesIds: List<Int> = emptyList(),
+        expiresAt: Long? = null,
+        confidence: Float = 1f,
+        pinned: Boolean = false,
+        archived: Boolean = false,
     ): MemoryRecord {
         val now = Clock.System.now().toEpochMilliseconds()
         val record = MemoryRecord(
@@ -42,13 +68,13 @@ object IosMemoryFactory {
             scope = scope,
             kind = kind,
             assistantId = assistantId,
-            sourceConversationId = null,
-            sourceMessageIds = emptyList(),
-            supersedesIds = emptyList(),
-            expiresAt = null,
-            confidence = 1f,
-            pinned = false,
-            archived = false,
+            sourceConversationId = sourceConversationId,
+            sourceMessageIds = sourceMessageIds,
+            supersedesIds = supersedesIds,
+            expiresAt = expiresAt,
+            confidence = confidence,
+            pinned = pinned,
+            archived = archived,
             createdAt = now,
             updatedAt = now,
             lastUsedAt = now,
@@ -72,6 +98,16 @@ object IosMemoryFactory {
         records[index] = updated
         _records.value = records
         return updated.toAssistantMemory()
+    }
+
+    fun updateRecord(record: MemoryRecord): MemoryRecord? {
+        val records = _records.value.toMutableList()
+        val index = records.indexOfFirst { it.id == record.id }
+        if (index < 0) return null
+        records[index] = record
+        _records.value = records
+        nextId = (records.maxOfOrNull { it.id } ?: 999) + 1
+        return record
     }
 
     fun deleteMemory(id: Int) {

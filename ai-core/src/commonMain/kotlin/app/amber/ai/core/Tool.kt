@@ -51,6 +51,20 @@ fun createScrapeWebToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createMemoryToolDeclaration(): Tool = Tool(
+    name = "memory_tool",
+    description = """
+        Read and update AmberAgent iOS memories. Use `action`:
+        - `list`: list saved memories visible under the enabled memory scopes.
+        - `create`: add a memory with `content`, optional `scope` (`core`, `short_term`, `long_term`), `kind`, `pinned`, `expiresAt`, and `confidence`.
+        - `edit`: update an existing memory by `id` with new `content`, and optional `scope`, `kind`, or `pinned`.
+        - `delete`: remove a memory by `id`.
+        Do not store sensitive personal data. Prefer concise durable preferences, project continuity notes, and explicit user-approved facts.
+    """.trimIndent(),
+    parameters = { memoryToolParameters() },
+    execute = { emptyList() }
+)
+
 fun createWebMountStationsToolDeclaration(): Tool = webMountTool(
     name = "wm_stations",
     description = "List configured iOS WebMount stations, enabled state, auth kind, and redacted cookie summary.",
@@ -274,6 +288,73 @@ private fun scrapeWebParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("url")
+)
+
+private fun memoryToolParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("action", buildJsonObject {
+            put("type", "string")
+            put("description", "operation to perform")
+            put("enum", buildJsonArray {
+                add("list")
+                add("create")
+                add("edit")
+                add("delete")
+            })
+        })
+        put("id", buildJsonObject {
+            put("type", "integer")
+            put("description", "memory id for edit/delete")
+        })
+        put("scope", buildJsonObject {
+            put("type", "string")
+            put("description", "memory scope")
+            put("enum", buildJsonArray {
+                add("core")
+                add("short_term")
+                add("long_term")
+                add("all")
+            })
+        })
+        put("kind", buildJsonObject {
+            put("type", "string")
+            put("description", "memory kind")
+            put("enum", buildJsonArray {
+                add("user")
+                add("feedback")
+                add("project")
+                add("reference")
+                add("routine")
+                add("note")
+            })
+        })
+        put("content", buildJsonObject {
+            put("type", "string")
+            put("description", "memory content for create/edit")
+        })
+        put("pinned", buildJsonObject {
+            put("type", "boolean")
+            put("description", "whether this memory should sort ahead of ordinary memories")
+        })
+        put("sourceConversationId", buildJsonObject {
+            put("type", "string")
+            put("description", "optional source conversation id")
+        })
+        put("sourceMessageIds", buildJsonObject {
+            put("type", "array")
+            put("description", "optional source message ids")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+        put("expiresAt", buildJsonObject {
+            put("type", "integer")
+            put("description", "optional expiration epoch milliseconds")
+        })
+        put("confidence", buildJsonObject {
+            put("type", "number")
+            put("description", "confidence from 0 to 1")
+        })
+    },
+    required = listOf("action")
 )
 
 private fun webMountTool(

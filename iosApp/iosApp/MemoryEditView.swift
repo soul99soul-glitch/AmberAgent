@@ -140,11 +140,18 @@ struct MemoryEditView: View {
                     case "短期": memScope = MemoryScope.shortTerm; bucket = IosMemoryFactory.shared.SHORT_TERM_MEMORY_ID
                     default: memScope = MemoryScope.longTerm; bucket = IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
                     }
-                    IosMemoryFactory.shared.addMemory(
+                    IosMemoryFactory.shared.addDetailedMemory(
                         scope: memScope,
                         kind: memScope == MemoryScope.shortTerm ? MemoryKind.project : MemoryKind.note,
                         content: trimmed,
                         assistantId: bucket,
+                        sourceConversationId: nil,
+                        sourceMessageIds: [],
+                        supersedesIds: [],
+                        expiresAt: nil,
+                        confidence: 1,
+                        pinned: pinned,
+                        archived: false
                     )
                     // [Slice 6] Persist the new memory to Documents/memories/memories.json.
                     IOSMemoryPersistence.shared.persist()
@@ -239,7 +246,7 @@ struct MemoryEditView: View {
                             Text("置顶")
                                 .font(.body)
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("当前置顶标记仅预览；保存时尚未写入 MemoryRecord.pinned。")
+                            Text("保存时会写入 MemoryRecord.pinned，并影响聊天注入排序。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -256,7 +263,7 @@ struct MemoryEditView: View {
                 .buttonStyle(.plain)
             }
 
-            MemoryEditNote(text.isEmpty ? "待保存 · 空内容" : "待保存 · \(scope.title) · \(pinned ? "置顶预览" : "未置顶")")
+            MemoryEditNote(text.isEmpty ? "待保存 · 空内容" : "待保存 · \(scope.title) · \(pinned ? "置顶" : "未置顶")")
                 .padding(.top, 2)
         }
     }

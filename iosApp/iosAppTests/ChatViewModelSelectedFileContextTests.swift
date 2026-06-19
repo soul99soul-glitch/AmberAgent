@@ -188,6 +188,102 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertTrue(memoryText.contains(longTermText))
     }
 
+    func testMemoryToolDeclarationFollowsRuntimeSwitches() {
+        let enabledSettings = memorySettings(core: false, shortTerm: true, longTerm: false)
+        let enabledViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: enabledSettings,
+            autoGenerateResponses: false
+        )
+        XCTAssertTrue(Set(enabledViewModel.currentToolDeclarationNames()).contains("memory_tool"))
+
+        let disabledSettings = memorySettings(core: false, shortTerm: false, longTerm: false)
+        let disabledViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: disabledSettings,
+            autoGenerateResponses: false
+        )
+        XCTAssertFalse(Set(disabledViewModel.currentToolDeclarationNames()).contains("memory_tool"))
+    }
+
+    func testMemoryToolCreateEditDeletePersistsAndFeedsPrompt() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer {
+            IosMemoryFactory.shared.replaceAll(records: originalRecords)
+            IOSMemoryPersistence.shared.persist()
+        }
+
+        let sharedSettings = memorySettings(core: true, shortTerm: true, longTerm: true)
+        let createOutput = IOSMemoryToolExecutor.execute(
+            input: #"{"action":"create","scope":"long_term","kind":"user","content":"用户喜欢先做端到端验证","pinned":true,"confidence":0.8}"#,
+            runtime: sharedSettings.agentRuntime
+        )
+        let createPayload = try jsonObject(createOutput)
+        XCTAssertEqual(createPayload["ok"] as? Bool, true)
+
+        var record = try XCTUnwrap(IosMemoryFactory.shared.getAllRecords().first)
+        let id = Int(record.id)
+        XCTAssertEqual(record.scope, MemoryScope.longTerm)
+        XCTAssertEqual(record.kind, MemoryKind.user)
+        XCTAssertTrue(record.pinned)
+        XCTAssertEqual(record.confidence, 0.8, accuracy: 0.001)
+
+        let editedText = "用户喜欢先做端到端验证，再提交小批量改动"
+        let editOutput = IOSMemoryToolExecutor.execute(
+            input: #"{"action":"edit","id":\#(id),"scope":"short_term","kind":"project","content":"\#(editedText)","pinned":false}"#,
+            runtime: sharedSettings.agentRuntime
+        )
+        let editPayload = try jsonObject(editOutput)
+        XCTAssertEqual(editPayload["ok"] as? Bool, true)
+
+        record = try XCTUnwrap(IosMemoryFactory.shared.getAllRecords().first { Int($0.id) == id })
+        XCTAssertEqual(record.content, editedText)
+        XCTAssertEqual(record.scope, MemoryScope.shortTerm)
+        XCTAssertEqual(record.kind, MemoryKind.project)
+        XCTAssertFalse(record.pinned)
+
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: false
+        )
+        viewModel.inputText = "下一步怎么做"
+        viewModel.sendMessage()
+
+        let uploadMessages = viewModel.preparedUploadMessagesForTesting(viewModel.messages)
+        let memoryPrompt = textContent(of: try XCTUnwrap(uploadMessages.first))
+        XCTAssertTrue(memoryPrompt.contains(editedText))
+        XCTAssertTrue(memoryPrompt.contains("[short_term/project]"))
+
+        let deleteOutput = IOSMemoryToolExecutor.execute(
+            input: #"{"action":"delete","id":\#(id)}"#,
+            runtime: sharedSettings.agentRuntime
+        )
+        let deletePayload = try jsonObject(deleteOutput)
+        XCTAssertEqual(deletePayload["ok"] as? Bool, true)
+        XCTAssertFalse(IosMemoryFactory.shared.getAllRecords().contains { Int($0.id) == id })
+    }
+
+    func testMemoryToolRejectsDisabledScope() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer {
+            IosMemoryFactory.shared.replaceAll(records: originalRecords)
+        }
+
+        let sharedSettings = memorySettings(core: false, shortTerm: false, longTerm: true)
+        let output = IOSMemoryToolExecutor.execute(
+            input: #"{"action":"create","scope":"core","content":"disabled scope should not save"}"#,
+            runtime: sharedSettings.agentRuntime
+        )
+        let payload = try jsonObject(output)
+
+        XCTAssertEqual(payload["ok"] as? Bool, false)
+        XCTAssertEqual(payload["scope"] as? String, "core")
+        XCTAssertTrue(IosMemoryFactory.shared.getAllRecords().isEmpty)
+    }
+
     func testAgentCouncilAndMcpToolCallsCanBeFinishedForResume() throws {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -237,6 +333,24 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         message.parts
             .compactMap { ($0 as? UIMessagePart.Text)?.text }
             .joined(separator: "\n")
+    }
+
+    private func jsonObject(_ text: String) throws -> [String: Any] {
+        let data = try XCTUnwrap(text.data(using: .utf8))
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func memorySettings(core: Bool, shortTerm: Bool, longTerm: Bool) -> IOSSharedSettingsStore {
+        let store = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        store.restoreSnapshot(
+            IosSettingsMutations.shared.setMemoryRuntimeEnabled(
+                settings: store.snapshot,
+                enableCoreMemory: core,
+                enableShortTermMemory: shortTerm,
+                enableLongTermMemory: longTerm
+            )
+        )
+        return store
     }
 
     private func makeTempFile(text: String) throws -> URL {

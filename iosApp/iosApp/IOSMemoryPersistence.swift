@@ -2,6 +2,330 @@ import Foundation
 import Observation
 @preconcurrency import Shared
 
+enum IOSMemoryToolExecutor {
+    @MainActor
+    static func execute(input: String, runtime: AgentRuntimeSetting) -> String {
+        guard let args = jsonObject(input) else {
+            return json(["ok": false, "tool": "memory_tool", "error": "memory_tool input must be a JSON object"])
+        }
+
+        let action = ((args["action"] ?? args["operation"] ?? args["op"]) as? String ?? "list").lowercased()
+        switch action {
+        case "list", "read", "search", "query", "status":
+            return list(args: args, runtime: runtime)
+        case "create", "add", "write":
+            return create(args: args, runtime: runtime)
+        case "edit", "update":
+            return edit(args: args, runtime: runtime)
+        case "delete", "remove":
+            return delete(args: args)
+        default:
+            return json([
+                "ok": false,
+                "tool": "memory_tool",
+                "error": "unknown action: \(action)"
+            ])
+        }
+    }
+
+    static func isEnabled(runtime: AgentRuntimeSetting) -> Bool {
+        runtime.enableCoreMemory || runtime.enableShortTermMemory || runtime.enableLongTermMemory
+    }
+
+    @MainActor
+    private static func list(args: [String: Any], runtime: AgentRuntimeSetting) -> String {
+        let requestedScope = (args["scope"] ?? args["type"]) as? String
+        let records = IosMemoryFactory.shared.getAllRecords()
+            .filter { record in
+                guard isScopeEnabled(record.scope, runtime: runtime) else { return false }
+                guard let requestedScope, requestedScope != "all" else { return true }
+                return record.scope.wireName == requestedScope
+            }
+            .sorted { lhs, rhs in
+                if lhs.pinned != rhs.pinned { return lhs.pinned && !rhs.pinned }
+                if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+                return lhs.id < rhs.id
+            }
+
+        return json([
+            "ok": true,
+            "tool": "memory_tool",
+            "action": "list",
+            "count": records.count,
+            "memories": records.map(recordPayload)
+        ])
+    }
+
+    @MainActor
+    private static func create(args: [String: Any], runtime: AgentRuntimeSetting) -> String {
+        guard let content = nonEmptyString(args["content"]) else {
+            return json(["ok": false, "tool": "memory_tool", "action": "create", "error": "content is required"])
+        }
+        let scope = memoryScope(from: (args["scope"] ?? args["type"]) as? String)
+        guard isScopeEnabled(scope, runtime: runtime) else {
+            return disabledScopeResult(scope, action: "create")
+        }
+
+        let kind = memoryKind(from: args["kind"] as? String)
+        let record = IosMemoryFactory.shared.addDetailedMemory(
+            scope: scope,
+            kind: kind,
+            content: content,
+            assistantId: bucket(for: scope),
+            sourceConversationId: nonEmptyString(args["sourceConversationId"]),
+            sourceMessageIds: stringArray(args["sourceMessageIds"]),
+            supersedesIds: kotlinIntArray(args["supersedesIds"]),
+            expiresAt: int64(args["expiresAt"]).map { KotlinLong(value: $0) },
+            confidence: float(args["confidence"]) ?? 1,
+            pinned: bool(args["pinned"]) ?? false,
+            archived: false
+        )
+        IOSMemoryPersistence.shared.persist()
+
+        return json([
+            "ok": true,
+            "tool": "memory_tool",
+            "action": "create",
+            "memory": recordPayload(record)
+        ])
+    }
+
+    @MainActor
+    private static func edit(args: [String: Any], runtime: AgentRuntimeSetting) -> String {
+        guard let id = int(args["id"]) else {
+            return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "id is required"])
+        }
+        guard let existing = IosMemoryFactory.shared.getAllRecords().first(where: { Int($0.id) == id }) else {
+            return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "memory not found", "id": id])
+        }
+        guard let content = nonEmptyString(args["content"]) else {
+            return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "content is required"])
+        }
+
+        let scope = ((args["scope"] ?? args["type"]) as? String).map(memoryScope) ?? existing.scope
+        guard isScopeEnabled(scope, runtime: runtime) else {
+            return disabledScopeResult(scope, action: "edit")
+        }
+
+        let kind = (args["kind"] as? String).map(memoryKind) ?? existing.kind
+        let sourceMessageIds = args.keys.contains("sourceMessageIds")
+            ? stringArray(args["sourceMessageIds"])
+            : existing.sourceMessageIds
+        let supersedesIds = args.keys.contains("supersedesIds")
+            ? kotlinIntArray(args["supersedesIds"])
+            : existing.supersedesIds
+        let updatedAt = nowMillis()
+        let updated = MemoryRecord(
+            id: existing.id,
+            content: content,
+            scope: scope,
+            kind: kind,
+            assistantId: bucket(for: scope),
+            sourceConversationId: args.keys.contains("sourceConversationId")
+                ? nonEmptyString(args["sourceConversationId"])
+                : existing.sourceConversationId,
+            sourceMessageIds: sourceMessageIds,
+            supersedesIds: supersedesIds,
+            expiresAt: args.keys.contains("expiresAt")
+                ? int64(args["expiresAt"]).map { KotlinLong(value: $0) }
+                : existing.expiresAt,
+            confidence: float(args["confidence"]) ?? existing.confidence,
+            pinned: bool(args["pinned"]) ?? existing.pinned,
+            archived: existing.archived,
+            createdAt: existing.createdAt,
+            updatedAt: updatedAt,
+            lastUsedAt: KotlinLong(value: updatedAt)
+        )
+
+        guard let saved = IosMemoryFactory.shared.updateRecord(record: updated) else {
+            return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "memory not found", "id": id])
+        }
+        IOSMemoryPersistence.shared.persist()
+
+        return json([
+            "ok": true,
+            "tool": "memory_tool",
+            "action": "edit",
+            "memory": recordPayload(saved)
+        ])
+    }
+
+    @MainActor
+    private static func delete(args: [String: Any]) -> String {
+        guard let id = int(args["id"]) else {
+            return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "id is required"])
+        }
+        let existed = IosMemoryFactory.shared.getAllRecords().contains { Int($0.id) == id }
+        guard existed else {
+            return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "memory not found", "id": id])
+        }
+        IosMemoryFactory.shared.deleteMemory(id: Int32(id))
+        IOSMemoryPersistence.shared.persist()
+        return json([
+            "ok": true,
+            "tool": "memory_tool",
+            "action": "delete",
+            "id": id
+        ])
+    }
+
+    private static func disabledScopeResult(_ scope: MemoryScope, action: String) -> String {
+        json([
+            "ok": false,
+            "tool": "memory_tool",
+            "action": action,
+            "scope": scope.wireName,
+            "error": "memory scope is disabled"
+        ])
+    }
+
+    private static func isScopeEnabled(_ scope: MemoryScope, runtime: AgentRuntimeSetting) -> Bool {
+        if scope == MemoryScope.core { return runtime.enableCoreMemory }
+        if scope == MemoryScope.shortTerm { return runtime.enableShortTermMemory }
+        if scope == MemoryScope.longTerm { return runtime.enableLongTermMemory }
+        return false
+    }
+
+    private static func memoryScope(from wireName: String?) -> MemoryScope {
+        switch wireName {
+        case "core":
+            MemoryScope.core
+        case "short_term":
+            MemoryScope.shortTerm
+        default:
+            MemoryScope.longTerm
+        }
+    }
+
+    private static func memoryKind(from wireName: String?) -> MemoryKind {
+        switch wireName {
+        case "user":
+            MemoryKind.user
+        case "feedback":
+            MemoryKind.feedback
+        case "project":
+            MemoryKind.project
+        case "reference":
+            MemoryKind.reference
+        case "routine":
+            MemoryKind.routine
+        default:
+            MemoryKind.note
+        }
+    }
+
+    private static func bucket(for scope: MemoryScope) -> String {
+        if scope == MemoryScope.core { return IosMemoryFactory.shared.GLOBAL_MEMORY_ID }
+        if scope == MemoryScope.shortTerm { return IosMemoryFactory.shared.SHORT_TERM_MEMORY_ID }
+        return IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+    }
+
+    private static func recordPayload(_ record: MemoryRecord) -> [String: Any] {
+        var payload: [String: Any] = [
+            "id": Int(record.id),
+            "type": record.scope.wireName,
+            "scope": record.scope.wireName,
+            "kind": record.kind.wireName,
+            "content": record.content,
+            "assistantId": record.assistantId,
+            "confidence": Double(record.confidence),
+            "pinned": record.pinned,
+            "archived": record.archived,
+            "createdAt": record.createdAt,
+            "updatedAt": record.updatedAt
+        ]
+        if let sourceConversationId = record.sourceConversationId {
+            payload["sourceConversationId"] = sourceConversationId
+        }
+        let sourceMessageIds = record.sourceMessageIds
+        if !sourceMessageIds.isEmpty {
+            payload["sourceMessageIds"] = sourceMessageIds
+        }
+        let supersedesIds = record.supersedesIds.map { Int(truncating: $0) }
+        if !supersedesIds.isEmpty {
+            payload["supersedesIds"] = supersedesIds
+        }
+        if let expiresAt = record.expiresAt?.int64Value {
+            payload["expiresAt"] = expiresAt
+        }
+        if let lastUsedAt = record.lastUsedAt?.int64Value {
+            payload["lastUsedAt"] = lastUsedAt
+        }
+        return payload
+    }
+
+    private static func jsonObject(_ string: String) -> [String: Any]? {
+        guard let data = string.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private static func json(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return #"{"ok":false,"tool":"memory_tool","error":"failed to encode result"}"#
+        }
+        return text
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let text = value as? String else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func stringArray(_ value: Any?) -> [String] {
+        (value as? [Any])?.compactMap { $0 as? String } ?? []
+    }
+
+    private static func kotlinIntArray(_ value: Any?) -> [KotlinInt] {
+        ((value as? [Any]) ?? []).compactMap { item in
+            int(item).map { KotlinInt(value: Int32($0)) }
+        }
+    }
+
+    private static func int(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        if let string = value as? String { return Int(string) }
+        return nil
+    }
+
+    private static func int64(_ value: Any?) -> Int64? {
+        if let int64 = value as? Int64 { return int64 }
+        if let number = value as? NSNumber { return number.int64Value }
+        if let string = value as? String { return Int64(string) }
+        return nil
+    }
+
+    private static func float(_ value: Any?) -> Float? {
+        if let float = value as? Float { return float }
+        if let number = value as? NSNumber { return number.floatValue }
+        if let string = value as? String { return Float(string) }
+        return nil
+    }
+
+    private static func bool(_ value: Any?) -> Bool? {
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber { return number.boolValue }
+        if let string = value as? String {
+            switch string.lowercased() {
+            case "true", "1", "yes":
+                return true
+            case "false", "0", "no":
+                return false
+            default:
+                return nil
+            }
+        }
+        return nil
+    }
+
+    private static func nowMillis() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1000)
+    }
+}
+
 /// [Slice 6] iOS-local persistence for memories.
 ///
 /// The KMP `IosMemoryFactory` is a pure in-memory StateFlow (no file IO). This
@@ -104,8 +428,8 @@ private struct PersistedMemoryRecord: Codable {
             kind: record.kind.wireName,
             assistantId: record.assistantId,
             sourceConversationId: record.sourceConversationId,
-            sourceMessageIds: record.sourceMessageIds as? [String] ?? [],
-            supersedesIds: (record.supersedesIds as? [KotlinInt])?.map { Int(truncating: $0) } ?? [],
+            sourceMessageIds: record.sourceMessageIds,
+            supersedesIds: record.supersedesIds.map { Int(truncating: $0) },
             expiresAt: record.expiresAt?.int64Value,
             confidence: Double(record.confidence),
             pinned: record.pinned,
