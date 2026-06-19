@@ -191,6 +191,13 @@ final class CouncilRunner {
         ]
     }
 
+    #if DEBUG
+    /// Test accessor for the default seat roster.
+    static func defaultSeatDescriptorsForTesting() -> [IOSCouncilSeatDescriptor] {
+        defaultSeatDescriptors()
+    }
+    #endif
+
     private static func json(_ object: [String: Any]) -> String {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),

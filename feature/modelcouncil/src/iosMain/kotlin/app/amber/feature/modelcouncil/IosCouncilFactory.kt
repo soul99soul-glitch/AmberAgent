@@ -165,10 +165,25 @@ private class RealOpenAIModelRunner(
             temperature = temperature,
             maxTokens = (outputBudgetChars / 4).coerceAtLeast(256),
         )
-        val result = runCatching {
+        // Retry cascade (Android ProviderModelCouncilTextRunner parity): some
+        // providers reject reasoning_level or a specific temperature. On a
+        // provider error that looks param-related, drop reasoning then relax
+        // temperature to null and retry once each before surfacing failure.
+        return runCatching {
             provider.generateText(providerSetting, messages, params)
-        }
-        return result.fold(
+        }.recoverCatching { firstError ->
+            val msg = (firstError.message ?: firstError::class.simpleName ?: "").lowercase()
+            val looksParamRelated = msg.contains("reasoning") || msg.contains("temperature") ||
+                msg.contains("unsupported") || msg.contains("400") || msg.contains("bad request")
+            if (!looksParamRelated) throw firstError
+            // Attempt 2: drop reasoningLevel (already null here) — relax temperature.
+            val relaxedParams = app.amber.ai.provider.TextGenerationParams(
+                model = params.model,
+                temperature = null,
+                maxTokens = params.maxTokens,
+            )
+            provider.generateText(providerSetting, messages, relaxedParams)
+        }.fold(
             onSuccess = { chunk ->
                 val text = chunk.choices.firstOrNull()?.message?.parts
                     ?.filterIsInstance<app.amber.ai.ui.UIMessagePart.Text>()
