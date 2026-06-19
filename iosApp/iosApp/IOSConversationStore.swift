@@ -420,6 +420,145 @@ final class IOSConversationStore {
         currentRevision &+= 1
     }
 
+    // MARK: - Message branching (Android ChatService parity)
+    //
+    // The KMP `Conversation` already carries a `List<MessageNode>` tree where
+    // each node holds sibling `UIMessage` variants + a `selectIndex`. iOS loads
+    // and persists this tree today; it just never creates or navigates
+    // branches. These operations mirror Android's `ChatService` semantics
+    // (selectMessageNode / editMessage / regenerateAtMessage / deleteMessage):
+    //
+    //   - flat message index == node index (currentMessages = messageNodes.map
+    //     { node.messages[selectIndex] }), so callers address a branch by the
+    //     index of the message it shows in the flat chat list.
+    //   - edit/regenerate = APPEND a new variant to the node + select it (the
+    //     original is retained and reachable via selectVariant).
+    //   - delete = remove the message from its node; drop the node if it
+    //     becomes empty.
+
+    /// Variant info for a node, exposed so the UI can show `< 2/3 >` only when
+    /// a node actually carries more than one sibling.
+    struct VariantInfo: Equatable {
+        let variantCount: Int
+        let selectedIndex: Int
+        var hasMultipleVariants: Bool { variantCount > 1 }
+    }
+
+    func variantInfo(forMessageIndex index: Int) -> VariantInfo? {
+        guard let conversation = currentConversation,
+              index >= 0, index < conversation.messageNodes.count else {
+            return nil
+        }
+        let node = conversation.messageNodes[index]
+        // selectIndex bridges as Int32 (Kotlin Int → Obj-C Int32).
+        return VariantInfo(variantCount: node.messages.count, selectedIndex: Int(node.selectIndex))
+    }
+
+    /// Switch the selected variant of a node (cheap, no generation). Mirrors
+    /// `ChatService.selectMessageNode`.
+    func selectVariant(messageIndex: Int, variantIndex: Int) async {
+        guard let conversation = currentConversation,
+              messageIndex >= 0, messageIndex < conversation.messageNodes.count else {
+            return
+        }
+        var nodes = conversation.messageNodes
+        let node = nodes[messageIndex]
+        guard variantIndex >= 0, variantIndex < node.messages.count, variantIndex != node.selectIndex else {
+            return
+        }
+        nodes[messageIndex] = MessageNode(
+            id: node.id,
+            messages: node.messages,
+            selectIndex: Int32(variantIndex),
+            isFavorite: node.isFavorite
+        )
+        let updated = conversationWithNodes(conversation, nodes: nodes)
+        await persist(updated)
+        setCurrent(updated)
+    }
+
+    /// Append a new variant to a node and select it. This is the shared
+    /// primitive for edit-message and regenerate-assistant. Mirrors
+    /// `ChatService.editMessage` / the append path of `mergeGeneratedMessagesByIndex`.
+    /// Returns the node index so the caller (e.g. ChatViewModel) can target
+    /// generation at it.
+    @discardableResult
+    func appendVariant(messageIndex: Int, message: UIMessage) async -> Int? {
+        guard let conversation = currentConversation,
+              messageIndex >= 0, messageIndex < conversation.messageNodes.count else {
+            return nil
+        }
+        var nodes = conversation.messageNodes
+        let node = nodes[messageIndex]
+        var newMessages = node.messages
+        newMessages.append(message)
+        // Kotlin List bridges to NSArray-ish; use count-1 instead of lastIndex
+        // to avoid ambiguity. selectIndex is Int32 (Kotlin Int → Obj-C Int32).
+        nodes[messageIndex] = MessageNode(
+            id: node.id,
+            messages: newMessages,
+            selectIndex: Int32(newMessages.count - 1),
+            isFavorite: node.isFavorite
+        )
+        let updated = conversationWithNodes(conversation, nodes: nodes)
+        await persist(updated)
+        setCurrent(updated)
+        return messageIndex
+    }
+
+    /// Remove a message from its node. If the node becomes empty it is removed
+    /// (and selectIndex clamped). Mirrors `ChatService.deleteMessage`.
+    func deleteMessage(messageIndex: Int) async {
+        guard let conversation = currentConversation,
+              messageIndex >= 0, messageIndex < conversation.messageNodes.count else {
+            return
+        }
+        var nodes = conversation.messageNodes
+        let node = nodes[messageIndex]
+        // A node only ever holds the currently-selected variant for deletion
+        // purposes on iOS (the flat list shows the selected variant); drop the
+        // whole node. If we later support per-variant delete, this is where the
+        // `node.messages.remove(at:)` + clamp logic would go.
+        nodes.remove(at: messageIndex)
+        let updated = conversationWithNodes(conversation, nodes: nodes)
+        await persist(updated)
+        setCurrent(updated)
+        await refreshSummaries()
+    }
+
+    /// Truncate the conversation to end at (and include) the given node index.
+    /// Used by regenerate-from-USER-message: Android drops everything after the
+    /// user turn, then re-runs generation. Mirrors `ChatService.regenerateAtMessage`
+    /// (role == USER branch).
+    func truncateAfter(messageIndex: Int) async {
+        guard let conversation = currentConversation,
+              messageIndex >= 0, messageIndex < conversation.messageNodes.count else {
+            return
+        }
+        let kept = Array(conversation.messageNodes.prefix(messageIndex + 1))
+        guard kept.count != conversation.messageNodes.count else { return }
+        let updated = conversationWithNodes(conversation, nodes: kept)
+        await persist(updated)
+        setCurrent(updated)
+    }
+
+    /// Rebuild a Conversation with a different `messageNodes` list (full-field
+    /// constructor, same pattern as `retitledCopy`). updateAt refreshed.
+    private func conversationWithNodes(_ conversation: Conversation, nodes: [MessageNode]) -> Conversation {
+        Conversation(
+            id: conversation.id,
+            assistantId: conversation.assistantId,
+            title: conversation.title,
+            messageNodes: nodes,
+            chatSuggestions: conversation.chatSuggestions,
+            isPinned: conversation.isPinned,
+            autoApproveToolCalls: conversation.autoApproveToolCalls,
+            createAt: conversation.createAt,
+            updateAt: nowInstant(),
+            newConversation: conversation.newConversation
+        )
+    }
+
     private func persist(_ conversation: Conversation) async {
         do {
             try await storage.saveConversation(conversation: conversation)

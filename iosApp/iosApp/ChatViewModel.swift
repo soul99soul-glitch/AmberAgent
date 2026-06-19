@@ -565,6 +565,118 @@ final class ChatViewModel {
         }
     }
 
+    // MARK: - Message branching actions (Android ChatService parity)
+    //
+    // These operate on the Conversation tree via IOSConversationStore. After
+    // mutating the tree they re-sync `self.messages` (the flat currentMessages
+    // projection) so the chat list reflects the new branch, then re-run
+    // generation for regenerate. Mirrors Android ChatService.regenerateAtMessage
+    // / editMessage.
+
+    /// Regenerate the assistant reply that follows a given message index.
+    /// - If the target is a USER message: drop everything after it and re-run
+    ///   generation (Android's USER-regenerate path).
+    /// - If the target is an ASSISTANT message: drop it + everything after, then
+    ///   re-run from the preceding user turn (produces a fresh variant; the old
+    ///   reply is replaced in this minimal implementation — full variant
+    ///   retention is surfaced via selectVariant for nodes that already have
+    ///   multiple siblings).
+    func regenerate(atMessageIndex index: Int) {
+        guard streamJob == nil else { return }
+        guard let store = conversationStore,
+              let conversation = store.currentConversation,
+              index >= 0, index < conversation.messageNodes.count else { return }
+
+        let targetNode = conversation.messageNodes[index]
+        let truncateIndex: Int
+        if targetNode.role == MessageRole.user {
+            truncateIndex = index
+        } else {
+            // Assistant: regenerate from the user turn immediately before it.
+            // If there is no preceding user turn, fall back to truncating at
+            // this node (re-run from the assistant slot's own context).
+            // messageNodes is a Kotlin List — convert to Swift Array so we can
+            // use Swift's lastIndex(where:) on the prefix.
+            let nodes = Array(conversation.messageNodes.prefix(index))
+            let precedingUser = nodes.lastIndex { $0.role == MessageRole.user }
+            truncateIndex = precedingUser ?? max(index - 1, 0)
+        }
+
+        Task { @MainActor in
+            await store.truncateAfter(messageIndex: truncateIndex)
+            // Re-sync the flat projection from the mutated tree.
+            if let updated = store.currentConversation {
+                self.messages = updated.currentMessages
+                self.messageRevision &+= 1
+            }
+            let digest = Self.inputDigest(for: regenerateDigestSeed())
+            generateResponse(inputDigest: digest, conversationId: currentConversationId)
+        }
+    }
+
+    /// Edit a user message in place and re-run generation from it. The edited
+    /// text replaces the selected variant; the conversation is truncated after
+    /// the edited user turn (Android's editMessage = append-variant + re-run).
+    func editMessage(atMessageIndex index: Int, newText: String) {
+        guard streamJob == nil else { return }
+        let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let store = conversationStore,
+              let conversation = store.currentConversation,
+              index >= 0, index < conversation.messageNodes.count else { return }
+
+        let node = conversation.messageNodes[index]
+        guard node.role == MessageRole.user else { return }
+
+        let edited = UIMessage.companion.user(prompt: trimmed)
+        Task { @MainActor in
+            await store.appendVariant(messageIndex: index, message: edited)
+            // Truncate anything after the edited user turn (drop stale reply).
+            await store.truncateAfter(messageIndex: index)
+            if let updated = store.currentConversation {
+                self.messages = updated.currentMessages
+                self.messageRevision &+= 1
+                self.persistMessages(conversationId: currentConversationId)
+            }
+            let digest = Self.inputDigest(for: trimmed)
+            generateResponse(inputDigest: digest, conversationId: currentConversationId)
+        }
+    }
+
+    /// Delete a single message (and its node). No generation.
+    func deleteMessage(atMessageIndex index: Int) {
+        guard streamJob == nil, let store = conversationStore else { return }
+        Task { @MainActor in
+            await store.deleteMessage(messageIndex: index)
+            if let updated = store.currentConversation {
+                self.messages = updated.currentMessages
+                self.messageRevision &+= 1
+            }
+            self.persistMessages(conversationId: currentConversationId)
+        }
+    }
+
+    /// Switch the visible variant of a node (no generation).
+    func selectVariant(messageIndex: Int, variantIndex: Int) {
+        guard streamJob == nil, let store = conversationStore else { return }
+        Task { @MainActor in
+            await store.selectVariant(messageIndex: messageIndex, variantIndex: variantIndex)
+            if let updated = store.currentConversation {
+                self.messages = updated.currentMessages
+                self.messageRevision &+= 1
+            }
+        }
+    }
+
+    /// Variant info for the UI (to render `< n/m >` when a node has siblings).
+    func variantInfo(atMessageIndex index: Int) -> IOSConversationStore.VariantInfo? {
+        conversationStore?.variantInfo(forMessageIndex: index)
+    }
+
+    private func regenerateDigestSeed() -> String {
+        messages.last(where: { $0.role == MessageRole.user })?.toText() ?? ""
+    }
+
     // MARK: - Private
 
     private func generateResponse(inputDigest: String, conversationId: KotlinUuid?) {

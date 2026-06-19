@@ -181,9 +181,19 @@ struct ChatView: View {
                                 onModelDefaults: openModelDefaults
                             )
                         }
-                        ForEach(viewModel.messages, id: \.id) { message in
-                            MessageBubbleView(message: message, displaySetting: sharedSettings.displaySetting)
-                                .id(message.id)
+                        ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
+                            MessageBubbleView(
+                                message: message,
+                                messageIndex: index,
+                                variantInfo: viewModel.variantInfo(atMessageIndex: index),
+                                displaySetting: sharedSettings.displaySetting,
+                                onRegenerate: { viewModel.regenerate(atMessageIndex: index) },
+                                onEdit: { newText in viewModel.editMessage(atMessageIndex: index, newText: newText) },
+                                onDelete: { viewModel.deleteMessage(atMessageIndex: index) },
+                                onSelectVariant: { variantIndex in viewModel.selectVariant(messageIndex: index, variantIndex: variantIndex) },
+                                isGenerating: viewModel.isLoading
+                            )
+                            .id(message.id)
                         }
                     }
                 }

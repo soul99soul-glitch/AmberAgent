@@ -4,11 +4,29 @@ import Shared
 struct MessageBubbleView: View {
 
     let message: UIMessage
+    var messageIndex: Int = 0
+    var variantInfo: IOSConversationStore.VariantInfo? = nil
     var displaySetting: DisplaySetting? = nil
+    // Branching actions (Android ChatService parity). Defaults are no-ops so
+    // existing call sites / previews that don't supply them still compile.
+    var onRegenerate: () -> Void = {}
+    var onEdit: (String) -> Void = { _ in }
+    var onDelete: () -> Void = {}
+    var onSelectVariant: (Int) -> Void = { _ in }
+    var isGenerating: Bool = false
+
     @Environment(IOSWorkspaceStore.self) private var workspaceStore
+    @State private var editing: Bool = false
+    @State private var editDraft: String = ""
 
     private var isUser: Bool {
         message.role == MessageRole.user
+    }
+
+    private var canBranch: Bool {
+        // Disable branching actions while a generation is running, mirroring
+        // the ChatViewModel guard (streamJob == nil).
+        !isGenerating
     }
 
     var body: some View {
@@ -17,16 +35,128 @@ struct MessageBubbleView: View {
                 Spacer(minLength: 48)
 
                 VStack(alignment: .trailing, spacing: 4) {
+                    variantSwitcher
                     messageParts
                 }
                 .frame(maxWidth: ChatLayout.userMaxWidth, alignment: .trailing)
             }
+            .contextMenu { messageActions }
+            .sheet(isPresented: $editing) {
+                editSheet
+            }
         } else {
             ChatAssistantStack {
-                ChatAgentName()
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    ChatAgentName()
+                    if variantInfo?.hasMultipleVariants == true {
+                        variantBadge
+                    }
+                }
+                variantSwitcher
                 messageParts
             }
+            .contextMenu { messageActions }
         }
+    }
+
+    // MARK: - Branching controls
+
+    @ViewBuilder
+    private var variantSwitcher: some View {
+        if let info = variantInfo, info.hasMultipleVariants, canBranch {
+            HStack(spacing: 4) {
+                Button {
+                    let next = info.selectedIndex - 1
+                    if next >= 0 { onSelectVariant(next) }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .disabled(info.selectedIndex <= 0)
+
+                Text("\(info.selectedIndex + 1)/\(info.variantCount)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(AmberTheme.muted)
+
+                Button {
+                    let next = info.selectedIndex + 1
+                    if next < info.variantCount { onSelectVariant(next) }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .disabled(info.selectedIndex >= info.variantCount - 1)
+            }
+            .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        }
+    }
+
+    private var variantBadge: some View {
+        Text("\(variantInfo?.selectedIndex ?? 0 + 1)/\(variantInfo?.variantCount ?? 1)")
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(AmberTheme.muted2)
+    }
+
+    @ViewBuilder
+    private var messageActions: some View {
+        if canBranch {
+            if isUser {
+                Button {
+                    editDraft = message.toText()
+                    editing = true
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+            } else {
+                Button {
+                    onRegenerate()
+                } label: {
+                    Label("重新生成", systemImage: "arrow.clockwise")
+                }
+            }
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+            Divider()
+        }
+        Button {
+            UIPasteboard.general.string = message.toText()
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+    }
+
+    /// Edit-user-message sheet (Android editMessage parity). On submit it calls
+    /// `onEdit` with the trimmed draft; ChatViewModel appends the edited text
+    /// as a new variant, truncates the stale reply, and re-runs generation.
+    private var editSheet: some View {
+        NavigationStack {
+            VStack {
+                TextEditor(text: $editDraft)
+                    .font(.body)
+                    .padding(8)
+                    .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(16)
+            }
+            .navigationTitle("编辑消息")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { editing = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("发送") {
+                        onEdit(editDraft)
+                        editing = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     // MARK: - Subviews
