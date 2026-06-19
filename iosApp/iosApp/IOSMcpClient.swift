@@ -140,6 +140,7 @@ enum IOSMcpConnectionStatus: Equatable {
     case idle
     case connecting
     case connected
+    case reconnecting
     case error(String)
 
     var title: String {
@@ -147,6 +148,7 @@ enum IOSMcpConnectionStatus: Equatable {
         case .idle: "未连接"
         case .connecting: "连接中"
         case .connected: "已连接"
+        case .reconnecting: "重连中"
         case .error: "连接失败"
         }
     }

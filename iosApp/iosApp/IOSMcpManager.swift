@@ -136,6 +136,77 @@ final class IOSMcpManager {
         for server in servers {
             statusByServer[server.name] = .idle
         }
+        reconnectAttempts.removeAll()
+    }
+
+    // MARK: - Auto-reconnect (Android McpManager parity)
+    //
+    // Android McpManager auto-reconnects with exponential backoff (up to
+    // MAX_RECONNECT_ATTEMPTS=5). iOS had no reconnect — a dropped connection
+    // stayed in `.error` until the user manually re-synced. This retries failed
+    // servers when they're next needed (callTool) and via syncAll.
+
+    private static let maxReconnectAttempts = 5
+    private static let baseReconnectDelaySeconds: UInt64 = 2
+    private var reconnectAttempts: [String: Int] = [:]
+    private var lastReconnectAttemptByServer: [String: Date] = [:]
+
+    /// Attempts to reconnect servers currently in `.error`. Returns the names
+    /// that were retried. Uses exponential backoff (2^n seconds) capped at
+    /// maxReconnectAttempts per server; a successful connection resets the
+    /// counter. Safe to call repeatedly — it respects the backoff window.
+    @discardableResult
+    func reconnectFailedServers() async -> [String] {
+        guard isEnabled() else { return [] }
+        let failed = statusByServer.filter { _, status in
+            if case .error = status { return true }
+            return false
+        }.map(\.key)
+        guard !failed.isEmpty else { return [] }
+
+        let now = Date()
+        var retried: [String] = []
+        for serverName in failed {
+            let attempts = reconnectAttempts[serverName] ?? 0
+            guard attempts < Self.maxReconnectAttempts else { continue }
+            // Backoff: 2^n seconds since the last attempt. Skip if still within
+            // the backoff window.
+            let delay = Self.baseReconnectDelaySeconds * (1 << attempts)
+            if let last = lastReconnectAttemptByServer[serverName],
+               now.timeIntervalSince(last) < Double(delay) {
+                continue
+            }
+            lastReconnectAttemptByServer[serverName] = now
+            reconnectAttempts[serverName] = attempts + 1
+            statusByServer[serverName] = .reconnecting
+
+            guard let server = servers.first(where: { $0.name == serverName }), server.enabled else {
+                statusByServer[serverName] = .error("server missing or disabled")
+                continue
+            }
+            let client: IOSMcpClienting = clientsByServer[serverName] ?? clientFactory(server)
+            clientsByServer[serverName] = client
+            do {
+                _ = try await client.connect(config: server)
+                let listedTools = try await client.listTools()
+                let merged = discoveredToolSink(server.name, listedTools) ?? Self.mergeDiscoveredTools(
+                    discovered: listedTools,
+                    existing: server.tools
+                )
+                if let index = servers.firstIndex(where: { $0.name == server.name }) {
+                    servers[index] = server.withTools(merged)
+                }
+                tools.removeAll { $0.serverName == server.name }
+                tools.append(contentsOf: merged.map { IOSMcpDiscoveredTool(serverName: server.name, tool: $0) })
+                statusByServer[server.name] = .connected
+                reconnectAttempts[server.name] = nil
+                lastReconnectAttemptByServer[server.name] = nil
+                retried.append(serverName)
+            } catch {
+                statusByServer[server.name] = .error(error.localizedDescription)
+            }
+        }
+        return retried
     }
 
     private static func mergeDiscoveredTools(discovered: [IOSMcpTool], existing: [IOSMcpTool]) -> [IOSMcpTool] {
@@ -145,4 +216,13 @@ final class IOSMcpManager {
             return IOSMcpTool(name: tool.name, description: tool.description ?? old.description, enabled: old.enabled)
         }
     }
+
+    #if DEBUG
+    /// Test accessor: clears the reconnect backoff window so a test can retry
+    /// immediately without waiting for the exponential delay.
+    func clearReconnectBackoffForTesting(serverName: String) {
+        lastReconnectAttemptByServer[serverName] = nil
+        reconnectAttempts[serverName] = nil
+    }
+    #endif
 }

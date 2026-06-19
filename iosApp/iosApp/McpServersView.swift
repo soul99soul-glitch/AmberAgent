@@ -223,6 +223,8 @@ struct McpServersView: View {
             return "连接中"
         case .connected:
             return "已连接"
+        case .reconnecting:
+            return "重连中"
         case .error:
             return "连接失败"
         }

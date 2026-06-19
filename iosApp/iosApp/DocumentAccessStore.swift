@@ -181,8 +181,8 @@ enum IOSWorkspaceStoreError: Error, LocalizedError, Equatable {
 }
 
 enum IOSWorkspaceToolCatalog {
-    static let readToolNames: Set<String> = ["workspace_file_read", "workspace_artifact_read"]
-    static let writeToolNames: Set<String> = ["workspace_file_write", "workspace_artifact_delete"]
+    static let readToolNames: Set<String> = ["workspace_file_read", "workspace_artifact_read", "workspace_file_list", "workspace_file_search"]
+    static let writeToolNames: Set<String> = ["workspace_file_write", "workspace_artifact_delete", "workspace_file_edit", "workspace_file_move"]
     static let supportedToolNames: Set<String> = readToolNames.union(writeToolNames)
 }
 
@@ -393,6 +393,14 @@ final class IOSWorkspaceStore {
                 return try await workspaceFileReadJSON(args)
             case "workspace_file_write":
                 return try await workspaceFileWriteJSON(args)
+            case "workspace_file_edit":
+                return try await workspaceFileEditJSON(args)
+            case "workspace_file_list":
+                return try workspaceFileListJSON(args)
+            case "workspace_file_search":
+                return try await workspaceFileSearchJSON(args)
+            case "workspace_file_move":
+                return try await workspaceFileMoveJSON(args)
             case "workspace_artifact_read":
                 return try workspaceArtifactReadJSON(args)
             case "workspace_artifact_delete":
@@ -490,6 +498,126 @@ final class IOSWorkspaceStore {
             "id": record.id,
             "path": "/workspace/\(record.workspacePath)",
             "size_bytes": record.sizeBytes
+        ])
+    }
+
+    /// file_edit: in-place string replacement in an existing workspace file
+    /// (Android WorkspaceTools.file_edit parity).
+    private func workspaceFileEditJSON(_ args: [String: Any]) async throws -> String {
+        let raw = (args["file_id"] as? String)?.workspaceNilIfBlank
+            ?? (args["path"] as? String)?.workspaceNilIfBlank
+            ?? ""
+        guard let record = fileRecord(idOrPath: raw) else {
+            throw IOSWorkspaceStoreError.missingFile
+        }
+        let find = (args["find"] as? String) ?? ""
+        let replace = (args["replace"] as? String) ?? ""
+        guard !find.isEmpty else {
+            return Self.json(["ok": false, "error": "file_edit requires a non-empty 'find'."])
+        }
+        let url = fileURL(for: record)
+        let original = (try? String(contentsOf: url, encoding: .utf8)) ?? record.preview
+        let edited = original.replacingOccurrences(of: find, with: replace)
+        guard edited != original else {
+            return Self.json(["ok": true, "id": record.id, "path": "/workspace/\(record.workspacePath)", "replacements": 0, "message": "No occurrences of 'find' matched; file unchanged."])
+        }
+        let occurrences = original.components(separatedBy: find).count - 1
+        try Data(edited.utf8).write(to: url, options: [.atomic])
+        let now = Date()
+        var updated = record
+        updated.sizeBytes = Int64(edited.utf8.count)
+        updated.updatedAtMillis = Self.millis(now)
+        updated = await parsedRecord(updated, now: now)
+        files.removeAll { $0.id == updated.id }
+        files.insert(updated, at: 0)
+        try persist()
+        publish()
+        return Self.json([
+            "ok": true,
+            "id": updated.id,
+            "path": "/workspace/\(updated.workspacePath)",
+            "replacements": occurrences,
+            "size_bytes": updated.sizeBytes
+        ])
+    }
+
+    /// file_list: lists workspace files (optionally under a sub-path) with
+    /// metadata. Android WorkspaceTools.file_list parity.
+    private func workspaceFileListJSON(_ args: [String: Any]) throws -> String {
+        let prefix = (args["path"] as? String)?.workspaceNilIfBlank
+        let matching = files.filter { record in
+            guard let prefix else { return true }
+            return record.workspacePath.hasPrefix(prefix) || "/workspace/\(record.workspacePath)".hasPrefix(prefix)
+        }
+        let items = matching.map { record -> [String: Any] in
+            [
+                "id": record.id,
+                "path": "/workspace/\(record.workspacePath)",
+                "name": record.displayName,
+                "size_bytes": record.sizeBytes,
+                "mime_type": record.mimeType,
+                "status": record.status.rawValue,
+                "updated_at": record.updatedAtMillis
+            ]
+        }
+        return Self.json(["ok": true, "count": items.count, "files": items])
+    }
+
+    /// file_search: content search across workspace files; returns matching
+    /// files + snippet. Android WorkspaceTools.file_search parity.
+    private func workspaceFileSearchJSON(_ args: [String: Any]) async throws -> String {
+        let query = (args["query"] as? String) ?? ""
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return Self.json(["ok": false, "error": "file_search requires a non-empty 'query'."])
+        }
+        var hits: [[String: Any]] = []
+        for record in files where record.status == .ready {
+            let content = record.preview
+            guard let range = content.range(of: query, options: .caseInsensitive) else { continue }
+            let lower = content.index(range.lowerBound, offsetBy: -40, limitedBy: content.startIndex) ?? content.startIndex
+            let upper = content.index(range.upperBound, offsetBy: 60, limitedBy: content.endIndex) ?? content.endIndex
+            let snippet = String(content[lower..<upper]).replacingOccurrences(of: "\n", with: " ")
+            hits.append([
+                "id": record.id,
+                "path": "/workspace/\(record.workspacePath)",
+                "name": record.displayName,
+                "snippet": snippet
+            ])
+        }
+        return Self.json(["ok": true, "query": query, "matches": hits.count, "results": hits])
+    }
+
+    /// file_move: rename/move a workspace file to a new path. Android
+    /// WorkspaceTools.file_move parity.
+    private func workspaceFileMoveJSON(_ args: [String: Any]) async throws -> String {
+        let raw = (args["file_id"] as? String)?.workspaceNilIfBlank
+            ?? (args["path"] as? String)?.workspaceNilIfBlank
+            ?? ""
+        guard var record = fileRecord(idOrPath: raw) else {
+            throw IOSWorkspaceStoreError.missingFile
+        }
+        let destPath = try normalizeWorkspacePath((args["destination_path"] as? String) ?? "")
+        guard !destPath.isEmpty, destPath != record.workspacePath else {
+            return Self.json(["ok": false, "error": "file_move requires a non-empty, different 'destination_path'."])
+        }
+        let sourceURL = fileURL(for: record)
+        let destURL = fileURL(forWorkspacePath: destPath)
+        if fileManager.fileExists(atPath: destURL.path) {
+            return Self.json(["ok": false, "error": "A file already exists at \(destPath)."])
+        }
+        try fileManager.createDirectory(at: destURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fileManager.moveItem(at: sourceURL, to: destURL)
+        record.workspacePath = destPath
+        record.displayName = destPath.components(separatedBy: "/").last ?? destPath
+        record.updatedAtMillis = Self.millis(Date())
+        files.removeAll { $0.id == record.id }
+        files.insert(record, at: 0)
+        try persist()
+        publish()
+        return Self.json([
+            "ok": true,
+            "id": record.id,
+            "path": "/workspace/\(record.workspacePath)"
         ])
     }
 
