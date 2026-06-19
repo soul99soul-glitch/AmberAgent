@@ -54,6 +54,7 @@ Deep Read 是杂志风格的全屏深度阅读功能，由隐藏 agent 分四段
    - 调用 `writeFallbackSection` 仅用于保留链接。
    - 其判断 `fallback.statusOf(stage) == READY` 在新语义下永远为 false，所以最终走到 `writer.markFailed(stage, ...)`。
    - 简化逻辑：保留链接合并后直接 `markFailed`，不再尝试用 `statusOf(stage) == READY` 判定恢复。
+   - **返回值语义**：函数返回 `Boolean`（recovered），被 `runStageSupervisorLoop` 的 timeout 分支（`:497`）和 other 分支（`:512`）消费，用于 `if (!recovered && status != READY) markFailed(...)`。新语义下 recovered 恒为 false，调用点会再次 markFailed，但 `markFailed`（`:85-92`）对已 FAILED 段是 no-op（先判 `statusOf(stage) == READY` 才写），不会出错。可保留 Boolean 返回（恒 false）或改为内部直接 markFailed 后返回 Unit 简化调用方；实现时任选其一，关键是行为正确。
 
 3. `DeepReadSectionWriterTools.markRequiredWrite` / `writeFallbackSection` 中的 `markRequiredWrite()` 调用：links-only 的 fallback 不算一次"有效写入"，不调 `markRequiredWrite`，避免污染 supervisor loop 的 `requiredWriteCount` 计数。
 
@@ -93,8 +94,9 @@ val pinned: Boolean = false,
 ```kotlin
 val MIGRATION_6_7 = object : Migration(6, 7) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        // BOOLEAN 存为 INTEGER；SQLite ALTER TABLE ADD COLUMN 不支持 NOT NULL
-        // 无 DEFAULT，必须给 DEFAULT 0 让既有行回填为未收藏。
+        // BOOLEAN 存为 INTEGER。SQLite 的 ALTER TABLE ADD COLUMN 允许 NOT NULL，
+        // 但声明 NOT NULL 时必须同时提供非 NULL 的 DEFAULT；DEFAULT 0 让既有行回填为未收藏。
+        // 范式参照 MIGRATION_4_5（AppDatabase.kt:395-406），而非 MIGRATION_5_6（后者是可空列 DEFAULT NULL）。
         db.execSQL(
             "ALTER TABLE `deep_read_cache` ADD COLUMN `pinned` INTEGER NOT NULL DEFAULT 0"
         )
@@ -103,7 +105,7 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
 ```
 
 - `AppDatabase` 的 `version = 6` → `version = 7`。
-- migration 注册到 Room builder 的 `.addMigrations(...)` 调用链（查找现有 `addMigrations` 调用点，追加 `MIGRATION_6_7`）。
+- migration 注册点：`app/src/main/java/app/amber/core/di/DataSourceModule.kt:125-131` 的 `.addMigrations(...)` 调用链，追加 `MIGRATION_6_7`。
 - 新增 schema 快照 `app/schemas/app.amber.agent.data.db.AppDatabase/7.json`（构建时 Room 自动生成，需提交）。
 
 **`TodayBoardSetting` 加 TTL 字段**（`BoardSettings.kt:171-190`）：
@@ -150,7 +152,10 @@ val deepReadCacheTtlDays: Int = 7,
    - `ttlDays == 0` → `expiresAt = Long.MAX_VALUE`（避免溢出，isFresh 永真）。
    - `ttlDays > 0` → `expiresAt = now + ttlDays * 24h`。
    - `DEFAULT_TTL_DAYS = 7` 作为常量。
-   - 调用方（`DeepReadWorker` / `DeepReadAgentRunManager` / `DeepReadSectionWriterTools`）从 Settings 读 `deepReadCacheTtlDays` 传入。`DeepReadSectionWriterTools` 已持有 repository 但不持有 settings——需在构造时传入 `ttlDays`（作为构造参数），或在每次 `update` 时传入。考虑到 TTL 在单次生成内稳定，**作为构造参数传入**最简洁。
+   - 调用方取数方式：
+     - `DeepReadAgentRunManager`：在 `createRunContext`（`:291-381`，`:300` 已读 `settings`）读取 `settings.agentRuntime.todayBoard.deepReadCacheTtlDays`，new writer 时传入（见下条）。
+     - `DeepReadWorker`：是 `KoinComponent`（`:23`），用 `get<SettingsAggregator>().settingsFlow.value.agentRuntime.todayBoard.deepReadCacheTtlDays` 同步取值，传给自己 3 处 `saveDeepRead` 调用（`:44,116,124`）。
+     - `DeepReadSectionWriterTools`：不持有 settings，**在构造时接收 `ttlDays` 参数并存为私有字段**。这是关键——writer 的私有 `update()`（`:564-569`）是段落写入的主要路径（overview/narrative/analysis/extendedReading 各 tool 都走它），每次调用 `repository.saveDeepRead(topicId, topicTitle, next)` 时必须把 `ttlDays` 一并传入，否则每次段落写入都用默认 TTL 重算 expiresAt，配置形同虚设。构造时机：`createRunContext`（`:341`）已能拿到 settings，直接 `DeepReadSectionWriterTools(repository, topicId, topicTitle, imageCandidates, allowTitleFallback, ttlDays = settings...)`。
 
 2. **保留** `DEEP_READ_HISTORY_RETENTION_MS` 语义不变。关键理解：retention 不是"从生成点起 N 天删除"，而是"**过期后再保留 7 天才删除**"。证据是 `pruneExpiredDeepReads(now)` 调用 `dao.pruneExpiredDeepReads(now - DEEP_READ_HISTORY_RETENTION_MS)`，即删除 `expires_at < now - 7天` 的行。
 
@@ -174,6 +179,7 @@ val deepReadCacheTtlDays: Int = 7,
 
 - `HotListRepository.toFreshDeepRead`（`HotListRepository.kt:255-258`）和 `toHistoryItem`（`:260-272`）：`isFresh` 调用传入实体的 `pinned`。pin 项 `expired` 永远 false。
 - `observeDeepReadEntry`（`HotListRepository.kt:43-51`）：`includeExpired=false` 时仍展示 pin 项（即使 TTL 到了）。
+- **`getFreshDeepReadByTitle`（`HotListDAO.kt:52-60`）SQL 补 pin 豁免**：现 SQL `WHERE title = :title AND expires_at >= :now`，pin 项 expires_at 过期后查不到。改为 `WHERE title = :title AND (expires_at >= :now OR pinned = 1)`。这条路径被 `materializeFreshDeepRead`（`HotListRepository.kt:163`）和 `getFreshDeepRead` 的 title fallback（`:150-151`）使用，是 RunManager `fresh()`（`:1002-1009`）的取数路径，必须覆盖 pin 豁免，否则 pin 的文章跨重启或重新进入时按 title 匹配会漏。
 
 ### B4. UI
 
@@ -258,7 +264,7 @@ val deepReadCacheTtlDays: Int = 7,
 ## 风险与缓解
 
 1. **产出率下降**（簇 A 主要风险）：门槛拉高 + 废除降级，弱模型下更多段失败。这是预期行为，但需观察实际生成成功率。缓解：门槛选 80/60 而非对齐 prompt 的 120/100，留出模型偏短余量。
-2. **DB migration 失败**（簇 B）：Room schema 验证严格，`pinned` 列必须带 `DEFAULT 0` 且类型匹配。缓解：参照现有 `MIGRATION_5_6` 的 DEFAULT 处理范式，构建时生成 schema 快照验证。
+2. **DB migration 失败**（簇 B）：Room schema 验证严格，`pinned` 列必须带 `NOT NULL DEFAULT 0` 且类型匹配。缓解：参照现有 `MIGRATION_4_5`（`AppDatabase.kt:395-406`）的 NOT NULL DEFAULT 范式，构建时生成 schema 快照验证。测试上需在 `app/src/androidTest/.../AppDatabaseMigrationTest.kt` 新增 v6→v7 测试方法，构造含 `deep_read_cache` 表及既有行的 v6 库，验证 migration 后 `pinned` 列存在且回填为 0（参照现有 `helper.runMigrationAndValidate(TEST_DB, startVersion, true, MIGRATION_X_Y)` 范式，`:148-153`）。
 3. **TTL 变更影响既有缓存**：已存数据的 `expiresAt` 是旧 24h 算的，升级后不会自动延长。可接受——新生成内容用新 TTL，旧内容按原值过期。如需统一可加一次性回填，但非必需。
 4. **文案"3-10 万 tokens"仍不准确**：这是粗估，真实值取决于来源数和模型多步程度。作为向用户透明的大致量级可接受；若要精确需在生成后统计实际 token，属后续增强。
 
