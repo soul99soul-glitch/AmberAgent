@@ -956,7 +956,21 @@ final class ChatViewModel {
     }
 
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
-        messagesByInjectingMemoryContext(messagesByInjectingMcpContext(messagesByInjectingMiniAppInstruction(messages)))
+        // Order: system prompt (assistant-defined) → MCP → memory → mini-app.
+        // The assistant system prompt goes first so it frames everything after,
+        // mirroring Android GenerationHandler's system-message construction.
+        messagesByInjectingSystemPrompt(messagesByInjectingMemoryContext(messagesByInjectingMcpContext(messagesByInjectingMiniAppInstruction(messages))))
+    }
+
+    /// Injects the current Amber Assistant's user-defined system prompt as a
+    /// leading system message (Android GenerationHandler parity). No-op when
+    /// the assistant has no system prompt (the common default).
+    private func messagesByInjectingSystemPrompt(_ messages: [UIMessage]) -> [UIMessage] {
+        let snapshot = sharedSettings.snapshot
+        let systemPrompt = snapshot.getCurrentAssistant().systemPrompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !systemPrompt.isEmpty else { return messages }
+        return [UIMessage.companion.system(prompt: systemPrompt)] + messages
     }
 
     private func messagesByInjectingMcpContext(_ messages: [UIMessage]) -> [UIMessage] {
@@ -2775,7 +2789,19 @@ final class ChatViewModel {
         var builtInTools: [BuiltInTools] = []
         if searchEnabled { builtInTools.append(BuiltInTools.Search.shared) }
         if imageGenerationConfigured { builtInTools.append(BuiltInTools.ImageGeneration.shared) }
-        let model = Model(
+
+        // Real Android parity: read generation params from the current Assistant
+        // + Model instead of hardcoding temperature=0.7/topP=nil/maxTokens=nil.
+        // Mirrors GenerationHandler.kt:453-468 + resolveSessionDefaults.
+        let snapshot = sharedSettings.snapshot
+        let assistant = snapshot.getCurrentAssistant()
+        let currentModel = snapshot.getCurrentChatModel()
+        let contextWindow = currentModel?.contextWindowTokens
+        // resolveSessionDefaults handles: reasoningLevel AUTO→model default,
+        // contextMessageSize 0→group default, maxTokens→group default fallback.
+        // It is a Settings extension fun; the fallback model avoids a nil model.
+        // Model requires its full initializer (Kotlin default args don't bridge).
+        let resolvedModel = currentModel ?? Model(
             modelId: modelId,
             displayName: modelId,
             id: KotlinUuid.companion.random(),
@@ -2784,10 +2810,30 @@ final class ChatViewModel {
             customBodies: [],
             inputModalities: [],
             outputModalities: [],
-            abilities: modelAbilities,
-            tools: Set(builtInTools),
+            abilities: [],
+            tools: Set<BuiltInTools>(),
             contextWindowTokens: nil,
             providerOverwrite: nil
+        )
+        let resolved = snapshot.resolveSessionDefaults(assistant: assistant, model: resolvedModel)
+
+        // Merge custom headers/bodies: Assistant's + Model's (Android merges both).
+        let mergedHeaders: [CustomHeader] = assistant.customHeaders + (currentModel?.customHeaders ?? [])
+        let mergedBodies: [CustomBody] = assistant.customBodies + (currentModel?.customBodies ?? [])
+
+        let model = Model(
+            modelId: modelId,
+            displayName: currentModel?.displayName ?? modelId,
+            id: currentModel?.id ?? KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: mergedHeaders,
+            customBodies: mergedBodies,
+            inputModalities: [],
+            outputModalities: [],
+            abilities: modelAbilities,
+            tools: Set(builtInTools),
+            contextWindowTokens: contextWindow,
+            providerOverwrite: currentModel?.providerOverwrite
         )
         // Tool declarations: iOS search/scrape, memory, WebMount, MCP,
         // sub-agent dispatch, and model-council run. The model decides which to
@@ -2824,21 +2870,33 @@ final class ChatViewModel {
         }
         toolDeclarations.append(ToolKt.createSubAgentDispatchToolDeclaration())
         toolDeclarations.append(ToolKt.createModelCouncilRunToolDeclaration())
+        // Real params: temperature/topP from Assistant, maxTokens from
+        // resolveSessionDefaults (Assistant → group default), reasoningLevel
+        // resolved, custom headers/bodies merged. Mirrors GenerationHandler.
+        let resolvedReasoningLevel = modelAbilities.contains(.reasoning) ? resolved.reasoningLevel : ReasoningLevel.off
         return TextGenerationParams(
             model: model,
-            temperature: KotlinFloat(value: 0.7),
-            topP: nil,
-            maxTokens: nil,
+            temperature: assistant.temperature.map { KotlinFloat(value: Float($0)) },
+            topP: assistant.topP.map { KotlinFloat(value: Float($0)) },
+            maxTokens: resolved.maxTokens.map { KotlinInt(value: Int32($0)) },
             tools: toolDeclarations,
-            reasoningLevel: modelAbilities.contains(.reasoning) ? reasoningLevel : .off,
-            customHeaders: [],
-            customBody: []
+            reasoningLevel: resolvedReasoningLevel,
+            customHeaders: mergedHeaders,
+            customBody: mergedBodies
         )
     }
 
     func currentToolDeclarationNames() -> [String] {
         makeTextGenerationParams().tools.map(\.name)
     }
+
+    #if DEBUG
+    /// Test accessor for the resolved generation params (reads real
+    /// Assistant/Model values + resolveSessionDefaults).
+    func textGenerationParamsForTesting() -> TextGenerationParams {
+        makeTextGenerationParams()
+    }
+    #endif
 
     static func chatConfigurationIssue(
         baseUrl: String,

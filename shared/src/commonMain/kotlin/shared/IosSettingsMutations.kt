@@ -455,6 +455,45 @@ object IosSettingsMutations {
         )
     }
 
+    /**
+     * Update the current assistant's generation-prompt fields: systemPrompt,
+     * messageTemplate, temperature, topP, maxTokens, contextMessageSize. Any
+     * argument left null is left unchanged on the assistant. This mirrors the
+     * fields Android's AssistantBasicPage/AssistantPromptPage edit and that
+     * `GenerationHandler` consumes. iOS-only bridge helper (same pattern as
+     * [setSkillEnabledForCurrentAssistant]).
+     */
+    fun updateCurrentAssistantParams(
+        settings: Settings,
+        systemPrompt: String? = null,
+        messageTemplate: String? = null,
+        temperature: Float? = null,
+        topP: Float? = null,
+        maxTokens: Int? = null,
+        contextMessageSize: Int? = null,
+        clearTemperature: Boolean = false,
+        clearTopP: Boolean = false,
+        clearMaxTokens: Boolean = false,
+    ): Settings {
+        val currentAssistantId = settings.getCurrentAssistant().id
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.id != currentAssistantId) {
+                    assistant
+                } else {
+                    assistant.copy(
+                        systemPrompt = systemPrompt ?: assistant.systemPrompt,
+                        messageTemplate = messageTemplate ?: assistant.messageTemplate,
+                        temperature = if (clearTemperature) null else (temperature ?: assistant.temperature),
+                        topP = if (clearTopP) null else (topP ?: assistant.topP),
+                        maxTokens = if (clearMaxTokens) null else (maxTokens ?: assistant.maxTokens),
+                        contextMessageSize = contextMessageSize ?: assistant.contextMessageSize,
+                    )
+                }
+            }
+        )
+    }
+
     // ---- helpers ----
 
     private fun parseRunnerType(raw: String): ModelCouncilSeatRunner {

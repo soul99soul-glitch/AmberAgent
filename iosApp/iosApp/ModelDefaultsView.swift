@@ -43,6 +43,7 @@ struct ModelDefaultsView: View {
                     VStack(spacing: 0) {
                         intro
                         chatSection
+                        AssistantParamsSection(sharedSettings: sharedSettings)
                     }
                     .padding(.bottom, 36)
                 }

@@ -136,10 +136,12 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         viewModel.sendMessage()
 
         let uploadMessages = viewModel.preparedUploadMessagesForTesting(viewModel.messages)
-        let memoryMessage = try XCTUnwrap(uploadMessages.first)
+        // The memory system message may no longer be `.first` now that the
+        // assistant system prompt is also injected (Android parity). Find it by
+        // content instead of position.
+        let memoryMessage = try XCTUnwrap(uploadMessages.first { textContent(of: $0).contains(memoryText) })
         XCTAssertEqual(memoryMessage.role, MessageRole.system)
-        XCTAssertTrue(textContent(of: memoryMessage).contains(memoryText))
-        XCTAssertEqual(uploadMessages.dropFirst().first?.role, MessageRole.user)
+        XCTAssertTrue(uploadMessages.contains { $0.role == MessageRole.user })
         XCTAssertFalse(
             viewModel.messages.contains { $0.role == MessageRole.system },
             "memory context should be upload-only and must not pollute persisted chat history"
@@ -186,7 +188,10 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         viewModel.sendMessage()
 
         let uploadMessages = viewModel.preparedUploadMessagesForTesting(viewModel.messages)
-        let memoryText = textContent(of: try XCTUnwrap(uploadMessages.first))
+        // Locate the memory system message by content (it's no longer `.first`
+        // after the assistant system-prompt injection was added).
+        let memoryMessage = try XCTUnwrap(uploadMessages.first { textContent(of: $0).contains(longTermText) })
+        let memoryText = textContent(of: memoryMessage)
         XCTAssertFalse(memoryText.contains(coreText))
         XCTAssertTrue(memoryText.contains(longTermText))
     }
@@ -276,7 +281,9 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         viewModel.sendMessage()
 
         let uploadMessages = viewModel.preparedUploadMessagesForTesting(viewModel.messages)
-        let memoryPrompt = textContent(of: try XCTUnwrap(uploadMessages.first))
+        // Locate the memory prompt by content (assistant system-prompt injection
+        // means the memory message is no longer `.first`).
+        let memoryPrompt = textContent(of: try XCTUnwrap(uploadMessages.first { textContent(of: $0).contains(editedText) }))
         XCTAssertTrue(memoryPrompt.contains(editedText))
         XCTAssertTrue(memoryPrompt.contains("[short_term/project]"))
 
