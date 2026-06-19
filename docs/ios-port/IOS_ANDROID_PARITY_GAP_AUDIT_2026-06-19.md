@@ -156,7 +156,34 @@
 
 这些的**循环结构/工具注入/report 捕获/阶段 seeding 机制**都已用 scripted provider 单测覆盖;真实模型输出质量只能用真 Key 在模拟器上验证(符合本轮约定的验证策略)。
 
-### 仍未做的(明确 P2 / 暂不在范围)
+### 2026-06-20 P1 闭环(本轮追加)
 
-- Lorebook / 模式注入编辑器、记忆 dream/extraction、记忆导出/导入、额外搜索商、MCP 图片内容、WebMount 页面交互工具/adapter、PPTX 解析、OCR/视觉、Share/Shortcuts/通知、AmberNative 原生库链接警告。
-- 这些要么明确不做,要么依赖真实账号/付费服务/App Store 策略,留作后续 work packet。
+本轮把 10 个 P1 全部修掉(P1-2 分支选择器 UI、P1-12 I/O 错误上抛 已随 P0 闭环)。每个配单测,全量 iosAppTests 通过。
+
+| P1 | 提交 | 内容 |
+|---|---|---|
+| P1-13 昵称持久化 | `8d4ad239a` | AccountView 回写 displaySetting.userNickname |
+| P1-1 消息注解渲染 | `8d4ad239a` | MessageBubbleView 渲染 URL citation 链接(provider 已解析) |
+| P1-11 PPTX 解析 | `8d4ad239a` | DocumentAccessStore 加 .pptx,提取 slide <a:t> 文本 |
+| P1-3 记忆召回打分 | `8d4ad239a` | pinned+关键词重叠+时间衰减+置信度打分(CJK 感知分词) |
+| P1-4 Workspace 工具 | `1e8fbaf35` | file_edit/list/search/move |
+| P1-5 MCP 自动重连 | `1e8fbaf35` | 指数退避重连(最多 5 次),.reconnecting 状态 |
+| P1-8 备份含会话 | `78e9b80ac` | export 含 conversations.zip,可还原 |
+| P1-9/10 注入/Lorebook 编辑器 | `914352d06` | PromptInjectionEditorView + KMP CRUD 桥接 |
+| P1-7 WebMount 交互工具 | `7de8c74d6` | wm_click/type/scroll/select/find/wait(受限 JS 桥接) |
+| P1-6 Hotlist 提供商 | `f148f2537` | ArxivAI/InfoqAI/36Kr/HFPapers/GithubTrending(+HN 共 6 家) |
+
+验证:全量 iosAppTests **336 passed, 1 skipped, 0 failed**(本轮新增 13 个 P1 单测),0 Swift warning。
+
+### 仍为 P2 / 明确不做(更新后)
+
+- 记忆 dream/extraction(后台固化)、记忆导出/导入、记忆 prompt/agent-soul 文本块
+- 额外搜索商(SearXNG/LinkUp/Metaso/Ollama/Perplexity/Firecrawl/Bocha/Grok)
+- MCP 图片内容工具结果、WebMount OAuth/signed-fetch/adapter/screenshot、多 tab
+- PPTX 已做;OCR/视觉仍诚实降级不支持
+- Share Extension / App Intents / Shortcuts / Universal Links / 通知深链(平台入口)
+- AmberNative 原生库 iOS-sim 26.5 vs link 26.0 警告(需 native rebuild)
+- 微博/B站热榜(反爬,需登录,诚实不做)
+- MiniApp launch/clipboard.read/location/sensor(iOS 平台限制)
+- 真实 CLI seats(桌面二进制,非 iOS)、Cron(Android 后台服务)
+- 需真实 API Key/账号/付费服务才能端到端验证的(SubAgent 多轮/Council 辩论/DeepRead 生成/MCP 重连/WebMount 交互真实页面)机制已测,质量留人工 smoke
