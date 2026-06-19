@@ -98,6 +98,11 @@ import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
 import app.amber.feature.board.hotlist.deepread.verifiedImageUrls
+import app.amber.feature.ui.components.message.LocalSearchSources
+import app.amber.feature.ui.components.message.LocalStripUnverifiedLinks
+import app.amber.feature.ui.components.message.SearchSourcesRegistry
+import app.amber.feature.ui.components.message.SourceRef
+import app.amber.feature.ui.components.message.normalizeSearchSourceHost
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.richtext.MarkdownNew
@@ -743,7 +748,16 @@ private fun DeepReadArticle(
     onRetrySection: (DeepReadGenerationStage) -> Unit,
 ) {
     val verifiedImageUrls = remember(output.imageAssets) { output.verifiedImageUrls() }
-    DeepReadScaledText(fontScale) {
+    val sourceRegistry = remember(output.references, output.extendedReading) {
+        buildDeepReadSourceRegistry(output)
+    }
+    CompositionLocalProvider(
+        LocalSearchSources provides sourceRegistry,
+        // Only strip unverified links when we actually have prefetched sources to match
+        // against; an empty registry would otherwise erase every link in the article.
+        LocalStripUnverifiedLinks provides sourceRegistry.isNotEmpty,
+    ) {
+        DeepReadScaledText(fontScale) {
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -822,6 +836,7 @@ private fun DeepReadArticle(
             }
         }
     }
+    }
 }
 
 @Composable
@@ -839,8 +854,32 @@ private fun DeepReadScaledText(
 
 // Vertical spacing between consecutive block paragraphs rendered inside DeepRead body
 // text (summary / timeline / core_points / perspectives). Magazine-style breathing room
-// so multi-paragraph viewpoints don't collapse into a single dense block.
+// so multi-paragraph viewpoints don't collapse into one dense block.
 private val DEEP_READ_PARAGRAPH_SPACING = 12.dp
+
+/**
+ * Builds a [SearchSourcesRegistry] from the article's collected sources so markdown links
+ * inside the body (model-embedded `[text](url)`) render as source pills when their host
+ * matches a prefetched source. Drives the claim-level citation feature: only links whose
+ * host appears here become clickable pills; with [LocalStripUnverifiedLinks] enabled,
+ * every other link is dropped entirely so readers only see verified sources.
+ */
+private fun buildDeepReadSourceRegistry(output: DeepReadOutput): SearchSourcesRegistry {
+    val byHost = linkedMapOf<String, SourceRef>()
+    (output.references + output.extendedReading).forEach { link ->
+        val host = normalizeSearchSourceHost(link.url) ?: return@forEach
+        byHost.putIfAbsent(
+            host,
+            SourceRef(
+                host = host,
+                name = link.source?.takeIf { it.isNotBlank() } ?: host,
+                url = link.url,
+                id = null,
+            ),
+        )
+    }
+    return SearchSourcesRegistry(byHost)
+}
 
 @Composable
 private fun DeepReadMarkdownText(
@@ -852,6 +891,8 @@ private fun DeepReadMarkdownText(
     val safeHtml = remember(text) {
         DeepReadTemplateRenderer.renderSafeMarkdownHtml(text)
     }
+    // Source pills (claim citations) and any surviving hyperlinks open via MarkdownNew's
+    // default context.openUrl, matching the chat page behavior. No custom onClickUrl needed.
     MarkdownNew(
         content = safeHtml,
         modifier = modifier.fillMaxWidth(),

@@ -385,6 +385,7 @@ private fun HtmlParagraphContent(
         { url -> context.openUrl(url) }
     }
     val searchSources = LocalSearchSources.current
+    val stripUnverified = LocalStripUnverifiedLinks.current
 
     val (annotatedString, inlineContents) = remember(
         element.outerHtml(),
@@ -395,6 +396,7 @@ private fun HtmlParagraphContent(
         onClickCitation,
         onClickUrl,
         searchSources,
+        stripUnverified,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
@@ -409,6 +411,7 @@ private fun HtmlParagraphContent(
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
                     searchSources = searchSources,
+                    stripUnverified = stripUnverified,
                 )
             }
         }
@@ -756,6 +759,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
         { url -> context.openUrl(url) }
     }
     val searchSources = LocalSearchSources.current
+    val stripUnverified = LocalStripUnverifiedLinks.current
 
     val key = remember(nodes) { nodes.joinToString("") { if (it is Element) it.outerHtml() else it.toString() } }
     val (annotatedString, inlineContents) = remember(
@@ -767,6 +771,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
         onClickCitation,
         onClickUrl,
         searchSources,
+        stripUnverified,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
@@ -781,6 +786,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
                     searchSources = searchSources,
+                    stripUnverified = stripUnverified,
                 )
             }
         }
@@ -844,6 +850,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                         { url -> context.openUrl(url) }
                     }
                     val searchSources = LocalSearchSources.current
+                    val stripUnverified = LocalStripUnverifiedLinks.current
                     val (annotated, inlineContents) = remember(
                         node.outerHtml(),
                         enableLatexRendering,
@@ -853,6 +860,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                         onClickCitation,
                         onClickUrl,
                         searchSources,
+                        stripUnverified,
                     ) {
                         val contents = mutableMapOf<String, InlineTextContent>()
                         val text = buildAnnotatedString {
@@ -866,6 +874,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                                 onClickCitation = onClickCitation,
                                 onClickUrl = onClickUrl,
                                 searchSources = searchSources,
+                                stripUnverified = stripUnverified,
                             )
                         }
                         text to contents
@@ -889,6 +898,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
     onClickCitation: (String) -> Unit,
     onClickUrl: (String) -> Unit,
     searchSources: SearchSourcesRegistry?,
+    stripUnverified: Boolean,
 ) {
     when (node) {
         is TextNode -> append(node.text())
@@ -902,6 +912,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
             onClickCitation = onClickCitation,
             onClickUrl = onClickUrl,
             searchSources = searchSources,
+            stripUnverified = stripUnverified,
         )
     }
 }
@@ -916,6 +927,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
     onClickCitation: (String) -> Unit,
     onClickUrl: (String) -> Unit,
     searchSources: SearchSourcesRegistry?,
+    stripUnverified: Boolean,
 ) {
     val cssStyle = element.attr("style").takeIf { it.isNotBlank() }?.let {
         parseInlineSpanStyle(
@@ -936,6 +948,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             onClickCitation = onClickCitation,
             onClickUrl = onClickUrl,
             searchSources = searchSources,
+            stripUnverified = stripUnverified,
         )
     }
 
@@ -1004,13 +1017,19 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                 }
 
                 href.isNotEmpty() -> {
-                    val linkStyle = SpanStyle(
-                        color = colorScheme.primary,
-                        textDecoration = TextDecoration.Underline,
-                    ).merge(cssStyle ?: SpanStyle())
-                    withLink(openUrlLinkAnnotation(href, onClickUrl)) {
-                        withStyle(linkStyle) {
-                            recurseChildren(element, style.merge(linkStyle.asTextStyle()))
+                    if (stripUnverified) {
+                        // Deep Read strict mode: a link that is neither a citation nor a host
+                        // present in the source registry is dropped entirely (text + href).
+                        // Readers only ever see pills backed by real prefetched sources.
+                    } else {
+                        val linkStyle = SpanStyle(
+                            color = colorScheme.primary,
+                            textDecoration = TextDecoration.Underline,
+                        ).merge(cssStyle ?: SpanStyle())
+                        withLink(openUrlLinkAnnotation(href, onClickUrl)) {
+                            withStyle(linkStyle) {
+                                recurseChildren(element, style.merge(linkStyle.asTextStyle()))
+                            }
                         }
                     }
                 }

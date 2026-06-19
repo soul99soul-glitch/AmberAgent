@@ -879,6 +879,28 @@ private fun String.cleanText(max: Int): String =
         .normalizeQuotes()
         .trim()
         .safeTake(max)
+        .repairTruncatedMarkdownLink()
+
+/**
+ * If [safeTake] cut a claim string mid-link, the trailing `[text](url` fragment would
+ * render as literal garbage. Drop the whole incomplete link by rewinding to the last `[`
+ * that opened a still-unclosed link. A `[` with no following `](` is treated as a literal
+ * bracket and left alone.
+ */
+private fun String.repairTruncatedMarkdownLink(): String {
+    val lastOpen = lastIndexOf('[')
+    if (lastOpen < 0) return this
+    val afterOpen = substring(lastOpen)
+    // Complete link form: [text](url) — has both ]( and a closing ).
+    val hasCloser = "](" in afterOpen && afterOpen.lastIndexOf(')') > afterOpen.lastIndexOf("](")
+    if (hasCloser) return this
+    // Only treat as a broken link if ]( is present (i.e. we got past the label into the url).
+    return if ("](" in afterOpen) {
+        substring(0, lastOpen).trimEnd()
+    } else {
+        this
+    }
+}
 
 /**
  * Normalize curly/smart quotes into CJK corner brackets (直角引号):

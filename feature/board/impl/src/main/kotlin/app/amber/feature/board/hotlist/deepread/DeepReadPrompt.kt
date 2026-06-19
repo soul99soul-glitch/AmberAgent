@@ -39,6 +39,7 @@ object DeepReadPrompt {
         appendLine("- 用户可见引号一律使用直角引号：双引号用「」，单引号或嵌套引号用『』。不要使用弯引号或英文直引号。")
         appendLine("- hero_image_url、image_assets、timeline.image_url、core_points.image_url 只能使用来源 images 中出现过的 URL。")
         appendLine("- 正文不能写「来源不足」「链接见扩展阅读」来冒充分析；如果某事实来源未覆盖，就保守跳过。")
+        appendLine("- 关键 claim 在句末用 `[来源名](真实URL)` 标注来源，URL 必须来自本段证据包中出现的来源。把链接作为句末附加标记，不要写成句子必要成分（如「定价4999元[报道](url)」，不要写「详见[此报道](url)了解」）。没有可靠来源支撑的 claim 不要挂链接。")
         appendLine()
         previousJson?.takeIf { it.isNotBlank() }?.let {
             appendLine("## 上一阶段 JSON")
@@ -71,6 +72,7 @@ object DeepReadPrompt {
         appendLine("- 绝对禁止把来源域名列表、热榜排名、搜索命中本身当成关键脉络；这些只能出现在 extended_reading/references。")
         appendLine("- 不要按来源逐条复述；先读懂多个来源，再合并同类信息，输出读者真正需要的中文解释。")
         appendLine("- references 和 extended_reading 才能承载来源列表；正文区域只承载消化后的内容。")
+        appendLine("- summary、timeline、core_points、analysis 中每个关键 claim 在句末用 `[来源名](真实URL)` 标注来源，URL 必须来自给定来源。把链接作为句末附加标记，不要写成句子必要成分（如「定价4999元[报道](url)」，不要写「详见[此报道](url)了解」）。没有可靠来源支撑的 claim 不要挂链接。")
         appendLine("- summary、timeline、core_points、analysis、extended_reading.title、hero_caption、references.title 全部必须是中文；原始英文页面只保留在 url。")
         appendLine("- 用户可见引号一律使用直角引号：双引号用「」，单引号或嵌套引号用『』。不要使用弯引号“ ”‘ ’或英文直引号。")
         appendLine("- 如果来源是英文，请先理解后转写成中文，不要直接裸露英文段落。")

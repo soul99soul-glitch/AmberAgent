@@ -74,6 +74,15 @@ internal val EmptySearchPresentation = SearchPresentation(
 internal val LocalSearchSources = compositionLocalOf<SearchSourcesRegistry?> { null }
 internal val LocalSearchImageUrls = compositionLocalOf<SearchImageUrlRegistry?> { null }
 
+/**
+ * When true, markdown links whose destination is neither a citation nor a host present in
+ * [LocalSearchSources] are dropped entirely (text and href) instead of rendering as a plain
+ * hyperlink. Used by Deep Read so readers only ever see source pills backed by real
+ * prefetched sources. Default false keeps the chat page's existing behavior (render every
+ * link as a blue hyperlink).
+ */
+internal val LocalStripUnverifiedLinks = compositionLocalOf<Boolean> { false }
+
 internal fun List<UIMessagePart>.searchWebOutputsSignature(): String {
     return filterIsInstance<UIMessagePart.Tool>()
         .filter { it.toolName == "search_web" && it.isExecuted }
