@@ -1445,8 +1445,15 @@ enum IOSDeepReadSourceNormalizer {
     }
 
     static func cleanMultiline(_ value: String) -> String {
-        clean(value)
-            .replacingOccurrences(of: #"\n\s*\n\s*\n+"#, with: "\n\n", options: .regularExpression)
+        value
+            .replacingOccurrences(of: "\u{0}", with: "")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+            .map { clean($0) }
+            .joined(separator: "\n")
+            .replacingOccurrences(of: #"\n[ \t]*\n(?:[ \t]*\n)+"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func firstLineTitle(_ text: String, fallback: String) -> String {

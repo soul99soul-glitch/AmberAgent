@@ -415,8 +415,8 @@ final class IOSAdvancedTaskStore {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         let patterns = [
+            #"(?i)bearer\s+[A-Za-z0-9._~+/=-]{6,}"#,
             #"(?i)(api[_-]?key|token|password|passwd|secret|authorization)\s*[:=]\s*["']?[^"'\s]+["']?"#,
-            #"(?i)bearer\s+[A-Za-z0-9._\-]+"#,
             #"sk-[A-Za-z0-9_\-]{12,}"#,
             #"(?i)(ssh-rsa|ssh-ed25519)\s+[A-Za-z0-9+/=]+"#
         ]
