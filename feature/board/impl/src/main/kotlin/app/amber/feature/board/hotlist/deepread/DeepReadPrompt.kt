@@ -36,6 +36,7 @@ object DeepReadPrompt {
         }
         appendLine("- 输出合法 JSON 对象，不要代码围栏、不要解释。")
         appendLine("- 用户可见文本必须是简体中文；url 原样保留。")
+        appendLine("- 用户可见引号一律使用直角引号：双引号用「」，单引号或嵌套引号用『』。不要使用弯引号或英文直引号。")
         appendLine("- hero_image_url、image_assets、timeline.image_url、core_points.image_url 只能使用来源 images 中出现过的 URL。")
         appendLine("- 正文不能写「来源不足」「链接见扩展阅读」来冒充分析；如果某事实来源未覆盖，就保守跳过。")
         appendLine()
@@ -71,6 +72,7 @@ object DeepReadPrompt {
         appendLine("- 不要按来源逐条复述；先读懂多个来源，再合并同类信息，输出读者真正需要的中文解释。")
         appendLine("- references 和 extended_reading 才能承载来源列表；正文区域只承载消化后的内容。")
         appendLine("- summary、timeline、core_points、analysis、extended_reading.title、hero_caption、references.title 全部必须是中文；原始英文页面只保留在 url。")
+        appendLine("- 用户可见引号一律使用直角引号：双引号用「」，单引号或嵌套引号用『』。不要使用弯引号“ ”‘ ’或英文直引号。")
         appendLine("- 如果来源是英文，请先理解后转写成中文，不要直接裸露英文段落。")
         appendLine("- 输出合法 JSON 对象，不要代码围栏、不要前后解释。")
         appendLine("- 不要输出 null；没有内容时用空字符串或空数组。")

@@ -875,7 +875,22 @@ private fun List<DeepReadDiagramEdge>.normalizedDiagramEdges(
 }
 
 private fun String.cleanText(max: Int): String =
-    replace(Regex("\\s+"), " ").trim().safeTake(max)
+    replace(Regex("\\s+"), " ")
+        .normalizeQuotes()
+        .trim()
+        .safeTake(max)
+
+/**
+ * Normalize curly/smart quotes into CJK corner brackets (直角引号):
+ * “ ” → 「 」, ‘ ’ → 『 』. ASCII straight quotes are left untouched since they
+ * cannot be distinguished into opening/closing without context. This keeps
+ * user-visible Deep Read copy on the 直角引号 system the project standardizes on.
+ */
+private fun String.normalizeQuotes(): String =
+    replace("\u201C", "「") // "
+        .replace("\u201D", "」") // "
+        .replace("\u2018", "『") // '
+        .replace("\u2019", "』") // '
 
 /**
  * Like [String.take] but does not split a UTF-16 surrogate pair. A dangling

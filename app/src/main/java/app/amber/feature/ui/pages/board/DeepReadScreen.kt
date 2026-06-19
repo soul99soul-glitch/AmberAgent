@@ -63,6 +63,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -836,11 +837,17 @@ private fun DeepReadScaledText(
     )
 }
 
+// Vertical spacing between consecutive block paragraphs rendered inside DeepRead body
+// text (summary / timeline / core_points / perspectives). Magazine-style breathing room
+// so multi-paragraph viewpoints don't collapse into a single dense block.
+private val DEEP_READ_PARAGRAPH_SPACING = 12.dp
+
 @Composable
 private fun DeepReadMarkdownText(
     text: String,
     style: TextStyle,
     modifier: Modifier = Modifier,
+    paragraphSpacing: Dp = DEEP_READ_PARAGRAPH_SPACING,
 ) {
     val safeHtml = remember(text) {
         DeepReadTemplateRenderer.renderSafeMarkdownHtml(text)
@@ -849,6 +856,7 @@ private fun DeepReadMarkdownText(
         content = safeHtml,
         modifier = modifier.fillMaxWidth(),
         style = style,
+        paragraphSpacing = paragraphSpacing,
     )
 }
 
@@ -1668,7 +1676,7 @@ private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fo
             QuoteBlock(text = quote.text, attribution = quote.attribution, palette = palette, fontFamily = fontFamily)
         }
         analysis.perspectives.takeIf { it.isNotEmpty() }?.let { perspectives ->
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
                 perspectives.forEach { PerspectiveRow(it, palette, fontFamily) }
             }
         }

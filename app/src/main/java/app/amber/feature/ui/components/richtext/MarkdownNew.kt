@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
@@ -160,6 +161,7 @@ fun MarkdownNew(
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
+    paragraphSpacing: Dp = 0.dp,
 ) {
     var document by remember {
         mutableStateOf(parseMarkdownHtmlDocument(content))
@@ -178,7 +180,14 @@ fun MarkdownNew(
     }
 
     ProvideTextStyle(style) {
-        Column(modifier = modifier.padding(start = 4.dp)) {
+        Column(
+            modifier = modifier.padding(start = 4.dp),
+            verticalArrangement = if (paragraphSpacing > 0.dp) {
+                Arrangement.spacedBy(paragraphSpacing)
+            } else {
+                Arrangement.Top
+            },
+        ) {
             document.body().childNodes().fastForEach { node ->
                 HtmlBodyNode(node = node, onClickCitation = onClickCitation)
             }
