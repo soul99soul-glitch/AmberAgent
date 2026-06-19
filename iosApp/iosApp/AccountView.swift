@@ -6,7 +6,7 @@ struct AccountView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var displayName = "Amber"
+    @State private var displayName = ""
 
     private var avatarInitial: String {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,6 +33,12 @@ struct AccountView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            // Seed the field from the persisted nickname (empty → "Amber" display).
+            if displayName.isEmpty {
+                displayName = sharedSettings.displaySetting.userNickname
+            }
+        }
     }
 
     private var header: some View {
@@ -92,9 +98,15 @@ struct AccountView: View {
             AmberSectionLabel(text: "个人资料")
             AmberFormGroup {
                 AccountTextFieldRow(title: "昵称", placeholder: "输入你的称呼", text: $displayName)
+                    .onChange(of: displayName) { _, newValue in
+                        // Persist to displaySetting.userNickname (Android
+                        // ChatDrawer parity). Empty falls back to "Amber" in the
+                        // hero display.
+                        sharedSettings.updateUserNickname(newValue)
+                    }
             }
 
-            Text("iOS 端缺账户资料存储桥；这里仅预览本页称呼和头像。")
+            Text("昵称会保存到本机设置，重启后保留。")
                 .font(.caption)
                 .lineSpacing(3)
                 .foregroundStyle(AmberTheme.muted2)

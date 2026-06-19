@@ -1048,7 +1048,10 @@ final class ChatViewModel {
             records: IosMemoryFactory.shared.getAllRecords(),
             runtime: sharedSettings.agentRuntime
         )
-        guard let prompt = Self.memoryContextPrompt(records: records) else { return messages }
+        // Extract the latest user message text to drive relevance scoring (Android
+        // MemoryRecallStore parity: keyword overlap + time decay, not just freshness).
+        let queryText = messages.reversed().first { $0.role == MessageRole.user }?.toText() ?? ""
+        guard let prompt = Self.memoryContextPrompt(records: records, queryText: queryText) else { return messages }
         return [UIMessage.companion.system(prompt: prompt)] + messages
     }
 
@@ -1063,20 +1066,25 @@ final class ChatViewModel {
         return false
     }
 
-    static func memoryContextPrompt(records: [MemoryRecord]) -> String? {
+    static func memoryContextPrompt(records: [MemoryRecord], queryText: String = "") -> String? {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let activeRecords = records
+        let eligible = records
             .filter { !$0.archived }
             .filter { record in
                 guard let expiresAt = record.expiresAt?.int64Value else { return true }
                 return expiresAt > now
             }
-            .sorted { lhs, rhs in
-                if lhs.pinned != rhs.pinned { return lhs.pinned && !rhs.pinned }
-                if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
-                return lhs.id < rhs.id
-            }
-            .prefix(20)
+        // Android MemoryRecallStore parity: rank by a relevance score that
+        // combines pinned (+boost), keyword overlap with the latest user
+        // message, recency time-decay, and confidence — instead of the old
+        // pinned→updatedAt freshness-only ordering. Pinned always surfaces;
+        // the rest are ranked by query relevance.
+        let activeRecords = Array(
+            Self.scoredByRelevance(eligible, queryText: queryText, now: now)
+                .sorted { $0.score > $1.score }
+                .map { $0.record }
+                .prefix(20)
+        )
 
         guard !activeRecords.isEmpty else { return nil }
 
@@ -1091,6 +1099,76 @@ final class ChatViewModel {
         </memory-context>
         """
     }
+
+    /// Relevance scoring for memory recall (Android MemoryRecallStore parity).
+    /// Score = pinned boost + keyword-overlap fraction + time-decay + confidence.
+    /// Pinned records get a large constant boost so they always surface; the
+    /// rest are ranked by how many query keywords appear in the content, a
+    /// half-life recency decay (≈30 days), and the record's stored confidence.
+    private static func scoredByRelevance(_ records: [MemoryRecord], queryText: String, now: Int64) -> [(record: MemoryRecord, score: Double)] {
+        let queryTokens = Self.recallTokens(from: queryText)
+        let halfLifeMs: Int64 = 30 * 24 * 60 * 60 * 1_000 // ~30 days
+        return records.map { record in
+            let pinnedBoost: Double = record.pinned ? 100 : 0
+            let overlap: Double
+            if queryTokens.isEmpty {
+                overlap = 0
+            } else {
+                let contentTokens = Set(Self.recallTokens(from: record.content))
+                let hits = queryTokens.filter { contentTokens.contains($0) }.count
+                overlap = Double(hits) / Double(queryTokens.count)
+            }
+            let updatedMs = record.updatedAt
+            let ageMs = max(now - updatedMs, 0)
+            let recency = pow(0.5, Double(ageMs) / Double(halfLifeMs)) // 1.0 now → ~0 now+30d
+            let confidence = Double(record.confidence)
+            let score = pinnedBoost + (overlap * 30) + (recency * 10) + (confidence * 5)
+            return (record, score)
+        }
+    }
+
+    /// Tokenizes text for memory-recall keyword overlap: lowercased, split on
+    /// non-alphanumeric (covers CJK by character + latin by word). Stopwords and
+    /// very short tokens are dropped to avoid noise.
+    private static func recallTokens(from text: String) -> [String] {
+        let stopwords: Set<String> = ["the", "a", "an", "is", "are", "was", "were", "be", "to", "of", "and", "or", "in", "on", "for", "i", "you", "me", "my", "的", "了", "是", "在", "和"]
+        var tokens: [String] = []
+        // Latin/digit runs → words; CJK chars → single-char tokens.
+        var current = ""
+        for char in text.lowercased() {
+            if char.isLetter || char.isNumber {
+                if char.utf8.first.map({ $0 >= 0x80 }) == true {
+                    // Non-ASCII (CJK etc.) — flush any latin run, emit the char alone.
+                    if !current.isEmpty { tokens.append(current); current = "" }
+                    tokens.append(String(char))
+                } else {
+                    current.append(char)
+                }
+            } else {
+                if !current.isEmpty { tokens.append(current); current = "" }
+            }
+        }
+        if !current.isEmpty { tokens.append(current) }
+        return tokens.filter { token in
+            // Drop stopwords. Drop single-char ASCII tokens (noise like "a"),
+            // but KEEP single-char CJK tokens (each CJK char is a meaningful token).
+            if stopwords.contains(token) { return false }
+            if token.count <= 1 {
+                return token.unicodeScalars.first.map { $0.value > 0x7F } ?? false
+            }
+            return true
+        }
+    }
+
+    #if DEBUG
+    /// Test accessors for memory recall scoring.
+    static func recallTokensForTesting(_ text: String) -> [String] {
+        recallTokens(from: text)
+    }
+    static func scoredByRelevanceForTesting(_ records: [MemoryRecord], queryText: String, now: Int64) -> [(record: MemoryRecord, score: Double)] {
+        scoredByRelevance(records, queryText: queryText, now: now).sorted { $0.score > $1.score }
+    }
+    #endif
 
     private static func truncatedMemoryContent(_ content: String, maxLength: Int = 500) -> String {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)

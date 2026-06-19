@@ -625,6 +625,13 @@ final class IOSSharedSettingsStore {
         restoreSnapshot(merged)
     }
 
+    /// Update the user nickname (displaySetting.userNickname). Android
+    /// ChatDrawer parity — iOS AccountView was preview-only before this.
+    func updateUserNickname(_ nickname: String) {
+        let merged = IosSettingsMutations.shared.updateUserNickname(settings: snapshot, nickname: nickname)
+        restoreSnapshot(merged)
+    }
+
     func removeSkillFromAllAssistants(name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

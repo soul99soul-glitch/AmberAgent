@@ -494,6 +494,18 @@ object IosSettingsMutations {
         )
     }
 
+    /**
+     * Update the current user's nickname (`displaySetting.userNickname`). Android
+     * edits this in ChatDrawer; iOS AccountView was preview-only. iOS-only
+     * bridge helper (same pattern as [updateCurrentAssistantParams]).
+     */
+    fun updateUserNickname(settings: Settings, nickname: String): Settings {
+        val trimmed = nickname.trim()
+        return settings.copy(
+            displaySetting = settings.displaySetting.copy(userNickname = trimmed)
+        )
+    }
+
     // ---- helpers ----
 
     private fun parseRunnerType(raw: String): ModelCouncilSeatRunner {

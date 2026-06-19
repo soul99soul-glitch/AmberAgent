@@ -54,8 +54,56 @@ struct MessageBubbleView: View {
                 }
                 variantSwitcher
                 messageParts
+                annotationsBlock
             }
             .contextMenu { messageActions }
+        }
+    }
+
+    // MARK: - Annotations (URL citations)
+
+    /// Renders URL-citation annotations the provider attaches to an assistant
+    /// message (Android MessageAnnotations parity). The provider already parses
+    /// these into `message.annotations`; iOS was just never rendering them.
+    @ViewBuilder
+    private var annotationsBlock: some View {
+        let citations = Self.urlCitations(in: message)
+        if !citations.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(citations.enumerated()), id: \.offset) { index, citation in
+                    if let url = URL(string: citation.url) {
+                        Link(destination: url) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "link")
+                                    .font(.caption2)
+                                Text("[\(index + 1)] \(citation.title)")
+                                    .font(.caption)
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(AmberTheme.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    /// Extracts URL-citation annotations from a message. `annotations` is a
+    /// Kotlin `List<UIMessageAnnotation>` bridged as NSArray; each URL citation
+    /// is a `UIMessageAnnotation.UrlCitation` sealed subclass instance.
+    private static func urlCitations(in message: UIMessage) -> [(title: String, url: String)] {
+        message.annotations.compactMap { annotation in
+            // The sealed subclass UrlCitation bridges as
+            // UIMessageAnnotation.UrlCitation in Swift.
+            if let citation = annotation as? UIMessageAnnotation.UrlCitation {
+                return (title: citation.title, url: citation.url)
+            }
+            return nil
         }
     }
 

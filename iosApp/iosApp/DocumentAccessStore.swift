@@ -941,10 +941,18 @@ final class DocumentAccessStore {
                         maxPreviewCharacters: maxPreviewCharacters
                     )
                     return .success(result)
+                case .pptx:
+                    let result = try readPptxPreview(
+                        url: url,
+                        fileType: fileType,
+                        fileSize: fileSize,
+                        maxPreviewCharacters: maxPreviewCharacters
+                    )
+                    return .success(result)
                 case .image:
                     return .failure(DocumentAccessError.unsupportedFileType("图片文件暂不能作为文本上下文读取；iOS 端不会假装 OCR。"))
                 case .unsupported:
-                    return .failure(DocumentAccessError.unsupportedFileType("暂不支持此文件类型的文本上下文。支持 txt、md、json、csv、pdf、docx。"))
+                    return .failure(DocumentAccessError.unsupportedFileType("暂不支持此文件类型的文本上下文。支持 txt、md、json、csv、pdf、docx、pptx。"))
                 }
             } catch {
                 return Result<SelectedDocumentReadResult, Error>.failure(error)
@@ -956,6 +964,7 @@ final class DocumentAccessStore {
         case text
         case pdf
         case docx
+        case pptx
         case image
         case unsupported
     }
@@ -967,11 +976,15 @@ final class DocumentAccessStore {
         }
         if ext == "pdf" { return .pdf }
         if ext == "docx" { return .docx }
+        if ext == "pptx" { return .pptx }
 
         let lowerType = fileType.lowercased()
         if lowerType.contains("pdf") { return .pdf }
         if lowerType.contains("wordprocessingml.document") || lowerType.contains("officedocument.wordprocessingml") {
             return .docx
+        }
+        if lowerType.contains("presentationml.presentation") || lowerType.contains("officedocument.presentationml") {
+            return .pptx
         }
         if lowerType.hasPrefix("text/") ||
             lowerType.contains("json") ||
@@ -1093,6 +1106,47 @@ final class DocumentAccessStore {
         )
     }
 
+    /// Extracts text from a PPTX. Slides live at `ppt/slides/slide{N}.xml`;
+    /// the visible text is in `<a:t>` elements (the DrawingML text-run tag),
+    /// analogous to DOCX's `<w:t>`. Android parity for `PptxParser`.
+    nonisolated private static func readPptxPreview(
+        url: URL,
+        fileType: String,
+        fileSize: Int64,
+        maxPreviewCharacters: Int
+    ) throws -> SelectedDocumentReadResult {
+        let data = try Data(contentsOf: url)
+        // Discover slide entries (variable count) in presentation order.
+        let slideNames = try IOSDocumentZipReader.entryNames(matchingPrefix: "ppt/slides/slide", in: data)
+            .filter { $0.hasSuffix(".xml") }
+        guard !slideNames.isEmpty else {
+            throw DocumentAccessError.noReadableText("PPTX 中没有找到 ppt/slides/slideN.xml，无法提取幻灯片文本。")
+        }
+        var slideTexts: [String] = []
+        for (index, name) in slideNames.enumerated() {
+            guard let entryData = try IOSDocumentZipReader.entry(named: name, in: data),
+                  let xml = String(data: entryData, encoding: .utf8) else { continue }
+            let slideText = extractPptxText(xml)
+            if !slideText.isEmpty {
+                slideTexts.append("[Slide \(index + 1)]\n\(slideText)")
+            }
+        }
+        let text = slideTexts.joined(separator: "\n\n")
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw DocumentAccessError.noReadableText("PPTX 幻灯片正文为空，或当前文档结构暂不支持文本提取。")
+        }
+        return buildReadResult(
+            fileName: url.lastPathComponent,
+            fileType: fileType,
+            fileSize: fileSize,
+            bytesRead: Int(fileSize),
+            text: text,
+            truncatedBySource: text.count > maxPreviewCharacters,
+            maxPreviewBytes: Int(fileSize),
+            maxPreviewCharacters: maxPreviewCharacters
+        )
+    }
+
     nonisolated private static func buildReadResult(
         fileName: String,
         fileType: String,
@@ -1163,6 +1217,30 @@ final class DocumentAccessStore {
         prepared = prepared.replacingOccurrences(of: "</w:tr>", with: "<w:t>\n</w:t>")
 
         let pattern = #"<w:t(?:\s[^>]*)?>(.*?)</w:t>"#
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        ) else {
+            return ""
+        }
+        let matches = regex.matches(in: prepared, range: NSRange(prepared.startIndex..., in: prepared))
+        let pieces = matches.compactMap { match -> String? in
+            guard match.numberOfRanges >= 2,
+                  let range = Range(match.range(at: 1), in: prepared) else {
+                return nil
+            }
+            return decodeXMLEntities(String(prepared[range]))
+        }
+        return normalizeExtractedText(pieces.joined())
+    }
+
+    /// Extracts visible text from a PPTX slide XML. DrawingML text runs are in
+    /// `<a:t>` elements; `</a:p>` marks paragraph breaks (analogous to DOCX
+    /// `<w:t>` / `</w:p>`). Mirrors `extractDocxText`.
+    nonisolated private static func extractPptxText(_ xml: String) -> String {
+        // Paragraph-end → newline so each text block sits on its own line.
+        let prepared = xml.replacingOccurrences(of: "</a:p>", with: "<a:t>\n</a:t>")
+        let pattern = #"<a:t(?:\s[^>]*)?>(.*?)</a:t>"#
         guard let regex = try? NSRegularExpression(
             pattern: pattern,
             options: [.dotMatchesLineSeparators, .caseInsensitive]
@@ -1293,6 +1371,48 @@ private struct IOSDocumentZipReader {
             }
         }
         return nil
+    }
+
+    /// Lists the entry names in a ZIP archive that start with the given prefix
+    /// (e.g. "ppt/slides/slide" for PPTX slides). Used to discover a variable
+    /// number of slide entries before extracting them. Returns names sorted by
+    /// their trailing integer so slide1..slideN come out in order.
+    static func entryNames(matchingPrefix prefix: String, in data: Data) throws -> [String] {
+        guard let eocd = data.lastRange(of: Data([0x50, 0x4b, 0x05, 0x06]))?.lowerBound else {
+            throw DocumentAccessError.unsupportedFileType("文档不是有效的 ZIP。")
+        }
+        let entryCount = Int(try data.doc_uint16LE(at: eocd + 10))
+        let centralOffset = Int(try data.doc_uint32LE(at: eocd + 16))
+        var cursor = centralOffset
+        var matches: [String] = []
+
+        for _ in 0..<entryCount {
+            guard try data.doc_uint32LE(at: cursor) == 0x02014b50 else {
+                throw DocumentAccessError.unsupportedFileType("ZIP 中央目录损坏。")
+            }
+            let nameLength = Int(try data.doc_uint16LE(at: cursor + 28))
+            let extraLength = Int(try data.doc_uint16LE(at: cursor + 30))
+            let commentLength = Int(try data.doc_uint16LE(at: cursor + 32))
+            let nameStart = cursor + 46
+            let nameEnd = nameStart + nameLength
+            guard nameEnd <= data.count,
+                  let name = String(data: data[nameStart..<nameEnd], encoding: .utf8) else {
+                throw DocumentAccessError.unsupportedFileType("ZIP 条目名损坏。")
+            }
+            cursor = nameEnd + extraLength + commentLength
+            if name.hasPrefix(prefix) { matches.append(name) }
+        }
+        // Sort by trailing integer (slide1, slide2, ..., slide10) so slides stay
+        // in presentation order rather than lexicographic order.
+        return matches.sorted { lhs, rhs in
+            trailingInt(lhs) < trailingInt(rhs)
+        }
+    }
+
+    /// Extracts the trailing integer from a name like "ppt/slides/slide12.xml".
+    private static func trailingInt(_ name: String) -> Int {
+        let digits = name.reversed().prefix { $0.isNumber }.reversed()
+        return Int(String(digits)) ?? 0
     }
 }
 
