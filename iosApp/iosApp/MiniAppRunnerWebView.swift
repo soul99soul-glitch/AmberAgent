@@ -20,6 +20,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
     let repository: IOSMiniAppRepository
     let policy: IOSMiniAppBridgePolicy
     let apiKeyProvider: () -> String
+    let aiGenerateHandler: IOSMiniAppBridgeRuntime.AIGenerateHandler?
     let onValidationError: (String) -> Void
     let onBridgeLog: ([String]) -> Void
     let onToast: (String) -> Void
@@ -45,6 +46,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
             repository: repository,
             policy: policy,
             apiKeyProvider: apiKeyProvider,
+            aiGenerateHandler: aiGenerateHandler,
             toastHandler: onToast
         )
         let bridge = MiniAppBridge(runtime: runtime)

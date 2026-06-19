@@ -20,7 +20,7 @@ struct MiniAppSettingsView: View {
         ),
         .init(
             title: "ai.generate / host.context / host.write",
-            subtitle: "ai.generate 会检查 grant、设置和 API Key；host.context/send/createArtifact 仍因敏感确认链缺失返回错误。",
+            subtitle: "ai.generate 已接当前聊天模型调用，并检查 grant、设置和 API Key；host.context/send/createArtifact 仍因敏感确认链缺失返回错误。",
             status: "部分接入",
             tint: .purple
         ),

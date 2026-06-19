@@ -60,6 +60,82 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         XCTAssertEqual(result.errorMessage, "Permission 'search' is disabled in MiniApp settings.")
     }
 
+    func testAIGenerateChecksPolicyKeyThenCallsHandler() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: ["ai.generate"]))
+        try repo.setGrant(appId: app.id, permission: "ai.generate", decision: .allow)
+        var callCount = 0
+        let noKeyRuntime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(aiEnabled: true),
+            apiKeyProvider: { "" },
+            aiGenerateHandler: { _ in
+                callCount += 1
+                return .object(["text": .string("should not run")])
+            }
+        )
+
+        let noKey = await noKeyRuntime.dispatch(method: "ai.generate", params: ["prompt": "hi"])
+        XCTAssertEqual(noKey.errorMessage, "Amber.ai is not available because no API key is configured.")
+        XCTAssertEqual(callCount, 0)
+
+        let disabledRuntime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(aiEnabled: false),
+            apiKeyProvider: { "sk-test" },
+            aiGenerateHandler: { _ in
+                callCount += 1
+                return .object(["text": .string("should not run")])
+            }
+        )
+
+        let disabled = await disabledRuntime.dispatch(method: "ai.generate", params: ["prompt": "hi"])
+        XCTAssertEqual(disabled.errorMessage, "Permission 'ai.generate' is disabled in MiniApp settings.")
+        XCTAssertEqual(callCount, 0)
+
+        var captured: IOSMiniAppAIGenerateRequest?
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(aiEnabled: true),
+            apiKeyProvider: { "sk-test" },
+            aiGenerateHandler: { request in
+                captured = request
+                callCount += 1
+                return .object([
+                    "text": .string("mock response"),
+                    "model": .string("mock-model"),
+                ])
+            }
+        )
+
+        let result = await runtime.dispatch(
+            method: "ai.generate",
+            params: [
+                "prompt": String(repeating: "p", count: 17_000),
+                "system": String(repeating: "s", count: 2_500),
+                "maxOutputChars": 20_000,
+                "temperature": 9.0,
+            ]
+        )
+
+        XCTAssertEqual(
+            result,
+            .success(.object([
+                "text": .string("mock response"),
+                "model": .string("mock-model"),
+            ]))
+        )
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(captured?.prompt.count, 16_000)
+        XCTAssertEqual(captured?.system.count, 2_000)
+        XCTAssertEqual(captured?.maxOutputChars, 16_000)
+        XCTAssertEqual(captured?.temperature, 2)
+        XCTAssertEqual(repo.auditLogs(appId: app.id).first?.method, "ai.generate")
+    }
+
     func testSharedStoreRejectsCrossAppNamespace() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: ["sharedStore"]))

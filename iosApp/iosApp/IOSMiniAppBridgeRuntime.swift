@@ -48,15 +48,24 @@ struct IOSMiniAppThemePayload: Equatable {
     }
 }
 
+struct IOSMiniAppAIGenerateRequest: Equatable {
+    var prompt: String
+    var system: String
+    var maxOutputChars: Int
+    var temperature: Double?
+}
+
 @MainActor
 final class IOSMiniAppBridgeRuntime {
     typealias EventEmitter = (_ type: String, _ subscriptionId: String?, _ payload: IOSMiniAppJSONValue) -> Void
+    typealias AIGenerateHandler = (_ request: IOSMiniAppAIGenerateRequest) async throws -> IOSMiniAppJSONValue
 
     let appId: String
 
     private let repository: IOSMiniAppRepository
     private let policy: IOSMiniAppBridgePolicy
     private let apiKeyProvider: () -> String
+    private let aiGenerateHandler: AIGenerateHandler?
     private let toastHandler: (String) -> Void
     private let clipboardCopyHandler: (String) -> Void
     private let themeProvider: () -> IOSMiniAppThemePayload
@@ -68,6 +77,7 @@ final class IOSMiniAppBridgeRuntime {
         repository: IOSMiniAppRepository? = nil,
         policy: IOSMiniAppBridgePolicy = IOSMiniAppBridgePolicy(),
         apiKeyProvider: @escaping () -> String = { "" },
+        aiGenerateHandler: AIGenerateHandler? = nil,
         toastHandler: @escaping (String) -> Void = { _ in },
         clipboardCopyHandler: @escaping (String) -> Void = {
             #if canImport(UIKit)
@@ -85,6 +95,7 @@ final class IOSMiniAppBridgeRuntime {
         self.repository = repository ?? IOSMiniAppRepository.shared
         self.policy = policy
         self.apiKeyProvider = apiKeyProvider
+        self.aiGenerateHandler = aiGenerateHandler
         self.toastHandler = toastHandler
         self.clipboardCopyHandler = clipboardCopyHandler
         self.themeProvider = themeProvider
@@ -220,11 +231,16 @@ final class IOSMiniAppBridgeRuntime {
                 return .success(value)
             case "ai.generate":
                 try require(.aiGenerate, method: method)
+                let request = try aiGenerateRequest(params)
                 let key = apiKeyProvider().trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !key.isEmpty else {
                     throw BridgeError.denied("Amber.ai is not available because no API key is configured.")
                 }
-                throw BridgeError.denied("Amber.ai grant is allowed, but the iOS MiniApp-specific AI bridge is not implemented yet.")
+                guard let aiGenerateHandler else {
+                    throw BridgeError.denied("Amber.ai is not available in this MiniApp runner.")
+                }
+                try audit(method: method, permission: .aiGenerate, summary: "ai.generate", payload: ["prompt": request.prompt])
+                return .success(try await aiGenerateHandler(request))
             case "host.getConversationContext", "host.sendToConversation", "host.createArtifact",
                  "launch", "clipboard.read", "location.getCurrent", "sensor.subscribe", "sensor.unsubscribe":
                 throw BridgeError.denied("Method '\(method)' requires sensitive host/system permission that is not implemented on iOS yet.")
@@ -361,6 +377,47 @@ final class IOSMiniAppBridgeRuntime {
         (params[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
     }
 
+    private func aiGenerateRequest(_ params: [String: Any]) throws -> IOSMiniAppAIGenerateRequest {
+        IOSMiniAppAIGenerateRequest(
+            prompt: try stringParam("prompt", params).truncated(to: 16_000),
+            system: (stringParamOrNil("system", params) ?? "").truncated(to: 2_000),
+            maxOutputChars: intParam("maxOutputChars", params, defaultValue: 6_000, range: 1...16_000),
+            temperature: doubleParam("temperature", params)?.clamped(to: 0...2)
+        )
+    }
+
+    private func intParam(
+        _ key: String,
+        _ params: [String: Any],
+        defaultValue: Int,
+        range: ClosedRange<Int>
+    ) -> Int {
+        let raw: Int?
+        if let value = params[key] as? Int {
+            raw = value
+        } else if let value = params[key] as? Double {
+            raw = Int(value)
+        } else if let value = params[key] as? NSNumber {
+            raw = value.intValue
+        } else {
+            raw = nil
+        }
+        return (raw ?? defaultValue).clamped(to: range)
+    }
+
+    private func doubleParam(_ key: String, _ params: [String: Any]) -> Double? {
+        if let value = params[key] as? Double {
+            return value
+        }
+        if let value = params[key] as? Int {
+            return Double(value)
+        }
+        if let value = params[key] as? NSNumber {
+            return value.doubleValue
+        }
+        return nil
+    }
+
     private func ownNamespace(_ namespace: String) throws -> String {
         guard namespace == appId else { throw BridgeError.denied("Cross-app namespace is not granted.") }
         return namespace
@@ -425,5 +482,11 @@ private extension String {
 
     func truncated(to limit: Int) -> String {
         String(prefix(limit))
+    }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
