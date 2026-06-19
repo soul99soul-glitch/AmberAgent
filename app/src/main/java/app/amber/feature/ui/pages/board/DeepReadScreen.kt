@@ -80,7 +80,6 @@ import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
 import app.amber.feature.board.hotlist.deepread.DeepReadScheduler
-import app.amber.feature.board.hotlist.deepread.DeepReadSectionQuality
 import app.amber.feature.board.hotlist.deepread.DeepReadSectionState
 import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
 import app.amber.feature.board.hotlist.deepread.Perspective
@@ -190,7 +189,6 @@ fun DeepReadScreen(
     val phaseRunning = lifecycleRunning && output?.generationPhase?.isActiveDeepReadPhase() == true
     val generating = lifecycleRunning || anySectionRunning || phaseRunning
     val complete = output?.isComplete() == true
-    val hasBasicDraft = output?.hasBasicDraft() == true
 
     fun runAll(force: Boolean = false) {
         if (!confirmed) return
@@ -328,10 +326,6 @@ fun DeepReadScreen(
                             retryLabel = failureRetryLabel,
                             modifier = noticeModifier,
                         )
-                        hasBasicDraft && !complete -> TemplateFallbackNotice(
-                            message = "基础稿，可继续增强",
-                            modifier = noticeModifier,
-                        )
                         historyExpired -> TemplateFallbackNotice(
                             message = "内容已过 24 小时，可能需要重新生成",
                             modifier = noticeModifier,
@@ -433,10 +427,6 @@ fun DeepReadScreen(
                             retryLabel = failureRetryLabel,
                             modifier = noticeModifier,
                         )
-                        hasBasicDraft && !complete -> TemplateFallbackNotice(
-                            message = "基础稿，可继续增强",
-                            modifier = noticeModifier,
-                        )
                         selectedCustomMissing -> TemplateFallbackNotice(
                             message = "模板不可用，已回退默认排版",
                             modifier = noticeModifier,
@@ -483,9 +473,6 @@ private fun DeepReadOutput.firstFailedStage(): DeepReadGenerationStage? =
     DeepReadGenerationStage.entries.firstOrNull { stage ->
         sectionStates[stage]?.status == DeepReadSectionStatus.FAILED
     }
-
-private fun DeepReadOutput.hasBasicDraft(): Boolean =
-    sectionQualities.values.any { it == DeepReadSectionQuality.BASIC }
 
 private fun DeepReadGenerationPhase.isActiveDeepReadPhase(): Boolean =
     this == DeepReadGenerationPhase.COLLECTING ||
@@ -781,14 +768,6 @@ private fun DeepReadArticle(
                 )
             }
 
-            if (output.hasBasicDraft()) {
-                item {
-                    ArticleInset {
-                        BasicDraftNotice(palette = palette, fontFamily = fontFamily)
-                    }
-                }
-            }
-
             item {
                 ArticleInset {
                     NarrativeFrame(
@@ -841,25 +820,6 @@ private fun DeepReadArticle(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun BasicDraftNotice(
-    palette: MagazinePalette,
-    fontFamily: FontFamily?,
-) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = palette.accent.copy(alpha = 0.08f),
-    ) {
-        Text(
-            "基础稿，可继续增强",
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            style = MaterialTheme.typography.labelMedium.copy(
-                color = palette.muted,
-            ).withReadingFont(fontFamily),
-        )
     }
 }
 
