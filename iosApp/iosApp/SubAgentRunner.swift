@@ -149,12 +149,171 @@ final class SubAgentRunner {
         }
     }
 
-    /// [Slice 3] Input-driven run for the chat-tool dispatch path. Drives the
-    /// same startInput → start → wait → read chain as runTestCycle, but with a
-    /// caller-supplied `objective`. Returns a text summary suitable to use as a
-    /// tool-call output that the model can read to continue the conversation.
-    /// Failures (no manager, start/wait/read error, timeout) return an honest
-    /// error string — never empty/fabricated success.
+    // MARK: - Engine-based multi-turn execution (Android GenerationSubAgentRunner parity)
+    //
+    // The KMP RealOpenAISubAgentRunner does a single non-streaming call with no
+    // tools and never passes parentTools (it's a stub). This Swift path uses the
+    // reusable IOSAgentToolEngine to run a real multi-turn loop: the model can
+    // call the allowed parent tools + subagent_report, the engine executes each
+    // and re-calls the model, and the structured report is captured. Mirrors
+    // Android's GenerationSubAgentRunner (maxTurns loop + subagent_report
+    // capture + resultOrFallback). Real-model behavior is validated via manual
+    // smoke; the loop mechanics are unit-tested with a scripted provider.
+
+    /// Executes a SubAgent via the engine. Caller supplies the engine's tool
+    /// executors (parent tools) so this stays decoupled from ChatViewModel.
+    /// Returns the captured report JSON (or an honest fallback).
+    func runViaEngine(
+        objective: String,
+        roleId: String = "explorer",
+        requestedToolScope: [String] = [],
+        providerSetting: ProviderSetting.OpenAI,
+        modelId: String,
+        parentToolExecutors: [String: any IOSToolExecutor]
+    ) async -> String {
+        let role = IOSSubAgentRoleCatalog.resolve(roleId: roleId)
+        let scopedTools = requestedToolScope.isEmpty
+            ? role.toolAllowlist
+            : requestedToolScope.filter { role.toolAllowlist.contains($0) }
+        let tools = scopedTools.isEmpty ? role.toolAllowlist : scopedTools
+
+        let task = taskStore.startTask(
+            kind: .subAgent,
+            title: "\(role.name) · \(objective.prefix(36))",
+            objective: objective,
+            roleId: role.id,
+            toolScope: tools,
+            budgetSummary: "turns \(role.maxTurns) · timeout \(role.timeoutSeconds)s · output \(role.outputBudgetChars) chars (engine)",
+            sourceToolName: "subagent_dispatch",
+            metadata: [
+                "provider_mode": "engine_real_provider",
+                "role_name": role.name,
+                "engine": "true"
+            ]
+        )
+        currentTaskId = task.id
+        lastTask = task
+        isRunning = true
+        defer { isRunning = false }
+
+        // Build the report-capture executor + merge with parent tools. Only the
+        // allowed tools get executors; others fall through to the engine's
+        // "unregistered tool" honest-failure path.
+        let reportCapture = SubAgentReportCaptureExecutor()
+        var executors: [String: any IOSToolExecutor] = [
+            SUBAGENT_REPORT_TOOL_NAME_swift: reportCapture
+        ]
+        for name in tools {
+            if let parent = parentToolExecutors[name] {
+                executors[name] = parent
+            }
+        }
+
+        // Build the prompt: role system prompt + objective + tool scope.
+        let systemPrompt = """
+        \(role.systemPrompt)
+
+        You are subagent \(role.name). Work toward the objective using only the allowed tools.
+        When done, call `subagent_report` with a concise summary and findings.
+        Do not ask the user follow-up questions.
+        """
+        let userPrompt = """
+        Objective:
+        \(objective)
+
+        Allowed tools: \(tools.joined(separator: ", "))
+        """
+        let messages = [
+            UIMessage.companion.system(prompt: systemPrompt),
+            UIMessage.companion.user(prompt: userPrompt)
+        ]
+
+        let params = TextGenerationParams(
+            model: Model(
+                modelId: modelId,
+                displayName: modelId,
+                id: KotlinUuid.companion.random(),
+                type: ModelType.chat,
+                customHeaders: [],
+                customBodies: [],
+                inputModalities: [],
+                outputModalities: [],
+                abilities: [],
+                tools: Set<BuiltInTools>(),
+                contextWindowTokens: nil,
+                providerOverwrite: nil
+            ),
+            temperature: KotlinFloat(value: 0.7),
+            topP: nil,
+            maxTokens: KotlinInt(value: Int32(role.outputBudgetChars / 4)),
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+
+        let engine = IOSAgentToolEngine(
+            provider: OpenAIKmpProviderAdapter(),
+            executors: executors,
+            configuration: .init(maxSteps: role.maxTurns + 1, honorApprovalPause: false)
+        )
+
+        let result = await engine.run(
+            providerSetting: providerSetting,
+            messages: messages,
+            params: params
+        )
+
+        let displayText = result.messages
+            .filter { $0.role == MessageRole.assistant }
+            .flatMap { $0.parts }
+            .compactMap { $0 as? UIMessagePart.Text }
+            .map { $0.text }
+            .joined(separator: "\n")
+
+        let summary: String
+        if let report = reportCapture.captured {
+            summary = report
+        } else {
+            // No structured report captured — fall back to the visible transcript
+            // (Android resultOrFallback behavior).
+            summary = displayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "SubAgent completed without a report or visible output."
+                : String(displayText.prefix(role.outputBudgetChars))
+        }
+
+        let mappedStatus: IOSAdvancedTaskStatus = result.hitStepLimit ? .timedOut : .completed
+        lastTask = taskStore.updateTask(
+            id: task.id,
+            status: mappedStatus,
+            resultSummary: String(summary.prefix(1_000)),
+            logTail: "role=\(role.id)\ntools=\(tools.joined(separator: ", "))\nsteps=\(result.stepsExecuted)\nreport_captured=\(reportCapture.captured != nil)",
+            retryable: mappedStatus != .completed,
+            cancelCapability: false,
+            metadata: [
+                "steps_executed": "\(result.stepsExecuted)",
+                "report_captured": "\(reportCapture.captured != nil)",
+                "hit_step_limit": "\(result.hitStepLimit)"
+            ]
+        )
+        lastRunResult = summary
+        return Self.json([
+            "ok": mappedStatus == .completed,
+            "task_id": task.id,
+            "kind": IOSAdvancedTaskKind.subAgent.rawValue,
+            "role_id": role.id,
+            "role_name": role.name,
+            "status": mappedStatus.rawValue,
+            "tool_scope": tools,
+            "engine": true,
+            "steps_executed": result.stepsExecuted,
+            "report_captured": reportCapture.captured != nil,
+            "summary": String(summary.prefix(2_000))
+        ])
+    }
+
+    /// The KMP `subagent_report` tool name as visible in Swift.
+    private var SUBAGENT_REPORT_TOOL_NAME_swift: String { "subagent_report" }
     func run(objective: String, roleId: String = "explorer", requestedToolScope: [String] = []) async -> String {
         guard let m = ensureManager() else {
             return "SubAgent 不可用：无法构造 Manager（文档目录不可用）。"
@@ -324,5 +483,24 @@ final class SubAgentRunner {
             return String(describing: object)
         }
         return text
+    }
+}
+
+/// Engine executor for the `subagent_report` tool. Captures the model's
+/// structured report payload (summary/findings/evidence/risks/...) so the
+/// SubAgent runner can surface it as the tool result, mirroring Android's
+/// KMP `SubAgentReportCapture`. The captured value is the raw arguments JSON.
+final class SubAgentReportCaptureExecutor: IOSToolExecutor {
+    /// The last `subagent_report` arguments the model emitted, or nil if it
+    /// never called the tool (the runner falls back to visible text).
+    private(set) var captured: String?
+
+    func execute(name: String, arguments: String, isUserInitiated: Bool) async -> IOSAgentToolOutcome {
+        let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .failed("subagent_report requires a non-empty summary or findings.")
+        }
+        captured = trimmed
+        return .filled("{\"status\":\"ok\",\"message\":\"Structured subagent report recorded.\"}")
     }
 }
