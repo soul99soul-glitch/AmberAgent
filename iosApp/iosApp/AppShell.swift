@@ -266,6 +266,7 @@ enum Route: Hashable {
     case settingsPlaceholder(title: String, subtitle: String, systemImage: String)
     case providerSettings
     case toolPermissions
+    case promptInjection
 }
 
 enum SheetDestination: Identifiable, Hashable {
@@ -455,6 +456,8 @@ private extension View {
                 }
             case .toolPermissions:
                 PermissionsApprovalView(permissionStore: permissionStore)
+            case .promptInjection:
+                PromptInjectionEditorView(sharedSettings: sharedSettings)
             }
         }
     }

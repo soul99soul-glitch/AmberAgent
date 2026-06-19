@@ -1,8 +1,12 @@
 package shared
 
+import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
+import app.amber.core.model.InjectionPosition
+import app.amber.core.model.Lorebook
+import app.amber.core.model.PromptInjection
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.feature.modelcouncil.ModelCouncilSeat
@@ -504,6 +508,87 @@ object IosSettingsMutations {
         return settings.copy(
             displaySetting = settings.displaySetting.copy(userNickname = trimmed)
         )
+    }
+
+    // ---- Mode injections (PromptInjection.ModeInjection) CRUD ----
+    // Android extensions/PromptPage parity. iOS-only bridge helpers.
+
+    /** Upsert a mode injection by id (insert if absent). */
+    fun upsertModeInjection(
+        settings: Settings,
+        id: String,
+        name: String,
+        content: String,
+        enabled: Boolean,
+        priority: Int,
+        position: String,
+        role: String,
+    ): Settings {
+        val parsedId = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrElse { kotlin.uuid.Uuid.random() }
+        val injection = PromptInjection.ModeInjection(
+            id = parsedId,
+            name = name.trim(),
+            content = content,
+            enabled = enabled,
+            priority = priority,
+            position = parseInjectionPosition(position),
+            role = parseMessageRole(role),
+        )
+        val existing = settings.modeInjections.toMutableList()
+        val idx = existing.indexOfFirst { it.id == parsedId }
+        if (idx >= 0) existing[idx] = injection else existing.add(injection)
+        return settings.copy(modeInjections = existing)
+    }
+
+    /** Delete a mode injection by id string. */
+    fun deleteModeInjection(settings: Settings, id: String): Settings {
+        val parsedId = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return settings
+        return settings.copy(
+            modeInjections = settings.modeInjections.filterNot { it.id == parsedId }
+        )
+    }
+
+    // ---- Lorebooks CRUD ----
+
+    /** Upsert a lorebook by id (insert if absent). A lorebook holds keyword
+     *  entries; pass an empty entries list to create a placeholder. */
+    fun upsertLorebook(
+        settings: Settings,
+        id: String,
+        name: String,
+        description: String,
+        enabled: Boolean,
+    ): Settings {
+        val parsedId = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrElse { kotlin.uuid.Uuid.random() }
+        val existing = settings.lorebooks.toMutableList()
+        val idx = existing.indexOfFirst { it.id == parsedId }
+        val lorebook = if (idx >= 0) {
+            existing[idx].copy(name = name.trim(), description = description, enabled = enabled)
+        } else {
+            Lorebook(id = parsedId, name = name.trim(), description = description, enabled = enabled)
+        }
+        if (idx >= 0) existing[idx] = lorebook else existing.add(lorebook)
+        return settings.copy(lorebooks = existing)
+    }
+
+    /** Delete a lorebook by id string. */
+    fun deleteLorebook(settings: Settings, id: String): Settings {
+        val parsedId = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return settings
+        return settings.copy(lorebooks = settings.lorebooks.filterNot { it.id == parsedId })
+    }
+
+    private fun parseInjectionPosition(raw: String): InjectionPosition = when (raw.lowercase()) {
+        "before_system_prompt", "before" -> InjectionPosition.BEFORE_SYSTEM_PROMPT
+        "top_of_chat", "top" -> InjectionPosition.TOP_OF_CHAT
+        "bottom_of_chat", "after_user", "bottom" -> InjectionPosition.BOTTOM_OF_CHAT
+        "at_depth" -> InjectionPosition.AT_DEPTH
+        else -> InjectionPosition.AFTER_SYSTEM_PROMPT
+    }
+
+    private fun parseMessageRole(raw: String): MessageRole = when (raw.lowercase()) {
+        "assistant" -> MessageRole.ASSISTANT
+        "system" -> MessageRole.SYSTEM
+        else -> MessageRole.USER
     }
 
     // ---- helpers ----

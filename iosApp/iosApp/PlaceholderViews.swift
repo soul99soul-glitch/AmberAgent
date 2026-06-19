@@ -1071,6 +1071,7 @@ struct SettingsHomeView: View {
             .init(title: "执行与任务", subtitle: nil, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
             .init(title: "技能", subtitle: nil, value: nil, systemImage: "wrench.and.screwdriver", color: AmberTheme.accentAmber, route: .skills),
             .init(title: "MCP", subtitle: nil, value: nil, systemImage: "network", color: AmberTheme.accentRed, route: .mcpServers),
+            .init(title: "注入与 Lorebook", subtitle: nil, value: nil, systemImage: "text.badge.plus", color: AmberTheme.accentIndigo, route: .promptInjection),
             .init(title: "权限与批准", subtitle: nil, value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions)
         ]
     }

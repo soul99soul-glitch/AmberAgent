@@ -632,6 +632,41 @@ final class IOSSharedSettingsStore {
         restoreSnapshot(merged)
     }
 
+    // MARK: - Mode injections (PromptInjection.ModeInjection) — Android PromptPage parity
+
+    var modeInjections: [PromptInjection.ModeInjection] {
+        snapshot.modeInjections
+    }
+
+    func upsertModeInjection(id: String, name: String, content: String, enabled: Bool, priority: Int, position: String, role: String) {
+        let merged = IosSettingsMutations.shared.upsertModeInjection(
+            settings: snapshot, id: id, name: name, content: content,
+            enabled: enabled, priority: Int32(priority), position: position, role: role
+        )
+        restoreSnapshot(merged)
+    }
+
+    func deleteModeInjection(id: String) {
+        restoreSnapshot(IosSettingsMutations.shared.deleteModeInjection(settings: snapshot, id: id))
+    }
+
+    // MARK: - Lorebooks — Android PromptPage parity
+
+    var lorebooks: [Lorebook] {
+        snapshot.lorebooks
+    }
+
+    func upsertLorebook(id: String, name: String, description: String, enabled: Bool) {
+        let merged = IosSettingsMutations.shared.upsertLorebook(
+            settings: snapshot, id: id, name: name, description: description, enabled: enabled
+        )
+        restoreSnapshot(merged)
+    }
+
+    func deleteLorebook(id: String) {
+        restoreSnapshot(IosSettingsMutations.shared.deleteLorebook(settings: snapshot, id: id))
+    }
+
     func removeSkillFromAllAssistants(name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

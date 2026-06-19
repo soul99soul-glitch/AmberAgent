@@ -19,7 +19,7 @@ final class IOSP1Batch2Tests: XCTestCase {
         let (store, dir) = try makeStore()
         defer { try? FileManager.default.removeItem(at: dir) }
         // Seed a file via workspace_file_write.
-        _ = try await store.executeTool(
+        _ = await store.executeTool(
             toolName: "workspace_file_write",
             input: "{\"path\":\"notes.md\",\"content\":\"hello world\",\"overwrite\":true}"
         )
@@ -40,10 +40,10 @@ final class IOSP1Batch2Tests: XCTestCase {
     func testFileListReturnsAllFiles() async throws {
         let (store, dir) = try makeStore()
         defer { try? FileManager.default.removeItem(at: dir) }
-        _ = try await store.executeTool(toolName: "workspace_file_write", input: "{\"path\":\"a.md\",\"content\":\"alpha\",\"overwrite\":true}")
-        _ = try await store.executeTool(toolName: "workspace_file_write", input: "{\"path\":\"b.md\",\"content\":\"beta\",\"overwrite\":true}")
+        _ = await store.executeTool(toolName: "workspace_file_write", input: "{\"path\":\"a.md\",\"content\":\"alpha\",\"overwrite\":true}")
+        _ = await store.executeTool(toolName: "workspace_file_write", input: "{\"path\":\"b.md\",\"content\":\"beta\",\"overwrite\":true}")
 
-        let result = try await store.executeTool(toolName: "workspace_file_list", input: "{}")
+        let result = await store.executeTool(toolName: "workspace_file_list", input: "{}")
         let payload = try XCTUnwrap(Self.jsonDict(result))
         XCTAssertEqual(payload["ok"] as? Bool, true)
         XCTAssertEqual(payload["count"] as? Int, 2)
@@ -54,7 +54,7 @@ final class IOSP1Batch2Tests: XCTestCase {
     func testFileSearchFindsMatchingContent() async throws {
         let (store, dir) = try makeStore()
         defer { try? FileManager.default.removeItem(at: dir) }
-        _ = try await store.executeTool(toolName: "workspace_file_write", input: "{\"path\":\"doc.md\",\"content\":\"The quick brown fox\",\"overwrite\":true}")
+        _ = await store.executeTool(toolName: "workspace_file_write", input: "{\"path\":\"doc.md\",\"content\":\"The quick brown fox\",\"overwrite\":true}")
 
         let result = await store.executeTool(toolName: "workspace_file_search", input: "{\"query\":\"brown\"}")
         let payload = try XCTUnwrap(Self.jsonDict(result))
@@ -67,7 +67,7 @@ final class IOSP1Batch2Tests: XCTestCase {
     func testFileMoveRelocatesFile() async throws {
         let (store, dir) = try makeStore()
         defer { try? FileManager.default.removeItem(at: dir) }
-        _ = try await store.executeTool(toolName: "workspace_file_write", input: "{\"path\":\"old.md\",\"content\":\"move me\",\"overwrite\":true}")
+        _ = await store.executeTool(toolName: "workspace_file_write", input: "{\"path\":\"old.md\",\"content\":\"move me\",\"overwrite\":true}")
 
         let result = await store.executeTool(toolName: "workspace_file_move", input: "{\"path\":\"old.md\",\"destination_path\":\"renamed.md\"}")
         let payload = try XCTUnwrap(Self.jsonDict(result))
