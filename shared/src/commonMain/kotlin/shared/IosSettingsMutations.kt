@@ -4,6 +4,7 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.settings.Settings
+import app.amber.core.settings.getCurrentAssistant
 import app.amber.feature.modelcouncil.ModelCouncilSeat
 import app.amber.feature.modelcouncil.ModelCouncilSeatRunner
 import app.amber.feature.subagent.SubAgentOverride
@@ -162,33 +163,93 @@ object IosSettingsMutations {
         return settings.copy(searchServices = settings.searchServices + service)
     }
 
+    /**
+     * Append [service], make it the selected search service, and mark it
+     * enabled. Mirrors Android's add-provider sheet behavior so iOS additions
+     * are immediately visible to the search execution route.
+     */
+    fun addSearchServiceAndSelect(settings: Settings, service: SearchServiceOptions): Settings {
+        val services = settings.searchServices + service
+        return settings.copy(
+            searchServices = services,
+            searchServiceSelected = services.lastIndex,
+            searchEnabledServiceIds = (settings.searchEnabledServiceIds + service.id).distinct(),
+        )
+    }
+
     /** Remove a search service by [id] (Uuid string); no-op if not found. */
     fun removeSearchService(settings: Settings, id: String): Settings {
         val parsed = kotlin.uuid.Uuid.parse(id)
-        return settings.copy(searchServices = settings.searchServices.filterNot { it.id == parsed })
+        val services = settings.searchServices.filterNot { it.id == parsed }
+        val selected = if (services.isEmpty()) {
+            0
+        } else {
+            settings.searchServiceSelected.coerceIn(0, services.lastIndex)
+        }
+        val enabledIds = settings.searchEnabledServiceIds
+            .filterNot { it == parsed }
+            .filter { id -> services.any { service -> service.id == id } }
+            .ifEmpty { services.getOrNull(selected)?.let { listOf(it.id) }.orEmpty() }
+        return settings.copy(
+            searchServices = services,
+            searchServiceSelected = selected,
+            searchEnabledServiceIds = enabledIds,
+        )
+    }
+
+    /** Select a search service by [index], clamped to the current service list. */
+    fun selectSearchService(settings: Settings, index: Int): Settings {
+        val selected = if (settings.searchServices.isEmpty()) {
+            0
+        } else {
+            index.coerceIn(0, settings.searchServices.lastIndex)
+        }
+        return settings.copy(searchServiceSelected = selected)
+    }
+
+    /** Enable or disable one search service by [id] (Uuid string). */
+    fun setSearchServiceEnabled(settings: Settings, id: String, enabled: Boolean): Settings {
+        val parsed = kotlin.uuid.Uuid.parse(id)
+        if (settings.searchServices.none { it.id == parsed }) return settings
+        val enabledIds = if (enabled) {
+            (settings.searchEnabledServiceIds + parsed).distinct()
+        } else {
+            settings.searchEnabledServiceIds.filterNot { it == parsed }
+        }
+        return settings.copy(searchEnabledServiceIds = enabledIds)
+    }
+
+    /** Toggle the master web-search gate consumed by iOS ChatViewModel. */
+    fun setEnableWebSearch(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(enableWebSearch = enabled)
     }
 
     /**
      * Construct a [SearchServiceOptions] by [serviceType] (the @SerialName wire
-     * name, e.g. "tavily"/"zhipu"/"exa"/"brave"/"serper"/"serpapi"/"metaso"/
-     * "perplexity"/"firecrawl"/"jina"/"bocha"/"grok"/"linkup"). Sets [apiKey]
-     * where the subtype supports it. Unknown types fall back to Tavily (which
-     * has an apiKey field) so the entry is still persisted + editable; the iOS
-     * form is responsible for offering only known types.
+     * name, e.g. "bing_local"/"tavily"/"zhipu"/"exa"/"brave"/"serper"/
+     * "serpapi"/"metaso"/"perplexity"/"firecrawl"/"jina"/"bocha"/"grok"/
+     * "linkup"). Sets [apiKey] where the subtype supports it. Unknown types
+     * fall back to Tavily (which has an apiKey field) so the entry is still
+     * persisted + editable; the iOS form is responsible for offering only
+     * known types.
      */
     fun buildSearchService(serviceType: String, apiKey: String): SearchServiceOptions {
         val id = kotlin.uuid.Uuid.random()
         return when (serviceType.lowercase()) {
+            "bing", "bing_local" -> SearchServiceOptions.BingLocalOptions(id = id)
             "zhipu" -> SearchServiceOptions.ZhipuOptions(id = id, apiKey = apiKey)
             "exa" -> SearchServiceOptions.ExaOptions(id = id, apiKey = apiKey)
+            "searxng" -> SearchServiceOptions.SearXNGOptions(id = id)
             "brave" -> SearchServiceOptions.BraveOptions(id = id, apiKey = apiKey)
             "serper" -> SearchServiceOptions.SerperOptions(id = id, apiKey = apiKey)
             "serpapi" -> SearchServiceOptions.SerpApiOptions(id = id, apiKey = apiKey)
             "metaso" -> SearchServiceOptions.MetasoOptions(id = id, apiKey = apiKey)
+            "ollama" -> SearchServiceOptions.OllamaOptions(id = id, apiKey = apiKey)
             "perplexity" -> SearchServiceOptions.PerplexityOptions(id = id, apiKey = apiKey)
             "firecrawl" -> SearchServiceOptions.FirecrawlOptions(id = id, apiKey = apiKey)
             "jina" -> SearchServiceOptions.JinaOptions(id = id, apiKey = apiKey)
             "bocha" -> SearchServiceOptions.BochaOptions(id = id, apiKey = apiKey)
+            "amber_agent" -> SearchServiceOptions.AmberAgentSearchOptions(id = id, apiKey = apiKey)
             "grok" -> SearchServiceOptions.GrokOptions(id = id, apiKey = apiKey)
             "linkup" -> SearchServiceOptions.LinkUpOptions(id = id, apiKey = apiKey)
             "tavily" -> SearchServiceOptions.TavilyOptions(id = id, apiKey = apiKey)
@@ -233,6 +294,53 @@ object IosSettingsMutations {
                     overrides = sub.overrides.filterKeys { it != roleId }
                 )
             )
+        )
+    }
+
+    // ---- Skills (assistant.enabledSkills) ----
+
+    /** Swift-friendly read for the current assistant's enabled skill names. */
+    fun currentAssistantEnabledSkillNames(settings: Settings): List<String> {
+        return settings.getCurrentAssistant().enabledSkills.sorted()
+    }
+
+    /** Enable or disable one skill for the current assistant. */
+    fun setSkillEnabledForCurrentAssistant(
+        settings: Settings,
+        skillName: String,
+        enabled: Boolean,
+    ): Settings {
+        val normalized = skillName.trim()
+        if (normalized.isBlank()) return settings
+        val currentAssistantId = settings.getCurrentAssistant().id
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.id == currentAssistantId) {
+                    val next = if (enabled) {
+                        assistant.enabledSkills + normalized
+                    } else {
+                        assistant.enabledSkills - normalized
+                    }
+                    assistant.copy(enabledSkills = next)
+                } else {
+                    assistant
+                }
+            }
+        )
+    }
+
+    /** Remove a deleted skill from every assistant so it cannot resurrect. */
+    fun removeSkillFromAllAssistants(settings: Settings, skillName: String): Settings {
+        val normalized = skillName.trim()
+        if (normalized.isBlank()) return settings
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (normalized in assistant.enabledSkills) {
+                    assistant.copy(enabledSkills = assistant.enabledSkills - normalized)
+                } else {
+                    assistant
+                }
+            }
         )
     }
 

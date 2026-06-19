@@ -113,6 +113,13 @@ struct ToolPermissionsView: View {
                         subtitle: "访问局域网设备时由 iOS 弹出确认",
                         systemImage: "network",
                         color: AmberTheme.accentGreen
+                    ),
+                    capabilityItem(
+                        id: "ios.webmount.browser",
+                        title: "WebMount",
+                        subtitle: "使用受限 WKWebView 工具读取允许站点；不暴露 cookie 值或任意 JS",
+                        systemImage: "globe.badge.chevron.backward",
+                        color: AmberTheme.accentIndigo
                     )
                 ].compactMap { $0 }
             )

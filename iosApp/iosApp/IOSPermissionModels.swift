@@ -1308,6 +1308,21 @@ struct IOSCapabilityRegistry {
             defaultEnabled: true,
             gate: freshHighRiskGate
         ),
+        capability(
+            id: "ios.webmount.browser",
+            title: "WebMount browser tools",
+            summary: "Use a local WKWebView session for allowlisted WebMount stations. Cookie values, tokens, Authorization headers, arbitrary JavaScript, OAuth, and signed fetch are not exposed.",
+            domain: .networkAndConnectivity,
+            status: .supported,
+            risk: .high,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "WebMount settings and per-site WKWebView",
+            uiActionNames: ["webmount_open_site", "webmount_clear_session"],
+            modelToolNames: Array(IOSWebMountToolCatalog.supportedToolNames).sorted(),
+            blockedToolNames: Array(IOSWebMountToolCatalog.unsupportedToolNames).sorted(),
+            defaultEnabled: true,
+            gate: freshHighRiskGate
+        ),
 
         unsupported(
             id: "android.sms.read",

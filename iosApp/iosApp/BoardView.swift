@@ -8,11 +8,13 @@ struct BoardView: View {
     let sharedSettings: IOSSharedSettingsStore
 
     @State private var generationState = BoardGenerationState.idle
+    @State private var collectionSnapshot = IOSBoardCollectionSnapshot.empty
     // [Board MVP] Guards the .task restore so in-session re-navigation to this
     // page doesn't overwrite a just-generated state with the persisted restore.
     @State private var hasRestoredPersistedBoard = false
 
     @Environment(RouterPath.self) private var router
+    @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.dismiss) private var dismiss
 
     private let evidenceRows: [BoardCapabilityRow] = [
@@ -48,11 +50,8 @@ struct BoardView: View {
         ),
         .init(
             title: "iOS 数据源桥",
-            // [Slice 1] 文案诚实拆分：时间锚点信号采集已接——BoardView.swift:255
-            // IosBoardFactory.shared.createTimeCollectContext + :261 createCollectors + :263
-            // 循环 collect 已在手动生成里跑通。BoardRepository / worker / 日历 / 飞书 / 热榜采集仍待接。
-            subtitle: "时间锚点采集已接（IosBoardFactory.createTimeCollectContext/createCollectors，手动生成区可见真实信号）；BoardRepository、worker、日历/飞书/热榜采集仍待接。",
-            value: "部分接",
+            subtitle: "Swift 原生 signal repository 已接 Documents 持久化、sourceRef/contentHash 去重、processed 标记；聊天、EventKit、热榜和时间锚点由手动 runOnce 聚合。",
+            value: "采集中",
             color: AmberTheme.accentAmber
         )
     ]
@@ -69,8 +68,8 @@ struct BoardView: View {
         ),
         .init(
             title: "刷新",
-            subtitle: "Android 的刷新会调用 BoardScheduler.runOnce() 和 HotListScheduler.runOnce()；iOS 当前不触发后台任务（可手动重新生成）。",
-            value: "手动",
+            subtitle: "iOS 当前提供前台手动 runOnce 聚合框架；BGTaskScheduler 仍未启用，不在后台伪造运行。",
+            value: "前台",
             color: AmberTheme.muted
         ),
         .init(
@@ -83,7 +82,7 @@ struct BoardView: View {
         .init(
             title: "深度阅读",
             subtitle: "不读取 HotTopic、DeepRead cache、模板或字体包，也不启动隐藏阅读 Agent。",
-            value: "待接",
+            value: "独立工程",
             color: AmberTheme.accentAmber
         )
     ]
@@ -91,26 +90,26 @@ struct BoardView: View {
     private let sourceRows: [BoardCapabilityRow] = [
         .init(
             title: "通知 / 日历",
-            subtitle: "Android collector 可从通知和日历生成信号；iOS 未接相应权限、collector 或 DB 写入。",
-            value: "待接",
+            subtitle: "日历和提醒事项通过 EventKit adapter 读取；未授权时返回空状态和错误。通知仍不读取。",
+            value: "日历已接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "飞书消息 / 文档",
             subtitle: "Android 有 Feishu signal collectors；iOS 当前没有 Feishu MCP/Skill 写入 BoardSignal 的桥。",
-            value: "待接",
+            value: "缺账号桥",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "聊天记录",
-            subtitle: "Android 可从历史会话提取信号；iOS 没有接 BoardSignalCollector 或 Message/Conversation DAO。",
-            value: "待接",
-            color: AmberTheme.accentAmber
+            subtitle: "从 IOSConversationStore 只读导出近期会话尾部内容，并用关键词/深度启发式过滤为 chat_history 信号。",
+            value: "已接",
+            color: AmberTheme.accentGreen
         ),
         .init(
             title: "热榜",
-            subtitle: "Android HotListRepository/HotListScheduler 可抓取、缓存和筛选热点；iOS 未接网络抓取或缓存。",
-            value: "待接",
+            subtitle: "轻量 provider 框架已接；默认可拉取 Hacker News，网络失败时显示真实错误，不填假数据。",
+            value: "轻量",
             color: AmberTheme.accentAmber
         )
     ]
@@ -126,6 +125,7 @@ struct BoardView: View {
                     VStack(spacing: 0) {
                         intro
                         manualGenerationSection
+                        collectionStatusSection
                         presetConfigSection
                         evidenceSection
                         handlingSection
@@ -145,6 +145,13 @@ struct BoardView: View {
         .task {
             guard !hasRestoredPersistedBoard else { return }
             hasRestoredPersistedBoard = true
+            collectionSnapshot = IOSBoardCollectionSnapshot(
+                statuses: [],
+                recentSignals: IOSBoardSignalRepository.shared.recentSignals(limit: 10),
+                pendingCount: IOSBoardSignalRepository.shared.countUnprocessedSignals(),
+                lastRunAt: nil,
+                lastRunError: nil
+            )
             if !generationState.isRunning,
                let recent = IOSBoardPersistence.shared.loadMostRecent(),
                let output = recent.markdown.isEmpty ? nil : recent.markdown {
@@ -172,7 +179,7 @@ struct BoardView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("Android/KMP 已实现 · iOS 时间锚点采集已接；日历/飞书/热榜采集待接")
+                Text("本地 signals · 手动 runOnce · Documents 持久化")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -191,7 +198,7 @@ struct BoardView: View {
     }
 
     private var intro: some View {
-        Text("iOS 今日看板（范围：只做今日看板内容）：时间锚点信号采集 + 手动模型生成（IosBoardFactory.createCollectors/createAgent，上方\"手动生成\"区触发真实 BoardAgent）+ 生成的 Markdown 按日期持久化到 Documents/boards/，重启后重新显示。任务流/机会/日报派发/深度阅读不做（产品决定）。日历/飞书/热榜采集仍待接。本页不展示假新闻流、不派发任务。")
+        Text("iOS 今日看板（范围：只做今日看板内容）：手动 runOnce 会采集聊天历史、EventKit 日历/提醒事项、轻量热榜和 KMP 时间锚点，写入 Documents/boards/signals/ 并做 sourceRef/contentHash 去重，再把筛选后的真实信号交给 BoardAgent 生成 Markdown，保存到 Documents/boards/。任务流/机会/日报派发/深度阅读不做；通知、飞书等需要更大权限或账号边界的来源不伪造。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -217,7 +224,7 @@ struct BoardView: View {
                             Text("生成今日看板")
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("采集 iOS 时间锚点信号，并用当前 OpenAI 兼容配置调用 KMP BoardAgent。")
+                            Text("采集本地 Board signals，去重持久化后用当前 OpenAI 兼容配置调用 KMP BoardAgent。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -272,41 +279,118 @@ struct BoardView: View {
                 .padding(.vertical, 12)
             }
 
-            BoardCapabilityNote("阶段 1 仅接时间信号和手动触发；不会启动 WorkManager/BGTaskScheduler，也不会伪造日历、热榜或聊天数据。")
+            BoardCapabilityNote("当前只做前台手动 runOnce；不会启动 BGTaskScheduler，不读取通知，不伪造日历、热榜、飞书或聊天数据。")
+        }
+    }
+
+    private var collectionStatusSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "采集状态")
+            AmberFormGroup {
+                if collectionSnapshot.statuses.isEmpty {
+                    Text("尚未运行本地 collector。已有 \(collectionSnapshot.pendingCount) 条未处理 signals；点击“生成今日看板”会执行一次前台 runOnce。")
+                        .font(.caption)
+                        .lineSpacing(3)
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(collectionSnapshot.statuses.enumerated()), id: \.element.id) { index, status in
+                        BoardCollectorStatusRow(status: status)
+                        if index < collectionSnapshot.statuses.count - 1 {
+                            BoardCapabilityDivider()
+                        }
+                    }
+                }
+            }
+
+            if !collectionSnapshot.recentSignals.isEmpty {
+                AmberSectionLabel(text: "最近信号")
+                    .padding(.top, 10)
+                AmberFormGroup {
+                    ForEach(Array(collectionSnapshot.recentSignals.enumerated()), id: \.element.id) { index, signal in
+                        BoardRecentSignalRow(signal: signal)
+                        if index < collectionSnapshot.recentSignals.count - 1 {
+                            BoardCapabilityDivider()
+                        }
+                    }
+                }
+            }
+
+            BoardCapabilityNote("Signals 持久化在 Documents/boards/signals/board_signals.json；processed=true 的旧信号会按最小 7 天窗口裁剪。")
         }
     }
 
     private func runManualGeneration() {
-        generationState = .running(message: "正在采集时间信号…")
+        generationState = .running(message: "正在采集本地 Board signals…")
         Task {
             do {
                 let setting = sharedSettings.agentRuntime.todayBoard
-                let factory = IosBoardFactory.shared
-                let context = factory.createTimeCollectContext(
-                    assistantId: "ios-manual-board",
-                    anchorTime: 0,
-                    limit: 50
+                let repository = IOSBoardSignalRepository.shared
+                let aggregator = IOSBoardSignalAggregator(
+                    repository: repository,
+                    collectors: makeBoardSignalCollectors(setting: setting)
                 )
-                let collectors = factory.createCollectors(setting: setting)
-                var collected: [BoardSignal] = []
-                for collector in collectors {
-                    collected.append(contentsOf: try await collectSignals(collector: collector, context: context))
-                }
+                let run = await aggregator.runOnce(
+                    limitPerCollector: 50,
+                    agentLimit: 80,
+                    enabledSources: enabledIOSBoardSources(setting: setting)
+                )
+                let collected = run.boardSignals
 
                 await MainActor.run {
+                    collectionSnapshot = run.snapshot
                     generationState = .running(
-                        message: "已采集 \(collected.count) 条时间信号，正在调用模型…",
+                        message: "本轮采集 \(run.snapshot.totalCollected) 条、入库 \(run.snapshot.totalIngested) 条，筛选 \(collected.count) 条信号，正在调用模型…",
                         signals: BoardSignalPreviewItem.from(collected)
                     )
                 }
 
+                if collected.isEmpty {
+                    repository.markSignalsProcessed(ids: run.batch.consideredIds)
+                    let output = "今日暂无可用于生成看板的本地信号。"
+                    IOSBoardPersistence.shared.save(board: .init(
+                        boardDate: IOSBoardPersistence.shared.todayBoardDate(),
+                        markdown: output,
+                        signalCount: 0,
+                        generatedAt: Int64(Date().timeIntervalSince1970 * 1000),
+                        sourceCounts: run.snapshot.sourceCounts
+                    ))
+                    await MainActor.run {
+                        generationState = .finished(
+                            message: "采集完成：暂无可用于生成的真实信号；已保存空状态。",
+                            signals: [],
+                            output: output
+                        )
+                    }
+                    return
+                }
+
+                let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                let modelId = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !apiKey.isEmpty else {
+                    await MainActor.run {
+                        generationState = .failed("已采集并持久化 \(collected.count) 条信号，但未配置 OpenAI API Key；信号保留为未处理。")
+                    }
+                    return
+                }
+                guard !modelId.isEmpty else {
+                    await MainActor.run {
+                        generationState = .failed("已采集并持久化 \(collected.count) 条信号，但未配置看板模型；信号保留为未处理。")
+                    }
+                    return
+                }
+
                 let agent = factory.createAgent(
                     baseUrl: settingsStore.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines),
-                    apiKey: settingsStore.currentApiKey,
-                    modelId: settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines),
+                    apiKey: apiKey,
+                    modelId: modelId,
                     chatCompletionsPath: "/chat/completions"
                 )
                 let output = try await generateBoard(agent: agent, signals: collected, setting: setting)
+                repository.markSignalsProcessed(ids: run.batch.consideredIds)
                 // [Board MVP] Persist the generated board Markdown by date so it
                 // survives restart and redisplay on next launch. Scope = 今日看板
                 // 内容 only (no task-flow / BoardItemEntity / dispatch).
@@ -314,11 +398,19 @@ struct BoardView: View {
                     boardDate: IOSBoardPersistence.shared.todayBoardDate(),
                     markdown: output,
                     signalCount: collected.count,
-                    generatedAt: Int64(Date().timeIntervalSince1970 * 1000)
+                    generatedAt: Int64(Date().timeIntervalSince1970 * 1000),
+                    sourceCounts: run.snapshot.sourceCounts
                 ))
                 await MainActor.run {
+                    collectionSnapshot = IOSBoardCollectionSnapshot(
+                        statuses: run.snapshot.statuses,
+                        recentSignals: repository.recentSignals(limit: 10),
+                        pendingCount: repository.countUnprocessedSignals(),
+                        lastRunAt: run.snapshot.lastRunAt,
+                        lastRunError: run.snapshot.lastRunError
+                    )
                     generationState = .finished(
-                        message: "采集完成：\(collected.count) 条时间信号。已保存到 Documents/boards/（重启保留）。",
+                        message: "采集完成：\(collected.count) 条信号已进入 BoardAgent；已标记 processed 并保存到 Documents/boards/。",
                         signals: BoardSignalPreviewItem.from(collected),
                         output: output
                     )
@@ -329,6 +421,30 @@ struct BoardView: View {
                 }
             }
         }
+    }
+
+    private var factory: IosBoardFactory { IosBoardFactory.shared }
+
+    private func makeBoardSignalCollectors(setting: TodayBoardSetting) -> [IOSBoardSignalCollector] {
+        [
+            IOSChatHistorySignalCollector(source: conversationStore),
+            IOSEventKitCalendarSignalCollector(),
+            IOSEventKitReminderSignalCollector(),
+            IOSHotlistSignalCollector(),
+            IOSKMPTimeSignalCollector(setting: setting)
+        ]
+    }
+
+    private func enabledIOSBoardSources(setting: TodayBoardSetting) -> Set<String> {
+        var enabled = Set(setting.enabledSources.map { String(describing: $0) })
+        if enabled.contains(IOSBoardSignalSourceType.calendar) {
+            enabled.insert(IOSBoardSignalSourceType.reminder)
+        }
+        if !setting.hotListEnabledSources.isEmpty {
+            enabled.insert(IOSBoardSignalSourceType.hotlist)
+        }
+        enabled.insert(IOSBoardSignalSourceType.time)
+        return enabled
     }
 
     private func collectSignals(
@@ -586,9 +702,119 @@ struct BoardCapabilityNote: View {
     }
 }
 
+private struct BoardCollectorStatusRow: View {
+    let status: IOSBoardCollectorStatus
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: status.errorMessage == nil ? "checkmark.circle" : "exclamationmark.triangle")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(status.errorMessage == nil ? AmberTheme.accentGreen : AmberTheme.accentAmber)
+                .frame(width: 30, height: 30)
+                .background(AmberTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(BoardSourceLabels.title(for: status.sourceType))
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(status.ingestedCount)/\(status.collectedCount)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(status.ingestedCount > 0 ? AmberTheme.accentGreen : AmberTheme.foreground2)
+                if status.duplicateCount > 0 {
+                    Text("去重 \(status.duplicateCount)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(AmberTheme.muted2)
+                }
+            }
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+    }
+
+    private var subtitle: String {
+        if let error = status.errorMessage, !error.isEmpty {
+            return error
+        }
+        if let title = status.latestTitle, !title.isEmpty {
+            return "最近：\(title)"
+        }
+        if let message = status.statusMessage, !message.isEmpty {
+            return message
+        }
+        return "暂无新信号"
+    }
+}
+
+private struct BoardRecentSignalRow: View {
+    let signal: IOSBoardSignalRecord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Text(BoardSourceLabels.title(for: signal.sourceType))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                Text(signal.processed ? "processed" : "pending")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(signal.processed ? AmberTheme.muted2 : AmberTheme.accentAmber)
+            }
+
+            Text(signal.title)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.foreground2)
+                .lineLimit(2)
+
+            Text("\(signal.sourceRef) · \(IOSBoardDateFormatters.monthDayTime.string(from: Date(timeIntervalSince1970: TimeInterval(signal.signalTime) / 1_000)))")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(AmberTheme.muted2)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+}
+
+private enum BoardSourceLabels {
+    static func title(for sourceType: String) -> String {
+        switch sourceType {
+        case IOSBoardSignalSourceType.chatHistory:
+            return "聊天历史"
+        case IOSBoardSignalSourceType.calendar:
+            return "日历"
+        case IOSBoardSignalSourceType.reminder:
+            return "提醒事项"
+        case IOSBoardSignalSourceType.hotlist:
+            return "热榜"
+        case IOSBoardSignalSourceType.time:
+            return "时间锚点"
+        case IOSBoardSignalSourceType.notification:
+            return "通知"
+        case IOSBoardSignalSourceType.feishuMessage:
+            return "飞书消息"
+        case IOSBoardSignalSourceType.feishuDocument:
+            return "飞书文档"
+        default:
+            return sourceType
+        }
+    }
+}
+
 #Preview {
     NavigationStack {
         BoardView(settingsStore: SettingsStore(), sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
+            .environment(IOSConversationStore())
     }
 }

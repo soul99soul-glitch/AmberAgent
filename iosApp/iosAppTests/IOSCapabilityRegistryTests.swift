@@ -66,8 +66,9 @@ final class IOSCapabilityRegistryTests: XCTestCase {
         XCTAssertTrue(IOSCapabilityRegistry.executableToolNames.contains("file_read_selected"))
     }
 
-    func testOnlySelectedFileReadIsCurrentlyExecutableAsModelTool() {
-        XCTAssertEqual(IOSCapabilityRegistry.executableToolNames, ["file_read_selected"])
+    func testExecutableModelToolsIncludeSelectedFileAndWebMountSafeTools() {
+        let expected = Set(["file_read_selected"]).union(IOSWebMountToolCatalog.supportedToolNames)
+        XCTAssertEqual(IOSCapabilityRegistry.executableToolNames, expected)
     }
 
     func testBlockedIOSAndAndroidToolsAreNotExecutable() {
@@ -82,7 +83,9 @@ final class IOSCapabilityRegistryTests: XCTestCase {
             "camera_capture",
             "audio_record_once",
             "contacts_search",
-            "calendar_create"
+            "calendar_create",
+            "wm_eval",
+            "wm_signed_fetch"
         ]
 
         for toolName in blocked {
@@ -108,5 +111,16 @@ final class IOSCapabilityRegistryTests: XCTestCase {
 
         XCTAssertTrue(ids.contains("ios.camera.capture"))
         XCTAssertTrue(ids.contains("ios.microphone.record"))
+    }
+
+    func testWebMountCapabilityAdvertisesSafeAndUnsupportedTools() throws {
+        let capability = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.webmount.browser" }
+        )
+
+        XCTAssertEqual(Set(capability.modelToolNames), IOSWebMountToolCatalog.supportedToolNames)
+        XCTAssertTrue(capability.blockedToolNames.contains("wm_eval"))
+        XCTAssertTrue(capability.blockedToolNames.contains("wm_signed_fetch"))
+        XCTAssertEqual(capability.risk, .high)
     }
 }

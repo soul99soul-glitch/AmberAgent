@@ -5,7 +5,7 @@ struct ConversationStorageView: View {
     let sharedSettings: IOSSharedSettingsStore
 
     // [Slice 2] 注入 IOSConversationStore（AppShell 已 .environment(conversationStore)，
-    // Phase 2 完成）。本页所有"待接"操作改为真接：
+    // Phase 2 完成）。本页旧占位操作已改为真接：
     //   - 对话文件数 → conversationStore.summaries.count（IOSConversationStore.swift:25）
     //   - 按时间清理 → 按 summary.updateAt 过滤 + 批量 deleteConversation（IOSConversationStore.swift:174）
     //   - 删除全部 → 确认 alert + 循环 deleteConversation

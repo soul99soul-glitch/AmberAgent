@@ -8,9 +8,9 @@ struct SearchServicesView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let builtInSources: [SearchBuiltInSource] = [
-        .init(name: "Jina Search / Reader", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinJinaEnabled；iOS 未接 SearchPrefs/SearchTools。"),
-        .init(name: "DuckDuckGo Lite", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinDuckDuckGoEnabled；iOS 未接搜索执行链。"),
-        .init(name: "Bing HTML", badge: "默认", badgeStyle: .free, detail: "Android 默认 SearchServiceOptions.DEFAULT；iOS 未持久化 searchServices。"),
+        .init(name: "Jina Search / Reader", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinJinaEnabled；iOS search_web 当前未走 Jina/Reader。"),
+        .init(name: "DuckDuckGo Lite", badge: "已接", badgeStyle: .noKey, detail: "iOS ChatViewModel 已声明 search_web，并由 IOSSearchExecutor 执行 DuckDuckGo Lite。"),
+        .init(name: "Bing HTML", badge: "已接", badgeStyle: .free, detail: "Android 默认 SearchServiceOptions.DEFAULT；iOS 选中 BingLocalOptions 时执行 Bing HTML。"),
         .init(name: "Wikipedia", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinWikipediaEnabled；iOS 未接内置源开关。"),
         .init(name: "Hacker News", badge: "内置", badgeStyle: .noKey, detail: "Android 字段 searchBuiltinHackerNewsEnabled；iOS 未接内置源开关。"),
         .init(name: "Google WebView 兜底", badge: "兜底", badgeStyle: .plain, detail: "Android 字段 searchGoogleWebViewFallbackEnabled；iOS 未接 WebView 搜索工具。")
@@ -22,7 +22,7 @@ struct SearchServicesView: View {
         .init(name: "Tavily / Exa / Brave", detail: "仓库已有对应 SearchService 与 API Key 字段。", badge: "需 Key", badgeStyle: .plain),
         .init(name: "Serper / SerpAPI", detail: "仓库已有 Google 结果服务类型与编辑器。", badge: "需 Key", badgeStyle: .plain),
         .init(name: "SearXNG", detail: "仓库已有自托管 URL、引擎、语言、用户名和密码字段。", badge: "自托管", badgeStyle: .free),
-        .init(name: "Perplexity / Firecrawl / Grok", detail: "仓库已有服务类型；iOS 当前没有 settings/search bridge。", badge: "未桥接", badgeStyle: .plain)
+        .init(name: "Perplexity / Firecrawl / Grok", detail: "仓库已有服务类型；iOS 会读取选中 provider，但这些 API provider 暂返回 unsupported/fallback。", badge: "未实现", badgeStyle: .plain)
     ]
 
     var body: some View {
@@ -66,7 +66,7 @@ struct SearchServicesView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加搜索服务本地预览", size: 44, symbolSize: 17) {
+            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加搜索服务", size: 44, symbolSize: 17) {
                 router.navigate(to: .searchProvider)
             }
         }
@@ -76,7 +76,7 @@ struct SearchServicesView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有搜索服务、设置字段和 search_web / scrape_web 工具链路；iOS 当前还没有把这些字段接进 SettingsStore、ChatViewModel 或本地工具执行器。")
+        Text("Android/KMP 已有搜索服务、设置字段和 search_web / scrape_web 工具链路；iOS 当前已把 search_web/scrape_web 接入 ChatViewModel + IOSSearchExecutor，并按 searchServices 选中/启用状态选择 Bing HTML 或 DuckDuckGo Lite fallback。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -89,8 +89,8 @@ struct SearchServicesView: View {
     /// Read-only view of the REAL seeded search settings (built-in source toggles
     /// + the master enableWebSearch switch + count of seeded SearchServiceOptions),
     /// sourced from `IOSSharedSettingsStore` → KMP `IosSettingsDefaults`. Proves the
-    /// real-settings read path is wired for this module. Does NOT make search
-    /// executable or editable — the draft sections below stay draft-only.
+    /// real-settings read path is wired for this module. Add/remove happens in
+    /// SearchProviderView and feeds the iOS search execution selection.
     private var presetServicesSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "预置搜索设置（KMP 默认 · 只读）")
@@ -121,7 +121,7 @@ struct SearchServicesView: View {
             }
 
             SearchServicesNote {
-                Text("这些开关与计数来自 KMP Settings 真实 seed（IosSettingsDefaults），只读展示当前默认状态。下方服务类型与配置仍是本地预览，不保存。")
+                Text("这些开关与计数来自 KMP Settings 真实 seed（IosSettingsDefaults），只读展示当前默认状态。新增 provider 会保存并进入执行选择。")
             }
         }
     }
@@ -133,15 +133,24 @@ struct SearchServicesView: View {
                     systemImage: "magnifyingglass",
                     iconColor: AmberTheme.accentCyan,
                     title: "Agent 网络搜索",
-                    subtitle: "Android 使用 settings.enableWebSearch 进入 SearchTools / SearchOrchestrator；iOS 生成链路未接该开关。",
-                    value: "执行待接",
-                    valueColor: AmberTheme.accentAmber
+                    subtitle: "iOS ChatViewModel 读取 snapshot.enableWebSearch；开启时声明 search_web/scrape_web，并在工具调用后用 IOSSearchExecutor 回填结果继续生成。",
+                    value: "工具已接",
+                    valueColor: AmberTheme.accentGreen
+                )
+                SearchServicesDivider()
+                SearchStatusRow(
+                    systemImage: "doc.text.magnifyingglass",
+                    iconColor: AmberTheme.accentGreen,
+                    title: "网页抓取与 provider 编排",
+                    subtitle: "scrape_web 采用安全公网 URL 直抓正文 MVP；search_web 会消费 searchServiceSelected/searchEnabledServiceIds。API provider 原生执行器未实现时明确 fallback/unsupported。",
+                    value: "MVP 已接",
+                    valueColor: AmberTheme.accentGreen
                 )
             }
             .padding(.top, 18)
 
             SearchServicesNote {
-                Text("当前页面不会启用 search_web、scrape_web，也不会修改搜索服务选择。")
+                Text("新增搜索服务会写入 snapshot.searchServices，并成为默认选中/启用服务；执行器会读取该选择，不会伪造未实现 API provider 的成功结果。")
             }
         }
     }
@@ -199,7 +208,7 @@ struct SearchServicesView: View {
             }
 
             SearchServicesNote {
-                Text("这些是 KMP Settings 真实 seed 的 SearchServiceOptions 实例（只读展示类型与 DEFAULT 单例）。iOS 当前不可编辑或新增服务。")
+                Text("这些是 KMP Settings 真实 seed 的 SearchServiceOptions 实例（只读展示类型与 DEFAULT 单例）。新增服务请用右上角 +，保存后会进入执行选择。")
             }
         }
     }
@@ -218,7 +227,7 @@ struct SearchServicesView: View {
             }
 
             SearchServicesNote {
-                Text("右上角 + 只会打开本页本地预览；不会创建 SearchServiceOptions、写入 API Key、保存启用状态或发起网络测试。")
+                Text("右上角 + 会创建 SearchServiceOptions 并保存到本机设置；不会发起 provider 连通性测试，也不会把未实现 API provider 当成可用。")
             }
         }
     }
@@ -232,7 +241,7 @@ struct SearchServicesView: View {
                     systemImage: "list.bullet",
                     iconColor: AmberTheme.accent,
                     title: "结果数量",
-                    subtitle: "KMP SearchCommonOptions 真实 seed 默认值（resultSize）；iOS 尚未接设置读写",
+                    subtitle: "KMP SearchCommonOptions 真实 seed 默认值（resultSize）；iOS 当前只读展示。",
                     value: "\(resultSize)",
                     valueColor: AmberTheme.foreground2
                 )
@@ -371,9 +380,9 @@ private struct SearchSourceStatusRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("执行待接")
+            Text(source.badge == "已接" ? "已接" : "缺口")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(source.badge == "已接" ? AmberTheme.accentGreen : AmberTheme.accentAmber)
         }
         .frame(minHeight: 58)
         .padding(.horizontal, 14)
@@ -411,9 +420,9 @@ private struct SearchTypeRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("本地预览")
+            Text(provider.badge == "未实现" ? "fallback" : "可配置")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted)
+                .foregroundStyle(provider.badge == "未实现" ? AmberTheme.accentAmber : AmberTheme.accentGreen)
         }
         .frame(minHeight: 58)
         .padding(.horizontal, 14)

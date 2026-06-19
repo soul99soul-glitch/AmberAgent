@@ -37,28 +37,28 @@ struct SubAgentsView: View {
     private let iOSRows: [SubAgentEvidenceRow] = [
         .init(
             // [Slice 3] subagent_dispatch 工具已注入聊天（onComplete dispatch →
-            // SubAgentRunner.run → resume）。但 subAgent.enabled 总开关仍待接。
+            // SubAgentRunner.run → resume）。但 subAgent.enabled 总开关仍缺写回。
             title: "启用子代理",
-            subtitle: "聊天已注入 subagent_dispatch 工具（Slice 3，dispatch+resume 逻辑闭环；真链路需 API key）；但 SettingsStore 的 subAgent.enabled 总开关仍待接。",
+            subtitle: "聊天已注入 subagent_dispatch 工具（Slice 3，dispatch+resume 逻辑闭环；真链路需 API key）；但 SettingsStore 的 subAgent.enabled 总开关仍缺写回。",
             value: "部分接",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "@ 角色调用",
             subtitle: "iOS 输入框没有 SubAgentDefinitions.extractMentions 或 SubAgentTools system prompt 注入路径。",
-            value: "待接",
+            value: "未启用",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "运行结果 / 实时面板",
             subtitle: "dispatch 仅返回最终 runId/status；没有实时 liveTextFlow、livePartsFlow、transcriptPath 或 AgentTask 快照来源。",
-            value: "待接",
+            value: "缺实时",
             color: AmberTheme.accentAmber
         ),
         .init(
             // [Slice 4] systemPrompt 覆盖已持久化到 snapshot.agentRuntime.subAgent.overrides。
             title: "角色覆盖与自定义角色",
-            subtitle: "systemPrompt 覆盖已持久化（Slice 4，重启保留）；customDefinitions / prompt markdown 写入仍待接。",
+            subtitle: "systemPrompt 覆盖已持久化（Slice 4，重启保留）；customDefinitions / prompt markdown 仍缺写入桥。",
             value: "部分接",
             color: AmberTheme.accentAmber
         )
@@ -68,13 +68,13 @@ struct SubAgentsView: View {
         .init(
             title: "enabled / mode",
             subtitle: "Android/KMP 支持 ROSTER 与 SMART_DYNAMIC；iOS 当前不读写这些值。",
-            value: "待接",
+            value: "缺写回",
             color: AmberTheme.accentAmber
         ),
         .init(
             title: "allowDynamicSubAgents",
             subtitle: "动态角色需要 SubAgentValidator 校验边界、工具白名单和预算；iOS 未接该校验/保存链。",
-            value: "待接",
+            value: "缺校验",
             color: AmberTheme.accentAmber
         ),
         .init(

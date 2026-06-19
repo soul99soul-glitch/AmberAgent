@@ -969,8 +969,8 @@ struct SettingsHomeView: View {
 
     private var runtimeRows: [SettingsHomeRow] {
         [
-            .init(title: "核心记忆", subtitle: "默认配置只读 · 记忆库执行待接", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
-            .init(title: "技能", subtitle: "Skill/MCP 配置桥待接", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
+            .init(title: "核心记忆", subtitle: "CRUD + 文件持久化已接 · recall/worker 缺口", value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
+            .init(title: "技能", subtitle: "扫描 + MCP 已接 · 详情只读", value: nil, systemImage: "hexagon", color: AmberTheme.accentAmber, route: .skills),
             .init(title: "执行与任务", subtitle: executionSummary, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
             .init(title: "工具权限", subtitle: "系统权限 · 批准策略", value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions),
             .init(title: "运行环境", subtitle: runtimeSummary, value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentIndigo, route: .sandbox)
@@ -988,18 +988,18 @@ struct SettingsHomeView: View {
 
     private var dataRows: [SettingsHomeRow] {
         [
-            .init(title: "同步与备份", subtitle: "iOS 同步桥待接", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
-            .init(title: "对话存储", subtitle: nil, value: "待接", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
+            .init(title: "同步与备份", subtitle: "本机/WebDAV 闭环已接 · Google/S3 缺配置", value: nil, systemImage: "icloud", color: AmberTheme.accentCyan, route: .syncBackup),
+            .init(title: "对话存储", subtitle: nil, value: "已接", systemImage: "tray.full", color: AmberTheme.accent, route: .conversationStorage)
         ]
     }
 
     private var experimentalRows: [SettingsHomeRow] {
         [
-            .init(title: "今日看板", subtitle: "默认配置只读 · 采集待接", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
-            .init(title: "模型议会", subtitle: "start 调用链已通(stub) · 真实推理待接", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
-            .init(title: "SubAgent", subtitle: "默认配置只读 · 运行待接", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
-            .init(title: "小应用", subtitle: "默认配置只读 · 运行待接(WKWebView)", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
-            .init(title: "WebMount", subtitle: "待接(WKWebView)", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
+            .init(title: "今日看板", subtitle: "内容 + 本地采集已接 · 后台/飞书缺口", value: nil, systemImage: "rectangle.grid.2x2", color: AmberTheme.accentAmber, route: .board),
+            .init(title: "模型议会", subtitle: "手动运行 + chat 工具已接 · liveText 缺口", value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
+            .init(title: "SubAgent", subtitle: "运行 + chat 工具已接 · 总开关缺口", value: nil, systemImage: "person.2", color: AmberTheme.accentGreen, route: .subagents),
+            .init(title: "小应用", subtitle: "本地仓库 + Runner + grant bridge 已接", value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
+            .init(title: "WebMount", subtitle: "Registry + WKWebView + wm tools 已接", value: nil, systemImage: "globe", color: AmberTheme.accentIndigo, route: .webMount)
         ]
     }
 

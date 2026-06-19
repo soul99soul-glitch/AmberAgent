@@ -128,18 +128,18 @@ struct DisplayFontSettingsView: View {
                 DisplayStatusRow(
                     title: "显示助手消息气泡",
                     subtitle: "当前 Chat 渲染器没有助手气泡模式",
-                    value: "执行待接"
+                    value: "未实现"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "昵称下方显示日期",
-                    subtitle: "消息模型/时间格式桥尚执行待接",
-                    value: "执行待接"
+                    subtitle: "消息模型/时间格式桥未实现",
+                    value: "未实现"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "助手状态点 / 思考折叠",
-                    subtitle: "KMP 默认值（autoCloseThinking）；状态点与生成结束折叠策略尚未接到 Chat 状态机",
+                    subtitle: "KMP 默认值（autoCloseThinking）；状态点与生成结束折叠策略还没有进入 Chat 状态机",
                     value: sharedSettings.displaySetting.autoCloseThinking ? "默认开" : "默认关"
                 )
             }
@@ -165,7 +165,7 @@ struct DisplayFontSettingsView: View {
                 DisplayStatusRow(
                     title: "显示行号",
                     subtitle: "当前 iOS Markdown renderer 不生成行号",
-                    value: "执行待接"
+                    value: "未实现"
                 )
             }
         }
@@ -185,20 +185,20 @@ struct DisplayFontSettingsView: View {
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "按 Enter 发送",
-                    subtitle: "KMP 默认值（sendOnEnter）；移动端输入器尚未接硬件键盘提交策略",
+                    subtitle: "KMP 默认值（sendOnEnter）；移动端输入器没有硬件键盘提交策略",
                     value: sharedSettings.displaySetting.sendOnEnter ? "默认开" : "默认关"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "粘贴长文本为文件",
-                    subtitle: "KMP 默认值（pasteLongTextAsFile，阈值 \(sharedSettings.displaySetting.pasteLongTextThreshold)）；iOS 粘贴管线尚执行待接",
+                    subtitle: "KMP 默认值（pasteLongTextAsFile，阈值 \(sharedSettings.displaySetting.pasteLongTextThreshold)）；iOS 粘贴管线未实现",
                     value: sharedSettings.displaySetting.pasteLongTextAsFile ? "默认开" : "默认关"
                 )
                 DisplayDivider()
                 DisplayStatusRow(
                     title: "启动入口",
                     subtitle: "App 启动路由目前固定进入 Home",
-                    value: "执行待接"
+                    value: "未实现"
                 )
             }
         }

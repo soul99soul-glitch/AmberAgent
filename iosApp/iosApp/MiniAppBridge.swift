@@ -1,52 +1,45 @@
 import Foundation
-import WebKit
+@preconcurrency import WebKit
 
-/// [MiniApp MVP] Minimal iOS JS bridge for the MiniApp WKWebView runner.
-///
-/// Android's `MiniAppBridge` (app/.../miniapp/bridge/MiniAppBridge.kt) is a
-/// ~475-line JSON-RPC bridge exposing Amber.fetch / search / ai / host /
-/// sharedStore / eventBus / sensor with permission/audit/sandbox. That full
-/// surface is the "完整 Runner 待开发" piece.
-///
-/// This MVP implements the closed-loop protocol so generated HTML can talk to
-/// native and get a response:
-///   1. Web app calls `window.AmberNative.postMessage(JSON.stringify({id, method, params}))`.
-///   2. Native parses it, dispatches by `method`, and calls
-///      `window.AmberNative.onResponse(JSON)` back into the page.
-///
-/// Handled methods (honest):
-///   - `log`           → appends to the in-memory log (debug aid)
-///   - `echo`          → returns params verbatim (protocol proof)
-///   - `app.info`      → returns {platform:"ios", bridgeVersion, sessionId}
-/// Stubbed methods (return an honest "not implemented" error so the web app
-/// can branch, never a fabricated success):
-///   - `ai.*`, `search.*`, `host.*`, `fetch.*`, `clipboard.*`, `sharedStore.*`,
-///     `eventBus.*`, `location.*`, `sensor.*`
-///
-/// The richer methods are deferred to the full Runner (Slice 9+).
+/// WKScriptMessageHandler for the iOS MiniApp runner.
+/// Dispatches into IOSMiniAppBridgeRuntime, which owns grants, audit, storage,
+/// shared store, event bus, and honest errors for unavailable capabilities.
 @MainActor
 final class MiniAppBridge: NSObject, WKScriptMessageHandler {
 
     /// Logged bridge messages (for the dev UI). Bounded to avoid unbounded growth.
     private(set) var log: [String] = []
     private let sessionId: String
+    private let runtime: IOSMiniAppBridgeRuntime
+    private weak var webView: WKWebView?
 
-    init(sessionId: String = UUID().uuidString) {
+    init(runtime: IOSMiniAppBridgeRuntime, sessionId: String = UUID().uuidString) {
         self.sessionId = sessionId
+        self.runtime = runtime
         super.init()
+    }
+
+    func attach(webView: WKWebView) {
+        self.webView = webView
+        runtime.setEventEmitter { [weak webView, weak self] type, subscriptionId, payload in
+            self?.sendEvent(webView: webView, type: type, subscriptionId: subscriptionId, payload: payload)
+        }
+    }
+
+    func close() {
+        runtime.close()
     }
 
     /// WKScriptMessageHandler entry — called when the web page invokes
     /// `window.webkit.messageHandlers.amberNative.postMessage(...)`.
-    nonisolated func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let raw = message.body as? String else { return }
-        // Hop to MainActor for state mutation + response dispatch.
         Task { @MainActor in
-            self.handle(raw, webView: message.webView)
+            await self.handle(raw, webView: message.webView ?? self.webView)
         }
     }
 
-    private func handle(_ raw: String, webView: WKWebView?) {
+    private func handle(_ raw: String, webView: WKWebView?) async {
         appendLog("◀ postMessage: \(raw.prefix(500))")
         // Parse defensively; a malformed request still gets an honest error
         // response (never swallowed silently).
@@ -60,53 +53,47 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
             return
         }
         let params = request["params"] as? [String: Any] ?? [:]
-        let result = dispatch(method: method, params: params)
+        let result = await runtime.dispatch(method: method, params: params)
         sendResponse(webView: webView, id: id, result: result)
     }
 
-    /// Dispatch by method name. Returns a JSON-serializable result or an error.
-    private func dispatch(method: String, params: [String: Any]) -> BridgeResult {
-        switch method {
-        case "log":
-            if let msg = params["message"] as? String { appendLog("page: \(msg)") }
-            return .result(["ok": true])
-        case "echo":
-            return .result(params)
-        case "app.info":
-            return .result([
-                "platform": "ios",
-                "bridgeVersion": "0.1-mvp",
-                "sessionId": sessionId,
-            ])
-        default:
-            // Honest stub: full bridge methods (ai/search/host/fetch/clipboard/
-            // sharedStore/eventBus/location/sensor) are not implemented in the
-            // MVP. Return an explicit error so the web app can branch — never
-            // fabricated success.
-            return .error("method '\(method)' not implemented in MVP bridge (full Runner 待开发)")
-        }
-    }
-
-    private enum BridgeResult {
-        case result([String: Any])
-        case error(String)
-    }
-
-    private func sendResponse(webView: WKWebView?, id: Any, result: BridgeResult) {
+    private func sendResponse(webView: WKWebView?, id: Any, result: IOSMiniAppBridgeDispatchResult) {
         var payload: [String: Any] = ["id": id]
         switch result {
-        case .result(let value): payload["result"] = value
-        case .error(let message): payload["error"] = message
+        case .success(let value):
+            payload["result"] = value.anyValue
+        case .failure(let message):
+            payload["error"] = message
         }
+        payload["sessionId"] = sessionId
         guard let webView,
               let data = try? JSONSerialization.jsonObject(with: JSONSerialization.data(withJSONObject: payload)) as? [String: Any],
               let jsonString = stringValue(data) else { return }
         appendLog("▶ onResponse: \(jsonString.prefix(500))")
-        webView.evaluateJavaScript("window.AmberNative && window.AmberNative.onResponse && window.AmberNative.onResponse(\(jsonString));")
+        webView.evaluateJavaScript("""
+        window.AmberBridge && window.AmberBridge._handleNativeResponse && window.AmberBridge._handleNativeResponse(\(jsonString));
+        window.AmberNative && window.AmberNative.onResponse && window.AmberNative.onResponse(\(jsonString));
+        """)
     }
 
     private func sendResponse(webView: WKWebView?, id: Any, error: String) {
-        sendResponse(webView: webView, id: id, result: .error(error))
+        sendResponse(webView: webView, id: id, result: .failure(error))
+    }
+
+    private func sendEvent(webView: WKWebView?, type: String, subscriptionId: String?, payload: IOSMiniAppJSONValue) {
+        var event: [String: Any] = [
+            "type": type,
+            "payload": payload.anyValue,
+        ]
+        if let subscriptionId {
+            event["subscriptionId"] = subscriptionId
+        }
+        guard let webView,
+              let jsonString = stringValue(event) else { return }
+        appendLog("▶ event: \(jsonString.prefix(500))")
+        webView.evaluateJavaScript("""
+        window.AmberBridge && window.AmberBridge._emitNativeEvent && window.AmberBridge._emitNativeEvent(\(jsonString));
+        """)
     }
 
     private func appendLog(_ line: String) {

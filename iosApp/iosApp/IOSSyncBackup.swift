@@ -9,6 +9,8 @@ enum IOSSyncBackupError: LocalizedError {
     case emptyPayload
     case invalidArchive(String)
     case invalidPassphrase
+    case providerNotConfigured(String)
+    case remoteProviderUnavailable(String)
     case unsupportedCrypto(String)
 
     var errorDescription: String? {
@@ -19,6 +21,10 @@ enum IOSSyncBackupError: LocalizedError {
             return message
         case .invalidPassphrase:
             return "同步口令不能为空"
+        case .providerNotConfigured(let message):
+            return message
+        case .remoteProviderUnavailable(let message):
+            return message
         case .unsupportedCrypto(let message):
             return message
         }
@@ -42,7 +48,7 @@ struct IOSSyncBackup {
     private static let settingsEntry = "settings.json"
     private static let payloadManifestEntry = "payload_manifest.json"
 
-    static func export(settings: Settings, passphrase: String?) throws -> Data {
+    static func export(settings: Settings, passphrase: String?, remoteRevision: String? = nil) throws -> Data {
         let settingsJson = IosSettingsJsonBridge.shared.encode(settings: settings)
         let settingsData = Data(settingsJson.utf8)
         let payloadManifest = IOSSyncPayloadManifest(datasets: [
@@ -70,7 +76,7 @@ struct IOSSyncBackup {
             deviceId: settings.syncSettings.deviceId,
             deviceLabel: IOSDeviceLabel.current,
             mode: String(describing: settings.syncSettings.mode),
-            remoteRevision: "",
+            remoteRevision: remoteRevision ?? settings.syncSettings.lastRemoteRevision,
             encrypted: true,
             kdf: IOSSyncKdfInfo(iterations: pbkdf2Iterations, saltBase64: salt.base64EncodedString()),
             cipher: IOSSyncCipherInfo(ivBase64: iv.base64EncodedString()),
@@ -86,6 +92,15 @@ struct IOSSyncBackup {
     }
 
     static func `import`(data: Data, passphrase: String?) throws -> (settings: Settings, preview: IOSSyncPreview) {
+        let decoded = try decodeArchive(data: data, passphrase: passphrase, fileName: nil)
+        return (decoded.settings, decoded.preview)
+    }
+
+    static func restorePreview(data: Data, passphrase: String?, fileName: String? = nil) throws -> IOSSyncPreview {
+        try decodeArchive(data: data, passphrase: passphrase, fileName: fileName).preview
+    }
+
+    static func inspectManifest(data: Data, fileName: String? = nil) throws -> IOSSyncPreview {
         let archiveEntries = try IOSStoredZipArchive.read(data: data)
         guard let manifestData = archiveEntries[manifestEntry] else {
             throw IOSSyncBackupError.invalidArchive("同步备份缺少 manifest.json")
@@ -103,6 +118,20 @@ struct IOSSyncBackup {
         guard actualSha256 == manifest.payloadSha256 else {
             throw IOSSyncBackupError.invalidArchive("同步备份 payload 校验失败")
         }
+        return IOSSyncPreview(manifest: manifest, fileName: fileName, sizeBytes: Int64(data.count), datasets: [])
+    }
+
+    private static func decodeArchive(
+        data: Data,
+        passphrase: String?,
+        fileName: String?
+    ) throws -> (settings: Settings, preview: IOSSyncPreview) {
+        let manifestPreview = try inspectManifest(data: data, fileName: fileName)
+        let archiveEntries = try IOSStoredZipArchive.read(data: data)
+        let manifest = manifestPreview.manifest
+        guard let encryptedPayload = archiveEntries[payloadEntry] else {
+            throw IOSSyncBackupError.invalidArchive("同步备份缺少 payload.enc")
+        }
 
         let salt = try Data(base64: manifest.kdf.saltBase64, field: "saltBase64")
         let iv = try Data(base64: manifest.cipher.ivBase64, field: "ivBase64")
@@ -116,8 +145,17 @@ struct IOSSyncBackup {
               let settingsJson = String(data: settingsData, encoding: .utf8) else {
             throw IOSSyncBackupError.invalidArchive("同步备份缺少 settings.json")
         }
+        let payloadManifest = try payloadEntries[payloadManifestEntry].map {
+            try JSONDecoder().decode(IOSSyncPayloadManifest.self, from: $0)
+        } ?? IOSSyncPayloadManifest()
         let settings = IosSettingsJsonBridge.shared.decode(json: settingsJson)
-        return (settings, IOSSyncPreview(manifest: manifest, sizeBytes: Int64(data.count)))
+        let preview = IOSSyncPreview(
+            manifest: manifest,
+            fileName: fileName,
+            sizeBytes: Int64(data.count),
+            datasets: payloadManifest.datasets
+        )
+        return (settings, preview)
     }
 
     private static func normalizedPassphrase(_ passphrase: String?, protected: Bool = false) throws -> String {
@@ -173,12 +211,14 @@ struct IOSSyncBackup {
     }
 }
 
-struct IOSSyncPreview {
+struct IOSSyncPreview: Equatable, Sendable {
     let manifest: IOSSyncManifest
+    let fileName: String?
     let sizeBytes: Int64
+    let datasets: [IOSSyncDatasetSummary]
 }
 
-struct IOSSyncManifest: Codable {
+struct IOSSyncManifest: Codable, Equatable, Sendable {
     let archiveVersion: Int
     let appVersionName: String
     let appVersionCode: Int64
@@ -192,26 +232,110 @@ struct IOSSyncManifest: Codable {
     let cipher: IOSSyncCipherInfo
     let payloadSha256: String
     let passphraseProtected: Bool
+
+    init(
+        archiveVersion: Int = 1,
+        appVersionName: String,
+        appVersionCode: Int64,
+        createdAt: Int64,
+        deviceId: String,
+        deviceLabel: String = "",
+        mode: String,
+        remoteRevision: String = "",
+        encrypted: Bool = true,
+        kdf: IOSSyncKdfInfo,
+        cipher: IOSSyncCipherInfo,
+        payloadSha256: String,
+        passphraseProtected: Bool = true
+    ) {
+        self.archiveVersion = archiveVersion
+        self.appVersionName = appVersionName
+        self.appVersionCode = appVersionCode
+        self.createdAt = createdAt
+        self.deviceId = deviceId
+        self.deviceLabel = deviceLabel
+        self.mode = mode
+        self.remoteRevision = remoteRevision
+        self.encrypted = encrypted
+        self.kdf = kdf
+        self.cipher = cipher
+        self.payloadSha256 = payloadSha256
+        self.passphraseProtected = passphraseProtected
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.archiveVersion = try container.decodeIfPresent(Int.self, forKey: .archiveVersion) ?? 1
+        self.appVersionName = try container.decode(String.self, forKey: .appVersionName)
+        self.appVersionCode = try container.decode(Int64.self, forKey: .appVersionCode)
+        self.createdAt = try container.decode(Int64.self, forKey: .createdAt)
+        self.deviceId = try container.decode(String.self, forKey: .deviceId)
+        self.deviceLabel = try container.decodeIfPresent(String.self, forKey: .deviceLabel) ?? ""
+        self.mode = try container.decode(String.self, forKey: .mode)
+        self.remoteRevision = try container.decodeIfPresent(String.self, forKey: .remoteRevision) ?? ""
+        self.encrypted = try container.decodeIfPresent(Bool.self, forKey: .encrypted) ?? true
+        self.kdf = try container.decode(IOSSyncKdfInfo.self, forKey: .kdf)
+        self.cipher = try container.decode(IOSSyncCipherInfo.self, forKey: .cipher)
+        self.payloadSha256 = try container.decode(String.self, forKey: .payloadSha256)
+        self.passphraseProtected = try container.decodeIfPresent(Bool.self, forKey: .passphraseProtected) ?? true
+    }
 }
 
-struct IOSSyncKdfInfo: Codable {
-    var name: String = "PBKDF2WithHmacSHA256"
+struct IOSSyncKdfInfo: Codable, Equatable, Sendable {
+    var name: String
     let iterations: Int
     let saltBase64: String
-    var keySizeBits: Int = 256
+    var keySizeBits: Int
+
+    init(
+        name: String = "PBKDF2WithHmacSHA256",
+        iterations: Int,
+        saltBase64: String,
+        keySizeBits: Int = 256
+    ) {
+        self.name = name
+        self.iterations = iterations
+        self.saltBase64 = saltBase64
+        self.keySizeBits = keySizeBits
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? "PBKDF2WithHmacSHA256"
+        self.iterations = try container.decode(Int.self, forKey: .iterations)
+        self.saltBase64 = try container.decode(String.self, forKey: .saltBase64)
+        self.keySizeBits = try container.decodeIfPresent(Int.self, forKey: .keySizeBits) ?? 256
+    }
 }
 
-struct IOSSyncCipherInfo: Codable {
-    var name: String = "AES/GCM/NoPadding"
+struct IOSSyncCipherInfo: Codable, Equatable, Sendable {
+    var name: String
     let ivBase64: String
-    var tagSizeBits: Int = 128
+    var tagSizeBits: Int
+
+    init(
+        name: String = "AES/GCM/NoPadding",
+        ivBase64: String,
+        tagSizeBits: Int = 128
+    ) {
+        self.name = name
+        self.ivBase64 = ivBase64
+        self.tagSizeBits = tagSizeBits
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? "AES/GCM/NoPadding"
+        self.ivBase64 = try container.decode(String.self, forKey: .ivBase64)
+        self.tagSizeBits = try container.decodeIfPresent(Int.self, forKey: .tagSizeBits) ?? 128
+    }
 }
 
-private struct IOSSyncPayloadManifest: Codable {
-    let datasets: [IOSSyncDatasetSummary]
+struct IOSSyncPayloadManifest: Codable, Equatable, Sendable {
+    var datasets: [IOSSyncDatasetSummary] = []
 }
 
-private struct IOSSyncDatasetSummary: Codable {
+struct IOSSyncDatasetSummary: Codable, Equatable, Sendable {
     let id: String
     let recordCount: Int
     let byteCount: Int64
@@ -222,6 +346,552 @@ private enum IOSDeviceLabel {
         let device = UIDevice.current
         return [device.systemName, device.model].filter { !$0.isEmpty }.joined(separator: " ")
     }
+}
+
+enum IOSRemoteProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case localFolder
+    case webDAV
+    case googleDrive
+    case s3
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .localFolder:
+            return "本机文件夹"
+        case .webDAV:
+            return "WebDAV"
+        case .googleDrive:
+            return "Google Drive"
+        case .s3:
+            return "S3"
+        }
+    }
+}
+
+struct IOSRemoteSnapshot: Identifiable, Codable, Equatable, Sendable {
+    let id: String
+    let fileName: String
+    let provider: IOSRemoteProviderKind
+    let createdAt: Int64
+    let modifiedAt: Int64
+    let sizeBytes: Int64
+    let remoteRevision: String
+    let deviceId: String
+    let deviceLabel: String
+    let appVersionName: String
+    let appVersionCode: Int64
+    let mode: String
+    let encrypted: Bool
+    let passphraseProtected: Bool
+    let payloadSha256: String
+
+    static func fileName(for manifest: IOSSyncManifest) -> String {
+        "amber-sync-\(manifest.createdAt).\(IOSSyncBackup.fileExtension)"
+    }
+
+    init(
+        id: String? = nil,
+        fileName: String,
+        provider: IOSRemoteProviderKind,
+        createdAt: Int64,
+        modifiedAt: Int64,
+        sizeBytes: Int64,
+        remoteRevision: String,
+        deviceId: String,
+        deviceLabel: String,
+        appVersionName: String,
+        appVersionCode: Int64,
+        mode: String,
+        encrypted: Bool,
+        passphraseProtected: Bool,
+        payloadSha256: String
+    ) {
+        self.id = id ?? "\(provider.rawValue):\(fileName):\(remoteRevision)"
+        self.fileName = fileName
+        self.provider = provider
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
+        self.sizeBytes = sizeBytes
+        self.remoteRevision = remoteRevision
+        self.deviceId = deviceId
+        self.deviceLabel = deviceLabel
+        self.appVersionName = appVersionName
+        self.appVersionCode = appVersionCode
+        self.mode = mode
+        self.encrypted = encrypted
+        self.passphraseProtected = passphraseProtected
+        self.payloadSha256 = payloadSha256
+    }
+
+    init(
+        fileName: String,
+        provider: IOSRemoteProviderKind,
+        manifest: IOSSyncManifest,
+        modifiedAt: Int64,
+        sizeBytes: Int64,
+        remoteRevision: String
+    ) {
+        self.init(
+            fileName: fileName,
+            provider: provider,
+            createdAt: manifest.createdAt,
+            modifiedAt: modifiedAt,
+            sizeBytes: sizeBytes,
+            remoteRevision: remoteRevision,
+            deviceId: manifest.deviceId,
+            deviceLabel: manifest.deviceLabel,
+            appVersionName: manifest.appVersionName,
+            appVersionCode: manifest.appVersionCode,
+            mode: manifest.mode,
+            encrypted: manifest.encrypted,
+            passphraseProtected: manifest.passphraseProtected,
+            payloadSha256: manifest.payloadSha256
+        )
+    }
+}
+
+protocol IOSRemoteSyncProvider: Sendable {
+    var kind: IOSRemoteProviderKind { get }
+    var displayName: String { get }
+    var isConfigured: Bool { get }
+
+    func testConnection() async throws
+    func listSnapshots() async throws -> [IOSRemoteSnapshot]
+    func uploadSnapshot(data: Data, fileName: String, manifest: IOSSyncManifest) async throws -> IOSRemoteSnapshot
+    func downloadSnapshot(_ snapshot: IOSRemoteSnapshot) async throws -> Data
+    func deleteSnapshot(_ snapshot: IOSRemoteSnapshot) async throws
+}
+
+extension IOSRemoteSyncProvider {
+    var displayName: String { kind.displayName }
+
+    func latestSnapshot() async throws -> IOSRemoteSnapshot? {
+        try await listSnapshots().sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.modifiedAt > rhs.modifiedAt
+            }
+            return lhs.createdAt > rhs.createdAt
+        }.first
+    }
+}
+
+struct IOSLocalFolderSyncProvider: IOSRemoteSyncProvider {
+    let folderURL: URL
+
+    var kind: IOSRemoteProviderKind { .localFolder }
+    var isConfigured: Bool { true }
+
+    init(folderURL: URL = IOSLocalFolderSyncProvider.defaultFolderURL()) {
+        self.folderURL = folderURL
+    }
+
+    static func defaultFolderURL() -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return documents.appendingPathComponent("AmberRemoteSyncLocal", isDirectory: true)
+    }
+
+    func testConnection() async throws {
+        try ensureFolder()
+    }
+
+    func listSnapshots() async throws -> [IOSRemoteSnapshot] {
+        try ensureFolder()
+        let urls = try FileManager.default.contentsOfDirectory(
+            at: folderURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )
+        return try urls
+            .filter { $0.pathExtension == IOSSyncBackup.fileExtension }
+            .map(snapshot(from:))
+            .sorted { lhs, rhs in
+                if lhs.createdAt == rhs.createdAt {
+                    return lhs.modifiedAt > rhs.modifiedAt
+                }
+                return lhs.createdAt > rhs.createdAt
+            }
+    }
+
+    func uploadSnapshot(data: Data, fileName: String, manifest: IOSSyncManifest) async throws -> IOSRemoteSnapshot {
+        try ensureFolder()
+        let safeName = try safeSnapshotFileName(fileName)
+        let targetURL = folderURL.appendingPathComponent(safeName, isDirectory: false)
+        try data.write(to: targetURL, options: [.atomic])
+        return try snapshot(from: targetURL, fallbackManifest: manifest, data: data)
+    }
+
+    func downloadSnapshot(_ snapshot: IOSRemoteSnapshot) async throws -> Data {
+        let safeName = try safeSnapshotFileName(snapshot.fileName)
+        return try Data(contentsOf: folderURL.appendingPathComponent(safeName, isDirectory: false))
+    }
+
+    func deleteSnapshot(_ snapshot: IOSRemoteSnapshot) async throws {
+        let safeName = try safeSnapshotFileName(snapshot.fileName)
+        let url = folderURL.appendingPathComponent(safeName, isDirectory: false)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func ensureFolder() throws {
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true, attributes: nil)
+    }
+
+    private func snapshot(from url: URL) throws -> IOSRemoteSnapshot {
+        try snapshot(from: url, fallbackManifest: nil, data: nil)
+    }
+
+    private func snapshot(from url: URL, fallbackManifest: IOSSyncManifest?, data cachedData: Data?) throws -> IOSRemoteSnapshot {
+        let data: Data
+        if let cachedData {
+            data = cachedData
+        } else {
+            data = try Data(contentsOf: url)
+        }
+        let preview = try IOSSyncBackup.inspectManifest(data: data, fileName: url.lastPathComponent)
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        let modified = (attrs[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: TimeInterval(preview.manifest.createdAt) / 1000)
+        let size = (attrs[.size] as? NSNumber)?.int64Value ?? Int64(data.count)
+        let manifest = fallbackManifest ?? preview.manifest
+        return IOSRemoteSnapshot(
+            fileName: url.lastPathComponent,
+            provider: kind,
+            manifest: manifest,
+            modifiedAt: Int64(modified.timeIntervalSince1970 * 1000),
+            sizeBytes: size,
+            remoteRevision: data.sha256Hex()
+        )
+    }
+}
+
+struct IOSWebDAVConfig: Codable, Equatable {
+    var baseURL: String = ""
+    var path: String = "AmberAgent"
+    var username: String = ""
+    var password: String = ""
+
+    var isConfigured: Bool {
+        URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
+    }
+}
+
+protocol IOSWebDAVTransport: Sendable {
+    func send(_ request: URLRequest, body: Data?) async throws -> (HTTPURLResponse, Data)
+}
+
+struct IOSURLSessionWebDAVTransport: IOSWebDAVTransport {
+    func send(_ request: URLRequest, body: Data?) async throws -> (HTTPURLResponse, Data) {
+        let result: (Data, URLResponse)
+        if let body {
+            result = try await URLSession.shared.upload(for: request, from: body)
+        } else {
+            result = try await URLSession.shared.data(for: request)
+        }
+        guard let response = result.1 as? HTTPURLResponse else {
+            throw IOSSyncBackupError.invalidArchive("WebDAV 响应不是 HTTP")
+        }
+        return (response, result.0)
+    }
+}
+
+struct IOSWebDAVSyncProvider: IOSRemoteSyncProvider {
+    let config: IOSWebDAVConfig
+    let transport: any IOSWebDAVTransport
+
+    var kind: IOSRemoteProviderKind { .webDAV }
+    var isConfigured: Bool { config.isConfigured }
+
+    init(config: IOSWebDAVConfig, transport: any IOSWebDAVTransport = IOSURLSessionWebDAVTransport()) {
+        self.config = config
+        self.transport = transport
+    }
+
+    func testConnection() async throws {
+        _ = try await propfind(depth: 0)
+    }
+
+    func listSnapshots() async throws -> [IOSRemoteSnapshot] {
+        try await ensureCollectionExists()
+        let resources = try await propfind(depth: 1)
+        return resources
+            .filter { !$0.isCollection && $0.fileName.hasSuffix(".\(IOSSyncBackup.fileExtension)") }
+            .map { resource in
+                IOSRemoteSnapshot(
+                    fileName: resource.fileName,
+                    provider: kind,
+                    createdAt: resource.modifiedAt,
+                    modifiedAt: resource.modifiedAt,
+                    sizeBytes: resource.sizeBytes,
+                    remoteRevision: resource.etag.ifBlank(resource.href),
+                    deviceId: "",
+                    deviceLabel: "",
+                    appVersionName: "",
+                    appVersionCode: 0,
+                    mode: "",
+                    encrypted: true,
+                    passphraseProtected: true,
+                    payloadSha256: ""
+                )
+            }
+            .sorted { lhs, rhs in lhs.modifiedAt > rhs.modifiedAt }
+    }
+
+    func uploadSnapshot(data: Data, fileName: String, manifest: IOSSyncManifest) async throws -> IOSRemoteSnapshot {
+        try await ensureCollectionExists()
+        let safeName = try safeSnapshotFileName(fileName)
+        let request = try makeRequest(method: "PUT", fileName: safeName, headers: [
+            "Content-Type": IOSSyncBackup.mimeType,
+            "Content-Length": "\(data.count)",
+        ])
+        let (response, _) = try await transport.send(request, body: data)
+        try validate(response: response, accepted: 200, 201, 204)
+        return IOSRemoteSnapshot(
+            fileName: safeName,
+            provider: kind,
+            manifest: manifest,
+            modifiedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            sizeBytes: Int64(data.count),
+            remoteRevision: response.value(forHTTPHeaderField: "ETag")?.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                ?? data.sha256Hex()
+        )
+    }
+
+    func downloadSnapshot(_ snapshot: IOSRemoteSnapshot) async throws -> Data {
+        let safeName = try safeSnapshotFileName(snapshot.fileName)
+        let request = try makeRequest(method: "GET", fileName: safeName)
+        let (response, data) = try await transport.send(request, body: nil)
+        try validate(response: response, accepted: 200)
+        return data
+    }
+
+    func deleteSnapshot(_ snapshot: IOSRemoteSnapshot) async throws {
+        let safeName = try safeSnapshotFileName(snapshot.fileName)
+        let request = try makeRequest(method: "DELETE", fileName: safeName)
+        let (response, _) = try await transport.send(request, body: nil)
+        try validate(response: response, accepted: 200, 202, 204, 404)
+    }
+
+    private func ensureCollectionExists() async throws {
+        guard !config.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let request = try makeRequest(method: "MKCOL")
+        let (response, _) = try await transport.send(request, body: nil)
+        try validate(response: response, accepted: 200, 201, 204, 405)
+    }
+
+    private func propfind(depth: Int) async throws -> [IOSWebDAVResource] {
+        let body = Data("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <D:propfind xmlns:D="DAV:">
+          <D:prop>
+            <D:displayname/>
+            <D:getcontentlength/>
+            <D:getcontenttype/>
+            <D:getlastmodified/>
+            <D:getetag/>
+            <D:resourcetype/>
+          </D:prop>
+        </D:propfind>
+        """.utf8)
+        let request = try makeRequest(method: "PROPFIND", headers: [
+            "Content-Type": "application/xml; charset=utf-8",
+            "Depth": "\(depth)",
+        ])
+        let (response, data) = try await transport.send(request, body: body)
+        try validate(response: response, accepted: 200, 207)
+        return IOSWebDAVPropfindParser.parse(data: data)
+    }
+
+    func makeRequest(method: String, fileName: String? = nil, headers: [String: String] = [:]) throws -> URLRequest {
+        guard let url = buildURL(fileName: fileName) else {
+            throw IOSSyncBackupError.providerNotConfigured("WebDAV URL 未配置")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        if !config.username.isEmpty || !config.password.isEmpty {
+            let raw = "\(config.username):\(config.password)"
+            let encoded = Data(raw.utf8).base64EncodedString()
+            request.setValue("Basic \(encoded)", forHTTPHeaderField: "Authorization")
+        }
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        return request
+    }
+
+    private func buildURL(fileName: String?) -> URL? {
+        guard var url = URL(string: config.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        let pathParts = config.path
+            .split(separator: "/")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        for part in pathParts {
+            url.appendPathComponent(part, isDirectory: true)
+        }
+        if let fileName {
+            url.appendPathComponent(fileName, isDirectory: false)
+        }
+        return url
+    }
+
+    private func validate(response: HTTPURLResponse, accepted codes: Int...) throws {
+        guard codes.contains(response.statusCode) || (200...299).contains(response.statusCode) else {
+            throw IOSSyncBackupError.remoteProviderUnavailable("WebDAV 请求失败：HTTP \(response.statusCode)")
+        }
+    }
+}
+
+struct IOSUnavailableRemoteSyncProvider: IOSRemoteSyncProvider {
+    let kind: IOSRemoteProviderKind
+    let reason: String
+
+    var isConfigured: Bool { false }
+
+    func testConnection() async throws { throw unavailableError() }
+    func listSnapshots() async throws -> [IOSRemoteSnapshot] { throw unavailableError() }
+    func uploadSnapshot(data: Data, fileName: String, manifest: IOSSyncManifest) async throws -> IOSRemoteSnapshot {
+        throw unavailableError()
+    }
+    func downloadSnapshot(_ snapshot: IOSRemoteSnapshot) async throws -> Data { throw unavailableError() }
+    func deleteSnapshot(_ snapshot: IOSRemoteSnapshot) async throws { throw unavailableError() }
+
+    private func unavailableError() -> IOSSyncBackupError {
+        .remoteProviderUnavailable("\(kind.displayName) 尚未配置：\(reason)")
+    }
+}
+
+struct IOSSyncConflict: Equatable {
+    let localRevision: String
+    let remoteSnapshot: IOSRemoteSnapshot
+}
+
+enum IOSSyncConflictResolver {
+    static func conflict(status: IOSRemoteSyncStatus, remoteSnapshots: [IOSRemoteSnapshot]) -> IOSSyncConflict? {
+        guard !status.remoteRevision.isEmpty,
+              let latest = remoteSnapshots.filter({ $0.provider == status.provider }).sorted(by: { lhs, rhs in
+                  if lhs.createdAt == rhs.createdAt {
+                      return lhs.modifiedAt > rhs.modifiedAt
+                  }
+                  return lhs.createdAt > rhs.createdAt
+              }).first,
+              latest.remoteRevision != status.remoteRevision else {
+            return nil
+        }
+        return IOSSyncConflict(localRevision: status.remoteRevision, remoteSnapshot: latest)
+    }
+}
+
+private struct IOSWebDAVResource {
+    let href: String
+    let displayName: String
+    let sizeBytes: Int64
+    let modifiedAt: Int64
+    let etag: String
+    let isCollection: Bool
+
+    var fileName: String {
+        if !displayName.isEmpty {
+            return displayName
+        }
+        return href.trimmingCharacters(in: CharacterSet(charactersIn: "/")).split(separator: "/").last.map(String.init) ?? href
+    }
+}
+
+private final class IOSWebDAVPropfindParser: NSObject, XMLParserDelegate {
+    private var resources: [IOSWebDAVResource] = []
+    private var currentHref = ""
+    private var currentDisplayName = ""
+    private var currentSize: Int64 = 0
+    private var currentModifiedAt: Int64 = 0
+    private var currentEtag = ""
+    private var currentIsCollection = false
+    private var currentText = ""
+    private var inResponse = false
+
+    static func parse(data: Data) -> [IOSWebDAVResource] {
+        let delegate = IOSWebDAVPropfindParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.parse()
+        return delegate.resources
+    }
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?, attributes attributeDict: [String: String] = [:]) {
+        let name = elementName.localXMLName
+        currentText = ""
+        if name == "response" {
+            inResponse = true
+            currentHref = ""
+            currentDisplayName = ""
+            currentSize = 0
+            currentModifiedAt = 0
+            currentEtag = ""
+            currentIsCollection = false
+        } else if name == "collection", inResponse {
+            currentIsCollection = true
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        currentText += string
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
+        let name = elementName.localXMLName
+        let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if inResponse {
+            switch name {
+            case "href":
+                currentHref = text
+            case "displayname":
+                currentDisplayName = text
+            case "getcontentlength":
+                currentSize = Int64(text) ?? 0
+            case "getlastmodified":
+                currentModifiedAt = Self.parseWebDAVDate(text)
+            case "getetag":
+                currentEtag = text.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            case "response":
+                resources.append(IOSWebDAVResource(
+                    href: currentHref,
+                    displayName: currentDisplayName,
+                    sizeBytes: currentSize,
+                    modifiedAt: currentModifiedAt,
+                    etag: currentEtag,
+                    isCollection: currentIsCollection
+                ))
+                inResponse = false
+            default:
+                break
+            }
+        }
+        currentText = ""
+    }
+
+    private static func parseWebDAVDate(_ value: String) -> Int64 {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
+        if let date = formatter.date(from: value) {
+            return Int64(date.timeIntervalSince1970 * 1000)
+        }
+        if let date = ISO8601DateFormatter().date(from: value) {
+            return Int64(date.timeIntervalSince1970 * 1000)
+        }
+        return 0
+    }
+}
+
+private func safeSnapshotFileName(_ fileName: String) throws -> String {
+    guard !fileName.isEmpty, fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+          !fileName.contains("\\"),
+          fileName.hasSuffix(".\(IOSSyncBackup.fileExtension)") else {
+        throw IOSSyncBackupError.invalidArchive("Invalid snapshot file name: \(fileName)")
+    }
+    return fileName
 }
 
 private struct IOSStoredZipArchive {
@@ -393,6 +1063,20 @@ private extension Data {
             crc = (crc >> 8) ^ IOSCRC32.table[index]
         }
         return crc ^ 0xffffffff
+    }
+
+    func sha256Hex() -> String {
+        SHA256.hash(data: self).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private extension String {
+    var localXMLName: String {
+        split(separator: ":").last.map(String.init) ?? self
+    }
+
+    func ifBlank(_ fallback: String) -> String {
+        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : self
     }
 }
 

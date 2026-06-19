@@ -118,7 +118,7 @@ struct ProviderDetailView: View {
                     ProviderStaticRow(
                         title: "账户余额",
                         subtitle: "余额读取会触发外部请求，iOS 不做例行测试",
-                        value: "执行待接"
+                        value: "未实现"
                     )
                 }
             }
@@ -378,7 +378,7 @@ struct ProviderDetailView: View {
         }
 
         if requiresResponseAPIBridge {
-            return "Android 默认 useResponseApi = true；iOS 执行待接"
+            return "Android 默认 useResponseApi = true；iOS 未保存该开关"
         }
 
         return "当前 ChatViewModel 固定使用"
@@ -397,7 +397,7 @@ struct ProviderDetailView: View {
     }
 
     private var responseAPIValue: String {
-        requiresResponseAPIBridge ? "模板需要" : "执行待接"
+        requiresResponseAPIBridge ? "模板需要" : "未启用"
     }
 
     private var connectionFooterText: String {
@@ -473,7 +473,7 @@ private enum ProviderDetailAlert: Identifiable {
     var title: String {
         switch self {
         case .protocolPicker:
-            "接口协议选择尚执行待接"
+            "接口协议选择未实现"
         case .presetApplied:
             "API 地址已套用"
         case .providerBridgeRequired:
@@ -481,7 +481,7 @@ private enum ProviderDetailAlert: Identifiable {
         case .endpointConfirmationRequired:
             "Base URL 需要确认"
         case .responseAPIRequired:
-            "Response API 尚执行待接"
+            "Response API 未实现"
         }
     }
 
@@ -492,7 +492,7 @@ private enum ProviderDetailAlert: Identifiable {
         case .presetApplied(let provider):
             "\(provider) 的预置 Base URL 已写入当前聊天配置。API Key 仍为空或保持你已有的 Keychain 值；本操作没有发起网络请求。"
         case .providerBridgeRequired(let provider):
-            "\(provider) 使用的 ProviderSetting 类型尚未接到 iOS 当前聊天链路；这里只展示预置模板，不会保存或请求。"
+            "\(provider) 使用的 ProviderSetting 类型还没有接到 iOS 当前聊天链路；这里只展示预置模板，不会保存或请求。"
         case .endpointConfirmationRequired(let provider):
             "\(provider) 的 Android 默认 Base URL 在源码中标记为占位/可覆盖。iOS 当前不会把它写入真实聊天配置。"
         case .responseAPIRequired(let provider):

@@ -3,11 +3,28 @@ import SwiftUI
 struct SkillDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
+    let sharedSettings: IOSSharedSettingsStore
     let skillName: String
-    @State private var pendingAlert: SkillDetailAlert?
+    let dirName: String?
+    private let skillStore: IOSSkillFileStore
 
-    init(skillName: String) {
+    @State private var pendingAlert: SkillDetailAlert?
+    @State private var snapshot: SkillDetailSnapshot?
+    @State private var loadError: String?
+    @State private var isEnabled = false
+    @State private var editorDraft: SkillEditorDraft?
+    @State private var deleteConfirmationPresented = false
+
+    init(
+        sharedSettings: IOSSharedSettingsStore,
+        skillName: String,
+        dirName: String? = nil,
+        skillStore: IOSSkillFileStore = IOSSkillFileStore()
+    ) {
+        self.sharedSettings = sharedSettings
         self.skillName = skillName
+        self.dirName = dirName
+        self.skillStore = skillStore
     }
 
     var body: some View {
@@ -37,6 +54,22 @@ struct SkillDetailView: View {
                 dismissButton: .default(Text("知道了"))
             )
         }
+        .sheet(item: $editorDraft) { draft in
+            SkillMarkdownEditorSheet(initialText: draft.content) { content in
+                saveEditedMarkdown(content)
+            }
+        }
+        .confirmationDialog("删除技能", isPresented: $deleteConfirmationPresented, titleVisibility: .visible) {
+            Button("删除 \(snapshot?.name ?? skillName)", role: .destructive) {
+                deleteSkill()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("会删除 Documents/skills/\(dirName ?? "") 目录，并从所有 assistant.enabledSkills 中移除该技能。")
+        }
+        .task(id: dirName ?? skillName) {
+            loadSnapshot()
+        }
     }
 
     private var header: some View {
@@ -54,7 +87,11 @@ struct SkillDetailView: View {
             Spacer()
 
             SkillEditButton {
-                pendingAlert = .edit
+                if let content = snapshot?.content {
+                    editorDraft = SkillEditorDraft(content: content)
+                } else {
+                    pendingAlert = .file
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -82,7 +119,7 @@ struct SkillDetailView: View {
                 Circle()
                     .fill(AmberTheme.muted2)
                     .frame(width: 7, height: 7)
-                Text("执行待接 · 未读取 SKILL.md")
+                Text(statusText)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -101,16 +138,19 @@ struct SkillDetailView: View {
                         .foregroundStyle(AmberTheme.foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Text("执行待接")
-                        .font(.subheadline)
-                        .foregroundStyle(AmberTheme.muted)
+                    Button {
+                        setSkillEnabled(!isEnabled)
+                    } label: {
+                        SkillDetailSwitch(isOn: isEnabled)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .frame(minHeight: 52)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 4)
             }
 
-            SkillDetailFooter("iOS 尚未接入 SkillManager 和 assistant.enabledSkills；当前不会修改启用状态。")
+            SkillDetailFooter("启用状态写入当前 assistant.enabledSkills；聊天工具选择会读取这个集合。")
         }
     }
 
@@ -130,7 +170,7 @@ struct SkillDetailView: View {
                 }
                 .padding(.horizontal, 16)
 
-            SkillDetailFooter("真实触发条件需要读取 SKILL.md；iOS 详情页尚执行待接。")
+            SkillDetailFooter(snapshot == nil ? "未能读取真实 SKILL.md；请从技能扫描列表进入详情。" : "内容来自 Documents/skills/\(snapshot?.dirName ?? "")/SKILL.md。")
         }
     }
 
@@ -138,12 +178,10 @@ struct SkillDetailView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "工具与权限")
             AmberFormGroup {
-                SkillDetailValueRow(title: "允许的工具", value: "未读取", monospace: false) {
-                    pendingAlert = .allowedTools
-                }
+                SkillStaticValueRow(title: "允许的工具", value: allowedToolsSummary)
             }
 
-            SkillDetailFooter("需要读取真实 SKILL.md frontmatter 后才能展示 allowed-tools。")
+            SkillDetailFooter("权限来自 SKILL.md frontmatter 中的 allowed-tools / tools 字段；可通过编辑 SKILL.md 修改。")
         }
     }
 
@@ -151,16 +189,14 @@ struct SkillDetailView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "信息")
             AmberFormGroup {
-                SkillStaticValueRow(title: "版本", value: "未知", monospace: true)
+                SkillStaticValueRow(title: "版本", value: snapshot?.version ?? "未声明", monospace: true)
                 SkillDetailDivider()
-                SkillStaticValueRow(title: "来源", value: "执行待接")
+                SkillStaticValueRow(title: "来源", value: snapshot?.dirName ?? "未读取")
                 SkillDetailDivider()
-                SkillDetailValueRow(title: "文件", value: "SKILL.md", monospace: true) {
-                    pendingAlert = .file
-                }
+                SkillStaticValueRow(title: "文件", value: snapshot?.relativePath ?? "SKILL.md", monospace: true)
             }
 
-            SkillDetailFooter("当前不会读取本地 Skill 目录或文件树。")
+            SkillDetailFooter(loadError ?? "已读取真实本地 SKILL.md；编辑按钮会直接写回主文件。")
         }
     }
 
@@ -168,9 +204,9 @@ struct SkillDetailView: View {
         VStack(spacing: 0) {
             AmberFormGroup {
                 Button {
-                    pendingAlert = .delete
+                    deleteConfirmationPresented = true
                 } label: {
-                    Text("删除尚执行待接")
+                    Text("删除技能")
                         .font(.body.weight(.medium))
                         .foregroundStyle(AmberTheme.accentRed)
                         .frame(maxWidth: .infinity)
@@ -181,12 +217,181 @@ struct SkillDetailView: View {
             }
             .padding(.top, 20)
 
-            SkillDetailFooter("删除需要真实 Skill 文件系统桥和确认流程；当前不会删除任何文件。")
+            SkillDetailFooter("删除会移除本地 Skill 目录，并同步清理所有 assistant.enabledSkills。")
         }
     }
 
     private var triggerText: String {
-        "iOS 详情页尚未接入 SkillManager，无法读取 \(skillName) 的真实触发说明。"
+        snapshot?.description.nonEmpty
+            ?? snapshot?.bodyPreview.nonEmpty
+            ?? "未能读取 \(skillName) 的真实触发说明。"
+    }
+
+    private var statusText: String {
+        if snapshot != nil {
+            return isEnabled ? "已启用 · 已读取 SKILL.md" : "未启用 · 已读取 SKILL.md"
+        }
+        if loadError != nil {
+            return "未读取 SKILL.md"
+        }
+        return "读取中"
+    }
+
+    private var allowedToolsSummary: String {
+        guard let tools = snapshot?.allowedTools, !tools.isEmpty else {
+            return "未声明"
+        }
+        return tools.joined(separator: ", ")
+    }
+
+    private var enabledSkillName: String {
+        snapshot?.name ?? skillName
+    }
+
+    private func loadSnapshot() {
+        guard let dirName, !dirName.isEmpty else {
+            snapshot = nil
+            loadError = "未收到技能目录名；请从技能扫描列表进入详情。"
+            return
+        }
+        do {
+            let content = try skillStore.readSkillMarkdown(dirName: dirName)
+            let next = SkillDetailSnapshot(dirName: dirName, content: content)
+            snapshot = next
+            loadError = nil
+            isEnabled = sharedSettings.isSkillEnabled(next.name ?? skillName)
+        } catch {
+            snapshot = nil
+            loadError = "读取 Documents/skills/\(dirName)/SKILL.md 失败：\(error.localizedDescription)"
+            isEnabled = false
+        }
+    }
+
+    private func setSkillEnabled(_ enabled: Bool) {
+        sharedSettings.setSkillEnabled(name: enabledSkillName, enabled: enabled)
+        isEnabled = enabled
+    }
+
+    private func saveEditedMarkdown(_ content: String) -> String? {
+        guard let dirName, !dirName.isEmpty else {
+            return "未收到技能目录名；请从技能扫描列表进入详情。"
+        }
+        do {
+            try skillStore.saveSkillMarkdown(
+                dirName: dirName,
+                expectedName: enabledSkillName,
+                content: content
+            )
+            loadSnapshot()
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func deleteSkill() {
+        guard let dirName, !dirName.isEmpty else {
+            pendingAlert = .operationFailed("未收到技能目录名；请从技能扫描列表进入详情。")
+            return
+        }
+        do {
+            try skillStore.deleteSkill(dirName: dirName)
+            sharedSettings.removeSkillFromAllAssistants(name: enabledSkillName)
+            dismiss()
+        } catch {
+            pendingAlert = .operationFailed(error.localizedDescription)
+        }
+    }
+}
+
+private struct SkillDetailSnapshot {
+    let dirName: String
+    let content: String
+    let name: String?
+    let description: String
+    let allowedTools: [String]
+    let version: String?
+    let bodyPreview: String
+
+    var relativePath: String {
+        "skills/\(dirName)/SKILL.md"
+    }
+
+    init(dirName: String, content: String) {
+        self.dirName = dirName
+        self.content = content
+        let parsed = SkillDetailSnapshot.parse(content: content)
+        self.name = parsed.frontmatter["name"]
+        self.description = parsed.frontmatter["description"] ?? ""
+        self.allowedTools = SkillDetailSnapshot.parseList(parsed.frontmatter["allowed-tools"] ?? parsed.frontmatter["tools"])
+        self.version = parsed.frontmatter["version"]
+        self.bodyPreview = parsed.body
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .prefix(8)
+            .joined(separator: "\n")
+    }
+
+    private static func parse(content: String) -> (frontmatter: [String: String], body: String) {
+        guard content.hasPrefix("---"),
+              let endRange = content.range(of: "\n---", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else {
+            return ([:], content)
+        }
+
+        let yaml = String(content[content.index(content.startIndex, offsetBy: 3)..<endRange.lowerBound])
+        let bodyStart = content.index(endRange.upperBound, offsetBy: 0, limitedBy: content.endIndex) ?? endRange.upperBound
+        var frontmatter: [String: String] = [:]
+        var activeKey: String?
+        var activeValues: [String] = []
+
+        func flushActive() {
+            guard let key = activeKey else { return }
+            frontmatter[key] = activeValues.joined(separator: ", ")
+            activeKey = nil
+            activeValues = []
+        }
+
+        for line in yaml.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("- "), let key = activeKey {
+                activeValues.append(String(trimmed.dropFirst(2)).trimmingQuotes)
+                frontmatter[key] = activeValues.joined(separator: ", ")
+                continue
+            }
+            flushActive()
+            guard let separator = trimmed.firstIndex(of: ":") else { continue }
+            let key = String(trimmed[..<separator]).trimmingCharacters(in: .whitespaces)
+            let value = String(trimmed[trimmed.index(after: separator)...]).trimmingCharacters(in: .whitespaces).trimmingQuotes
+            if value.isEmpty {
+                activeKey = key
+                activeValues = []
+            } else {
+                frontmatter[key] = value
+            }
+        }
+        flushActive()
+
+        return (frontmatter, String(content[bodyStart...]))
+    }
+
+    private static func parseList(_ raw: String?) -> [String] {
+        guard let raw, !raw.isEmpty else { return [] }
+        return raw
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            .components(separatedBy: CharacterSet(charactersIn: ", \n\t"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingQuotes }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        isEmpty ? nil : self
+    }
+
+    var trimmingQuotes: String {
+        trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
     }
 }
 
@@ -306,40 +511,84 @@ private struct SkillDetailFooter: View {
     }
 }
 
+private struct SkillEditorDraft: Identifiable {
+    let id = UUID()
+    let content: String
+}
+
+private struct SkillMarkdownEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+    @State private var saveError: String?
+
+    let save: (String) -> String?
+
+    init(initialText: String, save: @escaping (String) -> String?) {
+        self._text = State(initialValue: initialText)
+        self.save = save
+    }
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $text)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(AmberTheme.foreground)
+                .scrollContentBackground(.hidden)
+                .background(AmberTheme.background)
+                .padding(.horizontal, 12)
+                .navigationTitle("编辑 SKILL.md")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") {
+                            dismiss()
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") {
+                            if let error = save(text) {
+                                saveError = error
+                            } else {
+                                dismiss()
+                            }
+                        }
+                    }
+                }
+                .alert("保存失败", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                    Button("知道了", role: .cancel) {
+                        saveError = nil
+                    }
+                } message: {
+                    Text(saveError ?? "")
+                }
+        }
+    }
+}
+
 private enum SkillDetailAlert: Identifiable {
-    case edit
-    case allowedTools
     case file
-    case delete
+    case operationFailed(String)
 
     var id: String {
         switch self {
-        case .edit: "edit"
-        case .allowedTools: "allowed-tools"
         case .file: "file"
-        case .delete: "delete"
+        case .operationFailed(let message): "operationFailed-\(message)"
         }
     }
 
     var title: String {
         switch self {
-        case .edit: "编辑 SKILL.md"
-        case .allowedTools: "允许的工具"
         case .file: "文件"
-        case .delete: "删除技能"
+        case .operationFailed: "操作失败"
         }
     }
 
     var message: String {
         switch self {
-        case .edit:
-            "编辑 SKILL.md 需要接入文件编辑和校验流程；当前不会修改技能文件。"
-        case .allowedTools:
-            "工具权限需要读取真实 SKILL.md 的 allowed-tools 声明；当前不会展示或修改权限。"
         case .file:
-            "文件查看需要接入 Skill 文件浏览器；当前不会读取本地文件。"
-        case .delete:
-            "删除技能会修改本地 Skill 目录；当前不会删除任何文件。"
+            "未能读取 SKILL.md；请从技能扫描列表进入详情。"
+        case .operationFailed(let message):
+            message
         }
     }
 }

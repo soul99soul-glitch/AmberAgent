@@ -5,6 +5,8 @@ struct SkillsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
 
+    let sharedSettings: IOSSharedSettingsStore
+
     @State private var pendingAlert: SkillsAlert?
     @State private var importOptionsPresented = false
     @State private var scannedSkills: [IosSkillFactory.SkillMetadata] = []
@@ -95,29 +97,39 @@ struct SkillsView: View {
                     .padding(.vertical, 12)
                 } else {
                     ForEach(Array(scannedSkills.enumerated()), id: \.offset) { index, skill in
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(skill.name)
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(AmberTheme.foreground)
-                                if !skill.description_.isEmpty {
-                                    Text(skill.description_)
-                                        .font(.caption)
-                                        .foregroundStyle(AmberTheme.muted)
-                                        .lineLimit(2)
+                        let enabled = sharedSettings.isSkillEnabled(skill.name)
+                        Button {
+                            router.navigate(to: .skillDetail(name: skill.name, dirName: skill.dirName))
+                        } label: {
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(skill.name)
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(AmberTheme.foreground)
+                                    if !skill.description_.isEmpty {
+                                        Text(skill.description_)
+                                            .font(.caption)
+                                            .foregroundStyle(AmberTheme.muted)
+                                            .lineLimit(2)
+                                    }
+                                    Text("dir: \(skill.dirName)")
+                                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                                        .foregroundStyle(AmberTheme.muted2)
                                 }
-                                Text("dir: \(skill.dirName)")
-                                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(enabled ? "启用" : "关闭")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(enabled ? AmberTheme.accentGreen : AmberTheme.muted2)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
                                     .foregroundStyle(AmberTheme.muted2)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(skill.enabled ? "启用" : "关闭")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(skill.enabled ? AmberTheme.accentGreen : AmberTheme.muted2)
+                            .frame(minHeight: 52)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
                         }
-                        .frame(minHeight: 52)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
 
                         if index < scannedSkills.count - 1 {
                             Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
@@ -158,7 +170,7 @@ struct SkillsView: View {
     // [Slice 1] 扫描标记已撤：IosSkillFactory.shared.listSkills(documentsDir:) 真实扫描
     // Documents/skills/*/SKILL.md（feature/task/.../IosSkillFactory.kt:24），本页 scannedSkillsSection
     // 已在 SkillsView.swift:132(按钮)/:153(onAppear) 调用，结果存入 scannedSkills。
-    // 因此"本机 Skill 库"改为诚实反映扫描结果数，不再标"执行待接"。
+    // 因此"本机 Skill 库"改为诚实反映扫描结果数，不再保留旧占位标记。
     private var installedSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "本机 Skill 库")
@@ -169,12 +181,12 @@ struct SkillsView: View {
                     title: scannedSkills.isEmpty ? "尚未扫描到 Skill" : "已扫描 \(scannedSkills.count) 个 Skill",
                     subtitle: scannedSkills.isEmpty
                         ? "Documents/skills/ 下没有 SKILL.md。把技能放入该目录的子文件夹后点\"重新扫描\"即可。"
-                        : "扫描结果见上方\"技能扫描\"区。启用/禁用与删除本地 Skill 仍待接（需 Skill 文件写入桥）。",
+                        : "扫描结果见上方\"技能扫描\"区；点条目可打开真实 SKILL.md，并修改启用状态或删除本地 Skill。",
                     badge: scannedSkills.isEmpty ? "空" : "已扫描"
                 )
             }
 
-            SkillsFooter("扫描为真实文件系统读取（IosSkillFactory.listSkills）；启用/禁用/删除本地 Skill 仍待接。")
+            SkillsFooter("扫描为真实文件系统读取（IosSkillFactory.listSkills）；启用状态写入当前 assistant.enabledSkills。")
         }
     }
 

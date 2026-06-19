@@ -4,21 +4,33 @@ import SwiftUI
 struct SkillAddView: View {
     @Environment(\.dismiss) private var dismiss
 
+    let sharedSettings: IOSSharedSettingsStore
+    private let skillStore: IOSSkillFileStore
+
     @State private var skillName = "research-helper"
     @State private var triggerText = "Use when the user asks to investigate a topic, compare sources, or prepare a concise research brief."
     @State private var category: SkillDraftCategory = .task
     @State private var enabled = true
     @State private var allowedTools = "read, rg, web_search"
-    @State private var fileName = "SKILL.md"
+    @State private var isSaving = false
+    @State private var saveError: SkillDraftSaveError?
+
+    init(sharedSettings: IOSSharedSettingsStore, skillStore: IOSSkillFileStore = IOSSkillFileStore()) {
+        self.sharedSettings = sharedSettings
+        self.skillStore = skillStore
+    }
 
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                SkillDraftHeader(title: "添加技能", doneTitle: "关闭") {
-                    dismiss()
-                }
+                SkillDraftHeader(
+                    title: "添加技能",
+                    doneTitle: isSaving ? "创建中" : "创建",
+                    isDoneDisabled: hasBasicsWarning || isSaving,
+                    done: saveSkill
+                )
 
                 ScrollView {
                     VStack(spacing: 0) {
@@ -34,6 +46,13 @@ struct SkillAddView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .alert(item: $saveError) { error in
+            Alert(
+                title: Text("创建失败"),
+                message: Text(error.message),
+                dismissButton: .default(Text("知道了"))
+            )
+        }
     }
 
     private var introSection: some View {
@@ -46,11 +65,11 @@ struct SkillAddView: View {
                     .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("创建本地 Skill 本地预览")
+                    Text("创建本地 Skill")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
-                    Text("先填写触发说明和权限边界。当前只预览 SKILL.md 结构，不写入技能目录。")
+                    Text("填写触发说明和权限边界后，会写入 Documents/skills/ 下的真实 SKILL.md。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                         .lineSpacing(2)
@@ -92,19 +111,17 @@ struct SkillAddView: View {
             AmberSectionLabel(text: "权限")
             AmberFormGroup {
                 SkillDraftToggleRow(
-                    title: "本地预览启用标记",
-                    subtitle: "仅影响下方预览；当前不会写入 assistant.enabledSkills。",
+                    title: "创建后启用",
+                    subtitle: "写入当前 assistant.enabledSkills；关闭后只创建文件，不启用。",
                     isOn: enabled
                 ) {
                     enabled.toggle()
                 }
                 SkillDraftDivider()
                 SkillDraftTextFieldRow(title: "允许的工具", text: $allowedTools, placeholder: "留空表示未限制", monospace: true)
-                SkillDraftDivider()
-                SkillDraftTextFieldRow(title: "主文件", text: $fileName, placeholder: "SKILL.md", monospace: true)
             }
 
-            SkillDraftNote("真实创建时需要写入本地 Skill 目录；无人值守阶段只保留本地预览，不创建文件。")
+            SkillDraftNote("创建会生成 Documents/skills/\(normalizedName.isEmpty ? "skill-name" : normalizedName)/SKILL.md。")
         }
     }
 
@@ -114,9 +131,9 @@ struct SkillAddView: View {
             AmberFormGroup {
                 SkillPreviewLine(label: "目录", value: normalizedName.isEmpty ? "未命名" : normalizedName)
                 SkillDraftDivider()
-                SkillPreviewLine(label: "文件", value: fileName.trimmed.isEmpty ? "SKILL.md" : fileName.trimmed)
+                SkillPreviewLine(label: "文件", value: "SKILL.md")
                 SkillDraftDivider()
-                SkillPreviewLine(label: "状态", value: enabled ? "本地预览启用" : "本地预览停用")
+                SkillPreviewLine(label: "状态", value: enabled ? "创建后启用" : "仅创建文件")
                 SkillDraftDivider()
                 SkillPreviewBlock(text: previewMarkdown)
             }
@@ -143,25 +160,48 @@ struct SkillAddView: View {
             return "触发说明为空；Agent 将无法判断何时使用。"
         }
 
-        return "本地预览结构完整；当前不会写入文件系统。"
+        return "结构完整；点击创建会写入本地 Skill 目录。"
+    }
+
+    private var allowedToolTokens: [String] {
+        IOSSkillFileStore.allowedToolTokens(from: allowedTools)
     }
 
     private var previewMarkdown: String {
-        """
-        ---
-        name: \(normalizedName.isEmpty ? "skill-name" : normalizedName)
-        description: \(triggerText.trimmed)
-        ---
+        IOSSkillFileStore.makeSkillMarkdown(
+            name: normalizedName.isEmpty ? "skill-name" : normalizedName,
+            description: triggerText.trimmed,
+            allowedTools: allowedToolTokens
+        )
+    }
 
-        # \(normalizedName.isEmpty ? "Skill" : normalizedName)
-        """
+    private func saveSkill() {
+        guard !hasBasicsWarning else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let savedName = try skillStore.createSkill(
+                name: normalizedName,
+                description: triggerText,
+                allowedTools: allowedToolTokens
+            )
+            if enabled {
+                sharedSettings.setSkillEnabled(name: savedName, enabled: true)
+            }
+            dismiss()
+        } catch {
+            saveError = SkillDraftSaveError(message: error.localizedDescription)
+        }
     }
 }
 
 private struct SkillDraftHeader: View {
     let title: String
     let doneTitle: String
-    let dismiss: () -> Void
+    var isDoneDisabled = false
+    let done: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         HStack {
@@ -177,7 +217,7 @@ private struct SkillDraftHeader: View {
 
             Spacer()
 
-            Button(action: dismiss) {
+            Button(action: done) {
                 Text(doneTitle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.accent)
@@ -186,6 +226,8 @@ private struct SkillDraftHeader: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)
+            .disabled(isDoneDisabled)
+            .opacity(isDoneDisabled ? 0.45 : 1)
             .amberGlass(cornerRadius: AmberTheme.radiusPill)
             .accessibilityLabel(doneTitle)
         }
@@ -438,5 +480,10 @@ private extension String {
 }
 
 #Preview("Skill Add") {
-    SkillAddView()
+    SkillAddView(sharedSettings: IOSSharedSettingsStore())
+}
+
+private struct SkillDraftSaveError: Identifiable {
+    let id = UUID()
+    let message: String
 }

@@ -30,7 +30,7 @@ struct BoardSettingsView: View {
             ),
             .init(
                 title: "enabledSources",
-                subtitle: "KMP todayBoard.enabledSources 真实种子值。",
+                subtitle: "KMP todayBoard.enabledSources 真实种子值；iOS 手动 runOnce 会额外把提醒事项跟随 calendar、热榜跟随 hotListEnabledSources。",
                 value: "\(tb.enabledSources.count) 个来源",
                 color: AmberTheme.foreground2
             ),
@@ -45,27 +45,27 @@ struct BoardSettingsView: View {
 
     private let persistenceRows: [BoardCapabilityRow] = [
         .init(
-            title: "关注规则",
-            subtitle: "Android 通过 BoardFocusRuleDAO 增删改关注点；iOS 当前没有 DAO 或输入保存。",
-            value: "执行待接",
+            title: "Signal repository",
+            subtitle: "iOS 已将 Board signals 持久化到 Documents/boards/signals/board_signals.json，并支持重启恢复。",
+            value: "已接",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "去重 / processed",
+            subtitle: "sourceRef 和 contentHash 去重已接；BoardAgent 成功考虑后标记 processed，并裁剪旧 processed signals。",
+            value: "已接",
+            color: AmberTheme.accentGreen
+        ),
+        .init(
+            title: "前台 runOnce",
+            subtitle: "手动生成会聚合聊天历史、EventKit 日历/提醒事项、轻量热榜和时间锚点，再喂给 BoardAgent。",
+            value: "手动",
             color: AmberTheme.accentAmber
         ),
         .init(
-            title: "来源权重",
-            subtitle: "Android 将完成、忽略、聊天反馈写入 BoardWeightEntity，并可自动 hard-mute。",
-            value: "执行待接",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "自定义热榜源",
-            subtitle: "Android 通过 HotListRepository 写入 HotListSourceEntity 并触发 HotListScheduler.runOnce()。",
-            value: "执行待接",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "搜索服务复用",
-            subtitle: "Android 深度阅读复用 Settings.searchEnabledServiceIds；iOS 搜索服务桥也仍未完成。",
-            value: "执行待接",
+            title: "后台 / 外部账号",
+            subtitle: "BGTaskScheduler、通知读取、飞书账号/MCP、深度阅读和自定义热榜源仍未启用；无权限时返回空状态。",
+            value: "降级",
             color: AmberTheme.accentAmber
         )
     ]
@@ -106,7 +106,7 @@ struct BoardSettingsView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AmberTheme.foreground)
 
-                Text("字段映射 · 不保存")
+                Text("字段映射 · 本地采集")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(1)
@@ -124,7 +124,7 @@ struct BoardSettingsView: View {
     }
 
     private var intro: some View {
-        Text("以下字段来自 KMP Settings.agentRuntime.todayBoard 真实种子值（只读展示）。持久化/DAO/调度/采集仍待 iOS 原生实现。")
+        Text("以下字段来自 KMP Settings.agentRuntime.todayBoard 真实种子值（只读展示）。iOS 已有本地 signal repository、Documents 持久化、去重、processed 标记和前台手动采集；本页仍不写 KMP Settings，也不启用后台、通知、飞书或深度阅读。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -150,7 +150,7 @@ struct BoardSettingsView: View {
 
     private var persistenceSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "设置页持久化")
+            AmberSectionLabel(text: "iOS 本地采集链路")
             AmberFormGroup {
                 ForEach(Array(persistenceRows.enumerated()), id: \.element.id) { index, row in
                     BoardCapabilityStatusRow(row: row)
@@ -166,7 +166,7 @@ struct BoardSettingsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "启用前需要")
             AmberFormGroup {
-                Text("需要先定义 iOS 侧 Settings.agentRuntime.todayBoard 持久化、Board DAO/Repository、信号 collector、WorkManager 等价调度、模型生成与 JSON 校验、热榜缓存、深度阅读缓存和任务流写回。没有这些链路前，任何开关或选择器都会变成只在本页生效的假设置。")
+                Text("剩余需要产品/权限决定的能力：后台刷新策略是否启用 BGTaskScheduler、是否读取通知、是否接飞书账号/MCP、是否启用深度阅读缓存和自定义热榜源。当前设置页保持只读，避免保存只在 iOS 页面生效的假开关。")
                     .font(.caption)
                     .lineSpacing(4)
                     .foregroundStyle(AmberTheme.foreground2)
@@ -176,7 +176,7 @@ struct BoardSettingsView: View {
                     .padding(.vertical, 13)
             }
 
-            BoardCapabilityNote("本页不写 UserDefaults、SettingsStore、Keychain、数据库，也不会触发 BoardScheduler 或 HotListScheduler。")
+            BoardCapabilityNote("本页不写 UserDefaults、SettingsStore、Keychain，也不会触发后台任务；手动采集入口在今日看板页。")
         }
     }
 }

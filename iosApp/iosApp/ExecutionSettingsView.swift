@@ -52,7 +52,7 @@ struct ExecutionSettingsView: View {
     }
 
     private var intro: some View {
-        Text("这里仅保留已经被 iOS Chat 运行链消费的实时活动开关；其他 Android/KMP 执行字段先作为执行待接映射展示。")
+        Text("这里仅保留已经被 iOS Chat 运行链消费的实时活动开关；其他 Android/KMP 执行字段先作为只读缺口映射展示。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -87,7 +87,7 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "arrow.clockwise",
                     title: "工具循环上限",
-                    subtitle: "KMP agentRuntime.maxToolLoopSteps；iOS 工具循环调度器尚未接入",
+                    subtitle: "KMP agentRuntime.maxToolLoopSteps；iOS 工具循环调度器未消费",
                     value: "\(rt.maxToolLoopSteps)"
                 )
             }
@@ -165,7 +165,7 @@ struct ExecutionSettingsView: View {
                 ExecutionStatusRow(
                     systemImage: "clock.arrow.circlepath",
                     title: "自动重试生成",
-                    subtitle: "KMP agentRuntime.generationRetry；iOS provider streaming 尚未接重试策略",
+                    subtitle: "KMP agentRuntime.generationRetry；iOS provider streaming 未消费重试策略",
                     value: rt.generationRetry.enabled ? "启用" : "关闭"
                 )
 

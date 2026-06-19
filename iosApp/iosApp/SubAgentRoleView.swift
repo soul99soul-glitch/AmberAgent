@@ -170,7 +170,7 @@ struct SubAgentRoleView: View {
                 }
             }
 
-            SubAgentRoleFootnote(text: "systemPrompt 覆盖已接：下方\"角色覆盖\"区可保存/删除并持久化到 snapshot.agentRuntime.subAgent.overrides（重启保留）。modelId/reasoningLevel/turns 等字段仍待接（本页未暴露编辑入口）。")
+            SubAgentRoleFootnote(text: "systemPrompt 覆盖已接：下方\"角色覆盖\"区可保存/删除并持久化到 snapshot.agentRuntime.subAgent.overrides（重启保留）。modelId/reasoningLevel/turns 等字段仍缺编辑入口。")
         }
     }
 
@@ -264,13 +264,13 @@ private struct SubAgentRoleDetail {
             .init(
                 title: "modelId",
                 subtitle: "KMP 支持为角色覆盖聊天模型；iOS 当前没有 provider/model registry bridge。",
-                value: "执行待接",
+                value: "缺模型桥",
                 color: AmberTheme.accentAmber
             ),
             .init(
                 title: "reasoningLevel / temperature",
                 subtitle: "KMP SubAgentOverride 可覆盖推理强度和采样温度；iOS 当前不会写入。",
-                value: "执行待接",
+                value: "缺参数桥",
                 color: AmberTheme.accentAmber
             ),
             // [Slice 4] systemPrompt 覆盖已接：上方"保存角色覆盖"经
@@ -286,7 +286,7 @@ private struct SubAgentRoleDetail {
             .init(
                 title: "turns / timeout / outputBudget",
                 subtitle: "KMP 可按角色覆盖最大轮数、超时和输出预算；iOS 当前不暴露保存。",
-                value: "执行待接",
+                value: "缺预算桥",
                 color: AmberTheme.accentAmber
             )
         ]

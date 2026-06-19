@@ -100,7 +100,7 @@ struct CouncilView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 通过下方\"执行（真实调用链）\"区可手动启动议会，且聊天里模型可调用 model_council_run 工具触发（Slice 3 已接：onComplete dispatch → CouncilRunner.run → resume，逻辑闭环；真链路需 API key）。席位增删已持久化。实时 liveText/transcript 快照来源仍待接。")
+        Text("Android/KMP 已有真实模型议会运行时、工具族和设置页；iOS 通过下方\"执行（真实调用链）\"区可手动启动议会，且聊天里模型可调用 model_council_run 工具触发（Slice 3 已接：onComplete dispatch → CouncilRunner.run → resume，逻辑闭环；真链路需 API key）。席位增删已持久化。实时 liveText/transcript 快照来源仍缺。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -210,8 +210,8 @@ struct CouncilView: View {
                 CouncilStatusRow(
                     row: .init(
                         title: "实时席位 / 转录",
-                        subtitle: "手动 run 只能读 start() 返回的 runId/status；聊天里实时 liveTextFlow/transcriptPath 快照来源仍待接。",
-                        value: "待接",
+                        subtitle: "手动 run 只能读 start() 返回的 runId/status；聊天里实时 liveTextFlow/transcriptPath 快照来源仍缺。",
+                        value: "缺实时",
                         color: AmberTheme.accentAmber
                     )
                 )

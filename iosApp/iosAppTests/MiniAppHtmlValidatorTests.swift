@@ -93,6 +93,7 @@ final class MiniAppHtmlValidatorTests: XCTestCase {
 
     // ---- the MVP sample HTML must pass ----
 
+    @MainActor
     func testSampleRunnerHtmlPassesValidation() throws {
         // The sample shipped in MiniAppRunnerView must clear the validator
         // (otherwise the demo runner would refuse to load).

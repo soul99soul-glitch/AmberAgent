@@ -206,7 +206,7 @@ enum Route: Hashable {
     case mcpServers
     case mcpImport
     case mcpAdd
-    case skillDetail(name: String)
+    case skillDetail(name: String, dirName: String?)
     case execution
     case providers
     case providerAdd
@@ -225,7 +225,7 @@ enum Route: Hashable {
     case boardSettings
     case miniApps
     case miniAppSettings
-    case miniAppRunner(title: String)
+    case miniAppRunner(appId: String)
     case webMount
     case webMountSite(site: WebMountSiteRoute)
     case workspace
@@ -297,17 +297,17 @@ private extension View {
             case .memoryEdit(let text, let scope, let pinned):
                 MemoryEditView(initialText: text, initialScope: scope, initialPinned: pinned)
             case .skills:
-                SkillsView()
+                SkillsView(sharedSettings: sharedSettings)
             case .skillAdd:
-                SkillAddView()
+                SkillAddView(sharedSettings: sharedSettings)
             case .mcpServers:
                 McpServersView(sharedSettings: sharedSettings, configStore: mcpConfigStore)
             case .mcpImport:
                 McpImportView(configStore: mcpConfigStore)
             case .mcpAdd:
                 McpAddView(configStore: mcpConfigStore)
-            case .skillDetail(let name):
-                SkillDetailView(skillName: name)
+            case .skillDetail(let name, let dirName):
+                SkillDetailView(sharedSettings: sharedSettings, skillName: name, dirName: dirName)
             case .execution:
                 ExecutionSettingsView(sharedSettings: sharedSettings)
             case .providers:
@@ -344,8 +344,8 @@ private extension View {
                 MiniAppListView()
             case .miniAppSettings:
                 MiniAppSettingsView(sharedSettings: sharedSettings)
-            case .miniAppRunner(let title):
-                MiniAppRunnerView(title: title)
+            case .miniAppRunner(let appId):
+                MiniAppRunnerView(appId: appId, settingsStore: settingsStore, sharedSettings: sharedSettings)
             case .webMount:
                 WebMountView()
             case .webMountSite(let site):

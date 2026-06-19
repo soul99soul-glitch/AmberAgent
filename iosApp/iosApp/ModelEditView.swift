@@ -215,7 +215,7 @@ struct ModelEditView: View {
                 ModelValueRow(
                     title: "自定义 Headers",
                     subtitle: "附加到该模型的请求头",
-                    value: "编辑待接"
+                    value: "需字段桥"
                 ) {
                     router.navigate(to: .modelCustomHeaders)
                 }
@@ -223,7 +223,7 @@ struct ModelEditView: View {
                 ModelValueRow(
                     title: "自定义 Body",
                     subtitle: "合并进请求体的 JSON 字段",
-                    value: "编辑待接"
+                    value: "需字段桥"
                 ) {
                     router.navigate(to: .modelCustomBody)
                 }
@@ -237,15 +237,15 @@ struct ModelEditView: View {
             // [Slice 4] "保存模型" above now creates a real ProviderSetting.OpenAI
             // (merged into snapshot.providers, persisted). The per-row delete in
             // savedModelsSection also persists. The bottom "删除模型" button below
-            // is an info-only stub (not wired) so it stays 待接.
-            ModelEditNote("上方\"保存模型\"会创建真实 ProviderSetting.OpenAI 并持久化（重启保留）；下方\"删除模型\"按钮仍为待接。")
+            // is an info-only stub for the non-add flow.
+            ModelEditNote("上方\"保存模型\"会创建真实 ProviderSetting.OpenAI 并持久化（重启保留）；下方\"删除模型\"按钮仍为说明态。")
                 .padding(.top, 4)
         } else {
             AmberFormGroup {
                 Button {
                     alert = .delete
                 } label: {
-                    Text("删除模型 · 编辑待接（需 Settings.providers 持久化）")
+                    Text("删除模型 · 需删除桥")
                         .font(.body.weight(.medium))
                         .foregroundStyle(AmberTheme.accentRed)
                         .frame(maxWidth: .infinity)
@@ -351,7 +351,7 @@ private enum ModelEditAlert: Identifiable {
 
     var title: String {
         switch self {
-        case .delete: "删除模型 · 编辑待接（需 Settings.providers 持久化）"
+        case .delete: "删除模型 · 需删除桥"
         }
     }
 

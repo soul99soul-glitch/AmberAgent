@@ -47,7 +47,7 @@ struct SearchProviderView: View {
 
             Spacer()
 
-            Text("搜索服务本地预览")
+            Text("搜索服务配置")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
                 .lineLimit(1)
@@ -74,7 +74,7 @@ struct SearchProviderView: View {
     }
 
     private var draftNotice: some View {
-        SearchProviderNote("Android/KMP 已有 SearchServiceOptions 与 SettingSearchPage 保存逻辑；iOS 当前没有 searchServices、searchEnabledServiceIds、SearchCommonOptions 或 API Key 存储桥。")
+        SearchProviderNote("iOS 会把新增服务保存到 snapshot.searchServices，并同步设为 searchServiceSelected + searchEnabledServiceIds。当前执行器支持 Bing HTML、DuckDuckGo Lite fallback 和 scrape_web 安全直抓；其它 API provider 会被读取但返回 unsupported/fallback，不伪造成功。")
             .padding(.top, 2)
     }
 
@@ -94,7 +94,7 @@ struct SearchProviderView: View {
                     SearchProviderTextFieldRow(
                         title: "API Key",
                         text: $apiKey,
-                        placeholder: "本地预览 API Key",
+                        placeholder: "可选 API Key（本机设置）",
                         monospace: true,
                         isSecure: true
                     )
@@ -126,14 +126,14 @@ struct SearchProviderView: View {
                     SearchProviderTextFieldRow(
                         title: "Username",
                         text: $searXNGUsername,
-                        placeholder: "可选本地预览",
+                        placeholder: "可选（暂不写入）",
                         monospace: true
                     )
                     SearchProviderDivider()
                     SearchProviderTextFieldRow(
                         title: "Password",
                         text: $searXNGPassword,
-                        placeholder: "可选本地预览",
+                        placeholder: "可选（暂不写入）",
                         monospace: true,
                         isSecure: true
                     )
@@ -158,9 +158,16 @@ struct SearchProviderView: View {
                 SearchProviderDivider()
                 SearchProviderStatusRow(
                     title: "iOS 工具调用",
-                    subtitle: "ChatViewModel 与 IOSLocalToolExecutor 尚未接 search_web / scrape_web。",
-                    value: "待接（需 ChatViewModel 工具桥）",
-                    valueColor: AmberTheme.accentAmber
+                    subtitle: "ChatViewModel 会在 enableWebSearch 开启时声明 search_web/scrape_web，并把 Tool 输出回填后 resume。",
+                    value: "工具已接",
+                    valueColor: AmberTheme.accentGreen
+                )
+                SearchProviderDivider()
+                SearchProviderStatusRow(
+                    title: "抓取 / 多 provider",
+                    subtitle: "新增服务会成为选中/启用 provider；IOSSearchExecutor 读取该选择，支持 Bing HTML 与 DuckDuckGo fallback，未实现 provider 诚实返回 unsupported。",
+                    value: "MVP 已接",
+                    valueColor: AmberTheme.accentGreen
                 )
             }
         }
@@ -172,9 +179,9 @@ struct SearchProviderView: View {
             AmberFormGroup {
                 SearchProviderStatusRow(
                     title: "服务启用",
-                    subtitle: "Android 通过 searchEnabledServiceIds 保存；iOS 当前不写入该列表。",
-                    value: "未保存",
-                    valueColor: AmberTheme.muted
+                    subtitle: "保存新服务时会同步写入 searchEnabledServiceIds，并设为默认 selected provider。",
+                    value: "新增即启用",
+                    valueColor: AmberTheme.accentGreen
                 )
             }
         }
@@ -189,7 +196,7 @@ struct SearchProviderView: View {
             AmberFormGroup {
                 let providers = sharedSettings.savedSearchProviders
                 if providers.isEmpty {
-                    Text("暂无自定义搜索服务。选择类型并填写名称后点「保存服务」。")
+                    Text("暂无自定义搜索服务。选择类型后点「保存服务」。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -327,13 +334,13 @@ private enum SearchProviderType: String, CaseIterable, Identifiable {
     var note: String {
         switch self {
         case .bing:
-            "Bing HTML 兜底是 Android 默认 SearchServiceOptions.DEFAULT；iOS 未接入时不会自动启用。"
+            "Bing HTML 是 Android 默认 SearchServiceOptions.DEFAULT；iOS 保存后会选中并用 Bing HTML 执行 search_web。"
         case .searXNG:
-            "SearXNG 在 Android/KMP 中保存 URL、引擎、语言、用户名和密码；当前字段只是本地预览。"
+            "SearXNG 在 Android/KMP 中保存 URL、引擎、语言、用户名和密码；iOS 当前会保存类型并进入选择，但原生 SearXNG 执行器未实现。"
         case .jina:
-            "Jina 在 Android/KMP 中有 apiKey、searchUrl 和 scrapeUrl；iOS 当前不保存这些字段。"
+            "Jina 在 Android/KMP 中有 apiKey、searchUrl 和 scrapeUrl；iOS 当前只保存类型/apiKey，search_web 会 fallback，scrape_web 使用安全直抓 MVP。"
         default:
-            "\(title) 在仓库里有 SearchServiceOptions 类型；iOS 当前不写 API Key、不保存服务，也不测试连接。"
+            "\(title) 在仓库里有 SearchServiceOptions 类型；iOS 会保存类型/apiKey 并进入选择，但不会测试连接，原生 provider 执行器未实现时会返回 unsupported/fallback。"
         }
     }
 }

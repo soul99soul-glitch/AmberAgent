@@ -19,6 +19,7 @@ final class IOSSharedSettingsStore {
     private let defaults: UserDefaults
     private let fullSettingsJsonKey = "app.amber.ios.sharedSettingsJson"
     private let seatsKey = "app.amber.ios.councilSeats"
+    private let remoteSyncStatusKey = "app.amber.ios.remoteSyncStatus"
 
     init(userDefaults: UserDefaults = .standard) {
         self.defaults = userDefaults
@@ -33,6 +34,64 @@ final class IOSSharedSettingsStore {
     func restoreSnapshot(_ settings: Settings) {
         snapshot = settings
         defaults.set(IosSettingsJsonBridge.shared.encode(settings: settings), forKey: fullSettingsJsonKey)
+    }
+
+    var remoteSyncStatus: IOSRemoteSyncStatus {
+        if let data = defaults.data(forKey: remoteSyncStatusKey),
+           let decoded = try? JSONDecoder().decode(IOSRemoteSyncStatus.self, from: data) {
+            return decoded
+        }
+        return IOSRemoteSyncStatus()
+    }
+
+    func updateRemoteSyncStatus(_ transform: (inout IOSRemoteSyncStatus) -> Void) {
+        var status = remoteSyncStatus
+        transform(&status)
+        if let data = try? JSONEncoder().encode(status) {
+            defaults.set(data, forKey: remoteSyncStatusKey)
+        }
+    }
+
+    func recordRemoteUpload(snapshot: IOSRemoteSnapshot, preview: IOSSyncPreview) {
+        updateRemoteSyncStatus { status in
+            status.lastUploadAt = Self.currentEpochMillis()
+            status.setRemoteRevision(snapshot.remoteRevision, for: snapshot.provider)
+            status.deviceLabel = preview.manifest.deviceLabel
+            status.lastBackupVersionName = preview.manifest.appVersionName
+            status.lastBackupVersionCode = preview.manifest.appVersionCode
+            status.lastError = ""
+        }
+    }
+
+    func recordRemoteDownload(snapshot: IOSRemoteSnapshot, preview: IOSSyncPreview) {
+        updateRemoteSyncStatus { status in
+            status.lastDownloadAt = Self.currentEpochMillis()
+            status.setRemoteRevision(snapshot.remoteRevision, for: snapshot.provider)
+            status.deviceLabel = preview.manifest.deviceLabel
+            status.lastBackupVersionName = preview.manifest.appVersionName
+            status.lastBackupVersionCode = preview.manifest.appVersionCode
+            status.lastError = ""
+        }
+    }
+
+    func recordLocalRestore(preview: IOSSyncPreview) {
+        updateRemoteSyncStatus { status in
+            status.lastDownloadAt = Self.currentEpochMillis()
+            status.deviceLabel = preview.manifest.deviceLabel
+            status.lastBackupVersionName = preview.manifest.appVersionName
+            status.lastBackupVersionCode = preview.manifest.appVersionCode
+            status.lastError = ""
+        }
+    }
+
+    func recordRemoteSyncError(_ error: Error) {
+        updateRemoteSyncStatus { status in
+            status.lastError = error.localizedDescription
+        }
+    }
+
+    private static func currentEpochMillis() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1000)
     }
 
     private static func decodeSettings(_ json: String) throws -> Settings {
@@ -182,13 +241,14 @@ final class IOSSharedSettingsStore {
     ///
     /// [Slice 4] Now merges a real SearchServiceOptions subtype (built by
     /// `IosSettingsMutations.buildSearchService`) into `snapshot.searchServices`
-    /// via `addSearchService`, then `restoreSnapshot`. Survives restart.
+    /// via `addSearchServiceAndSelect`, then `restoreSnapshot`. Survives
+    /// restart and immediately becomes the selected/enabled iOS search route.
     func addSearchProvider(name: String, apiKey: String = "", serviceType: String = "") {
         let service = IosSettingsMutations.shared.buildSearchService(
             serviceType: serviceType.isEmpty ? "tavily" : serviceType,
             apiKey: apiKey
         )
-        let merged = IosSettingsMutations.shared.addSearchService(settings: snapshot, service: service)
+        let merged = IosSettingsMutations.shared.addSearchServiceAndSelect(settings: snapshot, service: service)
         restoreSnapshot(merged)
         var providers = savedSearchProviders
         providers.append([
@@ -230,7 +290,7 @@ final class IOSSharedSettingsStore {
     /// `snapshot.ttsProviders` via `buildOpenAITtsProvider` + `addTtsProvider`,
     /// then `restoreSnapshot`. Survives restart. Only engineType == "openai"
     /// builds a real provider; other types fall back to legacy mirror only
-    /// (honest — their markers stay 待接).
+    /// with honest UI labels.
     func addTtsEngine(name: String, engineType: String, apiKey: String = "", model: String = "") {
         if engineType.lowercased() == "openai" {
             let provider = IosSettingsMutations.shared.buildOpenAITtsProvider(
@@ -342,6 +402,37 @@ final class IOSSharedSettingsStore {
         }
     }
 
+    // MARK: - Skill enablement write-back
+
+    var currentAssistantEnabledSkillNames: Set<String> {
+        Set(IosSettingsMutations.shared.currentAssistantEnabledSkillNames(settings: snapshot))
+    }
+
+    func isSkillEnabled(_ name: String) -> Bool {
+        currentAssistantEnabledSkillNames.contains(name)
+    }
+
+    func setSkillEnabled(name: String, enabled: Bool) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let merged = IosSettingsMutations.shared.setSkillEnabledForCurrentAssistant(
+            settings: snapshot,
+            skillName: trimmed,
+            enabled: enabled
+        )
+        restoreSnapshot(merged)
+    }
+
+    func removeSkillFromAllAssistants(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let merged = IosSettingsMutations.shared.removeSkillFromAllAssistants(
+            settings: snapshot,
+            skillName: trimmed
+        )
+        restoreSnapshot(merged)
+    }
+
     // MARK: - Real seeded collections (for UI display)
 
     /// Real KMP default TTS providers (DEFAULT_TTS_PROVIDERS), seeded + de-duplicated.
@@ -404,4 +495,51 @@ final class IOSSharedSettingsStore {
     var suggestionModelId: KotlinUuid { snapshot.suggestionModelId }
     var ocrModelId: KotlinUuid { snapshot.ocrModelId }
     var compressModelId: KotlinUuid { snapshot.compressModelId }
+}
+
+struct IOSRemoteSyncStatus: Codable, Equatable {
+    var lastUploadAt: Int64 = 0
+    var lastDownloadAt: Int64 = 0
+    var remoteRevision: String = ""
+    var provider: IOSRemoteProviderKind = .localFolder
+    var providerRevisions: [String: String] = [:]
+    var deviceLabel: String = ""
+    var lastBackupVersionName: String = ""
+    var lastBackupVersionCode: Int64 = 0
+    var lastError: String = ""
+
+    init() {}
+
+    func remoteRevision(for provider: IOSRemoteProviderKind) -> String {
+        providerRevisions[provider.rawValue] ?? (self.provider == provider ? remoteRevision : "")
+    }
+
+    func scoped(to provider: IOSRemoteProviderKind) -> IOSRemoteSyncStatus {
+        var scoped = self
+        scoped.provider = provider
+        scoped.remoteRevision = remoteRevision(for: provider)
+        return scoped
+    }
+
+    mutating func setRemoteRevision(_ revision: String, for provider: IOSRemoteProviderKind) {
+        self.provider = provider
+        self.remoteRevision = revision
+        providerRevisions[provider.rawValue] = revision
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.lastUploadAt = try container.decodeIfPresent(Int64.self, forKey: .lastUploadAt) ?? 0
+        self.lastDownloadAt = try container.decodeIfPresent(Int64.self, forKey: .lastDownloadAt) ?? 0
+        self.remoteRevision = try container.decodeIfPresent(String.self, forKey: .remoteRevision) ?? ""
+        self.provider = try container.decodeIfPresent(IOSRemoteProviderKind.self, forKey: .provider) ?? .localFolder
+        self.providerRevisions = try container.decodeIfPresent([String: String].self, forKey: .providerRevisions) ?? [:]
+        if !remoteRevision.isEmpty, providerRevisions[provider.rawValue] == nil {
+            providerRevisions[provider.rawValue] = remoteRevision
+        }
+        self.deviceLabel = try container.decodeIfPresent(String.self, forKey: .deviceLabel) ?? ""
+        self.lastBackupVersionName = try container.decodeIfPresent(String.self, forKey: .lastBackupVersionName) ?? ""
+        self.lastBackupVersionCode = try container.decodeIfPresent(Int64.self, forKey: .lastBackupVersionCode) ?? 0
+        self.lastError = try container.decodeIfPresent(String.self, forKey: .lastError) ?? ""
+    }
 }

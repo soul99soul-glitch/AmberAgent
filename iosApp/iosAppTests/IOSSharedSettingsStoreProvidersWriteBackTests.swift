@@ -147,6 +147,17 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         let added = store.snapshot.searchServices.last as? SearchServiceOptions.TavilyOptions
         XCTAssertNotNil(added, "serviceType tavily must build a TavilyOptions")
         XCTAssertEqual(added?.apiKey, "tvly-test")
+        let addedId = added?.id.description()
+        XCTAssertNotNil(addedId)
+        XCTAssertEqual(
+            Int(store.snapshot.searchServiceSelected),
+            store.snapshot.searchServices.count - 1,
+            "newly added search provider should become the selected default provider"
+        )
+        XCTAssertTrue(
+            addedId.map { id in store.snapshot.searchEnabledServiceIds.contains { $0.description() == id } } ?? false,
+            "newly added search provider should be enabled for execution"
+        )
     }
 
     func testAddedSearchProviderSurvivesRestart() {
@@ -161,6 +172,31 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
             countBeforeRestart,
             "Added search service must survive restart"
         )
+    }
+
+    func testAddAmberAgentSearchProviderBuildsMatchingSubtype() {
+        let store = makeIsolatedStore()
+
+        store.addSearchProvider(name: "AmberAgent", apiKey: "amber-search", serviceType: "amber_agent")
+
+        let added = store.snapshot.searchServices.last as? SearchServiceOptions.AmberAgentSearchOptions
+        XCTAssertNotNil(added, "serviceType amber_agent must build AmberAgentSearchOptions, not fallback to Tavily")
+        XCTAssertEqual(added?.apiKey, "amber-search")
+    }
+
+    func testSearchProviderBuilderCoversMenuOnlyTypes() {
+        let store = makeIsolatedStore()
+
+        store.addSearchProvider(name: "SearXNG", serviceType: "searxng")
+        XCTAssertTrue(
+            store.snapshot.searchServices.last is SearchServiceOptions.SearXNGOptions,
+            "serviceType searxng must build SearXNGOptions, not fallback to Tavily"
+        )
+
+        store.addSearchProvider(name: "Ollama", apiKey: "ollama-key", serviceType: "ollama")
+        let ollama = store.snapshot.searchServices.last as? SearchServiceOptions.OllamaOptions
+        XCTAssertNotNil(ollama, "serviceType ollama must build OllamaOptions, not fallback to Tavily")
+        XCTAssertEqual(ollama?.apiKey, "ollama-key")
     }
 
     func testRemoveSearchProviderDoesNotResurrectAfterRestart() {

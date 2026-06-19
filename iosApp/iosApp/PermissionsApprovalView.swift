@@ -8,7 +8,8 @@ struct PermissionsApprovalView: View {
 
     private var approvalCapabilities: [IOSPlatformCapability] {
         [
-            "ios.files.selected_read"
+            "ios.files.selected_read",
+            "ios.webmount.browser"
         ].compactMap { id in
             IOSCapabilityRegistry.capabilities.first { $0.id == id }
         }
@@ -105,7 +106,7 @@ struct PermissionsApprovalView: View {
                 }
             }
 
-            Text("当前只有 file_read_selected 这条 Agent 本地工具执行链会读取这里的策略。照片、定位、相机、通知等系统权限仍在完整能力页申请或查看；没有 iOS executor 的能力不会在这里承诺可自动批准。")
+            Text("当前 file_read_selected 与 WebMount 的安全 wm_* 工具会读取这里的策略。WebMount 仍受自己的全局开关、站点启用状态和 URL allowlist 限制；清除 session 必须来自前台用户动作。")
                 .font(.caption)
                 .foregroundStyle(AmberTheme.muted2)
                 .lineSpacing(2)

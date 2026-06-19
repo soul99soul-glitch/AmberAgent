@@ -94,7 +94,7 @@ struct AccountView: View {
                 AccountTextFieldRow(title: "昵称", placeholder: "输入你的称呼", text: $displayName)
             }
 
-            Text("iOS 端尚未接入账户资料存储；这里仅预览本页称呼和头像。")
+            Text("iOS 端缺账户资料存储桥；这里仅预览本页称呼和头像。")
                 .font(.caption)
                 .lineSpacing(3)
                 .foregroundStyle(AmberTheme.muted2)

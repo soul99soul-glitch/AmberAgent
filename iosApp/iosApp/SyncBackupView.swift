@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import Shared
 import UniformTypeIdentifiers
@@ -12,6 +13,23 @@ struct SyncBackupView: View {
     @State private var isExportingFile = false
     @State private var isImportingFile = false
     @State private var alert: SyncBackupAlert?
+    @State private var remoteStatus: IOSRemoteSyncStatus
+    @State private var providerKind: IOSRemoteProviderKind = .localFolder
+    @State private var remoteSnapshots: [IOSRemoteSnapshot] = []
+    @State private var selectedSnapshotID: String?
+    @State private var pendingRestore: IOSPendingSyncRestore?
+    @State private var pendingConflict: IOSSyncConflict?
+    @State private var isRemoteBusy = false
+    @State private var remoteMessage = ""
+    @State private var webDAVBaseURL = ""
+    @State private var webDAVPath = "AmberAgent"
+    @State private var webDAVUsername = ""
+    @State private var webDAVPassword = ""
+
+    init(sharedSettings: IOSSharedSettingsStore) {
+        self.sharedSettings = sharedSettings
+        self._remoteStatus = State(initialValue: sharedSettings.remoteSyncStatus)
+    }
 
     private var sync: SyncSettings { sharedSettings.snapshot.syncSettings }
 
@@ -45,47 +63,49 @@ struct SyncBackupView: View {
     }
 
     private var headerSubtitle: String {
-        "Settings JSON 加密导出/导入已接通 · 纯本地 AES-GCM"
+        "Settings JSON 加密归档 · Local/WebDAV 远端同步闭环"
     }
 
-    private let currentRows: [SyncBackupRow] = [
-        .init(
-            title: "Google 账号",
-            subtitle: "不读取 GoogleDriveAuthSession，也不恢复 Android syncSettings.googleAccountEmail。",
-            value: "执行待接",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "备份状态",
-            subtitle: "阶段 1 本地导出/导入不会写 Android lastUploadAt / lastDownloadAt；iOS 恢复本地 Settings 快照。",
-            value: "本地可用",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "上传 / 下载",
-            subtitle: "没有 Google OAuth、Drive AppData client、云端快照列表、冲突确认或恢复预览。",
-            value: "禁用",
-            color: AmberTheme.muted
-        ),
-        .init(
-            title: "自动同步",
-            subtitle: "不再写本地 @AppStorage；真实字段应来自 SyncSettings.autoSyncEnabled。",
-            value: "执行待接",
-            color: AmberTheme.accentAmber
-        ),
-        .init(
-            title: "加密口令",
-            subtitle: "PBKDF2WithHmacSHA256 210,000 次 + AES/GCM/NoPadding；留空时使用 Android NO_PASSPHRASE_FALLBACK。",
-            value: "已接通",
-            color: AmberTheme.accentGreen
-        ),
-        .init(
-            title: "本地导出 / 导入",
-            subtitle: "SwiftUI document exporter/importer 打开系统文件面板，读写 .amberbackup 文件。",
-            value: "已接通",
-            color: AmberTheme.accentGreen
-        )
-    ]
+    private var currentRows: [SyncBackupRow] {
+        [
+            .init(
+                title: "远端 provider",
+                subtitle: "Swift 原生 provider 协议已接：本机文件夹端到端；WebDAV 使用 URLSession/mockable transport；Google/S3 诚实未配置。",
+                value: providerKind.displayName,
+                color: providerKind == .localFolder || providerKind == .webDAV ? AmberTheme.accentGreen : AmberTheme.accentAmber
+            ),
+            .init(
+                title: "lastUploadAt",
+                subtitle: "iOS 侧 IOSRemoteSyncStatus 持久化镜像；不伪装成 KMP shared mutation。",
+                value: formatEpoch(remoteStatus.lastUploadAt),
+                color: remoteStatus.lastUploadAt > 0 ? AmberTheme.accentGreen : AmberTheme.muted2
+            ),
+            .init(
+                title: "lastDownloadAt",
+                subtitle: "只有显式 apply restore 成功后才更新；preview 不写 sharedSettings。",
+                value: formatEpoch(remoteStatus.lastDownloadAt),
+                color: remoteStatus.lastDownloadAt > 0 ? AmberTheme.accentGreen : AmberTheme.muted2
+            ),
+            .init(
+                title: "remoteRevision",
+                subtitle: "Local folder 用 SHA-256；WebDAV 优先 ETag，上传后写回本机状态。",
+                value: providerRemoteRevision.isEmpty ? "(空)" : String(providerRemoteRevision.prefix(12)) + "...",
+                color: providerRemoteRevision.isEmpty ? AmberTheme.muted2 : AmberTheme.foreground2
+            ),
+            .init(
+                title: "lastError",
+                subtitle: "远端操作错误持久化，成功上传/恢复会清空。",
+                value: remoteStatus.lastError.isEmpty ? "无" : "有错误",
+                color: remoteStatus.lastError.isEmpty ? AmberTheme.accentGreen : AmberTheme.accentRed
+            ),
+            .init(
+                title: "加密口令",
+                subtitle: "PBKDF2WithHmacSHA256 210,000 次 + AES/GCM/NoPadding；留空时使用 Android NO_PASSPHRASE_FALLBACK。",
+                value: "已接通",
+                color: AmberTheme.accentGreen
+            )
+        ]
+    }
 
     private let archiveRows: [SyncBackupRow] = [
         .init(
@@ -114,6 +134,10 @@ struct SyncBackupView: View {
         )
     ]
 
+    private var providerRemoteRevision: String {
+        remoteStatus.remoteRevision(for: providerKind)
+    }
+
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
@@ -125,8 +149,11 @@ struct SyncBackupView: View {
                     VStack(spacing: 0) {
                         intro
                         localBackupSection
+                        remoteStatusSection
+                        remoteProviderSection
+                        remoteSnapshotSection
+                        restorePreviewSection
                         evidenceSection
-                        currentHandlingSection
                         archiveScopeSection
                         blockedSection
                     }
@@ -199,7 +226,7 @@ struct SyncBackupView: View {
     }
 
     private var intro: some View {
-        Text("阶段 1 已接通纯本地 Settings JSON 加密导出/导入：iOS 使用 KMP Settings 真实序列化，按 Android .amberbackup 结构写入 manifest.json + payload.enc，并用 PBKDF2WithHmacSHA256 + AES/GCM/NoPadding 加密。不会连接 Google Drive、WebDAV、S3，也不会上传任何数据。")
+        Text("iOS 现在使用 Android 兼容 .amberbackup 结构加密 Settings JSON，并在 Swift 侧接入远端 provider 协议。本机文件夹 provider 可端到端验证；WebDAV 需要用户自行填写测试配置并点击操作；Google Drive / S3 只显示未配置骨架。恢复必须先预览，再显式应用。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -230,7 +257,7 @@ struct SyncBackupView: View {
                         .buttonStyle(.borderedProminent)
 
                         Button(action: { isImportingFile = true }) {
-                            Label("导入备份", systemImage: "tray.and.arrow.down")
+                            Label("预览导入", systemImage: "doc.text.magnifyingglass")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
@@ -239,7 +266,237 @@ struct SyncBackupView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
             }
-            SyncBackupNote("导出内容是真实 KMP Settings JSON。导入会解密并恢复 iOS 本地 sharedSettings 快照；阶段 1 不包含 Room 表、文件树或云同步。")
+            SyncBackupNote("导出内容是真实 KMP Settings JSON。选择本地文件后只进入恢复预览；点击“应用恢复”才会写回 iOS sharedSettings。")
+        }
+    }
+
+    private var remoteStatusSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "远端同步状态")
+            AmberFormGroup {
+                ForEach(Array(currentRows.enumerated()), id: \.element.id) { index, row in
+                    SyncBackupStatusRow(row: row)
+                    if index < currentRows.count - 1 {
+                        SyncBackupDivider()
+                    }
+                }
+            }
+            if !remoteStatus.lastError.isEmpty {
+                SyncBackupNote("最近错误：\(remoteStatus.lastError)")
+            }
+        }
+    }
+
+    private var remoteProviderSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "远端 provider")
+            AmberFormGroup {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Provider", selection: $providerKind) {
+                        ForEach(IOSRemoteProviderKind.allCases) { kind in
+                            Text(kind.displayName).tag(kind)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if providerKind == .localFolder {
+                        Text(IOSLocalFolderSyncProvider.defaultFolderURL().path)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(3)
+                            .textSelection(.enabled)
+                    } else if providerKind == .webDAV {
+                        VStack(spacing: 8) {
+                            TextField("WebDAV Base URL", text: $webDAVBaseURL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            TextField("Path", text: $webDAVPath)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            TextField("Username", text: $webDAVUsername)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            SecureField("Password", text: $webDAVPassword)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                        .textFieldStyle(.roundedBorder)
+                    } else {
+                        Text("\(providerKind.displayName) provider skeleton 已保留，但没有 OAuth / S3 key 配置；不会伪装成可用云同步。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let conflict = pendingConflict {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("检测到远端冲突")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AmberTheme.accentAmber)
+                            Text("本机记录 \(String(conflict.localRevision.prefix(12)))...，远端最新 \(String(conflict.remoteSnapshot.remoteRevision.prefix(12)))...。继续上传会覆盖当前 provider 的最新快照。")
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(10)
+                        .background(AmberTheme.accentAmber.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await listRemoteSnapshots() }
+                        } label: {
+                            Label("列出快照", systemImage: "list.bullet.rectangle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isRemoteBusy)
+
+                        Button {
+                            Task { await uploadRemoteSnapshot(force: false) }
+                        } label: {
+                            Label("上传", systemImage: "icloud.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isRemoteBusy)
+                    }
+
+                    if pendingConflict != nil {
+                        Button {
+                            Task { await uploadRemoteSnapshot(force: true) }
+                        } label: {
+                            Label("确认覆盖上传", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AmberTheme.accentAmber)
+                        .disabled(isRemoteBusy)
+                    }
+
+                    if !remoteMessage.isEmpty {
+                        Text(remoteMessage)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+            }
+            SyncBackupNote("本机文件夹 provider 只写入本机 Documents/AmberRemoteSyncLocal。WebDAV 只有填写配置并点击操作时才发起请求；本轮不会自动上传任何真实数据。")
+        }
+    }
+
+    private var remoteSnapshotSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "远端快照")
+            AmberFormGroup {
+                if remoteSnapshots.isEmpty {
+                    Text(isRemoteBusy ? "正在读取..." : "暂无快照")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 13)
+                } else {
+                    ForEach(remoteSnapshots) { snapshot in
+                        Button {
+                            selectedSnapshotID = snapshot.id
+                        } label: {
+                            SyncRemoteSnapshotRow(
+                                snapshot: snapshot,
+                                isSelected: snapshot.id == selectedSnapshotID
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        if snapshot.id != remoteSnapshots.last?.id {
+                            SyncBackupDivider()
+                        }
+                    }
+                }
+            }
+
+            if selectedSnapshot != nil {
+                HStack(spacing: 10) {
+                    Button {
+                        Task { await downloadSelectedSnapshotForPreview() }
+                    } label: {
+                        Label("下载预览", systemImage: "icloud.and.arrow.down")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isRemoteBusy)
+
+                    Button {
+                        Task { await deleteSelectedSnapshot() }
+                    } label: {
+                        Label("删除快照", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AmberTheme.accentRed)
+                    .disabled(isRemoteBusy)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var restorePreviewSection: some View {
+        if let pendingRestore {
+            VStack(spacing: 0) {
+                AmberSectionLabel(text: "恢复预览")
+                AmberFormGroup {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(pendingRestore.sourceLabel)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text(restorePreviewText(pendingRestore.preview))
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !pendingRestore.preview.datasets.isEmpty {
+                            VStack(spacing: 6) {
+                                ForEach(pendingRestore.preview.datasets, id: \.id) { dataset in
+                                    HStack {
+                                        Text(dataset.id)
+                                            .font(.caption)
+                                            .foregroundStyle(AmberTheme.foreground2)
+                                        Spacer()
+                                        Text("\(dataset.recordCount) / \(ByteCountFormatter.string(fromByteCount: dataset.byteCount, countStyle: .file))")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(AmberTheme.muted)
+                                    }
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 10) {
+                            Button {
+                                applyPendingRestore()
+                            } label: {
+                                Label("应用恢复", systemImage: "checkmark.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button {
+                                self.pendingRestore = nil
+                            } label: {
+                                Label("取消", systemImage: "xmark.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                }
+                SyncBackupNote("预览阶段只解密读取 manifest、payload_manifest 和 Settings JSON；不会写入 sharedSettings。")
+            }
         }
     }
 
@@ -283,7 +540,7 @@ struct SyncBackupView: View {
                 }
             }
 
-            SyncBackupNote("Android BackupVM 在成功后写回 SyncSettings 的时间戳、版本、设备名和 lastError；iOS 当前没有读取或写回这些字段。")
+            SyncBackupNote("Android BackupVM 写回 KMP SyncSettings；iOS 本轮在 IOSRemoteSyncStatus 做本地持久化镜像，避免没有 shared mutation 时伪造 KMP 写回。")
         }
     }
 
@@ -291,7 +548,7 @@ struct SyncBackupView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "后续阶段")
             AmberFormGroup {
-                Text("阶段 1 只做本地 Settings JSON 加密备份。Google Drive OAuth、Drive AppData、WebDAV、S3、Room tables、文件树、恢复事务与冲突处理仍未接通，后续阶段再实现。")
+                Text("本轮远端同步覆盖 Settings JSON 快照闭环：本机文件夹可端到端验证，WebDAV 支持 PROPFIND/PUT/GET/DELETE 和 mockable transport。Google Drive OAuth、S3 签名配置、自动同步、Room tables、secrets 与文件树恢复仍未接通。")
                     .font(.caption)
                     .lineSpacing(4)
                     .foregroundStyle(AmberTheme.foreground2)
@@ -320,18 +577,180 @@ struct SyncBackupView: View {
         }
         do {
             let data = try Data(contentsOf: url)
-            let result = try IOSSyncBackup.import(data: data, passphrase: passphrase)
-            sharedSettings.restoreSnapshot(result.settings)
-            alert = .success("已导入 Settings 备份：\(result.preview.manifest.appVersionName)，\(ByteCountFormatter.string(fromByteCount: result.preview.sizeBytes, countStyle: .file))")
+            let preview = try IOSSyncBackup.restorePreview(data: data, passphrase: passphrase, fileName: url.lastPathComponent)
+            pendingRestore = IOSPendingSyncRestore(
+                sourceLabel: "本地文件：\(url.lastPathComponent)",
+                data: data,
+                snapshot: nil,
+                preview: preview
+            )
+            alert = .success("已读取备份预览，确认后可应用恢复。")
         } catch {
             alert = .error("导入失败：\(error.localizedDescription)")
         }
+    }
+
+    @MainActor
+    private func listRemoteSnapshots() async {
+        await runRemoteOperation(successMessage: "已读取远端快照列表") { provider in
+            let snapshots = try await provider.listSnapshots()
+            remoteSnapshots = snapshots
+            selectedSnapshotID = snapshots.first?.id
+            pendingConflict = nil
+        }
+    }
+
+    @MainActor
+    private func uploadRemoteSnapshot(force: Bool) async {
+        await runRemoteOperation(successMessage: "已上传远端快照") { provider in
+            let existing = try await provider.listSnapshots()
+            let scopedStatus = remoteStatus.scoped(to: provider.kind)
+            if !force, let conflict = IOSSyncConflictResolver.conflict(status: scopedStatus, remoteSnapshots: existing) {
+                remoteSnapshots = existing
+                selectedSnapshotID = conflict.remoteSnapshot.id
+                pendingConflict = conflict
+                remoteMessage = "上传已暂停：请先处理远端冲突。"
+                return
+            }
+
+            let data = try IOSSyncBackup.export(
+                settings: sharedSettings.snapshot,
+                passphrase: passphrase,
+                remoteRevision: scopedStatus.remoteRevision
+            )
+            let preview = try IOSSyncBackup.restorePreview(data: data, passphrase: passphrase)
+            let fileName = IOSRemoteSnapshot.fileName(for: preview.manifest)
+            let snapshot = try await provider.uploadSnapshot(data: data, fileName: fileName, manifest: preview.manifest)
+            sharedSettings.recordRemoteUpload(snapshot: snapshot, preview: preview)
+            refreshRemoteStatus()
+            pendingConflict = nil
+            remoteSnapshots = try await provider.listSnapshots()
+            selectedSnapshotID = snapshot.id
+        }
+    }
+
+    @MainActor
+    private func downloadSelectedSnapshotForPreview() async {
+        guard let snapshot = selectedSnapshot else { return }
+        await runRemoteOperation(successMessage: "已下载并解析恢复预览") { provider in
+            let data = try await provider.downloadSnapshot(snapshot)
+            let preview = try IOSSyncBackup.restorePreview(data: data, passphrase: passphrase, fileName: snapshot.fileName)
+            pendingRestore = IOSPendingSyncRestore(
+                sourceLabel: "\(snapshot.provider.displayName)：\(snapshot.fileName)",
+                data: data,
+                snapshot: snapshot,
+                preview: preview
+            )
+        }
+    }
+
+    @MainActor
+    private func deleteSelectedSnapshot() async {
+        guard let snapshot = selectedSnapshot else { return }
+        await runRemoteOperation(successMessage: "已删除远端快照") { provider in
+            try await provider.deleteSnapshot(snapshot)
+            remoteSnapshots.removeAll { $0.id == snapshot.id }
+            selectedSnapshotID = remoteSnapshots.first?.id
+            if pendingRestore?.snapshot?.id == snapshot.id {
+                pendingRestore = nil
+            }
+        }
+    }
+
+    private func applyPendingRestore() {
+        guard let pendingRestore else { return }
+        do {
+            let result = try IOSSyncBackup.import(data: pendingRestore.data, passphrase: passphrase)
+            sharedSettings.restoreSnapshot(result.settings)
+            if let snapshot = pendingRestore.snapshot {
+                sharedSettings.recordRemoteDownload(snapshot: snapshot, preview: result.preview)
+            } else {
+                sharedSettings.recordLocalRestore(preview: result.preview)
+            }
+            refreshRemoteStatus()
+            self.pendingRestore = nil
+            alert = .success("已应用 Settings 恢复：\(result.preview.manifest.appVersionName)")
+        } catch {
+            sharedSettings.recordRemoteSyncError(error)
+            refreshRemoteStatus()
+            alert = .error("恢复失败：\(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    private func runRemoteOperation(
+        successMessage: String,
+        operation: @MainActor (any IOSRemoteSyncProvider) async throws -> Void
+    ) async {
+        isRemoteBusy = true
+        remoteMessage = ""
+        defer { isRemoteBusy = false }
+        do {
+            let provider = try makeRemoteProvider()
+            try await operation(provider)
+            if remoteMessage.isEmpty {
+                remoteMessage = successMessage
+            }
+        } catch {
+            sharedSettings.recordRemoteSyncError(error)
+            refreshRemoteStatus()
+            remoteMessage = error.localizedDescription
+            alert = .error(error.localizedDescription)
+        }
+    }
+
+    private func makeRemoteProvider() throws -> any IOSRemoteSyncProvider {
+        switch providerKind {
+        case .localFolder:
+            return IOSLocalFolderSyncProvider()
+        case .webDAV:
+            let config = IOSWebDAVConfig(
+                baseURL: webDAVBaseURL,
+                path: webDAVPath,
+                username: webDAVUsername,
+                password: webDAVPassword
+            )
+            guard config.isConfigured else {
+                throw IOSSyncBackupError.providerNotConfigured("请先填写 WebDAV Base URL")
+            }
+            return IOSWebDAVSyncProvider(config: config)
+        case .googleDrive:
+            return IOSUnavailableRemoteSyncProvider(kind: .googleDrive, reason: "iOS Google OAuth / Drive AppData 未配置")
+        case .s3:
+            return IOSUnavailableRemoteSyncProvider(kind: .s3, reason: "iOS S3 endpoint、bucket 与签名密钥未配置")
+        }
+    }
+
+    private var selectedSnapshot: IOSRemoteSnapshot? {
+        remoteSnapshots.first { $0.id == selectedSnapshotID } ?? remoteSnapshots.first
+    }
+
+    private func refreshRemoteStatus() {
+        remoteStatus = sharedSettings.remoteSyncStatus
+    }
+
+    private func restorePreviewText(_ preview: IOSSyncPreview) -> String {
+        [
+            "版本 \(preview.manifest.appVersionName) (\(preview.manifest.appVersionCode))",
+            "设备 \(preview.manifest.deviceLabel.isEmpty ? "未知设备" : preview.manifest.deviceLabel)",
+            "模式 \(preview.manifest.mode)",
+            formatEpoch(preview.manifest.createdAt),
+            ByteCountFormatter.string(fromByteCount: preview.sizeBytes, countStyle: .file),
+            preview.manifest.passphraseProtected ? "需要口令" : "无口令 fallback",
+        ].joined(separator: " · ")
     }
 
     private func exportFileStamp() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         return formatter.string(from: Date())
+    }
+
+    private func formatEpoch(_ millis: Int64) -> String {
+        guard millis > 0 else { return "暂无" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(millis) / 1000))
     }
 }
 
@@ -341,6 +760,62 @@ private struct SyncBackupRow: Identifiable {
     let subtitle: String
     let value: String
     let color: Color
+}
+
+private struct IOSPendingSyncRestore {
+    let sourceLabel: String
+    let data: Data
+    let snapshot: IOSRemoteSnapshot?
+    let preview: IOSSyncPreview
+}
+
+private struct SyncRemoteSnapshotRow: View {
+    let snapshot: IOSRemoteSnapshot
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(isSelected ? AmberTheme.accentGreen : AmberTheme.muted2)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(snapshot.fileName)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text(snapshotSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(ByteCountFormatter.string(fromByteCount: snapshot.sizeBytes, countStyle: .file))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(isSelected ? AmberTheme.accentGreen.opacity(0.08) : Color.clear)
+    }
+
+    private var snapshotSubtitle: String {
+        let device = snapshot.deviceLabel.isEmpty ? snapshot.provider.displayName : snapshot.deviceLabel
+        return [
+            device,
+            formatEpoch(snapshot.createdAt),
+            snapshot.remoteRevision.isEmpty ? "" : String(snapshot.remoteRevision.prefix(12)) + "...",
+        ].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func formatEpoch(_ millis: Int64) -> String {
+        guard millis > 0 else { return "未知时间" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(millis) / 1000))
+    }
 }
 
 private struct SyncBackupStatusRow: View {

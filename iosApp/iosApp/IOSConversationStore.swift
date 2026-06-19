@@ -223,7 +223,60 @@ final class IOSConversationStore {
         currentConversation?.currentMessages as? [UIMessage] ?? []
     }
 
+    /// Read-only export for iOS Board chat-history collection.
+    ///
+    /// This does not switch `currentConversation`, bump `currentRevision`, mutate metadata,
+    /// or write back to disk. It loads recent conversations by summary id and returns a
+    /// compact tail window for the Board collector's local heuristics.
+    func boardSignalCandidates(limit: Int = 30) async -> [IOSBoardConversationCandidate] {
+        let sourceSummaries: [ConversationSummary]
+        if summaries.isEmpty {
+            sourceSummaries = (try? await storage.listSummaries()) ?? []
+        } else {
+            sourceSummaries = summaries
+        }
+
+        var candidates: [IOSBoardConversationCandidate] = []
+        for summary in sourceSummaries.prefix(max(limit, 0)) {
+            guard let conversation = try? await storage.loadConversation(id: summary.id) else { continue }
+            let title = conversation.title.isEmpty ? summary.title : conversation.title
+            let tailNodes = Array(conversation.messageNodes.suffix(6))
+            let tailTexts = tailNodes.flatMap { node in
+                let messages = node.messages as? [UIMessage] ?? []
+                return messages.compactMap { message -> String? in
+                    let text = message.toText().trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { return nil }
+                    return "\(Self.boardRoleName(message.role)): \(String(text.prefix(500)))"
+                }
+            }
+
+            let fallbackMessages = conversation.currentMessages as? [UIMessage] ?? []
+            let fallbackTexts = fallbackMessages.compactMap { message -> String? in
+                let text = message.toText().trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                return "\(Self.boardRoleName(message.role)): \(String(text.prefix(500)))"
+            }
+
+            candidates.append(IOSBoardConversationCandidate(
+                id: String(describing: conversation.id),
+                title: title.isEmpty ? "未命名对话" : title,
+                updateAt: conversation.updateAt.toEpochMilliseconds(),
+                nodeCount: conversation.messageNodes.count,
+                tailTexts: tailTexts.isEmpty ? fallbackTexts : tailTexts
+            ))
+        }
+        return candidates
+    }
+
     // MARK: - Private helpers
+
+    private static func boardRoleName(_ role: MessageRole) -> String {
+        if role == MessageRole.user { return "user" }
+        if role == MessageRole.assistant { return "assistant" }
+        if role == MessageRole.system { return "system" }
+        if role == MessageRole.tool { return "tool" }
+        return String(describing: role).lowercased()
+    }
 
     /// 替换 currentConversation 并 bump 修订号（驱动 SwiftUI onChange reload）。
     private func setCurrent(_ conversation: Conversation?) {
@@ -249,3 +302,5 @@ final class IOSConversationStore {
         }
     }
 }
+
+extension IOSConversationStore: IOSBoardConversationSignalSource {}
