@@ -16,6 +16,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,14 +44,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
-import app.amber.feature.ui.hooks.ImeLazyListAutoScroller
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -58,7 +59,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
+import app.amber.feature.ui.hooks.ImeLazyListAutoScroller
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -129,15 +138,61 @@ fun CouncilTimelineTab(
     val isStreaming = remember(room.messages) {
         room.messages.any { it.status.running }
     }
-    // Length of the currently-streaming message's text. This changes on every
-    // chunk (the manager mutates an existing message in place rather than
-    // appending), so it is the key that makes auto-scroll re-fire mid-stream.
-    val streamingTail = room.messages.lastOrNull { it.status.running }?.text?.length ?: 0
+    // A token that changes whenever the streaming content actually changes
+    // (message count OR the running message's text length). Used as a
+    // LaunchedEffect key to *request* a follow — but the request goes through a
+    // conflate'd SharedFlow (one scroll per frame max), NOT a direct scroll,
+    // which is what stops the per-chunk jitter the old `streamingTail`-keyed
+    // effect caused.
+    val streamingChangeToken = remember(room.messages) {
+        val running = room.messages.lastOrNull { it.status.running }
+        "${room.messages.size}#${running?.text?.length ?: 0}"
+    }
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var followStreaming by remember { mutableStateOf(true) }
-    var programmaticFollowScroll by remember { mutableStateOf(false) }
+
+    // ── Three-state follow mode (mirrors chat's TimelineFollowMode) ─────────
+    // Idle: not streaming, no follow needed.
+    // FollowingBottom: stick to the bottom; content growth scrolls to keep tail pinned.
+    // PausedForUser: the user dragged away; stay put until they scroll back to bottom.
+    // The sticky PausedForUser state is the key fix: the old bool `followStreaming`
+    // couldn't tell "programmatic scroll in progress" from "user dragged away", so
+    // isScrollInProgress races flipped it off mid-stream → the jitter the user saw.
+    var followMode by remember { mutableStateOf(CouncilFollowMode.Idle) }
+
+    // Token counter so overlapping programmatic scrolls don't clear the flag
+    // out from under each other (mirrors chat's programmaticScrollToken). An
+    // older `endProgrammaticScroll` whose token no longer matches is a no-op,
+    // so a fast follow-up follow can't prematurely mark "done scrolling".
+    var programmaticScrollToken by remember { mutableIntStateOf(0) }
+    var programmaticScrollInProgress by remember { mutableStateOf(false) }
+
+    // Ground-truth user gesture detection. `isScrollInProgress` fires for BOTH
+    // user drags and our own scrollBy; only a real pointer-down in the list
+    // proves the user initiated it. Mirrors chat's pointerInput/awaitFirstDown.
+    var userScrollInTimeline by remember { mutableStateOf(false) }
+    var userDragInTimeline by remember { mutableStateOf(false) }
+
+    // Token captured by the IME auto-scroller's start so its end callback can
+    // release the programmatic-scroll flag via endProgrammaticScroll(token).
+    // Stored (not discarded) so a cancelled/replaced scroll still pairs cleanly
+    // — if we discarded it (the old buggy approach) and the start's launch got
+    // cancelled, programmaticScrollInProgress would stick at true and the
+    // PausedForUser → FollowingBottom recovery would never re-arm.
+    var imeScrollToken by remember { mutableIntStateOf(0) }
+
+    // One-shot event flow: a streaming chunk requests "please follow", and the
+    // collector drains at most one per frame (conflate + DROP_OLDEST). This
+    // replaces the old per-chunk LaunchedEffect restart, which fired scrollBy
+    // once per chunk with no coalescing — the direct cause of the jitter.
+    val followEvents = remember(room.conversationId) {
+        MutableSharedFlow<String>(
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+    }
+
     // Match the main chat: about one CJK text line. The explicit follow state
     // keeps streaming growth from disabling follow, so the buffer can stay tight.
     val bottomFollowBufferPx = with(LocalDensity.current) { 24.dp.toPx().toInt() }
@@ -177,46 +232,121 @@ fun CouncilTimelineTab(
         return (contentBottom - info.viewportEndOffset).coerceAtLeast(0)
     }
 
-    suspend fun scrollToBottom() {
-        val total = listState.layoutInfo.totalItemsCount
-        if (total == 0) return
-        val distance = distanceToBottomPx()
-        if (distance == null) {
-            listState.scrollToItem(total - 1)
+    fun beginProgrammaticScroll(): Int {
+        val token = programmaticScrollToken + 1
+        programmaticScrollToken = token
+        programmaticScrollInProgress = true
+        return token
+    }
+
+    fun endProgrammaticScroll(token: Int) {
+        scope.launch {
+            // One frame is enough for the isScrollInProgress flicker right after
+            // scrollBy settles to clear; matching the chat's M0.3 reasoning. The
+            // token check prevents an older follow's end from clobbering a newer
+            // one's "still scrolling" flag.
             withFrameNanos { }
-            val settleDistance = distanceToBottomPx()
-            if (settleDistance != null && settleDistance > 0) {
-                listState.scrollBy(settleDistance.toFloat())
-            }
-        } else if (distance > 0) {
-            listState.scrollBy(distance.toFloat())
-        }
-    }
-
-    // ── Streaming bottom-follow ────────────────────────────────────────────
-    // Track whether the user still wants the tail pinned. Content growth can make
-    // isAtBottom false before we get a chance to scroll; only a real scroll in
-    // progress should pause follow.
-    LaunchedEffect(listState, isStreaming) {
-        snapshotFlow { listState.layoutInfo }.collect {
-            val atBottom = isAtBottom(bottomFollowBufferPx)
-            when {
-                atBottom -> followStreaming = true
-                !isStreaming -> followStreaming = false
-                listState.isScrollInProgress && !programmaticFollowScroll -> followStreaming = false
+            if (programmaticScrollToken == token) {
+                programmaticScrollInProgress = false
             }
         }
     }
 
-    LaunchedEffect(entries.size, streamingTail, isStreaming, followStreaming) {
-        if (!isStreaming || !followStreaming) return@LaunchedEffect
-        withFrameNanos { }
-        if (!isStreaming || !followStreaming || listState.isScrollInProgress) return@LaunchedEffect
-        programmaticFollowScroll = true
+    suspend fun scrollToBottom() {
+        val token = beginProgrammaticScroll()
         try {
-            scrollToBottom()
+            val total = listState.layoutInfo.totalItemsCount
+            if (total == 0) return
+            val distance = distanceToBottomPx()
+            if (distance == null) {
+                listState.scrollToItem(total - 1)
+                withFrameNanos { }
+                val settleDistance = distanceToBottomPx()
+                if (settleDistance != null && settleDistance > 0) {
+                    listState.scrollBy(settleDistance.toFloat())
+                }
+            } else if (distance > 0) {
+                listState.scrollBy(distance.toFloat())
+            }
         } finally {
-            programmaticFollowScroll = false
+            endProgrammaticScroll(token)
+        }
+    }
+
+    fun bottomFollowAllowed(): Boolean =
+        followMode == CouncilFollowMode.FollowingBottom && !userScrollInTimeline
+
+    // ── Streaming bottom-follow (mirrors chat's follow state machine) ───────
+    LaunchedEffect(isStreaming) {
+        if (isStreaming) {
+            // Streaming started: arm follow if we're already near the bottom.
+            if (isAtBottom(bottomFollowBufferPx)) {
+                followMode = CouncilFollowMode.FollowingBottom
+            }
+        } else {
+            // Streaming just ended. Mirror the chat page's "generation-end"
+            // settle: if we were following, fire one last bottom-follow so the
+            // final chunk's tail (often left 1-2 lines below the fold by the
+            // last incremental scrollBy) gets pulled fully into view. Only THEN
+            // relax to Idle — emitting before the mode flip keeps
+            // bottomFollowAllowed() true for the collector. Without this, the
+            // last lines of a finished turn can sit partially hidden until the
+            // user scrolls manually.
+            val wasFollowing = followMode == CouncilFollowMode.FollowingBottom
+            if (wasFollowing) {
+                followEvents.tryEmit("generation-end")
+            }
+            followMode = CouncilFollowMode.Idle
+        }
+    }
+
+    // The single scroll executor: one collector, conflate'd, so a burst of
+    // follow requests in the same frame coalesces into one scrollBy. This is
+    // the core anti-jitter fix — the old code re-launched a new scroll per chunk.
+    LaunchedEffect(followEvents, room.conversationId) {
+        followEvents.conflate().collect { reason ->
+            if (!bottomFollowAllowed()) return@collect
+            withFrameNanos { }
+            if (bottomFollowAllowed()) {
+                scrollToBottom()
+            }
+        }
+    }
+
+    // Content-changed → request a follow (emit, not scroll). The collector above
+    // drains and coalesces. Keyed on streamingChangeToken so it only fires when
+    // the streaming tail actually grew, not on every unrelated recomposition.
+    LaunchedEffect(streamingChangeToken, room.conversationId, isStreaming) {
+        if (!isStreaming) return@LaunchedEffect
+        if (bottomFollowAllowed()) {
+            followEvents.tryEmit("chunk")
+        }
+    }
+
+    // User-gesture vs programmatic-scroll disambiguation. This is the other half
+    // of the jitter fix: `isScrollInProgress` alone can't tell our scrollBy from a
+    // user drag, so we tag real pointer-downs here and gate the pause on that.
+    // Mirrors chat's LaunchedEffect(isScrollInProgress, userDragInTimeline).
+    LaunchedEffect(listState.isScrollInProgress, userDragInTimeline) {
+        if (listState.isScrollInProgress) {
+            val userDriven = userScrollInTimeline &&
+                (!programmaticScrollInProgress || userDragInTimeline)
+            if (userDriven && followMode == CouncilFollowMode.FollowingBottom) {
+                followMode = CouncilFollowMode.PausedForUser
+            }
+        } else {
+            // M0.3-style gate: only decide "user released at bottom → resume follow"
+            // when we were actually PausedForUser. A programmatic scroll that just
+            // ended (followMode still FollowingBottom) must NOT be misread as a
+            // user release — that was the old code's race and the root of the jitter.
+            if (!programmaticScrollInProgress &&
+                followMode == CouncilFollowMode.PausedForUser
+            ) {
+                if (isAtBottom(bottomFollowBufferPx)) {
+                    followMode = CouncilFollowMode.FollowingBottom
+                }
+                // else: user released away from bottom → stay PausedForUser.
+            }
         }
     }
 
@@ -241,24 +371,26 @@ fun CouncilTimelineTab(
     ImeLazyListAutoScroller(
         lazyListState = listState,
         shouldScroll = {
-            // Scroll on IME rise while following the bottom (same rule as the
-            // streaming follow), OR whenever an ask_user card needs to be kept
-            // on screen — the latter applies even when the user has scrolled up
-            // and paused the streaming follow, because the question is the only
-            // actionable control at that moment.
-            followStreaming || hasPendingAskUser ||
+            // Scroll on IME rise while following the bottom, OR whenever an
+            // ask_user card needs to be kept on screen — the latter applies even
+            // when the user has scrolled up (PausedForUser), because the question
+            // is the only actionable control at that moment.
+            followMode == CouncilFollowMode.FollowingBottom || hasPendingAskUser ||
                 isAtBottom(bottomFollowBufferPx)
         },
-        // Shared with the streaming bottom-follow above on purpose: this flag
-        // marks "a programmatic scroll is in flight" so the user-scroll detector
-        // (line ~206) doesn't mistake it for a manual scroll and pause follow.
-        // LazyListState serializes scrollBy calls, so the two sources never truly
-        // overlap; the start/end pairing stays balanced.
-        onProgrammaticScrollStart = { programmaticFollowScroll = true },
-        onProgrammaticScrollEnd = { programmaticFollowScroll = false },
+        onProgrammaticScrollStart = {
+            // Capture the token so end can release the flag via the same
+            // endProgrammaticScroll(token) path the streaming follow uses.
+            // Mirrors chat's imeProgrammaticScrollToken pairing.
+            imeScrollToken = beginProgrammaticScroll()
+        },
+        onProgrammaticScrollEnd = {
+            endProgrammaticScroll(imeScrollToken)
+            imeScrollToken = 0
+        },
     )
     // Who is mid-turn — drives the live "正在发言" strip above the composer.
-    val speaking = remember(room.participants, streamingTail) {
+    val speaking = remember(room.participants, streamingChangeToken) {
         room.participants.firstOrNull { it.status == CouncilParticipantStatus.SPEAKING }
     }
 
@@ -272,7 +404,30 @@ fun CouncilTimelineTab(
     Column(modifier = modifier) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                // Tag real user pointer-downs BEFORE the scroll-progress effect
+                // runs, so isScrollInProgress can't be misread as user-driven
+                // during our own follow scrollBy. Initial pass = earliest point
+                // we can observe the gesture. Mirrors the chat page's pointerInput.
+                .pointerInput(room.conversationId) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        userScrollInTimeline = true
+                        userDragInTimeline = false
+                        try {
+                            do {
+                                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                                if (event.changes.any { it.positionChange().getDistance() > 0.5f }) {
+                                    userDragInTimeline = true
+                                }
+                            } while (event.changes.any { it.pressed })
+                        } finally {
+                            userScrollInTimeline = false
+                            userDragInTimeline = false
+                        }
+                    }
+                },
             // Extra bottom headroom so the streaming tail (and a freshly appended
             // line) stays comfortably above the composer instead of hugging the edge.
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 64.dp),
@@ -284,13 +439,17 @@ fun CouncilTimelineTab(
                 }
             }
             items(items = entries, key = { it.key }) { entry ->
-                // animateItem gives every new turn the design's "rise" entrance
-                // (fade + settle) and smoothly reflows neighbours on insertion.
-                // On top of that, a user message that arrives after the room is
-                // open gets a one-shot scale "pop" from its trailing edge — the
-                // same send feedback as the main chat. firstAppearance is false
-                // for history (pre-seeded) and for items scrolled back into view,
-                // so neither replays the pop.
+                // A user message that arrives after the room is open gets a one-shot
+                // scale "pop" from its trailing edge — the same send feedback as the
+                // main chat. firstAppearance is false for history (pre-seeded) and
+                // for items scrolled back into view, so neither replays the pop.
+                //
+                // We deliberately do NOT use Modifier.animateItem() here. The chat
+                // page avoids it too: animateItem's placement animation chases the
+                // per-frame auto-scroll during streaming and the two fight, which
+                // reads as flicker/jitter at the anchor point. The pop is done with
+                // a pure graphicsLayer scale (no layout slot change), so it doesn't
+                // interfere with scroll placement at all.
                 val isUserMsg = entry is TimelineEntry.Message &&
                     entry.msg.authorId == COUNCIL_ROOM_USER_ID
                 val firstAppearance = remember(entry.key) { entry.key !in poppedKeys }
@@ -308,11 +467,6 @@ fun CouncilTimelineTab(
                         )
                     }
                 }
-                // The actively-streaming message must NOT use animateItem: its
-                // placement animation chases the per-frame auto-scroll and the two
-                // fight, which reads as a flicker at the anchor point. Landed turns
-                // and phase markers keep the "rise" entrance / reflow.
-                val isStreamingMsg = entry is TimelineEntry.Message && entry.msg.status.running
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -321,8 +475,7 @@ fun CouncilTimelineTab(
                             scaleY = popScale.value
                             // User bubble is right-aligned; pop from its trailing edge.
                             transformOrigin = TransformOrigin(1f, 0.5f)
-                        }
-                        .then(if (isStreamingMsg) Modifier else Modifier.animateItem()),
+                        },
                 ) {
                     when (entry) {
                         is TimelineEntry.Phase -> PhaseDivider(entry.marker)
@@ -339,10 +492,28 @@ fun CouncilTimelineTab(
                                     onAnswer = { answer -> vm?.resumeAfterUserAnswer(answer) },
                                 )
                             } else {
+                                // Only the actively-streaming turn drives bottom-follow,
+                                // and it does so off the renderer's frame-release callback
+                                // (onStreamingVisibleFrame) so scroll stays in phase with
+                                // the characters actually appearing on screen, not the raw
+                                // text length. The lambdas close over followEvents /
+                                // followMode, which live in this composable's scope, so
+                                // they must be built here and threaded down to MessageBubble.
+                                val isStreamingTurn = entry.msg.status == CouncilMessageStatus.STREAMING
                                 TimelineMessageRow(
                                     msg = entry.msg,
                                     room = room,
                                     isTopic = entry.msg.id == topicMessageId,
+                                    onStreamingVisibleFrame = if (isStreamingTurn) {
+                                        { followEvents.tryEmit("visible") }
+                                    } else null,
+                                    onStreamingVisualActiveChange = if (isStreamingTurn) {
+                                        { active ->
+                                            if (active && followMode == CouncilFollowMode.FollowingBottom) {
+                                                followEvents.tryEmit("visual-active")
+                                            }
+                                        }
+                                    } else null,
                                 )
                             }
                         }
@@ -523,7 +694,13 @@ private fun PhaseDivider(marker: CouncilPhaseMarker) {
 }
 
 @Composable
-private fun TimelineMessageRow(msg: CouncilMessage, room: CouncilRoom, isTopic: Boolean) {
+private fun TimelineMessageRow(
+    msg: CouncilMessage,
+    room: CouncilRoom,
+    isTopic: Boolean,
+    onStreamingVisibleFrame: (() -> Unit)? = null,
+    onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
+) {
     val isUser = msg.authorId == COUNCIL_ROOM_USER_ID
     val isHost = msg.authorId == COUNCIL_ROOM_HOST_ID
     val chatTheme = LocalChatTheme.current
@@ -634,6 +811,11 @@ private fun TimelineMessageRow(msg: CouncilMessage, room: CouncilRoom, isTopic: 
                     else -> chatTheme.surfaceEdge
                 },
                 shape = bubbleShape,
+                // Forwarded from CouncilTimelineTab: only the actively-streaming
+                // turn supplies non-null callbacks, so the renderer's frame
+                // release drives bottom-follow in phase with visible characters.
+                onStreamingVisibleFrame = onStreamingVisibleFrame,
+                onStreamingVisualActiveChange = onStreamingVisualActiveChange,
             )
             ReferenceFootnotes(msg, room, alignEnd = false)
         }
@@ -722,6 +904,8 @@ private fun MessageBubble(
     content: Color,
     borderColor: Color,
     shape: Shape = RoundedCornerShape(18.dp),
+    onStreamingVisibleFrame: (() -> Unit)? = null,
+    onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
     val streaming = msg.status == CouncilMessageStatus.STREAMING
@@ -739,6 +923,12 @@ private fun MessageBubble(
                     streaming = streaming,
                     deferStreamingParse = streaming,
                     style = TextStyle(color = content),
+                    // Forward the streaming frame callbacks so the timeline's
+                    // bottom-follow stays in lockstep with what the renderer
+                    // actually shows (each released frame → follow), instead of
+                    // chasing raw text length which leads the display buffer.
+                    onStreamingVisibleFrame = onStreamingVisibleFrame,
+                    onStreamingVisualActiveChange = onStreamingVisualActiveChange,
                 )
             } else if (streaming) {
                 StreamingPlaceholder()
@@ -918,4 +1108,24 @@ private fun CouncilAskUserCard(
             }
         }
     }
+}
+
+/**
+ * Three-state bottom-follow mode for the council timeline, mirroring the chat
+ * page's TimelineFollowMode. The sticky [PausedForUser] state is what lets us
+ * tell a programmatic follow-scroll from a real user drag — the core fix for
+ * the old bool-flag jitter.
+ */
+private enum class CouncilFollowMode {
+    /** Not streaming; no auto-follow needed. */
+    Idle,
+
+    /** Stick to the bottom; streaming growth scrolls to keep the tail pinned. */
+    FollowingBottom,
+
+    /**
+     * The user dragged away from the bottom. Stay put (don't yank back) until
+     * they scroll back within the bottom buffer, which re-arms [FollowingBottom].
+     */
+    PausedForUser,
 }

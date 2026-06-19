@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.councilroom
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -8,6 +9,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -15,9 +19,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -84,6 +91,8 @@ fun CouncilRoomPage(
     vm: CouncilRoomVM = koinViewModel(parameters = { parametersOf(conversationId) }),
 ) {
     val room by vm.room.collectAsStateWithLifecycle()
+    val isRestarting by vm.isRestarting.collectAsStateWithLifecycle()
+    val reopenToken by vm.reopenToken.collectAsStateWithLifecycle()
     val chatTheme = LocalChatTheme.current
 
     // Only consume the status-bar inset here; the composer handles the bottom
@@ -98,14 +107,90 @@ fun CouncilRoomPage(
                 .padding(padding)
                 .background(chatTheme.bg),
         ) {
-            when {
-                room == null -> CouncilRoomLoading()
+            // Content state drives both the AnimatedContent transition and the
+            // composition `key` for a live room. restart() flips isRestarting →
+            // the placeholder crossfades in; once the new room lands isRestarting
+            // clears and the live body crossfades in with a fresh composition
+            // (keyed on reopenToken so timeline's remember state fully resets).
+            val contentState = when {
+                isRestarting -> CouncilContentState.Restarting
+                room == null -> CouncilContentState.Loading
                 room!!.status.terminal ->
-                    // Read-only view of a finished/stopped council. The only mutating
-                    // action offered here is "restart" (discard + reopen fresh).
-                    CouncilRoomBody(room!!, vm = null, onRestart = vm::restart)
-                else -> CouncilRoomBody(room!!, vm = vm, onRestart = null)
+                    CouncilContentState.Terminal(room!!)
+                else -> CouncilContentState.Live(room!!)
             }
+            AnimatedContent(
+                targetState = contentState,
+                transitionSpec = {
+                    // Any state change: old fades out + settles down slightly,
+                    // new fades in + rises up slightly — reads as a "reset → new
+                    // begin" without a jarring hard cut. Short enough (~450ms)
+                    // to feel snappy on restart, long enough to register.
+                    (fadeIn(tween(350)) +
+                        slideInVertically(tween(450)) { full -> full / 8 }) togetherWith
+                        (fadeOut(tween(250)) +
+                            slideOutVertically(tween(350)) { full -> -full / 8 })
+                },
+                contentKey = { it::class },
+                label = "council-content",
+            ) { state ->
+                when (state) {
+                    CouncilContentState.Loading -> CouncilRoomLoading()
+                    CouncilContentState.Restarting -> CouncilRestartingPlaceholder()
+                    is CouncilContentState.Terminal ->
+                        // Read-only view of a finished/stopped council. The only mutating
+                        // action offered here is "restart" (discard + reopen fresh).
+                        CouncilRoomBody(state.room, vm = null, onRestart = vm::restart)
+                    is CouncilContentState.Live -> key(reopenToken) {
+                        // key(reopenToken) forces a brand-new composition on every
+                        // restart, so the timeline's remember'd state (entries,
+                        // poppedKeys, listState, scroll position) all reset to the
+                        // fresh room instead of carrying the old deliberation over.
+                        CouncilRoomBody(state.room, vm = vm, onRestart = null)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Sealed content state for the [CouncilRoomPage] body. Using a sealed type as
+ * the [AnimatedContent] targetState (with `contentKey = { it::class }`) means a
+ * transition fires exactly when the *kind* of content changes — initial load,
+ * restart-in-progress, finished room, live room — not on every room emit.
+ */
+private sealed interface CouncilContentState {
+    /** Cold-loading the room from storage on first open. */
+    data object Loading : CouncilContentState
+    /** restart() is closing the old room and opening a new one. */
+    data object Restarting : CouncilContentState
+    /** A finished/stopped council — read-only, restart is the only action. */
+    data class Terminal(val room: CouncilRoom) : CouncilContentState
+    /** An active deliberation. key(reopenToken) in the caller resets remember. */
+    data class Live(val room: CouncilRoom) : CouncilContentState
+}
+
+@Composable
+private fun CouncilRestartingPlaceholder() {
+    val chatTheme = LocalChatTheme.current
+    val workspace = workspaceColors()
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(
+                color = chatTheme.accent,
+                strokeWidth = 2.4.dp,
+                modifier = Modifier.size(28.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = "议会重置中…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = workspace.muted,
+            )
         }
     }
 }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -46,6 +47,22 @@ class CouncilRoomVM(
      * would otherwise stay pinned to the dead slot and never see the new room.
      */
     private val reopen = MutableStateFlow(0)
+
+    /**
+     * Read-only mirror of [reopen] for the UI to use as a composition `key` so a
+     * fresh room forces a brand-new [CouncilRoomBody] composition (timeline's
+     * remember state — entries / poppedKeys / listState / scroll position — all
+     * reset to the new room instead of being carried over from the old one).
+     */
+    val reopenToken: StateFlow<Int> = reopen.asStateFlow()
+
+    /**
+     * True while [restart] is closing the old room and opening a new one. The
+     * page observes this to show a "议会重置中…" placeholder + crossfade
+     * transition while the new room is materializing, instead of a hard cut.
+     */
+    private val _isRestarting = MutableStateFlow(false)
+    val isRestarting: StateFlow<Boolean> = _isRestarting.asStateFlow()
 
     /**
      * Live room state. [CouncilRoomManager.observeRoom] is `suspend` (cold-loads
@@ -131,26 +148,51 @@ class CouncilRoomVM(
      */
     fun restart() {
         viewModelScope.launch {
+            android.util.Log.i("CouncilRestart", "restart() invoked for cid=$cid")
             val settings = settingsStore.settingsFlow.value
             val seats = settings.agentRuntime.modelCouncil.defaultSeats
-            if (seats.isEmpty()) return@launch
-            val assistant = settings.getCurrentAssistant()
-            val guests = seats.map { seat ->
-                seat.toCouncilParticipant().copy(
-                    modelName = settings.findModelById(seat.modelId)?.displayName.orEmpty(),
-                )
+            if (seats.isEmpty()) {
+                android.util.Log.w("CouncilRestart", "restart() aborted: no defaultSeats configured")
+                return@launch
             }
-            manager.close(cid, cancel = true)
-            manager.openRoom(
-                conversationId = cid,
-                hostAssistantId = assistant.id,
-                hostName = assistant.name.removeSuffix(" Agent").ifBlank { "Amber" },
-                objective = "多模型协作讨论",
-                initialGuests = guests,
-                maxRounds = settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
-                hostModelIdOverride = settings.agentRuntime.modelCouncil.hostModelId,
-            )
-            reopen.value += 1
+            _isRestarting.value = true
+            try {
+                val assistant = settings.getCurrentAssistant()
+                val guests = seats.map { seat ->
+                    seat.toCouncilParticipant().copy(
+                        modelName = settings.findModelById(seat.modelId)?.displayName.orEmpty(),
+                    )
+                }
+                android.util.Log.i("CouncilRestart", "restart(): calling close(cancel=true)")
+                val closeResult = runCatching { manager.close(cid, cancel = true) }
+                android.util.Log.i("CouncilRestart", "restart(): close returned $closeResult")
+                if (closeResult.isFailure) {
+                    android.util.Log.e("CouncilRestart", "restart(): close threw, aborting restart", closeResult.exceptionOrNull())
+                    return@launch
+                }
+                android.util.Log.i("CouncilRestart", "restart(): calling openRoom")
+                val openResult = runCatching {
+                    manager.openRoom(
+                        conversationId = cid,
+                        hostAssistantId = assistant.id,
+                        hostName = assistant.name.removeSuffix(" Agent").ifBlank { "Amber" },
+                        objective = "多模型协作讨论",
+                        initialGuests = guests,
+                        maxRounds = settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
+                        hostModelIdOverride = settings.agentRuntime.modelCouncil.hostModelId,
+                    )
+                }
+                android.util.Log.i("CouncilRestart", "restart(): openRoom returned $openResult; room before reopen bump = ${manager.peekRoom(cid)?.let { "status=${it.status} msgs=${it.messages.size}" }}")
+                if (openResult.isFailure) {
+                    android.util.Log.e("CouncilRestart", "restart(): openRoom threw, aborting restart", openResult.exceptionOrNull())
+                    return@launch
+                }
+                val beforeBump = reopen.value
+                reopen.value += 1
+                android.util.Log.i("CouncilRestart", "restart(): reopen bumped $beforeBump -> ${reopen.value}")
+            } finally {
+                _isRestarting.value = false
+            }
         }
     }
 }
