@@ -54,7 +54,7 @@ struct MiniAppSettingsView: View {
     }
 
     private var intro: some View {
-        Text("控制小应用能否读取当前上下文，以及是否允许它把内容写回聊天。敏感操作仍需要前台确认。")
+        Text("控制小应用运行时可申请的能力。每个小应用仍需要在运行页单独允许或拒绝声明的权限。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -69,13 +69,90 @@ struct MiniAppSettingsView: View {
             AmberSectionLabel(text: "小应用权限")
             AmberFormGroup {
                 MiniAppPresetToggleRow(
+                    title: "网络 fetch",
+                    subtitle: "允许已授权小应用请求公开 https 页面；本地、私网和带凭证 URL 会被拒绝。",
+                    systemImage: "network",
+                    tint: AmberTheme.accentGreen,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.networkEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(networkEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider()
+                MiniAppPresetToggleRow(
+                    title: "搜索",
+                    subtitle: "允许已授权小应用通过内置搜索执行公开检索。",
+                    systemImage: "magnifyingglass",
+                    tint: AmberTheme.accentCyan,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.searchEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(searchEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider()
+                MiniAppPresetToggleRow(
+                    title: "AI 生成",
+                    subtitle: "允许已授权小应用调用宿主 AI 生成文本；缺少 API Key 时会返回错误。",
+                    systemImage: "sparkles",
+                    tint: AmberTheme.accentAmber,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.aiEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(aiEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider()
+                MiniAppPresetToggleRow(
+                    title: "复制到剪贴板",
+                    subtitle: "允许已授权小应用写入剪贴板。",
+                    systemImage: "doc.on.clipboard",
+                    tint: AmberTheme.accent,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.clipboardCopyEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(clipboardCopyEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider()
+                MiniAppPresetToggleRow(
+                    title: "SharedStore",
+                    subtitle: "允许已授权小应用读写自己的共享存储命名空间。",
+                    systemImage: "tray.full",
+                    tint: AmberTheme.accentIndigo,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.sharedStoreEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(sharedStoreEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider()
+                MiniAppPresetToggleRow(
+                    title: "EventBus",
+                    subtitle: "允许已授权小应用在自身命名空间内订阅和发布事件。",
+                    systemImage: "dot.radiowaves.left.and.right",
+                    tint: AmberTheme.accentGreen,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.eventBusEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(eventBusEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider()
+                MiniAppPresetToggleRow(
+                    title: "深度阅读摘要",
+                    subtitle: "允许已授权小应用更新自己的深度阅读摘要。",
+                    systemImage: "book.pages",
+                    tint: AmberTheme.accentAmber,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.boardSummaryUpdateEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(boardSummaryUpdateEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider()
+                MiniAppPresetToggleRow(
                     title: "读取宿主上下文",
                     subtitle: "允许 host.context 在前台确认后返回最小化上下文。",
                     systemImage: "text.bubble",
                     tint: AmberTheme.accentCyan,
                     isOn: Binding(
                         get: { sharedSettings.agentRuntime.miniApp.hostContextEnabled },
-                        set: { sharedSettings.setMiniAppHostContextEnabled($0) }
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(hostContextEnabled: enabled) } }
                     )
                 )
                 MiniAppCapabilityDivider()
@@ -86,7 +163,7 @@ struct MiniAppSettingsView: View {
                     tint: .purple,
                     isOn: Binding(
                         get: { sharedSettings.agentRuntime.miniApp.hostWriteEnabled },
-                        set: { sharedSettings.setMiniAppHostWriteEnabled($0) }
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(hostWriteEnabled: enabled) } }
                     )
                 )
             }

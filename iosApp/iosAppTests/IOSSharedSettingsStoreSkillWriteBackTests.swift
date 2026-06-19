@@ -71,6 +71,46 @@ final class IOSSharedSettingsStoreSkillWriteBackTests: XCTestCase {
         )
     }
 
+    func testMiniAppRuntimeOptionsPersistAcrossRestart() {
+        let suiteName = "MiniAppRuntimeOptions-\(UUID().uuidString)"
+        let store1 = makeIsolatedStore(suiteName: suiteName)
+
+        store1.updateMiniAppRuntime { _ in
+            MiniAppSettingPatch(
+                networkEnabled: false,
+                searchEnabled: false,
+                clipboardCopyEnabled: false,
+                boardSummaryUpdateEnabled: false,
+                hostContextEnabled: true,
+                hostWriteEnabled: true,
+                aiEnabled: false,
+                sharedStoreEnabled: false,
+                eventBusEnabled: false
+            )
+        }
+
+        XCTAssertFalse(store1.agentRuntime.miniApp.networkEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.searchEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.aiEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.sharedStoreEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.eventBusEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.clipboardCopyEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.boardSummaryUpdateEnabled)
+        XCTAssertTrue(store1.agentRuntime.miniApp.hostContextEnabled)
+        XCTAssertTrue(store1.agentRuntime.miniApp.hostWriteEnabled)
+
+        let store2 = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertFalse(store2.agentRuntime.miniApp.networkEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.searchEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.aiEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.sharedStoreEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.eventBusEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.clipboardCopyEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.boardSummaryUpdateEnabled)
+        XCTAssertTrue(store2.agentRuntime.miniApp.hostContextEnabled)
+        XCTAssertTrue(store2.agentRuntime.miniApp.hostWriteEnabled)
+    }
+
     func testCapabilityGatesAreAlwaysAvailable() {
         let store = makeIsolatedStore(suiteName: "CapabilityGatesDefault-\(UUID().uuidString)")
 

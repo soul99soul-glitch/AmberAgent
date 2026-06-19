@@ -1,0 +1,49 @@
+{
+  "title": "AmberAgent iOS Phase 2 Capability Closure",
+  "slug": "amberagent-ios-phase-2-capability-closure",
+  "created_at": "2026-06-19T13:29:27+00:00",
+  "status": "running",
+  "approval": {
+    "required": null,
+    "granted": null,
+    "notes": ""
+  },
+  "packets": [
+    {
+      "id": "A",
+      "name": "Android Parity Auditor",
+      "status": "running",
+      "mode": "read_only",
+      "agent_id": "019ee013-74c0-7fb1-9b25-8c1b606816bc",
+      "nickname": "Kierkegaard"
+    },
+    {
+      "id": "B",
+      "name": "iOS Architecture Auditor",
+      "status": "running",
+      "mode": "read_only",
+      "agent_id": "019ee013-7562-77f3-9a36-66fc8f8d4af7",
+      "nickname": "Einstein"
+    },
+    {
+      "id": "C",
+      "name": "Product UX Auditor",
+      "status": "running",
+      "mode": "read_only",
+      "agent_id": "019ee013-7607-7d12-be77-efed19b852fe",
+      "nickname": "Dewey"
+    },
+    {
+      "id": "D",
+      "name": "Verification Auditor",
+      "status": "running",
+      "mode": "read_only",
+      "agent_id": "019ee013-76d2-72d0-a47e-fe8ea200c4bd",
+      "nickname": "Darwin"
+    }
+  ],
+  "verification": {
+    "status": "not_started",
+    "checks": []
+  }
+}

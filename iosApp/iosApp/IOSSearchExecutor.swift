@@ -38,6 +38,12 @@ struct IOSSearchProviderSelection: Equatable {
     let fallbackReason: String?
 }
 
+struct IOSSearchExecution: Equatable {
+    let request: IOSSearchRequest
+    let selection: IOSSearchProviderSelection
+    let results: [IOSSearchResult]
+}
+
 @MainActor
 protocol IOSSearchHTTPTransport {
     func send(_ request: URLRequest) async throws -> (HTTPURLResponse, Data)
@@ -125,70 +131,86 @@ struct IOSSearchExecutor {
     ) async throws -> String {
         switch toolName {
         case "search_web":
-            let settingsDefaultMaxResults = settings.map { Int($0.searchCommonOptions.resultSize) } ?? defaultMaxResults
-            let request = try searchRequest(from: toolInput, defaultMaxResults: settingsDefaultMaxResults)
-            let selection = searchProviderSelection(settings: settings)
-            let results: [IOSSearchResult]
-            switch selection.route {
-            case .duckDuckGoLite:
-                results = try await searchDuckDuckGoLite(
-                    query: request.query,
-                    maxResults: request.maxResults,
-                    transport: transport
-                )
-            case .bingHTML:
-                results = try await searchBingHTML(
-                    query: request.query,
-                    maxResults: request.maxResults,
-                    transport: transport
-                )
-            case .tavilyAPI:
-                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.TavilyOptions else {
-                    throw IOSSearchExecutorError.unsupportedProvider("Selected Tavily service is missing from settings.")
-                }
-                results = try await searchTavily(request: request, service: service, transport: transport)
-            case .exaAPI:
-                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.ExaOptions else {
-                    throw IOSSearchExecutorError.unsupportedProvider("Selected Exa service is missing from settings.")
-                }
-                results = try await searchExa(request: request, service: service, transport: transport)
-            case .zhipuAPI:
-                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.ZhipuOptions else {
-                    throw IOSSearchExecutorError.unsupportedProvider("Selected Zhipu service is missing from settings.")
-                }
-                results = try await searchZhipu(request: request, service: service, transport: transport)
-            case .braveAPI:
-                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.BraveOptions else {
-                    throw IOSSearchExecutorError.unsupportedProvider("Selected Brave service is missing from settings.")
-                }
-                results = try await searchBrave(request: request, service: service, transport: transport)
-            case .serperAPI:
-                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.SerperOptions else {
-                    throw IOSSearchExecutorError.unsupportedProvider("Selected Serper service is missing from settings.")
-                }
-                results = try await searchSerper(request: request, service: service, transport: transport)
-            case .serpAPI:
-                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.SerpApiOptions else {
-                    throw IOSSearchExecutorError.unsupportedProvider("Selected SerpAPI service is missing from settings.")
-                }
-                results = try await searchSerpAPI(request: request, service: service, transport: transport)
-            case .jinaAPI:
-                guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.JinaOptions else {
-                    throw IOSSearchExecutorError.unsupportedProvider("Selected Jina service is missing from settings.")
-                }
-                results = try await searchJina(request: request, service: service, transport: transport)
-            case .unsupported:
-                throw IOSSearchExecutorError.unsupportedProvider(
-                    selection.fallbackReason ?? "\(selection.providerName) is not implemented on iOS search."
-                )
-            }
-            return format(query: request.query, results: results, selection: selection)
+            let execution = try await searchResults(
+                toolInput: toolInput,
+                maxResults: defaultMaxResults,
+                settings: settings,
+                transport: transport
+            )
+            return format(query: execution.request.query, results: execution.results, selection: execution.selection)
         case "scrape_web":
             let request = try scrapeRequest(from: toolInput)
             return try await scrapeWeb(request: request, transport: transport)
         default:
             throw IOSSearchExecutorError.unsupportedTool(toolName)
         }
+    }
+
+    @MainActor
+    static func searchResults(
+        toolInput: String,
+        maxResults defaultMaxResults: Int = 5,
+        settings: Settings? = nil,
+        transport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport()
+    ) async throws -> IOSSearchExecution {
+        let settingsDefaultMaxResults = settings.map { Int($0.searchCommonOptions.resultSize) } ?? defaultMaxResults
+        let request = try searchRequest(from: toolInput, defaultMaxResults: settingsDefaultMaxResults)
+        let selection = searchProviderSelection(settings: settings)
+        let results: [IOSSearchResult]
+        switch selection.route {
+        case .duckDuckGoLite:
+            results = try await searchDuckDuckGoLite(
+                query: request.query,
+                maxResults: request.maxResults,
+                transport: transport
+            )
+        case .bingHTML:
+            results = try await searchBingHTML(
+                query: request.query,
+                maxResults: request.maxResults,
+                transport: transport
+            )
+        case .tavilyAPI:
+            guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.TavilyOptions else {
+                throw IOSSearchExecutorError.unsupportedProvider("Selected Tavily service is missing from settings.")
+            }
+            results = try await searchTavily(request: request, service: service, transport: transport)
+        case .exaAPI:
+            guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.ExaOptions else {
+                throw IOSSearchExecutorError.unsupportedProvider("Selected Exa service is missing from settings.")
+            }
+            results = try await searchExa(request: request, service: service, transport: transport)
+        case .zhipuAPI:
+            guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.ZhipuOptions else {
+                throw IOSSearchExecutorError.unsupportedProvider("Selected Zhipu service is missing from settings.")
+            }
+            results = try await searchZhipu(request: request, service: service, transport: transport)
+        case .braveAPI:
+            guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.BraveOptions else {
+                throw IOSSearchExecutorError.unsupportedProvider("Selected Brave service is missing from settings.")
+            }
+            results = try await searchBrave(request: request, service: service, transport: transport)
+        case .serperAPI:
+            guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.SerperOptions else {
+                throw IOSSearchExecutorError.unsupportedProvider("Selected Serper service is missing from settings.")
+            }
+            results = try await searchSerper(request: request, service: service, transport: transport)
+        case .serpAPI:
+            guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.SerpApiOptions else {
+                throw IOSSearchExecutorError.unsupportedProvider("Selected SerpAPI service is missing from settings.")
+            }
+            results = try await searchSerpAPI(request: request, service: service, transport: transport)
+        case .jinaAPI:
+            guard let service = searchService(settings: settings, selection: selection) as? SearchServiceOptions.JinaOptions else {
+                throw IOSSearchExecutorError.unsupportedProvider("Selected Jina service is missing from settings.")
+            }
+            results = try await searchJina(request: request, service: service, transport: transport)
+        case .unsupported:
+            throw IOSSearchExecutorError.unsupportedProvider(
+                selection.fallbackReason ?? "\(selection.providerName) is not implemented on iOS search."
+            )
+        }
+        return IOSSearchExecution(request: request, selection: selection, results: results)
     }
 
     static func searchProviderSelection(settings: Settings?) -> IOSSearchProviderSelection {
@@ -942,7 +964,7 @@ struct IOSSearchExecutor {
         return decoded
     }
 
-    private static func allowedPublicHTTPURL(from rawURL: String) throws -> URL {
+    static func allowedPublicHTTPURL(from rawURL: String) throws -> URL {
         let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw IOSSearchExecutorError.missingURL }
         guard var components = URLComponents(string: trimmed),

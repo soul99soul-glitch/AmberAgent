@@ -27,7 +27,13 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
     let onToast: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onValidationError: onValidationError, onBridgeLog: onBridgeLog)
+        Coordinator(
+            onValidationError: onValidationError,
+            onBridgeLog: onBridgeLog,
+            onBlockedNavigation: { url in
+                onToast("已阻止小应用打开外部链接：\(url.host ?? url.absoluteString)")
+            }
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -209,11 +215,35 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         let onValidationError: (String) -> Void
         let onBridgeLog: ([String]) -> Void
+        let onBlockedNavigation: (URL) -> Void
         var bridge: MiniAppBridge?
 
-        init(onValidationError: @escaping (String) -> Void, onBridgeLog: @escaping ([String]) -> Void) {
+        init(
+            onValidationError: @escaping (String) -> Void,
+            onBridgeLog: @escaping ([String]) -> Void,
+            onBlockedNavigation: @escaping (URL) -> Void
+        ) {
             self.onValidationError = onValidationError
             self.onBridgeLog = onBridgeLog
+            self.onBlockedNavigation = onBlockedNavigation
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+            let scheme = url.scheme?.lowercased() ?? ""
+            if scheme == "about" || scheme == "data" || scheme == "blob" {
+                decisionHandler(.allow)
+                return
+            }
+            onBlockedNavigation(url)
+            decisionHandler(.cancel)
         }
 
         deinit {

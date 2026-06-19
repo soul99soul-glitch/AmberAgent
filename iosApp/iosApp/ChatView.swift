@@ -14,6 +14,7 @@ struct ChatView: View {
     let settingsStore: SettingsStore
     let sharedSettings: IOSSharedSettingsStore
     let documentStore: DocumentAccessStore?
+    let workspaceStore: IOSWorkspaceStore
     @State private var viewModel: ChatViewModel
     @State private var activeComposerPanel: ComposerPanel?
     @State private var isModelSheetPresented = false
@@ -29,11 +30,13 @@ struct ChatView: View {
         settingsStore: SettingsStore,
         sharedSettings: IOSSharedSettingsStore = IOSSharedSettingsStore(),
         localToolExecutor: IOSLocalToolExecutor? = nil,
-        documentStore: DocumentAccessStore? = nil
+        documentStore: DocumentAccessStore? = nil,
+        workspaceStore: IOSWorkspaceStore = .shared
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
         self.documentStore = documentStore
+        self.workspaceStore = workspaceStore
         self._viewModel = State(
             initialValue: ChatViewModel(
                 settingsStore: settingsStore,
@@ -78,6 +81,10 @@ struct ChatView: View {
             // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
             viewModel.conversationStore = conversationStore
             viewModel.reloadFromStore()
+            if let handoff = IOSWebMountContentHandoffStore.shared.consumeChatHandoff() {
+                viewModel.inputText = handoff.chatPrompt
+                viewModel.selectedFileContextError = nil
+            }
         }
         // 会话切换（store.currentRevision 变化）时重新灌入历史消息。
         // 用 Int 修订号而非 KotlinUuid——后者是否被 Swift 当作 Equatable 不可靠。
@@ -102,7 +109,16 @@ struct ChatView: View {
             }
             documentStore.registerPickedFile(url)
             Task {
+                var workspaceImportError: String?
+                do {
+                    _ = try await workspaceStore.importFile(url: url, source: "chat_picker")
+                } catch {
+                    workspaceImportError = error.localizedDescription
+                }
                 await viewModel.attachSelectedFilePreviewToNextMessage()
+                if let workspaceImportError, viewModel.selectedFileContextError == nil {
+                    viewModel.selectedFileContextError = "已附加到本条消息，但未保存到 Workspace：\(workspaceImportError)"
+                }
             }
         case .failure(let error):
             let message = "文件选择失败：\(error.localizedDescription)"
@@ -229,6 +245,19 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if let request = viewModel.pendingWorkspaceApproval {
+                WorkspaceToolApprovalCard(
+                    request: request,
+                    onApprove: {
+                        viewModel.approvePendingWorkspaceTool()
+                    },
+                    onDeny: {
+                        viewModel.denyPendingWorkspaceTool()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if let request = viewModel.pendingMcpApproval {
                 McpToolApprovalCard(
                     request: request,
@@ -243,24 +272,29 @@ struct ChatView: View {
             }
 
             if let preview = viewModel.pendingSelectedFilePreview {
-                HStack(spacing: 8) {
-                    Label(preview.fileName, systemImage: "doc.text")
-                        .font(.caption)
-                        .lineLimit(1)
-                    Text(preview.isTruncated ? "\(preview.byteSummary) · 已截断" : preview.byteSummary)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        viewModel.clearPendingSelectedFilePreview()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Label(preview.fileName, systemImage: "doc.text")
+                            .font(.caption)
+                            .lineLimit(1)
+                        Text(preview.isTruncated ? "\(preview.byteSummary) · 已截断" : preview.byteSummary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            viewModel.clearPendingSelectedFilePreview()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                    Text("发送后，已解析文本会保存进此会话上下文。")
+                        .font(.caption2)
+                        .foregroundStyle(AmberTheme.muted)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(.thinMaterial, in: Capsule())
+                .padding(.vertical, 8)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
             if let error = viewModel.selectedFileContextError {
@@ -460,6 +494,7 @@ struct ChatView: View {
         viewModel.pendingMemoryApproval != nil ||
             viewModel.pendingSearchApproval != nil ||
             viewModel.pendingWebMountApproval != nil ||
+            viewModel.pendingWorkspaceApproval != nil ||
             viewModel.pendingMcpApproval != nil
     }
 
@@ -1320,6 +1355,41 @@ struct ChatToolStepModel: Identifiable {
             return
         }
 
+        if tool.toolName == "generate_image" {
+            let prompt = Self.imagePrompt(from: tool.input)
+            let imageCount = tool.output.compactMap { $0 as? UIMessagePart.Image }.count
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "photo.on.rectangle",
+                title: executed ? "图片已生成" : "正在生成图片",
+                detail: executed ? "\(max(imageCount, 1)) 张图片" : prompt.map { "提示词：\($0)" },
+                state: executed ? .done : .active
+            )
+            return
+        }
+
+        if tool.toolName.hasPrefix("wm_") {
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "globe.badge.chevron.backward",
+                title: executed ? Self.webMountCompletedTitle(for: tool) : Self.webMountPendingTitle(for: tool.toolName),
+                detail: executed ? Self.webMountResultSummary(from: tool.output) : Self.webMountInputSummary(from: tool.input),
+                state: executed ? .done : .active
+            )
+            return
+        }
+
+        if IOSWorkspaceToolCatalog.supportedToolNames.contains(tool.toolName) {
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "folder",
+                title: executed ? Self.workspaceCompletedTitle(for: tool.toolName) : Self.workspacePendingTitle(for: tool.toolName),
+                detail: executed ? Self.workspaceResultSummary(from: tool.output) : Self.workspaceInputSummary(from: tool.input),
+                state: executed ? .done : .active
+            )
+            return
+        }
+
         let title = tool.toolName.isEmpty ? "工具调用" : tool.toolName
         self.init(
             systemImage: Self.icon(for: title),
@@ -1341,11 +1411,143 @@ struct ChatToolStepModel: Identifiable {
         return trimmedInput
     }
 
+    private static func imagePrompt(from input: String) -> String? {
+        let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else { return nil }
+        if let data = trimmedInput.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let prompt = object["prompt"] as? String {
+            let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedPrompt.isEmpty ? nil : String(trimmedPrompt.prefix(120))
+        }
+        return String(trimmedInput.prefix(120))
+    }
+
     private static func searchResultSummary(from output: [UIMessagePart]) -> String? {
         let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
         guard !text.isEmpty else { return "已返回搜索结果" }
         let firstLine = text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init)
         return firstLine ?? "已返回搜索结果"
+    }
+
+    private static func webMountPendingTitle(for toolName: String) -> String {
+        switch toolName {
+        case "wm_open": "准备打开网页"
+        case "wm_extract": "准备提取网页"
+        case "wm_get": "准备读取网页节点"
+        case "wm_state": "准备读取网页状态"
+        case "wm_back": "准备后退"
+        case "wm_forward": "准备前进"
+        case "wm_clear_session": "准备清理 WebMount Session"
+        case "wm_stations": "准备读取 WebMount 站点"
+        default: toolName
+        }
+    }
+
+    private static func webMountCompletedTitle(for tool: UIMessagePart.Tool) -> String {
+        switch tool.toolName {
+        case "wm_open": "网页已打开"
+        case "wm_extract": "网页内容已提取"
+        case "wm_get": "网页节点已读取"
+        case "wm_state": "网页状态已读取"
+        case "wm_back": "WebMount 已后退"
+        case "wm_forward": "WebMount 已前进"
+        case "wm_clear_session": "WebMount Session 已处理"
+        case "wm_stations": "WebMount 站点已读取"
+        default: tool.toolName
+        }
+    }
+
+    private static func webMountInputSummary(from input: String) -> String? {
+        let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else { return nil }
+        if let data = trimmedInput.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let redacted = IOSWebMountRedactor.redactedJSONObject(object)
+            let json = IOSWebMountController.json(redacted)
+            return String(json.prefix(160))
+        }
+        return String(IOSWebMountRedactor.redactedText(trimmedInput).prefix(160))
+    }
+
+    private static func workspacePendingTitle(for toolName: String) -> String {
+        switch toolName {
+        case "workspace_file_read": "准备读取 Workspace 文件"
+        case "workspace_file_write": "准备写入 Workspace 文件"
+        case "workspace_artifact_read": "准备读取 Artifact"
+        case "workspace_artifact_delete": "准备删除 Artifact"
+        default: toolName
+        }
+    }
+
+    private static func workspaceCompletedTitle(for toolName: String) -> String {
+        switch toolName {
+        case "workspace_file_read": "Workspace 文件已读取"
+        case "workspace_file_write": "Workspace 文件已写入"
+        case "workspace_artifact_read": "Artifact 已读取"
+        case "workspace_artifact_delete": "Artifact 已删除"
+        default: toolName
+        }
+    }
+
+    private static func workspaceInputSummary(from input: String) -> String? {
+        let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else { return nil }
+        if let data = trimmedInput.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            return String(text.prefix(160))
+        }
+        return String(trimmedInput.prefix(160))
+    }
+
+    private static func workspaceResultSummary(from output: [UIMessagePart]) -> String? {
+        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
+        guard !text.isEmpty else { return "已返回 Workspace 结果" }
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return String(text.prefix(160))
+        }
+        if object["denied"] as? Bool == true {
+            return "已拒绝：\((object["reason"] as? String) ?? "Workspace 权限限制")"
+        }
+        if let path = object["path"] as? String {
+            return path
+        }
+        if let title = object["title"] as? String {
+            return title
+        }
+        if let error = object["error"] as? String {
+            return "失败：\(error)"
+        }
+        return "已返回 Workspace 结果"
+    }
+
+    private static func webMountResultSummary(from output: [UIMessagePart]) -> String? {
+        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
+        guard !text.isEmpty else { return "已返回 WebMount 结果" }
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return String(IOSWebMountRedactor.redactedText(text).prefix(160))
+        }
+        if object["denied"] as? Bool == true {
+            return "已拒绝：\((object["reason"] as? String) ?? "WebMount 权限限制")"
+        }
+        if object["unsupported"] as? Bool == true {
+            return "iOS 暂不支持：\((object["tool"] as? String) ?? "WebMount 工具")"
+        }
+        if let status = object["status"] as? String {
+            let url = object["url"] as? String
+            return [status, url].compactMap { $0?.nilIfBlank }.joined(separator: " · ")
+        }
+        if let count = object["count"] as? Int {
+            return "\(count) 个站点"
+        }
+        if let siteId = object["site_id"] as? String {
+            return "站点：\(siteId)"
+        }
+        return "已返回 WebMount 结果"
     }
 
     private static func icon(for title: String) -> String {
@@ -1434,6 +1636,13 @@ private struct ChatEmptyState: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 96)
         .padding(.bottom, 180)
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

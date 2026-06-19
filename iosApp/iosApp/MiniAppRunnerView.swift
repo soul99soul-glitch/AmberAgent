@@ -557,6 +557,13 @@ struct MiniAppRunnerView: View {
         case .createArtifact(let request):
             let summary = "\(request.title)\n\(request.content.truncated(to: 420))"
             try repository.updateBoardSummary(id: appId, summary: summary)
+            try? IOSWorkspaceStore.shared.saveArtifact(
+                title: request.title,
+                content: request.content,
+                type: .miniApp,
+                sourceKind: "miniapp_host",
+                sourceId: appId
+            )
             actionMessage = "MiniApp 已创建内容卡片：\(request.title)"
             return .object([
                 "accepted": .bool(true),

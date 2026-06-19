@@ -65,6 +65,49 @@ fun createMemoryToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createWorkspaceFileReadToolDeclaration(): Tool = workspaceTool(
+    name = "workspace_file_read",
+    description = """
+        Read text preview from an AmberAgent iOS Workspace file previously imported by the user.
+        Use `file_id` from Workspace UI/tool output or a `/workspace/...` path. This cannot read arbitrary device files.
+    """.trimIndent(),
+    parameters = workspaceFileReadParameters()
+)
+
+fun createWorkspaceFileWriteToolDeclaration(): Tool = workspaceTool(
+    name = "workspace_file_write",
+    description = """
+        Write a UTF-8 text or Markdown file under AmberAgent iOS `/workspace`.
+        Use a relative path or `/workspace/...`; traversal and absolute device paths are rejected. Requires foreground approval.
+    """.trimIndent(),
+    parameters = workspaceFileWriteParameters()
+)
+
+fun createWorkspaceArtifactReadToolDeclaration(): Tool = workspaceTool(
+    name = "workspace_artifact_read",
+    description = "Read a saved AmberAgent iOS Workspace artifact by `artifact_id`.",
+    parameters = workspaceArtifactReadParameters()
+)
+
+fun createWorkspaceArtifactDeleteToolDeclaration(): Tool = workspaceTool(
+    name = "workspace_artifact_delete",
+    description = "Delete a saved AmberAgent iOS Workspace artifact by `artifact_id`. Requires explicit foreground approval.",
+    parameters = workspaceArtifactReadParameters()
+)
+
+fun createImageGenToolDeclaration(): Tool = Tool(
+    name = "generate_image",
+    description = """
+        Generate raster images using AmberAgent iOS image generation. Use for photos, paintings,
+        illustrations, posters, concept art, wallpapers, product mockups, and other visual results
+        where pixels, lighting, texture, composition, or style matter. Prefer detailed English
+        prompts. Use SVG or markdown diagrams for precise editable charts and diagrams unless the
+        user explicitly asks for an artistic rendering.
+    """.trimIndent().replace("\n", " "),
+    parameters = { imageGenParameters() },
+    execute = { emptyList() }
+)
+
 fun createWebMountStationsToolDeclaration(): Tool = webMountTool(
     name = "wm_stations",
     description = "List configured iOS WebMount stations, enabled state, auth kind, and redacted cookie summary.",
@@ -357,6 +400,83 @@ private fun memoryToolParameters(): InputSchema = InputSchema.Obj(
     required = listOf("action")
 )
 
+private fun workspaceFileReadParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("file_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace file id returned by Workspace, optional when `path` is provided")
+        })
+        put("path", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace path such as /workspace/uploads/example.md, optional when `file_id` is provided")
+        })
+        put("max_chars", buildJsonObject {
+            put("type", "integer")
+            put("description", "maximum text characters to return")
+        })
+    }
+)
+
+private fun workspaceFileWriteParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("path", buildJsonObject {
+            put("type", "string")
+            put("description", "target path under /workspace, for example /workspace/notes/summary.md")
+        })
+        put("content", buildJsonObject {
+            put("type", "string")
+            put("description", "UTF-8 text or Markdown content to write")
+        })
+        put("overwrite", buildJsonObject {
+            put("type", "boolean")
+            put("description", "set true to replace an existing Workspace file")
+        })
+    },
+    required = listOf("path", "content")
+)
+
+private fun workspaceArtifactReadParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("artifact_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace artifact id")
+        })
+        put("id", buildJsonObject {
+            put("type", "string")
+            put("description", "alias for artifact_id")
+        })
+    }
+)
+
+private fun imageGenParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("prompt", buildJsonObject {
+            put("type", "string")
+            put("description", "Detailed image prompt. Include subject, style, composition, lighting, and mood.")
+        })
+        put("aspect_ratio", buildJsonObject {
+            put("type", "string")
+            put("description", "Image aspect ratio.")
+            put("enum", buildJsonArray {
+                add("1:1")
+                add("16:9")
+                add("9:16")
+            })
+        })
+        put("count", buildJsonObject {
+            put("type", "integer")
+            put("minimum", 1)
+            put("maximum", 4)
+            put("description", "Number of variants to generate, 1-4. Default 1.")
+        })
+        put("style", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional style hint, for example photo, watercolor, poster, or product mockup.")
+        })
+    },
+    required = listOf("prompt")
+)
+
 private fun webMountTool(
     name: String,
     description: String,
@@ -369,6 +489,20 @@ private fun webMountTool(
     needsApproval = needsApproval,
     allowsAutoApproval = !needsApproval,
     mandatoryApproval = needsApproval,
+    execute = { emptyList() }
+)
+
+private fun workspaceTool(
+    name: String,
+    description: String,
+    parameters: InputSchema
+): Tool = Tool(
+    name = name,
+    description = description,
+    parameters = { parameters },
+    needsApproval = true,
+    allowsAutoApproval = false,
+    mandatoryApproval = true,
     execute = { emptyList() }
 )
 

@@ -239,11 +239,148 @@ final class DocumentAccessStoreTests: XCTestCase {
         XCTAssertTrue(message.contains("larger"))
     }
 
+    func testMissingSelectedFileClearsGrantAndReportsRecovery() async throws {
+        let store = DocumentAccessStore()
+        let url = try makeTempFile(size: 16)
+        let grant = store.registerPickedFile(url)
+        try FileManager.default.removeItem(at: url)
+        let executor = makeExecutor(documentStore: store)
+
+        let result = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: grant.toolName,
+                operation: grant.operation,
+                scopeDigest: grant.scopeDigest,
+                payloadDigest: grant.payloadDigest,
+                isUserInitiated: true
+            )
+        )
+
+        guard case .failed(let message) = result else {
+            return XCTFail("Expected failed, got \(result)")
+        }
+        XCTAssertTrue(message.contains("missing"))
+        XCTAssertNil(store.grantSummary)
+    }
+
+    func testWorkspaceImportStoresMetadataPreviewAndReloads() async throws {
+        let baseDirectory = makeTempDirectory()
+        let store = IOSWorkspaceStore(baseDirectory: baseDirectory)
+        let importedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let source = try makeTempFile(text: "# Workspace\nReadable markdown body.", extension: "md")
+
+        let record = try await store.importFile(url: source, source: "unit_test", now: importedAt)
+
+        XCTAssertEqual(record.displayName, source.lastPathComponent)
+        XCTAssertEqual(record.originalFileName, source.lastPathComponent)
+        XCTAssertTrue(record.workspacePath.hasPrefix("uploads/"))
+        XCTAssertFalse(record.workspacePath.contains(".."))
+        XCTAssertEqual(record.status, .ready)
+        XCTAssertEqual(record.source, "unit_test")
+        XCTAssertTrue(record.preview.contains("Readable markdown body."))
+        XCTAssertEqual(store.files.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: record).path))
+
+        let reloaded = IOSWorkspaceStore(baseDirectory: baseDirectory)
+        XCTAssertEqual(reloaded.files.first?.id, record.id)
+        XCTAssertEqual(reloaded.files.first?.preview, record.preview)
+    }
+
+    func testWorkspaceReparseMarksMissingAndRemoveDeletesRecord() async throws {
+        let store = makeWorkspaceStore()
+        let source = try makeTempFile(text: "File that will disappear.", extension: "txt")
+        let record = try await store.importFile(url: source, source: "unit_test")
+        try FileManager.default.removeItem(at: store.fileURL(for: record))
+
+        let reparsed = try await store.reparseFile(id: record.id)
+
+        XCTAssertEqual(reparsed.status, .missing)
+        XCTAssertTrue(reparsed.statusMessage.contains("missing"))
+        try store.removeFile(id: record.id)
+        XCTAssertTrue(store.files.isEmpty)
+    }
+
+    func testWorkspaceArtifactSaveReadReloadAndDelete() throws {
+        let baseDirectory = makeTempDirectory()
+        let store = IOSWorkspaceStore(baseDirectory: baseDirectory)
+
+        let artifact = try store.saveArtifact(
+            title: "Report",
+            content: "Artifact body",
+            type: .chat,
+            sourceKind: "unit_test",
+            sourceId: "message-1"
+        )
+
+        XCTAssertEqual(artifact.title, "Report")
+        XCTAssertEqual(artifact.type, .chat)
+        XCTAssertEqual(artifact.sourceKind, "unit_test")
+        XCTAssertEqual(try store.artifactContent(id: artifact.id), "Artifact body")
+
+        let reloaded = IOSWorkspaceStore(baseDirectory: baseDirectory)
+        XCTAssertEqual(reloaded.artifacts.first?.id, artifact.id)
+        XCTAssertEqual(try reloaded.artifactContent(id: artifact.id), "Artifact body")
+
+        try reloaded.deleteArtifact(id: artifact.id)
+        XCTAssertTrue(reloaded.artifacts.isEmpty)
+        XCTAssertThrowsError(try reloaded.artifactContent(id: artifact.id))
+    }
+
+    func testWorkspaceToolWriteReadAndOverwriteProtection() async throws {
+        let store = makeWorkspaceStore()
+        let write = await store.executeTool(
+            toolName: "workspace_file_write",
+            input: #"{"path":"/workspace/notes/a.md","content":"hello"}"#
+        )
+        XCTAssertEqual(try jsonObject(write)["ok"] as? Bool, true)
+
+        let duplicate = await store.executeTool(
+            toolName: "workspace_file_write",
+            input: #"{"path":"/workspace/notes/a.md","content":"again"}"#
+        )
+        let duplicateObject = try jsonObject(duplicate)
+        XCTAssertEqual(duplicateObject["ok"] as? Bool, false)
+        XCTAssertTrue((duplicateObject["error"] as? String)?.contains("already exists") == true)
+
+        let read = await store.executeTool(
+            toolName: "workspace_file_read",
+            input: #"{"path":"/workspace/notes/a.md"}"#
+        )
+        let readObject = try jsonObject(read)
+        XCTAssertEqual(readObject["ok"] as? Bool, true)
+        XCTAssertEqual(readObject["text"] as? String, "hello")
+    }
+
+    func testWorkspaceImportRejectsTooLargeFile() async throws {
+        let store = makeWorkspaceStore()
+        let tooLarge = try makeTempFile(size: Int(store.maxImportBytes) + 1)
+
+        do {
+            _ = try await store.importFile(url: tooLarge, source: "unit_test")
+            XCTFail("Expected Workspace import to reject files over its local limit.")
+        } catch let error as IOSWorkspaceStoreError {
+            guard case .fileTooLarge(let message) = error else {
+                return XCTFail("Expected fileTooLarge, got \(error).")
+            }
+            XCTAssertTrue(message.contains("Workspace import limit"))
+            XCTAssertTrue(message.contains(DocumentAccessStore.formatBytes(store.maxImportBytes)))
+        }
+    }
+
     private func makeExecutor(documentStore: DocumentAccessStore) -> IOSLocalToolExecutor {
         IOSLocalToolExecutor(
             permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
             documentStore: documentStore
         )
+    }
+
+    private func makeWorkspaceStore() -> IOSWorkspaceStore {
+        IOSWorkspaceStore(baseDirectory: makeTempDirectory())
+    }
+
+    private func makeTempDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
     private func makeTempFile(size: Int) throws -> URL {
@@ -379,6 +516,11 @@ final class DocumentAccessStoreTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+
+    private func jsonObject(_ text: String) throws -> [String: Any] {
+        let data = try XCTUnwrap(text.data(using: .utf8))
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 }
 

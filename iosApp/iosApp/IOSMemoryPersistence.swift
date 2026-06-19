@@ -108,13 +108,27 @@ enum IOSMemoryToolExecutor {
         writePolicy: IOSMemoryToolWritePolicy
     ) -> String {
         guard case .allow = writePolicy else {
-            return writeBlockedResult(action: "create", writePolicy: writePolicy)
+            let result = writeBlockedResult(action: "create", writePolicy: writePolicy)
+            auditWrite(action: "create", args: args, writePolicy: writePolicy)
+            return result
         }
         guard let content = nonEmptyString(args["content"]) else {
+            IOSMemoryWriteAuditStore.shared.record(
+                action: "create",
+                status: "failed",
+                reason: "content is required"
+            )
             return json(["ok": false, "tool": "memory_tool", "action": "create", "error": "content is required"])
         }
         let scope = memoryScope(from: (args["scope"] ?? args["type"]) as? String)
         guard isScopeEnabled(scope, runtime: runtime) else {
+            IOSMemoryWriteAuditStore.shared.record(
+                action: "create",
+                status: "failed",
+                reason: "memory scope is disabled",
+                scope: scope.wireName,
+                contentPreview: previewText(content)
+            )
             return disabledScopeResult(scope, action: "create")
         }
 
@@ -133,6 +147,14 @@ enum IOSMemoryToolExecutor {
             archived: false
         )
         IOSMemoryPersistence.shared.persist()
+        IOSMemoryWriteAuditStore.shared.record(
+            action: "create",
+            status: "approved",
+            memoryId: Int(record.id),
+            scope: record.scope.wireName,
+            kind: record.kind.wireName,
+            contentPreview: previewText(record.content)
+        )
 
         return json([
             "ok": true,
@@ -149,20 +171,33 @@ enum IOSMemoryToolExecutor {
         writePolicy: IOSMemoryToolWritePolicy
     ) -> String {
         guard case .allow = writePolicy else {
-            return writeBlockedResult(action: "edit", writePolicy: writePolicy)
+            let result = writeBlockedResult(action: "edit", writePolicy: writePolicy)
+            auditWrite(action: "edit", args: args, writePolicy: writePolicy)
+            return result
         }
         guard let id = int(args["id"]) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "id is required")
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "id is required"])
         }
         guard let existing = IosMemoryFactory.shared.getAllRecords().first(where: { Int($0.id) == id }) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "memory not found", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "memory not found", "id": id])
         }
         guard let content = nonEmptyString(args["content"]) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "content is required", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "content is required"])
         }
 
         let scope = ((args["scope"] ?? args["type"]) as? String).map(memoryScope) ?? existing.scope
         guard isScopeEnabled(scope, runtime: runtime) else {
+            IOSMemoryWriteAuditStore.shared.record(
+                action: "edit",
+                status: "failed",
+                reason: "memory scope is disabled",
+                memoryId: id,
+                scope: scope.wireName,
+                contentPreview: previewText(content)
+            )
             return disabledScopeResult(scope, action: "edit")
         }
 
@@ -197,9 +232,18 @@ enum IOSMemoryToolExecutor {
         )
 
         guard let saved = IosMemoryFactory.shared.updateRecord(record: updated) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "memory not found", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "memory not found", "id": id])
         }
         IOSMemoryPersistence.shared.persist()
+        IOSMemoryWriteAuditStore.shared.record(
+            action: "edit",
+            status: "approved",
+            memoryId: id,
+            scope: saved.scope.wireName,
+            kind: saved.kind.wireName,
+            contentPreview: previewText(saved.content)
+        )
 
         return json([
             "ok": true,
@@ -212,17 +256,22 @@ enum IOSMemoryToolExecutor {
     @MainActor
     private static func delete(args: [String: Any], writePolicy: IOSMemoryToolWritePolicy) -> String {
         guard case .allow = writePolicy else {
-            return writeBlockedResult(action: "delete", writePolicy: writePolicy)
+            let result = writeBlockedResult(action: "delete", writePolicy: writePolicy)
+            auditWrite(action: "delete", args: args, writePolicy: writePolicy)
+            return result
         }
         guard let id = int(args["id"]) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "failed", reason: "id is required")
             return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "id is required"])
         }
         let existed = IosMemoryFactory.shared.getAllRecords().contains { Int($0.id) == id }
         guard existed else {
+            IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "failed", reason: "memory not found", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "memory not found", "id": id])
         }
         IosMemoryFactory.shared.deleteMemory(id: Int32(id))
         IOSMemoryPersistence.shared.persist()
+        IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "approved", memoryId: id)
         return json([
             "ok": true,
             "tool": "memory_tool",
@@ -263,6 +312,39 @@ enum IOSMemoryToolExecutor {
                 "reason": reason
             ])
         }
+    }
+
+    @MainActor
+    private static func auditWrite(
+        action: String,
+        args: [String: Any],
+        writePolicy: IOSMemoryToolWritePolicy
+    ) {
+        let status: String
+        let reason: String
+        switch writePolicy {
+        case .allow:
+            status = "unexpected"
+            reason = ""
+        case .needsUserAction(let message):
+            status = "needs_user_action"
+            reason = message
+        case .denied(let message):
+            status = "denied"
+            reason = message
+        case .deniedByUser(let message):
+            status = "denied_by_user"
+            reason = message
+        }
+        IOSMemoryWriteAuditStore.shared.record(
+            action: action,
+            status: status,
+            reason: reason,
+            memoryId: int(args["id"]),
+            scope: nonEmptyString(args["scope"] ?? args["type"]),
+            kind: nonEmptyString(args["kind"]),
+            contentPreview: nonEmptyString(args["content"]).map { previewText($0) }
+        )
     }
 
     private static func disabledScopeResult(_ scope: MemoryScope, action: String) -> String {

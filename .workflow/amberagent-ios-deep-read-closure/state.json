@@ -1,0 +1,58 @@
+{
+  "title": "AmberAgent iOS Deep Read Closure",
+  "slug": "amberagent-ios-deep-read-closure",
+  "created_at": "2026-06-19T13:26:47+00:00",
+  "status": "completed_with_external_build_blocker",
+  "approval": {
+    "required": null,
+    "granted": null,
+    "notes": "No approval needed for local read-only audit, scoped Swift edits, or local build/tests. Approval required for destructive/external/private-config actions."
+  },
+  "packets": [
+    {
+      "id": "android-deep-read-audit",
+      "owner": "explorer",
+      "status": "completed",
+      "write_scope": "none"
+    },
+    {
+      "id": "ios-board-gap-audit",
+      "owner": "explorer",
+      "status": "completed",
+      "write_scope": "none"
+    },
+    {
+      "id": "main-implementation",
+      "owner": "main-agent",
+      "status": "completed",
+      "write_scope": "iosApp/iosApp, iosApp/iosAppTests, docs/ios-port"
+    }
+  ],
+  "verification": {
+    "status": "partially_passed",
+    "checks": [
+      {
+        "command": "git status --short --branch",
+        "status": "passed"
+      },
+      {
+        "command": "git log --oneline --decorate -12",
+        "status": "passed"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed"
+      },
+      {
+        "command": "xcodebuild -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination \"generic/platform=iOS Simulator\" build",
+        "status": "blocked",
+        "notes": "Without JAVA_HOME: KMP script failed with Unable to locate a Java Runtime. With JAVA_HOME=/opt/homebrew/opt/openjdk@17: compile reached Swift and failed in existing iosApp/iosApp/SubAgentRunner.swift lines 321 and 329, outside the Deep Read allowed edit scope."
+      },
+      {
+        "command": "xcodebuild -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination \"platform=iOS Simulator,name=iPhone 17\" -only-testing:iosAppTests/IOSBoardPersistenceTests -only-testing:iosAppTests/IOSSearchExecutorTests -only-testing:iosAppTests/IOSConversationStoreTests test",
+        "status": "blocked",
+        "notes": "Targeted XCTest build cancelled by the same existing SubAgentRunner.swift syntax errors."
+      }
+    ]
+  }
+}

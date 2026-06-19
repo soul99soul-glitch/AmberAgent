@@ -6,7 +6,7 @@ import Observation
 @preconcurrency import EventKit
 #endif
 
-/// [Board MVP] iOS-local persistence for the generated "深度阅读内容" (Markdown).
+/// [Board MVP] iOS-local persistence for the generated board signal summary (Markdown).
 ///
 /// Scope (per product decision): ONLY the generated board content is persisted
 /// — the model's Markdown output for a given date. NOT persisted: the structured
@@ -111,6 +111,7 @@ enum IOSBoardSignalSourceType {
     static let feishuMessage = "feishu_msg"
     static let feishuDocument = "feishu_doc"
     static let chatHistory = "chat_history"
+    static let webmount = "webmount"
     static let time = "time"
     static let hotlist = "hotlist"
 }
@@ -1200,5 +1201,553 @@ enum IOSBoardDateFormatters {
         time.timeZone = TimeZone.current
         time.dateFormat = "HH:mm"
         return "\(day) - \(time.string(from: end))"
+    }
+}
+
+// MARK: - iOS Deep Read
+
+enum IOSDeepReadTaskStatus: String, Codable, CaseIterable, Sendable {
+    case queued
+    case running
+    case succeeded
+    case failed
+    case unsupported
+
+    var isTerminal: Bool {
+        self == .succeeded || self == .failed || self == .unsupported
+    }
+
+    var title: String {
+        switch self {
+        case .queued: "待生成"
+        case .running: "生成中"
+        case .succeeded: "已完成"
+        case .failed: "失败"
+        case .unsupported: "不可用"
+        }
+    }
+}
+
+enum IOSDeepReadSourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case manualText = "manual_text"
+    case searchResult = "search_result"
+    case conversation
+    case file
+    case webMount = "web_mount"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .manualText: "手动文本"
+        case .searchResult: "搜索结果"
+        case .conversation: "会话内容"
+        case .file: "文件"
+        case .webMount: "WebMount"
+        }
+    }
+}
+
+struct IOSDeepReadSource: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var kind: IOSDeepReadSourceKind
+    var title: String
+    var content: String
+    var url: String?
+    var metadata: [String: String]
+    var createdAt: Int64
+
+    init(
+        id: String = UUID().uuidString,
+        kind: IOSDeepReadSourceKind,
+        title: String,
+        content: String,
+        url: String? = nil,
+        metadata: [String: String] = [:],
+        createdAt: Int64 = IOSBoardSignalRepository.currentEpochMs()
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = IOSDeepReadSourceNormalizer.clean(title).prefixString(160).ifEmpty(kind.title)
+        self.content = IOSDeepReadSourceNormalizer.cleanMultiline(content).prefixString(40_000)
+        self.url = IOSDeepReadSourceNormalizer.clean(url ?? "").ifBlankNil
+        self.metadata = metadata
+        self.createdAt = createdAt
+    }
+}
+
+struct IOSDeepReadTemplate: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    var description: String
+
+    static let magazine = IOSDeepReadTemplate(
+        id: "ios_magazine",
+        name: "杂志",
+        description: "摘要、关键点、脉络和延伸阅读。"
+    )
+    static let reading = IOSDeepReadTemplate(
+        id: "ios_reading",
+        name: "阅读",
+        description: "更安静的长文阅读版式。"
+    )
+    static let analysis = IOSDeepReadTemplate(
+        id: "ios_analysis",
+        name: "分析",
+        description: "突出判断、风险和下一步。"
+    )
+    static let builtIns = [magazine, reading, analysis]
+    static let defaultId = magazine.id
+
+    static func template(id: String) -> IOSDeepReadTemplate {
+        builtIns.first { $0.id == id } ?? magazine
+    }
+}
+
+struct IOSDeepReadTemplateValidationResult: Equatable, Sendable {
+    var ok: Bool
+    var error: String?
+
+    static let valid = IOSDeepReadTemplateValidationResult(ok: true, error: nil)
+}
+
+enum IOSDeepReadTemplateValidator {
+    static let maxHTMLBytes = 96 * 1024
+
+    static func validateHTML(_ html: String) -> IOSDeepReadTemplateValidationResult {
+        let byteCount = html.data(using: .utf8)?.count ?? 0
+        if byteCount > maxHTMLBytes {
+            return .init(ok: false, error: "模板过大：\(byteCount) bytes。")
+        }
+        if html.range(of: #"(?is)<\s*(html\b|!doctype\s+html)"#, options: .regularExpression) == nil {
+            return .init(ok: false, error: "模板必须包含 <html> 或 <!DOCTYPE html>。")
+        }
+
+        let blocked: [(String, String)] = [
+            (#"(?is)<\s*script\b"#, "模板不允许 JavaScript。"),
+            (#"(?is)\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#, "模板不允许事件处理器。"),
+            (#"(?is)<\s*(iframe|object|embed|form|input|button|textarea|select)\b"#, "模板不允许交互或嵌入元素。"),
+            (#"(?is)<\s*(svg|canvas|math|audio|video|source|picture|track)\b"#, "模板不允许媒体、Canvas 或 SVG。"),
+            (#"(?is)\b(srcset|poster)\s*="#, "模板不允许响应式或媒体资源属性。"),
+            (#"(?is)<\s*link\b[^>]*\bhref\s*=\s*['"]?\s*(https?:|//|file:|content:)"#, "模板不允许外部样式表。"),
+            (#"(?is)\bhref\s*=\s*(?:['"]\s*)?(https?:|//|file:|content:)"#, "模板不允许硬编码外部链接。"),
+            (#"(?is)\bsrc\s*=\s*(?:['"]\s*)?(https?:|//|file:|content:)"#, "模板不允许硬编码外部资源。"),
+            (#"(?is)@import\b"#, "模板不允许 CSS import。"),
+            (#"(?is)url\s*\("#, "模板不允许 CSS URL。"),
+            (#"(?is)\b(fetch|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB|eval)\b"#, "模板不允许浏览器 API。")
+        ]
+        for (pattern, message) in blocked where html.range(of: pattern, options: .regularExpression) != nil {
+            return .init(ok: false, error: message)
+        }
+        return .valid
+    }
+}
+
+enum IOSDeepReadSourceNormalizationError: LocalizedError, Equatable {
+    case emptySource(IOSDeepReadSourceKind)
+    case unsupported(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .emptySource(let kind):
+            return "\(kind.title)没有可读取内容。"
+        case .unsupported(let reason):
+            return reason
+        }
+    }
+}
+
+enum IOSDeepReadSourceNormalizer {
+    static func manualText(title: String, text: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) throws -> IOSDeepReadSource {
+        let content = cleanMultiline(text)
+        guard !content.isEmpty else { throw IOSDeepReadSourceNormalizationError.emptySource(.manualText) }
+        return IOSDeepReadSource(
+            kind: .manualText,
+            title: clean(title).ifEmpty(firstLineTitle(content, fallback: "手动深度阅读")),
+            content: content,
+            createdAt: now
+        )
+    }
+
+    static func searchSources(query: String, results: [IOSSearchResult], now: Int64 = IOSBoardSignalRepository.currentEpochMs()) throws -> [IOSDeepReadSource] {
+        let cleanQuery = clean(query)
+        let sources = results.enumerated().compactMap { index, result -> IOSDeepReadSource? in
+            let content = cleanMultiline([
+                result.snippet,
+                result.url
+            ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n"))
+            guard !content.isEmpty else { return nil }
+            return IOSDeepReadSource(
+                kind: .searchResult,
+                title: result.title.ifEmpty("搜索结果 \(index + 1)"),
+                content: content,
+                url: result.url,
+                metadata: [
+                    "query": cleanQuery,
+                    "rank": "\(index + 1)"
+                ],
+                createdAt: now
+            )
+        }
+        guard !sources.isEmpty else { throw IOSDeepReadSourceNormalizationError.emptySource(.searchResult) }
+        return sources
+    }
+
+    static func conversationSource(title: String, messages: [String], now: Int64 = IOSBoardSignalRepository.currentEpochMs()) throws -> IOSDeepReadSource {
+        let content = cleanMultiline(messages.joined(separator: "\n\n"))
+        guard !content.isEmpty else { throw IOSDeepReadSourceNormalizationError.emptySource(.conversation) }
+        return IOSDeepReadSource(
+            kind: .conversation,
+            title: clean(title).ifEmpty("当前会话"),
+            content: content,
+            metadata: ["message_count": "\(messages.count)"],
+            createdAt: now
+        )
+    }
+
+    static func fileSource(_ read: SelectedDocumentReadResult, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) throws -> IOSDeepReadSource {
+        let content = cleanMultiline(read.preview)
+        guard !content.isEmpty else {
+            throw IOSDeepReadSourceNormalizationError.unsupported(read.note ?? "文件中没有可读取文本。")
+        }
+        return IOSDeepReadSource(
+            kind: .file,
+            title: read.fileName,
+            content: content,
+            metadata: [
+                "file_type": read.fileType,
+                "bytes": "\(read.bytesRead)",
+                "truncated": "\(read.isTruncated)"
+            ],
+            createdAt: now
+        )
+    }
+
+    static func webMountSource(title: String, url: String?, text: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) throws -> IOSDeepReadSource {
+        let content = cleanMultiline(text)
+        guard !content.isEmpty else {
+            throw IOSDeepReadSourceNormalizationError.unsupported("当前 WebMount 页面没有可读取正文；请先打开站点并确认页面已加载。")
+        }
+        return IOSDeepReadSource(
+            kind: .webMount,
+            title: clean(title).ifEmpty("WebMount 页面"),
+            content: content,
+            url: url,
+            createdAt: now
+        )
+    }
+
+    static func clean(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\u{0}", with: "")
+            .replacingOccurrences(of: #"[ \t\r\f\v]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func cleanMultiline(_ value: String) -> String {
+        clean(value)
+            .replacingOccurrences(of: #"\n\s*\n\s*\n+"#, with: "\n\n", options: .regularExpression)
+    }
+
+    private static func firstLineTitle(_ text: String, fallback: String) -> String {
+        text
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map { String($0).prefixString(60) }?
+            .ifEmpty(fallback) ?? fallback
+    }
+}
+
+struct IOSDeepReadTask: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var title: String
+    var status: IOSDeepReadTaskStatus
+    var templateId: String
+    var sources: [IOSDeepReadSource]
+    var resultMarkdown: String
+    var failureMessage: String?
+    var createdAt: Int64
+    var updatedAt: Int64
+    var completedAt: Int64?
+    var retryCount: Int
+
+    var sourceSummary: String {
+        let counts = Dictionary(grouping: sources, by: \.kind)
+            .mapValues(\.count)
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .map { "\($0.key.title) \($0.value)" }
+        return counts.joined(separator: " · ")
+    }
+
+    var template: IOSDeepReadTemplate {
+        IOSDeepReadTemplate.template(id: templateId)
+    }
+}
+
+@MainActor
+@Observable
+final class IOSDeepReadStore {
+    static let shared = IOSDeepReadStore()
+
+    private(set) var tasks: [IOSDeepReadTask]
+
+    private let directory: URL
+    private let fileURL: URL
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+    private let fileManager: FileManager
+
+    init(baseDirectory: URL? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let root = baseDirectory
+            ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        directory = root.appendingPathComponent("deep_read", isDirectory: true)
+        fileURL = directory.appendingPathComponent("tasks.json", isDirectory: false)
+        encoder = JSONEncoder()
+        decoder = JSONDecoder()
+        tasks = Self.loadTasks(from: fileURL, decoder: decoder)
+    }
+
+    var history: [IOSDeepReadTask] {
+        tasks.sorted {
+            if $0.updatedAt == $1.updatedAt { return $0.createdAt > $1.createdAt }
+            return $0.updatedAt > $1.updatedAt
+        }
+    }
+
+    func task(id: String) -> IOSDeepReadTask? {
+        tasks.first { $0.id == id }
+    }
+
+    @discardableResult
+    func createTask(
+        title rawTitle: String,
+        sources: [IOSDeepReadSource],
+        templateId: String = IOSDeepReadTemplate.defaultId,
+        now: Int64 = IOSBoardSignalRepository.currentEpochMs()
+    ) throws -> IOSDeepReadTask {
+        let validSources = sources.filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !validSources.isEmpty else {
+            throw IOSDeepReadSourceNormalizationError.emptySource(.manualText)
+        }
+        let title = IOSDeepReadSourceNormalizer.clean(rawTitle)
+            .ifEmpty(validSources.first?.title ?? "深度阅读")
+        let task = IOSDeepReadTask(
+            id: UUID().uuidString,
+            title: title.prefixString(160),
+            status: .queued,
+            templateId: IOSDeepReadTemplate.template(id: templateId).id,
+            sources: validSources,
+            resultMarkdown: "",
+            failureMessage: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            retryCount: 0
+        )
+        upsert(task)
+        return task
+    }
+
+    func markRunning(id: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        update(id: id) { task in
+            task.status = .running
+            task.failureMessage = nil
+            task.updatedAt = now
+        }
+    }
+
+    func replaceSources(id: String, sources: [IOSDeepReadSource], now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        update(id: id) { task in
+            task.sources = sources
+            task.updatedAt = now
+        }
+    }
+
+    func complete(id: String, markdown: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        update(id: id) { task in
+            task.status = .succeeded
+            task.resultMarkdown = markdown
+            task.failureMessage = nil
+            task.updatedAt = now
+            task.completedAt = now
+        }
+    }
+
+    func fail(id: String, message: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        update(id: id) { task in
+            task.status = .failed
+            task.failureMessage = message.prefixString(500)
+            task.updatedAt = now
+        }
+    }
+
+    func markUnsupported(id: String, message: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        update(id: id) { task in
+            task.status = .unsupported
+            task.failureMessage = message.prefixString(500)
+            task.updatedAt = now
+        }
+    }
+
+    func prepareRetry(id: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        update(id: id) { task in
+            task.status = .queued
+            task.failureMessage = nil
+            task.retryCount += 1
+            task.updatedAt = now
+        }
+    }
+
+    private func update(id: String, mutate: (inout IOSDeepReadTask) -> Void) {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&tasks[index])
+        persist()
+    }
+
+    private func upsert(_ task: IOSDeepReadTask) {
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[index] = task
+        } else {
+            tasks.append(task)
+        }
+        persist()
+    }
+
+    private func persist() {
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try encoder.encode(tasks.sorted { $0.createdAt < $1.createdAt })
+            try data.write(to: fileURL, options: [.atomic])
+        } catch {
+            print("[IOSDeepReadStore] persist failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func loadTasks(from fileURL: URL, decoder: JSONDecoder) -> [IOSDeepReadTask] {
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let data = try? Data(contentsOf: fileURL),
+              let decoded = try? decoder.decode([IOSDeepReadTask].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+}
+
+enum IOSDeepReadDraftGenerator {
+    static func generate(task: IOSDeepReadTask, now: Date = Date()) -> String {
+        let template = task.template
+        let sources = task.sources
+        let totalCharacters = sources.reduce(0) { $0 + $1.content.count }
+        let date = IOSDeepReadDateFormatters.detail.string(from: now)
+        let grouped = Dictionary(grouping: sources, by: \.kind)
+
+        var lines: [String] = []
+        lines.append("# \(task.title)")
+        lines.append("")
+        lines.append("版式：\(template.name) · 来源：\(sources.count) 个 · 字符：\(totalCharacters) · \(date)")
+        lines.append("")
+        lines.append("## 摘要")
+        lines.append(summary(from: sources))
+        lines.append("")
+        lines.append("## 关键来源")
+        for source in sources.prefix(8) {
+            lines.append("- **\(source.kind.title)｜\(source.title)**：\(excerpt(source.content, limit: 220))")
+            if let url = source.url, !url.isEmpty {
+                lines.append("  \(url)")
+            }
+        }
+        lines.append("")
+        lines.append("## 脉络")
+        lines.append(narrative(from: sources))
+        lines.append("")
+        lines.append("## 分析")
+        lines.append(analysis(from: sources, templateId: task.templateId))
+        lines.append("")
+        lines.append("## 后续阅读")
+        let links = sources.compactMap { source -> String? in
+            guard let url = source.url, !url.isEmpty else { return nil }
+            return "- [\(source.title)](\(url))"
+        }
+        lines.append(contentsOf: links.isEmpty ? ["- 当前来源没有可打开链接。"] : links)
+        if grouped[.file]?.contains(where: { $0.metadata["truncated"] == "true" }) == true {
+            lines.append("")
+            lines.append("> 文件内容已截断；如需更完整分析，请缩小文件或分段导入。")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func summary(from sources: [IOSDeepReadSource]) -> String {
+        let head = sources
+            .prefix(3)
+            .map { excerpt($0.content, limit: 160) }
+            .filter { !$0.isEmpty }
+        guard !head.isEmpty else { return "当前没有足够文本形成摘要。" }
+        return "这次深度阅读基于\(sources.count)个真实来源整理：\(head.joined(separator: " "))"
+    }
+
+    private static func narrative(from sources: [IOSDeepReadSource]) -> String {
+        sources
+            .prefix(5)
+            .enumerated()
+            .map { index, source in
+                "\(index + 1). \(source.title)：\(excerpt(source.content, limit: 180))"
+            }
+            .joined(separator: "\n")
+    }
+
+    private static func analysis(from sources: [IOSDeepReadSource], templateId: String) -> String {
+        let sourceKinds = Set(sources.map(\.kind))
+        var points: [String] = []
+        if sourceKinds.contains(.searchResult) {
+            points.append("- 搜索来源适合交叉核对，但摘要可能受搜索页片段限制。")
+        }
+        if sourceKinds.contains(.conversation) {
+            points.append("- 会话来源能保留上下文意图，适合提炼待办、决策和未解决问题。")
+        }
+        if sourceKinds.contains(.file) {
+            points.append("- 文件来源来自本机显式选择；不可读或扫描图片不会被假装 OCR。")
+        }
+        if sourceKinds.contains(.webMount) {
+            points.append("- WebMount 来源只读取当前前台页面正文，不自动登录或跨站抓取。")
+        }
+        if points.isEmpty {
+            points.append("- 当前结论主要来自用户提供文本；建议补充搜索或文件来源做交叉验证。")
+        }
+        if templateId == IOSDeepReadTemplate.analysis.id {
+            points.append("- 下一步：标记需要验证的事实、补齐缺失来源，再决定是否把结果发回聊天继续推演。")
+        }
+        return points.joined(separator: "\n")
+    }
+
+    private static func excerpt(_ text: String, limit: Int) -> String {
+        IOSDeepReadSourceNormalizer.cleanMultiline(text).prefixString(limit)
+    }
+}
+
+enum IOSDeepReadDateFormatters {
+    static let detail: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
+}
+
+private extension String {
+    var ifBlankNil: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func ifEmpty(_ fallback: String) -> String {
+        isEmpty ? fallback : self
+    }
+
+    func prefixString(_ limit: Int) -> String {
+        guard count > limit else { return self }
+        return String(prefix(limit))
     }
 }

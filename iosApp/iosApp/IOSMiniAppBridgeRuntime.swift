@@ -384,7 +384,13 @@ final class IOSMiniAppBridgeRuntime {
 
     private func fetch(params: [String: Any]) async throws -> IOSMiniAppJSONValue {
         let urlString = try stringParam("url", params)
-        guard let url = URL(string: urlString), url.scheme?.lowercased() == "https" else {
+        let url: URL
+        do {
+            url = try IOSSearchExecutor.allowedPublicHTTPURL(from: urlString)
+        } catch {
+            throw BridgeError.denied(error.localizedDescription)
+        }
+        guard url.scheme?.lowercased() == "https" else {
             throw BridgeError.denied("Amber.fetch only allows https URLs.")
         }
         let method = (stringParamOrNil("method", params) ?? "GET").uppercased()

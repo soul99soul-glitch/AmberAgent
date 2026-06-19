@@ -89,6 +89,13 @@
 - 无 API Key、无网络、来源不可读、生成失败、超预算时都有可恢复状态。
 - 所有状态来自真实持久化和任务状态，不用静态说明冒充功能。
 
+2026-06-19 iOS 落地记录：
+
+- 已把 `BoardView` 从轻量线索摘要扩展为正式深度阅读入口，支持手动文本、搜索结果、当前会话、文件选择、当前 WebMount 页面五类来源；其中文件和 WebMount 会在不可读、未授权、页面未加载时给出诚实失败/降级。
+- 已新增本地深度阅读任务模型、状态机、历史持久化、结果详情页、复制结果、回填当前聊天、失败/unsupported 重试，以及最小模板/版式选择和 HTML 模板校验。
+- 已保留 iOS 单 Amber Assistant 的产品边界；没有实现 Android 多 Assistant，也没有把深度阅读放进实验区或总开关。
+- 未实现 Android WorkManager/通知/24h 后台缓存等平台特有能力；iOS 目前是前台本地可验证闭环，真实联网搜索仍依赖现有搜索配置。
+
 推荐 goal：见本文档末尾“首个推荐 /goal Prompt”。
 
 ### Phase 2：记忆、搜索、图片生成、Mini App 正式能力追平
@@ -160,6 +167,14 @@
 - 图片生成可以独立推进。
 - Mini App 可独立推进，但要避免和 WebMount 共用 WebKit/Bridge 文件时互相覆盖。
 
+2026-06-19 iOS Phase 2 落地记录：
+
+- 记忆：新增正式记忆库 helper、搜索/范围过滤、来源摘要、召回解释和写入审计；`MemoryOverviewView` 变为可搜索、可编辑、可删除、可看来源和审批记录的管理闭环，`MemoryEditView` 支持单条创建/编辑/删除。
+- 搜索：`SearchServicesView` 可直接运行 `search_web` 与 `scrape_web`，展示 provider、fallback、引用和错误降级；`SearchProviderView` 的状态文案改为真实保存/缺 Key 状态。
+- 图片生成：新增 OpenAI-compatible 图片生成设置、repository、历史图库、保存文件、分享、独立页面和聊天 `generate_image` 工具结果渲染；缺 API Key、缺模型、错误响应会显示真实错误，不新增伪设置项。
+- Mini App：扩展 runtime 权限设置到 network/search/AI/clipboard/shared store/event bus/host context/host write，`fetch` 复用公开 URL 校验阻断私网/本机地址，runner 阻断外部导航继承 native bridge。
+- 验证：`git diff --check` 通过；`env JAVA_HOME=/opt/homebrew/opt/openjdk@17 xcodebuild -quiet -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination "id=293252D5-CCF3-47DD-8736-8A8A26A6788C" build` 通过；相关 XCTest（`IOSMemoryLibraryTests`、`IOSImageGenerationRepositoryTests`、`IOSMiniAppBridgeRuntimeTests`、`IOSSharedSettingsStoreSkillWriteBackTests`、`IOSSearchExecutorTests`）通过。`generic/platform=iOS Simulator` 仍会选择 x86_64 并因现有 `Shared.framework`/`AmberNative` 只有 arm64 simulator slice 而链接失败，应使用真实 arm64 simulator destination。
+
 ### Phase 3：工作区与文件闭环
 
 目标：让文件、上下文、Artifacts、工作区成为贯穿聊天、深度阅读和工具执行的统一能力，而不是散落入口。
@@ -179,6 +194,16 @@
 - 用户能把文件交给 Amber，清楚知道哪些文件参与上下文。
 - 生成物不只存在于一次聊天里，而能保存和回看。
 - 工具访问文件时有清晰审批和范围。
+
+2026-06-19 iOS 落地记录：
+
+- 已新增本地 `IOSWorkspaceStore`：用户通过系统文件选择器导入的文件会复制进 AmberAgent app 容器下的 Workspace，记录 metadata、状态、预览文本、大小、来源和 `/workspace/...` 路径；不会自动扫描用户目录，也不会持久化跨启动安全书签。
+- 已把 Workspace 首页从占位入口改成真实页面，支持导入文件、最近文件、Artifact 列表、metadata、文本预览、重新解析、移除文件和删除 Artifact；失效文件、过大文件、解析失败、unsupported 格式会显示诚实状态。
+- 已把聊天文件选择接到 Workspace 导入和 one-shot 会话文件上下文：发送前明确提示解析文本会写入当前会话；失效文件会清理 grant 并要求用户从 Files 重新选择。
+- 已支持文本、Markdown、JSON/CSV、PDF、DOCX 的基础解析路径；图片/OCR、Office 高阶解析和 iCloud/Files 真实账号状态仍按 unsupported/错误状态处理，不伪装完成。
+- 已新增 Workspace 工具和权限边界：`workspace_file_read`、`workspace_file_write`、`workspace_artifact_read`、`workspace_artifact_delete` 均需要前台审批；路径穿越和设备绝对路径会被拒绝。
+- 已让聊天回复、图片生成输出、Mini App 生成/host artifact、Deep Read 结果能保存为 Workspace Artifact。Mini App/Deep Read 主线仅做输出沉淀旁路，不改变原执行流程。
+- 验证：`git diff --check` 通过；`JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :shared:compileKotlinIosSimulatorArm64 :shared:linkDebugFrameworkIosSimulatorArm64` 通过。`generic/platform=iOS Simulator` 在当前机器会选择 x86_64，仍因现有 `Shared.framework`/`AmberNative` 只有 arm64 simulator slice 而链接失败；使用真实 arm64 iPhone 17 simulator destination 可完成 app build 和相关测试。
 
 ### Phase 4：WebMount 与高级网页工具闭环
 

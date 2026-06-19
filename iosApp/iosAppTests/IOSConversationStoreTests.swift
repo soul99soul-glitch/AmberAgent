@@ -125,6 +125,34 @@ final class IOSConversationStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("Persistent selected file body"))
     }
 
+    func testCurrentConversationCanBecomeDeepReadSourceAndReceiveResult() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreDeepRead-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        await store.saveCurrent(messages: [
+            UIMessage.companion.user(prompt: "请深度阅读这个搜索结果"),
+            UIMessage.companion.assistant(prompt: "可以，先整理来源和关键问题。")
+        ])
+
+        let source = try store.currentConversationDeepReadSource()
+        XCTAssertEqual(source.kind, .conversation)
+        XCTAssertTrue(source.content.contains("请深度阅读"))
+
+        let deepReadStore = IOSDeepReadStore(baseDirectory: baseDirectory)
+        let task = try deepReadStore.createTask(title: "会话深读", sources: [source])
+        deepReadStore.complete(id: task.id, markdown: "# 会话深读\n\n结果")
+        let saved = await store.appendDeepReadResultToCurrentConversation(try XCTUnwrap(deepReadStore.task(id: task.id)))
+
+        XCTAssertTrue(saved)
+        XCTAssertTrue(store.currentMessages.map { $0.toText() }.joined(separator: "\n").contains("已保存深度阅读结果"))
+        XCTAssertTrue(store.currentMessages.map { $0.toText() }.joined(separator: "\n").contains("# 会话深读"))
+    }
+
     private func waitFor(
         timeout: TimeInterval = 2,
         condition: @escaping @MainActor () -> Bool

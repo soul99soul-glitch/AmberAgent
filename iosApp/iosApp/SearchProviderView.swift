@@ -149,9 +149,9 @@ struct SearchProviderView: View {
             AmberFormGroup {
                 SearchProviderStatusRow(
                     title: "服务启用",
-                    subtitle: "保存后会成为聊天搜索可用服务。",
-                    value: "可新增",
-                    valueColor: AmberTheme.accentGreen
+                    subtitle: "保存会写入真实搜索服务配置，并成为当前执行路由。",
+                    value: canSave ? "可保存" : "缺少 Key",
+                    valueColor: canSave ? AmberTheme.accentGreen : AmberTheme.accentAmber
                 )
             }
         }

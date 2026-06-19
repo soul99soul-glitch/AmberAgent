@@ -60,6 +60,21 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         XCTAssertEqual(result.errorMessage, "Permission 'search' is disabled in MiniApp settings.")
     }
 
+    func testFetchDeniesPrivateHostsEvenWhenGranted() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: ["network"]))
+        try repo.setGrant(appId: app.id, permission: "network", decision: .allow)
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(networkEnabled: true)
+        )
+
+        let result = await runtime.dispatch(method: "fetch", params: ["url": "https://127.0.0.1/admin"])
+
+        XCTAssertEqual(result.errorMessage, "URL is not allowed: local, loopback, link-local, and private hosts are blocked")
+    }
+
     func testAIGenerateChecksPolicyKeyThenCallsHandler() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: ["ai.generate"]))

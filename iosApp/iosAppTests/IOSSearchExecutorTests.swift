@@ -79,6 +79,32 @@ final class IOSSearchExecutorTests: XCTestCase {
         XCTAssertTrue(output.contains("https://example.com/one"))
     }
 
+    func testSearchResultsCanBecomeDeepReadSources() async throws {
+        let transport = MockSearchTransport(responses: [
+            .html("""
+            <html><body>
+            <a rel="nofollow" class='result-link' href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fexample.com%2Fdeep">Deep Result</a>
+            <td class='result-snippet'>Snippet for deep reading.</td>
+            </body></html>
+            """)
+        ])
+
+        let execution = try await IOSSearchExecutor.searchResults(
+            toolInput: #"{"query":"deep read source","max_results":1}"#,
+            transport: transport
+        )
+        let sources = try IOSDeepReadSourceNormalizer.searchSources(
+            query: execution.request.query,
+            results: execution.results,
+            now: 1_800_000_000_000
+        )
+
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(sources.first?.kind, .searchResult)
+        XCTAssertEqual(sources.first?.metadata["query"], "deep read source")
+        XCTAssertEqual(sources.first?.url, "https://example.com/deep")
+    }
+
     func testSelectedBingRouteUsesMockTransport() async throws {
         let store = makeIsolatedStore()
         let transport = MockSearchTransport(responses: [

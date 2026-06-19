@@ -245,6 +245,40 @@ final class IOSConversationStore {
         currentConversation?.currentMessages as? [UIMessage] ?? []
     }
 
+    func currentConversationDeepReadSource(maxMessages: Int = 12) throws -> IOSDeepReadSource {
+        let messages = currentMessages.suffix(max(maxMessages, 1)).compactMap { message -> String? in
+            let text = message.toText().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return "\(Self.boardRoleName(message.role)): \(String(text.prefix(1_200)))"
+        }
+        let title = currentConversation?.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? currentConversation?.title ?? "当前会话"
+            : "当前会话"
+        return try IOSDeepReadSourceNormalizer.conversationSource(
+            title: title,
+            messages: messages
+        )
+    }
+
+    @discardableResult
+    func appendDeepReadResultToCurrentConversation(_ task: IOSDeepReadTask) async -> Bool {
+        guard let conversation = currentConversation else { return false }
+        let markdown = task.resultMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !markdown.isEmpty else { return false }
+
+        var nextMessages = currentMessages
+        let message = UIMessage.companion.assistant(
+            prompt: """
+            已保存深度阅读结果：\(task.title)
+
+            \(markdown)
+            """
+        )
+        nextMessages.append(message)
+        await save(messages: nextMessages, to: conversation.id)
+        return true
+    }
+
     /// Global search over persisted conversation titles and message text.
     ///
     /// Read-only by design: it does not switch current conversation, bump revision,

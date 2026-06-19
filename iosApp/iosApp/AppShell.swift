@@ -9,6 +9,7 @@ struct AppShell: View {
     @State private var tabRouter = TabRouter()
     @State private var permissionStore: IOSPermissionStore
     @State private var documentAccessStore: DocumentAccessStore
+    @State private var workspaceStore: IOSWorkspaceStore
     @State private var systemPermissionCoordinator: IOSSystemPermissionCoordinator
     @State private var localToolExecutor: IOSLocalToolExecutor
     @State private var providerRegistry: ProviderRegistryStore
@@ -21,15 +22,18 @@ struct AppShell: View {
     init(settingsStore: SettingsStore) {
         let permissionStore = IOSPermissionStore()
         let documentAccessStore = DocumentAccessStore()
+        let workspaceStore = IOSWorkspaceStore.shared
         let systemPermissionCoordinator = IOSSystemPermissionCoordinator()
         self.settingsStore = settingsStore
         self._permissionStore = State(initialValue: permissionStore)
         self._documentAccessStore = State(initialValue: documentAccessStore)
+        self._workspaceStore = State(initialValue: workspaceStore)
         self._systemPermissionCoordinator = State(initialValue: systemPermissionCoordinator)
         self._localToolExecutor = State(
             initialValue: IOSLocalToolExecutor(
                 permissionStore: permissionStore,
                 documentStore: documentAccessStore,
+                workspaceStore: workspaceStore,
                 systemPermissionCoordinator: systemPermissionCoordinator
             )
         )
@@ -53,6 +57,7 @@ struct AppShell: View {
                     mcpConfigStore: mcpConfigStore,
                     permissionStore: permissionStore,
                     documentStore: documentAccessStore,
+                    workspaceStore: workspaceStore,
                     systemPermissionCoordinator: systemPermissionCoordinator,
                     localToolExecutor: localToolExecutor
                 )
@@ -62,6 +67,8 @@ struct AppShell: View {
         }
         .environment(rootRouter)
         .environment(conversationStore)
+        .environment(documentAccessStore)
+        .environment(workspaceStore)
         .tint(AmberTheme.accent)
         .preferredColorScheme(preferredColorScheme)
         .task {
@@ -118,7 +125,8 @@ enum AppTab: String, CaseIterable, Identifiable {
         settingsStore: SettingsStore,
         sharedSettings: IOSSharedSettingsStore,
         localToolExecutor: IOSLocalToolExecutor,
-        documentStore: DocumentAccessStore? = nil
+        documentStore: DocumentAccessStore? = nil,
+        workspaceStore: IOSWorkspaceStore = .shared
     ) -> some View {
         switch self {
         case .chat:
@@ -126,11 +134,12 @@ enum AppTab: String, CaseIterable, Identifiable {
                 settingsStore: settingsStore,
                 sharedSettings: sharedSettings,
                 localToolExecutor: localToolExecutor,
-                documentStore: documentStore
+                documentStore: documentStore,
+                workspaceStore: workspaceStore
             )
         case .workspace:
             if sharedSettings.isCapabilityGateEnabled(.workspace) {
-                WorkspaceView()
+                WorkspaceView(workspaceStore: workspaceStore)
             } else {
                 CapabilityGateLockedView(gate: .workspace)
             }
@@ -153,7 +162,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .workspace:
             Label("Workspace", systemImage: "square.grid.2x2")
         case .assistants:
-            Label("Assistants", systemImage: "person.2")
+            Label("Amber", systemImage: "sparkles")
         case .settings:
             Label("Settings", systemImage: "gearshape")
         }
@@ -217,7 +226,7 @@ enum Route: Hashable {
     case conversationStorage
     case syncBackup
     case capabilities
-    case memoryEdit(text: String, scope: String, pinned: Bool)
+    case memoryEdit(recordId: Int?, text: String, scope: String, pinned: Bool)
     case skills
     case skillAdd
     case mcpServers
@@ -230,11 +239,13 @@ enum Route: Hashable {
     case providerDetail(name: String, endpoint: String, kind: ProviderRouteKind)
     case providerKeyEditor(name: String)
     case modelDefaults
+    case imageGeneration
     case searchServices
     case searchProvider
     case ttsSettings
     case board
     case boardSettings
+    case deepReadTask(id: String)
     case miniApps
     case miniAppSettings
     case miniAppRunner(appId: String)
@@ -277,6 +288,7 @@ private extension View {
         mcpConfigStore: IOSMcpConfigStore,
         permissionStore: IOSPermissionStore,
         documentStore: DocumentAccessStore,
+        workspaceStore: IOSWorkspaceStore,
         systemPermissionCoordinator: IOSSystemPermissionCoordinator,
         localToolExecutor: IOSLocalToolExecutor
     ) -> some View {
@@ -287,7 +299,8 @@ private extension View {
                     settingsStore: settingsStore,
                     sharedSettings: sharedSettings,
                     localToolExecutor: localToolExecutor,
-                    documentStore: documentStore
+                    documentStore: documentStore,
+                    workspaceStore: workspaceStore
                 )
             case .search(let initialQuery):
                 if sharedSettings.isCapabilityGateEnabled(.standaloneSearch) {
@@ -314,8 +327,8 @@ private extension View {
                     systemPermissionCoordinator: systemPermissionCoordinator,
                     localToolExecutor: localToolExecutor
                 )
-            case .memoryEdit(let text, let scope, let pinned):
-                MemoryEditView(initialText: text, initialScope: scope, initialPinned: pinned)
+            case .memoryEdit(let recordId, let text, let scope, let pinned):
+                MemoryEditView(recordId: recordId, initialText: text, initialScope: scope, initialPinned: pinned)
             case .skills:
                 if sharedSettings.isCapabilityGateEnabled(.skills) {
                     SkillsView(sharedSettings: sharedSettings)
@@ -368,6 +381,8 @@ private extension View {
                     sharedSettings: sharedSettings,
                     providerRegistry: providerRegistry
                 )
+            case .imageGeneration:
+                ImageGenerationView(settingsStore: settingsStore)
             case .searchServices:
                 SearchServicesView(sharedSettings: sharedSettings)
             case .searchProvider:
@@ -378,6 +393,8 @@ private extension View {
                 BoardView(settingsStore: settingsStore, sharedSettings: sharedSettings)
             case .boardSettings:
                 BoardSettingsView(sharedSettings: sharedSettings)
+            case .deepReadTask(let id):
+                IOSDeepReadTaskDetailView(taskId: id)
             case .miniApps:
                 MiniAppListView()
             case .miniAppSettings:
@@ -390,7 +407,7 @@ private extension View {
                 WebMountSiteView(site: site)
             case .workspace:
                 if sharedSettings.isCapabilityGateEnabled(.workspace) {
-                    WorkspaceView()
+                    WorkspaceView(workspaceStore: workspaceStore)
                 } else {
                     CapabilityGateLockedView(gate: .workspace)
                 }
@@ -416,15 +433,15 @@ private extension View {
                 }
             case .conversation(let id):
                 PlaceholderDetailView(title: "Conversation", subtitle: id, systemImage: "text.bubble")
-            case .assistant(let id):
-                if sharedSettings.isCapabilityGateEnabled(.workspace) {
-                    PlaceholderDetailView(title: "Assistant", subtitle: id, systemImage: "person.crop.circle")
-                } else {
-                    CapabilityGateLockedView(gate: .workspace)
-                }
+            case .assistant:
+                PlaceholderDetailView(
+                    title: "Amber Assistant",
+                    subtitle: "iOS 只保留一个 Amber Assistant。",
+                    systemImage: "sparkles"
+                )
             case .workspaceItem(let id):
                 if sharedSettings.isCapabilityGateEnabled(.workspace) {
-                    PlaceholderDetailView(title: "Workspace Item", subtitle: id, systemImage: "folder")
+                    WorkspaceView(workspaceStore: workspaceStore, focusedItemId: id)
                 } else {
                     CapabilityGateLockedView(gate: .workspace)
                 }

@@ -1,0 +1,82 @@
+{
+  "title": "AmberAgent iOS WebMount advanced closure",
+  "slug": "amberagent-ios-webmount-advanced-closure",
+  "created_at": "2026-06-19T13:32:53+00:00",
+  "status": "completed_with_external_build_blocker",
+  "approval": {
+    "required": null,
+    "granted": null,
+    "notes": ""
+  },
+  "packets": [
+    {
+      "id": "A",
+      "name": "Android WebMount Parity Auditor",
+      "status": "completed",
+      "mode": "read_only"
+    },
+    {
+      "id": "B",
+      "name": "iOS WebKit Security Auditor",
+      "status": "completed",
+      "mode": "read_only"
+    },
+    {
+      "id": "C",
+      "name": "Product UX Auditor",
+      "status": "completed",
+      "mode": "read_only"
+    },
+    {
+      "id": "D",
+      "name": "Verification Auditor",
+      "status": "completed",
+      "mode": "read_only"
+    }
+  ],
+  "verification": {
+    "status": "blocked_by_unrelated_subagent_compile_error",
+    "checks": [
+      {
+        "command": "git status --short --branch",
+        "status": "passed",
+        "notes": "Initial branch was codex/ios-port-wip ahead 16; .workflow/ was untracked."
+      },
+      {
+        "command": "git log --oneline --decorate -12",
+        "status": "passed",
+        "notes": "Captured latest 12 commits before implementation."
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed",
+        "notes": "No whitespace errors."
+      },
+      {
+        "command": "xcrun swiftc -parse iosApp/iosApp/IOSLocalToolExecutor.swift iosApp/iosApp/WebMountView.swift",
+        "status": "passed",
+        "notes": "WebMount executor and UI parse check passed."
+      },
+      {
+        "command": "xcrun swiftc -parse -F shared/build/bin/iosSimulatorArm64/debugFramework iosApp/iosApp/ChatView.swift iosApp/iosApp/BoardView.swift",
+        "status": "passed",
+        "notes": "Chat and board handoff parse check passed."
+      },
+      {
+        "command": "xcrun swiftc -parse -F shared/build/bin/iosSimulatorArm64/debugFramework iosApp/iosAppTests/IOSLocalToolExecutorTests.swift iosApp/iosAppTests/ChatViewModelSelectedFileContextTests.swift iosApp/iosAppTests/IOSCapabilityRegistryTests.swift",
+        "status": "passed",
+        "notes": "Updated test files parse check passed."
+      },
+      {
+        "command": "xcodebuild -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination \"generic/platform=iOS Simulator\" -derivedDataPath /tmp/amberagent-ios-derived CODE_SIGNING_ALLOWED=NO build",
+        "status": "blocked",
+        "notes": "Without JAVA_HOME: Unable to locate a Java Runtime."
+      },
+      {
+        "command": "env JAVA_HOME=/opt/homebrew/opt/openjdk@17 xcodebuild -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination \"generic/platform=iOS Simulator\" -derivedDataPath /tmp/amberagent-ios-derived CODE_SIGNING_ALLOWED=NO build",
+        "status": "blocked",
+        "notes": "KMP shared build succeeded, then iosApp compile failed in out-of-scope SubAgentRunner.swift:321 Static methods may only be declared on a type; :329 Extraneous '}' at top level."
+      }
+    ]
+  }
+}

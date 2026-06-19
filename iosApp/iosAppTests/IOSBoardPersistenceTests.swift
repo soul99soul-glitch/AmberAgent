@@ -315,6 +315,147 @@ final class IOSBoardPersistenceTests: XCTestCase {
         XCTAssertEqual(loaded?.sourceCounts?[IOSBoardSignalSourceType.chatHistory], 1)
     }
 
+    func testDeepReadTaskPersistenceHistoryAndCompletion() throws {
+        let base = makeTempBase()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = IOSDeepReadStore(baseDirectory: base)
+        let source = try IOSDeepReadSourceNormalizer.manualText(
+            title: "Swift Concurrency",
+            text: "Actors isolate mutable state and structured concurrency keeps task lifetimes visible.",
+            now: 100
+        )
+
+        let task = try store.createTask(
+            title: "Concurrency 阅读",
+            sources: [source],
+            templateId: IOSDeepReadTemplate.analysis.id,
+            now: 1_000
+        )
+        store.markRunning(id: task.id, now: 2_000)
+        store.complete(id: task.id, markdown: "# Concurrency\n\nResult", now: 3_000)
+
+        let restarted = IOSDeepReadStore(baseDirectory: base)
+        let loaded = try XCTUnwrap(restarted.task(id: task.id))
+        XCTAssertEqual(loaded.status, .succeeded)
+        XCTAssertEqual(loaded.templateId, IOSDeepReadTemplate.analysis.id)
+        XCTAssertEqual(loaded.resultMarkdown, "# Concurrency\n\nResult")
+        XCTAssertEqual(restarted.history.first?.id, task.id)
+    }
+
+    func testDeepReadFailureAndRetryState() throws {
+        let store = IOSDeepReadStore(baseDirectory: makeTempBase())
+        let source = try IOSDeepReadSourceNormalizer.manualText(title: "", text: "A source with enough text.", now: 100)
+        let task = try store.createTask(title: "", sources: [source], now: 1_000)
+
+        store.fail(id: task.id, message: "network unavailable", now: 2_000)
+        XCTAssertEqual(store.task(id: task.id)?.status, .failed)
+        XCTAssertEqual(store.task(id: task.id)?.failureMessage, "network unavailable")
+
+        store.prepareRetry(id: task.id, now: 3_000)
+        XCTAssertEqual(store.task(id: task.id)?.status, .queued)
+        XCTAssertEqual(store.task(id: task.id)?.retryCount, 1)
+        XCTAssertNil(store.task(id: task.id)?.failureMessage)
+
+        store.markRunning(id: task.id, now: 4_000)
+        let output = IOSDeepReadDraftGenerator.generate(task: try XCTUnwrap(store.task(id: task.id)))
+        store.complete(id: task.id, markdown: output, now: 5_000)
+        XCTAssertEqual(store.task(id: task.id)?.status, .succeeded)
+        XCTAssertTrue(store.task(id: task.id)?.resultMarkdown.contains("## 摘要") == true)
+    }
+
+    func testDeepReadSourceNormalizationCoversManualFileConversationAndWeb() throws {
+        let manual = try IOSDeepReadSourceNormalizer.manualText(
+            title: "  ",
+            text: "  First line\n\n\nSecond line  ",
+            now: 100
+        )
+        XCTAssertEqual(manual.title, "First line")
+        XCTAssertEqual(manual.content, "First line\n\nSecond line")
+
+        let conversation = try IOSDeepReadSourceNormalizer.conversationSource(
+            title: "Current chat",
+            messages: ["user: 深读这个问题", "assistant: 可以，从来源开始。"],
+            now: 101
+        )
+        XCTAssertEqual(conversation.kind, .conversation)
+        XCTAssertEqual(conversation.metadata["message_count"], "2")
+
+        let file = try IOSDeepReadSourceNormalizer.fileSource(
+            SelectedDocumentReadResult(
+                fileName: "report.pdf",
+                fileType: "application/pdf",
+                totalBytes: 2_048,
+                bytesRead: 2_048,
+                characterCount: 24,
+                preview: "PDF readable text",
+                isTruncated: false,
+                note: nil
+            ),
+            now: 102
+        )
+        XCTAssertEqual(file.kind, .file)
+        XCTAssertEqual(file.metadata["file_type"], "application/pdf")
+
+        let web = try IOSDeepReadSourceNormalizer.webMountSource(
+            title: "Loaded page",
+            url: "https://example.com/article?secret=redacted",
+            text: "Readable page text",
+            now: 103
+        )
+        XCTAssertEqual(web.kind, .webMount)
+        XCTAssertEqual(web.url, "https://example.com/article?secret=redacted")
+    }
+
+    func testDeepReadSourceNormalizationRejectsUnreadableFileAndEmptyWebMount() {
+        let unreadable = SelectedDocumentReadResult(
+            fileName: "scan.pdf",
+            fileType: "application/pdf",
+            totalBytes: 1_024,
+            bytesRead: 1_024,
+            characterCount: 0,
+            preview: "",
+            isTruncated: false,
+            note: "PDF 中没有可提取文本；扫描版 PDF 需要 OCR。"
+        )
+        XCTAssertThrowsError(try IOSDeepReadSourceNormalizer.fileSource(unreadable)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("PDF") || error.localizedDescription.contains("OCR"))
+        }
+        XCTAssertThrowsError(try IOSDeepReadSourceNormalizer.webMountSource(title: "", url: nil, text: "   ")) { error in
+            XCTAssertTrue(error.localizedDescription.contains("WebMount"))
+        }
+    }
+
+    func testDeepReadTemplateValidatorAcceptsSafeHTMLAndRejectsUnsafeHTML() {
+        let valid = IOSDeepReadTemplateValidator.validateHTML("""
+        <!DOCTYPE html><html><head><style>{{font_css}}</style></head><body>{{narrative_html}}</body></html>
+        """)
+        XCTAssertTrue(valid.ok)
+
+        let script = IOSDeepReadTemplateValidator.validateHTML("<html><body><script>alert(1)</script></body></html>")
+        XCTAssertFalse(script.ok)
+        XCTAssertTrue(script.error?.contains("JavaScript") == true)
+
+        let external = IOSDeepReadTemplateValidator.validateHTML("<html><body><img src=\"https://example.com/a.png\"></body></html>")
+        XCTAssertFalse(external.ok)
+        XCTAssertTrue(external.error?.contains("外部") == true || external.error?.contains("资源") == true)
+    }
+
+    func testDeepReadDraftGeneratorIncludesSourceBoundaries() throws {
+        let sources = [
+            try IOSDeepReadSourceNormalizer.manualText(title: "Manual", text: "Manual source explains the topic."),
+            try IOSDeepReadSourceNormalizer.conversationSource(title: "Chat", messages: ["user: 需要跟进这个决策"]),
+            try IOSDeepReadSourceNormalizer.webMountSource(title: "Page", url: "https://example.com/page", text: "Current page body")
+        ]
+        let store = IOSDeepReadStore(baseDirectory: makeTempBase())
+        let task = try store.createTask(title: "Boundary test", sources: sources, templateId: IOSDeepReadTemplate.analysis.id)
+
+        let markdown = IOSDeepReadDraftGenerator.generate(task: task)
+
+        XCTAssertTrue(markdown.contains("## 摘要"))
+        XCTAssertTrue(markdown.contains("WebMount 来源只读取当前前台页面正文"))
+        XCTAssertTrue(markdown.contains("会话来源能保留上下文意图"))
+    }
+
     private func makeTempBase() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("IOSBoardPersistenceTests-")

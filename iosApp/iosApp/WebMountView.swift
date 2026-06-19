@@ -21,6 +21,136 @@ struct WebMountSiteRoute: Hashable, Identifiable {
     }
 }
 
+enum IOSDeepReadWebMountAdapter {
+    @MainActor
+    static func currentPageSource(
+        controller: IOSWebMountController = .shared,
+        maxChars: Int = 20_000
+    ) async -> Result<IOSDeepReadSource, IOSDeepReadSourceNormalizationError> {
+        let snapshot = controller.runtime.snapshot
+        guard snapshot.status == .ready else {
+            let reason = snapshot.error?.nilIfBlank
+                ?? "WebMount 当前没有已加载完成的页面；请先打开站点并停留在要深读的页面。"
+            return .failure(.unsupported(reason))
+        }
+        do {
+            let extracted = try await controller.runtime.extract(mode: "readable", maxChars: maxChars, maxLinks: 20)
+            let result = extracted["text"] as? String
+                ?? (extracted["result"] as? [String: Any])?["text"] as? String
+                ?? ""
+            let title = extracted["title"] as? String
+                ?? (extracted["result"] as? [String: Any])?["title"] as? String
+                ?? snapshot.title
+                ?? "WebMount 页面"
+            let url = extracted["url"] as? String
+                ?? (extracted["result"] as? [String: Any])?["url"] as? String
+                ?? snapshot.currentURL
+            let source = try IOSDeepReadSourceNormalizer.webMountSource(title: title, url: url, text: result)
+            return .success(source)
+        } catch let error as IOSDeepReadSourceNormalizationError {
+            return .failure(error)
+        } catch {
+            return .failure(.unsupported("WebMount 页面正文读取失败：\(error.localizedDescription)"))
+        }
+    }
+}
+
+struct IOSWebMountContentHandoff: Equatable, Identifiable {
+    let id: String
+    let siteId: String
+    let siteName: String
+    let title: String
+    let sourceURL: String
+    let text: String
+    let linkCount: Int
+    let createdAtMillis: Int64
+
+    var chatPrompt: String {
+        """
+        请基于以下 WebMount 网页内容继续帮我处理。
+
+        来源：\(siteName)
+        标题：\(title.nilIfBlank ?? siteName)
+        URL：\(sourceURL)
+        链接数：\(linkCount)
+
+        正文：
+        \(String(text.prefix(12_000)))
+        """
+    }
+
+    var boardSignal: IOSRawBoardSignal {
+        IOSRawBoardSignal(
+            sourceType: IOSBoardSignalSourceType.webmount,
+            sourceRef: "webmount:\(siteId):\(sourceURL)",
+            title: title.nilIfBlank ?? siteName,
+            content: String(text.prefix(4_000)),
+            signalTime: createdAtMillis,
+            metadataJson: IOSWebMountController.json([
+                "site_id": siteId,
+                "site_name": siteName,
+                "source_url": sourceURL,
+                "link_count": linkCount,
+                "redacted": true
+            ])
+        )
+    }
+
+    static func from(
+        site: IOSWebMountSite,
+        snapshot: IOSWebMountRuntimeSnapshot,
+        extraction: [String: Any]
+    ) -> IOSWebMountContentHandoff? {
+        let rawText = (extraction["text"] as? String)?.nilIfBlank
+        guard let rawText else { return nil }
+        let redactedText = IOSWebMountRedactor.redactedText(rawText).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !redactedText.isEmpty else { return nil }
+        let sourceURL = IOSWebMountRedactor.redactedURL(extraction["url"] as? String)
+            ?? snapshot.currentURL
+            ?? IOSWebMountRedactor.redactedURL(site.homepageURL)
+            ?? site.homepageHost
+        let links = extraction["links"] as? [[String: Any]] ?? []
+        return IOSWebMountContentHandoff(
+            id: UUID().uuidString,
+            siteId: site.id,
+            siteName: site.displayName,
+            title: (extraction["title"] as? String)?.nilIfBlank ?? snapshot.title ?? site.displayName,
+            sourceURL: sourceURL,
+            text: redactedText,
+            linkCount: links.count,
+            createdAtMillis: IOSWebMountClock.nowMillis()
+        )
+    }
+}
+
+@MainActor
+final class IOSWebMountContentHandoffStore {
+    static let shared = IOSWebMountContentHandoffStore()
+
+    private var pendingChatHandoff: IOSWebMountContentHandoff?
+    private var pendingDeepReadHandoff: IOSWebMountContentHandoff?
+
+    private init() {}
+
+    func prepareChat(_ handoff: IOSWebMountContentHandoff) {
+        pendingChatHandoff = handoff
+    }
+
+    func consumeChatHandoff() -> IOSWebMountContentHandoff? {
+        defer { pendingChatHandoff = nil }
+        return pendingChatHandoff
+    }
+
+    func prepareDeepRead(_ handoff: IOSWebMountContentHandoff) {
+        pendingDeepReadHandoff = handoff
+    }
+
+    func consumeDeepReadHandoff() -> IOSWebMountContentHandoff? {
+        defer { pendingDeepReadHandoff = nil }
+        return pendingDeepReadHandoff
+    }
+}
+
 @MainActor
 struct WebMountView: View {
     @Environment(\.dismiss) private var dismiss
@@ -54,6 +184,7 @@ struct WebMountView: View {
                             WebMountBanner(text: banner)
                                 .padding(.top, 4)
                         }
+                        settingsSection
                         stationSection
                     }
                     .padding(.bottom, 36)
@@ -104,25 +235,65 @@ struct WebMountView: View {
         .padding(.bottom, 10)
     }
 
+    private var settingsSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "Agent 工具")
+            AmberFormGroup {
+                WebMountInfoRow(
+                    title: "正式能力",
+                    subtitle: "WebMount 工具会按「权限与批准」策略执行；模型读取页面前默认需要前台确认。",
+                    systemImage: "checkmark.shield",
+                    tint: AmberTheme.accentGreen,
+                    trailing: "可用"
+                )
+                WebMountDivider()
+                WebMountInfoRow(
+                    title: "wm_eval",
+                    subtitle: "任意 JavaScript 未声明，也不会默认开启。OAuth / signed fetch / adapter 工具会返回 unsupported。",
+                    systemImage: "curlybraces",
+                    tint: AmberTheme.accentRed,
+                    trailing: "关闭"
+                )
+                WebMountDivider()
+                WebMountInfoRow(
+                    title: "URL allowlist",
+                    subtitle: "仅允许当前站点注册表里的 http(s) host；移除站点后 direct URL 也会被拒绝。",
+                    systemImage: "link.badge.plus",
+                    tint: AmberTheme.accentCyan,
+                    trailing: "\(settings.allowedHosts.count)"
+                )
+            }
+        }
+    }
+
     private var stationSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "站点")
             AmberFormGroup {
-                ForEach(Array(registry.sites.enumerated()), id: \.element.id) { index, site in
-                    WebMountStationRow(
-                        site: site,
-                        onOpen: {
-                            router.navigate(to: .webMountSite(site: WebMountSiteRoute(site: site)))
-                        },
-                        onToggle: { enabled in
-                            registry.setEnabled(id: site.id, enabled: enabled)
-                        },
-                        onDelete: {
-                            delete(site)
+                if registry.sites.isEmpty {
+                    Text("还没有 WebMount 站点。添加一个 http(s) 网站，或恢复内置站点。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(registry.sites.enumerated()), id: \.element.id) { index, site in
+                        WebMountStationRow(
+                            site: site,
+                            onOpen: {
+                                router.navigate(to: .webMountSite(site: WebMountSiteRoute(site: site)))
+                            },
+                            onToggle: { enabled in
+                                registry.setEnabled(id: site.id, enabled: enabled)
+                            },
+                            onDelete: {
+                                delete(site)
+                            }
+                        )
+                        if index < registry.sites.count - 1 {
+                            WebMountDivider()
                         }
-                    )
-                    if index < registry.sites.count - 1 {
-                        WebMountDivider()
                     }
                 }
             }
@@ -130,7 +301,7 @@ struct WebMountView: View {
             HStack(spacing: 10) {
                 Button {
                     let restored = registry.restoreMissingSeeds()
-                    settings.addAllowedHosts(registry.sites.flatMap(\.allowedHosts))
+                    settings.syncAllowedHosts(registry.sites.flatMap(\.allowedHosts))
                     banner = restored == 0 ? "内置站点已是最新。" : "已恢复 \(restored) 个内置站点。"
                 } label: {
                     Label("恢复内置站点", systemImage: "arrow.clockwise")
@@ -198,7 +369,7 @@ struct WebMountView: View {
                 needsLogin: addNeedsLogin,
                 loginCookieName: addCookieName
             )
-            settings.addAllowedHosts(site.allowedHosts)
+            settings.syncAllowedHosts(registry.sites.flatMap(\.allowedHosts))
             addName = ""
             addURL = ""
             addCookieName = ""
@@ -213,6 +384,7 @@ struct WebMountView: View {
 
     private func delete(_ site: IOSWebMountSite) {
         if registry.remove(id: site.id) {
+            settings.syncAllowedHosts(registry.sites.flatMap(\.allowedHosts))
             banner = "已移除 \(site.displayName)。"
         }
     }
@@ -221,6 +393,7 @@ struct WebMountView: View {
 @MainActor
 struct WebMountSiteView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(RouterPath.self) private var router
 
     let site: WebMountSiteRoute
 
@@ -229,8 +402,11 @@ struct WebMountSiteView: View {
     @State private var cookieSummary: IOSWebMountCookieSummary?
     @State private var bridgeState = ""
     @State private var extractText = ""
+    @State private var visualSnapshotText = ""
     @State private var getSelector = "body"
     @State private var getText = ""
+    @State private var openURLText = ""
+    @State private var contentHandoff: IOSWebMountContentHandoff?
     @State private var banner: String?
     @State private var isLoading = false
 
@@ -283,6 +459,9 @@ struct WebMountSiteView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .task {
+            if openURLText.isEmpty {
+                openURLText = resolvedSite.homepageURL
+            }
             await refreshCookieSummary()
             if runtime.snapshot.status == .idle {
                 await openSite()
@@ -332,6 +511,22 @@ struct WebMountSiteView: View {
                     trailing: runtime.snapshot.title?.nilIfBlank ?? "\(Int(runtime.snapshot.estimatedProgress * 100))%"
                 )
                 WebMountDivider()
+                HStack(spacing: 8) {
+                    TextField("https://example.com/path", text: $openURLText)
+                        .font(.system(size: 13, design: .monospaced))
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    Button("打开") { Task { await openTypedURL() } }
+                        .buttonStyle(.bordered)
+                        .disabled(isLoading)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                WebMountDivider()
                 HStack(spacing: 10) {
                     Button {
                         Task { _ = await controller.runtime.back() }
@@ -339,6 +534,7 @@ struct WebMountSiteView: View {
                         Label("后退", systemImage: "chevron.left")
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!runtime.snapshot.canGoBack)
 
                     Button {
                         Task { _ = await controller.runtime.forward() }
@@ -346,6 +542,7 @@ struct WebMountSiteView: View {
                         Label("前进", systemImage: "chevron.right")
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!runtime.snapshot.canGoForward)
 
                     Spacer()
                 }
@@ -378,6 +575,8 @@ struct WebMountSiteView: View {
                         .buttonStyle(.bordered)
                     Button("提取正文") { Task { await extractReadable() } }
                         .buttonStyle(.bordered)
+                    Button("视觉快照") { Task { await visualSnapshot() } }
+                        .buttonStyle(.bordered)
                     Spacer()
                 }
                 .padding(.horizontal, 14)
@@ -388,7 +587,25 @@ struct WebMountSiteView: View {
                     WebMountDivider()
                 }
                 if !extractText.isEmpty {
+                    if let contentHandoff {
+                        WebMountHandoffActions(
+                            handoff: contentHandoff,
+                            onChat: {
+                                IOSWebMountContentHandoffStore.shared.prepareChat(contentHandoff)
+                                router.navigate(to: .chat)
+                            },
+                            onDeepRead: {
+                                IOSWebMountContentHandoffStore.shared.prepareDeepRead(contentHandoff)
+                                router.navigate(to: .board)
+                            }
+                        )
+                        WebMountDivider()
+                    }
                     WebMountCodeBlock(text: extractText)
+                    WebMountDivider()
+                }
+                if !visualSnapshotText.isEmpty {
+                    WebMountCodeBlock(text: visualSnapshotText)
                     WebMountDivider()
                 }
                 HStack(spacing: 8) {
@@ -469,9 +686,30 @@ struct WebMountSiteView: View {
     private func openSite() async {
         isLoading = true
         _ = await controller.openForUser(site: resolvedSite)
+        openURLText = runtime.snapshot.currentURL ?? resolvedSite.homepageURL
         isLoading = false
         if let error = runtime.snapshot.error?.nilIfBlank {
             banner = error
+        }
+    }
+
+    private func openTypedURL() async {
+        isLoading = true
+        let output = await controller.execute(
+            toolName: "wm_open",
+            input: IOSWebMountController.json([
+                "site_id": resolvedSite.id,
+                "url": openURLText
+            ]),
+            isUserInitiated: true
+        )
+        isLoading = false
+        if let object = Self.jsonObject(output),
+           object["ok"] as? Bool == false {
+            banner = object["reason"] as? String ?? object["error"] as? String ?? "打开失败。"
+        } else {
+            banner = nil
+            openURLText = runtime.snapshot.currentURL ?? openURLText
         }
     }
 
@@ -491,9 +729,25 @@ struct WebMountSiteView: View {
     private func extractReadable() async {
         do {
             let result = try await controller.runtime.extract(mode: "readable", maxChars: 4_000, maxLinks: 12)
-            extractText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(result))
+            let redacted = IOSWebMountRedactor.redactedJSONObject(result)
+            extractText = IOSWebMountController.json(redacted)
+            contentHandoff = IOSWebMountContentHandoff.from(
+                site: resolvedSite,
+                snapshot: runtime.snapshot,
+                extraction: result
+            )
         } catch {
             extractText = IOSWebMountController.json(["ok": false, "error": error.localizedDescription])
+            contentHandoff = nil
+        }
+    }
+
+    private func visualSnapshot() async {
+        do {
+            let result = try await controller.runtime.extract(mode: "snapshot", maxChars: 4_000, maxLinks: 24)
+            visualSnapshotText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(result))
+        } catch {
+            visualSnapshotText = IOSWebMountController.json(["ok": false, "error": error.localizedDescription])
         }
     }
 
@@ -516,6 +770,11 @@ struct WebMountSiteView: View {
         let result = await controller.cookieStore.clearSession(for: resolvedSite)
         banner = "已清除 \(result.deletedCookieCount) 个 Cookie 和 \(result.clearedWebsiteDataRecords) 条网页数据。"
         await refreshCookieSummary()
+    }
+
+    private static func jsonObject(_ text: String) -> [String: Any]? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 }
 
@@ -658,6 +917,39 @@ private struct WebMountInfoRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+    }
+}
+
+private struct WebMountHandoffActions: View {
+    let handoff: IOSWebMountContentHandoff
+    let onChat: () -> Void
+    let onDeepRead: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("已提取 \(handoff.text.count) 个字符，可转入下一步。")
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(2)
+
+            HStack(spacing: 8) {
+                Button(action: onChat) {
+                    Label("转入聊天", systemImage: "bubble.left.and.text.bubble.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: onDeepRead) {
+                    Label("转入深度阅读", systemImage: "book.pages")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
 

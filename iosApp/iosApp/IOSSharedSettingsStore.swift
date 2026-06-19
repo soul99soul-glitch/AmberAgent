@@ -440,6 +440,14 @@ final class IOSSharedSettingsStore {
         restoreSnapshot(merged)
     }
 
+    func selectSearchProvider(serviceId: String) {
+        guard let index = snapshot.searchServices.firstIndex(where: { $0.id.description() == serviceId }) else {
+            return
+        }
+        let merged = IosSettingsMutations.shared.selectSearchService(settings: snapshot, index: Int32(index))
+        restoreSnapshot(merged)
+    }
+
     // MARK: - Custom TTS engines write-back
 
     private let ttsEnginesKey = "app.amber.ios.customTtsEngines"
@@ -618,6 +626,32 @@ final class IOSSharedSettingsStore {
         restoreSnapshot(merged)
     }
 
+    func updateMiniAppRuntime(_ transform: (MiniAppSetting) -> MiniAppSettingPatch) {
+        let miniApp = snapshot.agentRuntime.miniApp
+        let patch = transform(miniApp)
+        let merged = IosSettingsMutations.shared.setMiniAppRuntimeOptions(
+            settings: snapshot,
+            enabled: patch.enabled ?? miniApp.enabled,
+            networkEnabled: patch.networkEnabled ?? miniApp.networkEnabled,
+            externalImagesEnabled: patch.externalImagesEnabled ?? miniApp.externalImagesEnabled,
+            searchEnabled: patch.searchEnabled ?? miniApp.searchEnabled,
+            clipboardCopyEnabled: patch.clipboardCopyEnabled ?? miniApp.clipboardCopyEnabled,
+            boardSummaryUpdateEnabled: patch.boardSummaryUpdateEnabled ?? miniApp.boardSummaryUpdateEnabled,
+            hostContextEnabled: patch.hostContextEnabled ?? miniApp.hostContextEnabled,
+            hostWriteEnabled: patch.hostWriteEnabled ?? miniApp.hostWriteEnabled,
+            aiEnabled: patch.aiEnabled ?? miniApp.aiEnabled,
+            sharedStoreEnabled: patch.sharedStoreEnabled ?? miniApp.sharedStoreEnabled,
+            eventBusEnabled: patch.eventBusEnabled ?? miniApp.eventBusEnabled,
+            launchEnabled: patch.launchEnabled ?? miniApp.launchEnabled,
+            sensorEnabled: patch.sensorEnabled ?? miniApp.sensorEnabled,
+            locationEnabled: patch.locationEnabled ?? miniApp.locationEnabled,
+            clipboardReadEnabled: patch.clipboardReadEnabled ?? miniApp.clipboardReadEnabled,
+            webViewDebugEnabled: patch.webViewDebugEnabled ?? miniApp.webViewDebugEnabled,
+            showSourceButton: patch.showSourceButton ?? miniApp.showSourceButton
+        )
+        restoreSnapshot(merged)
+    }
+
     // MARK: - Real seeded collections (for UI display)
 
     /// Real KMP default TTS providers (DEFAULT_TTS_PROVIDERS), seeded + de-duplicated.
@@ -697,6 +731,64 @@ final class IOSSharedSettingsStore {
     var suggestionModelId: KotlinUuid { snapshot.suggestionModelId }
     var ocrModelId: KotlinUuid { snapshot.ocrModelId }
     var compressModelId: KotlinUuid { snapshot.compressModelId }
+}
+
+struct MiniAppSettingPatch {
+    var enabled: Bool?
+    var networkEnabled: Bool?
+    var externalImagesEnabled: Bool?
+    var searchEnabled: Bool?
+    var clipboardCopyEnabled: Bool?
+    var boardSummaryUpdateEnabled: Bool?
+    var hostContextEnabled: Bool?
+    var hostWriteEnabled: Bool?
+    var aiEnabled: Bool?
+    var sharedStoreEnabled: Bool?
+    var eventBusEnabled: Bool?
+    var launchEnabled: Bool?
+    var sensorEnabled: Bool?
+    var locationEnabled: Bool?
+    var clipboardReadEnabled: Bool?
+    var webViewDebugEnabled: Bool?
+    var showSourceButton: Bool?
+
+    init(
+        enabled: Bool? = nil,
+        networkEnabled: Bool? = nil,
+        externalImagesEnabled: Bool? = nil,
+        searchEnabled: Bool? = nil,
+        clipboardCopyEnabled: Bool? = nil,
+        boardSummaryUpdateEnabled: Bool? = nil,
+        hostContextEnabled: Bool? = nil,
+        hostWriteEnabled: Bool? = nil,
+        aiEnabled: Bool? = nil,
+        sharedStoreEnabled: Bool? = nil,
+        eventBusEnabled: Bool? = nil,
+        launchEnabled: Bool? = nil,
+        sensorEnabled: Bool? = nil,
+        locationEnabled: Bool? = nil,
+        clipboardReadEnabled: Bool? = nil,
+        webViewDebugEnabled: Bool? = nil,
+        showSourceButton: Bool? = nil
+    ) {
+        self.enabled = enabled
+        self.networkEnabled = networkEnabled
+        self.externalImagesEnabled = externalImagesEnabled
+        self.searchEnabled = searchEnabled
+        self.clipboardCopyEnabled = clipboardCopyEnabled
+        self.boardSummaryUpdateEnabled = boardSummaryUpdateEnabled
+        self.hostContextEnabled = hostContextEnabled
+        self.hostWriteEnabled = hostWriteEnabled
+        self.aiEnabled = aiEnabled
+        self.sharedStoreEnabled = sharedStoreEnabled
+        self.eventBusEnabled = eventBusEnabled
+        self.launchEnabled = launchEnabled
+        self.sensorEnabled = sensorEnabled
+        self.locationEnabled = locationEnabled
+        self.clipboardReadEnabled = clipboardReadEnabled
+        self.webViewDebugEnabled = webViewDebugEnabled
+        self.showSourceButton = showSourceButton
+    }
 }
 
 struct IOSRemoteSyncStatus: Codable, Equatable {

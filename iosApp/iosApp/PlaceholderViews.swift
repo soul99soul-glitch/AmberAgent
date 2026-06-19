@@ -1,5 +1,6 @@
 import SwiftUI
 @preconcurrency import Shared
+import UniformTypeIdentifiers
 
 enum AmberTheme {
     static let background = Color(hex: 0xFBF7F1)
@@ -287,6 +288,12 @@ struct ConversationsView: View {
                 systemImage: "square.grid.2x2",
                 color: AmberTheme.accent,
                 route: .miniApps
+            ),
+            .init(
+                title: "图片",
+                systemImage: "photo.on.rectangle",
+                color: AmberTheme.accentRed,
+                route: .imageGeneration
             ),
             .init(
                 title: "核心记忆",
@@ -1070,6 +1077,7 @@ struct SettingsHomeView: View {
         [
             .init(title: "服务商", subtitle: nil, value: nil, systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
             .init(title: "模型与提示词", subtitle: nil, value: nil, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
+            .init(title: "图片生成", subtitle: nil, value: nil, systemImage: "photo.on.rectangle", color: AmberTheme.accentRed, route: .imageGeneration),
             .init(title: "搜索服务", subtitle: nil, value: nil, systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
             .init(title: "语音服务", subtitle: nil, value: nil, systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
         ]
@@ -1181,32 +1189,591 @@ private struct SettingsHomeEntry: Identifiable {
 }
 
 struct WorkspaceView: View {
+    @Bindable var workspaceStore: IOSWorkspaceStore
+    let focusedItemId: String?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var isImportingFile = false
+    @State private var selectedFile: IOSWorkspaceFileRecord?
+    @State private var selectedArtifact: IOSWorkspaceArtifactRecord?
+    @State private var alertMessage: String?
+
+    init(workspaceStore: IOSWorkspaceStore = .shared, focusedItemId: String? = nil) {
+        self.workspaceStore = workspaceStore
+        self.focusedItemId = focusedItemId
+    }
+
     var body: some View {
-        PlaceholderListView(
-            title: "Workspace",
-            systemImage: "square.grid.2x2",
-            rows: [
-                "Live tasks",
-                "Artifacts",
-                "Files",
-                "Web previews"
-            ]
-        )
+        ZStack {
+            AmberTheme.background.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    workspaceStats
+                    filesSection
+                    artifactsSection
+                }
+                .padding(.bottom, 36)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .fileImporter(
+            isPresented: $isImportingFile,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            handleImport(result)
+        }
+        .sheet(item: $selectedFile) { record in
+            WorkspaceFileDetailSheet(
+                record: record,
+                store: workspaceStore,
+                onReparse: {
+                    Task { await reparse(record) }
+                },
+                onRemove: {
+                    removeFile(record)
+                }
+            )
+        }
+        .sheet(item: $selectedArtifact) { record in
+            WorkspaceArtifactDetailSheet(
+                record: record,
+                store: workspaceStore,
+                onDelete: {
+                    deleteArtifact(record)
+                }
+            )
+        }
+        .alert("Workspace", isPresented: Binding(
+            get: { alertMessage != nil },
+            set: { if !$0 { alertMessage = nil } }
+        )) {
+            Button("好", role: .cancel) { alertMessage = nil }
+        } message: {
+            Text(alertMessage ?? "")
+        }
+        .onAppear {
+            focusInitialItem()
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
+                dismiss()
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Workspace")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Text("文件上下文与生成结果")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+
+            Spacer()
+
+            Button {
+                isImportingFile = true
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(AmberTheme.accent, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("导入文件")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 14)
+    }
+
+    private var workspaceStats: some View {
+        HStack(spacing: 10) {
+            WorkspaceMetricCard(
+                title: "文件",
+                value: "\(workspaceStore.files.count)",
+                systemImage: "doc.text",
+                color: AmberTheme.accentIndigo
+            )
+            WorkspaceMetricCard(
+                title: "Artifacts",
+                value: "\(workspaceStore.artifacts.count)",
+                systemImage: "sparkles.rectangle.stack",
+                color: AmberTheme.accentAmber
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 4)
+    }
+
+    private var filesSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "文件")
+            if workspaceStore.recentFiles.isEmpty {
+                WorkspaceEmptyState(
+                    systemImage: "doc.badge.plus",
+                    title: "还没有导入文件",
+                    subtitle: "通过 Files 选择的文件会复制进 AmberAgent 的本地 Workspace，不会自动扫描用户目录。"
+                )
+            } else {
+                AmberFormGroup {
+                    ForEach(Array(workspaceStore.recentFiles.enumerated()), id: \.element.id) { index, file in
+                        WorkspaceFileRow(record: file) {
+                            selectedFile = workspaceStore.fileRecord(idOrPath: file.id) ?? file
+                        }
+                        if index < workspaceStore.recentFiles.count - 1 {
+                            Divider()
+                                .overlay(AmberTheme.borderSoft)
+                                .padding(.leading, 58)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var artifactsSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "Artifacts")
+            if workspaceStore.recentArtifacts.isEmpty {
+                WorkspaceEmptyState(
+                    systemImage: "tray",
+                    title: "还没有保存的 Artifact",
+                    subtitle: "聊天、MiniApp、Deep Read 或工具输出可以保存到这里统一管理。"
+                )
+            } else {
+                AmberFormGroup {
+                    ForEach(Array(workspaceStore.recentArtifacts.enumerated()), id: \.element.id) { index, artifact in
+                        WorkspaceArtifactRow(record: artifact) {
+                            selectedArtifact = workspaceStore.artifacts.first { $0.id == artifact.id } ?? artifact
+                        }
+                        if index < workspaceStore.recentArtifacts.count - 1 {
+                            Divider()
+                                .overlay(AmberTheme.borderSoft)
+                                .padding(.leading, 58)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else {
+                alertMessage = "没有选择文件。"
+                return
+            }
+            Task {
+                do {
+                    let record = try await workspaceStore.importFile(url: url, source: "workspace_picker")
+                    selectedFile = record
+                } catch {
+                    alertMessage = error.localizedDescription
+                }
+            }
+        case .failure(let error):
+            alertMessage = "文件选择失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func reparse(_ record: IOSWorkspaceFileRecord) async {
+        do {
+            selectedFile = try await workspaceStore.reparseFile(id: record.id)
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    private func removeFile(_ record: IOSWorkspaceFileRecord) {
+        do {
+            try workspaceStore.removeFile(id: record.id)
+            selectedFile = nil
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteArtifact(_ record: IOSWorkspaceArtifactRecord) {
+        do {
+            try workspaceStore.deleteArtifact(id: record.id)
+            selectedArtifact = nil
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    private func focusInitialItem() {
+        guard let focusedItemId else { return }
+        if let file = workspaceStore.fileRecord(idOrPath: focusedItemId) {
+            selectedFile = file
+            return
+        }
+        if let artifact = workspaceStore.artifacts.first(where: { $0.id == focusedItemId }) {
+            selectedArtifact = artifact
+        }
     }
 }
 
 struct AssistantsView: View {
     var body: some View {
-        PlaceholderListView(
-            title: "Assistants",
-            systemImage: "person.2",
-            rows: [
-                "Assistant profiles",
-                "Prompt and behavior",
-                "Model defaults",
-                "Memory settings"
-            ]
+        PlaceholderDetailView(
+            title: "Amber Assistant",
+            subtitle: "iOS 只保留一个 Amber Assistant；模型、记忆与工具在设置中管理。",
+            systemImage: "sparkles"
         )
+    }
+}
+
+private struct WorkspaceMetricCard: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 32, height: 32)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value)
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 62)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
+    }
+}
+
+private struct WorkspaceEmptyState: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(AmberTheme.muted2)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .padding(.horizontal, 24)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 28)
+    }
+}
+
+private struct WorkspaceFileRow: View {
+    let record: IOSWorkspaceFileRecord
+    let action: () -> Void
+
+    var body: some View {
+        AmberFormRow(
+            systemImage: statusIcon,
+            iconColor: statusColor,
+            title: record.displayName,
+            subtitle: "\(record.byteSummary) · \(record.status.title) · /workspace/\(record.workspacePath)",
+            trailing: WorkspaceDateFormat.short(record.updatedAtMillis),
+            showsChevron: true,
+            action: action
+        )
+    }
+
+    private var statusIcon: String {
+        switch record.status {
+        case .ready: "doc.text"
+        case .missing: "doc.badge.exclamationmark"
+        case .parseFailed: "exclamationmark.triangle"
+        case .unsupported: "nosign"
+        case .tooLarge: "externaldrive.badge.exclamationmark"
+        case .needsReauthorization: "lock.open"
+        }
+    }
+
+    private var statusColor: Color {
+        switch record.status {
+        case .ready: AmberTheme.accentIndigo
+        case .unsupported, .needsReauthorization: AmberTheme.accentAmber
+        case .missing, .parseFailed, .tooLarge: AmberTheme.accentRed
+        }
+    }
+}
+
+private struct WorkspaceArtifactRow: View {
+    let record: IOSWorkspaceArtifactRecord
+    let action: () -> Void
+
+    var body: some View {
+        AmberFormRow(
+            systemImage: "sparkles.rectangle.stack",
+            iconColor: AmberTheme.accentAmber,
+            title: record.title,
+            subtitle: "\(record.type.title) · \(DocumentAccessStore.formatBytes(record.contentBytes))",
+            trailing: WorkspaceDateFormat.short(record.updatedAtMillis),
+            showsChevron: true,
+            action: action
+        )
+    }
+}
+
+private struct WorkspaceFileDetailSheet: View {
+    let record: IOSWorkspaceFileRecord
+    @Bindable var store: IOSWorkspaceStore
+    let onReparse: () -> Void
+    let onRemove: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    WorkspaceDetailHeader(
+                        systemImage: "doc.text",
+                        title: record.displayName,
+                        subtitle: "/workspace/\(record.workspacePath)"
+                    )
+
+                    WorkspaceInfoGrid(rows: [
+                        ("状态", record.status.title),
+                        ("大小", record.byteSummary),
+                        ("类型", record.mimeType),
+                        ("字符", "\(record.characterCount)"),
+                        ("来源", record.source),
+                        ("更新", WorkspaceDateFormat.long(record.updatedAtMillis))
+                    ])
+
+                    if !record.statusMessage.isEmpty {
+                        WorkspaceStatusBanner(status: record.status, message: record.statusMessage)
+                    }
+
+                    WorkspacePreviewBlock(text: record.preview, emptyText: previewEmptyText)
+                }
+                .padding(16)
+            }
+            .background(AmberTheme.background.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        onReparse()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .accessibilityLabel("重新解析")
+
+                    Button(role: .destructive) {
+                        onRemove()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel("移除文件")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var previewEmptyText: String {
+        switch record.status {
+        case .ready:
+            "没有可预览文本。"
+        case .missing:
+            "文件副本丢失，请重新导入。"
+        case .unsupported:
+            "此格式暂不支持文本预览。"
+        case .tooLarge:
+            "文件超过本地解析上限。"
+        case .needsReauthorization:
+            "需要从 Files 重新选择文件。"
+        case .parseFailed:
+            "解析失败，可尝试重新解析。"
+        }
+    }
+}
+
+private struct WorkspaceArtifactDetailSheet: View {
+    let record: IOSWorkspaceArtifactRecord
+    @Bindable var store: IOSWorkspaceStore
+    let onDelete: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var content: String {
+        (try? store.artifactContent(id: record.id)) ?? "Artifact 内容丢失或读取失败。"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    WorkspaceDetailHeader(
+                        systemImage: "sparkles.rectangle.stack",
+                        title: record.title,
+                        subtitle: record.type.title
+                    )
+                    WorkspaceInfoGrid(rows: [
+                        ("大小", DocumentAccessStore.formatBytes(record.contentBytes)),
+                        ("来源", record.sourceKind),
+                        ("创建", WorkspaceDateFormat.long(record.createdAtMillis)),
+                        ("更新", WorkspaceDateFormat.long(record.updatedAtMillis))
+                    ])
+                    WorkspacePreviewBlock(text: content, emptyText: "Artifact 内容为空。")
+                }
+                .padding(16)
+            }
+            .background(AmberTheme.background.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel("删除 Artifact")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+private struct WorkspaceDetailHeader: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(AmberTheme.accent)
+                .frame(width: 42, height: 42)
+                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(3)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+}
+
+private struct WorkspaceInfoGrid: View {
+    let rows: [(String, String)]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                HStack(alignment: .top) {
+                    Text(row.0)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(width: 56, alignment: .leading)
+                    Text(row.1)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .padding(.vertical, 8)
+                if index < rows.count - 1 {
+                    Divider().overlay(AmberTheme.borderSoft)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+    }
+}
+
+private struct WorkspaceStatusBanner: View {
+    let status: IOSWorkspaceFileStatus
+    let message: String
+
+    var body: some View {
+        Label(message, systemImage: status == .ready ? "checkmark.circle" : "exclamationmark.triangle")
+            .font(.caption)
+            .foregroundStyle(status == .ready ? AmberTheme.accentGreen : AmberTheme.accentAmber)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background((status == .ready ? AmberTheme.accentGreen : AmberTheme.accentAmber).opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct WorkspacePreviewBlock: View {
+    let text: String
+    let emptyText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("预览")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+                .textCase(.uppercase)
+            Text(text.isEmpty ? emptyText : text)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(text.isEmpty ? AmberTheme.muted : AmberTheme.foreground2)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+        }
+    }
+}
+
+private enum WorkspaceDateFormat {
+    static func short(_ millis: Int64) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    static func long(_ millis: Int64) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

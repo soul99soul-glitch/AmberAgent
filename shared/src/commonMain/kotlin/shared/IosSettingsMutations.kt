@@ -362,6 +362,52 @@ object IosSettingsMutations {
         )
     }
 
+    fun setMiniAppRuntimeOptions(
+        settings: Settings,
+        enabled: Boolean,
+        networkEnabled: Boolean,
+        externalImagesEnabled: Boolean,
+        searchEnabled: Boolean,
+        clipboardCopyEnabled: Boolean,
+        boardSummaryUpdateEnabled: Boolean,
+        hostContextEnabled: Boolean,
+        hostWriteEnabled: Boolean,
+        aiEnabled: Boolean,
+        sharedStoreEnabled: Boolean,
+        eventBusEnabled: Boolean,
+        launchEnabled: Boolean,
+        sensorEnabled: Boolean,
+        locationEnabled: Boolean,
+        clipboardReadEnabled: Boolean,
+        webViewDebugEnabled: Boolean,
+        showSourceButton: Boolean,
+    ): Settings {
+        val miniApp = settings.agentRuntime.miniApp
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                miniApp = miniApp.copy(
+                    enabled = enabled,
+                    networkEnabled = networkEnabled,
+                    externalImagesEnabled = externalImagesEnabled,
+                    searchEnabled = searchEnabled,
+                    clipboardCopyEnabled = clipboardCopyEnabled,
+                    boardSummaryUpdateEnabled = boardSummaryUpdateEnabled,
+                    hostContextEnabled = hostContextEnabled,
+                    hostWriteEnabled = hostWriteEnabled,
+                    aiEnabled = aiEnabled,
+                    sharedStoreEnabled = sharedStoreEnabled,
+                    eventBusEnabled = eventBusEnabled,
+                    launchEnabled = launchEnabled,
+                    sensorEnabled = sensorEnabled,
+                    locationEnabled = locationEnabled,
+                    clipboardReadEnabled = clipboardReadEnabled,
+                    webViewDebugEnabled = webViewDebugEnabled,
+                    showSourceButton = showSourceButton,
+                )
+            )
+        )
+    }
+
     // ---- Skills (assistant.enabledSkills) ----
 
     /** Swift-friendly read for the current assistant's enabled skill names. */

@@ -65,6 +65,623 @@ struct SelectedDocumentReadResult: Hashable {
     }
 }
 
+enum IOSWorkspaceFileStatus: String, Codable, Hashable {
+    case ready
+    case missing
+    case parseFailed
+    case unsupported
+    case tooLarge
+    case needsReauthorization
+
+    var title: String {
+        switch self {
+        case .ready: "Ready"
+        case .missing: "Missing"
+        case .parseFailed: "Parse failed"
+        case .unsupported: "Unsupported"
+        case .tooLarge: "Too large"
+        case .needsReauthorization: "Needs reauthorization"
+        }
+    }
+}
+
+enum IOSWorkspaceArtifactType: String, Codable, CaseIterable, Identifiable {
+    case chat
+    case deepRead
+    case webMount
+    case miniApp
+    case image
+    case note
+    case file
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .chat: "Chat"
+        case .deepRead: "Deep Read"
+        case .webMount: "WebMount"
+        case .miniApp: "Mini App"
+        case .image: "Image"
+        case .note: "Note"
+        case .file: "File"
+        }
+    }
+}
+
+struct IOSWorkspaceFileRecord: Identifiable, Codable, Hashable {
+    let id: String
+    var displayName: String
+    var originalFileName: String
+    var workspacePath: String
+    var mimeType: String
+    var sizeBytes: Int64
+    var importedAtMillis: Int64
+    var updatedAtMillis: Int64
+    var status: IOSWorkspaceFileStatus
+    var statusMessage: String
+    var preview: String
+    var isTruncated: Bool
+    var characterCount: Int
+    var source: String
+
+    var byteSummary: String {
+        DocumentAccessStore.formatBytes(sizeBytes)
+    }
+}
+
+struct IOSWorkspaceArtifactRecord: Identifiable, Codable, Hashable {
+    let id: String
+    var title: String
+    var type: IOSWorkspaceArtifactType
+    var contentPath: String
+    var contentBytes: Int64
+    var summary: String
+    var createdAtMillis: Int64
+    var updatedAtMillis: Int64
+    var sourceKind: String
+    var sourceId: String?
+}
+
+private struct IOSWorkspaceState: Codable {
+    var files: [IOSWorkspaceFileRecord] = []
+    var artifacts: [IOSWorkspaceArtifactRecord] = []
+}
+
+enum IOSWorkspaceStoreError: Error, LocalizedError, Equatable {
+    case missingFile
+    case missingArtifact
+    case invalidPath(String)
+    case fileTooLarge(String)
+    case accessDenied(String)
+    case directorySelected
+    case writeWouldOverwrite(String)
+    case storage(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingFile:
+            "Workspace file was not found."
+        case .missingArtifact:
+            "Workspace artifact was not found."
+        case .invalidPath(let message):
+            message
+        case .fileTooLarge(let message):
+            message
+        case .accessDenied(let message):
+            message
+        case .directorySelected:
+            "Choose a regular file, not a folder."
+        case .writeWouldOverwrite(let path):
+            "Workspace file already exists: \(path)"
+        case .storage(let message):
+            message
+        }
+    }
+}
+
+enum IOSWorkspaceToolCatalog {
+    static let readToolNames: Set<String> = ["workspace_file_read", "workspace_artifact_read"]
+    static let writeToolNames: Set<String> = ["workspace_file_write", "workspace_artifact_delete"]
+    static let supportedToolNames: Set<String> = readToolNames.union(writeToolNames)
+}
+
+@MainActor
+@Observable
+final class IOSWorkspaceStore {
+    static let shared = IOSWorkspaceStore()
+
+    private(set) var files: [IOSWorkspaceFileRecord] = []
+    private(set) var artifacts: [IOSWorkspaceArtifactRecord] = []
+    private(set) var errorMessage: String?
+    private(set) var revision: Int = 0
+
+    let maxImportBytes: Int64 = 20 * 1024 * 1024
+    let maxPreviewCharacters = 60_000
+
+    @ObservationIgnored private let rootDirectory: URL
+    @ObservationIgnored private let filesDirectory: URL
+    @ObservationIgnored private let artifactsDirectory: URL
+    @ObservationIgnored private let stateURL: URL
+    @ObservationIgnored private let fileManager: FileManager
+    @ObservationIgnored private let encoder = JSONEncoder()
+    @ObservationIgnored private let decoder = JSONDecoder()
+
+    init(baseDirectory: URL? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let root = baseDirectory
+            ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        self.rootDirectory = root.appendingPathComponent("AmberWorkspace", isDirectory: true)
+        self.filesDirectory = rootDirectory.appendingPathComponent("files", isDirectory: true)
+        self.artifactsDirectory = rootDirectory.appendingPathComponent("artifacts", isDirectory: true)
+        self.stateURL = rootDirectory.appendingPathComponent("workspace.json", isDirectory: false)
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        reload()
+    }
+
+    var recentFiles: [IOSWorkspaceFileRecord] {
+        files.sorted { $0.updatedAtMillis > $1.updatedAtMillis }
+    }
+
+    var recentArtifacts: [IOSWorkspaceArtifactRecord] {
+        artifacts.sorted { $0.updatedAtMillis > $1.updatedAtMillis }
+    }
+
+    func reload() {
+        do {
+            try ensureDirectories()
+            guard fileManager.fileExists(atPath: stateURL.path) else {
+                files = []
+                artifacts = []
+                errorMessage = nil
+                return
+            }
+            let data = try Data(contentsOf: stateURL)
+            let state = try decoder.decode(IOSWorkspaceState.self, from: data)
+            files = state.files
+            artifacts = state.artifacts
+            errorMessage = nil
+        } catch {
+            files = []
+            artifacts = []
+            errorMessage = error.localizedDescription
+        }
+        revision &+= 1
+    }
+
+    @discardableResult
+    func importFile(url: URL, source: String = "document_picker", now: Date = Date()) async throws -> IOSWorkspaceFileRecord {
+        try ensureDirectories()
+        let shouldStopAccessing = try startScopedAccessIfNeeded(url)
+        defer {
+            if shouldStopAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw IOSWorkspaceStoreError.missingFile
+        }
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentTypeKey, .localizedTypeDescriptionKey])
+        guard values.isRegularFile != false else {
+            throw IOSWorkspaceStoreError.directorySelected
+        }
+        let size = Int64(values.fileSize ?? Self.fileSize(for: url) ?? 0)
+        guard size <= maxImportBytes else {
+            throw IOSWorkspaceStoreError.fileTooLarge("File is larger than the Workspace import limit of \(DocumentAccessStore.formatBytes(maxImportBytes)).")
+        }
+
+        let id = UUID().uuidString
+        let fileName = Self.safeFileName(url.lastPathComponent.isEmpty ? "file" : url.lastPathComponent)
+        let workspacePath = "uploads/\(id)-\(fileName)"
+        let destination = fileURL(forWorkspacePath: workspacePath)
+        try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: destination.path) {
+            try fileManager.removeItem(at: destination)
+        }
+        try fileManager.copyItem(at: url, to: destination)
+
+        let mimeType = values.contentType?.preferredMIMEType
+            ?? values.contentType?.identifier
+            ?? values.localizedTypeDescription
+            ?? "application/octet-stream"
+        var record = IOSWorkspaceFileRecord(
+            id: id,
+            displayName: url.lastPathComponent,
+            originalFileName: url.lastPathComponent,
+            workspacePath: workspacePath,
+            mimeType: mimeType,
+            sizeBytes: size,
+            importedAtMillis: Self.millis(now),
+            updatedAtMillis: Self.millis(now),
+            status: .ready,
+            statusMessage: "",
+            preview: "",
+            isTruncated: false,
+            characterCount: 0,
+            source: source
+        )
+        record = await parsedRecord(record, now: now)
+        files.insert(record, at: 0)
+        try persist()
+        publish()
+        return record
+    }
+
+    @discardableResult
+    func reparseFile(id: String, now: Date = Date()) async throws -> IOSWorkspaceFileRecord {
+        guard let index = files.firstIndex(where: { $0.id == id }) else {
+            throw IOSWorkspaceStoreError.missingFile
+        }
+        let next = await parsedRecord(files[index], now: now)
+        files[index] = next
+        try persist()
+        publish()
+        return next
+    }
+
+    func removeFile(id: String) throws {
+        guard let index = files.firstIndex(where: { $0.id == id }) else { return }
+        let record = files.remove(at: index)
+        let url = fileURL(forWorkspacePath: record.workspacePath)
+        if fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+        try persist()
+        publish()
+    }
+
+    @discardableResult
+    func saveArtifact(
+        title rawTitle: String,
+        content: String,
+        type: IOSWorkspaceArtifactType,
+        sourceKind: String,
+        sourceId: String? = nil,
+        now: Date = Date()
+    ) throws -> IOSWorkspaceArtifactRecord {
+        try ensureDirectories()
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines).workspaceNilIfBlank ?? "Untitled Artifact"
+        let id = UUID().uuidString
+        let safeTitle = Self.safeFileName(title).prefix(42)
+        let contentPath = "\(id)-\(safeTitle).md"
+        let destination = artifactsDirectory.appendingPathComponent(contentPath, isDirectory: false)
+        try Data(content.utf8).write(to: destination, options: [.atomic])
+        let nowMillis = Self.millis(now)
+        let record = IOSWorkspaceArtifactRecord(
+            id: id,
+            title: title,
+            type: type,
+            contentPath: contentPath,
+            contentBytes: Int64(content.utf8.count),
+            summary: Self.summary(content),
+            createdAtMillis: nowMillis,
+            updatedAtMillis: nowMillis,
+            sourceKind: sourceKind,
+            sourceId: sourceId
+        )
+        artifacts.insert(record, at: 0)
+        try persist()
+        publish()
+        return record
+    }
+
+    func artifactContent(id: String) throws -> String {
+        guard let record = artifacts.first(where: { $0.id == id }) else {
+            throw IOSWorkspaceStoreError.missingArtifact
+        }
+        return try String(contentsOf: artifactsDirectory.appendingPathComponent(record.contentPath), encoding: .utf8)
+    }
+
+    func deleteArtifact(id: String) throws {
+        guard let index = artifacts.firstIndex(where: { $0.id == id }) else { return }
+        let record = artifacts.remove(at: index)
+        let url = artifactsDirectory.appendingPathComponent(record.contentPath, isDirectory: false)
+        if fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+        try persist()
+        publish()
+    }
+
+    func executeTool(toolName: String, input: String) async -> String {
+        do {
+            let args = Self.jsonObject(input)
+            switch toolName {
+            case "workspace_file_read":
+                return try await workspaceFileReadJSON(args)
+            case "workspace_file_write":
+                return try await workspaceFileWriteJSON(args)
+            case "workspace_artifact_read":
+                return try workspaceArtifactReadJSON(args)
+            case "workspace_artifact_delete":
+                return try workspaceArtifactDeleteJSON(args)
+            default:
+                return Self.json(["ok": false, "tool": toolName, "error": "Unsupported Workspace tool."])
+            }
+        } catch {
+            return Self.json([
+                "ok": false,
+                "tool": toolName,
+                "error": (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            ])
+        }
+    }
+
+    func fileRecord(idOrPath raw: String) -> IOSWorkspaceFileRecord? {
+        let normalized = try? normalizeWorkspacePath(raw)
+        return files.first { record in
+            if record.id == raw || "/workspace/\(record.workspacePath)" == raw {
+                return true
+            }
+            guard let normalized else { return false }
+            return record.workspacePath == normalized
+        }
+    }
+
+    func fileURL(for record: IOSWorkspaceFileRecord) -> URL {
+        fileURL(forWorkspacePath: record.workspacePath)
+    }
+
+    private func workspaceFileReadJSON(_ args: [String: Any]) async throws -> String {
+        let raw = (args["file_id"] as? String)?.workspaceNilIfBlank
+            ?? (args["path"] as? String)?.workspaceNilIfBlank
+            ?? ""
+        guard var record = fileRecord(idOrPath: raw) else {
+            throw IOSWorkspaceStoreError.missingFile
+        }
+        if record.status != .ready || record.preview.isEmpty {
+            record = try await reparseFile(id: record.id)
+        }
+        let maxChars = ((args["max_chars"] as? Int) ?? 20_000).workspaceClamped(to: 1...80_000)
+        return Self.json([
+            "ok": record.status == .ready,
+            "id": record.id,
+            "path": "/workspace/\(record.workspacePath)",
+            "name": record.displayName,
+            "mime_type": record.mimeType,
+            "size_bytes": record.sizeBytes,
+            "status": record.status.rawValue,
+            "message": record.statusMessage,
+            "text": String(record.preview.prefix(maxChars)),
+            "text_chars": record.characterCount,
+            "truncated": record.isTruncated || record.preview.count > maxChars
+        ])
+    }
+
+    private func workspaceFileWriteJSON(_ args: [String: Any]) async throws -> String {
+        let path = try normalizeWorkspacePath((args["path"] as? String) ?? "")
+        let content = (args["content"] as? String) ?? ""
+        let overwrite = (args["overwrite"] as? Bool) ?? false
+        let url = fileURL(forWorkspacePath: path)
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: url.path), !overwrite {
+            throw IOSWorkspaceStoreError.writeWouldOverwrite("/workspace/\(path)")
+        }
+        try Data(content.utf8).write(to: url, options: [.atomic])
+        let now = Date()
+        let mime = path.hasSuffix(".md") ? "text/markdown" : "text/plain"
+        var record = files.first(where: { $0.workspacePath == path }) ?? IOSWorkspaceFileRecord(
+            id: UUID().uuidString,
+            displayName: path.components(separatedBy: "/").last ?? path,
+            originalFileName: path.components(separatedBy: "/").last ?? path,
+            workspacePath: path,
+            mimeType: mime,
+            sizeBytes: Int64(content.utf8.count),
+            importedAtMillis: Self.millis(now),
+            updatedAtMillis: Self.millis(now),
+            status: .ready,
+            statusMessage: "",
+            preview: "",
+            isTruncated: false,
+            characterCount: 0,
+            source: "tool_write"
+        )
+        record.sizeBytes = Int64(content.utf8.count)
+        record.updatedAtMillis = Self.millis(now)
+        record = await parsedRecord(record, now: now)
+        files.removeAll { $0.id == record.id || $0.workspacePath == record.workspacePath }
+        files.insert(record, at: 0)
+        try persist()
+        publish()
+        return Self.json([
+            "ok": true,
+            "id": record.id,
+            "path": "/workspace/\(record.workspacePath)",
+            "size_bytes": record.sizeBytes
+        ])
+    }
+
+    private func workspaceArtifactReadJSON(_ args: [String: Any]) throws -> String {
+        guard let id = (args["artifact_id"] as? String)?.workspaceNilIfBlank ?? (args["id"] as? String)?.workspaceNilIfBlank,
+              let record = artifacts.first(where: { $0.id == id }) else {
+            throw IOSWorkspaceStoreError.missingArtifact
+        }
+        let content = try artifactContent(id: record.id)
+        return Self.json([
+            "ok": true,
+            "id": record.id,
+            "title": record.title,
+            "type": record.type.rawValue,
+            "source_kind": record.sourceKind,
+            "content": content,
+            "content_bytes": record.contentBytes
+        ])
+    }
+
+    private func workspaceArtifactDeleteJSON(_ args: [String: Any]) throws -> String {
+        guard let id = (args["artifact_id"] as? String)?.workspaceNilIfBlank ?? (args["id"] as? String)?.workspaceNilIfBlank else {
+            throw IOSWorkspaceStoreError.missingArtifact
+        }
+        try deleteArtifact(id: id)
+        return Self.json(["ok": true, "id": id, "deleted": true])
+    }
+
+    private func parsedRecord(_ record: IOSWorkspaceFileRecord, now: Date) async -> IOSWorkspaceFileRecord {
+        var next = record
+        let url = fileURL(forWorkspacePath: record.workspacePath)
+        guard fileManager.fileExists(atPath: url.path) else {
+            next.status = .missing
+            next.statusMessage = "The copied Workspace file is missing. Import it again."
+            next.updatedAtMillis = Self.millis(now)
+            return next
+        }
+        let parseResult = await DocumentAccessStore.previewFileForWorkspace(
+            url: url,
+            fileType: record.mimeType,
+            maxReadableBytes: maxImportBytes,
+            maxPreviewBytes: 64 * 1024,
+            maxPreviewCharacters: maxPreviewCharacters
+        )
+        switch parseResult {
+        case .success(let preview):
+            next.status = .ready
+            next.statusMessage = preview.statusSummary
+            next.preview = preview.preview
+            next.isTruncated = preview.isTruncated
+            next.characterCount = preview.characterCount
+            next.sizeBytes = preview.totalBytes
+        case .failure(let error):
+            let accessError = (error as? DocumentAccessError) ?? .readFailed(error.localizedDescription)
+            next.status = Self.workspaceStatus(for: accessError)
+            next.statusMessage = accessError.userMessage
+            next.preview = ""
+            next.isTruncated = false
+            next.characterCount = 0
+        }
+        next.updatedAtMillis = Self.millis(now)
+        return next
+    }
+
+    private func normalizeWorkspacePath(_ raw: String) throws -> String {
+        var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("/workspace/") {
+            value.removeFirst("/workspace/".count)
+        } else if value == "/workspace" {
+            value = ""
+        }
+        value = value.replacingOccurrences(of: "\\", with: "/")
+        guard !value.isEmpty else {
+            throw IOSWorkspaceStoreError.invalidPath("Workspace path is required.")
+        }
+        guard !value.hasPrefix("/") && !value.contains(":") else {
+            throw IOSWorkspaceStoreError.invalidPath("Use a path under /workspace, not an absolute system path.")
+        }
+        let parts = value.split(separator: "/").map(String.init)
+        guard parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            throw IOSWorkspaceStoreError.invalidPath("Workspace path cannot contain traversal segments.")
+        }
+        return parts.joined(separator: "/")
+    }
+
+    private func fileURL(forWorkspacePath path: String) -> URL {
+        filesDirectory.appendingPathComponent(path, isDirectory: false)
+    }
+
+    private func startScopedAccessIfNeeded(_ url: URL) throws -> Bool {
+        guard !Self.isInsideAppContainer(url) else { return false }
+        let started = url.startAccessingSecurityScopedResource()
+        guard started else {
+            throw IOSWorkspaceStoreError.accessDenied("iOS did not grant access to this file. Reopen it from Files and try again.")
+        }
+        return true
+    }
+
+    private func ensureDirectories() throws {
+        try fileManager.createDirectory(at: filesDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: artifactsDirectory, withIntermediateDirectories: true)
+    }
+
+    private func persist() throws {
+        try ensureDirectories()
+        let state = IOSWorkspaceState(files: files, artifacts: artifacts)
+        let data = try encoder.encode(state)
+        try data.write(to: stateURL, options: [.atomic])
+    }
+
+    private func publish() {
+        errorMessage = nil
+        revision &+= 1
+    }
+
+    private static func workspaceStatus(for error: DocumentAccessError) -> IOSWorkspaceFileStatus {
+        switch error {
+        case .fileTooLarge:
+            .tooLarge
+        case .missingGrant, .expiredGrant:
+            .needsReauthorization
+        case .unsupportedFileType, .noReadableText:
+            .unsupported
+        case .readFailed(let message) where message.localizedCaseInsensitiveContains("exist") || message.localizedCaseInsensitiveContains("missing"):
+            .missing
+        default:
+            .parseFailed
+        }
+    }
+
+    private static func isInsideAppContainer(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        return path.hasPrefix(NSHomeDirectory()) || path.hasPrefix(NSTemporaryDirectory())
+    }
+
+    private static func safeFileName(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._- "))
+        let scalars = name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        return String(scalars).trimmingCharacters(in: .whitespacesAndNewlines).workspaceNilIfBlank ?? "file"
+    }
+
+    private static func summary(_ text: String, maxLength: Int = 240) -> String {
+        let compact = text
+            .split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return compact.count > maxLength ? String(compact.prefix(maxLength)) + "..." : compact
+    }
+
+    private static func millis(_ date: Date) -> Int64 {
+        Int64(date.timeIntervalSince1970 * 1000)
+    }
+
+    private static func fileSize(for url: URL) -> Int? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber else {
+            return nil
+        }
+        return size.intValue
+    }
+
+    private static func jsonObject(_ text: String) -> [String: Any] {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return object
+    }
+
+    static func json(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return #"{"ok":false,"error":"Unable to encode Workspace JSON."}"#
+        }
+        return text
+    }
+}
+
+private extension String {
+    var workspaceNilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private extension Comparable {
+    func workspaceClamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
 @MainActor
 @Observable
 final class DocumentAccessStore {
@@ -141,6 +758,26 @@ final class DocumentAccessStore {
         grant = nil
         lastRead = nil
         errorMessage = nil
+    }
+
+    func readSelectedDocumentForDeepRead(now: Date = Date()) async -> Result<IOSDeepReadSource, DocumentAccessError> {
+        let request = requestForCurrentGrant(isUserInitiated: true)
+        let result = await consumeSelectedFileRead(request: request, now: now)
+        switch result {
+        case .success(let read):
+            do {
+                return .success(try IOSDeepReadSourceNormalizer.fileSource(
+                    read,
+                    now: Int64(now.timeIntervalSince1970 * 1_000)
+                ))
+            } catch let error as IOSDeepReadSourceNormalizationError {
+                return .failure(.unsupportedFileType(error.localizedDescription))
+            } catch {
+                return .failure(.readFailed(error.localizedDescription))
+            }
+        case .failure(let error):
+            return .failure(error)
+        }
     }
 
     func recordSelectionError(_ message: String) {
@@ -225,10 +862,30 @@ final class DocumentAccessStore {
             return .success(readResult)
         case .failure(let error):
             let accessError = (error as? DocumentAccessError) ?? .readFailed(error.localizedDescription)
+            if accessError.clearsSelectedGrant {
+                grant = nil
+                lastRead = nil
+            }
             errorMessage = accessError.userMessage
             isReading = false
             return .failure(accessError)
         }
+    }
+
+    static func previewFileForWorkspace(
+        url: URL,
+        fileType: String,
+        maxReadableBytes: Int64,
+        maxPreviewBytes: Int,
+        maxPreviewCharacters: Int
+    ) async -> Result<SelectedDocumentReadResult, Error> {
+        await readPreview(
+            url: url,
+            fileType: fileType,
+            maxReadableBytes: maxReadableBytes,
+            maxPreviewBytes: maxPreviewBytes,
+            maxPreviewCharacters: maxPreviewCharacters
+        )
     }
 
     private static func readPreview(
@@ -247,6 +904,9 @@ final class DocumentAccessStore {
             }
 
             do {
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    return Result<SelectedDocumentReadResult, Error>.failure(DocumentAccessError.fileMissing)
+                }
                 let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
                 guard let fileSize = (attributes[.size] as? NSNumber)?.int64Value else {
                     return Result<SelectedDocumentReadResult, Error>.failure(DocumentAccessError.unknownFileSize)
@@ -659,12 +1319,19 @@ enum DocumentAccessError: Error, Equatable {
     case missingGrant
     case grantMismatch
     case expiredGrant
+    case fileMissing
     case fileTooLarge
     case unknownFileSize
     case alreadyReading
     case unsupportedFileType(String)
     case noReadableText(String)
     case readFailed(String)
+}
+
+extension DocumentAccessError {
+    var userMessageForDeepRead: String {
+        userMessage
+    }
 }
 
 struct IOSToolInvocationRequest: Equatable {
@@ -788,7 +1455,7 @@ final class IOSToolRuntime {
     }
 }
 
-private extension DocumentAccessError {
+fileprivate extension DocumentAccessError {
     var userMessage: String {
         switch self {
         case .missingGrant:
@@ -797,6 +1464,8 @@ private extension DocumentAccessError {
             "The selected-file grant does not match this request."
         case .expiredGrant:
             "The in-memory file grant expired. Choose the file again."
+        case .fileMissing:
+            "The selected file is missing. Choose it again from Files."
         case .fileTooLarge:
             "Selected file is larger than the file-context import limit."
         case .unknownFileSize:
@@ -809,6 +1478,15 @@ private extension DocumentAccessError {
             message
         case .readFailed(let message):
             "Failed to read selected file: \(message)"
+        }
+    }
+
+    var clearsSelectedGrant: Bool {
+        switch self {
+        case .expiredGrant, .fileMissing:
+            true
+        default:
+            false
         }
     }
 }
