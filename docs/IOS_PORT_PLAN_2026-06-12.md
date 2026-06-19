@@ -242,7 +242,7 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 - 每个页面任务交付：SwiftUI 实现 + 与共享层的接线 + 一段录屏/截图。
 
 #### P5-T1 信息架构与导航骨架
-状态: ⬜ 未开始
+状态: ✅ 完成 (2026-06-13, codex/ios-port-wip) — AppShell + per-tab NavigationStack + enum Route/Sheet；报告 docs/ios-port/P5_IA.md
 - 定义 Tab 结构（建议：对话 / 工作区 / 助手 / 设置，最终以实际功能盘点为准）、路由与深链方案，产出 `docs/ios-port/P5_IA.md` 供页面任务引用。
 
 #### P5-T2 会话列表 + 历史

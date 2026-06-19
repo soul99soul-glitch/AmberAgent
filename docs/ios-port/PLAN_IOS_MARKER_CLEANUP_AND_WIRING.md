@@ -1,46 +1,56 @@
-# Plan: iOS「执行待接」标记清理 + 已就绪能力接 UI
+# Plan: iOS 接线状态标记收口 + 已就绪能力接 UI
 
-> 目标：把 iOS 设置/功能页面里 114 处「执行待接」标记，按"底层真实就绪度"逐条处理——
+> 目标：把 iOS 设置/功能页面里仍存在的「执行待接 / 待接」标记，按"底层真实就绪度"逐条处理——
 > 该撤的撤（底层已接、标记陈旧），该接的接（底层就绪、UI 没调），真没底的诚实保留并改写文案。
 > 绝不"撤标记 = 造假"：每撤一处必须有可验证的真功能支撑。
 
-## 现状（已勘查确认，2026-06-17）
+## 现状（按当前 HEAD 复核，2026-06-18）
 
-### 关键发现：大部分底层其实已经接好了
+> **收口复扫（2026-06-19）：Swift UI 当前目标 marker 已清零。** 在 ABCD 大工程完成后的本轮收口中，`iosApp/iosApp/**/*.swift` 的 `执行待接|待接|尚未接|未接线` 基线为 `84`，收口后为 `0`。剩余真缺口改用更具体的状态词（如 `缺桥`、`未实现`、`未编排`、`未消费`、`缺实时`、`需写入桥`），避免继续把大块已完成能力显示成泛化待办。下方 Slice 记录保留历史原文，用作执行追溯，不代表当前 UI 文案。
 
-两次 subagent 审计（KMP 导出 + iOS 桥现状）颠覆了"15 个独立大工程"的初判。真相分三类：
+### 起点记录
 
-| 类别 | 数量 | 性质 |
+- `git status --short --branch`：`codex/ios-port-wip...origin/codex/ios-port-wip`，工作区已有非本轮改动（含 Android 测试/文档）和未跟踪 `iosApp/iosApp/CouncilChatRuntimeView.swift`；本轮不触碰该未跟踪文件。
+- `git log --oneline --decorate -25`：HEAD 为 `81c7cf3ca Board 今日看板内容 persistence (narrowed scope: content only, no task-flow)`，此前 Slice 1-6、MiniApp WebView MVP、Board 内容持久化均已 commit。
+- `rg -o "执行待接|待接|尚未接|未接线" iosApp/iosApp --glob "*.swift" | wc -l` 起点：`121`。
+
+### 当前标记分类
+
+当前不再使用旧的"114 处"作为事实基线；以本轮起点 121 个 marker 为准。大部分剩余 marker 属于真缺口或 v1 明确不做范围，只有少量是过期状态文案。
+
+| 类别 | 性质 | 本轮处理 |
 |---|---|---|
-| **A. 陈旧标记**（底层已真接，标记没回头撤） | ~30 处 | 纯文档债，撤标记即可，零代码 |
-| **B. 桥已存在但 UI 没调**（Runner/Factory 在，UI 没接或标错） | ~40 处 | 接线工作，每条 0.5-2 天 |
-| **C. 真缺口**（底层缺失或不导出，需新工程） | ~44 处 | 独立工程，每条 1-5 天 |
+| **A. 陈旧标记 / 过期说明** | 底层已真接，页面仍说待接或入口摘要误导 | Search、SettingsHome、Skill 详情 |
+| **B. 小闭环** | 桥已存在，UI 只缺最小只读接线 | Skill 列表进入真实 SKILL.md 只读详情 |
+| **C. 真缺口** | 底层缺失、未导出、依赖外部账号/key/runtime，或 v1 明确不做 | 改写为具体缺口/不做说明 |
 
 ### 已就绪的底层资产（不要重造，直接用）
 
 | 资产 | 位置 | 真实状态 | iOS 已调用? |
 |---|---|---|---|
-| `IosSkillFactory.listSkills/listIssues` | feature/task commonMain | ✅ 真扫 `Documents/skills/*/SKILL.md` 解析 frontmatter | ✅ SkillsView:132,153 在调 |
-| `IosMemoryFactory` (addMemory/deleteMemory/getAllRecords) | core/memory/api | ✅ 真 CRUD，⚠️ 仅内存（重启丢） | ✅ MemoryEditView:91 在调 |
-| `IosBoardFactory` + `IosBoardAgent` + `TimeAnchorBoardSignalCollector` | feature/board/api | ✅ **最完整的桥**，BoardView 真跑端到端 OpenAI 链 | ✅ BoardView:255-280 在调 |
+| `IosSkillFactory.listSkills/listIssues` | feature/task commonMain | ✅ 真扫 `Documents/skills/*/SKILL.md` 解析 frontmatter | ✅ SkillsView 扫描；本轮 SkillDetailView 只读读取 SKILL.md |
+| `IosMemoryFactory` + `IOSMemoryPersistence` | core/memory/api + iosApp | ✅ 真 CRUD + `Documents/memories/memories.json` 文件持久化 | ✅ MemoryEditView / AppShell 在调 |
+| `IosBoardFactory` + `IosBoardAgent` + `TimeAnchorBoardSignalCollector` | feature/board/api | ✅ **最完整的桥**，BoardView 真跑端到端 OpenAI 链 | ✅ BoardView 手动生成在调 |
+| `IOSBoardPersistence` + `IOSBoardSignalRepository` | iosApp | ✅ 今日看板 Markdown 按日期落 `Documents/boards/`；Board signals 落 `Documents/boards/signals/board_signals.json`，支持 sourceRef/contentHash 去重、processed 标记 | ✅ BoardView 启动恢复最近内容 + 最近 signals |
 | `IosCouncilFactory.createWithRealProvider` + `ModelCouncilManager` | feature/modelcouncil iosMain | ✅ 带 key 真推理（stub 仅无 key 时） | ✅ CouncilRunner.swift 在调 |
 | `IosSubAgentFactory.createWithRealProvider` + `SubAgentManager` | feature/subagent iosMain | ✅ 带 key 真推理 | ✅ SubAgentRunner.swift 在调 |
 | `IOSMcpManager` + `IOSMcpClient` | iosApp | ✅ 真 JSON-RPC over URLSession | ✅ McpServersView 在调 |
-| `IOSSearchExecutor` | iosApp | ✅ 真 DuckDuckGo Lite | ✅ ChatViewModel:436 在调 |
+| `IOSSearchExecutor` | iosApp | ✅ 真 DuckDuckGo Lite；`search_web` 已由 ChatViewModel 声明、执行、回填并 resume | ✅ ChatViewModel / IOSSearchExecutor 在调 |
 | `IOSConversationStore` | iosApp（刚做的） | ✅ 真文件持久化 | ✅ ConversationsView/ChatView 在调 |
 | `IosDatabaseFactory` + `AgentRuntimeDao` | core/agent-store-room | ✅ Room DB，insertRun/updateRun/observeRun 真实 | ⚠️ ChatViewModel 写 run，但没读统计 |
 | `TokenUsage` / `TokenBudget` | ai-core | ✅ 数据类，UIMessage.usage 里就有 | ❌ 没人聚合显示 |
 | `IOSSyncBackup` (export/import AES-GCM) | iosApp | ✅ 真加密导出导入 | ✅ SyncBackupView 在调（仅 settings 数据集） |
 
-### 真缺口（底层确实没有）
+### 真缺口（底层确实没有或本轮明确不做）
 
-- `Settings.providers` / `.ttsProviders` / `.searchServices` / `.agentRuntime.*` 的 **KMP 写回桥**——iOS 任何"增删模型/provider/搜索服务/TTS/SubAgent override"都只进 UserDefaults 旁路存储，从不 merge 回 `snapshot`，重启后 KMP 集合回到 seed（详见 IOSSharedSettingsStore 审计）
-- **Chat 工具注入**：`subagent_*` / `model_council_*` / `mcp_*` 工具声明都没注入 ChatViewModel（只有 `search_web` 注了）
-- **Memory / Council run / SubAgent run 的持久化**（全内存，重启丢）
-- **`SyncBackupInterface` 的实现类**（接口导出了，零实现；远端云同步完全没做）
-- **`feature/board/impl`**（调度器、真实采集器、DeepRead）——JVM-only，没导出
+- **Search**：`search_web` 已接 DuckDuckGo Lite；`scrape_web`、SearchOrchestrator、多 provider 选择、Reader/Firecrawl/自定义 provider 自动编排仍未接。
+- **Skills**：扫描与只读详情已接；启用/禁用、删除、编辑/创建 SKILL.md、assistant.enabledSkills 写入仍缺独立文件写入/校验流程。
+- **Memory**：现有 CRUD + 文件持久化已接；MemoryRepository/recall/worker/compaction 仍是更深 KMP 能力。
+- **Council / SubAgent**：手动运行和 chat 工具注入已接；liveText/transcript 实时快照、总开关/高级运行策略仍缺实现入口。
+- **iOS Remote Sync**：本机 Settings `.amberbackup` 已扩到 Swift provider 协议、本机文件夹 provider、WebDAV mockable transport、快照列表/上传/下载预览/删除、冲突检测与 iOS 侧状态镜像；Google Drive OAuth、S3 签名配置、Room tables、secrets、文件树和自动同步仍是独立真缺口。
+- **Board 剩余缺口**：iOS 已有本地 signal repository、聊天历史/EventKit/轻量热榜/时间锚点前台 runOnce；仍缺 BGTaskScheduler、通知读取、飞书账号/MCP、DeepRead、任务流/机会/日报派发（后几项本轮明确不做）。
 - **Terminal runtime 启动器**（只导出能力元数据，没 PTY/job-launch 类）
-- **MiniApp / WebMount 的 WKWebView 层**（iOS 零基础）
+- **MiniApp / WebMount**：MiniApp 已推进到本地仓库、Runner、grant bridge 和 chat 生成保存链路；WebMount 已推进到 registry/settings、真实 WKWebView、allowlist 导航、cookie summary/clear、受限 bridge 和最小 `wm_*` 工具。MiniApp 仍缺部分设备/系统高级 bridge 与全局设置写回；WebMount 仍缺 OAuth、signed fetch、站点 adapter 和完整 Android primitive parity。
 
 ---
 
@@ -166,13 +176,41 @@ KMP `Settings` 是 data class，`copy(...)` 可用；`restoreSnapshot` 已实现
 
 ---
 
+### Slice 6.5：当前 HEAD 收口（本轮）
+
+> **状态（2026-06-18）：✅ 已完成（完整构建受本机环境阻塞）。** 目标是只做小闭环，不混入 Board、MiniApp、Sync、WebMount 大工程：校准本 plan，清理当前 HEAD 上已完成能力对应的过期文案，完成 Search 状态收口与 Skill 只读详情。验证：marker 121 → 115；本轮 Swift 文件 `swiftc -parse` 通过；Gradle 被本机缺 Java 阻塞；xcodebuild 被本机缺 iOS Simulator runtime 阻塞。
+
+| 位置 | 当前代码事实 | 本轮处理 |
+|---|---|---|
+| SearchServicesView / SearchProviderView | `ChatViewModel` 已在 `enableWebSearch` 时声明 `search_web`，`IOSSearchExecutor` 真执行 DuckDuckGo Lite 并回填 resume | 改为"search_web 已接"；诚实保留 `scrape_web`、SearchOrchestrator、多 provider orchestration 待接 |
+| SkillsView → SkillDetailView | `IosSkillFactory.listSkills` 已扫描真实 `Documents/skills/*/SKILL.md`；旧详情页仍是静态"未读取" | 列表条目进入详情并携带 `dirName`；详情页只读读取对应 SKILL.md，展示 description / allowed-tools / version / 文件路径 |
+| SettingsHomeView | Memory、Skill、ConversationStorage、Board、Council、SubAgent、MiniApp 的入口摘要仍有旧的泛"待接" | 改为已接能力 + 真缺口并列：例如 Memory CRUD+持久化已接、Board 内容持久化/时间锚点已接、MiniApp WebView MVP 已接 |
+
+**仍为真缺口（本轮不做）**：Skill 编辑/删除/启用状态写入；Search `scrape_web` 与多 provider 编排；Memory recall/worker/compaction；Board 后台/通知/飞书/任务流/DeepRead；MiniApp 设备/系统高级 bridge 与全局设置写回；远端 Sync 真实云账号与 secrets；WebMount OAuth/signed fetch/站点 adapter。
+
+---
+
+### Slice 6.6：MiniApp 只读 appId Runner 链路（本轮后续薄片）
+
+> **状态（2026-06-18）：✅ 已完成（完整构建受本机环境阻塞）。** 在不接真实 MiniAppRepository/DAO、不写入文件/数据库、不碰权限 grant 的前提下，接通 iOS 最小只读链路：`MiniAppReadOnlyCatalog` 提供一个本地样例 appId，MiniApp 列表展示只读条目，点击进入 `Route.miniAppRunner(appId:)`，Runner 按 appId 读取 HTML，经 `MiniAppHtmlValidator` 校验后加载到 `MiniAppRunnerWebView`，继续保留 AmberNative bridge MVP。
+
+| 位置 | 当前代码事实 | 本轮处理 |
+|---|---|---|
+| MiniAppListView | 旧文案称 iOS 没有 appId -> runner 链路，且不提供可点击卡片 | 新增只读 catalog section，展示 `ios-miniapp-mvp-sample`，点击用 appId 导航 |
+| AppShell / Route | 旧路由只携带 display title | 改为 `miniAppRunner(appId:)`，避免用标题伪装身份 |
+| MiniAppRunnerView | 旧 Runner 只接收 title，样例 HTML 只在页面内部 | Runner 按 appId 解析 `MiniAppReadOnlyCatalog`，未找到时显示安全占位 HTML |
+
+**仍为真缺口**：Android 等价的 MiniAppRepository/Room DAO、MiniAppEntity 持久化、版本历史、rename/delete/export、Prompt/Output transformer、Chat UIMessagePart.MiniApp 渲染、permission grant store、完整 MiniAppBridge executor、shared store/event bus/sensor/location/clipboard/host writes。
+
+---
+
 ### Slice 7-9（真缺口，大工程，按需排期）
 
 | Slice | 内容 | 工作量 | 阻塞 |
 |---|---|---|---|
-| 7 | **远端云同步**（SyncBackupInterface 实现 + S3/WebDAV/Google OAuth） | 3-5 天 | 需 OAuth 凭证；工作区有 PLAN_SYNC_BACKUP.md 未提交 |
-| 8 | **Board 真实采集器**（导出 feature/board/impl 到 iOS + calendar/feishu collector） | 3-5 天 | 飞书/calendar 数据源；DeepRead 链 |
-| 9 | **MiniApp / WebMount WKWebView 层** | 3-5 天/个 | 全新 iOS WebView 工程；权限模型 |
+| 7 | **远端云同步深化**（Google OAuth、S3 live、Room/secrets/file tree、自动同步） | 3-5 天 | 本机文件夹/WebDAV mockable 闭环已推进；真实账号、key、覆盖策略与数据范围仍需单独决策 |
+| 8 | **Board 后台/外部账号/任务流**（BGTaskScheduler + 通知/飞书 + DeepRead + 任务流） | 3-5 天 | iOS 本地前台 collectors 已接；剩余需要系统权限、飞书账号/MCP、后台策略或产品决定恢复任务流范围 |
+| 9 | **MiniApp 高级 bridge + WebMount parity** | 3-5 天/个 | MiniApp 本地仓库/Runner/grants/chat 保存已接；剩余是设备/系统高级 bridge、全局设置写回。WebMount 核心 runtime 与最小 `wm_*` 已接；剩余是 OAuth、signed fetch、站点 adapter 和 Android primitive parity |
 
 这些每个都是独立大工程，建议单独立 PLAN 文档（工作区已有 PLAN_SYNC_BACKUP.md）。
 
@@ -215,4 +253,4 @@ KMP `Settings` 是 data class，`copy(...)` 可用；`restoreSnapshot` 已实现
 | **1-6 合计** | **7-11 天** | **~70** | 6 个真能力 |
 | 7-9（大工程，按需） | 9-15 天 | ~30 | 云同步/Board/WebView |
 
-补完 Slice 1-6 后，114 处「待接」清掉 ~70 处，剩余 ~44 处都是 Slice 7-9 级别的真·独立工程，届时按需排期。iOS 从"满屏待接"跨进"核心能力可用、剩余明确"。
+补完 Slice 1-6 和 ABCD 大工程后，iOS 从"满屏泛化缺口"跨进"核心能力可用、剩余明确"。2026-06-19 收口复扫：Swift 侧中文接线 marker 基线为 84，收口后为 0；后续只需要按具体阻塞项继续推进，不再用泛化 marker 表达当前状态。
