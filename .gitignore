@@ -19,6 +19,7 @@ local.properties
 core/**/build/
 feature/**/build/
 ai-core/build/
+ai-provider-*/build/
 ai/build/
 common/build/
 app/build/
@@ -42,6 +43,9 @@ iosApp/**/build/
 docs/cloud-design/**/uploads/
 docs/cloud-design/**/screenshots/
 docs/cloud-design/**/.thumbnail
+
+# Local one-off design previews
+/index.html
 
 # Local data backups — too large for GitHub, never commit
 /amberagent-notion-data-backup-*.tgz
