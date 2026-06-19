@@ -1142,6 +1142,184 @@ struct IOSHackerNewsHotlistProvider: IOSHotlistProvider {
     }
 }
 
+// MARK: - Additional hotlist providers (Android BuiltInHotListProviders parity)
+//
+// Android ships 9 built-in hotlist providers; iOS only had HackerNews. These
+// add the providers with stable public endpoints (RSS/JSON/HTML). Providers
+// that need login or have aggressive anti-scraping (Weibo, Bilibili) are
+// omitted honestly rather than faked.
+
+/// Parses RSS/Atom <item><title>/<link> entries into hotlist items. Shared by
+/// the ArxivAI / InfoqAI / 36Kr RSS providers.
+struct IOSRSSHotlistProvider: IOSHotlistProvider {
+    let providerId: String
+    let displayName: String
+    let feedURL: String
+
+    func fetch(limit: Int) async throws -> [IOSHotlistItem] {
+        let session = Self.ephemeralSession
+        let (data, _) = try await session.data(from: URL(string: feedURL)!)
+        let xml = String(data: data, encoding: .utf8) ?? ""
+        let now = IOSBoardSignalRepository.currentEpochMs()
+        // Naive RSS <item> extraction (sufficient for feed titles/links).
+        let itemPattern = #"<item[^>]*>([\s\S]*?)</item>"#
+        guard let regex = try? NSRegularExpression(pattern: itemPattern, options: []) else { return [] }
+        let matches = regex.matches(in: xml, range: NSRange(xml.startIndex..., in: xml))
+        var items: [IOSHotlistItem] = []
+        for (index, match) in matches.prefix(max(limit, 0)).enumerated() {
+            guard match.numberOfRanges >= 2,
+                  let range = Range(match.range(at: 1), in: xml) else { continue }
+            let block = String(xml[range])
+            let title = Self.firstTag(in: block, tag: "title").trimmingCharacters(in: .whitespacesAndNewlines)
+            let link = Self.firstTag(in: block, tag: "link").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            items.append(IOSHotlistItem(
+                providerId: providerId,
+                title: String(title.prefix(160)),
+                url: link.isEmpty ? nil : link,
+                rank: index + 1,
+                score: nil,
+                fetchedAt: now
+            ))
+        }
+        return items
+    }
+
+    private static func firstTag(in block: String, tag: String) -> String {
+        let pattern = "<\(tag)[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></\(tag)>|<\(tag)[^>]*>([\\s\\S]*?)</\(tag)>"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return "" }
+        guard let match = regex.firstMatch(in: block, range: NSRange(block.startIndex..., in: block)),
+              match.numberOfRanges >= 4 else { return "" }
+        // Group 2 = CDATA content, group 3 = plain content.
+        if let r = Range(match.range(at: 2), in: block), !r.isEmpty {
+            return String(block[r])
+        }
+        if let r = Range(match.range(at: 3), in: block) {
+            return String(block[r])
+        }
+        return ""
+    }
+
+    static let ephemeralSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 12
+        return URLSession(configuration: config)
+    }()
+}
+
+/// Arxiv AI/CL/LG/RO RSS feed.
+struct IOSArxivAIHotlistProvider: IOSHotlistProvider {
+    let providerId = "arxiv_ai"
+    let displayName = "Arxiv AI"
+    func fetch(limit: Int) async throws -> [IOSHotlistItem] {
+        // Merge the AI-related arxiv RSS feeds Android uses.
+        let urls = ["https://rss.arxiv.org/rss/cs.AI", "https://rss.arxiv.org/rss/cs.CL"]
+        var all: [IOSHotlistItem] = []
+        for url in urls {
+            let provider = IOSRSSHotlistProvider(providerId: providerId, displayName: displayName, feedURL: url)
+            all.append(contentsOf: try await provider.fetch(limit: limit))
+        }
+        return Array(all.prefix(limit))
+    }
+}
+
+/// InfoqAI RSS feed.
+struct IOSInfoqAIHotlistProvider: IOSHotlistProvider {
+    let providerId = "infoq_ai"
+    let displayName = "InfoQ AI"
+    func fetch(limit: Int) async throws -> [IOSHotlistItem] {
+        try await IOSRSSHotlistProvider(
+            providerId: providerId,
+            displayName: displayName,
+            feedURL: "https://www.infoq.com/artificial_intelligence/rss/"
+        ).fetch(limit: limit)
+    }
+}
+
+/// 36Kr RSS feed.
+struct IOSKr36HotlistProvider: IOSHotlistProvider {
+    let providerId = "36kr"
+    let displayName = "36 氪"
+    func fetch(limit: Int) async throws -> [IOSHotlistItem] {
+        try await IOSRSSHotlistProvider(
+            providerId: providerId,
+            displayName: displayName,
+            feedURL: "https://36kr.com/feed"
+        ).fetch(limit: limit)
+    }
+}
+
+/// HuggingFace daily papers (JSON API).
+struct IOSHuggingFacePapersHotlistProvider: IOSHotlistProvider {
+    let providerId = "huggingface_papers"
+    let displayName = "HuggingFace Papers"
+    func fetch(limit: Int) async throws -> [IOSHotlistItem] {
+        let session = IOSRSSHotlistProvider.ephemeralSession
+        let (data, _) = try await session.data(from: URL(string: "https://huggingface.co/api/daily_papers")!)
+        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        let now = IOSBoardSignalRepository.currentEpochMs()
+        return array.prefix(max(limit, 0)).enumerated().map { index, entry in
+            let paper = entry["paper"] as? [String: Any]
+            let title = (paper?["title"] as? String) ?? ""
+            let paperId = (paper?["id"] as? String) ?? ""
+            return IOSHotlistItem(
+                providerId: providerId,
+                title: String(title.prefix(160)),
+                url: paperId.isEmpty ? nil : "https://huggingface.co/papers/\(paperId)",
+                rank: index + 1,
+                score: (entry["upvotes"] as? Int),
+                fetchedAt: now
+            )
+        }
+    }
+}
+
+/// Github trending (HTML scrape — GitHub provides no JSON API for trending).
+struct IOSGithubTrendingHotlistProvider: IOSHotlistProvider {
+    let providerId = "github_trending"
+    let displayName = "GitHub Trending"
+    func fetch(limit: Int) async throws -> [IOSHotlistItem] {
+        let session = IOSRSSHotlistProvider.ephemeralSession
+        let (data, _) = try await session.data(from: URL(string: "https://github.com/trending")!)
+        let html = String(data: data, encoding: .utf8) ?? ""
+        let now = IOSBoardSignalRepository.currentEpochMs()
+        // Extract repo paths from <h2 class="..."><a href="/owner/repo">.
+        let pattern = #"<h2[^>]*>\s*<a[^>]*href="(/[^"]+)"[^>]*>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        var items: [IOSHotlistItem] = []
+        for (index, match) in matches.prefix(max(limit, 0)).enumerated() {
+            guard let r = Range(match.range(at: 1), in: html) else { continue }
+            let path = String(html[r])
+            let name = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !name.isEmpty else { continue }
+            items.append(IOSHotlistItem(
+                providerId: providerId,
+                title: String(name.prefix(160)),
+                url: "https://github.com\(path)",
+                rank: index + 1,
+                score: nil,
+                fetchedAt: now
+            ))
+        }
+        return items
+    }
+}
+
+/// All built-in iOS hotlist providers (Android BuiltInHotListProviders parity
+/// for the providers with stable public endpoints).
+enum IOSHotlistProviders {
+    static let all: [IOSHotlistProvider] = [
+        IOSHackerNewsHotlistProvider(),
+        IOSArxivAIHotlistProvider(),
+        IOSInfoqAIHotlistProvider(),
+        IOSKr36HotlistProvider(),
+        IOSHuggingFacePapersHotlistProvider(),
+        IOSGithubTrendingHotlistProvider()
+    ]
+}
+
 // MARK: - Foreground Refresh
 
 struct IOSBoardForegroundRefreshScheduler: Sendable {

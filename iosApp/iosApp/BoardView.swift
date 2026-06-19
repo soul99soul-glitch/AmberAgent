@@ -660,11 +660,16 @@ struct BoardView: View {
     private var factory: IosBoardFactory { IosBoardFactory.shared }
 
     private func makeBoardSignalCollectors(setting: TodayBoardSetting) -> [IOSBoardSignalCollector] {
-        [
+        // One hotlist collector per provider (Android BuiltInHotListProviders
+        // parity — iOS was HN-only before). Each fetches independently.
+        let hotlistCollectors: [IOSBoardSignalCollector] = IOSHotlistProviders.all.map {
+            IOSHotlistSignalCollector(provider: $0)
+        }
+        return [
             IOSChatHistorySignalCollector(source: conversationStore),
             IOSEventKitCalendarSignalCollector(),
             IOSEventKitReminderSignalCollector(),
-            IOSHotlistSignalCollector(),
+        ] + hotlistCollectors + [
             IOSKMPTimeSignalCollector(setting: setting)
         ]
     }
