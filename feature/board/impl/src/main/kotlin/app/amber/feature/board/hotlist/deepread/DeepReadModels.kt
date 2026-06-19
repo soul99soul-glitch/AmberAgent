@@ -103,9 +103,6 @@ fun DeepReadOutput.sectionFailureMessage(): String? =
             ?.errorMessage
     }
 
-fun DeepReadOutput.verificationWarningMessage(): String? =
-    null
-
 fun DeepReadOutput.sectionsReady(): Boolean =
     DeepReadGenerationStage.entries.all { sectionStates[it]?.status == DeepReadSectionStatus.READY }
 

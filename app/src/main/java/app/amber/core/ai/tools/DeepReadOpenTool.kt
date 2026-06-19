@@ -60,7 +60,6 @@ fun createDeepReadOpenTool(eventBus: AppEventBus): Tool = Tool(
             put("topic_id", event.topicId)
             put("title", event.title)
             event.sourceUrl?.let { put("source_url", it) }
-            put("cache_ttl_hours", 24)
             put("force_regenerate", event.forceRegenerate)
             put(
                 "note",

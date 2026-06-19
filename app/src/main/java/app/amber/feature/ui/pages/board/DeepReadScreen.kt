@@ -718,7 +718,7 @@ private fun DeepReadConfirmation(
                         .withReadingFont(fontFamily),
                 )
                 Text(
-                    "每次生成约消耗 3 万 tokens。同一话题 24 小时内优先使用缓存。",
+                    "单篇深读约消耗 3-10 万 tokens（取决于来源数量和模型多步程度）。已生成的话题在缓存有效期内不会重复计费。",
                     style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp, color = palette.muted)
                         .withReadingFont(fontFamily),
                 )

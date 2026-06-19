@@ -813,41 +813,6 @@ class DeepReadAgentRunManager(
         }
     }
 
-    private fun StringBuilder.appendPrefetchedSources(
-        sources: List<DeepReadSource>,
-        sourceLimit: Int = PROMPT_SOURCE_LIMIT,
-        excerptLimit: Int = PROMPT_SOURCE_EXCERPT_LIMIT,
-    ) {
-        appendLine("## 已预抓取来源（共 ${sources.size} 条，优先使用）")
-        if (sources.isEmpty()) {
-            appendLine("- 预抓返回空（理论上不会到这里，因为上层会先 fail）")
-            return
-        }
-        sources.take(sourceLimit).forEachIndexed { index, source ->
-            appendLine("### [${index + 1}] ${source.title}")
-            if (source.url.isNotBlank()) appendLine("- url: ${source.url}")
-            appendLine("- source: ${source.source ?: "-"}")
-            source.publishedAt?.takeIf { it.isNotBlank() }?.let { appendLine("- published_at: $it") }
-            if (source.images.isNotEmpty()) appendLine("- images: ${source.images.joinToString(", ")}")
-            val candidates = source.imageCandidates
-                .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
-                .take(5)
-            if (candidates.isNotEmpty()) {
-                appendLine("- image_candidates:")
-                candidates.forEach { candidate ->
-                    val risks = candidate.riskFlags.takeIf { it.isNotEmpty() }?.joinToString("|") ?: "-"
-                    appendLine(
-                        "  - ${candidate.confidence} score=${candidate.score} kind=${candidate.candidateKind} " +
-                            "risk=$risks url=${candidate.imageUrl} alt=${candidate.alt.orEmpty().take(80)}"
-                    )
-                }
-            }
-            val excerpt = source.content.take(excerptLimit).replace("\n", " ").trim()
-            if (excerpt.isNotBlank()) appendLine("- excerpt: $excerpt")
-            appendLine()
-        }
-    }
-
     private fun buildWriterReminder(stages: List<DeepReadGenerationStage>, pass: Int): String = buildString {
         appendLine("Supervisor reminder #${pass + 1}: 上一轮没有任何 deep_read_write_* 写入。")
         appendLine("时间提醒：现在请直接调用 writer tool。")

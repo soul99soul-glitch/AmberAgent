@@ -17,7 +17,6 @@ import app.amber.feature.board.hotlist.deepread.isComplete
 import app.amber.feature.board.hotlist.deepread.isDeliverableDraft
 import app.amber.feature.board.hotlist.deepread.sectionFailureMessage
 import app.amber.feature.board.hotlist.deepread.statusOf
-import app.amber.feature.board.hotlist.deepread.verificationWarningMessage
 import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
 import app.amber.feature.board.hotlist.deepread.withSectionStatus
 import org.junit.Assert.assertEquals
@@ -83,12 +82,11 @@ class DeepReadSectionStateTest {
 
         assertTrue(failedVerification.isDeliverableDraft())
         assertFalse(failedVerification.isComplete())
-        assertNull(failedVerification.verificationWarningMessage())
         assertNull(failedVerification.sectionFailureMessage())
     }
 
     @Test
-    fun sectionFailureMessageStaysSeparateFromVerificationWarning() {
+    fun sectionFailureMessageIgnoresVerificationState() {
         val sectionFailed = DeepReadOutput()
             .withSectionStatus(DeepReadGenerationStage.OVERVIEW, DeepReadSectionStatus.READY)
             .withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.FAILED, "时间线失败")
@@ -101,7 +99,6 @@ class DeepReadSectionStateTest {
 
         assertFalse(sectionFailed.isDeliverableDraft())
         assertEquals("时间线失败", sectionFailed.sectionFailureMessage())
-        assertNull(sectionFailed.verificationWarningMessage())
     }
 
     @Test
