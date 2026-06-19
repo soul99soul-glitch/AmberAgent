@@ -53,7 +53,7 @@ import app.amber.agent.Screen
 import app.amber.feature.modelcouncil.CouncilParticipantStatus
 import app.amber.feature.modelcouncil.CouncilRoom
 import app.amber.feature.modelcouncil.CouncilRoomMode
-import app.amber.feature.modelcouncil.CouncilRoomStatus
+import app.amber.feature.modelcouncil.running
 import app.amber.feature.modelcouncil.terminal
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -100,7 +100,7 @@ fun CouncilRoomPage(
         ) {
             when {
                 room == null -> CouncilRoomLoading()
-                room!!.status.terminal || room!!.status == CouncilRoomStatus.INTERRUPTED ->
+                room!!.status.terminal ->
                     // Read-only view of a finished/stopped council. The only mutating
                     // action offered here is "restart" (discard + reopen fresh).
                     CouncilRoomBody(room!!, vm = null, onRestart = vm::restart)
@@ -120,12 +120,15 @@ private fun CouncilRoomLoading() {
 @Composable
 private fun CouncilRoomBody(room: CouncilRoom, vm: CouncilRoomVM?, onRestart: (() -> Unit)?) {
     var modeMenuOpen by remember { mutableStateOf(false) }
+    val modeControlsEnabled = vm != null &&
+        room.status.running &&
+        room.mode != CouncilRoomMode.SYNTHESIZE
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             CouncilRoomTopBar(
                 room = room,
-                vm = vm,
                 onRestart = onRestart,
+                modeControlsEnabled = modeControlsEnabled,
                 modeMenuOpen = modeMenuOpen,
                 onToggleMode = { modeMenuOpen = !modeMenuOpen },
             )
@@ -139,7 +142,7 @@ private fun CouncilRoomBody(room: CouncilRoom, vm: CouncilRoomVM?, onRestart: ((
         }
         // Mode panel — a roller-blind dropping from just below the top bar, in the
         // app's TopModelMenu idiom (scrim + accent-selected rows).
-        if (vm != null) {
+        if (modeControlsEnabled) {
             CouncilModePanel(
                 open = modeMenuOpen,
                 current = room.mode,
@@ -161,8 +164,8 @@ private fun CouncilRoomBody(room: CouncilRoom, vm: CouncilRoomVM?, onRestart: ((
 @Composable
 private fun CouncilRoomTopBar(
     room: CouncilRoom,
-    vm: CouncilRoomVM?,
     onRestart: (() -> Unit)?,
+    modeControlsEnabled: Boolean,
     modeMenuOpen: Boolean,
     onToggleMode: () -> Unit,
 ) {
@@ -193,7 +196,7 @@ private fun CouncilRoomTopBar(
                 .councilPressBounce(titleInteraction)
                 .clip(RoundedCornerShape(10.dp))
                 .then(
-                    if (vm != null) {
+                    if (modeControlsEnabled) {
                         Modifier.clickable(interactionSource = titleInteraction, indication = null) {
                             onToggleMode()
                         }
@@ -212,7 +215,7 @@ private fun CouncilRoomTopBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (vm != null) {
+                if (modeControlsEnabled) {
                     Icon(
                         imageVector = HugeIcons.ArrowDown01,
                         contentDescription = "切换模式",

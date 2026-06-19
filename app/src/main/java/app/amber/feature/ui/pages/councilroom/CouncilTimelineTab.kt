@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -99,14 +101,6 @@ private sealed interface TimelineEntry {
 }
 
 /**
- * Pixel tolerance for the "is the viewport at the bottom?" check. Generous (~1/3
- * of a typical screen) so that a streaming chunk that grows the tail item by a
- * line or two does NOT flip isAtBottom false and kill follow — the exact bug the
- * previous pixel-only check (`+8`) had.
- */
-private const val bottomFollowBufferPx = 480
-
-/**
  * 群聊时间线 — merges messages + phase markers by timestamp.
  *
  * Alignment mirrors the main chat: user right-aligned, host/guest left-aligned.
@@ -114,10 +108,10 @@ private const val bottomFollowBufferPx = 480
  * to-guest reference graph (reply / continues / invited-by) renders as small
  * footnotes under the bubble.
  *
- * Streaming auto-follow: while any message is STREAMING and the viewport sits
- * at the bottom, we keep it pinned there. A user scrolling up naturally breaks
- * the follow (the "at bottom" check fails); scrolling back down re-engages it.
- * This is the lightweight variant used by the legacy Council sheet.
+ * Streaming auto-follow: while any message is STREAMING and the user has not
+ * scrolled away from the tail, keep the timeline pinned to the true content
+ * bottom. Content growth and newly appended turns do not disable follow; an
+ * actual user scroll away from the bottom does.
  */
 @Composable
 fun CouncilTimelineTab(
@@ -141,23 +135,19 @@ fun CouncilTimelineTab(
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    var followStreaming by remember { mutableStateOf(true) }
+    var programmaticFollowScroll by remember { mutableStateOf(false) }
+    // Match the main chat: about one CJK text line. The explicit follow state
+    // keeps streaming growth from disabling follow, so the buffer can stay tight.
+    val bottomFollowBufferPx = with(LocalDensity.current) { 24.dp.toPx().toInt() }
 
     // "Is the viewport at the bottom?" — the single source of truth for follow.
     // Two-stage check, matching the main chat's ChatListSupport.isAtTimelineBottom:
     //   1) index check: the last VISIBLE item must be the LAST item (guards against
     //      "the tail got pushed below the fold" — a pure pixel check can't see that
     //      and falsely reports bottom during fast scrolls).
-    //   2) pixel check WITH a generous buffer: the last item's bottom edge is within
-    //      bufferPx of the viewport's bottom. The buffer is what keeps follow alive
-    //      while a streaming chunk grows the tail item by a line or two — the exact
-    //      case the previous `+8` (pixel-only) version choked on, killing follow.
-    //
-    // No followMode / selfScrolling state machine: requestScrollToItem is non-suspending
-    // and never flips isScrollInProgress, so the ONLY way follow stops is for the user
-    // to scroll up (lastVisibleIndex < total-1) — which makes isAtBottom() false for
-    // free. Scroll back down and it re-engages automatically. Adding a manual state
-    // machine on top of this is what caused the "dragged back to bottom" / "stuck mid-
-    // scroll" regressions (competing with fling physics), so it was removed.
+    //   2) pixel check with a small buffer: the last item's bottom edge is within
+    //      bufferPx of the viewport's bottom.
     fun isAtBottom(bufferPx: Int): Boolean {
         val info = listState.layoutInfo
         val total = info.totalItemsCount
@@ -186,21 +176,46 @@ fun CouncilTimelineTab(
         return (contentBottom - info.viewportEndOffset).coerceAtLeast(0)
     }
 
-    // ── Streaming bottom-follow ────────────────────────────────────────────
-    // Pin to the true content bottom via scrollBy(distance), mirroring the main
-    // chat's scrollToTimelineBottom. scrollBy is suspending but does NOT trip the
-    // "user scrolled up → stop following" condition, because that condition is
-    // simply `isAtBottom() == false` after the user lifts their finger — a real
-    // upward drag moves the last visible item's index below total-1, so isAtBottom
-    // flips false and follow stops for free. Scroll back down → re-engages.
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo }.collect { info ->
-            if (isStreaming && isAtBottom(bottomFollowBufferPx)) {
-                val distance = distanceToBottomPx()
-                if (distance != null && distance > 0) {
-                    listState.scrollBy(distance.toFloat())
-                }
+    suspend fun scrollToBottom() {
+        val total = listState.layoutInfo.totalItemsCount
+        if (total == 0) return
+        val distance = distanceToBottomPx()
+        if (distance == null) {
+            listState.scrollToItem(total - 1)
+            withFrameNanos { }
+            val settleDistance = distanceToBottomPx()
+            if (settleDistance != null && settleDistance > 0) {
+                listState.scrollBy(settleDistance.toFloat())
             }
+        } else if (distance > 0) {
+            listState.scrollBy(distance.toFloat())
+        }
+    }
+
+    // ── Streaming bottom-follow ────────────────────────────────────────────
+    // Track whether the user still wants the tail pinned. Content growth can make
+    // isAtBottom false before we get a chance to scroll; only a real scroll in
+    // progress should pause follow.
+    LaunchedEffect(listState, isStreaming) {
+        snapshotFlow { listState.layoutInfo }.collect {
+            val atBottom = isAtBottom(bottomFollowBufferPx)
+            when {
+                atBottom -> followStreaming = true
+                !isStreaming -> followStreaming = false
+                listState.isScrollInProgress && !programmaticFollowScroll -> followStreaming = false
+            }
+        }
+    }
+
+    LaunchedEffect(entries.size, streamingTail, isStreaming, followStreaming) {
+        if (!isStreaming || !followStreaming) return@LaunchedEffect
+        withFrameNanos { }
+        if (!isStreaming || !followStreaming || listState.isScrollInProgress) return@LaunchedEffect
+        programmaticFollowScroll = true
+        try {
+            scrollToBottom()
+        } finally {
+            programmaticFollowScroll = false
         }
     }
 
@@ -279,8 +294,14 @@ fun CouncilTimelineTab(
                         is TimelineEntry.Phase -> PhaseDivider(entry.marker)
                         is TimelineEntry.Message -> {
                             if (entry.msg.kind == CouncilMessageKind.ASK_USER) {
+                                val answered = room.messages.any { msg ->
+                                    val isAnswer = msg.replyToMessageId == entry.msg.id ||
+                                        msg.createdAtMs > entry.msg.createdAtMs
+                                    msg.authorId == COUNCIL_ROOM_USER_ID && isAnswer
+                                }
                                 CouncilAskUserCard(
                                     msg = entry.msg,
+                                    answered = answered,
                                     onAnswer = { answer -> vm?.resumeAfterUserAnswer(answer) },
                                 )
                             } else {
@@ -313,8 +334,9 @@ fun CouncilTimelineTab(
                 )
             }
         }
-        // Composer only in active (non-terminal) mode.
-        if (vm != null) {
+        // Composer only while the room is actively running. INTERRUPTED keeps vm
+        // for the ask-user card but should not expose the normal composer.
+        if (vm != null && room.status.running) {
             CouncilRoomComposer(room = room, vm = vm)
         }
     }
@@ -771,20 +793,12 @@ private fun ReferenceFootnotes(msg: CouncilMessage, room: CouncilRoom, alignEnd:
 @Composable
 private fun CouncilAskUserCard(
     msg: CouncilMessage,
+    answered: Boolean,
     onAnswer: (String) -> Unit,
 ) {
     val chatTheme = LocalChatTheme.current
     val workspace = workspaceColors()
     var answer by remember(msg.id) { mutableStateOf("") }
-    val answered = remember(msg.id) {
-        // Heuristic: if a later USER message exists after this ask, the question
-        // has been answered (resumeAfterUserAnswer appended it). We can't easily
-        // see the whole room here without passing it in, so we rely on a simple
-        // state: once submitted, flip a local flag. For a resumed room (process
-        // death / re-open), the card still shows — that's acceptable, the user
-        // just sees the question they answered in context.
-        mutableStateOf(false)
-    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -816,7 +830,7 @@ private fun CouncilAskUserCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = chatTheme.ink,
             )
-            if (!answered.value) {
+            if (!answered) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -850,7 +864,6 @@ private fun CouncilAskUserCard(
                         onClick = {
                             val text = answer.trim()
                             if (text.isNotEmpty()) {
-                                answered.value = true
                                 onAnswer(text)
                                 answer = ""
                             }

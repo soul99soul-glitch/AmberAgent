@@ -2,6 +2,11 @@ package app.amber.feature.modelcouncil
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.core.Tool
@@ -37,10 +42,10 @@ import kotlin.uuid.Uuid
 class AppCouncilHostToolProvider(
     private val providerManager: ProviderManager,
     private val toolDispatcher: AgentToolDispatcher,
-) : CouncilHostToolProvider {
+    ) : CouncilHostToolProvider {
 
     override fun isAvailable(settings: Settings): Boolean =
-        createSearchTools(settings).any { it.name in HOST_TOOL_NAMES }
+        createSearchTools(settings, includeWebViewFallbackGuidance = false).any { it.name in HOST_TOOL_NAMES }
 
     override suspend fun generateWithTools(
         settings: Settings,
@@ -62,7 +67,10 @@ class AppCouncilHostToolProvider(
         // The "relatively strong" host tool set: web search + page scrape + time.
         // ask_user is included so the host CAN ask; it is intercepted, not run.
         val tools: List<Tool> = buildList {
-            addAll(createSearchTools(settings).filter { it.name in HOST_TOOL_NAMES })
+            addAll(
+                createSearchTools(settings, includeWebViewFallbackGuidance = false)
+                    .filter { it.name in HOST_TOOL_NAMES }
+            )
             add(createTimeTool())
             add(createAskUserTool())
         }
@@ -108,7 +116,9 @@ class AppCouncilHostToolProvider(
             }
 
             messages = accumulator.snapshot()
-            val toolCalls = messages.lastOrNull()?.getTools().orEmpty()
+            val toolCalls = messages.lastOrNull()?.getTools()
+                ?.filter { !it.isExecuted }
+                .orEmpty()
 
             // No tool calls → final text reached.
             if (toolCalls.isEmpty()) {
@@ -123,10 +133,9 @@ class AppCouncilHostToolProvider(
             // ask_user: surface it for the room's HITL flow, do not execute.
             val askUser = toolCalls.firstOrNull { it.toolName == ASK_USER_TOOL_NAME }
             if (askUser != null) {
-                // input is the raw JSON arguments string from the model; the UI parses it.
                 return HostToolOutcome.AskUser(
                     rawPayload = askUser.input,
-                    displayQuestion = askUser.input,
+                    displayQuestion = askUser.displayQuestion(),
                 )
             }
 
@@ -183,3 +192,17 @@ class AppCouncilHostToolProvider(
         const val ASK_USER_TOOL_NAME = "ask_user"
     }
 }
+
+private fun UIMessagePart.Tool.displayQuestion(): String =
+    runCatching {
+        Json.parseToJsonElement(input)
+            .jsonObject["questions"]
+            ?.jsonArray
+            ?.mapNotNull { question ->
+                question.jsonObject["question"]?.jsonPrimitive?.contentOrNull?.trim()
+            }
+            ?.filter { it.isNotBlank() }
+            ?.joinToString("\n")
+            .orEmpty()
+    }.getOrDefault("")
+        .ifBlank { input }

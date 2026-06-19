@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -895,6 +896,7 @@ class CouncilRoomManager(
                 return@mutate CouncilRoomOpResult.Err("room_terminal", "Room has ended.")
             }
             val now = nowMs()
+            val askMessage = room.messages.lastOrNull { it.kind == CouncilMessageKind.ASK_USER }
             val userMessage = CouncilMessage(
                 id = msgId(),
                 authorId = COUNCIL_ROOM_USER_ID,
@@ -904,6 +906,7 @@ class CouncilRoomManager(
                 mode = room.mode,
                 text = answer.take(MAX_MESSAGE_CHARS),
                 createdAtMs = now,
+                replyToMessageId = askMessage?.id,
                 status = CouncilMessageStatus.COMPLETED,
             )
             CouncilRoomOpResult.Ok(room.copy(
@@ -956,12 +959,15 @@ class CouncilRoomManager(
         if (!claimed) return
         val job = launchGuestJob(conversationId) {
             try {
-                runCatching { runAutoOrchestration(conversationId) }
-                    .onFailure { error ->
-                        if (error !is CancellationException) {
-                            android.util.Log.e(TAG, "Council auto-run failed", error)
-                        }
-                    }
+                runAutoOrchestration(conversationId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                android.util.Log.e(TAG, "Council auto-run failed", error)
+                failActiveRoom(
+                    conversationId = conversationId,
+                    message = "Council auto-run failed: ${error.message ?: error::class.java.simpleName}",
+                )
             } finally {
                 jobsLock.withLock { autoRunConversationIds.remove(conversationId) }
             }
@@ -1004,7 +1010,10 @@ class CouncilRoomManager(
 
         val seeded = peekRoom(conversationId) ?: return
         val guestIds = seeded.activeGuests.map { it.id }
-        if (guestIds.isEmpty()) return
+        if (guestIds.isEmpty()) {
+            failActiveRoom(conversationId, "No council guests are available to run.")
+            return
+        }
 
         // Interjection watermark = the topic message; anything the user sends AFTER
         // this is a mid-run interjection handled between turns.
@@ -1189,6 +1198,25 @@ class CouncilRoomManager(
             }
         }
         return (result as? CouncilRoomOpResult.Ok)?.room
+    }
+
+    private suspend fun failActiveRoom(
+        conversationId: Uuid,
+        message: String,
+    ) {
+        mutate(conversationId) { room ->
+            if (room.status.terminal) {
+                CouncilRoomOpResult.Ok(room)
+            } else {
+                val now = nowMs()
+                CouncilRoomOpResult.Ok(room.copy(
+                    status = CouncilRoomStatus.FAILED,
+                    warnings = room.warnings + message,
+                    finishedAtMs = now,
+                    updatedAtMs = now,
+                ))
+            }
+        }
     }
 
     /**
@@ -1978,8 +2006,8 @@ class CouncilRoomManager(
                 val ask = pendingAskUser.remove(conversationId)
                 Triple(guests, synth, ask)
             }
-            guestJobs.forEach { it.cancel() }
-            synthesisJob?.cancel()
+            guestJobs.forEach { it.cancelAndJoin() }
+            synthesisJob?.cancelAndJoin()
             // If the council was paused on an ask_user, cancel the parked awaiter
             // so the suspended runAutoOrchestration dies cleanly (its awaitUserAnswer
             // throws CancellationException, which the loop propagates to close).
