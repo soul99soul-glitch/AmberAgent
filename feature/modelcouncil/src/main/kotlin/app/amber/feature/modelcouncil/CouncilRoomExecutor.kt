@@ -51,7 +51,12 @@ interface RoomMutationSink {
     )
 
     /** Finalize synthesis: write [synthesis] and transition room to FINALIZED. */
-    suspend fun completeSynthesis(conversationId: Uuid, synthesis: String, warnings: List<String>)
+    suspend fun completeSynthesis(
+        conversationId: Uuid,
+        synthesisMessageId: String,
+        synthesis: String,
+        warnings: List<String>,
+    )
 }
 
 /**
@@ -202,9 +207,14 @@ class CouncilRoomExecutor(
     }
 
     /**
-     * Generate the host's synthesis. Uses [synthesizePrompt]; writes the final
-     * verdict via [RoomMutationSink.completeSynthesis], which transitions the
-     * room to FINALIZED.
+     * Generate the host's synthesis. Streams the verdict live into the timeline
+     * as a host message (mode == SYNTHESIZE) — same spine as [generateHostTurn]
+     * — so the conclusion types in instead of popping in whole. The final text
+     * is committed via [RoomMutationSink.completeSynthesis], which finalizes the
+     * streaming row, writes [CouncilRoom.synthesis], and transitions FINALIZED.
+     *
+     * [synthesisMessageId] is pre-allocated by the caller (manager) so the
+     * streaming row and the finalize call target the same id.
      *
      * The host runs on the host assistant's model (resolved from settings by the
      * caller); [hostModelId] is what the caller resolved.
@@ -216,25 +226,67 @@ class CouncilRoomExecutor(
         settings: Settings,
         reasoningLevel: ReasoningLevel = ReasoningLevel.OFF,
         extraSystemPrompt: String = "",
+        synthesisMessageId: String,
     ) = withContext(dispatcher) {
+        val host = room.host
         val budget = room.outputBudgetChars
         val effectiveSystemPrompt = if (extraSystemPrompt.isBlank()) {
             hostSystemPrompt
         } else {
             "$hostSystemPrompt\n\n—— 主持人补充设定 ——\n${extraSystemPrompt.trim()}"
         }
+
+        // Seed the streaming synthesis row up-front so the timeline shows the
+        // host "speaking" the conclusion as it arrives. Only when there is a
+        // host participant — otherwise we fall back to writing synthesis via
+        // completeSynthesis alone (no inline row), matching the legacy path.
+        if (host != null) {
+            sink.upsertStreamingMessage(
+                conversationId = room.conversationId,
+                message = CouncilMessage(
+                    id = synthesisMessageId,
+                    authorId = host.id,
+                    authorName = host.name,
+                    role = host.role,
+                    round = room.round,
+                    mode = CouncilRoomMode.SYNTHESIZE,
+                    text = "",
+                    createdAtMs = nowMs(),
+                    status = CouncilMessageStatus.STREAMING,
+                ),
+            )
+        }
+
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
-                modelRunner.generate(
-                    settings = settings,
-                    modelId = hostModelId,
-                    systemPrompt = effectiveSystemPrompt,
-                    userPrompt = CouncilRoomPrompts.synthesize(room),
-                    outputBudgetChars = budget,
-                    reasoningLevel = reasoningLevel,
-                    temperature = null,
-                    onChunk = { /* synthesis streams to room.synthesis only on completion */ },
-                )
+                if (host != null) {
+                    // Stream live into the seeded row, exactly like a host turn.
+                    streamInto(room.conversationId, synthesisMessageId) { onChunk ->
+                        modelRunner.generate(
+                            settings = settings,
+                            modelId = hostModelId,
+                            systemPrompt = effectiveSystemPrompt,
+                            userPrompt = CouncilRoomPrompts.synthesize(room),
+                            outputBudgetChars = budget,
+                            reasoningLevel = reasoningLevel,
+                            temperature = null,
+                            onChunk = onChunk,
+                        )
+                    }
+                } else {
+                    // No host participant: keep the non-streaming path so the
+                    // room still finalizes (e.g. hostless test fixtures).
+                    modelRunner.generate(
+                        settings = settings,
+                        modelId = hostModelId,
+                        systemPrompt = effectiveSystemPrompt,
+                        userPrompt = CouncilRoomPrompts.synthesize(room),
+                        outputBudgetChars = budget,
+                        reasoningLevel = reasoningLevel,
+                        temperature = null,
+                        onChunk = {},
+                    )
+                }
             } ?: ModelCouncilTextResult(
                 text = "（综合超时）",
                 warnings = listOf("Host synthesis timed out after ${room.seatTimeoutMs}ms."),
@@ -242,14 +294,20 @@ class CouncilRoomExecutor(
         }
         result.fold(
             onSuccess = { textResult ->
-                sink.completeSynthesis(room.conversationId, textResult.text, textResult.warnings)
+                sink.completeSynthesis(
+                    conversationId = room.conversationId,
+                    synthesisMessageId = synthesisMessageId,
+                    synthesis = textResult.text,
+                    warnings = textResult.warnings,
+                )
             },
             onFailure = { error ->
                 if (error is CancellationException) throw error
                 sink.completeSynthesis(
-                    room.conversationId,
-                    "综合失败：${error.message ?: error::class.java.simpleName}",
-                    listOf("Synthesis failed: ${error.message}"),
+                    conversationId = room.conversationId,
+                    synthesisMessageId = synthesisMessageId,
+                    synthesis = "综合失败：${error.message ?: error::class.java.simpleName}",
+                    warnings = listOf("Synthesis failed: ${error.message}"),
                 )
             },
         )

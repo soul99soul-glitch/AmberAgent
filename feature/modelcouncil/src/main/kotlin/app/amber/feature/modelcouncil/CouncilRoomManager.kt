@@ -368,6 +368,7 @@ class CouncilRoomManager(
 
     override suspend fun completeSynthesis(
         conversationId: Uuid,
+        synthesisMessageId: String,
         synthesis: String,
         warnings: List<String>,
     ) {
@@ -376,13 +377,27 @@ class CouncilRoomManager(
                 return@mutate CouncilRoomOpResult.Ok(room)
             }
             val now = nowMs()
-            // Surface the synthesis inline in the timeline as the host's final
-            // message — not only in room.synthesis (which the 综合 view reads) — so
-            // users see the summary in the message flow without opening a sheet.
+            // The synthesis was streamed into a host message row (mode ==
+            // SYNTHESIZE) by generateSynthesis; finalize that row in place
+            // rather than appending a duplicate. Fall back to inserting a new
+            // row if the streaming seed is missing (hostless fixtures, legacy
+            // callers) so the conclusion still surfaces inline.
             val host = room.participants.firstOrNull { it.id == COUNCIL_ROOM_HOST_ID }
-            val messages = if (synthesis.isNotBlank() && host != null) {
-                room.messages + CouncilMessage(
-                    id = msgId(),
+            val existing = room.messages.firstOrNull { it.id == synthesisMessageId }
+            val messages = when {
+                existing != null -> room.messages.map { m ->
+                    if (m.id == synthesisMessageId) {
+                        m.copy(
+                            text = synthesis.take(MAX_MESSAGE_CHARS),
+                            status = CouncilMessageStatus.COMPLETED,
+                            warnings = warnings,
+                        )
+                    } else {
+                        m
+                    }
+                }
+                synthesis.isNotBlank() && host != null -> room.messages + CouncilMessage(
+                    id = synthesisMessageId.ifBlank { msgId() },
                     authorId = host.id,
                     authorName = host.name,
                     role = host.role,
@@ -392,8 +407,7 @@ class CouncilRoomManager(
                     createdAtMs = now,
                     status = CouncilMessageStatus.COMPLETED,
                 )
-            } else {
-                room.messages
+                else -> room.messages
             }
             CouncilRoomOpResult.Ok(room.copy(
                 mode = CouncilRoomMode.SYNTHESIZE,
@@ -821,6 +835,7 @@ class CouncilRoomManager(
                     settings = settings,
                     reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
                     extraSystemPrompt = councilSetting.hostSystemPrompt,
+                    synthesisMessageId = msgId(),
                 )
             }.onFailure { error ->
                 if (error !is CancellationException) {
@@ -1148,9 +1163,10 @@ class CouncilRoomManager(
         val hostModelId = resolveHostModelId(finalRoom, settings)
         if (hostModelId == null) {
             completeSynthesis(
-                conversationId,
-                "（无法生成综合结论：未找到主持模型，请在设置中为当前助手配置主模型。）",
-                listOf("Host model not found; synthesis skipped."),
+                conversationId = conversationId,
+                synthesisMessageId = msgId(),
+                synthesis = "（无法生成综合结论：未找到主持模型，请在设置中为当前助手配置主模型。）",
+                warnings = listOf("Host model not found; synthesis skipped."),
             )
             return
         }
@@ -1182,6 +1198,7 @@ class CouncilRoomManager(
             settings = settings,
             reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
             extraSystemPrompt = councilSetting.hostSystemPrompt,
+            synthesisMessageId = msgId(),
         )
     }
 

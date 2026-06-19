@@ -48,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import app.amber.feature.ui.hooks.ImeLazyListAutoScroller
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -223,6 +224,39 @@ fun CouncilTimelineTab(
     val topicMessageId = remember(room.messages) {
         room.messages.firstOrNull { it.authorId == COUNCIL_ROOM_USER_ID }?.id
     }
+
+    // Whether an ask_user card is still awaiting input. The host can pause the
+    // council with a question embedded in the timeline (not the bottom composer),
+    // so when the soft keyboard rises for that card we must scroll the list to
+    // keep it visible — otherwise the TextField is hidden behind the keyboard.
+    val hasPendingAskUser = remember(room.messages) {
+        room.messages.any { msg ->
+            msg.kind == CouncilMessageKind.ASK_USER &&
+                room.messages.none {
+                    it.authorId == COUNCIL_ROOM_USER_ID &&
+                        (it.replyToMessageId == msg.id || it.createdAtMs > msg.createdAtMs)
+                }
+        }
+    }
+    ImeLazyListAutoScroller(
+        lazyListState = listState,
+        shouldScroll = {
+            // Scroll on IME rise while following the bottom (same rule as the
+            // streaming follow), OR whenever an ask_user card needs to be kept
+            // on screen — the latter applies even when the user has scrolled up
+            // and paused the streaming follow, because the question is the only
+            // actionable control at that moment.
+            followStreaming || hasPendingAskUser ||
+                isAtBottom(bottomFollowBufferPx)
+        },
+        // Shared with the streaming bottom-follow above on purpose: this flag
+        // marks "a programmatic scroll is in flight" so the user-scroll detector
+        // (line ~206) doesn't mistake it for a manual scroll and pause follow.
+        // LazyListState serializes scrollBy calls, so the two sources never truly
+        // overlap; the start/end pairing stays balanced.
+        onProgrammaticScrollStart = { programmaticFollowScroll = true },
+        onProgrammaticScrollEnd = { programmaticFollowScroll = false },
+    )
     // Who is mid-turn — drives the live "正在发言" strip above the composer.
     val speaking = remember(room.participants, streamingTail) {
         room.participants.firstOrNull { it.status == CouncilParticipantStatus.SPEAKING }
@@ -575,7 +609,7 @@ private fun TimelineMessageRow(msg: CouncilMessage, room: CouncilRoom, isTopic: 
             }
             if (isSynthesis) {
                 Text(
-                    text = "综合结论",
+                    text = "主持人总结",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = chatTheme.accent,

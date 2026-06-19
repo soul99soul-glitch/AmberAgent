@@ -167,8 +167,11 @@ object CouncilRoomPrompts {
     // ── SYNTHESIZE mode ────────────────────────────────────────────────────
 
     /**
-     * Host synthesis: collect all guest messages, produce structured verdict.
-     * Output feeds room.synthesis.
+     * Host synthesis: the host wraps up the council as the moderator — restating
+     * the proposition, weighing each member's contribution, and delivering a
+     * decisive closing statement (共识/分歧/最强证据/风险/最终建议). Written in
+     * the host's first-person moderator voice so it reads as the 主持人收尾,
+     * not a neutral report. Output feeds room.synthesis.
      */
     fun synthesize(room: CouncilRoom): String = """
         议题：${room.objective}
@@ -183,13 +186,16 @@ object CouncilRoomPrompts {
             }
             .joinToString("\n\n") { it.summaryBlock(limit = 1_200) }}
 
-        请综合并给出：
-        - 共识（consensus）
-        - 分歧（conflicts）
-        - 最强证据（strongest evidence）
-        - 风险（risks）
-        - 最终建议（final recommendation）
-        综合必须基于已给出的证据，不要引入未在讨论中出现的事实。
+        现在请你以「主持人」的身份做这场讨论的结案陈词。你是这场会议的主持，不是中立的报告生成器：
+        - 用第一人称（"我"）收尾，语气像一个真正在主持会议、听过所有人发言后做总结的主持人。
+        - 先简短回顾议题与各成员的核心立场，体现你确实"听过"了讨论。
+        - 然后给出你的主持人判断，结构如下：
+          - 共识（consensus）：各方达成一致的地方
+          - 分歧（conflicts）：仍未对齐的关键分歧
+          - 最强证据（strongest evidence）：支撑结论的最有力依据
+          - 风险（risks）：采纳该结论需要注意的风险
+          - 最终建议（final recommendation）：你作为主持人给出的明确结论
+        - 结案陈词必须基于讨论中已给出的证据，不要引入未在讨论中出现的事实。
     """.trimIndent()
 
     /**

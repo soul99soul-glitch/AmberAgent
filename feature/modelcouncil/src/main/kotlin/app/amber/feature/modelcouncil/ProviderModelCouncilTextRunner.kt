@@ -64,14 +64,33 @@ class ProviderModelCouncilTextRunner(
             val accumulated = StringBuilder()
             var lastEmitNanos = 0L
             var lastEmittedText = ""
+            // Diagnostic counters for the "guest sometimes doesn't stream" issue.
+            // Track how many raw chunks arrive, how many were non-empty deltas,
+            // how many emitLive calls were throttled/deduped away, and the wall
+            // time span of the stream — so a single log line per turn reveals
+            // whether the provider sent few chunks (upstream), or we suppressed
+            // them (our throttle). VERBOSE-only; guarded by a stable tag.
+            var rawChunkCount = 0
+            var nonEmptyDeltaCount = 0
+            var emitSkippedThrottle = 0
+            var emitSkippedNoChange = 0
+            var emitForwarded = 0
+            val streamStartNanos = System.nanoTime()
+            val runTag = "council-stream/${model.displayName.ifBlank { model.modelId }}/t=${candidateTemperature}/r=${reasoningLevel}"
             fun emitLive(force: Boolean) {
                 val now = System.nanoTime()
-                if (!force && now - lastEmitNanos < MODEL_COUNCIL_LIVE_EMIT_INTERVAL_NANOS) return
+                if (!force && now - lastEmitNanos < MODEL_COUNCIL_LIVE_EMIT_INTERVAL_NANOS) {
+                    emitSkippedThrottle++
+                    return
+                }
                 val text = accumulated.toString().take(outputBudgetChars)
                 if (text != lastEmittedText) {
                     lastEmittedText = text
                     lastEmitNanos = now
+                    emitForwarded++
                     onChunk(text)
+                } else {
+                    emitSkippedNoChange++
                 }
             }
             providerImpl.streamText(
@@ -79,16 +98,34 @@ class ProviderModelCouncilTextRunner(
                 messages = messages,
                 params = params,
             ).collect { chunk ->
+                rawChunkCount++
                 val delta = chunk.choices.firstOrNull()?.delta?.parts
                     ?.filterIsInstance<UIMessagePart.Text>()
                     ?.joinToString("") { it.text }
                     .orEmpty()
                 if (delta.isNotEmpty()) {
+                    nonEmptyDeltaCount++
                     accumulated.append(delta)
                     emitLive(force = false)
                 }
             }
             emitLive(force = true)
+            val totalChars = accumulated.length
+            val elapsedMs = (System.nanoTime() - streamStartNanos) / 1_000_000
+            // One diagnostic line per turn. Patterns to watch for:
+            //  - rawChunkCount <= 2 with large totalChars  → provider sent the whole
+            //    reply in one shot (non-streaming fallback / local model batching);
+            //    the "pop in whole" is upstream, not our throttle.
+            //  - emitSkippedThrottle high with rawChunkCount high → our 32ms cadence
+            //    is the culprit; lower the interval.
+            //  - emitForwarded high but user still sees a pop → rendering/Compose
+            //    side, not this runner.
+            android.util.Log.i(
+                "CouncilRunner",
+                "$runTag done: chunks=$rawChunkCount nonEmpty=$nonEmptyDeltaCount " +
+                    "chars=$totalChars elapsedMs=$elapsedMs " +
+                    "emit(fwd=$emitForwarded throttled=$emitSkippedThrottle noChange=$emitSkippedNoChange)",
+            )
             return accumulated.toString().take(outputBudgetChars)
         }
         val requestedReasoning = reasoningLevel ?: ReasoningLevel.OFF
@@ -124,6 +161,15 @@ class ProviderModelCouncilTextRunner(
                 add(null to ReasoningLevel.AUTO)
             }
         }.distinct()
+        // Note the retry path: the first attempt already streamed partial text
+        // (if it got that far before failing), and the retry restarts from an
+        // empty accumulator. If a user reports "the beginning appeared then the
+        // whole thing re-flowed", it's this retry, not a streaming bug.
+        android.util.Log.w(
+            "CouncilRunner",
+            "$label first stream failed (${firstError.message}); trying ${candidates.size} fallback candidate(s)",
+            firstError,
+        )
 
         var lastError = firstError
         candidates.forEach { (candidateTemperature, candidateReasoning) ->
