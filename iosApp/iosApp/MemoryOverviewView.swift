@@ -27,8 +27,8 @@ struct MemoryOverviewView: View {
         ),
         .init(
             title: "iOS 记忆桥",
-            subtitle: "当前 SwiftUI 没有 MemoryRepository、Settings.agentRuntime 或 memory_tool executor bridge。",
-            value: "缺桥",
+            subtitle: "IosMemoryFactory + IOSMemoryPersistence 已读写本地 JSON；ChatViewModel 已按 memory 开关注入提示词。memory_tool executor 仍缺。",
+            value: "部分已接",
             color: AmberTheme.accentAmber
         )
     ]
@@ -36,9 +36,9 @@ struct MemoryOverviewView: View {
     private let settingsRows: [MemoryCapabilityEvidence] = [
         .init(
             title: "核心 / 短期 / 长期记忆开关",
-            subtitle: "Android Settings.agentRuntime 已有真实开关；iOS 当前不读写这些字段。",
-            value: "只读缺口",
-            color: AmberTheme.accentAmber
+            subtitle: "iOS 已读取 KMP agentRuntime 开关，并在 ChatViewModel 注入记忆前按 scope 过滤；本页仍不提供写回。",
+            value: "读取已接",
+            color: AmberTheme.accentGreen
         ),
         .init(
             title: "最近会话参考 / 时间提醒",
@@ -90,7 +90,7 @@ struct MemoryOverviewView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "新增记忆本地预览", size: 44, symbolSize: 20) {
+            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "新增记忆", size: 44, symbolSize: 20) {
                 router.navigate(to: .memoryEdit(text: "", scope: "核心", pinned: false))
             }
         }
@@ -100,7 +100,7 @@ struct MemoryOverviewView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实记忆库、召回、自动整理和 memory_tool；iOS 当前还没有把这些能力接进 SettingsStore、ChatViewModel 或本地工具执行器。")
+        Text("iOS 已接本地记忆增删、Documents 持久化和 ChatViewModel 注入过滤；自动整理、memory_tool executor、最近会话参考和时间提醒仍未接。")
             .font(.subheadline)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -111,8 +111,8 @@ struct MemoryOverviewView: View {
 
     /// Read-only view of the REAL seeded memory settings from
     /// `IOSSharedSettingsStore.agentRuntime` (enableCoreMemory / short / long /
-    /// recentChats / timeReminder). Proves the real-settings read path is wired
-    /// for this module; does NOT enable memory execution/editing.
+    /// recentChats / timeReminder). ChatViewModel consumes the three memory
+    /// scope switches; this page remains read-only for settings writes.
     private var presetConfigSection: some View {
         let rt = sharedSettings.agentRuntime
         return VStack(spacing: 0) {
@@ -217,7 +217,7 @@ struct MemoryOverviewView: View {
                 }
             }
 
-            MemoryNote("这些行对应 Android/KMP 的真实设置字段；iOS 没有桥接前不会写入本地假开关。")
+            MemoryNote("记忆 scope 开关已被聊天注入链消费；其它行仍是只读缺口映射，不写本地假开关。")
         }
     }
 
@@ -228,23 +228,23 @@ struct MemoryOverviewView: View {
                 MemoryStatusRow(
                     row: .init(
                         title: "核心 / 短期 / 长期条目",
-                        subtitle: "Android/KMP 通过 MemoryRepository 读取；iOS 当前没有 DAO/repository bridge，因此不显示样例记忆条数。",
-                        value: "缺 repository",
-                        color: AmberTheme.accentAmber
+                        subtitle: "iOS 通过 IosMemoryFactory 读写，并由 IOSMemoryPersistence 持久化到 Documents/memories/memories.json。",
+                        value: "已接",
+                        color: AmberTheme.accentGreen
                     )
                 )
                 MemoryDivider()
                 MemoryStatusRow(
                     row: .init(
                         title: "新增 / 编辑 / 删除",
-                        subtitle: "右上角 + 和详情页只保留本地预览；不会创建、更新或删除真实记忆。",
-                        value: "本地预览",
-                        color: AmberTheme.muted
+                        subtitle: "详情页已支持新增和删除记忆并持久化；逐条编辑内容仍未接。",
+                        value: "增删已接",
+                        color: AmberTheme.accentGreen
                     )
                 )
             }
 
-            MemoryNote("Android/KMP 的记忆库能力真实存在；本页当前只记录 iOS bridge 缺口。")
+            MemoryNote("iOS 当前是本地 JSON 记忆库，不是 Android Room；memory_tool、自动整理和候选审核仍是缺口。")
         }
     }
 }

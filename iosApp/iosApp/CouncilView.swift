@@ -90,7 +90,7 @@ struct CouncilView: View {
 
             Spacer(minLength: 8)
 
-            AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "成员设置本地预览", size: 44, symbolSize: 18) {
+            AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "成员设置", size: 44, symbolSize: 18) {
                 router.navigate(to: .councilSettings)
             }
         }
@@ -111,8 +111,8 @@ struct CouncilView: View {
     }
 
     /// Read-only view of the REAL seeded ModelCouncil runtime defaults from
-    /// `IOSSharedSettingsStore.agentRuntime.modelCouncil`. Proves the read path;
-    /// does NOT enable council execution.
+    /// `IOSSharedSettingsStore.agentRuntime.modelCouncil`. Runtime execution is
+    /// handled by CouncilRunner; this section stays read-only for global settings.
     private var presetConfigSection: some View {
         let c = sharedSettings.agentRuntime.modelCouncil
         return VStack(spacing: 0) {
@@ -136,9 +136,8 @@ struct CouncilView: View {
     /// Real KMP council role presets (coreSeats + lensPresets), read live from
     /// `ModelCouncilRolePresets.shared` (already exported, pure commonMain data).
     /// Shows the actual default council roles — supporters/opponents/judge + lens
-    /// roles — instead of prose descriptions. Read-only; running a council still
-    /// needs the ModelCouncilManager execution bridge (blocked on Android-only
-    /// upstream modules — see audit).
+    /// roles — instead of prose descriptions. Read-only; execution can use these
+    /// roles through CouncilRunner, while editing built-in presets is not exposed.
     private var rolePresetsSection: some View {
         let coreSeats = ModelCouncilRolePresets.shared.coreSeats
         let lensPresets = ModelCouncilRolePresets.shared.lensPresets
@@ -166,7 +165,7 @@ struct CouncilView: View {
                 }
             }
 
-            Text("这些角色来自 Android/KMP ModelCouncilRolePresets 真实默认预设（只读展示）。真正运行议会（start/read）仍需 ModelCouncilManager 执行桥，iOS 当前不可执行。")
+            Text("这些角色来自 Android/KMP ModelCouncilRolePresets 真实默认预设（只读展示）。iOS 已可通过下方按钮或聊天工具触发议会运行；修改预设与实时 transcript 展示仍未接。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
                 .lineSpacing(2)
@@ -219,9 +218,9 @@ struct CouncilView: View {
                 CouncilStatusRow(
                     row: .init(
                         title: "成员配置",
-                        subtitle: "设置页和席位编辑页仅保留本地预览；不会写入默认席位或 prompt 文件。",
-                        value: "本地预览",
-                        color: AmberTheme.muted
+                        subtitle: "席位编辑页会保存自定义席位并重启保留；席位 prompt 文件与内置预设编辑仍未接。",
+                        value: "席位已接",
+                        color: AmberTheme.accentGreen
                     )
                 )
             }
@@ -257,7 +256,7 @@ struct CouncilView: View {
 
     private var draftActionSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "预览入口")
+            AmberSectionLabel(text: "配置入口")
             AmberFormGroup {
                 Button {
                     router.navigate(to: .councilSettings)
@@ -270,10 +269,10 @@ struct CouncilView: View {
                             .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("成员设置本地预览")
+                            Text("成员设置")
                                 .font(.body.weight(.medium))
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("查看 Android/KMP 字段映射；当前不会保存席位。")
+                            Text("管理自定义席位；prompt 文件和内置预设编辑仍未接。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)

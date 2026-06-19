@@ -67,7 +67,7 @@ struct SubAgentsView: View {
     private let settingRows: [SubAgentEvidenceRow] = [
         .init(
             title: "enabled / mode",
-            subtitle: "Android/KMP 支持 ROSTER 与 SMART_DYNAMIC；iOS 当前不读写这些值。",
+            subtitle: "Android/KMP 支持 ROSTER 与 SMART_DYNAMIC；iOS 当前只读展示，尚未提供写回。",
             value: "缺写回",
             color: AmberTheme.accentAmber
         ),
@@ -164,7 +164,7 @@ struct SubAgentsView: View {
     }
 
     private var intro: some View {
-        Text("Android/KMP 已有真实 SubAgent 设置、内置角色、运行管理器和 subagent_* 工具；iOS 现在可从本页手动构造 IosSubAgentFactory 并启动 start/read/wait/cancel 调用链。ChatViewModel 已注入 subagent_dispatch；动态角色写回和角色持久化仍未接。")
+        Text("Android/KMP 已有真实 SubAgent 设置、内置角色、运行管理器和 subagent_* 工具；iOS 现在可从本页手动构造 IosSubAgentFactory 并启动 start/read/wait/cancel 调用链。ChatViewModel 已注入 subagent_dispatch；customDefinitions 与动态角色写回仍未接。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -218,8 +218,8 @@ struct SubAgentsView: View {
     }
 
     /// Read-only view of the REAL seeded SubAgent runtime defaults from
-    /// `IOSSharedSettingsStore.agentRuntime.subAgent`. Proves the read path;
-    /// does NOT enable subagent execution.
+    /// `IOSSharedSettingsStore.agentRuntime.subAgent`. Execution is handled by
+    /// SubAgentRunner and ChatViewModel; this section stays read-only for settings.
     private var presetConfigSection: some View {
         let s = sharedSettings.agentRuntime.subAgent
         return VStack(spacing: 0) {
@@ -276,7 +276,7 @@ struct SubAgentsView: View {
                 }
             }
 
-            SubAgentFootnote(text: "Android 设置页每次 update 都会写 settings.agentRuntime.subAgent，并通过 AgentPromptConfigRepository.writeSubAgentMarkdown 同步 prompt；iOS 当前没有这条桥。")
+            SubAgentFootnote(text: "iOS 已能保存 systemPrompt 覆盖；enabled/mode、动态角色、prompt markdown 同步和预算编辑仍未接。")
         }
     }
 
@@ -298,7 +298,7 @@ struct SubAgentsView: View {
                 }
             }
 
-            SubAgentFootnote(text: "这些角色来自 KMP SubAgentDefinitions；iOS 当前不会读取或保存 per-role 模型、推理强度、提示词覆盖。")
+            SubAgentFootnote(text: "这些角色来自 KMP SubAgentDefinitions；iOS 已能保存 systemPrompt 覆盖，per-role 模型、推理强度和预算仍未接。")
         }
     }
 

@@ -468,7 +468,7 @@ struct TTSAddView: View {
                 TTSSettingsDivider()
                 TTSPreviewLine(label: "凭据", value: providerType.requiresAPIKey ? credentialPreview : "无需 Key")
                 TTSSettingsDivider()
-                TTSPreviewLine(label: "保存方式", value: "本地本地预览")
+                TTSPreviewLine(label: "保存方式", value: "本地预览")
             }
         }
     }

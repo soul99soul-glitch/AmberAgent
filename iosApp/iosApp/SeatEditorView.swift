@@ -81,7 +81,7 @@ struct SeatEditorView: View {
 
             Spacer()
 
-            Text("席位本地预览")
+            Text("席位设置")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -103,13 +103,13 @@ struct SeatEditorView: View {
     }
 
     private var noticeSection: some View {
-        SeatEditorFootnote(text: "Android/KMP 通过 ModelCouncilRuntimeSetting.defaultSeats 和 AgentPromptConfigRepository 保存席位与 prompt；iOS 当前没有这条设置/文件桥。本页编辑的席位会保存到 UserDefaults，重启后保留。")
+        SeatEditorFootnote(text: "自定义席位会保存到 UserDefaults，重启后保留；modelId 为 UUID 时同步写入 KMP snapshot.defaultSeats。席位 prompt 文件桥仍未接。")
             .padding(.bottom, 10)
     }
 
     private var identitySection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "席位本地预览")
+            AmberSectionLabel(text: "席位")
             AmberFormGroup {
                 HStack(spacing: 12) {
                     Text("名称")
@@ -149,13 +149,13 @@ struct SeatEditorView: View {
                 }
                 .buttonStyle(.plain)
             }
-            SeatEditorFootnote(text: "这些字段只影响本页本地预览；不会写入 Android/KMP 的 ModelCouncilSeat。")
+            SeatEditorFootnote(text: "名称、角色、模型 ID 会保存到自定义席位；只有合法 UUID modelId 会同步成 KMP ModelCouncilSeat。")
         }
     }
 
     private var runnerSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行方式本地预览")
+            AmberSectionLabel(text: "运行方式")
 
             HStack(spacing: 4) {
                 ForEach(SeatRunnerType.allCases) { type in
@@ -263,7 +263,7 @@ struct SeatEditorView: View {
 
     private var promptSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "席位提示词本地预览")
+            AmberSectionLabel(text: "席位提示词")
             AmberFormGroup {
                 TextEditor(text: $prompt)
                     .font(.system(size: 14))
@@ -284,7 +284,7 @@ struct SeatEditorView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
             }
-            SeatEditorFootnote(text: "填写内容只留在本页本地预览；不会写入 AgentPromptConfigRepository 的 modelCouncilPromptFile。")
+            SeatEditorFootnote(text: "填写内容当前仍只在本页预览；不会写入 AgentPromptConfigRepository 的 modelCouncilPromptFile。")
         }
     }
 
@@ -323,7 +323,7 @@ struct SeatEditorView: View {
                     Label("保存席位", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
                 }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
             }
-            SeatEditorFootnote(text: "席位保存到 UserDefaults，重启后保留。KMP seed 席位（\(sharedSettings.agentRuntime.modelCouncil.defaultSeats.count) 席）仍为只读。")
+            SeatEditorFootnote(text: "自定义席位保存到 UserDefaults，重启后保留；合法 UUID modelId 会同步到 snapshot。KMP seed 席位（\(sharedSettings.agentRuntime.modelCouncil.defaultSeats.count) 席）仍为只读。")
         }
     }
 

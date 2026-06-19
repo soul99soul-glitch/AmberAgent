@@ -143,7 +143,7 @@ struct ProviderDetailView: View {
                         }
                     }
 
-                    Text("当前只接入一个模型 ID 字符串。KMP Model 列表、能力、模态、上下文、custom headers/body 尚未桥接到 iOS。")
+                    Text("当前聊天请求仍只消费 SettingsStore.modelId 字符串。Provider registry 已可持久化 OpenAI-compatible 服务商；每个模型的能力、模态、上下文和 custom headers/body 仍未桥接到请求链。")
                         .font(.footnote)
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -172,7 +172,7 @@ struct ProviderDetailView: View {
                         }
                     }
 
-                    Text("这些是 Android/KMP 在该预置 Provider 上的种子模型，仅只读展示。iOS 当前不持久化模型列表、不创建模型配置、不拉取模型；预置不影响当前聊天模型。")
+                    Text("这些是 Android/KMP 在该预置 Provider 上的种子模型，仅只读展示。本页不拉取模型；自定义 OpenAI-compatible 服务商/模型请从添加入口创建，当前聊天模型仍由默认模型页选择。")
                         .font(.footnote)
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -402,7 +402,7 @@ struct ProviderDetailView: View {
 
     private var connectionFooterText: String {
         if isCurrentProvider {
-            return "API 地址写入 UserDefaults；API Key 字段绑定 SettingsStore.apiKey（既有 Keychain account）。当前不会创建多服务商 ProviderSetting。"
+            return "本页编辑 legacy 当前聊天配置：API 地址写入 UserDefaults，API Key 绑定 SettingsStore 的既有 Keychain account。新增多服务商请从服务商列表右上角 + 创建。"
         }
 
         if requiresProviderBridge {

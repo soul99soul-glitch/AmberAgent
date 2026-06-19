@@ -60,7 +60,7 @@ struct MemoryEditView: View {
 
             Spacer()
 
-            Text("记忆本地预览")
+            Text("记忆库")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -75,12 +75,12 @@ struct MemoryEditView: View {
         .padding(.bottom, 18)
     }
 
-    /// Real KMP memory store (in-memory, NOT persisted). Uses IosMemoryFactory
-    /// to add/list/delete memory records. Proves the read/write chain works;
-    /// changes are lost on app restart (no Room DB on iOS).
+    /// Real iOS memory store backed by KMP IosMemoryFactory plus Swift JSON
+    /// persistence in Documents/memories/memories.json. This is not Android Room,
+    /// but it survives app restart through AppShell load/persist hooks.
     private var iosMemorySection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "记忆库（KMP 内存版 · 可读写）")
+            AmberSectionLabel(text: "记忆库（iOS 本地持久化）")
 
             AmberFormGroup {
                 ForEach(Array(iosRecords.enumerated()), id: \.offset) { index, record in
@@ -160,7 +160,7 @@ struct MemoryEditView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
-            Text("注意：这是 KMP 内存版记忆库，可读写但不持久化（无 Room DB）。重启后清空。")
+            Text("注意：这是 iOS 本地 JSON 记忆库，可读写并随 AppShell 启动恢复；不是 Android Room。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -181,7 +181,7 @@ struct MemoryEditView: View {
 
     private var contentSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "内容本地预览")
+            AmberSectionLabel(text: "内容")
 
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
@@ -193,7 +193,7 @@ struct MemoryEditView: View {
                     .frame(minHeight: 176)
 
                 if text.isEmpty {
-                    Text("记一条本地预览；当前不会写入真实记忆库")
+                    Text("写一条记忆；保存后会进入本地记忆库")
                         .font(.body)
                         .foregroundStyle(AmberTheme.muted2)
                         .padding(.horizontal, 17)
@@ -213,7 +213,7 @@ struct MemoryEditView: View {
 
     private var classificationSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "归类本地预览")
+            AmberSectionLabel(text: "归类")
             AmberFormGroup {
                 Menu {
                     ForEach(MemoryEditScope.allCases) { option in
@@ -224,7 +224,7 @@ struct MemoryEditView: View {
                 } label: {
                     MemoryValueRow(
                         title: "记忆层级",
-                        subtitle: "仅影响本页本地预览；不会写入 MemoryScope。",
+                        subtitle: "保存时写入 MemoryScope，并影响 ChatViewModel 的 scope 过滤。",
                         value: scope.title
                     )
                 }
@@ -239,7 +239,7 @@ struct MemoryEditView: View {
                             Text("置顶")
                                 .font(.body)
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text("仅影响本页本地预览；不会改变真实召回优先级。")
+                            Text("当前置顶标记仅预览；保存时尚未写入 MemoryRecord.pinned。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -256,7 +256,7 @@ struct MemoryEditView: View {
                 .buttonStyle(.plain)
             }
 
-            MemoryEditNote(text.isEmpty ? "本地本地预览 · 空内容" : "本地本地预览 · \(scope.title) · \(pinned ? "已置顶" : "未置顶")")
+            MemoryEditNote(text.isEmpty ? "待保存 · 空内容" : "待保存 · \(scope.title) · \(pinned ? "置顶预览" : "未置顶")")
                 .padding(.top, 2)
         }
     }

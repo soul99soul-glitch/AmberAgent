@@ -148,7 +148,7 @@ struct SubAgentRoleView: View {
                     row: .init(
                         title: detail.isKnownBuiltIn ? "KMP SubAgentDefinitions" : "customDefinitions",
                         subtitle: detail.isKnownBuiltIn
-                            ? "此角色来自 KMP 内置角色表；iOS 当前只展示源码证据，不读取用户 override。"
+                            ? "此角色来自 KMP 内置角色表；systemPrompt 覆盖可在下方保存并持久化。"
                             : "iOS 当前没有读取 Settings.agentRuntime.subAgent.customDefinitions。",
                         value: detail.isKnownBuiltIn ? "存在" : "未读取",
                         color: detail.isKnownBuiltIn ? AmberTheme.accentGreen : AmberTheme.accentAmber
@@ -188,7 +188,7 @@ struct SubAgentRoleView: View {
                     .padding(.vertical, 13)
             }
 
-            SubAgentRoleFootnote(text: "真实运行时会从父工具集合里过滤 toolAllowlist，并禁止 subagent_* 嵌套调用；iOS 当前没有启动运行。")
+            SubAgentRoleFootnote(text: "聊天已可通过 subagent_dispatch 触发运行；toolAllowlist、嵌套限制和预算由 KMP 运行链处理，iOS 仍缺可编辑的 per-role 工具/预算配置。")
         }
     }
 

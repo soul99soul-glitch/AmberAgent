@@ -137,7 +137,7 @@ struct ModelEditView: View {
                 }
             }
 
-            ModelEditNote("当前只编辑本地本地预览；真实聊天请求只读取 SettingsStore.modelId。")
+            ModelEditNote("当前只编辑本地预览；真实聊天请求只读取 SettingsStore.modelId。")
         }
     }
 
@@ -590,7 +590,7 @@ struct ModelCustomFieldsView: View {
 
     private var validationText: String {
         if hasDuplicateNames {
-            return "\(kind.nameTitle) 名称重复；当前只保留本地本地预览，关闭后不会写入真实服务商配置。"
+            return "\(kind.nameTitle) 名称重复；当前只保留本地预览，关闭后不会写入真实服务商配置。"
         }
 
         if fields.contains(where: { $0.name.trimmed.isEmpty || $0.value.trimmed.isEmpty }) {
