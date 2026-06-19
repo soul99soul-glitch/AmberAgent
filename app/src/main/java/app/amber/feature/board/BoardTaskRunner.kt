@@ -343,7 +343,7 @@ class BoardTaskRunner(
     ): List<Tool> {
         val rawTools = buildList {
             addAll(localTools.getTools(listOf(LocalToolOption.TimeInfo, LocalToolOption.WebMount)))
-            addAll(createSearchTools(settings))
+            addAll(createSearchTools(settings, includeWebViewFallbackGuidance = false))
         }.associateBy { it.name }
 
         val safeTools = BOARD_TASK_RUNNER_SAFE_TOOL_NAMES.map { name ->

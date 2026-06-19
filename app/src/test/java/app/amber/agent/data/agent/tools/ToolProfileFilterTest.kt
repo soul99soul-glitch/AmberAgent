@@ -48,6 +48,7 @@ class ToolProfileFilterTest {
             listOf(
                 tool("search_web"),
                 tool("scrape_web"),
+                tool("webview_search_open"),
                 tool("webview_read"),
                 tool("wm_observe"),
                 tool("feishu_docs_read"),
@@ -65,6 +66,7 @@ class ToolProfileFilterTest {
         val names = result.tools.map { it.name }.toSet()
 
         assertTrue("search_web" in names)
+        assertTrue("webview_search_open" in names)
         assertTrue("webview_read" in names)
         assertTrue("wm_observe" in names)
         assertTrue("feishu_docs_read" in names)
@@ -154,6 +156,18 @@ class ToolProfileFilterTest {
 
         assertEquals(setOf("get_time_info"), minimalNames)
         assertEquals(setOf("get_time_info"), codingNames)
+    }
+
+    @Test
+    fun codingProfileDoesNotKeepWebViewSearchFallbackTool() {
+        val names = ToolProfileFilter.filter(
+            listOf(tool("search_web"), tool("webview_search_open"), tool("terminal_execute")),
+            MainAgentToolProfile.CODING,
+        ).tools.map { it.name }.toSet()
+
+        assertTrue("terminal_execute" in names)
+        assertFalse("search_web" in names)
+        assertFalse("webview_search_open" in names)
     }
 
     private fun tool(name: String) = Tool(

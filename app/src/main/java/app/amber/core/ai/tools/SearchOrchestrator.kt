@@ -43,6 +43,7 @@ internal object SearchOrchestrator {
     suspend fun search(
         settings: Settings,
         params: JsonObject,
+        includeWebViewFallback: Boolean = true,
         executor: OrchestratorSearchExecutor = ::executeSourceSearch,
     ): JsonObject = coroutineScope {
         val query = params.string("query") ?: params.string("q") ?: error("query is required")
@@ -59,10 +60,32 @@ internal object SearchOrchestrator {
         val sources = buildSources(settings, requestedServices, query = query, topic = topic).take(MAX_SOURCES)
 
         if (sources.isEmpty()) {
+            val availableSources = buildSources(
+                settings = settings,
+                requestedServices = emptyList(),
+                query = query,
+                topic = topic,
+            ).take(MAX_SOURCES)
             return@coroutineScope buildJsonObject {
                 put("status", "error")
                 put("query", query)
-                put("error", "No search sources are enabled. Enable built-in free sources or at least one configured search service.")
+                if (requestedServices.isNotEmpty() && availableSources.isNotEmpty()) {
+                    put(
+                        "error",
+                        "Requested services did not match enabled/applicable search sources. Retry without services, or use an id/name from available_sources.",
+                    )
+                    put("requested_services", buildJsonArray {
+                        requestedServices.forEach { add(JsonPrimitive(it)) }
+                    })
+                    put("available_sources", buildJsonArray {
+                        availableSources.forEach { add(it.toSummaryJson()) }
+                    })
+                } else {
+                    put(
+                        "error",
+                        "No search sources are enabled or applicable. Enable built-in free sources or at least one configured search service.",
+                    )
+                }
                 put("items", JsonArray(emptyList()))
                 put("sources", JsonArray(emptyList()))
             }
@@ -103,7 +126,8 @@ internal object SearchOrchestrator {
             timeRange = timeRange,
         ).take(maxResults)
         val anyFailure = sourceResults.any { it.result.isFailure }
-        val shouldOfferWebView = settings.searchGoogleWebViewFallbackEnabled &&
+        val shouldOfferWebView = includeWebViewFallback &&
+            settings.searchGoogleWebViewFallbackEnabled &&
             (allowWebView || depth == "deep" || merged.size < maxResults.coerceAtMost(3))
 
         buildJsonObject {
@@ -162,15 +186,20 @@ internal object SearchOrchestrator {
                     "message",
                     if (shouldOfferWebView) {
                         "No ordinary source produced results. Use webview_search_open with the suggested fallback URL, or enable more search services."
-                    } else {
+                    } else if (includeWebViewFallback) {
                         "No source produced parseable results. Enable Google WebView fallback or another search service."
+                    } else {
+                        "No source produced parseable results. Enable another search service."
                     }
                 )
             }
         }
     }
 
-    fun status(settings: Settings): JsonObject {
+    fun status(
+        settings: Settings,
+        includeWebViewFallback: Boolean = true,
+    ): JsonObject {
         val enabledConfigured = SearchAggregator.enabledServices(settings)
         return buildJsonObject {
             put("enabled", settings.enableWebSearch)
@@ -178,7 +207,7 @@ internal object SearchOrchestrator {
             put("enabled_configured_service_count", enabledConfigured.size)
             put("builtin_duckduckgo_enabled", settings.searchBuiltinDuckDuckGoEnabled)
             put("builtin_bing_enabled", settings.searchBuiltinBingEnabled)
-            put("google_webview_fallback_enabled", settings.searchGoogleWebViewFallbackEnabled)
+            put("google_webview_fallback_enabled", includeWebViewFallback && settings.searchGoogleWebViewFallbackEnabled)
             put("sources", buildJsonArray {
                 buildSources(settings).forEach { source ->
                     add(
@@ -188,6 +217,9 @@ internal object SearchOrchestrator {
                             put("kind", source.kind)
                             put("builtin", source.builtin)
                             put("priority", source.priority)
+                            put("accepted_selectors", buildJsonArray {
+                                source.acceptedSelectors().forEach { add(JsonPrimitive(it)) }
+                            })
                             source.apiKeyConfigured()?.let { configured ->
                                 put("api_key_configured", configured)
                             } ?: put("api_key_configured", JsonNull)
@@ -198,7 +230,11 @@ internal object SearchOrchestrator {
         }
     }
 
-    fun explain(settings: Settings, params: JsonObject): JsonObject {
+    fun explain(
+        settings: Settings,
+        params: JsonObject,
+        includeWebViewFallback: Boolean = true,
+    ): JsonObject {
         val query = params.string("query") ?: params.string("q") ?: ""
         val topic = params.string("topic")?.lowercase(Locale.ROOT)?.takeIf { it in allowedTopics } ?: "general"
         val depth = params.string("depth")?.lowercase(Locale.ROOT)?.takeIf { it in allowedDepths } ?: "standard"
@@ -224,6 +260,9 @@ internal object SearchOrchestrator {
                             put("kind", source.kind)
                             put("builtin", source.builtin)
                             put("reason", source.reason)
+                            put("accepted_selectors", buildJsonArray {
+                                source.acceptedSelectors().forEach { add(JsonPrimitive(it)) }
+                            })
                         }
                     )
                 }
@@ -231,7 +270,10 @@ internal object SearchOrchestrator {
             put("query_variants", buildJsonArray {
                 variants.forEach { add(JsonPrimitive(it)) }
             })
-            put("webview_fallback_would_be_available", settings.searchGoogleWebViewFallbackEnabled && (allowWebView || depth == "deep"))
+            put(
+                "webview_fallback_would_be_available",
+                includeWebViewFallback && settings.searchGoogleWebViewFallbackEnabled && (allowWebView || depth == "deep"),
+            )
         }
     }
 
@@ -609,6 +651,9 @@ internal object SearchOrchestrator {
                     put("service_id", source.id)
                     put("source_kind", source.kind)
                     put("builtin", source.builtin)
+                    put("accepted_selectors", buildJsonArray {
+                        source.acceptedSelectors().forEach { add(JsonPrimitive(it)) }
+                    })
                     put("called", attemptedCalls.isNotEmpty())
                     put("variant_count", attemptedCalls.size)
                     put("result_count", resultCount)
@@ -749,6 +794,43 @@ internal object SearchOrchestrator {
             override val builtin = false
             override val reason = "Enabled configured search service"
         }
+    }
+
+    private fun OrchestratorSource.toSummaryJson(): JsonObject = buildJsonObject {
+        put("id", id)
+        put("name", name)
+        put("kind", kind)
+        put("builtin", builtin)
+        put("accepted_selectors", buildJsonArray {
+            acceptedSelectors().forEach { add(JsonPrimitive(it)) }
+        })
+    }
+
+    private fun OrchestratorSource.acceptedSelectors(): List<String> {
+        if (this is OrchestratorSource.Configured) {
+            return SearchAggregator.acceptedSelectors(options)
+        }
+        val base = buildList {
+            add(id)
+            add(name)
+            when (this@acceptedSelectors) {
+                is OrchestratorSource.BuiltInBing -> addAll(listOf("bing", "bing_builtin", "bing html"))
+                is OrchestratorSource.BuiltInDuckDuckGo -> addAll(listOf("duckduckgo", "duckduckgo_builtin", "ddg"))
+                is OrchestratorSource.BuiltInHackerNews -> addAll(listOf("hackernews", "hacker_news", "hn"))
+                is OrchestratorSource.BuiltInJinaSearch -> addAll(listOf("jina", "jina_builtin", "jina search"))
+                is OrchestratorSource.BuiltInWikipedia -> addAll(listOf("wikipedia", "wiki"))
+                is OrchestratorSource.Configured -> Unit
+            }
+        }
+        return base.flatMap { it.selectorForms() }.distinct()
+    }
+
+    private fun String.selectorForms(): Set<String> {
+        val raw = trim().lowercase(Locale.ROOT)
+        if (raw.isBlank()) return emptySet()
+        val underscored = raw.replace(Regex("[\\s-]+"), "_")
+        val spaced = raw.replace(Regex("[_-]+"), " ")
+        return setOf(raw, underscored, spaced)
     }
 
     private fun OrchestratorSource.applicableFor(query: String?, topic: String): Boolean {

@@ -138,6 +138,7 @@ private const val GENERATION_CHECKPOINT_INTERVAL_MS = 10_000L
 private const val INITIAL_TIMELINE_NODE_COUNT = 80
 private const val TIMELINE_PREFETCH_BATCH_SIZE = 40
 private const val ASK_USER_TOOL_NAME = "ask_user"
+private const val WEBVIEW_SEARCH_OPEN_TOOL_NAME = "webview_search_open"
 
 private val TOOL_APPROVAL_CONTINUATION_WORDS = setOf(
     "继续",
@@ -2229,12 +2230,22 @@ class ChatService(
     internal fun createDebugRunTools(settings: Settings): List<Tool> = createRunTools(settings, null)
 
     private fun createRunTools(settings: Settings, conversationId: Uuid?): List<Tool> {
+        val assistant = settings.getCurrentAssistant()
+        val assistantLocalTools = localTools.getTools(assistant.localTools, conversationId)
+        val includeWebViewFallbackGuidance = ToolProfileFilter
+            .filter(assistantLocalTools, assistant.toolProfile)
+            .tools
+            .any { it.name == WEBVIEW_SEARCH_OPEN_TOOL_NAME }
         val rawTools = buildList {
             if (settings.enableWebSearch) {
-                addAll(createSearchTools(settings))
+                addAll(
+                    createSearchTools(
+                        settings = settings,
+                        includeWebViewFallbackGuidance = includeWebViewFallbackGuidance,
+                    )
+                )
             }
-            val assistant = settings.getCurrentAssistant()
-            addAll(localTools.getTools(assistant.localTools, conversationId))
+            addAll(assistantLocalTools)
             addAll(
                 createSkillTools(
                     enabledSkills = assistant.enabledSkills,
@@ -2298,7 +2309,6 @@ class ChatService(
             }
             addAll(AgentTaskTools(agentTaskScheduler).tools())
         }
-        val assistant = settings.getCurrentAssistant()
         val profileFilter = ToolProfileFilter.filter(rawTools, assistant.toolProfile)
         val profiledRawTools = profileFilter.tools
         val baseRegistry = ToolRegistry.from(profiledRawTools)

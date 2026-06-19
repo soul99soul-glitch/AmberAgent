@@ -13,7 +13,7 @@ class AgentToolSetFactory(
         writerTools: List<Tool>,
         descriptionContext: DeepReadToolDescriptionContext? = null,
     ): List<Tool> {
-        val researchRawTools = createSearchTools(settings)
+        val researchRawTools = createSearchTools(settings, includeWebViewFallbackGuidance = false)
             .filter { it.name in DEEP_READ_RESEARCH_TOOL_NAMES }
             .map { it.withDeepReadDescriptionContext(descriptionContext) }
         val writerRawTools = writerTools

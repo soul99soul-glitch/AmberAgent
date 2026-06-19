@@ -1,6 +1,7 @@
 package app.amber.core.ai.tools
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -8,12 +9,15 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import app.amber.ai.core.InputSchema
 import app.amber.core.settings.Settings
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchResult
 import app.amber.search.SearchServiceOptions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -140,6 +144,63 @@ class SearchOrchestratorTest {
     }
 
     @Test
+    fun configuredBingCanBeSelectedByStableAlias() {
+        val bing = SearchServiceOptions.BingLocalOptions()
+        val settings = Settings(
+            searchServices = listOf(bing),
+            searchEnabledServiceIds = listOf(bing.id),
+            searchBuiltinJinaEnabled = false,
+            searchBuiltinDuckDuckGoEnabled = false,
+            searchBuiltinBingEnabled = false,
+            searchBuiltinWikipediaEnabled = false,
+            searchBuiltinHackerNewsEnabled = false,
+        )
+
+        val sources = SearchOrchestrator.buildSources(
+            settings = settings,
+            requestedServices = listOf("bing"),
+            query = "OpenAI news",
+            topic = "news",
+        )
+
+        assertEquals(listOf(bing.id.toString()), sources.map { it.id })
+    }
+
+    @Test
+    fun selectorMismatchReturnsRecoverableAvailableSources() = runBlocking {
+        val brave = SearchServiceOptions.BraveOptions(apiKey = "key")
+        val settings = Settings(
+            searchServices = listOf(brave),
+            searchEnabledServiceIds = listOf(brave.id),
+            searchBuiltinJinaEnabled = false,
+            searchBuiltinDuckDuckGoEnabled = false,
+            searchBuiltinBingEnabled = false,
+            searchBuiltinWikipediaEnabled = false,
+            searchBuiltinHackerNewsEnabled = false,
+        )
+
+        val payload = SearchOrchestrator.search(
+            settings = settings,
+            params = buildJsonObject {
+                put("query", "OpenAI news")
+                put("services", buildJsonArray { add("brave search") })
+            },
+        )
+
+        assertEquals("error", payload["status"]!!.jsonPrimitive.content)
+        assertTrue(payload["error"]!!.jsonPrimitive.content.contains("Requested services"))
+        assertEquals("brave search", payload["requested_services"]!!.jsonArray.first().jsonPrimitive.content)
+        val available = payload["available_sources"]!!.jsonArray
+        assertEquals(brave.id.toString(), available.first().jsonObject["id"]!!.jsonPrimitive.content)
+        val selectors = available.first().jsonObject["accepted_selectors"]!!.jsonArray
+            .map { it.jsonPrimitive.content }
+        assertTrue(
+            selectors.any { it == "brave" }
+        )
+        assertFalse(selectors.contains(brave.id.toString().replace("-", "_")))
+    }
+
+    @Test
     fun allOrdinarySourcesFailWithoutWebViewDoesNotThrow() = runBlocking {
         val settings = Settings(
             searchServices = emptyList(),
@@ -181,6 +242,76 @@ class SearchOrchestratorTest {
         val fallback = payload["webview_fallback"]!!.jsonObject
         val suggestions = fallback["suggestions"]!!.jsonArray
         assertTrue(suggestions.any { it.jsonObject["source_service"]!!.jsonPrimitive.content == "google_webview" })
+    }
+
+    @Test
+    fun hiddenContextsCanDisableWebViewFallbackSuggestions() = runBlocking {
+        val settings = Settings(
+            searchServices = emptyList(),
+            searchEnabledServiceIds = emptyList(),
+            searchGoogleWebViewFallbackEnabled = true,
+        )
+
+        val payload = SearchOrchestrator.search(
+            settings = settings,
+            params = buildJsonObject {
+                put("query", "OpenAI news")
+                put("allow_webview", true)
+            },
+            includeWebViewFallback = false,
+            executor = { _, _ -> Result.failure(IllegalStateException("blocked")) },
+        )
+
+        assertNull(payload["webview_fallback"])
+        assertFalse(payload["message"]!!.jsonPrimitive.content.contains("webview_search_open"))
+        assertFalse(payload["message"]!!.jsonPrimitive.content.contains("WebView"))
+    }
+
+    @Test
+    fun hiddenSearchToolDescriptionDoesNotAdvertiseWebViewTools() {
+        val searchTool = createSearchTools(
+            settings = Settings(searchGoogleWebViewFallbackEnabled = true),
+            includeWebViewFallbackGuidance = false,
+        ).first { it.name == "search_web" }
+
+        assertFalse(searchTool.description.contains("call webview_search_open"))
+        assertTrue(searchTool.description.contains("do not call webview_* tools"))
+
+        val schema = searchTool.parameters() as InputSchema.Obj
+        val allowWebViewDescription = schema.properties["allow_webview"]!!
+            .jsonObject["description"]!!
+            .jsonPrimitive
+            .content
+        val depthDescription = schema.properties["depth"]!!
+            .jsonObject["description"]!!
+            .jsonPrimitive
+            .content
+        assertTrue(allowWebViewDescription.contains("ignored"))
+        assertFalse(depthDescription.contains("WebView fallback hints"))
+    }
+
+    @Test
+    fun sourceStatusIncludesAcceptedSelectors() {
+        val status = SearchOrchestrator.status(Settings(searchServices = emptyList(), searchEnabledServiceIds = emptyList()))
+        val bing = status["sources"]!!.jsonArray.first { source ->
+            source.jsonObject["id"]!!.jsonPrimitive.content == "bing_builtin"
+        }
+
+        assertNotNull(bing.jsonObject["accepted_selectors"])
+        assertTrue(
+            bing.jsonObject["accepted_selectors"]!!.jsonArray
+                .any { it.jsonPrimitive.content == "bing" }
+        )
+    }
+
+    @Test
+    fun hiddenStatusDoesNotAdvertiseWebViewFallback() {
+        val status = SearchOrchestrator.status(
+            settings = Settings(searchGoogleWebViewFallbackEnabled = true),
+            includeWebViewFallback = false,
+        )
+
+        assertEquals("false", status["google_webview_fallback_enabled"]!!.jsonPrimitive.content)
     }
 
     @Test

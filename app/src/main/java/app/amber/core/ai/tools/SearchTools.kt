@@ -20,7 +20,10 @@ import app.amber.search.SearchService
 import app.amber.search.SearchServiceOptions
 import java.time.LocalDate
 
-fun createSearchTools(settings: Settings): Set<Tool> {
+fun createSearchTools(
+    settings: Settings,
+    includeWebViewFallbackGuidance: Boolean = true,
+): Set<Tool> {
     return buildSet {
         val enabledServices = SearchAggregator.enabledServices(settings)
         val enabledServiceNames = enabledServices.joinToString { SearchServiceOptions.TYPES[it::class] ?: "Search" }
@@ -30,8 +33,13 @@ fun createSearchTools(settings: Settings): Set<Tool> {
             "Bing".takeIf { settings.searchBuiltinBingEnabled },
             "Wikipedia".takeIf { settings.searchBuiltinWikipediaEnabled },
             "Hacker News".takeIf { settings.searchBuiltinHackerNewsEnabled },
-            "Google WebView fallback".takeIf { settings.searchGoogleWebViewFallbackEnabled },
+            "Google WebView fallback".takeIf { includeWebViewFallbackGuidance && settings.searchGoogleWebViewFallbackEnabled },
         ).joinToString().ifBlank { "none" }
+        val webViewFallbackGuidance = if (includeWebViewFallbackGuidance) {
+            "If ordinary sources are blocked or weak, set `allow_webview=true` or call webview_search_open using webview_fallback suggestions."
+        } else {
+            "WebView fallback tools are not available in this tool set; do not call webview_* tools from search results."
+        }
         add(
             Tool(
                 name = "search_web",
@@ -44,14 +52,16 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                     For news/current events, set `topic=news` and choose `time_range` (`day` for today/latest, `week` for recent).
                     For market/sales/share questions, set `topic=market`; the orchestrator will generate English market-data variants.
                     Generate focused keywords and run multiple searches when the topic is broad or likely to have gaps.
+                    Do not pass `services` by default. Only pass it when the user explicitly requests a source or after search_sources_status returns a matching id/name/accepted_selectors value.
                     If snippets are not enough, call scrape_web on the most relevant source pages before answering.
-                    If ordinary sources are blocked or weak, set `allow_webview=true` or call webview_search_open using webview_fallback suggestions.
+                    $webViewFallbackGuidance
                     Today is ${LocalDate.now().toLocalString(true)}.
 
                     Response format:
                     - items[].id (short id), title, url, text, source_service, source_services, duplicate_count
                     - items[].images[] (optional): relevant image URLs from the search results
-                    - sources[].service, status, result_count, error
+                    - sources[].service, service_id, accepted_selectors, status, result_count, error
+                    - If status=error with available_sources, retry once without services or with one exact selector from available_sources.
 
                     Citations:
                     - Prefer natural Markdown source links, e.g. `[Reuters](https://www.reuters.com/...)`, after the sentence.
@@ -70,10 +80,14 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                     The population is about 2.1 million. [example.com](https://example.com/paris) [example2.com](https://example2.com/france)
                     """.trimIndent(),
                 parameters = {
-                    searchWebParameters()
+                    searchWebParameters(includeWebViewFallbackGuidance)
                 },
                 execute = {
-                    val results = SearchOrchestrator.search(settings, it.jsonObject)
+                    val results = SearchOrchestrator.search(
+                        settings = settings,
+                        params = it.jsonObject,
+                        includeWebViewFallback = includeWebViewFallbackGuidance,
+                    )
                     listOf(UIMessagePart.Text(results.toString()))
                 }
             )
@@ -82,12 +96,19 @@ fun createSearchTools(settings: Settings): Set<Tool> {
         add(
             Tool(
                 name = "search_sources_status",
-                description = "Return enabled Search Orchestrator sources, including configured API sources, built-in free public sources, and WebView fallback status.",
+                description = "Return enabled Search Orchestrator sources, including configured API sources, built-in free public sources, accepted selector strings for search_web services, and WebView fallback status.",
                 parameters = {
                     InputSchema.Obj(properties = buildJsonObject { })
                 },
                 execute = {
-                    listOf(UIMessagePart.Text(SearchOrchestrator.status(settings).toString()))
+                    listOf(
+                        UIMessagePart.Text(
+                            SearchOrchestrator.status(
+                                settings = settings,
+                                includeWebViewFallback = includeWebViewFallbackGuidance,
+                            ).toString()
+                        )
+                    )
                 }
             )
         )
@@ -97,10 +118,18 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                 name = "search_strategy_explain",
                 description = "Explain how search_web would rewrite this query, choose sources, and decide whether WebView fallback is available. It does not perform a search.",
                 parameters = {
-                    searchWebParameters()
+                    searchWebParameters(includeWebViewFallbackGuidance)
                 },
                 execute = {
-                    listOf(UIMessagePart.Text(SearchOrchestrator.explain(settings, it.jsonObject).toString()))
+                    listOf(
+                        UIMessagePart.Text(
+                            SearchOrchestrator.explain(
+                                settings = settings,
+                                params = it.jsonObject,
+                                includeWebViewFallback = includeWebViewFallbackGuidance,
+                            ).toString()
+                        )
+                    )
                 }
             )
         )
@@ -146,7 +175,17 @@ fun createSearchTools(settings: Settings): Set<Tool> {
     }
 }
 
-private fun searchWebParameters(): InputSchema {
+private fun searchWebParameters(includeWebViewFallbackGuidance: Boolean): InputSchema {
+    val depthDescription = if (includeWebViewFallbackGuidance) {
+        "search depth: quick uses fewer variants, standard rewrites queries, deep adds more variants and WebView fallback hints"
+    } else {
+        "search depth: quick uses fewer variants, standard rewrites queries, deep adds more variants"
+    }
+    val allowWebViewDescription = if (includeWebViewFallbackGuidance) {
+        "whether to return WebView search fallback suggestions when ordinary sources are weak"
+    } else {
+        "ignored in this tool set because WebView fallback tools are unavailable; leave false"
+    }
     return InputSchema.Obj(
         properties = buildJsonObject {
             put("query", buildJsonObject {
@@ -185,7 +224,7 @@ private fun searchWebParameters(): InputSchema {
             })
             put("depth", buildJsonObject {
                 put("type", "string")
-                put("description", "search depth: quick uses fewer variants, standard rewrites queries, deep adds more variants and WebView fallback hints")
+                put("description", depthDescription)
                 put("enum", buildJsonArray {
                     add("quick")
                     add("standard")
@@ -194,18 +233,11 @@ private fun searchWebParameters(): InputSchema {
             })
             put("allow_webview", buildJsonObject {
                 put("type", "boolean")
-                put("description", "whether to return WebView search fallback suggestions when ordinary sources are weak")
+                put("description", allowWebViewDescription)
             })
             put("services", buildJsonObject {
                 put("type", "array")
-                put("description", "optional enabled service names or ids to use")
-                put("items", buildJsonObject {
-                    put("type", "string")
-                })
-            })
-            put("preferred_sources", buildJsonObject {
-                put("type", "array")
-                put("description", "optional source names or ids to prefer; alias of services")
+                put("description", "strict optional filter. Omit by default. Values must be exact id/name/accepted_selectors from search_sources_status or available_sources.")
                 put("items", buildJsonObject {
                     put("type", "string")
                 })

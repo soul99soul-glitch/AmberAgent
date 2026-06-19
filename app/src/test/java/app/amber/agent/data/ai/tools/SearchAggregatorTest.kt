@@ -30,6 +30,19 @@ class SearchAggregatorTest {
     }
 
     @Test
+    fun acceptsStableServiceAliasesForEnabledConfiguredServices() {
+        val bing = SearchServiceOptions.BingLocalOptions()
+        val brave = SearchServiceOptions.BraveOptions(apiKey = "key")
+        val settings = Settings(
+            searchServices = listOf(bing, brave),
+            searchEnabledServiceIds = listOf(bing.id, brave.id),
+        )
+
+        assertEquals(listOf(bing), SearchAggregator.enabledServices(settings, listOf("bing")))
+        assertEquals(listOf(brave), SearchAggregator.enabledServices(settings, listOf("brave")))
+    }
+
+    @Test
     fun keepsPartialResultsWhenOneServiceFails() = runBlocking {
         val bing = SearchServiceOptions.BingLocalOptions()
         val brave = SearchServiceOptions.BraveOptions(apiKey = "key")

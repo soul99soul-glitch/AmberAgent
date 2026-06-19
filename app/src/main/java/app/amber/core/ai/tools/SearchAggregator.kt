@@ -137,11 +137,7 @@ internal object SearchAggregator {
         val selectors = requestedServices.map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotBlank() }
         if (selectors.isEmpty()) return enabled
         return enabled.filter { options ->
-            val id = options.id.toString().lowercase(Locale.ROOT)
-            val name = options.serviceName().lowercase(Locale.ROOT)
-            selectors.any { selector ->
-                id == selector || id.startsWith(selector) || name == selector
-            }
+            selectors.any { selector -> options.matchesSelector(selector) }
         }
     }
 
@@ -296,6 +292,52 @@ internal object SearchAggregator {
 
     private fun SearchServiceOptions.supportsNativeTopic(): Boolean {
         return this is SearchServiceOptions.TavilyOptions
+    }
+
+    internal fun acceptedSelectors(options: SearchServiceOptions): List<String> {
+        val aliases = buildList {
+            add(options.serviceName())
+            addAll(options.serviceAliases())
+        }
+        return (
+            listOf(options.id.toString().lowercase(Locale.ROOT)) +
+                aliases.flatMap { it.selectorForms() }
+            ).distinct()
+    }
+
+    private fun SearchServiceOptions.matchesSelector(selector: String): Boolean {
+        val raw = selector.trim().lowercase(Locale.ROOT)
+        if (raw.isBlank()) return false
+        val optionId = this.id.toString().lowercase(Locale.ROOT)
+        return optionId == raw || optionId.startsWith(raw) || raw in acceptedSelectors(this)
+    }
+
+    private fun SearchServiceOptions.serviceAliases(): List<String> = when (this) {
+        is SearchServiceOptions.AmberAgentSearchOptions -> listOf("amber_agent", "amberagent")
+        is SearchServiceOptions.BingLocalOptions -> listOf("bing", "bing_local", "bing html", "bing html fallback")
+        is SearchServiceOptions.BochaOptions -> listOf("bocha", "博查")
+        is SearchServiceOptions.BraveOptions -> listOf("brave")
+        is SearchServiceOptions.ExaOptions -> listOf("exa")
+        is SearchServiceOptions.FirecrawlOptions -> listOf("firecrawl")
+        is SearchServiceOptions.GrokOptions -> listOf("grok")
+        is SearchServiceOptions.JinaOptions -> listOf("jina")
+        is SearchServiceOptions.LinkUpOptions -> listOf("linkup", "link_up")
+        is SearchServiceOptions.MetasoOptions -> listOf("metaso", "秘塔")
+        is SearchServiceOptions.OllamaOptions -> listOf("ollama")
+        is SearchServiceOptions.PerplexityOptions -> listOf("perplexity")
+        is SearchServiceOptions.SearXNGOptions -> listOf("searxng", "searxng_local")
+        is SearchServiceOptions.SerperOptions -> listOf("serper")
+        is SearchServiceOptions.SerpApiOptions -> listOf("serpapi", "serp_api")
+        is SearchServiceOptions.TavilyOptions -> listOf("tavily")
+        is SearchServiceOptions.ZhipuOptions -> listOf("zhipu", "智谱")
+    }
+
+    private fun String.selectorForms(): Set<String> {
+        val raw = trim().lowercase(Locale.ROOT)
+        if (raw.isBlank()) return emptySet()
+        val underscored = raw.replace(Regex("[\\s-]+"), "_")
+        val spaced = raw.replace(Regex("[_-]+"), " ")
+        return setOf(raw, underscored, spaced)
     }
 
     private fun SearchServiceOptions.serviceName(): String {
