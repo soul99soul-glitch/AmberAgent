@@ -96,6 +96,20 @@
 - 已保留 iOS 单 Amber Assistant 的产品边界；没有实现 Android 多 Assistant，也没有把深度阅读放进实验区或总开关。
 - 未实现 Android WorkManager/通知/24h 后台缓存等平台特有能力；iOS 目前是前台本地可验证闭环，真实联网搜索仍依赖现有搜索配置。
 
+2026-06-20 iOS P0/P1 落地记录：
+
+- `BoardView` 改为热榜优先体验：展示综合热点和各来源榜，header 提供历史和设置，自定义来源通过 sheet 创建；热榜 topic/item 可直接创建深度阅读任务。
+- iOS 热榜源对齐真实支持范围：默认把 Android 的 `bilibili + hacker_news` 种子展开为 Hacker News、arXiv AI、InfoQ AI、36Kr、HF Papers、GitHub AI；GitHub provider id 对齐为 `github_trending_ai`。
+- 新增 iOS 本地热榜 dashboard/cache/aggregator/focus filter：按来源数、最佳排名、更新时间排序；支持全部、关注优先、只看关注；刷新失败保留 stale 缓存并显示错误。
+- 热榜来源进入深度阅读时记录榜单、排名、热度、URL；URL 正文补全复用 iOS `scrape_web` 的公网 URL 防线，失败只标记降级，不编造正文。
+- `BoardSettingsView` 从静态说明页改为真实设置页：深度阅读模型、前台刷新间隔、热榜来源、关注筛选、系统/衬线字体、字号比例、内置/自定义模板选择都写回 `TodayBoardSetting`。
+- `TodayBoardSetting` 写回通过 KMP `IosSettingsMutations.setTodayBoardOptions`，再由 `IOSSharedSettingsStore.restoreSnapshot` 持久化；Swift 不直接拼 KMP data class。
+- 模板 id 使用共享语义 `compose_magazine`、`editorial_slant`、`custom:*`，并兼容旧 iOS 历史 `ios_magazine`、`ios_reading`、`ios_analysis`。
+- 模板工坊支持新建、AI 生成草稿、编辑 HTML、校验、预览、保存、选择、删除；AI 草稿必须使用当前可用模型，缺 API Key 或失败只显示错误，不保存静态样例。
+- 默认结果页使用 `MarkdownView`；自定义模板预览/详情使用禁用 JavaScript 的受限 `WKWebView`，模板校验阻断脚本、外链资源、交互元素和缺失占位符。
+- 新增/更新 XCTest 覆盖热榜 id/default/聚合/筛选、topic 转 deep read source、模板 id/校验/持久化/渲染、TodayBoard 设置写回和重启持久化。
+- 验证：`git diff --check` 通过；`JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :shared:compileKotlinIosSimulatorArm64` 通过；`xcodebuild -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination "generic/platform=iOS Simulator" build` 首次因脚本缺 Java 失败，复跑 `env JAVA_HOME=/opt/homebrew/opt/openjdk@17 xcodebuild -quiet -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination "generic/platform=iOS Simulator" build` 已越过 KMP，但被当前工作区既有 `iosApp/iosApp/CouncilRunner.swift:378` 的 `IOSCouncilResearchBundle: Equatable` 合成错误阻塞。该文件属于本轮禁止触碰的模型议会主线，未在本轮修改。
+
 推荐 goal：见本文档末尾“首个推荐 /goal Prompt”。
 
 ### Phase 2：记忆、搜索、图片生成、Mini App 正式能力追平

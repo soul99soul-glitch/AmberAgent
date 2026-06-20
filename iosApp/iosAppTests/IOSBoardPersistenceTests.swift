@@ -427,7 +427,7 @@ final class IOSBoardPersistenceTests: XCTestCase {
 
     func testDeepReadTemplateValidatorAcceptsSafeHTMLAndRejectsUnsafeHTML() {
         let valid = IOSDeepReadTemplateValidator.validateHTML("""
-        <!DOCTYPE html><html><head><style>{{font_css}}</style></head><body>{{narrative_html}}</body></html>
+        <!DOCTYPE html><html><head><style>{{font_css}}</style></head><body><h1>{{title}}</h1><p>{{summary}}</p>{{analysis_html}}{{extended_reading_html}}</body></html>
         """)
         XCTAssertTrue(valid.ok)
 
@@ -438,6 +438,141 @@ final class IOSBoardPersistenceTests: XCTestCase {
         let external = IOSDeepReadTemplateValidator.validateHTML("<html><body><img src=\"https://example.com/a.png\"></body></html>")
         XCTAssertFalse(external.ok)
         XCTAssertTrue(external.error?.contains("外部") == true || external.error?.contains("资源") == true)
+    }
+
+    func testHotlistProviderIdsAndIOSDefaultExpansion() {
+        let board = IosSettingsDefaults.shared.defaultSeededSettings().agentRuntime.todayBoard
+        let effective = IOSHotlistProviders.effectiveEnabledProviderIds(setting: board)
+
+        XCTAssertTrue(IOSHotlistProviders.supportedProviderIds.contains("github_trending_ai"))
+        XCTAssertFalse(IOSHotlistProviders.supportedProviderIds.contains("github_trending"))
+        XCTAssertEqual(effective, IOSHotlistProviders.iOSDefaultProviderIds)
+        XCTAssertTrue(effective.contains("hacker_news"))
+        XCTAssertTrue(effective.contains("arxiv_ai"))
+        XCTAssertTrue(effective.contains("infoq_ai"))
+        XCTAssertTrue(effective.contains("36kr"))
+        XCTAssertTrue(effective.contains("huggingface_papers"))
+        XCTAssertTrue(effective.contains("github_trending_ai"))
+    }
+
+    func testHotListAggregationSortAndFocusFiltering() {
+        let now: Int64 = 1_800_000_000_000
+        let snapshots = [
+            IOSHotListProviderSnapshot(
+                providerId: "hacker_news",
+                providerName: "Hacker News",
+                items: [
+                    IOSHotlistItem(providerId: "hacker_news", title: "OpenAI launches agent framework", url: "https://example.com/openai", rank: 2, score: 100, fetchedAt: now),
+                    IOSHotlistItem(providerId: "hacker_news", title: "Gardening notes", url: nil, rank: 1, score: 8, fetchedAt: now)
+                ],
+                fetchedAt: now
+            ),
+            IOSHotListProviderSnapshot(
+                providerId: "github_trending_ai",
+                providerName: "GitHub AI",
+                items: [
+                    IOSHotlistItem(providerId: "github_trending_ai", title: "OpenAI agent tools", url: "https://github.com/example/agent", rank: 1, score: nil, fetchedAt: now + 1)
+                ],
+                fetchedAt: now + 1
+            )
+        ]
+
+        let topics = IOSHotListAggregator.aggregate(providerSnapshots: snapshots, limit: 10)
+        XCTAssertEqual(topics.first?.sourceCount, 2)
+        XCTAssertTrue(topics.first?.title.localizedCaseInsensitiveContains("OpenAI") == true)
+
+        let dashboard = IOSHotListDashboard(topics: topics, providers: snapshots, lastUpdatedAt: now + 1, enabledSourceCount: 2)
+        let focused = IOSHotListAggregator.applyInterestFilter(dashboard: dashboard, keywords: ["OpenAI"], modeWireName: "focus_only")
+        XCTAssertEqual(focused.topics.count, 1)
+        XCTAssertTrue(focused.providers.allSatisfy { provider in
+            provider.items.allSatisfy { $0.title.localizedCaseInsensitiveContains("OpenAI") }
+        })
+    }
+
+    func testHotTopicSourcesNormalizeIntoDeepReadSources() throws {
+        let topic = IOSHotTopic(
+            id: "topic-1",
+            title: "OpenAI agent tools",
+            sources: [
+                IOSHotTopicSource(
+                    providerId: "github_trending_ai",
+                    providerName: "GitHub AI",
+                    rank: 1,
+                    title: "openai/agent-tools",
+                    displayTitle: nil,
+                    url: "https://github.com/openai/agent-tools",
+                    heat: "1234",
+                    fetchedAt: 100
+                )
+            ],
+            sourceCount: 1,
+            bestRank: 1,
+            latestFetchedAt: 100
+        )
+
+        let sources = try IOSDeepReadSourceNormalizer.hotTopicSources(topic: topic, now: 200)
+
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(sources.first?.kind, .hotTopic)
+        XCTAssertEqual(sources.first?.metadata["provider_id"], "github_trending_ai")
+        XCTAssertTrue(sources.first?.content.contains("排名：1") == true)
+        XCTAssertEqual(sources.first?.url, "https://github.com/openai/agent-tools")
+    }
+
+    func testTemplateIdsUseSharedSemanticsAndKeepLegacyHistoryCompatible() {
+        XCTAssertEqual(IOSDeepReadTemplate.defaultId, "compose_magazine")
+        XCTAssertEqual(IOSDeepReadTemplate.normalizedTemplateId("ios_magazine"), "compose_magazine")
+        XCTAssertEqual(IOSDeepReadTemplate.normalizedTemplateId("ios_reading"), "editorial_slant")
+        XCTAssertEqual(IOSDeepReadTemplate.normalizedTemplateId("custom:abc"), "custom:abc")
+        XCTAssertEqual(IOSDeepReadTemplate.template(id: "ios_analysis").id, "ios_analysis")
+        XCTAssertEqual(IOSDeepReadTemplate.template(id: "custom:abc").id, "custom:abc")
+    }
+
+    func testCustomTemplateStorePersistsValidTemplateAndRendererRejectsUnsafeTemplate() throws {
+        let base = makeTempBase()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = IOSDeepReadTemplateStore(baseDirectory: base)
+        let template = IOSDeepReadCustomTemplate(
+            name: "测试模板",
+            description: "safe",
+            html: IOSDeepReadHTMLTemplateRenderer.starterHTML(),
+            createdByAI: false,
+            createdAt: 1,
+            updatedAt: 1
+        )
+
+        let saved = try store.save(template)
+        XCTAssertTrue(saved.id.hasPrefix("custom:"))
+        XCTAssertEqual(store.templates.count, 1)
+
+        let restarted = IOSDeepReadTemplateStore(baseDirectory: base)
+        XCTAssertEqual(restarted.templates.first?.id, saved.id)
+
+        let source = try IOSDeepReadSourceNormalizer.manualText(title: "Manual", text: "Readable source text.")
+        let task = IOSDeepReadTask(
+            id: "task",
+            title: "Rendered",
+            status: .succeeded,
+            templateId: saved.id,
+            sources: [source],
+            resultMarkdown: "# Rendered\n\n## 摘要\nBody",
+            failureMessage: nil,
+            createdAt: 1,
+            updatedAt: 2,
+            completedAt: 2,
+            retryCount: 0
+        )
+        let html = try IOSDeepReadHTMLTemplateRenderer.render(task: task, template: saved, fontScale: 1.0, fontModeWireName: "serif")
+        XCTAssertTrue(html.contains("Rendered"))
+        XCTAssertFalse(html.contains("{{title}}"))
+
+        let unsafe = IOSDeepReadCustomTemplate(
+            name: "bad",
+            description: "",
+            html: "<html><body><h1>{{title}}</h1><p>{{summary}}</p>{{analysis_html}}{{extended_reading_html}}<script>alert(1)</script><style>{{font_css}}</style></body></html>",
+            createdByAI: false
+        )
+        XCTAssertThrowsError(try store.save(unsafe))
     }
 
     func testDeepReadDraftGeneratorIncludesSourceBoundaries() throws {

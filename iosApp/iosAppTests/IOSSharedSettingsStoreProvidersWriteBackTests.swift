@@ -267,6 +267,51 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         )
     }
 
+    func testTodayBoardOptionsPersistThroughKMPMutationAndRestart() {
+        let suiteName = "Slice4-TodayBoard-\(UUID().uuidString)"
+        let store1 = makeIsolatedStore(suiteName: suiteName)
+
+        store1.updateTodayBoard { _ in
+            TodayBoardSettingPatch(
+                boardModelId: "board-model-uuid",
+                hotListRefreshIntervalMinutes: 120,
+                hotListWifiOnly: true,
+                hotListEnabledSources: ["github_trending_ai", "hacker_news"],
+                hotListFocusKeywords: ["OpenAI", "Agent", "OpenAI"],
+                hotListFilterModeWireName: "focus_only",
+                boardReadingFontModeWireName: "system",
+                clearBoardReadingFontPackId: true,
+                deepReadFontScale: 1.2,
+                deepReadTemplateId: "editorial_slant"
+            )
+        }
+
+        let board1 = store1.todayBoard
+        XCTAssertEqual(board1.boardModelId, "board-model-uuid")
+        XCTAssertEqual(Int(board1.hotListRefreshIntervalMinutes), 120)
+        XCTAssertTrue(board1.hotListWifiOnly)
+        XCTAssertEqual(Set(board1.hotListEnabledSources.map { String(describing: $0) }), ["github_trending_ai", "hacker_news"])
+        XCTAssertEqual(board1.hotListFocusKeywords, ["OpenAI", "Agent"])
+        XCTAssertEqual(board1.hotListFilterMode.wireName, "focus_only")
+        XCTAssertEqual(board1.boardReadingFontMode.wireName, "system")
+        XCTAssertEqual(board1.deepReadFontScale, 1.2, accuracy: 0.001)
+        XCTAssertEqual(board1.deepReadTemplateId, "editorial_slant")
+
+        let store2 = makeIsolatedStore(suiteName: suiteName)
+        let board2 = store2.todayBoard
+        XCTAssertEqual(board2.boardModelId, "board-model-uuid")
+        XCTAssertEqual(Set(board2.hotListEnabledSources.map { String(describing: $0) }), ["github_trending_ai", "hacker_news"])
+        XCTAssertEqual(board2.hotListFilterMode.wireName, "focus_only")
+        XCTAssertEqual(board2.deepReadTemplateId, "editorial_slant")
+
+        store2.updateTodayBoard { _ in
+            TodayBoardSettingPatch(clearBoardModelId: true, boardReadingFontModeWireName: "serif", deepReadFontScale: 3.0)
+        }
+        XCTAssertNil(store2.todayBoard.boardModelId)
+        XCTAssertEqual(store2.todayBoard.boardReadingFontMode.wireName, "serif")
+        XCTAssertEqual(store2.todayBoard.deepReadFontScale, 1.25, accuracy: 0.001)
+    }
+
     // ---- helpers ----
 
     private func makeIsolatedStore(suiteName: String = "Slice4-Providers-\(UUID().uuidString)") -> IOSSharedSettingsStore {

@@ -9,6 +9,10 @@ import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentAssistant
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
+import app.amber.feature.board.TodayBoardHotListFilterMode
+import app.amber.feature.board.TodayBoardReadingFontMode
 import app.amber.feature.modelcouncil.ModelCouncilSeat
 import app.amber.feature.modelcouncil.ModelCouncilSeatRunner
 import app.amber.feature.subagent.SubAgentOverride
@@ -344,6 +348,72 @@ object IosSettingsMutations {
                 enableCoreMemory = enableCoreMemory,
                 enableShortTermMemory = enableShortTermMemory,
                 enableLongTermMemory = enableLongTermMemory,
+            )
+        )
+    }
+
+    // ---- Today Board / Deep Read settings (agentRuntime.todayBoard) ----
+
+    /**
+     * Replace the iOS-editable TodayBoard fields while preserving the rest of
+     * [TodayBoardSetting]. Swift cannot safely reconstruct the Kotlin data class,
+     * so it submits the complete editable surface here, then persists via
+     * IOSSharedSettingsStore.restoreSnapshot.
+     */
+    fun setTodayBoardOptions(
+        settings: Settings,
+        boardModelId: String?,
+        clearBoardModelId: Boolean,
+        hotListRefreshIntervalMinutes: Int,
+        hotListWifiOnly: Boolean,
+        hotListEnabledSources: List<String>,
+        hotListFocusKeywords: List<String>,
+        hotListFilterModeWireName: String,
+        boardReadingFontModeWireName: String,
+        boardReadingFontPackId: String?,
+        clearBoardReadingFontPackId: Boolean,
+        deepReadFontScale: Float,
+        deepReadTemplateId: String,
+    ): Settings {
+        val runtime = settings.agentRuntime
+        val board = runtime.todayBoard
+        val nextBoardModelId = when {
+            clearBoardModelId -> null
+            boardModelId != null -> boardModelId.trim().takeIf { it.isNotBlank() }
+            else -> board.boardModelId
+        }
+        val nextPackId = when {
+            clearBoardReadingFontPackId -> null
+            boardReadingFontPackId != null -> boardReadingFontPackId.trim().takeIf { it.isNotBlank() }
+            else -> board.boardReadingFontPackId
+        }
+        val nextSources = hotListEnabledSources
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+        val nextKeywords = hotListFocusKeywords
+            .flatMap { raw -> raw.split(',', '，', '、', ';', '；', '\n', '\t') }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .take(80)
+        val nextTemplateId = deepReadTemplateId.trim().takeIf { it.isNotBlank() }
+            ?: board.deepReadTemplateId
+
+        return settings.copy(
+            agentRuntime = runtime.copy(
+                todayBoard = board.copy(
+                    boardModelId = nextBoardModelId,
+                    hotListRefreshIntervalMinutes = hotListRefreshIntervalMinutes.coerceAtLeast(30),
+                    hotListWifiOnly = hotListWifiOnly,
+                    hotListEnabledSources = nextSources,
+                    hotListFocusKeywords = nextKeywords,
+                    hotListFilterMode = TodayBoardHotListFilterMode.fromWireName(hotListFilterModeWireName),
+                    boardReadingFontMode = TodayBoardReadingFontMode.fromWireName(boardReadingFontModeWireName),
+                    boardReadingFontPackId = nextPackId,
+                    deepReadFontScale = deepReadFontScale.coerceIn(DEEP_READ_FONT_SCALE_MIN, DEEP_READ_FONT_SCALE_MAX),
+                    deepReadTemplateId = nextTemplateId,
+                )
             )
         )
     }

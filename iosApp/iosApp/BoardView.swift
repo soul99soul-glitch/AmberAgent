@@ -3,6 +3,9 @@ import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(WebKit)
+@preconcurrency import WebKit
+#endif
 @preconcurrency import Shared
 
 extension BoardSignal: @retroactive @unchecked Sendable {}
@@ -10,10 +13,12 @@ extension BoardSignal: @retroactive @unchecked Sendable {}
 struct BoardView: View {
     let settingsStore: SettingsStore
     let sharedSettings: IOSSharedSettingsStore
+    var providerRegistry: ProviderRegistryStore? = nil
 
     @State private var generationState = BoardGenerationState.idle
     @State private var collectionSnapshot = IOSBoardCollectionSnapshot.empty
     @State private var deepReadStore = IOSDeepReadStore.shared
+    @State private var hotListStore = IOSHotListDashboardStore.shared
     @State private var deepReadTitle = ""
     @State private var manualText = ""
     @State private var searchQuery = ""
@@ -22,6 +27,8 @@ struct BoardView: View {
     @State private var deepReadMessageIsError = false
     @State private var isCreatingDeepRead = false
     @State private var isImportingDeepReadFile = false
+    @State private var showCustomSourceSheet = false
+    @State private var showHistorySheet = false
     // [Board MVP] Guards the .task restore so in-session re-navigation to this
     // page doesn't overwrite a just-generated state with the persisted restore.
     @State private var hasRestoredPersistedBoard = false
@@ -40,19 +47,58 @@ struct BoardView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        intro
-                        deepReadCreateSection
-                        deepReadHistorySection
+                        hotListOverviewSection
+                        hotTopicSection
+                        hotListProviderSection
                         manualGenerationSection
                         collectionStatusSection
                     }
                     .padding(.bottom, 36)
                 }
                 .scrollIndicators(.hidden)
+                .refreshable {
+                    await refreshHotList(force: true)
+                }
             }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showCustomSourceSheet) {
+            NavigationStack {
+                ScrollView {
+                    deepReadCreateSection
+                        .padding(.top, 8)
+                        .padding(.bottom, 24)
+                }
+                .scrollIndicators(.hidden)
+                .background(AmberTheme.background.ignoresSafeArea())
+                .navigationTitle("自定义来源")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("完成") { showCustomSourceSheet = false }
+                    }
+                }
+            }
+            .presentationDetents([.large])
+        }
+        .sheet(isPresented: $showHistorySheet) {
+            NavigationStack {
+                ScrollView {
+                    deepReadHistorySection
+                        .padding(.top, 8)
+                        .padding(.bottom, 24)
+                }
+                .scrollIndicators(.hidden)
+                .background(AmberTheme.background.ignoresSafeArea())
+                .navigationTitle("深度阅读历史")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("完成") { showHistorySheet = false }
+                    }
+                }
+            }
+            .presentationDetents([.large])
+        }
         .fileImporter(
             isPresented: $isImportingDeepReadFile,
             allowedContentTypes: [.item],
@@ -74,6 +120,7 @@ struct BoardView: View {
                 lastRunAt: nil,
                 lastRunError: nil
             )
+            selectedTemplateId = IOSDeepReadTemplate.normalizedTemplateId(sharedSettings.todayBoard.deepReadTemplateId)
             if !generationState.isRunning,
                let recent = IOSBoardPersistence.shared.loadMostRecent(),
                let output = recent.markdown.isEmpty ? nil : recent.markdown {
@@ -86,6 +133,7 @@ struct BoardView: View {
                 )
             }
             consumeWebMountHandoffIfNeeded()
+            await refreshHotList(force: false)
         }
     }
 
@@ -111,8 +159,13 @@ struct BoardView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "深度阅读设置", size: 44, symbolSize: 17) {
-                router.navigate(to: .boardSettings)
+            HStack(spacing: 8) {
+                AmberGlassCircleButton(systemImage: "clock.arrow.circlepath", accessibilityLabel: "深度阅读历史", size: 44, symbolSize: 17) {
+                    showHistorySheet = true
+                }
+                AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "深度阅读设置", size: 44, symbolSize: 17) {
+                    router.navigate(to: .boardSettings)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -129,6 +182,143 @@ struct BoardView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
+    }
+
+    private var hotListOverviewSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "综合热点")
+            AmberFormGroup {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        Image(systemName: hotListStore.isRefreshing ? "arrow.triangle.2.circlepath" : "flame")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accent)
+                            .frame(width: 34, height: 34)
+                            .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("综合热点")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text(hotListSummaryText)
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await refreshHotList(force: true) }
+                        } label: {
+                            Label(hotListStore.isRefreshing ? "刷新中" : "刷新", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(hotListStore.isRefreshing)
+
+                        Button {
+                            showCustomSourceSheet = true
+                        } label: {
+                            Label("自定义来源", systemImage: "plus")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if let message = deepReadMessage {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(deepReadMessageIsError ? AmberTheme.accentAmber : AmberTheme.muted)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+
+            BoardCapabilityNote("热榜只使用 iOS 当前真实支持的公开来源；Android 默认的 B 站源不会在 iOS 上被假装可用。")
+        }
+    }
+
+    private var hotTopicSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "综合热榜")
+            AmberFormGroup {
+                if !hotListStore.dashboard.hasEnabledSources {
+                    hotListEmptyText("没有启用任何 iOS 支持的热榜来源。请到设置里选择 Hacker News、arXiv AI、InfoQ AI、36Kr、HF Papers 或 GitHub AI。")
+                } else if hotListStore.dashboard.topics.isEmpty {
+                    hotListEmptyText(hotListStore.isRefreshing ? "正在刷新综合热榜…" : "暂无可显示的综合热点。下拉或点击刷新重试。")
+                } else {
+                    ForEach(Array(hotListStore.dashboard.topics.prefix(20).enumerated()), id: \.element.id) { index, topic in
+                        Button {
+                            Task { await createDeepReadTask(topic: topic) }
+                        } label: {
+                            IOSHotTopicRow(topic: topic, isBusy: isCreatingDeepRead)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isCreatingDeepRead)
+                        if index < min(hotListStore.dashboard.topics.count, 20) - 1 {
+                            BoardCapabilityDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var hotListProviderSection: some View {
+        VStack(spacing: 0) {
+            ForEach(hotListStore.dashboard.providers) { provider in
+                AmberSectionLabel(text: provider.providerName)
+                    .padding(.top, 10)
+                AmberFormGroup {
+                    if provider.items.isEmpty {
+                        hotListEmptyText(provider.error ?? "这个来源暂时没有可显示内容。")
+                    } else {
+                        ForEach(Array(provider.items.prefix(8).enumerated()), id: \.offset) { index, item in
+                            Button {
+                                Task { await createDeepReadTask(topic: IOSHotListDashboardStore.topic(from: provider, item: item)) }
+                            } label: {
+                                IOSHotProviderItemRow(provider: provider, item: item)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isCreatingDeepRead)
+                            if index < min(provider.items.count, 8) - 1 {
+                                BoardCapabilityDivider()
+                            }
+                        }
+                    }
+                }
+                if provider.stale || (provider.error ?? "").isEmpty == false {
+                    BoardCapabilityNote(provider.stale ? "这个来源刷新失败，当前显示的是上次缓存。" : "刷新失败：\(provider.error ?? "未知错误")")
+                }
+            }
+        }
+    }
+
+    private func hotListEmptyText(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(AmberTheme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+    }
+
+    private var hotListSummaryText: String {
+        let dashboard = hotListStore.dashboard
+        guard dashboard.hasEnabledSources else { return "未启用热榜来源" }
+        if dashboard.hasContent {
+            let date = dashboard.lastUpdatedAt > 0
+                ? IOSBoardDateFormatters.monthDayTime.string(from: Date(timeIntervalSince1970: TimeInterval(dashboard.lastUpdatedAt) / 1_000))
+                : "尚未刷新"
+            return "\(dashboard.topics.count) 个综合主题 · \(dashboard.providers.count) 个来源 · \(date)"
+        }
+        return hotListStore.isRefreshing ? "正在读取公开热榜" : "还没有缓存，点击刷新读取公开热榜"
     }
 
     private var deepReadCreateSection: some View {
@@ -289,20 +479,46 @@ struct BoardView: View {
                     ))
                 }
             }
-            try createAndGenerateTask(sources: sources)
+            try createAndGenerateTask(title: deepReadTitle, sources: sources, templateId: selectedTemplateId)
             manualText = ""
             searchQuery = ""
+            showCustomSourceSheet = false
         } catch {
             deepReadMessage = error.localizedDescription
             deepReadMessageIsError = true
         }
     }
 
-    private func createAndGenerateTask(sources: [IOSDeepReadSource]) throws {
+    private func createDeepReadTask(topic: IOSHotTopic) async {
+        guard !isCreatingDeepRead else { return }
+        isCreatingDeepRead = true
+        deepReadMessage = nil
+        deepReadMessageIsError = false
+        defer { isCreatingDeepRead = false }
+
+        do {
+            let baseSources = try IOSDeepReadSourceNormalizer.hotTopicSources(topic: topic)
+            let sources = await enrichHotTopicSourcesWithScrape(baseSources)
+            try createAndGenerateTask(
+                title: topic.title,
+                sources: sources,
+                templateId: sharedSettings.todayBoard.deepReadTemplateId
+            )
+        } catch {
+            deepReadMessage = error.localizedDescription
+            deepReadMessageIsError = true
+        }
+    }
+
+    private func createAndGenerateTask(
+        title: String,
+        sources: [IOSDeepReadSource],
+        templateId: String
+    ) throws {
         let task = try deepReadStore.createTask(
-            title: deepReadTitle,
+            title: title,
             sources: sources,
-            templateId: selectedTemplateId
+            templateId: templateId
         )
         deepReadStore.markRunning(id: task.id)
         guard let running = deepReadStore.task(id: task.id) else { return }
@@ -310,9 +526,10 @@ struct BoardView: View {
         Task { @MainActor in
             // Real LLM pipeline when a provider/key is configured; deterministic
             // offline draft otherwise (honest degradation, no fabricated output).
-            let store = SettingsStore()
             let output: String
-            if !store.currentApiKey.isEmpty {
+            let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            let modelResolution = resolvedDeepReadModelId()
+            if !apiKey.isEmpty, !modelResolution.modelId.isEmpty {
                 let providerSetting = ProviderSetting.OpenAI(
                     id: KotlinUuid.companion.random(),
                     enabled: true,
@@ -322,8 +539,8 @@ struct BoardView: View {
                     builtIn: false,
                     descriptionText: nil,
                     shortDescriptionText: nil,
-                    apiKey: store.apiKey,
-                    baseUrl: store.baseUrl,
+                    apiKey: settingsStore.apiKey,
+                    baseUrl: settingsStore.baseUrl,
                     chatCompletionsPath: "/chat/completions",
                     useResponseApi: false,
                     authMode: OpenAIAuthMode.apiKey,
@@ -332,7 +549,7 @@ struct BoardView: View {
                 let llmDraft = await IOSDeepReadDraftGenerator.generateViaLLM(
                     task: running,
                     providerSetting: providerSetting,
-                    modelId: store.modelId
+                    modelId: modelResolution.modelId
                 )
                 output = llmDraft.isEmpty ? IOSDeepReadDraftGenerator.generate(task: running) : llmDraft
             } else {
@@ -347,11 +564,81 @@ struct BoardView: View {
                 sourceKind: "deep_read",
                 sourceId: running.id
             )
-            self.deepReadMessage = "已生成并保存深度阅读。"
+            self.deepReadMessage = modelResolution.notice ?? "已生成并保存深度阅读。"
             self.deepReadMessageIsError = false
             self.deepReadTitle = ""
             self.router.navigate(to: .deepReadTask(id: task.id))
         }
+    }
+
+    private func refreshHotList(force: Bool) async {
+        await hotListStore.refresh(setting: sharedSettings.todayBoard, force: force)
+    }
+
+    private func enrichHotTopicSourcesWithScrape(_ sources: [IOSDeepReadSource]) async -> [IOSDeepReadSource] {
+        var enriched: [IOSDeepReadSource] = []
+        for var source in sources {
+            guard let url = source.url, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                source.metadata["scrape_status"] = "no_url"
+                enriched.append(source)
+                continue
+            }
+            do {
+                let input = jsonString(["url": url, "max_chars": 12_000])
+                let output = try await IOSSearchExecutor.execute(
+                    toolName: "scrape_web",
+                    toolInput: input,
+                    settings: sharedSettings.snapshot
+                )
+                if let content = scrapeContent(from: output), !content.isEmpty {
+                    source.content = IOSDeepReadSourceNormalizer.cleanMultiline(source.content + "\n\n网页正文：\n" + content)
+                    source.metadata["scrape_status"] = "ok"
+                } else {
+                    source.metadata["scrape_status"] = "empty"
+                }
+            } catch {
+                source.metadata["scrape_status"] = "failed"
+                source.metadata["scrape_error"] = String(error.localizedDescription.prefix(180))
+            }
+            enriched.append(source)
+        }
+        return enriched
+    }
+
+    private func scrapeContent(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object["content"] as? String
+    }
+
+    private func jsonString(_ values: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(values),
+              let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
+    }
+
+    private func resolvedDeepReadModelId() -> (modelId: String, notice: String?) {
+        let fallback = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let boardModelId = sharedSettings.todayBoard.boardModelId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !boardModelId.isEmpty else {
+            return (fallback, nil)
+        }
+        if let selectedProvider = providerRegistry?.selectedProvider {
+            for model in selectedProvider.models where model.type == ModelType.chat {
+                if model.id.toHexDashString().caseInsensitiveCompare(boardModelId) == .orderedSame {
+                    return (model.modelId, nil)
+                }
+            }
+        }
+        let notice = fallback.isEmpty
+            ? "设置里的深度阅读模型不属于当前服务商，且当前聊天模型为空；已生成本地草稿。"
+            : "设置里的深度阅读模型不属于当前服务商，已回退当前聊天模型生成。"
+        return (fallback, notice)
     }
 
     private func createFromWebMount() async {
@@ -362,7 +649,11 @@ struct BoardView: View {
         switch result {
         case .success(let source):
             do {
-                try createAndGenerateTask(sources: [source])
+                try createAndGenerateTask(
+                    title: source.title,
+                    sources: [source],
+                    templateId: sharedSettings.todayBoard.deepReadTemplateId
+                )
             } catch {
                 deepReadMessage = error.localizedDescription
                 deepReadMessageIsError = true
@@ -389,7 +680,11 @@ struct BoardView: View {
                 switch read {
                 case .success(let source):
                     do {
-                        try createAndGenerateTask(sources: [source])
+                        try createAndGenerateTask(
+                            title: source.title,
+                            sources: [source],
+                            templateId: sharedSettings.todayBoard.deepReadTemplateId
+                        )
                     } catch {
                         deepReadMessage = error.localizedDescription
                         deepReadMessageIsError = true
@@ -847,10 +1142,95 @@ private struct IOSDeepReadHistoryRow: View {
     }
 }
 
+private struct IOSHotTopicRow: View {
+    let topic: IOSHotTopic
+    let isBusy: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(spacing: 2) {
+                Text("#\(topic.bestRank)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AmberTheme.accent)
+                Text("\(topic.sourceCount) 源")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
+            .frame(width: 44)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(topic.title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(2)
+                Text(topic.sources.prefix(4).map { "\($0.providerName) #\($0.rank)" }.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: isBusy ? "clock.arrow.circlepath" : "sparkles")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(AmberTheme.accent)
+                .frame(width: 30, height: 30)
+                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
+private struct IOSHotProviderItemRow: View {
+    let provider: IOSHotListProviderSnapshot
+    let item: IOSHotlistItem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("#\(item.rank)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AmberTheme.accent)
+                .frame(width: 36, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.presentationTitle)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    if let heat = item.heat ?? item.score.map(String.init), !heat.isEmpty {
+                        Text("热度 \(heat)")
+                    }
+                    if provider.stale {
+                        Text("缓存")
+                    }
+                    if item.url != nil {
+                        Text("可抓取链接")
+                    }
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AmberTheme.muted2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+    }
+}
+
 struct IOSDeepReadTaskDetailView: View {
     let taskId: String
+    var settingsStore: SettingsStore? = nil
+    var sharedSettings: IOSSharedSettingsStore? = nil
+    var providerRegistry: ProviderRegistryStore? = nil
 
     @State private var store = IOSDeepReadStore.shared
+    @State private var templateStore = IOSDeepReadTemplateStore.shared
     @State private var banner: String?
     @Environment(RouterPath.self) private var router
     @Environment(IOSConversationStore.self) private var conversationStore
@@ -994,15 +1374,19 @@ struct IOSDeepReadTaskDetailView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
                 } else {
-                    Text(task.resultMarkdown)
-                        .font(.footnote)
-                        .foregroundStyle(AmberTheme.foreground2)
-                        .lineSpacing(3)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
+                    if let html = customTemplateHTML(task) {
+                        IOSDeepReadTemplateWebView(html: html)
+                            .frame(minHeight: 560)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 10)
+                    } else {
+                        MarkdownView(markdown: task.resultMarkdown, displaySetting: sharedSettings?.displaySetting)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                    }
                 }
             }
         }
@@ -1041,20 +1425,82 @@ struct IOSDeepReadTaskDetailView: View {
 
     private func retry() {
         guard let task, task.status == .failed || task.status == .unsupported else { return }
-        store.prepareRetry(id: task.id)
-        store.markRunning(id: task.id)
-        if let running = store.task(id: task.id) {
-            let output = IOSDeepReadDraftGenerator.generate(task: running)
-            store.complete(id: task.id, markdown: output)
-            _ = try? IOSWorkspaceStore.shared.saveArtifact(
-                title: running.title,
-                content: output,
-                type: .deepRead,
-                sourceKind: "deep_read_retry",
-                sourceId: running.id
-            )
-            banner = "已重试并更新结果。"
+        Task { @MainActor in
+            store.prepareRetry(id: task.id)
+            store.markRunning(id: task.id)
+            if let running = store.task(id: task.id) {
+                let output = await generateRetryOutput(task: running)
+                store.complete(id: task.id, markdown: output)
+                _ = try? IOSWorkspaceStore.shared.saveArtifact(
+                    title: running.title,
+                    content: output,
+                    type: .deepRead,
+                    sourceKind: "deep_read_retry",
+                    sourceId: running.id
+                )
+                banner = "已重试并更新结果。"
+            }
         }
+    }
+
+    private func customTemplateHTML(_ task: IOSDeepReadTask) -> String? {
+        guard task.templateId.hasPrefix(IOSDeepReadTemplate.customPrefix),
+              let template = templateStore.template(id: task.templateId) else {
+            return nil
+        }
+        let board = sharedSettings?.todayBoard
+        return try? IOSDeepReadHTMLTemplateRenderer.render(
+            task: task,
+            template: template,
+            fontScale: board?.deepReadFontScale ?? 1.0,
+            fontModeWireName: board?.boardReadingFontMode.wireName ?? "serif"
+        )
+    }
+
+    private func generateRetryOutput(task: IOSDeepReadTask) async -> String {
+        guard let settingsStore else { return IOSDeepReadDraftGenerator.generate(task: task) }
+        let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelId = retryModelId()
+        guard !apiKey.isEmpty, !modelId.isEmpty else {
+            return IOSDeepReadDraftGenerator.generate(task: task)
+        }
+        let providerSetting = ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "DeepRead",
+            models: [],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: settingsStore.apiKey,
+            baseUrl: settingsStore.baseUrl,
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+        let llmDraft = await IOSDeepReadDraftGenerator.generateViaLLM(
+            task: task,
+            providerSetting: providerSetting,
+            modelId: modelId
+        )
+        return llmDraft.isEmpty ? IOSDeepReadDraftGenerator.generate(task: task) : llmDraft
+    }
+
+    private func retryModelId() -> String {
+        let fallback = settingsStore?.modelId.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let boardModelId = sharedSettings?.todayBoard.boardModelId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !boardModelId.isEmpty,
+              let selectedProvider = providerRegistry?.selectedProvider else {
+            return fallback
+        }
+        for model in selectedProvider.models where model.type == ModelType.chat {
+            if model.id.toHexDashString().caseInsensitiveCompare(boardModelId) == .orderedSame {
+                return model.modelId
+            }
+        }
+        return fallback
     }
 
     private func copyResult(_ task: IOSDeepReadTask) {
@@ -1080,6 +1526,57 @@ struct IOSDeepReadTaskDetailView: View {
         }
     }
 }
+
+#if canImport(WebKit)
+struct IOSDeepReadTemplateWebView: UIViewRepresentable {
+    let html: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        let validation = IOSDeepReadTemplateValidator.validateHTML(html, requirePlaceholders: false)
+        let safeHTML = validation.ok ? html : "<html><body><p>模板校验失败：\(validation.error ?? "未知错误")</p></body></html>"
+        webView.loadHTMLString(safeHTML, baseURL: nil)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+        ) {
+            guard navigationAction.navigationType == .other else {
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
+    }
+}
+#else
+struct IOSDeepReadTemplateWebView: View {
+    let html: String
+
+    var body: some View {
+        Text("当前平台不支持 HTML 模板预览。")
+            .font(.caption)
+            .foregroundStyle(AmberTheme.muted)
+    }
+}
+#endif
 
 struct BoardCapabilityDivider: View {
     var body: some View {

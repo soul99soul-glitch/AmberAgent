@@ -391,11 +391,20 @@ private extension View {
             case .ttsSettings:
                 TTSSettingsView(sharedSettings: sharedSettings)
             case .board:
-                BoardView(settingsStore: settingsStore, sharedSettings: sharedSettings)
+                BoardView(settingsStore: settingsStore, sharedSettings: sharedSettings, providerRegistry: providerRegistry)
             case .boardSettings:
-                BoardSettingsView(sharedSettings: sharedSettings)
+                BoardSettingsView(
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    providerRegistry: providerRegistry
+                )
             case .deepReadTask(let id):
-                IOSDeepReadTaskDetailView(taskId: id)
+                IOSDeepReadTaskDetailView(
+                    taskId: id,
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    providerRegistry: providerRegistry
+                )
             case .miniApps:
                 MiniAppListView()
             case .miniAppSettings:

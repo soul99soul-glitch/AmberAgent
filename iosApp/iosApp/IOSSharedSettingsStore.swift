@@ -725,6 +725,35 @@ final class IOSSharedSettingsStore {
         restoreSnapshot(merged)
     }
 
+    // MARK: - Today Board / Deep Read write-back
+
+    var todayBoard: TodayBoardSetting {
+        snapshot.agentRuntime.todayBoard
+    }
+
+    func updateTodayBoard(_ transform: (TodayBoardSetting) -> TodayBoardSettingPatch) {
+        let board = snapshot.agentRuntime.todayBoard
+        let patch = transform(board)
+        let merged = IosSettingsMutations.shared.setTodayBoardOptions(
+            settings: snapshot,
+            boardModelId: patch.boardModelId ?? board.boardModelId,
+            clearBoardModelId: patch.clearBoardModelId,
+            hotListRefreshIntervalMinutes: Int32(
+                patch.hotListRefreshIntervalMinutes ?? Int(board.hotListRefreshIntervalMinutes)
+            ),
+            hotListWifiOnly: patch.hotListWifiOnly ?? board.hotListWifiOnly,
+            hotListEnabledSources: patch.hotListEnabledSources ?? Array(board.hotListEnabledSources),
+            hotListFocusKeywords: patch.hotListFocusKeywords ?? board.hotListFocusKeywords,
+            hotListFilterModeWireName: patch.hotListFilterModeWireName ?? board.hotListFilterMode.wireName,
+            boardReadingFontModeWireName: patch.boardReadingFontModeWireName ?? board.boardReadingFontMode.wireName,
+            boardReadingFontPackId: patch.boardReadingFontPackId ?? board.boardReadingFontPackId,
+            clearBoardReadingFontPackId: patch.clearBoardReadingFontPackId,
+            deepReadFontScale: patch.deepReadFontScale ?? board.deepReadFontScale,
+            deepReadTemplateId: patch.deepReadTemplateId ?? board.deepReadTemplateId
+        )
+        restoreSnapshot(merged)
+    }
+
     // MARK: - Real seeded collections (for UI display)
 
     /// Real KMP default TTS providers (DEFAULT_TTS_PROVIDERS), seeded + de-duplicated.
@@ -861,6 +890,49 @@ struct MiniAppSettingPatch {
         self.clipboardReadEnabled = clipboardReadEnabled
         self.webViewDebugEnabled = webViewDebugEnabled
         self.showSourceButton = showSourceButton
+    }
+}
+
+struct TodayBoardSettingPatch {
+    var boardModelId: String?
+    var clearBoardModelId: Bool
+    var hotListRefreshIntervalMinutes: Int?
+    var hotListWifiOnly: Bool?
+    var hotListEnabledSources: [String]?
+    var hotListFocusKeywords: [String]?
+    var hotListFilterModeWireName: String?
+    var boardReadingFontModeWireName: String?
+    var boardReadingFontPackId: String?
+    var clearBoardReadingFontPackId: Bool
+    var deepReadFontScale: Float?
+    var deepReadTemplateId: String?
+
+    init(
+        boardModelId: String? = nil,
+        clearBoardModelId: Bool = false,
+        hotListRefreshIntervalMinutes: Int? = nil,
+        hotListWifiOnly: Bool? = nil,
+        hotListEnabledSources: [String]? = nil,
+        hotListFocusKeywords: [String]? = nil,
+        hotListFilterModeWireName: String? = nil,
+        boardReadingFontModeWireName: String? = nil,
+        boardReadingFontPackId: String? = nil,
+        clearBoardReadingFontPackId: Bool = false,
+        deepReadFontScale: Float? = nil,
+        deepReadTemplateId: String? = nil
+    ) {
+        self.boardModelId = boardModelId
+        self.clearBoardModelId = clearBoardModelId
+        self.hotListRefreshIntervalMinutes = hotListRefreshIntervalMinutes
+        self.hotListWifiOnly = hotListWifiOnly
+        self.hotListEnabledSources = hotListEnabledSources
+        self.hotListFocusKeywords = hotListFocusKeywords
+        self.hotListFilterModeWireName = hotListFilterModeWireName
+        self.boardReadingFontModeWireName = boardReadingFontModeWireName
+        self.boardReadingFontPackId = boardReadingFontPackId
+        self.clearBoardReadingFontPackId = clearBoardReadingFontPackId
+        self.deepReadFontScale = deepReadFontScale
+        self.deepReadTemplateId = deepReadTemplateId
     }
 }
 

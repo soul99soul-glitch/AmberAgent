@@ -1042,13 +1042,20 @@ struct IOSRealEventKitSignalAdapter: IOSEventKitSignalAdapter {
 
 // MARK: - Hotlist Collector
 
-struct IOSHotlistItem: Equatable, Sendable {
+struct IOSHotlistItem: Codable, Equatable, Sendable {
     var providerId: String
     var title: String
     var url: String?
     var rank: Int
     var score: Int?
     var fetchedAt: Int64
+    var displayTitle: String? = nil
+    var heat: String? = nil
+    var category: String? = nil
+
+    var presentationTitle: String {
+        (displayTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty(title)
+    }
 }
 
 protocol IOSHotlistProvider: Sendable {
@@ -1277,8 +1284,8 @@ struct IOSHuggingFacePapersHotlistProvider: IOSHotlistProvider {
 
 /// Github trending (HTML scrape — GitHub provides no JSON API for trending).
 struct IOSGithubTrendingHotlistProvider: IOSHotlistProvider {
-    let providerId = "github_trending"
-    let displayName = "GitHub Trending"
+    let providerId = "github_trending_ai"
+    let displayName = "GitHub AI"
     func fetch(limit: Int) async throws -> [IOSHotlistItem] {
         let session = IOSRSSHotlistProvider.ephemeralSession
         let (data, _) = try await session.data(from: URL(string: "https://github.com/trending")!)
@@ -1310,6 +1317,12 @@ struct IOSGithubTrendingHotlistProvider: IOSHotlistProvider {
 /// All built-in iOS hotlist providers (Android BuiltInHotListProviders parity
 /// for the providers with stable public endpoints).
 enum IOSHotlistProviders {
+    struct Descriptor: Identifiable, Codable, Equatable, Sendable {
+        var id: String { providerId }
+        var providerId: String
+        var displayName: String
+    }
+
     static let all: [IOSHotlistProvider] = [
         IOSHackerNewsHotlistProvider(),
         IOSArxivAIHotlistProvider(),
@@ -1318,6 +1331,478 @@ enum IOSHotlistProviders {
         IOSHuggingFacePapersHotlistProvider(),
         IOSGithubTrendingHotlistProvider()
     ]
+
+    static var descriptors: [Descriptor] {
+        all.map { Descriptor(providerId: $0.providerId, displayName: $0.displayName) }
+    }
+
+    static let iOSDefaultProviderIds: Set<String> = Set(all.map(\.providerId))
+    static let androidDefaultProviderIds: Set<String> = ["bilibili", "hacker_news"]
+    static let supportedProviderIds: Set<String> = Set(all.map(\.providerId))
+
+    static func provider(id: String) -> IOSHotlistProvider? {
+        all.first { $0.providerId == id }
+    }
+
+    static func displayName(for providerId: String) -> String {
+        provider(id: providerId)?.displayName ?? providerId
+    }
+
+    static func effectiveEnabledProviderIds(setting: TodayBoardSetting) -> Set<String> {
+        let raw = Set(setting.hotListEnabledSources.map {
+            String(describing: $0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty })
+        if raw.isEmpty {
+            return []
+        }
+        if raw == androidDefaultProviderIds {
+            return iOSDefaultProviderIds
+        }
+        return raw.intersection(supportedProviderIds)
+    }
+}
+
+struct IOSHotTopicSource: Codable, Equatable, Identifiable, Sendable {
+    var id: String { "\(providerId)|\(rank)|\(title)" }
+    var providerId: String
+    var providerName: String
+    var rank: Int
+    var title: String
+    var displayTitle: String?
+    var url: String?
+    var heat: String?
+    var fetchedAt: Int64
+
+    var presentationTitle: String {
+        (displayTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty(title)
+    }
+}
+
+struct IOSHotTopic: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var title: String
+    var sources: [IOSHotTopicSource]
+    var sourceCount: Int
+    var bestRank: Int
+    var latestFetchedAt: Int64
+}
+
+struct IOSHotListProviderSnapshot: Codable, Equatable, Identifiable, Sendable {
+    var id: String { providerId }
+    var providerId: String
+    var providerName: String
+    var items: [IOSHotlistItem]
+    var fetchedAt: Int64
+    var stale: Bool
+    var error: String?
+
+    init(
+        providerId: String,
+        providerName: String,
+        items: [IOSHotlistItem],
+        fetchedAt: Int64,
+        stale: Bool = false,
+        error: String? = nil
+    ) {
+        self.providerId = providerId
+        self.providerName = providerName
+        self.items = items
+        self.fetchedAt = fetchedAt
+        self.stale = stale
+        self.error = error
+    }
+}
+
+struct IOSHotListDashboard: Codable, Equatable, Sendable {
+    var topics: [IOSHotTopic]
+    var providers: [IOSHotListProviderSnapshot]
+    var lastUpdatedAt: Int64
+    var enabledSourceCount: Int
+
+    static let empty = IOSHotListDashboard(topics: [], providers: [], lastUpdatedAt: 0, enabledSourceCount: 0)
+
+    var hasContent: Bool {
+        !topics.isEmpty || providers.contains { !$0.items.isEmpty }
+    }
+
+    var hasEnabledSources: Bool {
+        enabledSourceCount > 0
+    }
+
+    var hasErrors: Bool {
+        providers.contains { ($0.error ?? "").isEmpty == false }
+    }
+}
+
+enum IOSHotListAggregator {
+    static func aggregate(providerSnapshots: [IOSHotListProviderSnapshot], limit: Int = 20) -> [IOSHotTopic] {
+        var clusters: [[IOSHotTopicSource]] = []
+        for snapshot in providerSnapshots {
+            for item in snapshot.items {
+                let source = IOSHotTopicSource(
+                    providerId: snapshot.providerId,
+                    providerName: snapshot.providerName,
+                    rank: item.rank,
+                    title: item.title,
+                    displayTitle: item.displayTitle,
+                    url: item.url,
+                    heat: item.heat ?? item.score.map(String.init),
+                    fetchedAt: item.fetchedAt
+                )
+                if let index = clusters.firstIndex(where: { cluster in
+                    cluster.contains { matches(source, $0) }
+                }) {
+                    clusters[index].append(source)
+                } else {
+                    clusters.append([source])
+                }
+            }
+        }
+
+        return clusters
+            .map(makeTopic(sources:))
+            .sorted {
+                if $0.sourceCount != $1.sourceCount { return $0.sourceCount > $1.sourceCount }
+                if $0.bestRank != $1.bestRank { return $0.bestRank < $1.bestRank }
+                return $0.latestFetchedAt > $1.latestFetchedAt
+            }
+            .prefix(max(limit, 0))
+            .map { $0 }
+    }
+
+    static func applyInterestFilter(
+        dashboard: IOSHotListDashboard,
+        keywords rawKeywords: [String],
+        modeWireName: String
+    ) -> IOSHotListDashboard {
+        let keywords = normalizeKeywords(rawKeywords)
+        guard !keywords.isEmpty, modeWireName != "all" else { return dashboard }
+
+        let topicPairs = dashboard.topics.map { topic in (topic, hotTopicMatches(topic, keywords: keywords)) }
+        let providerSnapshots = dashboard.providers.map { provider in
+            let indexedItems = provider.items.map { item in (item, hotItemMatches(item, keywords: keywords)) }
+            let items: [IOSHotlistItem]
+            if modeWireName == "focus_only" {
+                items = indexedItems.filter(\.1).map(\.0)
+            } else {
+                items = indexedItems.sorted { left, right in
+                    if left.1 != right.1 { return left.1 && !right.1 }
+                    return left.0.rank < right.0.rank
+                }.map(\.0)
+            }
+            return IOSHotListProviderSnapshot(
+                providerId: provider.providerId,
+                providerName: provider.providerName,
+                items: items,
+                fetchedAt: provider.fetchedAt,
+                stale: provider.stale,
+                error: modeWireName == "focus_only" && items.isEmpty && (provider.error ?? "").isEmpty ? "没有匹配关注关键词的内容。" : provider.error
+            )
+        }
+
+        let topics: [IOSHotTopic]
+        if modeWireName == "focus_only" {
+            topics = topicPairs.filter(\.1).map(\.0)
+        } else {
+            topics = topicPairs.sorted { left, right in
+                if left.1 != right.1 { return left.1 && !right.1 }
+                if left.0.sourceCount != right.0.sourceCount { return left.0.sourceCount > right.0.sourceCount }
+                if left.0.bestRank != right.0.bestRank { return left.0.bestRank < right.0.bestRank }
+                return left.0.latestFetchedAt > right.0.latestFetchedAt
+            }.map(\.0)
+        }
+        return IOSHotListDashboard(
+            topics: topics,
+            providers: providerSnapshots,
+            lastUpdatedAt: dashboard.lastUpdatedAt,
+            enabledSourceCount: dashboard.enabledSourceCount
+        )
+    }
+
+    static func normalizeKeywords(_ raw: [String]) -> [String] {
+        var seen = Set<String>()
+        return raw
+            .flatMap { $0.components(separatedBy: CharacterSet(charactersIn: ",，、;；\n\t")) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+            .prefix(80)
+            .map { $0 }
+    }
+
+    private static func makeTopic(sources: [IOSHotTopicSource]) -> IOSHotTopic {
+        let sortedSources = sources.sorted {
+            if $0.rank != $1.rank { return $0.rank < $1.rank }
+            return $0.fetchedAt > $1.fetchedAt
+        }
+        let title = sortedSources.first?.presentationTitle ?? "热点"
+        let sourceCount = Set(sortedSources.map(\.providerId)).count
+        let bestRank = sortedSources.map(\.rank).min() ?? Int.max
+        let latest = sortedSources.map(\.fetchedAt).max() ?? 0
+        return IOSHotTopic(
+            id: topicId(title: title, sources: sortedSources),
+            title: title,
+            sources: sortedSources,
+            sourceCount: sourceCount,
+            bestRank: bestRank,
+            latestFetchedAt: latest
+        )
+    }
+
+    private static func matches(_ left: IOSHotTopicSource, _ right: IOSHotTopicSource) -> Bool {
+        let leftTitle = normalizedTitle(left.presentationTitle)
+        let rightTitle = normalizedTitle(right.presentationTitle)
+        guard !leftTitle.isEmpty, !rightTitle.isEmpty else { return false }
+        if leftTitle == rightTitle { return true }
+
+        let sharedEntities = extractEntities(leftTitle).intersection(extractEntities(rightTitle))
+        if sharedEntities.count >= 2 { return true }
+        if sharedEntities.count == 1 && leftTitle == rightTitle { return true }
+        guard sameLanguageFamily(leftTitle, rightTitle) else { return false }
+        let minLength = min(leftTitle.count, rightTitle.count)
+        return minLength >= 6 && bigramJaccard(leftTitle, rightTitle) >= 0.4
+    }
+
+    private static func hotTopicMatches(_ topic: IOSHotTopic, keywords: [String]) -> Bool {
+        let haystack = ([topic.title] + topic.sources.flatMap { [$0.presentationTitle, $0.providerName, $0.heat ?? ""] })
+            .joined(separator: " ")
+        return keywords.contains { containsKeyword($0, in: haystack) }
+    }
+
+    private static func hotItemMatches(_ item: IOSHotlistItem, keywords: [String]) -> Bool {
+        let haystack = [item.presentationTitle, item.category ?? "", item.heat ?? "", item.url ?? ""]
+            .joined(separator: " ")
+        return keywords.contains { containsKeyword($0, in: haystack) }
+    }
+
+    private static func containsKeyword(_ keyword: String, in text: String) -> Bool {
+        let key = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return false }
+        let lowerText = text.lowercased()
+        let lowerKey = key.lowercased()
+        if lowerKey.count <= 3,
+           lowerKey.range(of: #"^[a-z0-9+\-]+$"#, options: .regularExpression) != nil {
+            let pattern = #"(?<![a-z0-9+\-])\#(NSRegularExpression.escapedPattern(for: lowerKey))(?![a-z0-9+\-])"#
+            return lowerText.range(of: pattern, options: .regularExpression) != nil
+        }
+        return lowerText.contains(lowerKey)
+    }
+
+    private static func normalizedTitle(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: #"https?://\S+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[^\p{L}\p{N}\+]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func extractEntities(_ normalized: String) -> Set<String> {
+        let aliases: [String: [String]] = [
+            "openai": ["openai", "chatgpt", "gpt"],
+            "anthropic": ["anthropic", "claude"],
+            "deepseek": ["deepseek", "深度求索"],
+            "gemini": ["gemini", "google ai"],
+            "ai": ["ai", "人工智能", "大模型", "llm", "agent"],
+            "robotics": ["机器人", "具身智能", "robot"],
+            "chip": ["芯片", "半导体", "gpu", "nvidia"],
+            "apple": ["apple", "苹果"],
+            "microsoft": ["microsoft", "微软"],
+            "google": ["google", "谷歌"],
+            "tesla": ["tesla", "特斯拉"],
+            "xiaomi": ["xiaomi", "小米"],
+            "huawei": ["huawei", "华为"],
+            "github": ["github", "git hub"]
+        ]
+        var found = Set<String>()
+        for (key, values) in aliases where values.contains(where: { normalized.contains($0) }) {
+            found.insert(key)
+        }
+        let words = normalized.split(separator: " ").map(String.init)
+        for word in words where word.count >= 4 && word.range(of: #"^[a-z][a-z0-9+\-]+$"#, options: .regularExpression) != nil {
+            found.insert(word)
+        }
+        return found
+    }
+
+    private static func sameLanguageFamily(_ left: String, _ right: String) -> Bool {
+        containsCJK(left) == containsCJK(right)
+    }
+
+    private static func containsCJK(_ value: String) -> Bool {
+        value.unicodeScalars.contains { scalar in
+            (0x4E00...0x9FFF).contains(Int(scalar.value))
+        }
+    }
+
+    private static func bigramJaccard(_ left: String, _ right: String) -> Double {
+        let leftSet = bigrams(left)
+        let rightSet = bigrams(right)
+        guard !leftSet.isEmpty, !rightSet.isEmpty else { return 0 }
+        let intersection = leftSet.intersection(rightSet).count
+        let union = leftSet.union(rightSet).count
+        return union == 0 ? 0 : Double(intersection) / Double(union)
+    }
+
+    private static func bigrams(_ value: String) -> Set<String> {
+        let chars = Array(value)
+        guard chars.count >= 2 else { return [] }
+        return Set((0..<(chars.count - 1)).map { String(chars[$0]) + String(chars[$0 + 1]) })
+    }
+
+    private static func topicId(title: String, sources: [IOSHotTopicSource]) -> String {
+        let material = ([normalizedTitle(title)] + sources.map { "\($0.providerId):\($0.rank):\(normalizedTitle($0.presentationTitle))" })
+            .joined(separator: "|")
+        let digest = SHA256.hash(data: Data(material.utf8))
+        return digest.compactMap { String(format: "%02x", $0) }.joined().prefixString(24)
+    }
+}
+
+@MainActor
+@Observable
+final class IOSHotListDashboardStore {
+    static let shared = IOSHotListDashboardStore()
+
+    private(set) var dashboard: IOSHotListDashboard
+    private(set) var isRefreshing = false
+    private(set) var lastError: String?
+
+    private let directory: URL
+    private let fileURL: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    private let fileManager: FileManager
+
+    init(baseDirectory: URL? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let root = baseDirectory
+            ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        directory = root.appendingPathComponent("deep_read", isDirectory: true)
+        fileURL = directory.appendingPathComponent("hotlist_dashboard.json", isDirectory: false)
+        dashboard = Self.load(from: fileURL, decoder: decoder, fileManager: fileManager) ?? .empty
+    }
+
+    func refresh(setting: TodayBoardSetting, force: Bool = true, limit: Int = 20) async {
+        guard !isRefreshing else { return }
+        let enabledIds = IOSHotlistProviders.effectiveEnabledProviderIds(setting: setting)
+        guard !enabledIds.isEmpty else {
+            dashboard = IOSHotListDashboard(topics: [], providers: [], lastUpdatedAt: 0, enabledSourceCount: 0)
+            lastError = nil
+            persist()
+            return
+        }
+        if !force, !shouldRefresh(setting: setting) {
+            dashboard = filteredDashboard(dashboard, setting: setting)
+            return
+        }
+
+        isRefreshing = true
+        lastError = nil
+        defer { isRefreshing = false }
+
+        let previous = Dictionary(uniqueKeysWithValues: dashboard.providers.map { ($0.providerId, $0) })
+        let now = IOSBoardSignalRepository.currentEpochMs()
+        var snapshots: [IOSHotListProviderSnapshot] = []
+        for provider in IOSHotlistProviders.all where enabledIds.contains(provider.providerId) {
+            do {
+                let items = try await provider.fetch(limit: limit)
+                snapshots.append(IOSHotListProviderSnapshot(
+                    providerId: provider.providerId,
+                    providerName: provider.displayName,
+                    items: items,
+                    fetchedAt: now
+                ))
+            } catch {
+                let cached = previous[provider.providerId]?.items ?? []
+                snapshots.append(IOSHotListProviderSnapshot(
+                    providerId: provider.providerId,
+                    providerName: provider.displayName,
+                    items: cached,
+                    fetchedAt: previous[provider.providerId]?.fetchedAt ?? now,
+                    stale: !cached.isEmpty,
+                    error: error.localizedDescription
+                ))
+            }
+        }
+
+        let topics = IOSHotListAggregator.aggregate(providerSnapshots: snapshots, limit: limit)
+        let rawDashboard = IOSHotListDashboard(
+            topics: topics,
+            providers: snapshots,
+            lastUpdatedAt: snapshots.map(\.fetchedAt).max() ?? now,
+            enabledSourceCount: enabledIds.count
+        )
+        dashboard = filteredDashboard(rawDashboard, setting: setting)
+        if dashboard.hasErrors {
+            lastError = dashboard.providers.compactMap(\.error).first
+        }
+        persist()
+    }
+
+    static func topic(from provider: IOSHotListProviderSnapshot, item: IOSHotlistItem) -> IOSHotTopic {
+        let source = IOSHotTopicSource(
+            providerId: provider.providerId,
+            providerName: provider.providerName,
+            rank: item.rank,
+            title: item.title,
+            displayTitle: item.displayTitle,
+            url: item.url,
+            heat: item.heat ?? item.score.map(String.init),
+            fetchedAt: item.fetchedAt
+        )
+        return IOSHotListAggregator.aggregate(
+            providerSnapshots: [
+                IOSHotListProviderSnapshot(
+                    providerId: provider.providerId,
+                    providerName: provider.providerName,
+                    items: [item],
+                    fetchedAt: provider.fetchedAt,
+                    stale: provider.stale,
+                    error: provider.error
+                )
+            ],
+            limit: 1
+        ).first ?? IOSHotTopic(
+            id: UUID().uuidString,
+            title: source.presentationTitle,
+            sources: [source],
+            sourceCount: 1,
+            bestRank: source.rank,
+            latestFetchedAt: source.fetchedAt
+        )
+    }
+
+    private func shouldRefresh(setting: TodayBoardSetting) -> Bool {
+        guard dashboard.hasContent, dashboard.lastUpdatedAt > 0 else { return true }
+        let minutes = max(Int(setting.hotListRefreshIntervalMinutes), 30)
+        let gapMs = Int64(minutes) * 60_000
+        return IOSBoardSignalRepository.currentEpochMs() - dashboard.lastUpdatedAt >= gapMs
+    }
+
+    private func filteredDashboard(_ rawDashboard: IOSHotListDashboard, setting: TodayBoardSetting) -> IOSHotListDashboard {
+        IOSHotListAggregator.applyInterestFilter(
+            dashboard: rawDashboard,
+            keywords: setting.hotListFocusKeywords,
+            modeWireName: setting.hotListFilterMode.wireName
+        )
+    }
+
+    private func persist() {
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try encoder.encode(dashboard)
+            try data.write(to: fileURL, options: [.atomic])
+        } catch {
+            print("[IOSHotListDashboardStore] persist failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func load(from url: URL, decoder: JSONDecoder, fileManager: FileManager) -> IOSHotListDashboard? {
+        guard fileManager.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? decoder.decode(IOSHotListDashboard.self, from: data)
+    }
 }
 
 // MARK: - Foreground Refresh
@@ -1412,6 +1897,7 @@ enum IOSDeepReadSourceKind: String, Codable, CaseIterable, Identifiable, Sendabl
     case conversation
     case file
     case webMount = "web_mount"
+    case hotTopic = "hot_topic"
 
     var id: String { rawValue }
 
@@ -1422,6 +1908,7 @@ enum IOSDeepReadSourceKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .conversation: "会话内容"
         case .file: "文件"
         case .webMount: "WebMount"
+        case .hotTopic: "热榜主题"
         }
     }
 }
@@ -1459,26 +1946,56 @@ struct IOSDeepReadTemplate: Codable, Equatable, Identifiable, Sendable {
     var name: String
     var description: String
 
+    static let customPrefix = "custom:"
     static let magazine = IOSDeepReadTemplate(
-        id: "ios_magazine",
-        name: "杂志",
+        id: "compose_magazine",
+        name: "默认杂志",
         description: "摘要、关键点、脉络和延伸阅读。"
     )
-    static let reading = IOSDeepReadTemplate(
-        id: "ios_reading",
-        name: "阅读",
-        description: "更安静的长文阅读版式。"
+    static let editorial = IOSDeepReadTemplate(
+        id: "editorial_slant",
+        name: "斜切图文",
+        description: "更有编辑判断的图文版式。"
     )
     static let analysis = IOSDeepReadTemplate(
         id: "ios_analysis",
         name: "分析",
-        description: "突出判断、风险和下一步。"
+        description: "旧 iOS 历史版式：突出判断、风险和下一步。"
     )
-    static let builtIns = [magazine, reading, analysis]
+    static let reading = editorial
+    static let builtIns = [magazine, editorial]
     static let defaultId = magazine.id
 
     static func template(id: String) -> IOSDeepReadTemplate {
-        builtIns.first { $0.id == id } ?? magazine
+        let normalized = normalizedTemplateId(id)
+        if normalized.hasPrefix(customPrefix) {
+            return IOSDeepReadTemplate(id: normalized, name: "自定义模板", description: "本机保存的 HTML 模板。")
+        }
+        return builtIns.first { $0.id == normalized } ?? {
+            if id == "ios_analysis" { return analysis }
+            return magazine
+        }()
+    }
+
+    static func normalizedTemplateId(_ id: String) -> String {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmed {
+        case "", "ios_magazine":
+            return magazine.id
+        case "ios_reading":
+            return editorial.id
+        case "ios_analysis":
+            return analysis.id
+        default:
+            if trimmed.hasPrefix(customPrefix) { return trimmed }
+            if builtIns.contains(where: { $0.id == trimmed }) { return trimmed }
+            return magazine.id
+        }
+    }
+
+    static func isValidTemplateId(_ id: String) -> Bool {
+        let normalized = normalizedTemplateId(id)
+        return normalized.hasPrefix(customPrefix) || builtIns.contains(where: { $0.id == normalized }) || normalized == analysis.id
     }
 }
 
@@ -1492,7 +2009,7 @@ struct IOSDeepReadTemplateValidationResult: Equatable, Sendable {
 enum IOSDeepReadTemplateValidator {
     static let maxHTMLBytes = 96 * 1024
 
-    static func validateHTML(_ html: String) -> IOSDeepReadTemplateValidationResult {
+    static func validateHTML(_ html: String, requirePlaceholders: Bool = true) -> IOSDeepReadTemplateValidationResult {
         let byteCount = html.data(using: .utf8)?.count ?? 0
         if byteCount > maxHTMLBytes {
             return .init(ok: false, error: "模板过大：\(byteCount) bytes。")
@@ -1500,7 +2017,6 @@ enum IOSDeepReadTemplateValidator {
         if html.range(of: #"(?is)<\s*(html\b|!doctype\s+html)"#, options: .regularExpression) == nil {
             return .init(ok: false, error: "模板必须包含 <html> 或 <!DOCTYPE html>。")
         }
-
         let blocked: [(String, String)] = [
             (#"(?is)<\s*script\b"#, "模板不允许 JavaScript。"),
             (#"(?is)\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#, "模板不允许事件处理器。"),
@@ -1516,6 +2032,18 @@ enum IOSDeepReadTemplateValidator {
         ]
         for (pattern, message) in blocked where html.range(of: pattern, options: .regularExpression) != nil {
             return .init(ok: false, error: message)
+        }
+        if requirePlaceholders {
+            let requiredPlaceholders = [
+                "{{title}}",
+                "{{summary}}",
+                "{{analysis_html}}",
+                "{{extended_reading_html}}",
+                "{{font_css}}"
+            ]
+            if let missing = requiredPlaceholders.first(where: { !html.contains($0) }) {
+                return .init(ok: false, error: "模板缺少必要占位符：\(missing)。")
+            }
         }
         return .valid
     }
@@ -1613,6 +2141,37 @@ enum IOSDeepReadSourceNormalizer {
             url: url,
             createdAt: now
         )
+    }
+
+    static func hotTopicSources(topic: IOSHotTopic, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) throws -> [IOSDeepReadSource] {
+        let sources = topic.sources.compactMap { source -> IOSDeepReadSource? in
+            let content = cleanMultiline([
+                "综合主题：\(topic.title)",
+                "来源：\(source.providerName)",
+                "榜单标题：\(source.presentationTitle)",
+                "排名：\(source.rank)",
+                source.heat.map { "热度：\($0)" },
+                source.url.map { "链接：\($0)" }
+            ].compactMap { $0 }.joined(separator: "\n"))
+            guard !content.isEmpty else { return nil }
+            return IOSDeepReadSource(
+                kind: .hotTopic,
+                title: source.presentationTitle,
+                content: content,
+                url: source.url,
+                metadata: [
+                    "topic_id": topic.id,
+                    "topic_title": topic.title,
+                    "provider_id": source.providerId,
+                    "provider_name": source.providerName,
+                    "rank": "\(source.rank)",
+                    "heat": source.heat ?? ""
+                ],
+                createdAt: now
+            )
+        }
+        guard !sources.isEmpty else { throw IOSDeepReadSourceNormalizationError.emptySource(.hotTopic) }
+        return sources
     }
 
     static func clean(_ value: String) -> String {
@@ -1722,7 +2281,7 @@ final class IOSDeepReadStore {
             id: UUID().uuidString,
             title: title.prefixString(160),
             status: .queued,
-            templateId: IOSDeepReadTemplate.template(id: templateId).id,
+            templateId: IOSDeepReadTemplate.normalizedTemplateId(templateId),
             sources: validSources,
             resultMarkdown: "",
             failureMessage: nil,
@@ -1820,6 +2379,326 @@ final class IOSDeepReadStore {
     }
 }
 
+struct IOSDeepReadCustomTemplate: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    var description: String
+    var html: String
+    var createdByAI: Bool
+    var createdAt: Int64
+    var updatedAt: Int64
+
+    init(
+        id: String = IOSDeepReadTemplate.customPrefix + UUID().uuidString.lowercased(),
+        name: String,
+        description: String,
+        html: String,
+        createdByAI: Bool,
+        createdAt: Int64 = IOSBoardSignalRepository.currentEpochMs(),
+        updatedAt: Int64 = IOSBoardSignalRepository.currentEpochMs()
+    ) {
+        self.id = id.hasPrefix(IOSDeepReadTemplate.customPrefix) ? id : IOSDeepReadTemplate.customPrefix + id
+        self.name = IOSDeepReadSourceNormalizer.clean(name).ifEmpty("自定义模板")
+        self.description = IOSDeepReadSourceNormalizer.clean(description).prefixString(240)
+        self.html = html
+        self.createdByAI = createdByAI
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+enum IOSDeepReadTemplateStoreError: LocalizedError, Equatable {
+    case invalidTemplate(String)
+    case notFound
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidTemplate(let message): message
+        case .notFound: "模板不存在。"
+        }
+    }
+}
+
+@MainActor
+@Observable
+final class IOSDeepReadTemplateStore {
+    static let shared = IOSDeepReadTemplateStore()
+
+    private(set) var templates: [IOSDeepReadCustomTemplate]
+
+    private let directory: URL
+    private let fileURL: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    private let fileManager: FileManager
+
+    init(baseDirectory: URL? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let root = baseDirectory
+            ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        directory = root.appendingPathComponent("deep_read", isDirectory: true)
+        fileURL = directory.appendingPathComponent("templates.json", isDirectory: false)
+        templates = Self.load(from: fileURL, decoder: decoder, fileManager: fileManager)
+    }
+
+    func template(id: String) -> IOSDeepReadCustomTemplate? {
+        templates.first { $0.id == id }
+    }
+
+    @discardableResult
+    func save(_ template: IOSDeepReadCustomTemplate) throws -> IOSDeepReadCustomTemplate {
+        let validation = IOSDeepReadTemplateValidator.validateHTML(template.html)
+        guard validation.ok else {
+            throw IOSDeepReadTemplateStoreError.invalidTemplate(validation.error ?? "模板校验失败。")
+        }
+        var next = template
+        next.id = IOSDeepReadTemplate.normalizedTemplateId(next.id)
+        if !next.id.hasPrefix(IOSDeepReadTemplate.customPrefix) {
+            next.id = IOSDeepReadTemplate.customPrefix + UUID().uuidString.lowercased()
+        }
+        next.updatedAt = IOSBoardSignalRepository.currentEpochMs()
+        if let index = templates.firstIndex(where: { $0.id == next.id }) {
+            templates[index] = next
+        } else {
+            templates.append(next)
+        }
+        templates.sort { $0.updatedAt > $1.updatedAt }
+        persist()
+        return next
+    }
+
+    func delete(id: String) {
+        templates.removeAll { $0.id == id }
+        persist()
+    }
+
+    private func persist() {
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try encoder.encode(templates)
+            try data.write(to: fileURL, options: [.atomic])
+        } catch {
+            print("[IOSDeepReadTemplateStore] persist failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func load(from url: URL, decoder: JSONDecoder, fileManager: FileManager) -> [IOSDeepReadCustomTemplate] {
+        guard fileManager.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? decoder.decode([IOSDeepReadCustomTemplate].self, from: data) else {
+            return []
+        }
+        return decoded.filter { IOSDeepReadTemplateValidator.validateHTML($0.html).ok }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+}
+
+enum IOSDeepReadHTMLTemplateRenderer {
+    static func render(task: IOSDeepReadTask, template: IOSDeepReadCustomTemplate, fontScale: Float, fontModeWireName: String) throws -> String {
+        let validation = IOSDeepReadTemplateValidator.validateHTML(template.html)
+        guard validation.ok else {
+            throw IOSDeepReadTemplateStoreError.invalidTemplate(validation.error ?? "模板校验失败。")
+        }
+        let contentHTML = markdownToHTML(task.resultMarkdown.isEmpty ? IOSDeepReadDraftGenerator.generate(task: task) : task.resultMarkdown)
+        let sourcesHTML = task.sources.map { source in
+            let url = source.url.map { "<div class=\"source-url\">\(escapeHTML($0))</div>" } ?? ""
+            return "<li><strong>\(escapeHTML(source.kind.title))｜\(escapeHTML(source.title))</strong><p>\(escapeHTML(source.content.prefixString(420)))</p>\(url)</li>"
+        }.joined(separator: "\n")
+        let replacements: [String: String] = [
+            "{{title}}": escapeHTML(task.title),
+            "{{summary}}": escapeHTML(summary(from: task.resultMarkdown)),
+            "{{content_html}}": contentHTML,
+            "{{analysis_html}}": contentHTML,
+            "{{narrative_html}}": contentHTML,
+            "{{extended_reading_html}}": "<ul class=\"sources\">\(sourcesHTML)</ul>",
+            "{{sources_html}}": "<ul class=\"sources\">\(sourcesHTML)</ul>",
+            "{{font_css}}": fontCSS(scale: fontScale, modeWireName: fontModeWireName)
+        ]
+        var html = template.html
+        for (key, value) in replacements {
+            html = html.replacingOccurrences(of: key, with: value)
+        }
+        return html
+    }
+
+    static func starterHTML(name: String = "自定义模板") -> String {
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <style>
+        {{font_css}}
+        body { margin: 0; padding: 24px; background: #f8fafc; color: #111827; }
+        article { max-width: 760px; margin: 0 auto; }
+        h1 { font-size: 30px; line-height: 1.18; margin: 0 0 14px; }
+        .summary { color: #475569; margin-bottom: 20px; }
+        section { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 18px; margin: 14px 0; }
+        .sources { padding-left: 18px; }
+        .source-url { color: #2563eb; word-break: break-all; font-size: 12px; }
+        </style>
+        </head>
+        <body>
+        <article>
+        <h1>{{title}}</h1>
+        <p class="summary">{{summary}}</p>
+        <section>{{analysis_html}}</section>
+        <section>{{extended_reading_html}}</section>
+        </article>
+        </body>
+        </html>
+        """
+    }
+
+    private static func fontCSS(scale: Float, modeWireName: String) -> String {
+        let safeScale = max(0.85, min(1.25, Double(scale)))
+        let family = modeWireName == "system"
+            ? "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif"
+            : "Georgia, 'Times New Roman', 'Songti SC', serif"
+        return """
+        :root { font-size: \(String(format: "%.2f", safeScale * 16))px; }
+        body { font-family: \(family); line-height: 1.72; }
+        """
+    }
+
+    private static func summary(from markdown: String) -> String {
+        let clean = IOSDeepReadSourceNormalizer.cleanMultiline(markdown)
+        guard !clean.isEmpty else { return "暂无摘要。" }
+        return clean
+            .split(whereSeparator: \.isNewline)
+            .first { line in
+                !line.hasPrefix("#") && !String(line).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            .map { String($0).prefixString(180) } ?? clean.prefixString(180)
+    }
+
+    private static func markdownToHTML(_ markdown: String) -> String {
+        var html: [String] = []
+        var inList = false
+        for rawLine in markdown.components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.isEmpty {
+                if inList {
+                    html.append("</ul>")
+                    inList = false
+                }
+                continue
+            }
+            if line.hasPrefix("### ") {
+                if inList { html.append("</ul>"); inList = false }
+                html.append("<h3>\(escapeHTML(String(line.dropFirst(4))))</h3>")
+            } else if line.hasPrefix("## ") {
+                if inList { html.append("</ul>"); inList = false }
+                html.append("<h2>\(escapeHTML(String(line.dropFirst(3))))</h2>")
+            } else if line.hasPrefix("# ") {
+                if inList { html.append("</ul>"); inList = false }
+                html.append("<h1>\(escapeHTML(String(line.dropFirst(2))))</h1>")
+            } else if line.hasPrefix("- ") {
+                if !inList {
+                    html.append("<ul>")
+                    inList = true
+                }
+                html.append("<li>\(escapeHTML(String(line.dropFirst(2))))</li>")
+            } else {
+                if inList { html.append("</ul>"); inList = false }
+                html.append("<p>\(escapeHTML(line))</p>")
+            }
+        }
+        if inList { html.append("</ul>") }
+        return html.joined(separator: "\n")
+    }
+
+    private static func escapeHTML(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
+    }
+}
+
+enum IOSDeepReadTemplateDraftGenerator {
+    enum DraftError: LocalizedError, Equatable {
+        case missingModel
+        case emptyResponse
+        case invalidJSON
+        case invalidTemplate(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingModel: "没有可用模型，无法生成模板草稿。"
+            case .emptyResponse: "模型没有返回模板草稿。"
+            case .invalidJSON: "模型返回的模板草稿不是可解析 JSON。"
+            case .invalidTemplate(let reason): "模板草稿未通过校验：\(reason)"
+            }
+        }
+    }
+
+    static func generateDraft(
+        name: String,
+        brief: String,
+        providerSetting: ProviderSetting.OpenAI,
+        modelId: String,
+        provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter()
+    ) async throws -> IOSDeepReadCustomTemplate {
+        let safeModel = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !safeModel.isEmpty else { throw DraftError.missingModel }
+        let prompt = """
+        为 AmberAgent 深度阅读生成一个受限 HTML 模板，返回 JSON：{"name":"","description":"","html":""}。
+        模板必须包含 <!DOCTYPE html> 或 <html>，不能包含 JavaScript、iframe、form、外部链接/外部资源、CSS url/import。
+        必须至少使用这些占位符：{{title}}、{{summary}}、{{analysis_html}}、{{extended_reading_html}}、{{font_css}}。
+        模板名称：\(name)
+        用户要求：\(brief)
+        """
+        let messages = [
+            UIMessage.companion.system(prompt: "你只输出 JSON，不输出 Markdown 代码围栏。"),
+            UIMessage.companion.user(prompt: prompt)
+        ]
+        let params = TextGenerationParams(
+            model: Model(modelId: safeModel, displayName: safeModel, id: KotlinUuid.companion.random(), type: ModelType.chat, customHeaders: [], customBodies: [], inputModalities: [], outputModalities: [], abilities: [], tools: Set<BuiltInTools>(), contextWindowTokens: nil, providerOverwrite: nil),
+            temperature: KotlinFloat(value: 0.35),
+            topP: nil,
+            maxTokens: KotlinInt(value: 2_800),
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+        let chunk = try await provider.generateText(providerSetting: providerSetting, messages: messages, params: params)
+        let text = (chunk.choices.first?.message?.parts ?? [])
+            .compactMap { $0 as? UIMessagePart.Text }
+            .map { $0.text }
+            .joined(separator: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw DraftError.emptyResponse }
+        guard let data = extractJSONObject(from: text).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw DraftError.invalidJSON
+        }
+        let html = object["html"] as? String ?? ""
+        let validation = IOSDeepReadTemplateValidator.validateHTML(html)
+        guard validation.ok else { throw DraftError.invalidTemplate(validation.error ?? "未知错误") }
+        return IOSDeepReadCustomTemplate(
+            name: (object["name"] as? String)?.ifEmpty(name) ?? name,
+            description: (object["description"] as? String) ?? brief,
+            html: html,
+            createdByAI: true
+        )
+    }
+
+    private static func extractJSONObject(from text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{"), trimmed.hasSuffix("}") { return trimmed }
+        guard let start = trimmed.firstIndex(of: "{"),
+              let end = trimmed.lastIndex(of: "}") else {
+            return trimmed
+        }
+        return String(trimmed[start...end])
+    }
+}
+
 enum IOSDeepReadDraftGenerator {
     static func generate(task: IOSDeepReadTask, now: Date = Date()) -> String {
         let template = task.template
@@ -1896,6 +2775,9 @@ enum IOSDeepReadDraftGenerator {
         }
         if sourceKinds.contains(.webMount) {
             points.append("- WebMount 来源只读取当前前台页面正文，不自动登录或跨站抓取。")
+        }
+        if sourceKinds.contains(.hotTopic) {
+            points.append("- 热榜来源来自公开榜单；网页正文抓取失败时只保留榜单标题、排名、热度和链接，不补写未读取内容。")
         }
         if points.isEmpty {
             points.append("- 当前结论主要来自用户提供文本；建议补充搜索或文件来源做交叉验证。")
