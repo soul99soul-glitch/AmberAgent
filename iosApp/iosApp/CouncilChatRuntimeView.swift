@@ -5,18 +5,28 @@ import Observation
 struct CouncilChatRuntimeView: View {
     let settingsStore: SettingsStore
     let sharedSettings: IOSSharedSettingsStore
+    let providerRegistry: ProviderRegistryStore?
+    let permissionStore: IOSPermissionStore
 
-    @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: CouncilChatViewModel
     @FocusState private var isComposerFocused: Bool
 
-    init(settingsStore: SettingsStore, sharedSettings: IOSSharedSettingsStore) {
+    init(
+        settingsStore: SettingsStore,
+        sharedSettings: IOSSharedSettingsStore,
+        providerRegistry: ProviderRegistryStore? = nil,
+        permissionStore: IOSPermissionStore = IOSPermissionStore()
+    ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
+        self.providerRegistry = providerRegistry
+        self.permissionStore = permissionStore
         self._viewModel = State(initialValue: CouncilChatViewModel(
             settingsStore: settingsStore,
-            sharedSettings: sharedSettings
+            sharedSettings: sharedSettings,
+            providerRegistry: providerRegistry,
+            permissionStore: permissionStore
         ))
     }
 
@@ -34,12 +44,49 @@ struct CouncilChatRuntimeView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
         }
-        .sheet(item: $viewModel.selectedDetail) { detail in
-            CouncilDiscussionDetailSheet(detail: detail)
+        .sheet(item: $viewModel.activeSheet) { sheet in
+            switch sheet {
+            case .detail(let detail):
+                CouncilDiscussionDetailSheet(detail: detail)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(24)
+                    .presentationBackground(AmberTheme.glassStrong)
+            case .members:
+                CouncilMembersSheet(
+                    participants: viewModel.participants,
+                    currentModelId: viewModel.currentModelId,
+                    stateProvider: { viewModel.state(for: $0) },
+                    failedSpeakerIds: viewModel.failedSpeakerIds,
+                    isRunning: viewModel.isRunning,
+                    restartAction: { viewModel.restartLastDiscussion() }
+                )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(24)
                 .presentationBackground(AmberTheme.glassStrong)
+            case .settings:
+                CouncilRoomSettingsSheet(
+                    roomSettingsStore: viewModel.roomSettingsStore,
+                    availableModelIds: viewModel.availableModelIds,
+                    currentModelId: viewModel.currentModelId,
+                    isReadOnly: viewModel.isRunning
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(24)
+                .presentationBackground(AmberTheme.glassStrong)
+            }
+        }
+        .alert("允许本轮主持人联网调研？", isPresented: $viewModel.isResearchConsentPresented) {
+            Button("允许本轮") {
+                viewModel.startPendingDiscussion(researchAllowed: true)
+            }
+            Button("不联网启动", role: .cancel) {
+                viewModel.startPendingDiscussion(researchAllowed: false)
+            }
+        } message: {
+            Text("主持人最多执行 2 次搜索和 2 次网页读取，并只在本轮模型议会中使用。")
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -67,13 +114,17 @@ struct CouncilChatRuntimeView: View {
             }
             .frame(maxWidth: .infinity)
 
+            AmberGlassCircleButton(systemImage: "person.3", accessibilityLabel: "席位成员", size: 44, symbolSize: 17) {
+                viewModel.showMembers()
+            }
+
             if viewModel.isRunning {
                 AmberGlassCircleButton(systemImage: "stop.fill", accessibilityLabel: "停止议会", size: 44, symbolSize: 15) {
                     viewModel.cancelDiscussion()
                 }
             } else {
                 AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "议会设置", size: 44, symbolSize: 18) {
-                    router.navigate(to: .councilSettings)
+                    viewModel.showSettings()
                 }
             }
         }
@@ -240,13 +291,11 @@ struct CouncilChatRuntimeView: View {
                     viewModel.insertInviteTemplate()
                     isComposerFocused = true
                 }
-                CouncilComposerChip(title: "席位回应", systemImage: "arrow.triangle.branch") {
-                    viewModel.insertGuestResponseTemplate()
-                    isComposerFocused = true
+                CouncilComposerChip(title: "成员", systemImage: "person.3") {
+                    viewModel.showMembers()
                 }
-                CouncilComposerChip(title: "主持总结", systemImage: "checkmark.seal") {
-                    viewModel.requestSynthesis()
-                    isComposerFocused = true
+                CouncilComposerChip(title: "重新开始", systemImage: "arrow.counterclockwise") {
+                    viewModel.restartLastDiscussion()
                 }
             }
             .padding(.horizontal, 2)
@@ -456,49 +505,349 @@ private struct CouncilDetailGroup: View {
     }
 }
 
+private struct CouncilMembersSheet: View {
+    let participants: [CouncilParticipant]
+    let currentModelId: String
+    let stateProvider: (CouncilParticipant) -> CouncilParticipantState
+    let failedSpeakerIds: Set<String>
+    let isRunning: Bool
+    let restartAction: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("席位成员")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text(isRunning ? "本轮议会运行中" : "可重新开始上一轮议会")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                    Spacer()
+                    Button {
+                        restartAction()
+                        dismiss()
+                    } label: {
+                        Label("重新开始", systemImage: "arrow.counterclockwise")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .frame(height: 32)
+                            .background(AmberTheme.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRunning)
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(participants.enumerated()), id: \.element.id) { index, participant in
+                        HStack(spacing: 12) {
+                            Image(systemName: participant.systemImage)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(participant.tint)
+                                .frame(width: 32, height: 32)
+                                .background(participant.tint.opacity(0.13), in: Circle())
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(participant.displayName)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.foreground)
+                                Text(participant.isHost ? "主持 · \(currentModelId)" : participant.roleDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(AmberTheme.muted)
+                                    .lineLimit(2)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Text(failedSpeakerIds.contains(participant.id) ? "失败" : stateProvider(participant).label)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(failedSpeakerIds.contains(participant.id) ? AmberTheme.accentRed : AmberTheme.muted)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+
+                        if index < participants.count - 1 {
+                            Divider().overlay(AmberTheme.borderSoft).padding(.leading, 58)
+                        }
+                    }
+                }
+                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+            }
+            .padding(20)
+        }
+        .background(AmberTheme.background)
+    }
+}
+
+private struct CouncilRoomSettingsSheet: View {
+    @Bindable var roomSettingsStore: IOSCouncilRoomSettingsStore
+    let availableModelIds: [String]
+    let currentModelId: String
+    let isReadOnly: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("议会设置")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(isReadOnly ? "运行中只读，下一轮生效。" : "设置会保存到本机，下一轮议会使用。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+
+                settingsGroup(title: "主持人") {
+                    modelMenu(
+                        title: "主持模型",
+                        value: roomSettingsStore.settings.host.modelId,
+                        setValue: { roomSettingsStore.updateHost(modelId: $0) }
+                    )
+                    Divider().overlay(AmberTheme.borderSoft)
+                    reasoningMenu(
+                        title: "思考档位",
+                        value: roomSettingsStore.settings.host.reasoning,
+                        setValue: { roomSettingsStore.updateHost(reasoning: $0) }
+                    )
+                    Divider().overlay(AmberTheme.borderSoft)
+                    TextField("主持人提示词", text: Binding(
+                        get: { roomSettingsStore.settings.host.prompt },
+                        set: { roomSettingsStore.updateHost(prompt: $0) }
+                    ), axis: .vertical)
+                    .lineLimit(2...5)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .disabled(isReadOnly)
+                }
+
+                settingsGroup(title: "默认席位") {
+                    ForEach(roomSettingsStore.settings.seats) { seat in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(seat.name)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(AmberTheme.foreground)
+                                Text("\(seat.modelId.trimmedOr(currentModelId)) · \(seat.reasoning.title)")
+                                    .font(.caption)
+                                    .foregroundStyle(AmberTheme.muted)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Toggle("", isOn: Binding(
+                                get: { seat.isDefault },
+                                set: { _ in roomSettingsStore.toggleDefaultSeat(id: seat.id) }
+                            ))
+                            .labelsHidden()
+                            .disabled(isReadOnly)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    }
+                }
+
+                settingsGroup(title: "功能限制") {
+                    Stepper(
+                        "最大席位 \(roomSettingsStore.settings.limits.maxSeats)",
+                        value: Binding(
+                            get: { roomSettingsStore.settings.limits.maxSeats },
+                            set: { roomSettingsStore.updateLimits(maxSeats: $0) }
+                        ),
+                        in: 2...8
+                    )
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    Divider().overlay(AmberTheme.borderSoft)
+
+                    Stepper(
+                        "默认轮数 \(roomSettingsStore.settings.limits.defaultRounds)",
+                        value: Binding(
+                            get: { roomSettingsStore.settings.limits.defaultRounds },
+                            set: { roomSettingsStore.updateLimits(defaultRounds: $0) }
+                        ),
+                        in: 1...6
+                    )
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    Divider().overlay(AmberTheme.borderSoft)
+
+                    Stepper(
+                        "席位超时 \(roomSettingsStore.settings.limits.seatTimeoutSeconds)s",
+                        value: Binding(
+                            get: { roomSettingsStore.settings.limits.seatTimeoutSeconds },
+                            set: { roomSettingsStore.updateLimits(seatTimeoutSeconds: $0) }
+                        ),
+                        in: 15...180,
+                        step: 15
+                    )
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    Divider().overlay(AmberTheme.borderSoft)
+
+                    Stepper(
+                        "输出预算 \(roomSettingsStore.settings.limits.outputBudgetCharacters)",
+                        value: Binding(
+                            get: { roomSettingsStore.settings.limits.outputBudgetCharacters },
+                            set: { roomSettingsStore.updateLimits(outputBudgetCharacters: $0) }
+                        ),
+                        in: 2_000...40_000,
+                        step: 2_000
+                    )
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                }
+            }
+            .padding(20)
+        }
+        .background(AmberTheme.background)
+    }
+
+    @ViewBuilder
+    private func settingsGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+            VStack(spacing: 0) {
+                content()
+            }
+            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+        }
+    }
+
+    private func modelMenu(title: String, value: String, setValue: @escaping (String) -> Void) -> some View {
+        Menu {
+            ForEach(availableModelIds, id: \.self) { modelId in
+                Button(modelId) { setValue(modelId) }
+            }
+        } label: {
+            settingsRow(title: title, value: value.trimmedOr(currentModelId), systemImage: "cpu")
+        }
+        .buttonStyle(.plain)
+        .disabled(isReadOnly || availableModelIds.isEmpty)
+    }
+
+    private func reasoningMenu(title: String, value: IOSCouncilReasoningPreset, setValue: @escaping (IOSCouncilReasoningPreset) -> Void) -> some View {
+        Menu {
+            ForEach(IOSCouncilReasoningPreset.allCases) { option in
+                Button(option.title) { setValue(option) }
+            }
+        } label: {
+            settingsRow(title: title, value: value.title, systemImage: "brain.head.profile")
+        }
+        .buttonStyle(.plain)
+        .disabled(isReadOnly)
+    }
+
+    private func settingsRow(title: String, value: String, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(AmberTheme.accent)
+                .frame(width: 30, height: 30)
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+            Spacer()
+            Text(value)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(1)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted2)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+    }
+}
+
+enum CouncilRuntimeSheet: Identifiable {
+    case detail(CouncilDiscussionDetail)
+    case members
+    case settings
+
+    var id: String {
+        switch self {
+        case .detail(let detail): "detail-\(detail.id)"
+        case .members: "members"
+        case .settings: "settings"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class CouncilChatViewModel {
     var inputText = ""
-    var selectedMode: CouncilDiscussionMode = .explore
+    var selectedMode: CouncilDiscussionMode = .freeChat
     var messages: [CouncilChatMessage]
     var isRunning = false
-    var selectedDetail: CouncilDiscussionDetail?
+    var activeSheet: CouncilRuntimeSheet?
+    var isResearchConsentPresented = false
+    var participants: [CouncilParticipant] = []
+    var failedSpeakerIds: Set<String> = []
 
-    let participants: [CouncilParticipant]
+    let roomSettingsStore: IOSCouncilRoomSettingsStore
 
     @ObservationIgnored private let settingsStore: SettingsStore
     @ObservationIgnored private let sharedSettings: IOSSharedSettingsStore
-    @ObservationIgnored private let taskStore = IOSAdvancedTaskStore.shared
-    @ObservationIgnored private lazy var provider = OpenAIKmpProvider()
-    @ObservationIgnored private let streamJobBox = CouncilStreamJobBox()
+    @ObservationIgnored private let providerRegistry: ProviderRegistryStore?
+    @ObservationIgnored private let runner: IOSCouncilRoomRunner
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
-    @ObservationIgnored private var activeContinuation: CheckedContinuation<String, Never>?
     @ObservationIgnored private var currentObjective = ""
     @ObservationIgnored private var currentTaskId: String?
+    @ObservationIgnored private var pendingObjective = ""
+    @ObservationIgnored private var lastRunObjective = ""
+    @ObservationIgnored private var lastResearchAllowed = false
 
+    private var roomStateOverride: String?
     private var activeSpeakerId: String?
     private var invitedSpeakerIds: Set<String> = []
 
-    init(settingsStore: SettingsStore, sharedSettings: IOSSharedSettingsStore) {
+    init(
+        settingsStore: SettingsStore,
+        sharedSettings: IOSSharedSettingsStore,
+        providerRegistry: ProviderRegistryStore?,
+        permissionStore: IOSPermissionStore,
+        roomSettingsStore: IOSCouncilRoomSettingsStore = .shared,
+        runner: IOSCouncilRoomRunner? = nil
+    ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
-        self.participants = CouncilParticipant.defaults(hostName: Self.hostName(for: settingsStore.modelId))
-            + CouncilParticipant.customSeats(from: sharedSettings.savedCouncilSeats)
+        self.providerRegistry = providerRegistry
+        self.roomSettingsStore = roomSettingsStore
+        self.runner = runner ?? IOSCouncilRoomRunner(permissionStore: permissionStore)
         self.messages = [
             CouncilChatMessage(
                 kind: .system,
                 author: "议会",
-                body: "模型议会已就绪。输入一个问题后，我会邀请不同视角的席位接力讨论。",
+                body: "模型议会已就绪。输入议题后，主持人会先调研和完善议题，再拉起席位讨论。",
                 systemImage: "person.3.sequence",
                 tint: AmberTheme.accentIndigo,
                 subtitle: "就绪"
             )
         ]
+        refreshSettingsBackedParticipants()
     }
 
     var canSend: Bool {
-        !isRunning && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isRunning &&
+            !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var currentModelId: String {
@@ -511,6 +860,10 @@ final class CouncilChatViewModel {
     }
 
     var roomStateText: String {
+        if let roomStateOverride { return roomStateOverride }
+        if settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "缺少 API Key"
+        }
         if isRunning {
             return selectedMode.runningState
         }
@@ -521,7 +874,27 @@ final class CouncilChatViewModel {
         messages.last?.body ?? ""
     }
 
+    var availableModelIds: [String] {
+        var seen = Set<String>()
+        var ids: [String] = []
+        if let selected = providerRegistry?.selectedProvider {
+            for model in selected.models where model.type == ModelType.chat {
+                let id = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty, seen.insert(id).inserted else { continue }
+                ids.append(id)
+            }
+        }
+        let current = currentModelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !current.isEmpty, seen.insert(current).inserted {
+            ids.insert(current, at: 0)
+        }
+        return ids
+    }
+
     func state(for participant: CouncilParticipant) -> CouncilParticipantState {
+        if failedSpeakerIds.contains(participant.id) {
+            return .failed
+        }
         if activeSpeakerId == participant.id {
             return .speaking
         }
@@ -540,26 +913,43 @@ final class CouncilChatViewModel {
     }
 
     func insertInviteTemplate() {
-        appendToken("@Gemini")
-    }
-
-    func insertGuestResponseTemplate() {
-        appendToken("让 guest 互相回应一下")
-    }
-
-    func requestSynthesis() {
-        selectedMode = .synthesize
-        if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            inputText = "@host 总结当前讨论，给出建议和下一步。"
-        }
+        appendToken("请主持人动态选择本轮需要加入的席位。")
     }
 
     func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isRunning else { return }
+        guard !settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            appendMessage(
+                kind: .system,
+                author: "议会",
+                body: "当前服务商缺少 API Key，无法启动模型议会。",
+                systemImage: "key.slash",
+                tint: AmberTheme.accentRed,
+                subtitle: "配置阻塞",
+                status: .failed
+            )
+            return
+        }
+        pendingObjective = text
+        if sharedSettings.snapshot.enableWebSearch {
+            isResearchConsentPresented = true
+        } else {
+            startPendingDiscussion(researchAllowed: false)
+        }
+    }
 
+    func startPendingDiscussion(researchAllowed: Bool) {
+        let text = pendingObjective.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingObjective = ""
+        isResearchConsentPresented = false
+        guard !text.isEmpty, !isRunning else { return }
         inputText = ""
         currentObjective = text
+        lastRunObjective = text
+        lastResearchAllowed = researchAllowed
+        roomStateOverride = nil
+        failedSpeakerIds.removeAll()
         appendMessage(
             kind: .user,
             author: "你",
@@ -569,23 +959,21 @@ final class CouncilChatViewModel {
             subtitle: nil
         )
 
-        let guests = guestsFor(text: text, mode: selectedMode)
         discussionTask?.cancel()
         discussionTask = Task { [weak self] in
-            await self?.runDiscussion(objective: text, guests: guests)
+            await self?.runDiscussion(objective: text, researchAllowed: researchAllowed)
         }
     }
 
     func cancelDiscussion() {
         discussionTask?.cancel()
         discussionTask = nil
-        streamJobBox.job?.cancel(cause: nil)
-        streamJobBox.job = nil
-        activeContinuation?.resume(returning: "")
-        activeContinuation = nil
+        runner.cancel()
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
+        failedSpeakerIds.removeAll()
         isRunning = false
+        roomStateOverride = "已取消"
         appendDivider("已停止")
         appendMessage(
             kind: .system,
@@ -596,193 +984,63 @@ final class CouncilChatViewModel {
             subtitle: "已取消"
         )
         updateDetail(status: "已停止")
-        if let currentTaskId {
-            _ = taskStore.updateTask(
-                id: currentTaskId,
-                status: .cancelled,
-                resultSummary: "模型议会已取消。",
-                retryable: true,
-                cancelCapability: false
-            )
-        }
     }
 
     func showCurrentDetail() {
-        selectedDetail = selectedDetail ?? makeDetail(status: isRunning ? selectedMode.runningState : "就绪")
+        activeSheet = .detail(makeDetail(status: isRunning ? selectedMode.runningState : "就绪"))
     }
 
-    private func runDiscussion(objective: String, guests: [CouncilParticipant]) async {
+    func showMembers() {
+        activeSheet = .members
+    }
+
+    func showSettings() {
+        activeSheet = .settings
+    }
+
+    func restartLastDiscussion() {
+        let objective = lastRunObjective.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !objective.isEmpty, !isRunning else { return }
+        resetRoom()
+        pendingObjective = objective
+        startPendingDiscussion(researchAllowed: lastResearchAllowed)
+    }
+
+    private func runDiscussion(objective: String, researchAllowed: Bool) async {
         isRunning = true
-        invitedSpeakerIds = Set(guests.map(\.id))
-        selectedDetail = makeDetail(status: selectedMode.runningState)
+        invitedSpeakerIds.removeAll()
+        activeSheet = nil
         appendDivider(selectedMode.openingDivider)
-        let task = taskStore.startTask(
-            kind: .modelCouncil,
-            title: "\(selectedMode.title) · \(objective.prefix(34))",
+        roomSettingsStore.bootstrapLegacySeatsIfNeeded(
+            sharedSettings.savedCouncilSeats,
+            currentModelId: currentModelId
+        )
+        refreshSettingsBackedParticipants()
+        let request = IOSCouncilRoomRunRequest(
             objective: objective,
-            budgetSummary: "mode \(selectedMode.rawValue) · seats \(max(1, guests.count + 1)) · max rounds 3",
-            sourceToolName: "council_chat",
-            metadata: [
-                "host": hostDisplayName,
-                "guests": guests.map(\.displayName).joined(separator: ", ")
-            ]
+            mode: selectedMode.runMode,
+            settings: roomSettingsStore.settings,
+            currentModelId: currentModelId,
+            providerSetting: IOSCouncilRoomRunner.makeProviderSetting(
+                baseUrl: settingsStore.baseUrl,
+                apiKey: settingsStore.currentApiKey
+            ),
+            searchSettings: sharedSettings.snapshot,
+            researchConsent: sharedSettings.snapshot.enableWebSearch
+                ? (researchAllowed ? .allowed : .denied)
+                : .unavailable
         )
-        currentTaskId = task.id
-        var generatedOutputs: [String] = []
-
-        defer {
-            let cancelled = Task.isCancelled
-            let transcript = roomTranscript(limit: 80)
-            let hadError = generatedOutputs.contains { $0.lowercased().hasPrefix("error:") }
-            _ = taskStore.updateTask(
-                id: task.id,
-                status: cancelled ? .cancelled : .completed,
-                resultSummary: cancelled
-                    ? "模型议会已取消。"
-                    : (hadError ? "模型议会已完成，但至少一个席位降级或失败。" : "模型议会已完成讨论并生成结论。"),
-                logTail: transcript,
-                error: hadError ? generatedOutputs.filter { $0.lowercased().hasPrefix("error:") }.joined(separator: "\n") : "",
-                retryable: cancelled || hadError,
-                cancelCapability: false,
-                metadata: ["message_count": "\(messages.count)"]
-            )
-            activeSpeakerId = nil
-            invitedSpeakerIds.removeAll()
-            isRunning = false
-            streamJobBox.job = nil
-            activeContinuation = nil
-            updateDetail(status: "就绪")
+        let summary = await runner.run(request: request) { [weak self] event in
+            self?.handle(event)
         }
-
-        let host = participants.first(where: \.isHost) ?? participants[0]
-
-        if selectedMode != .synthesize {
-            let openingId = appendSpeakingMessage(
-                speaker: host,
-                subtitle: "主持 · \(currentModelId)"
-            )
-            _ = await generateIntoMessage(
-                messageId: openingId,
-                speaker: host,
-                systemPrompt: hostSystemPrompt,
-                userPrompt: hostOpeningPrompt(objective: objective, guests: guests)
-            )
-            generatedOutputs.append(messages.first(where: { $0.id == openingId })?.body ?? "")
-        }
-
-        if Task.isCancelled { return }
-
-        for (index, guest) in guests.enumerated() {
-            let directive = hostDirective(for: guest, index: index, guests: guests)
-            appendMessage(
-                kind: .host,
-                author: host.displayName,
-                body: directive,
-                systemImage: host.systemImage,
-                tint: host.tint,
-                subtitle: "邀请 \(guest.displayName)"
-            )
-
-            let messageId = appendSpeakingMessage(
-                speaker: guest,
-                subtitle: "\(modelLabel(for: guest)) · \(host.displayName) 邀请"
-            )
-            let guestOutput = await generateIntoMessage(
-                messageId: messageId,
-                speaker: guest,
-                systemPrompt: guestSystemPrompt(for: guest),
-                userPrompt: guestPrompt(objective: objective, guest: guest, hostDirective: directive)
-            )
-            generatedOutputs.append(guestOutput)
-            if Task.isCancelled { return }
-        }
-
-        appendDivider("主持总结")
-        let synthesisId = appendSpeakingMessage(
-            speaker: host,
-            subtitle: "总结 · \(currentModelId)"
-        )
-        let synthesis = await generateIntoMessage(
-            messageId: synthesisId,
-            speaker: host,
-            systemPrompt: hostSystemPrompt,
-            userPrompt: hostSynthesisPrompt(objective: objective)
-        )
-        generatedOutputs.append(synthesis)
-    }
-
-    private func generateIntoMessage(
-        messageId: UUID,
-        speaker: CouncilParticipant,
-        systemPrompt: String,
-        userPrompt: String
-    ) async -> String {
-        activeSpeakerId = speaker.id
-        let result = await streamText(
-            systemPrompt: systemPrompt,
-            userPrompt: userPrompt,
-            modelId: modelId(for: speaker)
-        ) { [weak self] text in
-            self?.updateMessage(messageId, body: text.isEmpty ? "思考中..." : text, status: .speaking)
-        }
-        activeContinuation = nil
-        streamJobBox.job = nil
-        if !Task.isCancelled {
-            updateMessage(messageId, body: result.isEmpty ? "没有输出。" : result, status: .completed)
+        if currentTaskId == nil {
+            currentTaskId = summary.taskId
         }
         activeSpeakerId = nil
-        updateDetail(status: selectedMode.runningState)
-        return result
-    }
-
-    private func streamText(
-        systemPrompt: String,
-        userPrompt: String,
-        modelId: String,
-        onChunk: @escaping @MainActor (String) -> Void
-    ) async -> String {
-        let providerSetting = makeProviderSetting()
-        let params = makeTextGenerationParams(modelId: modelId)
-        let initialMessages = [
-            UIMessage.companion.system(prompt: systemPrompt),
-            UIMessage.companion.user(prompt: userPrompt)
-        ]
-        let accumulator = MessageStreamAccumulator(initialMessages: initialMessages, model: params.model)
-
-        return await withCheckedContinuation { continuation in
-            var didResume = false
-
-            func resumeOnce(_ value: String) {
-                guard !didResume else { return }
-                didResume = true
-                continuation.resume(returning: value)
-            }
-
-            activeContinuation = continuation
-            streamJobBox.job = provider.streamTextCancellable(
-                providerSetting: providerSetting,
-                messages: initialMessages,
-                params: params,
-                onChunk: { chunk in
-                    accumulator.append(chunk: chunk)
-                    let text = accumulator.snapshot().last?.toText() ?? ""
-                    Task { @MainActor in
-                        onChunk(text)
-                    }
-                },
-                onComplete: {
-                    let text = accumulator.snapshot().last?.toText() ?? ""
-                    Task { @MainActor in
-                        resumeOnce(text)
-                    }
-                },
-                onError: { error in
-                    Task { @MainActor in
-                        resumeOnce("Error: \(error.message ?? String(describing: error))")
-                    }
-                }
-            )
-        }
+        invitedSpeakerIds.removeAll()
+        isRunning = false
+        roomStateOverride = summary.status == .completed ? "就绪" : summary.status.title
+        updateDetail(status: roomStateOverride ?? "就绪")
     }
 
     private func appendToken(_ token: String) {
@@ -819,18 +1077,6 @@ final class CouncilChatViewModel {
         return message.id
     }
 
-    private func appendSpeakingMessage(speaker: CouncilParticipant, subtitle: String) -> UUID {
-        appendMessage(
-            kind: speaker.isHost ? .host : .guest,
-            author: speaker.displayName,
-            body: "思考中...",
-            systemImage: speaker.systemImage,
-            tint: speaker.tint,
-            subtitle: subtitle,
-            status: .speaking
-        )
-    }
-
     private func appendDivider(_ text: String) {
         messages.append(
             CouncilChatMessage(
@@ -850,110 +1096,42 @@ final class CouncilChatViewModel {
         messages[index].status = status
     }
 
-    private func guestsFor(text: String, mode: CouncilDiscussionMode) -> [CouncilParticipant] {
-        if mode == .synthesize { return [] }
-        let lowercased = text.lowercased()
-        let directMentions = participants
-            .filter { !$0.isHost && lowercased.contains("@\($0.handle.lowercased())") }
-        if !directMentions.isEmpty {
-            return Array(directMentions.prefix(3))
+    private func handle(_ event: IOSCouncilRoomEvent) {
+        switch event {
+        case .taskStarted(let id):
+            currentTaskId = id
+        case .state(let state):
+            roomStateOverride = state
+            updateDetail(status: state)
+        case .roster(let speakers, let activeId, let failedIds):
+            participants = speakers.map(CouncilParticipant.init(speaker:))
+            activeSpeakerId = activeId
+            failedSpeakerIds = failedIds
+            invitedSpeakerIds = Set(speakers.filter { !$0.isHost }.map(\.id))
+            updateDetail(status: roomStateOverride ?? selectedMode.runningState)
+        case .append(let event):
+            appendMessage(event)
+        case .updateMessage(let id, let body, let status):
+            updateMessage(id, body: body, status: CouncilMessageStatus(status))
         }
-        switch mode {
-        case .explore:
-            return participants.filter { ["deepseek", "glm", "gemini"].contains($0.id) }
-        case .debate:
-            return participants.filter { ["deepseek", "risk", "opponent"].contains($0.id) }
-        case .synthesize:
-            return []
-        }
     }
 
-    private var hostSystemPrompt: String {
-        """
-        You are the host Assistant in AmberAgent Council Chat.
-        You are not a passive judge. You guide the room, invite temporary Assistants, pass context between them, ask for sharper thinking, and synthesize a higher-quality decision.
-        Keep replies concise, concrete, and in Chinese unless the user asks otherwise.
-        Make it clear why each guest perspective matters.
-        """
-    }
-
-    private func guestSystemPrompt(for guest: CouncilParticipant) -> String {
-        """
-        You are \(guest.displayName), a temporary independent Assistant in AmberAgent Council Chat.
-        Role: \(guest.roleDescription)
-        You may reference the host and previous guest Assistants, agree, disagree, or continue their points.
-        You speak under the host's coordination. Do not take over the room.
-        Keep output concise, useful, and evidence-oriented.
-        """
-    }
-
-    private func hostOpeningPrompt(objective: String, guests: [CouncilParticipant]) -> String {
-        """
-        User objective:
-        \(objective)
-
-        Current mode: \(selectedMode.title)
-        Invited guests: \(guests.map(\.displayName).joined(separator: ", "))
-
-        Recent room transcript:
-        \(roomTranscript(limit: 10))
-
-        Write a short host message that frames the discussion and explains who you will invite first.
-        """
-    }
-
-    private func hostDirective(
-        for guest: CouncilParticipant,
-        index: Int,
-        guests: [CouncilParticipant]
-    ) -> String {
-        if selectedMode == .explore {
-            if index == 0 {
-                return "\(guest.displayName)，你先从\(guest.shortLens)角度扩展信息面，找出这个问题里容易被忽略的可能性。"
-            }
-            let previous = guests[index - 1].displayName
-            return "\(guest.displayName)，接着 \(previous) 的观点，从\(guest.shortLens)角度补充、扩展或提出不同路径。"
-        }
-        if index == 0 {
-            return "\(guest.displayName)，先从\(guest.shortLens)角度判断这个方向最关键的成立条件。"
-        }
-        let previous = guests[index - 1].displayName
-        return "\(guest.displayName)，请回应 \(previous) 的核心判断，从\(guest.shortLens)角度找盲区、反例和风险。"
-    }
-
-    private func guestPrompt(
-        objective: String,
-        guest: CouncilParticipant,
-        hostDirective: String
-    ) -> String {
-        """
-        User objective:
-        \(objective)
-
-        Discussion mode:
-        \(selectedMode.title) - \(selectedMode.intent)
-
-        Host instruction:
-        \(hostDirective)
-
-        Recent room transcript:
-        \(roomTranscript(limit: 16))
-
-        Respond as \(guest.displayName). If you build on or disagree with another Assistant, name that Assistant explicitly.
-        """
-    }
-
-    private func hostSynthesisPrompt(objective: String) -> String {
-        """
-        User objective:
-        \(objective)
-
-        Full recent council transcript:
-        \(roomTranscript(limit: 24))
-
-        Produce the host synthesis. Explain what the extra perspectives changed, what decision you recommend, and the next concrete step.
-        Keep it chat-native, not a long report.
-        """
+    private func appendMessage(_ event: IOSCouncilRoomMessageEvent) {
+        let participant = event.speakerId.flatMap { id in participants.first(where: { $0.id == id }) }
+        let kind = CouncilMessageKind(event.kind)
+        let tint = participant?.tint ?? (kind == .system ? AmberTheme.accentIndigo : AmberTheme.muted)
+        let image = participant?.systemImage ?? (kind == .divider ? "circle.grid.cross" : "person.3.sequence")
+        messages.append(CouncilChatMessage(
+            id: event.id,
+            kind: kind,
+            author: event.author,
+            body: event.body,
+            systemImage: image,
+            tint: tint,
+            subtitle: event.subtitle,
+            status: CouncilMessageStatus(event.status)
+        ))
+        updateDetail(status: roomStateOverride ?? (isRunning ? selectedMode.runningState : "就绪"))
     }
 
     private func roomTranscript(limit: Int) -> String {
@@ -976,61 +1154,15 @@ final class CouncilChatViewModel {
                         : "\(participant.displayName)：\(participant.roleDescription)（\(modelLabel(for: participant))）"
                 }
                 .joined(separator: "\n"),
-            budgetSummary: "模式：\(selectedMode.title)\n最多席位轮次：3\n提供商：当前 OpenAI-compatible 配置\n主持模型：\(currentModelId)",
+            budgetSummary: "模式：\(selectedMode.title)\n最大席位：\(roomSettingsStore.settings.limits.maxSeats)\n默认轮数：\(roomSettingsStore.settings.limits.defaultRounds)\n席位超时：\(roomSettingsStore.settings.limits.seatTimeoutSeconds)s\n输出预算：\(roomSettingsStore.settings.limits.outputBudgetCharacters)\n提供商：当前 OpenAI-compatible 配置\n主持模型：\(roomSettingsStore.settings.host.modelId.trimmedOr(currentModelId))",
             transcript: roomTranscript(limit: 80)
         )
     }
 
     private func updateDetail(status: String) {
-        guard selectedDetail != nil else { return }
-        selectedDetail = makeDetail(status: status)
-    }
-
-    private func makeProviderSetting() -> ProviderSetting.OpenAI {
-        ProviderSetting.OpenAI(
-            id: KotlinUuid.companion.random(),
-            enabled: true,
-            name: "OpenAI",
-            models: [],
-            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-            builtIn: false,
-            descriptionText: nil,
-            shortDescriptionText: nil,
-            apiKey: settingsStore.apiKey,
-            baseUrl: settingsStore.baseUrl,
-            chatCompletionsPath: "/chat/completions",
-            useResponseApi: false,
-            authMode: OpenAIAuthMode.apiKey,
-            brand: OpenAIBrand.generic
-        )
-    }
-
-    private func makeTextGenerationParams(modelId: String) -> TextGenerationParams {
-        let abilities = ModelRegistry.shared.MODEL_ABILITIES.getData(modelId: modelId) as? [ModelAbility] ?? []
-        let model = Model(
-            modelId: modelId,
-            displayName: modelId,
-            id: KotlinUuid.companion.random(),
-            type: ModelType.chat,
-            customHeaders: [],
-            customBodies: [],
-            inputModalities: [],
-            outputModalities: [],
-            abilities: abilities,
-            tools: Set<BuiltInTools>(),
-            contextWindowTokens: nil,
-            providerOverwrite: nil
-        )
-        return TextGenerationParams(
-            model: model,
-            temperature: KotlinFloat(value: selectedMode.temperature),
-            topP: nil,
-            maxTokens: nil,
-            tools: [],
-            reasoningLevel: .off,
-            customHeaders: [],
-            customBody: []
-        )
+        if case .detail = activeSheet {
+            activeSheet = .detail(makeDetail(status: status))
+        }
     }
 
     private func modelId(for participant: CouncilParticipant) -> String {
@@ -1051,84 +1183,115 @@ final class CouncilChatViewModel {
         if lowercased.contains("kimi") { return "Kimi" }
         return "GPT"
     }
-}
 
-private final class CouncilStreamJobBox {
-    var job: Kotlinx_coroutines_coreJob?
+    private func refreshSettingsBackedParticipants() {
+        roomSettingsStore.bootstrapLegacySeatsIfNeeded(sharedSettings.savedCouncilSeats, currentModelId: currentModelId)
+        let settings = roomSettingsStore.settings.normalized(currentModelId: currentModelId)
+        let host = IOSCouncilRoomSpeaker(
+            id: "host",
+            name: "主持人",
+            rolePrompt: settings.host.prompt,
+            modelId: settings.host.modelId,
+            reasoning: settings.host.reasoning,
+            prompt: settings.host.prompt,
+            isHost: true
+        )
+        let seats = settings.defaultSeats(currentModelId: currentModelId).map {
+            IOSCouncilRoomSpeaker(
+                id: $0.id,
+                name: $0.name,
+                rolePrompt: $0.rolePrompt,
+                modelId: $0.modelId,
+                reasoning: $0.reasoning,
+                prompt: $0.prompt,
+                isHost: false
+            )
+        }
+        participants = ([host] + seats).map(CouncilParticipant.init(speaker:))
+    }
 
-    deinit {
-        job?.cancel(cause: nil)
+    private func resetRoom() {
+        discussionTask?.cancel()
+        runner.cancel()
+        activeSpeakerId = nil
+        invitedSpeakerIds.removeAll()
+        failedSpeakerIds.removeAll()
+        currentTaskId = nil
+        roomStateOverride = nil
+        currentObjective = ""
+        messages = [
+            CouncilChatMessage(
+                kind: .system,
+                author: "议会",
+                body: "模型议会已重新开始。",
+                systemImage: "person.3.sequence",
+                tint: AmberTheme.accentIndigo,
+                subtitle: "就绪"
+            )
+        ]
+        refreshSettingsBackedParticipants()
     }
 }
 
 enum CouncilDiscussionMode: String, CaseIterable, Identifiable {
-    case explore
+    case freeChat = "free_chat"
     case debate
-    case synthesize
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .explore: "探索"
+        case .freeChat: "自由群聊"
         case .debate: "辩论"
-        case .synthesize: "总结"
         }
     }
 
     var accessibilityLabel: String {
         switch self {
-        case .explore: "自由群聊模式"
+        case .freeChat: "自由群聊模式"
         case .debate: "辩论模式"
-        case .synthesize: "主持总结模式"
         }
     }
 
     var intent: String {
         switch self {
-        case .explore: "扩展信息面、发现选项、形成早期方向"
+        case .freeChat: "扩展信息面、发现选项、形成早期方向"
         case .debate: "挑战假设、发现盲区、降低决策风险"
-        case .synthesize: "由主持人综合讨论，给出决策与下一步"
         }
     }
 
     var runningState: String {
         switch self {
-        case .explore: "探索中"
+        case .freeChat: "群聊中"
         case .debate: "辩论中"
-        case .synthesize: "总结中"
         }
     }
 
     var openingDivider: String {
         switch self {
-        case .explore: "探索 · 开场"
+        case .freeChat: "自由群聊 · 开场"
         case .debate: "辩论 · 交叉回应"
-        case .synthesize: "主持总结"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .explore: "sparkles"
+        case .freeChat: "bubble.left.and.bubble.right"
         case .debate: "scale.3d"
-        case .synthesize: "checkmark.seal"
         }
     }
 
     var tint: Color {
         switch self {
-        case .explore: AmberTheme.accentCyan
+        case .freeChat: AmberTheme.accentCyan
         case .debate: AmberTheme.accentRed
-        case .synthesize: AmberTheme.accentGreen
         }
     }
 
-    var temperature: Float {
+    var runMode: IOSCouncilRoomRunMode {
         switch self {
-        case .explore: 0.85
-        case .debate: 0.55
-        case .synthesize: 0.35
+        case .freeChat: .freeChat
+        case .debate: .debate
         }
     }
 }
@@ -1167,6 +1330,21 @@ struct CouncilParticipant: Identifiable {
         self.isHost = isHost
         self.modelHint = modelHint
         self.modelId = modelId?.trimmedNilIfBlank
+    }
+
+    init(speaker: IOSCouncilRoomSpeaker) {
+        self.init(
+            id: speaker.id,
+            handle: Self.makeHandle(from: speaker.name, fallback: speaker.isHost ? "host" : speaker.id),
+            displayName: speaker.isHost ? "Host · \(speaker.modelId)" : speaker.name,
+            roleDescription: speaker.rolePrompt,
+            shortLens: speaker.shortLens,
+            systemImage: speaker.isHost ? "crown" : Self.icon(for: speaker.id),
+            tint: speaker.isHost ? AmberTheme.accent : Self.tint(for: speaker.id),
+            isHost: speaker.isHost,
+            modelHint: speaker.modelId,
+            modelId: speaker.modelId
+        )
     }
 
     static func defaults(hostName: String) -> [CouncilParticipant] {
@@ -1273,18 +1451,40 @@ struct CouncilParticipant: Identifiable {
         let withoutSpaces = trimmed.filter { !$0.isWhitespace }
         return withoutSpaces.isEmpty ? fallback : withoutSpaces
     }
+
+    private static func icon(for id: String) -> String {
+        if id.contains("risk") { return "exclamationmark.shield" }
+        if id.contains("opponent") { return "hand.raised" }
+        if id.contains("product") { return "rectangle.3.group.bubble" }
+        if id.contains("engineering") { return "hammer" }
+        return "person.crop.circle.badge.checkmark"
+    }
+
+    private static func tint(for id: String) -> Color {
+        let palette = [
+            AmberTheme.accentCyan,
+            AmberTheme.accentGreen,
+            AmberTheme.accentAmber,
+            AmberTheme.accentIndigo,
+            AmberTheme.accentRed
+        ]
+        let value = abs(id.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) })
+        return palette[value % palette.count]
+    }
 }
 
 enum CouncilParticipantState: String {
     case idle
     case invited
     case speaking
+    case failed
 
     var label: String {
         switch self {
         case .idle: "待命"
         case .invited: "已邀请"
         case .speaking: "发言中"
+        case .failed: "失败"
         }
     }
 }
@@ -1327,12 +1527,15 @@ struct CouncilChatMessage: Identifiable {
     }
 
     var backgroundColor: Color {
+        if status == .failed {
+            return AmberTheme.accentRed.opacity(0.08)
+        }
         switch kind {
-        case .user: AmberTheme.accent
-        case .host: AmberTheme.surface
-        case .guest: Color.white.opacity(0.56)
-        case .system: AmberTheme.surface2.opacity(0.65)
-        case .divider: .clear
+        case .user: return AmberTheme.accent
+        case .host: return AmberTheme.surface
+        case .guest: return Color.white.opacity(0.56)
+        case .system: return AmberTheme.surface2.opacity(0.65)
+        case .divider: return .clear
         }
     }
 
@@ -1341,11 +1544,14 @@ struct CouncilChatMessage: Identifiable {
     }
 
     var borderColor: Color {
+        if status == .failed {
+            return AmberTheme.accentRed.opacity(0.42)
+        }
         switch kind {
-        case .host: AmberTheme.accent.opacity(0.24)
-        case .guest: AmberTheme.borderSoft
-        case .system: AmberTheme.borderSoft
-        default: .clear
+        case .host: return AmberTheme.accent.opacity(0.24)
+        case .guest: return AmberTheme.borderSoft
+        case .system: return AmberTheme.borderSoft
+        default: return .clear
         }
     }
 }
@@ -1356,11 +1562,29 @@ enum CouncilMessageKind {
     case guest
     case system
     case divider
+
+    init(_ kind: IOSCouncilRoomMessageKind) {
+        switch kind {
+        case .host: self = .host
+        case .seat: self = .guest
+        case .system: self = .system
+        case .divider: self = .divider
+        }
+    }
 }
 
 enum CouncilMessageStatus {
     case speaking
     case completed
+    case failed
+
+    init(_ status: IOSCouncilRoomMessageStatus) {
+        switch status {
+        case .speaking: self = .speaking
+        case .completed: self = .completed
+        case .failed: self = .failed
+        }
+    }
 }
 
 struct CouncilDiscussionDetail: Identifiable {
@@ -1373,6 +1597,11 @@ struct CouncilDiscussionDetail: Identifiable {
 }
 
 private extension String {
+    func trimmedOr(_ fallback: String) -> String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
     var trimmedNilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed

@@ -426,11 +426,24 @@ private extension View {
             case .council:
                 CouncilView(sharedSettings: sharedSettings)
             case .councilChat:
-                CouncilChatRuntimeView(settingsStore: settingsStore, sharedSettings: sharedSettings)
+                CouncilChatRuntimeView(
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    providerRegistry: providerRegistry,
+                    permissionStore: permissionStore
+                )
             case .councilSettings:
-                CouncilSettingsView(sharedSettings: sharedSettings)
+                CouncilSettingsView(
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    providerRegistry: providerRegistry
+                )
             case .seatEditor:
-                SeatEditorView(sharedSettings: sharedSettings)
+                SeatEditorView(
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    providerRegistry: providerRegistry
+                )
             case .subagents:
                 SubAgentsView(sharedSettings: sharedSettings)
             case .subAgentRole(let name, let roleId):

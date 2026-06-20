@@ -2,21 +2,33 @@ import SwiftUI
 import Shared
 
 struct SeatEditorView: View {
+    let settingsStore: SettingsStore
     let sharedSettings: IOSSharedSettingsStore
+    let providerRegistry: ProviderRegistryStore?
 
     @Environment(\.dismiss) private var dismiss
+    @State private var roomSettingsStore = IOSCouncilRoomSettingsStore.shared
 
     @State private var name = "工程"
     @State private var role = "工程"
-    @State private var runner: SeatRunnerType = .provider
-    @State private var model = "kimi-k2"
-    @State private var reasoning = "高"
-    @State private var cliTool = "Codex"
-    @State private var cliModel = ""
+    @State private var model = ""
+    @State private var reasoning: IOSCouncilReasoningPreset = .medium
     @State private var prompt = ""
+    @State private var isDefaultSeat = true
     @State private var showRemoveInfo = false
     @State private var isRemoving = false
     @State private var removeResultMessage: String?
+
+    init(
+        settingsStore: SettingsStore,
+        sharedSettings: IOSSharedSettingsStore,
+        providerRegistry: ProviderRegistryStore? = nil
+    ) {
+        self.settingsStore = settingsStore
+        self.sharedSettings = sharedSettings
+        self.providerRegistry = providerRegistry
+        self._model = State(initialValue: settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "gpt-4o" : settingsStore.modelId)
+    }
 
     var body: some View {
         ZStack {
@@ -30,6 +42,7 @@ struct SeatEditorView: View {
                         noticeSection
                         identitySection
                         modelSection
+                        promptSection
                         previewSection
                         deleteSection
                     }
@@ -40,13 +53,16 @@ struct SeatEditorView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            roomSettingsStore.bootstrapLegacySeatsIfNeeded(sharedSettings.savedCouncilSeats, currentModelId: currentModelId)
+        }
         .alert("移除席位", isPresented: $showRemoveInfo) {
             Button("移除", role: .destructive) {
                 removeAllCustomSeats()
             }
             Button("取消", role: .cancel) { }
         } message: {
-            Text("将删除全部 \(customSeatCount) 个自定义席位。内置席位不会被删除。此操作不可恢复。")
+            Text("将删除当前保存的全部 \(customSeatCount) 个席位配置。此操作不可恢复。")
         }
         .alert("移除结果", isPresented: Binding(
             get: { removeResultMessage != nil },
@@ -58,18 +74,18 @@ struct SeatEditorView: View {
         }
     }
 
-    // [Slice 4] 真删除：从后往前逐个调 removeCouncilSeat(at:)，
-    // 每次 removeCouncilSeat 都会同步从快照（IosSettingsMutations.removeCouncilSeat）
-    // 与 legacy 镜像移除。KMP seed 席位不受影响。
     private func removeAllCustomSeats() {
         isRemoving = true
         let count = customSeatCount
-        // 从尾部删，避免索引位移
-        for index in stride(from: count - 1, through: 0, by: -1) {
-            sharedSettings.removeCouncilSeat(at: index)
+        roomSettingsStore.removeAllCustomSeats()
+        let legacyCount = sharedSettings.savedCouncilSeats.count
+        if legacyCount > 0 {
+            for index in stride(from: legacyCount - 1, through: 0, by: -1) {
+                sharedSettings.removeCouncilSeat(at: index)
+            }
         }
         isRemoving = false
-        removeResultMessage = count > 0 ? "已移除 \(count) 个自定义席位。" : "没有可移除的自定义席位。"
+        removeResultMessage = count > 0 ? "已移除 \(count) 个席位配置。" : "没有可移除的席位配置。"
     }
 
     private var header: some View {
@@ -102,7 +118,7 @@ struct SeatEditorView: View {
     }
 
     private var noticeSection: some View {
-        SeatEditorFootnote(text: "自定义席位会保存名称、角色和模型，重启后保留。")
+        SeatEditorFootnote(text: "自定义席位会保存名称、模型、思考档位和提示词，重启后保留。")
             .padding(.bottom, 10)
     }
 
@@ -157,14 +173,14 @@ struct SeatEditorView: View {
             AmberSectionLabel(text: "模型")
             providerRunnerGroup
 
-            SeatEditorFootnote(text: "当前自定义席位只保存模型选择。")
+            SeatEditorFootnote(text: "模型列表只来自当前激活服务商；也可以手动填写同一服务商支持的请求模型 ID。")
         }
     }
 
     private var providerRunnerGroup: some View {
         AmberFormGroup {
             Menu {
-                ForEach(["kimi-k2", "codex", "gemini-3-pro", "glm-4.6", "claude-haiku-4.5"], id: \.self) { option in
+                ForEach(availableModelIds, id: \.self) { option in
                     Button(option) { model = option }
                 }
             } label: {
@@ -177,6 +193,65 @@ struct SeatEditorView: View {
                 )
             }
             .buttonStyle(.plain)
+
+            SeatEditorDivider()
+
+            HStack(spacing: 12) {
+                Text("请求模型 ID")
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .frame(width: 92, alignment: .leading)
+                TextField("例如 gpt-4o", text: $model)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.plain)
+            }
+            .frame(minHeight: 56)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
+
+            SeatEditorDivider()
+
+            Menu {
+                ForEach(IOSCouncilReasoningPreset.allCases) { option in
+                    Button(option.title) { reasoning = option }
+                }
+            } label: {
+                SeatEditorRow(
+                    systemImage: "brain.head.profile",
+                    iconColor: AmberTheme.accentCyan,
+                    title: "思考档位",
+                    trailing: reasoning.title,
+                    showsChevron: true
+                )
+            }
+            .buttonStyle(.plain)
+
+            SeatEditorDivider()
+
+            Toggle(isOn: $isDefaultSeat) {
+                Text("默认加入")
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 56)
+        }
+    }
+
+    private var promptSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "提示词")
+            AmberFormGroup {
+                TextField("补充这个席位的发言边界和偏好", text: $prompt, axis: .vertical)
+                    .lineLimit(3...7)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+            }
+            SeatEditorFootnote(text: "提示词会直接进入该席位的 system prompt。")
         }
     }
 
@@ -184,7 +259,7 @@ struct SeatEditorView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "已保存席位")
             AmberFormGroup {
-                let seats = sharedSettings.savedCouncilSeats
+                let seats = roomSettingsStore.settings.seats
                 if seats.isEmpty {
                     Text("暂无自定义席位。填写上方名称、角色和模型后点「保存席位」添加。")
                         .font(.caption).foregroundStyle(AmberTheme.muted)
@@ -194,11 +269,11 @@ struct SeatEditorView: View {
                     ForEach(Array(seats.enumerated()), id: \.offset) { index, seat in
                         HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(seat["name"] ?? "?").font(.body.weight(.semibold))
-                                Text("\(seat["role"] ?? "?") · \(seat["modelId"] ?? "?")")
+                                Text(seat.name).font(.body.weight(.semibold))
+                                Text("\(seat.rolePrompt) · \(seat.modelId.trimmedOr(currentModelId)) · \(seat.reasoning.title)")
                                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(AmberTheme.muted2)
                             }.frame(maxWidth: .infinity, alignment: .leading)
-                            Button { sharedSettings.removeCouncilSeat(at: index) } label: {
+                            Button { roomSettingsStore.removeSeat(id: seat.id) } label: {
                                 Image(systemName: "minus.circle.fill").font(.system(size: 18)).foregroundStyle(AmberTheme.accentRed)
                             }.buttonStyle(.plain)
                         }.frame(minHeight: 48).padding(.horizontal, 14).padding(.vertical, 4)
@@ -209,19 +284,29 @@ struct SeatEditorView: View {
                 Button {
                     let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
-                    sharedSettings.addCouncilSeat(name: trimmed, role: role, modelId: model)
+                    let normalizedModel = model.trimmedOr(currentModelId)
+                    roomSettingsStore.addOrUpdateSeat(
+                        IOSCouncilRoomSeatConfig(
+                            name: trimmed,
+                            rolePrompt: role,
+                            modelId: normalizedModel,
+                            reasoning: reasoning,
+                            prompt: prompt,
+                            isDefault: isDefaultSeat
+                        ),
+                        currentModelId: currentModelId
+                    )
+                    sharedSettings.addCouncilSeat(name: trimmed, role: role, modelId: normalizedModel)
                     name = ""
+                    prompt = ""
                 } label: {
                     Label("保存席位", systemImage: "plus.circle.fill").font(.body.weight(.semibold)).foregroundStyle(AmberTheme.accent)
                 }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
             }
-            SeatEditorFootnote(text: "自定义席位会保存在本机，重启后仍然保留。内置席位不可删除。")
+            SeatEditorFootnote(text: "席位会保存在本机，重启后仍然保留。")
         }
     }
 
-    // [Slice 4] 移除席位：真接。删除所有用户自定义席位（从快照
-    // agentRuntime.modelCouncil.defaultSeats 与 legacy 镜像同步移除）。
-    // KMP seed 席位不可删除（不在 savedCouncilSeats 里）。
     private var deleteSection: some View {
         AmberFormGroup {
             Button(role: .destructive) {
@@ -231,7 +316,7 @@ struct SeatEditorView: View {
                     if isRemoving {
                         ProgressView().controlSize(.small)
                     }
-                    Text(customSeatCount == 0 ? "没有可移除的自定义席位" : "移除全部 \(customSeatCount) 个自定义席位")
+                    Text(customSeatCount == 0 ? "没有可移除的席位配置" : "移除全部 \(customSeatCount) 个席位配置")
                         .font(.body)
                         .foregroundStyle(AmberTheme.accentRed)
                         .frame(maxWidth: .infinity)
@@ -246,7 +331,27 @@ struct SeatEditorView: View {
     }
 
     private var customSeatCount: Int {
-        sharedSettings.savedCouncilSeats.count
+        roomSettingsStore.settings.seats.count
+    }
+
+    private var currentModelId: String {
+        settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "gpt-4o" : settingsStore.modelId
+    }
+
+    private var availableModelIds: [String] {
+        var seen = Set<String>()
+        var ids: [String] = []
+        if let selected = providerRegistry?.selectedProvider {
+            for model in selected.models where model.type == ModelType.chat {
+                let id = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty, seen.insert(id).inserted else { continue }
+                ids.append(id)
+            }
+        }
+        if seen.insert(currentModelId).inserted {
+            ids.insert(currentModelId, at: 0)
+        }
+        return ids
     }
 }
 
@@ -270,20 +375,6 @@ private struct SeatEditorStatusLine: View {
         .frame(minHeight: 46)
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
-    }
-}
-
-private enum SeatRunnerType: String, CaseIterable, Identifiable {
-    case provider
-    case cli
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .provider: "Provider 模型"
-        case .cli: "外部 CLI"
-        }
     }
 }
 
@@ -359,8 +450,15 @@ private struct SeatEditorFootnote: View {
     }
 }
 
+private extension String {
+    func trimmedOr(_ fallback: String) -> String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+}
+
 #Preview {
     NavigationStack {
-        SeatEditorView(sharedSettings: IOSSharedSettingsStore())
+        SeatEditorView(settingsStore: SettingsStore(), sharedSettings: IOSSharedSettingsStore())
     }
 }
