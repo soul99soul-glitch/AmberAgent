@@ -35,6 +35,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -44,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -63,6 +65,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.ai.vision.ImageAttachmentStatusKind
+import app.amber.core.ai.vision.ImageAttachmentValidator
 import app.amber.core.files.FilesManager
 import app.amber.feature.modelcouncil.CouncilParticipant
 import app.amber.feature.modelcouncil.CouncilParticipantStatus
@@ -71,8 +75,11 @@ import app.amber.feature.modelcouncil.running
 import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.context.LocalSettings
+import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.LocalAmberTokens
 import coil3.compose.AsyncImage
+import com.dokar.sonner.ToastType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -119,7 +126,11 @@ fun CouncilRoomComposer(
         if (uris.isNotEmpty()) {
             scope.launch {
                 val localUris = filesManager.createChatFilesByContents(uris)
-                attachments.addAll(localUris.map { UIMessagePart.Image(url = it.toString()) })
+                val existingUrls = attachments.filterIsInstance<UIMessagePart.Image>().map { it.url }.toSet()
+                val newImages = localUris
+                    .map { UIMessagePart.Image(url = it.toString()) }
+                    .filter { it.url !in existingUrls }
+                attachments.addAll(newImages)
             }
         }
     }
@@ -128,6 +139,7 @@ fun CouncilRoomComposer(
     ) { uris ->
         if (uris.isNotEmpty()) {
             scope.launch {
+                val existingDocUrls = attachments.filterIsInstance<UIMessagePart.Document>().map { it.url }.toSet()
                 val docs = uris.mapNotNull { uri: Uri ->
                     val fileName = withContext(Dispatchers.IO) {
                         filesManager.getFileNameFromUri(uri) ?: "file"
@@ -139,7 +151,7 @@ fun CouncilRoomComposer(
                     localUri?.let {
                         UIMessagePart.Document(url = it.toString(), fileName = fileName, mime = mime)
                     }
-                }
+                }.filter { it.url !in existingDocUrls }
                 attachments.addAll(docs)
             }
         }
@@ -488,13 +500,16 @@ private fun MentionPopup(
     }
 }
 
-/** Horizontal strip of pending attachment chips above the input, each removable. */
+/** Horizontal strip of pending attachment chips above the input, each removable.
+ *  Images show validation status (checking/ready/blocked) like the main chat composer. */
 @Composable
 private fun CouncilAttachmentStrip(
     attachments: List<UIMessagePart>,
     onRemove: (UIMessagePart) -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val settings = LocalSettings.current
+    val toaster = LocalToaster.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -504,20 +519,68 @@ private fun CouncilAttachmentStrip(
     ) {
         attachments.forEach { part ->
             when (part) {
-                is UIMessagePart.Image -> Box {
-                    AsyncImage(
-                        model = part.url,
-                        contentDescription = "图片附件",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(tokens.surface2),
-                    )
-                    AttachmentRemoveBadge(
-                        onClick = { onRemove(part) },
-                        modifier = Modifier.align(Alignment.TopEnd),
-                    )
+                is UIMessagePart.Image -> {
+                    val status by produceState(
+                        ImageAttachmentValidator.checking(),
+                        part.url,
+                        settings.chatModelId,
+                        settings.ocrModelId,
+                        settings.providers,
+                    ) {
+                        value = withContext(Dispatchers.IO) {
+                            ImageAttachmentValidator.inspectImage(part, settings)
+                        }
+                    }
+                    Box {
+                        AsyncImage(
+                            model = part.url,
+                            contentDescription = "图片附件",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(tokens.surface2),
+                        )
+                        // 验证状态指示器：CHECKING 显示加载圈，其他显示颜色点
+                        when (status.kind) {
+                            ImageAttachmentStatusKind.CHECKING -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .align(Alignment.TopEnd)
+                                        .padding(2.dp),
+                                    color = tokens.accent,
+                                    strokeWidth = 2.dp,
+                                )
+                            }
+                            else -> {
+                                val dotColor = when (status.kind) {
+                                    ImageAttachmentStatusKind.READY -> Color(0xFF2EAD5B)
+                                    ImageAttachmentStatusKind.FALLBACK -> Color(0xFFFFB020)
+                                    ImageAttachmentStatusKind.BLOCKED -> MaterialTheme.colorScheme.error
+                                    else -> workspaceColors().muted
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .align(Alignment.TopEnd)
+                                        .padding(2.dp)
+                                        .clip(CircleShape)
+                                        .background(dotColor)
+                                        .clickable(
+                                            enabled = status.blocksSend,
+                                            onClick = {
+                                                toaster.show(status.message, type = ToastType.Error)
+                                            },
+                                        )
+                                )
+                            }
+                        }
+                        AttachmentRemoveBadge(
+                            onClick = { onRemove(part) },
+                            modifier = Modifier.align(Alignment.BottomEnd),
+                        )
+                    }
                 }
 
                 is UIMessagePart.Document -> Box {

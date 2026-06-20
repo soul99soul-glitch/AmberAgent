@@ -44,6 +44,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -60,6 +61,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
@@ -224,7 +227,7 @@ fun ModelSelector(
             }
         } else if (compact) {
             val workspace = workspaceColors()
-            val chipShape = RoundedCornerShape(8.dp)
+            val chipShape = RoundedCornerShape(12.dp)
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Surface(
                     onClick = { popup = true },
@@ -318,43 +321,82 @@ fun ModelSelector(
 
     if (popup) {
         val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        // V3 Whisper：28dp 顶圆角 + 白底 + 自定义 36dp/4dp 拖拽手柄；模型列表本身
-        // 暂保留旧实现，后续 phase 再按 model-picker.jsx 重做 active card / segment。
+        val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+        val tokens = LocalAmberTokens.current
+        val filteredProviderSettings = remember(visibleProviders, type) {
+            visibleProviders.fastFilter {
+                it.enabled && it.models.fastAny { model -> model.type == type }
+            }
+        }
+        // Amber Redesign §2: shell 22dp top radius. §6: terracotta `//` signboard
+        // (the ONE allowed terminal glyph) + cn title + mono count.
+        val totalModels = remember(filteredProviderSettings) {
+            filteredProviderSettings.sumOf { provider ->
+                provider.models.count { it.type == type && !provider.isHiddenCodexOAuthModel(it) }
+            }
+        }
         ModalBottomSheet(
-            onDismissRequest = {
-                popup = false
-            },
+            onDismissRequest = { popup = false },
             sheetState = state,
-            shape = RoundedCornerShape(
-                topStart = 28.dp,
-                topEnd = 28.dp,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                topStart = 22.dp,
+                topEnd = 22.dp,
                 bottomStart = 0.dp,
                 bottomEnd = 0.dp,
             ),
-            containerColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.surface,
-            scrimColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.sheetBackdrop,
+            containerColor = chatTheme.surface,
+            scrimColor = chatTheme.sheetBackdrop,
             dragHandle = {
-                // V3 model-picker.jsx:57 drag handle 40×4dp
                 Box(
                     modifier = Modifier
                         .padding(top = 10.dp, bottom = 4.dp)
-                        .width(40.dp)
+                        .width(36.dp)
                         .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(app.amber.feature.ui.pages.chat.LocalChatTheme.current.dragHandle),
+                        .background(chatTheme.dragHandle),
                 )
             },
         ) {
             Column(
                 modifier = Modifier
-                    .padding(8.dp)
                     .fillMaxHeight(0.8f)
                     .imePadding(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                val filteredProviderSettings = visibleProviders.fastFilter {
-                    it.enabled && it.models.fastAny { model -> model.type == type }
+                // ── Title row: // 招牌 + 选择模型 + 右对齐计数 ──────────────
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp)
+                        .padding(top = 6.dp, bottom = 14.dp),
+                ) {
+                    Text(
+                        text = "//",
+                        style = LocalAmberType.current.meta.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = chatTheme.accent,
+                    )
+                    Text(
+                        text = stringResource(R.string.model_list_select_model),
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                        ),
+                        color = chatTheme.ink,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = "$totalModels · ${filteredProviderSettings.size}",
+                        style = LocalAmberType.current.meta.copy(
+                            fontSize = 11.sp,
+                            fontFeatureSettings = "tnum",
+                        ),
+                        color = tokens.ink3,
+                    )
                 }
+                // ── Search field lives inside ModelList (it owns searchKeywords) ──
                 ModelList(
                     currentModel = modelId,
                     providers = filteredProviderSettings,
@@ -363,9 +405,6 @@ fun ModelSelector(
                     currentAssistant = currentAssistant,
                     onUpdateAssistant = onUpdateAssistant,
                     onSelect = { selectedModel ->
-                        // V3 改: 之前为了"切 model 顺手改 reasoning"保持 picker 不关,
-                        // 但 reasoning 已搬到 slash panel footer, 这里恢复"选即关".
-                        // 副作用: 生图 picker 第一次选模型不再卡住, 不会被误点 × 清成 sentinel.
                         onSelect(selectedModel)
                         scope.launch {
                             state.hide()
@@ -377,7 +416,7 @@ fun ModelSelector(
                             state.hide()
                             popup = false
                         }
-                    }
+                    },
                 )
             }
         }
@@ -578,25 +617,69 @@ private fun ColumnScope.ModelList(
         }.toMap()
     }
 
+    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    // Amber Redesign §2: search field 12dp radius, surface bg, hairline border.
+    // §6: input field is a control → 12dp, NOT the 50% pill the old code used.
     Surface(
-        shape = RoundedCornerShape(50),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        color = chatTheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp),
+            .padding(horizontal = 22.dp)
+            .padding(bottom = 4.dp),
     ) {
-        // V3: 统一 drawer Amber 下方搜索栏样式 (WorkspaceSearchField)
-        app.amber.feature.ui.components.ui.WorkspaceSearchField(
-            value = searchKeywords,
-            onValueChange = { searchKeywords = it },
-            placeholder = stringResource(R.string.model_list_search_placeholder),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            modifier = Modifier
+                .padding(horizontal = 13.dp, vertical = 10.dp),
+        ) {
+            Icon(
+                imageVector = HugeIcons.Search01,
+                contentDescription = null,
+                tint = chatTheme.inkFaint,
+                modifier = Modifier.size(18.dp),
+            )
+            BasicTextField(
+                value = searchKeywords,
+                onValueChange = { searchKeywords = it },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = chatTheme.ink),
+                cursorBrush = SolidColor(chatTheme.accent),
+                decorationBox = { inner ->
+                    if (searchKeywords.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.model_list_search_placeholder),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = chatTheme.inkFaint,
+                        )
+                    }
+                    inner()
+                },
+                modifier = Modifier.weight(1f),
+            )
+            if (searchKeywords.isNotEmpty()) {
+                Icon(
+                    imageVector = HugeIcons.Cancel01,
+                    contentDescription = stringResource(R.string.cancel),
+                    tint = chatTheme.inkFaint,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .clickable { searchKeywords = "" },
+                )
+            }
+        }
     }
 
+    // Amber Redesign §2/§3: list rows are 0-radius full-bleed (no cards), groups
+    // separated by mono section labels + whitespace, rows by 1px hairlines.
+    // Old code used spacedBy(8dp) + Card per group → double-border violation.
     LazyColumn(
         state = lazyListState,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(8.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 4.dp),
         modifier = Modifier
             .weight(1f)
             .fillMaxWidth(),
@@ -614,12 +697,20 @@ private fun ColumnScope.ModelList(
 
         if (favoriteModels.isNotEmpty()) {
             item(key = "favorite-header") {
+                // Amber Redesign §3: section label = mono uppercase + 0.15em
+                // tracking + ink-3, NOT primary blue. §4: accent budget — section
+                // headers are neutral, not terracotta.
+                val tokens = LocalAmberTokens.current
                 Text(
-                    text = stringResource(R.string.model_list_favorite),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    text = stringResource(R.string.model_list_favorite).uppercase(),
+                    style = LocalAmberType.current.meta.copy(
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.15.sp * (stringResource(R.string.model_list_favorite).length),
+                    ),
+                    color = tokens.ink3,
                     modifier = Modifier
-                        .padding(bottom = 4.dp, top = 8.dp)
+                        .padding(bottom = 6.dp, top = 12.dp)
                 )
             }
 
@@ -659,15 +750,13 @@ private fun ColumnScope.ModelList(
             }
         }
 
-        // Graphite §6.2 "Top model menu": provider groups as an accordion. The header row
-        // toggles expand/collapse (+/−); the ACTIVE provider name (the one holding the current
-        // model) and the SELECTED model are accent-colored, everything else neutral ink. Rows
-        // read "name … ctx" in mono, no check/badge. Kept inside one LazyColumn group item per
-        // provider (so the chip-rail / scroll-position math is unchanged); collapsing only
-        // hides rows inside that item, not whole items.
-        providers.fastForEach { providerSetting ->
+        // Amber Redesign §3: provider groups are full-bleed flat sections (no
+        // Card/border/16dp). Group-to-group separation = 1px hairline at the TOP
+        // of each group (except the first). Row-to-row = hairline between models.
+        // One layer of separation per level — no "bordered card + inner hairline".
+        providers.forEachIndexed { providerIndex, providerSetting ->
             val groupModels = searchFilteredModelsByProvider[providerSetting.id].orEmpty()
-            if (groupModels.isEmpty()) return@fastForEach
+            if (groupModels.isEmpty()) return@forEachIndexed
 
             val providerActive = groupModels.fastAny { it.id == currentModel }
 
@@ -679,76 +768,94 @@ private fun ColumnScope.ModelList(
                 var expanded by remember(providerSetting.id, searchKeywords) {
                     mutableStateOf(searchKeywords.isNotBlank() || providerActive)
                 }
-                Card(
-                    modifier = Modifier.animateItem(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = chatTheme.surface,
-                        contentColor = chatTheme.ink,
-                    ),
-                    border = BorderStroke(1.dp, chatTheme.hair),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                ) {
-                    Column {
-                        // Accordion header: mono provider name (accent when active) + +/− glyph.
-                        Row(
+                Column(modifier = Modifier.animateItem()) {
+                    // Group separator: hairline above each provider EXCEPT the first
+                    // (the favorite section or the first provider sits flush at top).
+                    if (providerIndex > 0 || favoriteModels.isNotEmpty()) {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { expanded = !expanded }
-                                .padding(horizontal = 14.dp, vertical = 11.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = providerSetting.name,
-                                style = LocalAmberType.current.meta.copy(
-                                    fontSize = 14.sp,
-                                    fontWeight = if (providerActive) FontWeight.SemiBold else FontWeight.Medium,
-                                ),
-                                color = if (providerActive) chatTheme.accent else tokens.ink2,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Icon(
-                                imageVector = if (expanded) HugeIcons.ArrowDown01 else HugeIcons.ArrowRight01,
-                                contentDescription = null,
-                                tint = tokens.ink4,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                        androidx.compose.animation.AnimatedVisibility(visible = expanded) {
-                            Column {
-                                groupModels.fastForEach { model ->
-                                    val isActive = model.id == currentModel
-                                    Box(
-                                        modifier = Modifier
-                                            .padding(start = 14.dp)
-                                            .fillMaxWidth()
-                                            .height(1.dp)
-                                            .background(chatTheme.hair),
-                                    )
-                                    val favorite = settings.value.favoriteModels.contains(model.id)
-                                    ModelItemRow(
-                                        model = model,
-                                        providerSetting = providerSetting,
-                                        isActive = isActive,
-                                        onSelect = onSelect,
-                                        onDismiss = onDismiss,
-                                        tail = {
-                                            FavoriteToggleIcon(
-                                                favorite = favorite,
-                                                isActive = isActive,
-                                                onToggle = {
-                                                    coroutineScope.launch {
-                                                        settingsStore.update { s ->
-                                                            if (favorite) s.copy(favoriteModels = s.favoriteModels.filter { it != model.id })
-                                                            else s.copy(favoriteModels = s.favoriteModels + model.id)
-                                                        }
+                                .height(1.dp)
+                                .background(chatTheme.hair),
+                        )
+                    }
+                    // Accordion header: cn provider name (accent when active) +
+                    // mono model count + chevron. No card, no border, full-bleed.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = !expanded }
+                            .padding(vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            text = providerSetting.name,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 14.5.sp,
+                                fontWeight = if (providerActive) FontWeight.SemiBold else FontWeight.Medium,
+                            ),
+                            color = if (providerActive) chatTheme.accent else chatTheme.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // mono model count
+                        Text(
+                            text = groupModels.size.toString(),
+                            style = LocalAmberType.current.meta.copy(
+                                fontSize = 11.sp,
+                                fontFeatureSettings = "tnum",
+                            ),
+                            color = tokens.ink3,
+                        )
+                        // chevron: rotates -90°→0° on expand (like the HTML sample)
+                        Icon(
+                            imageVector = HugeIcons.ArrowDown01,
+                            contentDescription = null,
+                            tint = tokens.ink3,
+                            modifier = Modifier
+                                .size(17.dp)
+                                .graphicsLayer {
+                                    rotationZ = if (expanded) 0f else -90f
+                                },
+                        )
+                    }
+                    androidx.compose.animation.AnimatedVisibility(visible = expanded) {
+                        Column {
+                            groupModels.fastForEach { model ->
+                                val isActive = model.id == currentModel
+                                // Row separator: hairline between models (full-bleed, left-aligned)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(chatTheme.hair),
+                                )
+                                val favorite = settings.value.favoriteModels.contains(model.id)
+                                ModelItemRow(
+                                    model = model,
+                                    providerSetting = providerSetting,
+                                    isActive = isActive,
+                                    onSelect = onSelect,
+                                    onDismiss = onDismiss,
+                                    startPadding = 16.dp,
+                                    endPadding = 2.dp,
+                                    tail = {
+                                        FavoriteToggleIcon(
+                                            favorite = favorite,
+                                            isActive = isActive,
+                                            onToggle = {
+                                                coroutineScope.launch {
+                                                    settingsStore.update { s ->
+                                                        if (favorite) s.copy(favoriteModels = s.favoriteModels.filter { it != model.id })
+                                                        else s.copy(favoriteModels = s.favoriteModels + model.id)
                                                     }
-                                                },
-                                            )
-                                        },
-                                    )
-                                }
+                                                }
+                                            },
+                                        )
+                                    },
+                                )
                             }
                         }
                     }
@@ -782,33 +889,25 @@ private fun ColumnScope.ModelList(
     }
     if (providers.isNotEmpty()) {
         val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-        // V3 model-picker.jsx ProviderChips: 12dp 圆角矩形 + 18×18 logo + 名 + hairline 边
-        // 顶部 hairline 分隔 chip 区 与 model list
+        val tokens = LocalAmberTokens.current
+        // Amber Redesign §2: chips are small controls → 12dp radius (NOT 999 pill).
+        // §3: no top hairline separator (that would be a double border with the
+        // list's own grouping above). Chips use surface-2 fill, no stroke — the
+        // fill alone distinguishes them, no need for a border.
         Column(modifier = Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(chatTheme.hair),
-            )
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp, bottom = 14.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp),
+                contentPadding = PaddingValues(horizontal = 22.dp),
                 state = providerBadgeListState,
             ) {
                 items(providers) { provider ->
-                    // V3: 简化层级 — 999 capsule 外框 + logo (无内嵌 18dp Box + 5dp 圆角矩形).
                     Row(
                         modifier = Modifier
-                            .clip(androidx.compose.foundation.shape.CircleShape)
-                            .background(chatTheme.surface)
-                            .border(
-                                BorderStroke(1.dp, chatTheme.hair),
-                                androidx.compose.foundation.shape.CircleShape,
-                            )
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                            .background(chatTheme.surfaceEdge.copy(alpha = 0.4f))
                             .clickable {
                                 val position = providerPositions[provider.id] ?: 0
                                 coroutineScope.launch {
@@ -819,11 +918,11 @@ private fun ColumnScope.ModelList(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        // V3: 去掉 provider 图标, 胶囊只剩 provider 名 (用户偏好)
+                        // cn provider name (chips are labels, not mono IDs)
                         Text(
                             text = provider.name,
                             fontSize = 12.5.sp,
-                            color = chatTheme.ink,
+                            color = tokens.ink2,
                             letterSpacing = 0.2.sp,
                             maxLines = 1,
                         )
@@ -918,7 +1017,7 @@ fun ProviderAccordionModelPicker(
             ) {
                 Text(
                     text = providerSetting.name,
-                    style = LocalAmberType.current.meta.copy(
+                    style = MaterialTheme.typography.bodyLarge.copy(
                         fontSize = providerFontSize,
                         fontWeight = if (providerActive) FontWeight.SemiBold else FontWeight.Medium,
                     ),
@@ -933,7 +1032,7 @@ fun ProviderAccordionModelPicker(
                         fontSize = if (dense) 16.sp else 18.sp,
                         fontWeight = FontWeight.Medium,
                     ),
-                    color = tokens.ink4,
+                    color = tokens.ink3,
                     textAlign = androidx.compose.ui.text.style.TextAlign.End,
                     modifier = Modifier.width(trailingSlotWidth),
                 )
@@ -980,76 +1079,65 @@ private fun ModelItem(
     val navController = LocalNavController.current
     val interactionSource = remember { MutableInteractionSource() }
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    // V3 model-picker.jsx: active 卡片 accentSoft 填底 + accent 文字 + 边线 22% accent
-    // 非 active 用 surface + ink + hair 边线
-    // V3: clickable 移到 Card 外层 modifier — 之前在内部 Column 上, 选中 ripple 只在 padding
-    //   之内, Card border 内但 padding 外的边角区域点不到, 看着"选中区分裂".
-    Card(
-        modifier = modifier.combinedClickable(
-            enabled = true,
-            onLongClick = {
-                onDismiss()
-                navController.navigate(
-                    Screen.SettingProviderDetail(providerSetting.id.toString())
-                )
-            },
-            onClick = { onSelect(model) },
-            interactionSource = interactionSource,
-            indication = LocalIndication.current,
-        ),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (select) chatTheme.accentSoft else chatTheme.surface,
-            contentColor = if (select) chatTheme.accent else chatTheme.ink,
-        ),
-        border = if (select) {
-            androidx.compose.foundation.BorderStroke(
-                1.dp,
-                chatTheme.accent.copy(alpha = 0.22f),
-            )
-        } else {
-            androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair)
-        },
+    val tokens = LocalAmberTokens.current
+    // Amber Redesign §5: selected = accent text + weight 700, NO fill block / NO
+    // border / NO check. §2: row = 0 radius full-bleed. §3: hairline between rows
+    // (added by the caller's list; this row itself is borderless).
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                enabled = true,
+                onLongClick = {
+                    onDismiss()
+                    navController.navigate(
+                        Screen.SettingProviderDetail(providerSetting.id.toString())
+                    )
+                },
+                onClick = { onSelect(model) },
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+            ),
     ) {
-        Column(
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(vertical = 11.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                val tokens = LocalAmberTokens.current
-                // Graphite §6.2 row: mono "name … ctx", accent only when selected, no badge.
+            // §6: mono model name, accent + 700 only when selected.
+            Text(
+                text = model.displayName,
+                style = LocalAmberType.current.meta.copy(
+                    fontSize = 14.sp,
+                    fontWeight = if (select) FontWeight.Bold else FontWeight.Medium,
+                ),
+                color = if (select) chatTheme.accent else chatTheme.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            // §6: right-aligned mono context number (tabular-nums)
+            model.contextWindowTokens?.let { ctx ->
                 Text(
-                    text = model.displayName,
+                    text = ctx.formatNumber(),
                     style = LocalAmberType.current.meta.copy(
-                        fontSize = 14.sp,
-                        fontWeight = if (select) FontWeight.SemiBold else FontWeight.Normal,
+                        fontSize = 11.5.sp,
+                        fontFeatureSettings = "tnum",
                     ),
-                    color = if (select) chatTheme.accent else tokens.ink3,
+                    color = tokens.ink3,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    modifier = Modifier.width(42.dp),
                 )
-                Spacer(modifier = Modifier.weight(1f))
-                model.contextWindowTokens?.let { ctx ->
-                    Text(
-                        text = ctx.formatNumber(),
-                        style = LocalAmberType.current.meta.copy(fontSize = 11.5.sp),
-                        color = tokens.ink4,
-                        maxLines = 1,
-                    )
-                }
-                tail()
             }
-            // ── 第二行：thinking-level segment（仅 active + REASONING 时显示）
-            thinkingSegment?.let {
-                Box(modifier = Modifier.padding(top = 6.dp)) {
-                    it()
-                }
+            tail()
+        }
+        // ── 第二行：thinking-level segment（仅 active + REASONING 时显示）
+        thinkingSegment?.let {
+            Box(modifier = Modifier.padding(top = 6.dp)) {
+                it()
             }
         }
     }
@@ -1353,9 +1441,9 @@ private fun ModelItemRow(
             text = model.displayName,
             style = LocalAmberType.current.meta.copy(
                 fontSize = modelFontSize,
-                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
             ),
-            color = if (isActive) chatTheme.accent else tokens.ink3,
+            color = if (isActive) chatTheme.accent else chatTheme.ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
@@ -1363,8 +1451,11 @@ private fun ModelItemRow(
         model.contextWindowTokens?.let { ctx ->
             Text(
                 text = ctx.formatNumber(),
-                style = LocalAmberType.current.meta.copy(fontSize = contextFontSize),
-                color = tokens.ink4,
+                style = LocalAmberType.current.meta.copy(
+                    fontSize = contextFontSize,
+                    fontFeatureSettings = "tnum",
+                ),
+                color = tokens.ink3,
                 maxLines = 1,
                 textAlign = androidx.compose.ui.text.style.TextAlign.End,
                 modifier = Modifier.width(contextWidth),

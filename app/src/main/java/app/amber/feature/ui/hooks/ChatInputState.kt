@@ -89,40 +89,60 @@ class ChatInputState {
 
     fun addImages(uris: List<Uri>) {
         val newMessage = messageContent.toMutableList()
+        val existingUrls = newMessage.filterIsInstance<UIMessagePart.Image>().map { it.url }.toMutableSet()
         uris.forEach { uri ->
-            newMessage.add(UIMessagePart.Image(uri.toString()))
+            val url = uri.toString()
+            // 去重：避免同一张图片被多次添加（用户多次点击时）
+            if (url !in existingUrls) {
+                newMessage.add(UIMessagePart.Image(url))
+                existingUrls.add(url)
+            }
         }
         messageContent = newMessage
     }
 
     fun addVideos(uris: List<Uri>, mimeTypes: List<String?> = emptyList()) {
         val newMessage = messageContent.toMutableList()
+        val existingUrls = newMessage.filterIsInstance<UIMessagePart.Video>().map { it.url }.toMutableSet()
         uris.forEachIndexed { index, uri ->
-            newMessage.add(UIMessagePart.Video(uri.toString(), mime = mimeTypes.getOrNull(index) ?: "video/mp4"))
+            val url = uri.toString()
+            if (url !in existingUrls) {
+                newMessage.add(UIMessagePart.Video(url, mime = mimeTypes.getOrNull(index) ?: "video/mp4"))
+                existingUrls.add(url)
+            }
         }
         messageContent = newMessage
     }
 
     fun addAudios(uris: List<Uri>, fileNames: List<String> = emptyList(), mimeTypes: List<String?> = emptyList()) {
         val newMessage = messageContent.toMutableList()
+        val existingUrls = newMessage.filterIsInstance<UIMessagePart.Audio>().map { it.url }.toMutableSet()
         uris.forEachIndexed { index, uri ->
-            val name = fileNames.getOrNull(index)?.takeIf { it.isNotBlank() }
-                ?: uri.lastPathSegment.orEmpty()
-            newMessage.add(
-                UIMessagePart.Audio(
-                    url = uri.toString(),
-                    fileName = name,
-                    mime = mimeTypes.getOrNull(index) ?: "audio/mpeg",
+            val url = uri.toString()
+            if (url !in existingUrls) {
+                val name = fileNames.getOrNull(index)?.takeIf { it.isNotBlank() }
+                    ?: uri.lastPathSegment.orEmpty()
+                newMessage.add(
+                    UIMessagePart.Audio(
+                        url = url,
+                        fileName = name,
+                        mime = mimeTypes.getOrNull(index) ?: "audio/mpeg",
+                    )
                 )
-            )
+                existingUrls.add(url)
+            }
         }
         messageContent = newMessage
     }
 
     fun addFiles(uris: List<UIMessagePart.Document>) {
         val newMessage = messageContent.toMutableList()
+        val existingUrls = newMessage.filterIsInstance<UIMessagePart.Document>().map { it.url }.toMutableSet()
         uris.forEach {
-            newMessage.add(it)
+            if (it.url !in existingUrls) {
+                newMessage.add(it)
+                existingUrls.add(it.url)
+            }
         }
         messageContent = newMessage
     }

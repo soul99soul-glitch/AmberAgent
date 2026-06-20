@@ -215,6 +215,25 @@ fun CouncilTimelineTab(
     }
 
     /**
+     * Loose "near bottom" check based on item COUNT, not pixels — mirrors the
+     * chat page's `isNearListEnd(bufferItems=2)`. True if the last visible item
+     * is within [bufferItems] of the true last item.
+     *
+     * This is the key to reliable follow re-arm: a pixel-based isAtBottom (even
+     * with a 24dp buffer) fails the moment streaming growth pushes content a
+     * few px below the fold, so the user can scroll to what *looks* like the
+     * bottom yet never trip the "resume follow" condition. An index-based check
+     * is immune to per-frame pixel jitter — if the last couple items are
+     * visible, we're "near enough" and should follow.
+     */
+    fun isNearBottom(bufferItems: Int = 2): Boolean {
+        val total = listState.layoutInfo.totalItemsCount
+        if (total == 0) return true
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
+        return lastVisible.index >= total - 1 - bufferItems
+    }
+
+    /**
      * Pixels from the current viewport to the true content bottom — null when the
      * last item isn't measured yet (off-screen). Same approach as the main chat's
      * distanceToTimelineBottomPx: we scrollBy this exact distance, NOT scrollToItem,
@@ -257,6 +276,14 @@ fun CouncilTimelineTab(
         try {
             val total = listState.layoutInfo.totalItemsCount
             if (total == 0) return
+            // Single-frame jump to the bottom. Used for one-shot events (new
+            // content arrival, generation-end settle). CONTINUOUS follow during
+            // streaming is handled by the frame-pinning effect below, NOT by
+            // re-calling this every chunk — re-measuring distance every frame
+            // and scrollBy-ing it is what caused the jitter (content grows
+            // between measure and scroll, so the scroll overshoots/undershoots
+            // every frame). The pin effect compensates the *increment* of
+            // growth instead, which is jitter-free.
             val distance = distanceToBottomPx()
             if (distance == null) {
                 listState.scrollToItem(total - 1)
@@ -280,8 +307,13 @@ fun CouncilTimelineTab(
     LaunchedEffect(isStreaming) {
         if (isStreaming) {
             // Streaming started: arm follow if we're already near the bottom.
-            if (isAtBottom(bottomFollowBufferPx)) {
+            val atBottom = isAtBottom(bottomFollowBufferPx)
+            android.util.Log.i("CouncilFollow", "arm check: isStreaming=true atBottom=$atBottom total=${listState.layoutInfo.totalItemsCount}")
+            if (atBottom) {
                 followMode = CouncilFollowMode.FollowingBottom
+                android.util.Log.i("CouncilFollow", "armed FollowingBottom")
+            } else {
+                android.util.Log.i("CouncilFollow", "NOT armed (not at bottom)")
             }
         } else {
             // Streaming just ended. Mirror the chat page's "generation-end"
@@ -309,20 +341,108 @@ fun CouncilTimelineTab(
     // the core anti-jitter fix — the old code re-launched a new scroll per chunk.
     LaunchedEffect(followEvents, room.conversationId) {
         followEvents.conflate().collect { reason ->
-            if (!bottomFollowAllowed()) return@collect
+            val allowed = bottomFollowAllowed()
+            android.util.Log.i("CouncilFollow", "collector: reason=$reason allowed=$allowed mode=$followMode")
+            if (!allowed) return@collect
             withFrameNanos { }
-            if (bottomFollowAllowed()) {
+            val stillAllowed = bottomFollowAllowed()
+            // One-shot jumps only. Continuous per-chunk follow is handled by the
+            // frame-pinning effect above, which is jitter-free; having the
+            // collector ALSO scrollBy every chunk would fight the pin and
+            // re-introduce the jitter. So:
+            //  - "new-content": jump to bottom (first arm / big content arrival)
+            //  - "generation-end": final settle, then flip to Idle
+            //  - "chunk" / "visible" / "visual-active": no-op here (pin handles them)
+            if (stillAllowed && (reason == "new-content" || reason == "generation-end")) {
                 scrollToBottom()
             }
-            // After servicing the generation-end settle, relax to Idle so a
-            // finished council stops fighting the user's scroll position. This
-            // is the only place we transition out of FollowingBottom on
-            // generation end — doing it here (post-scroll) guarantees the
-            // scroll ran while the mode was still FollowingBottom.
             if (reason == "generation-end") {
                 followMode = CouncilFollowMode.Idle
             }
         }
+    }
+
+    // ── Frame-pinning follow (the anti-jitter core) ────────────────────────
+    // While FollowingBottom, run a continuous per-frame loop that PINS the last
+    // item's bottom edge to a fixed on-screen Y, instead of chasing the content
+    // bottom with repeated "scrollBy distance-to-bottom" (which jitters because
+    // content grows between measure and scroll). Here we compensate only the
+    // *increment*: if the last item's bottom moved down by N px this frame (the
+    // content just grew), we scrollBy(N). The bubble's lower edge therefore
+    // stays glued to the same screen position — no oscillation, because we never
+    // overshoot (we move exactly what the content moved). Negative deltas
+    // (content shrinking) are ignored so the list never scrolls back up on its
+    // own.
+    LaunchedEffect(followMode, room.conversationId) {
+        if (followMode != CouncilFollowMode.FollowingBottom) return@LaunchedEffect
+        var pinnedBottomY: Int? = null
+        while (followMode == CouncilFollowMode.FollowingBottom) {
+            withFrameNanos { }
+            if (followMode != CouncilFollowMode.FollowingBottom) break
+            val info = listState.layoutInfo
+            val total = info.totalItemsCount
+            if (total == 0) {
+                pinnedBottomY = null
+                continue
+            }
+            val bottomItem = info.visibleItemsInfo.firstOrNull { it.index == total - 1 }
+            if (bottomItem == null) {
+                // Last item scrolled out of view (e.g. just appended) — re-pin
+                // with a one-shot jump so the pin loop resumes from bottom.
+                if (bottomFollowAllowed()) {
+                    scrollToBottom()
+                    withFrameNanos { }
+                }
+                pinnedBottomY = null
+                continue
+            }
+            val currentBottomY = bottomItem.offset + bottomItem.size + info.afterContentPadding
+            val prev = pinnedBottomY
+            pinnedBottomY = currentBottomY
+            if (prev != null) {
+                val delta = currentBottomY - prev
+                if (delta > 1) {
+                    // Content grew this frame — compensate exactly the growth
+                    // so the bubble's bottom edge stays at the same screen Y.
+                    val token = beginProgrammaticScroll()
+                    try {
+                        listState.scrollBy(delta.toFloat())
+                    } finally {
+                        endProgrammaticScroll(token)
+                    }
+                }
+            }
+        }
+    }
+
+    // Force-arm follow when content arrives and we're not PausedForUser.
+    // This mirrors the chat page's "new USER message / new message row lands →
+    // resumeBottomFollow()" safety net (ChatListNormalSection.kt:606-619). Without
+    // it, arm relied SOLELY on LaunchedEffect(isStreaming), which requires
+    // isAtBottom() at the exact moment streaming starts — if the viewport is a
+    // few px above bottom (very common right after sending a topic, due to the
+    // composer + contentPadding), arm fails and follow stays Idle for the entire
+    // host opening + first guest turn, only recovering by accident later.
+    // Keyed on message count so every new turn (host opening, each guest, phase
+    // markers) re-evaluates; PausedForUser is sticky so a real user scroll-up
+    // still wins.
+    val lastMessageId = room.messages.lastOrNull()?.id
+    LaunchedEffect(room.messages.size, lastMessageId, isStreaming) {
+        if (!isStreaming) return@LaunchedEffect
+        if (followMode == CouncilFollowMode.PausedForUser) return@LaunchedEffect
+        // Arm (or re-arm) follow when new content arrives — but ONLY if we're
+        // near the bottom (don't yank the user away while reading history).
+        // Use the index-based isNearBottom (not pixel isAtBottom) so streaming
+        // growth that pushes content a few px below the fold doesn't prevent
+        // re-arm — the user scrolled to "looks like bottom" and that should count.
+        if (followMode == CouncilFollowMode.Idle && !isNearBottom()) {
+            return@LaunchedEffect
+        }
+        if (followMode != CouncilFollowMode.FollowingBottom) {
+            followMode = CouncilFollowMode.FollowingBottom
+            android.util.Log.i("CouncilFollow", "force-armed FollowingBottom (msgCount=${room.messages.size} lastMsg=$lastMessageId nearBottom=${isNearBottom()})")
+        }
+        followEvents.tryEmit("new-content")
     }
 
     // Content-changed → request a follow (emit, not scroll). The collector above
@@ -330,7 +450,9 @@ fun CouncilTimelineTab(
     // the streaming tail actually grew, not on every unrelated recomposition.
     LaunchedEffect(streamingChangeToken, room.conversationId, isStreaming) {
         if (!isStreaming) return@LaunchedEffect
-        if (bottomFollowAllowed()) {
+        val allowed = bottomFollowAllowed()
+        android.util.Log.i("CouncilFollow", "chunk emit: token=$streamingChangeToken allowed=$allowed mode=$followMode userScroll=$userScrollInTimeline")
+        if (allowed) {
             followEvents.tryEmit("chunk")
         }
     }
@@ -354,7 +476,12 @@ fun CouncilTimelineTab(
             if (!programmaticScrollInProgress &&
                 followMode == CouncilFollowMode.PausedForUser
             ) {
-                if (isAtBottom(bottomFollowBufferPx)) {
+                // Resume follow when the user has scrolled back to "near bottom".
+                // Use isNearBottom (index-based, immune to pixel jitter) so that
+                // streaming growth doesn't make "looks like bottom" fail the
+                // strict pixel isAtBottom check — which was why follow wouldn't
+                // re-arm even after the user scrolled down.
+                if (isNearBottom()) {
                     followMode = CouncilFollowMode.FollowingBottom
                 }
                 // else: user released away from bottom → stay PausedForUser.
@@ -443,7 +570,15 @@ fun CouncilTimelineTab(
             // Extra bottom headroom so the streaming tail (and a freshly appended
             // line) stays comfortably above the composer instead of hugging the edge.
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 64.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            // Per-item spacing (not spacedBy): the chat page uses spacedBy(0) +
+            // per-item padding because spacedBy's uniform spacing is managed by
+            // the LazyList and, combined with a streaming item whose height
+            // changes every frame, can make the "last item bottom offset"
+            // measurement jitter — which feeds back into isAtBottom / distance
+            // and amplifies the scroll phase difference. Per-item padding fixes
+            // the gap into each item's own layout slot, decoupling it from the
+            // list-level arrangement.
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             if (entries.isEmpty()) {
                 item(key = "empty") {
@@ -482,6 +617,9 @@ fun CouncilTimelineTab(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        // Per-item bottom gap (replaces the old spacedBy(14.dp) —
+                        // see the LazyColumn verticalArrangement comment above).
+                        .padding(bottom = 14.dp)
                         .graphicsLayer {
                             scaleX = popScale.value
                             scaleY = popScale.value
@@ -716,6 +854,31 @@ private fun TimelineMessageRow(
     val isUser = msg.authorId == COUNCIL_ROOM_USER_ID
     val isHost = msg.authorId == COUNCIL_ROOM_HOST_ID
     val chatTheme = LocalChatTheme.current
+
+    // Withdrawn host review → render a compact "主持人撤回发言" capsule instead
+    // of a normal bubble. The host started a review (user saw it streaming) but
+    // decided this round needs no commentary; showing a withdrawn notice keeps
+    // the timeline continuous (no vanishing-jump) and explains the silence.
+    if (msg.kind == CouncilMessageKind.WITHDRAWN) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = chatTheme.surface,
+                border = BorderStroke(1.dp, chatTheme.surfaceEdge),
+            ) {
+                Text(
+                    text = "主持人撤回发言",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = chatTheme.inkFaint,
+                )
+            }
+        }
+        return
+    }
 
     if (isUser) {
         // Mirror the main chat user bubble: solid userBubble fill, light userBubbleInk

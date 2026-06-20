@@ -245,15 +245,27 @@ private fun ImageAttachmentPreview(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        Surface(
-            modifier = Modifier
-                .size(7.dp)
-                .align(Alignment.TopEnd),
-            shape = CircleShape,
-            color = status.dotColor(),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-        ) {}
+        // CHECKING 状态显示一个旋转的加载指示器，而不是几乎不可见的灰色小点
+        // 这样用户能明确知道图片正在被处理（大图片压缩可能需要较长时间）
+        if (status.kind == ImageAttachmentStatusKind.CHECKING) {
+            androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier
+                    .size(12.dp)
+                    .align(Alignment.TopEnd),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 1.5.dp,
+            )
+        } else {
+            Surface(
+                modifier = Modifier
+                    .size(7.dp)
+                    .align(Alignment.TopEnd),
+                shape = CircleShape,
+                color = status.dotColor(),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+            ) {}
+        }
     }
 }
 

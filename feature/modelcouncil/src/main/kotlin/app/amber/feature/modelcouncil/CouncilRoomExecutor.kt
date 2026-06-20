@@ -484,6 +484,37 @@ class CouncilRoomExecutor(
         textResult
     }
 
+    /**
+     * Stream a host review/steer into a pre-seeded STREAMING message (seeded by
+     * the caller via [RoomMutationSink.upsertStreamingMessage] or a direct
+     * mutate). Same spine as [generateHostTurn] but WITHOUT seeding or
+     * finalizing the message — the caller controls the lifecycle so it can
+     * remove the message if the review turns out to be a "no comment" sentinel.
+     */
+    suspend fun streamIntoReview(
+        conversationId: Uuid,
+        messageId: String,
+        room: CouncilRoom,
+        hostModelId: Uuid,
+        systemPrompt: String,
+        userPrompt: String,
+        settings: Settings,
+        reasoningLevel: ReasoningLevel = ReasoningLevel.OFF,
+    ): ModelCouncilTextResult = withContext(dispatcher) {
+        streamInto(conversationId, messageId) { onChunk ->
+            modelRunner.generate(
+                settings = settings,
+                modelId = hostModelId,
+                systemPrompt = systemPrompt,
+                userPrompt = userPrompt,
+                outputBudgetChars = 800,
+                reasoningLevel = reasoningLevel,
+                temperature = null,
+                onChunk = onChunk,
+            )
+        }
+    }
+
     /** Adapt a CouncilParticipant to the legacy ModelCouncilSeat shape the CLI runner expects. */
     private fun CouncilParticipant.toLegacySeat(systemPrompt: String, budget: Int): ModelCouncilSeat =
         ModelCouncilSeat(
@@ -511,6 +542,16 @@ private fun nowMs(): Long = System.currentTimeMillis()
  * (caller surfaces the error to the user).
  */
 fun resolveHostModelId(room: CouncilRoom, settings: Settings): Uuid? {
+    // Prefer the LIVE settings value first: the user can change the host model
+    // in settings at any time, and that change must take effect immediately on
+    // the active room — not only after a restart. The room's persisted
+    // hostModelIdOverride is a snapshot from openRoom time and can be stale
+    // (e.g. user opened the room before picking a host model).
+    settings.agentRuntime.modelCouncil.hostModelId?.let { liveId ->
+        if (settings.findModelById(liveId) != null) return liveId
+    }
+    // Fallback to the room-snapshot override (covers rooms opened with a host
+    // model before the live setting existed, or settings cleared).
     room.hostModelIdOverride?.let { if (settings.findModelById(it) != null) return it }
     val assistant = settings.assistants.firstOrNull { it.id == room.hostAssistantId }
     val candidateId = assistant?.chatModelId ?: settings.chatModelId

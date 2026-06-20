@@ -1903,9 +1903,10 @@ class CouncilRoomManager(
      * emits [CouncilRoomPrompts.NO_COMMENT_SENTINEL] (in which case nothing is
      * appended — no empty/noise bubble).
      *
-     * Uses the plain [modelRunner] (not the tool provider) and appends the
-     * finished text only after the sentinel check, so a "no comment" decision
-     * leaves the timeline untouched.
+     * STREAMED like a guest turn: a STREAMING host message is inserted first so
+     * the user sees the review type in live (instead of a frozen screen), then
+     * finalized or removed after the sentinel check. A "no comment" decision
+     * removes the streaming message, leaving the timeline clean.
      */
     private suspend fun runHostReviewTurn(
         conversationId: Uuid,
@@ -1917,55 +1918,97 @@ class CouncilRoomManager(
         val councilSetting = settings.agentRuntime.modelCouncil
         val hostModelId = resolveHostModelId(room, settings) ?: return null
         val host = room.host ?: return null
-        // Generate the review text OFFLINE (no streaming into the timeline yet):
-        // we only surface it if it isn't a sentinel.
+        val reviewMessageId = msgId()
+        val now = nowMs()
+        // Seed a STREAMING host review message so the user sees live progress
+        // ("主持人正在点评") instead of a frozen screen while the review generates.
+        mutate(conversationId) { r ->
+            if (r.status.terminal) return@mutate CouncilRoomOpResult.Ok(r)
+            CouncilRoomOpResult.Ok(r.copy(
+                messages = r.messages + CouncilMessage(
+                    id = reviewMessageId,
+                    authorId = host.id,
+                    authorName = host.name,
+                    role = host.role,
+                    round = round,
+                    mode = r.mode,
+                    text = "",
+                    createdAtMs = now,
+                    status = CouncilMessageStatus.STREAMING,
+                ),
+                updatedAtMs = now,
+            ))
+        }
+        // Stream the review text into the seeded message, exactly like a guest turn.
         val result = runCatching {
             kotlinx.coroutines.withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
-                modelRunner.generate(
-                    settings = settings,
-                    modelId = hostModelId,
+                executor.streamIntoReview(
+                    conversationId = conversationId,
+                    messageId = reviewMessageId,
+                    room = room,
+                    hostModelId = hostModelId,
                     systemPrompt = CouncilRoomPrompts.hostSystemPrompt(room),
                     userPrompt = CouncilRoomPrompts.hostRoundReviewPrompt(room, round, totalRounds),
-                    outputBudgetChars = 800,
+                    settings = settings,
                     reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
-                    temperature = null,
-                    onChunk = {},
                 )
             }
         }.getOrElse { error ->
             if (error is kotlinx.coroutines.CancellationException) throw error
             null
-        } ?: return null
-        val text = result.text.trim()
-        if (text.isEmpty()) return null
-        // Sentinel → host decided this round needs no commentary. Skip silently.
-        if (CouncilRoomPrompts.NO_COMMENT_SENTINEL in text) return null
-        // ask_user sentinel → host wants to ask the user a question. The text after
-        // the sentinel is the question. Do NOT append a review message here — the
-        // caller persists the question as an ASK_USER CouncilMessage and suspends.
+        }
+        val text = result?.text?.trim().orEmpty()
+        // Sentinel or empty → host decided this round needs no commentary. Mark
+        // the streaming message as WITHDRAWN (like a chat "撤回") instead of
+        // deleting it: the user already saw the host "speaking", so a clean
+        // removal would read as a visual jump. A withdrawn bubble keeps the
+        // timeline continuous and signals "主持人 considered but had nothing to add".
+        if (text.isEmpty() || CouncilRoomPrompts.NO_COMMENT_SENTINEL in text) {
+            mutate(conversationId) { r ->
+                CouncilRoomOpResult.Ok(r.copy(
+                    messages = r.messages.map { m ->
+                        if (m.id == reviewMessageId) {
+                            m.copy(status = CouncilMessageStatus.COMPLETED, kind = CouncilMessageKind.WITHDRAWN)
+                        } else {
+                            m
+                        }
+                    },
+                    updatedAtMs = nowMs(),
+                ))
+            }
+            return null
+        }
+        // ask_user sentinel → host wants to ask the user a question. Mark the
+        // streaming placeholder withdrawn; the caller persists the question as
+        // ASK_USER separately.
         if (CouncilRoomPrompts.ASK_USER_SENTINEL in text) {
+            mutate(conversationId) { r ->
+                CouncilRoomOpResult.Ok(r.copy(
+                    messages = r.messages.map { m ->
+                        if (m.id == reviewMessageId) {
+                            m.copy(status = CouncilMessageStatus.COMPLETED, kind = CouncilMessageKind.WITHDRAWN)
+                        } else {
+                            m
+                        }
+                    },
+                    updatedAtMs = nowMs(),
+                ))
+            }
             val question = text.substringAfter(CouncilRoomPrompts.ASK_USER_SENTINEL).trim()
             return question.ifBlank { "请补充说明你的需求。" }
         }
-        // Append the review as a COMPLETED host message. It becomes the latest
-        // steer, which appendSteeringNote picks up for the next round's guests.
-        val now = nowMs()
+        // Normal review: finalize the streaming message in place with the full text.
         mutate(conversationId) { r ->
             if (r.status.terminal) return@mutate CouncilRoomOpResult.Ok(r)
-            val reviewMessage = CouncilMessage(
-                id = msgId(),
-                authorId = host.id,
-                authorName = host.name,
-                role = host.role,
-                round = round,
-                mode = r.mode,
-                text = text,
-                createdAtMs = now,
-                status = CouncilMessageStatus.COMPLETED,
-            )
             CouncilRoomOpResult.Ok(r.copy(
-                messages = r.messages + reviewMessage,
-                updatedAtMs = now,
+                messages = r.messages.map { m ->
+                    if (m.id == reviewMessageId) {
+                        m.copy(text = text, status = CouncilMessageStatus.COMPLETED)
+                    } else {
+                        m
+                    }
+                },
+                updatedAtMs = nowMs(),
             ))
         }
         return null

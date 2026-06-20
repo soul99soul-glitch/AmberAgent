@@ -158,6 +158,8 @@ val CouncilMessageStatus.running: Boolean
 @Serializable
 enum class CouncilMessageKind {
     @SerialName("ask_user") ASK_USER,
+    /** Host started a review/steer but decided "no comment" — shown as a withdrawn bubble ("主持人撤回发言"). */
+    @SerialName("withdrawn") WITHDRAWN,
 }
 
 /**

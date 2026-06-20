@@ -151,19 +151,36 @@ class CouncilRoomVM(
         viewModelScope.launch {
             android.util.Log.i("CouncilRestart", "restart() invoked for cid=$cid")
             val settings = settingsStore.settingsFlow.value
+            // Seat source for the fresh room. Prefer the CURRENT room's guests
+            // (restarting the same deliberation with the same members is the
+            // natural meaning of "重新开始"), then fall back to the configured
+            // defaultSeats. The old code ONLY used defaultSeats and aborted
+            // outright when they were empty — which is why clicking "重新开始"
+            // silently did nothing for rooms whose members weren't in the preset.
+            val currentRoom = manager.peekRoom(cid)
+            val existingGuests = currentRoom?.activeGuests.orEmpty()
             val seats = settings.agentRuntime.modelCouncil.defaultSeats
-            if (seats.isEmpty()) {
-                android.util.Log.w("CouncilRestart", "restart() aborted: no defaultSeats configured")
-                return@launch
+            val guests = when {
+                existingGuests.isNotEmpty() -> {
+                    android.util.Log.i("CouncilRestart", "restart(): reusing ${existingGuests.size} guests from current room")
+                    existingGuests
+                }
+                seats.isNotEmpty() -> {
+                    android.util.Log.i("CouncilRestart", "restart(): using ${seats.size} defaultSeats")
+                    seats.map { seat ->
+                        seat.toCouncilParticipant().copy(
+                            modelName = settings.findModelById(seat.modelId)?.displayName.orEmpty(),
+                        )
+                    }
+                }
+                else -> {
+                    android.util.Log.w("CouncilRestart", "restart() aborted: no guests (current room empty AND no defaultSeats)")
+                    return@launch
+                }
             }
             _isRestarting.value = true
             try {
                 val assistant = settings.getCurrentAssistant()
-                val guests = seats.map { seat ->
-                    seat.toCouncilParticipant().copy(
-                        modelName = settings.findModelById(seat.modelId)?.displayName.orEmpty(),
-                    )
-                }
                 android.util.Log.i("CouncilRestart", "restart(): calling close(cancel=true)")
                 val closeResult = runCatching { manager.close(cid, cancel = true) }
                 android.util.Log.i("CouncilRestart", "restart(): close returned $closeResult")
@@ -177,9 +194,9 @@ class CouncilRoomVM(
                         conversationId = cid,
                         hostAssistantId = assistant.id,
                         hostName = assistant.name.removeSuffix(" Agent").ifBlank { "Amber" },
-                        objective = "多模型协作讨论",
+                        objective = currentRoom?.objective ?: "多模型协作讨论",
                         initialGuests = guests,
-                        maxRounds = settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
+                        maxRounds = currentRoom?.maxRounds ?: settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
                         hostModelIdOverride = settings.agentRuntime.modelCouncil.hostModelId,
                     )
                 }
