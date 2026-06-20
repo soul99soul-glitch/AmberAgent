@@ -25,6 +25,8 @@
 
 命名习惯：模块名为小写目录（如 `ai/`、`tts/`），Kotlin 类遵循 PascalCase，测试类以 `*Test` 结尾。
 
+**App 显示名约定**：桌面图标与对用户可见的产品名一律使用 `Amber`（即 `app/src/main/res/values/strings.xml` 的 `app_name`）。不要改成 "Amber Graphite" 或其它变体——`graphite` 只是 UI 重设计的内部构建变体代号（`build.gradle.kts` 的 buildType），不是面向用户的产品名。`applicationId` 保持 `app.amber.agent` 不变（已发布的正式包名，改动会破坏升级和 Google OAuth）。
+
 ## Testing Guidelines
 
 测试框架以 JUnit/AndroidX Test 为主。未设定强制覆盖率门槛，但新逻辑应配套新增/更新测试。测试文件命名建议：
