@@ -2802,17 +2802,11 @@ final class ChatViewModel {
             let objective = args?["objective"] as? String ?? toolCall.input
             let roleId = args?["role_id"] as? String ?? args?["subagent_id"] as? String ?? "explorer"
             let scope = Self.stringArray(args?["tool_scope"]) ?? Self.stringArray(args?["tools"]) ?? []
-            // Sub-agent engine currently runs on the OpenAI-compatible executor
-            // (Stage 5 generalizes IOSAgentToolEngine to Claude). For an OpenAI
-            // provider, pass it through; otherwise fall back to the legacy
-            // scalar-derived OpenAI provider so sub-agents keep working.
-            let subAgentProvider = (providerSetting as? ProviderSetting.OpenAI)
-                ?? makeLegacyOpenAIProviderSetting()
             return await subAgentRunner.runViaEngine(
                 objective: objective,
                 roleId: roleId,
                 requestedToolScope: scope,
-                providerSetting: subAgentProvider,
+                providerSetting: providerSetting,
                 modelId: params.model.modelId,
                 baseParams: params,
                 parentToolExecutors: subAgentParentToolExecutors()

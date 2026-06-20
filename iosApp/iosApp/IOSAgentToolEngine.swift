@@ -58,33 +58,50 @@ public protocol IOSToolExecutor: AnyObject {
 }
 
 /// Abstraction over the model call so the engine is unit-testable without a
-/// live HTTP provider. `OpenAIKmpProviderAdapter` wraps the real KMP provider;
-/// tests inject a scripted provider.
+/// live HTTP provider. `OpenAIKmpProviderAdapter` wraps the real KMP provider
+/// and dispatches to the OpenAI or Claude executor based on the provider's
+/// sealed type; tests inject a scripted provider.
 public protocol IOSAgentTextProvider: Sendable {
     /// Non-streaming generation. Returns the full message chunk (which may
     /// contain assistant text and/or tool calls in `choices[].message.parts`).
     func generateText(
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams
     ) async throws -> MessageChunk
 }
 
-/// Wraps the real KMP `OpenAIKmpProvider.generateText` (the same call the
-/// SubAgent/Council iOS factories already make) behind `IOSAgentTextProvider`.
+/// Wraps the real KMP providers behind `IOSAgentTextProvider`. Routes to
+/// `OpenAIKmpProvider` or `ClaudeKmpProvider` based on the provider's sealed
+/// type, so sub-agents/councils can run on either protocol.
 public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider {
-    private let provider: OpenAIKmpProvider
+    private let openAIProvider: OpenAIKmpProvider
+    private let claudeProvider: ClaudeKmpProvider
 
-    public init(provider: OpenAIKmpProvider = OpenAIKmpProvider()) {
-        self.provider = provider
+    public init(
+        openAIProvider: OpenAIKmpProvider = OpenAIKmpProvider(),
+        claudeProvider: ClaudeKmpProvider = ClaudeKmpProvider()
+    ) {
+        self.openAIProvider = openAIProvider
+        self.claudeProvider = claudeProvider
     }
 
     public func generateText(
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams
     ) async throws -> MessageChunk {
-        try await provider.generateText(providerSetting: providerSetting, messages: messages, params: params)
+        if let openAI = providerSetting as? ProviderSetting.OpenAI {
+            return try await openAIProvider.generateText(providerSetting: openAI, messages: messages, params: params)
+        }
+        if let claude = providerSetting as? ProviderSetting.Claude {
+            return try await claudeProvider.generateText(providerSetting: claude, messages: messages, params: params)
+        }
+        throw NSError(
+            domain: "AmberAgent.AgentToolEngine",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "当前服务商类型暂不支持子代理"]
+        )
     }
 }
 
@@ -149,7 +166,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     /// limit is hit). Pure function over `messages`: returns the new list,
     /// never mutates the caller's array.
     public func run(
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams
     ) async -> IOSAgentToolEngineResult {

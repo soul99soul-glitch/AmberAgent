@@ -42,7 +42,7 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
         init(_ script: [UIMessage]) { self.script = script }
 
         func generateText(
-            providerSetting: ProviderSetting.OpenAI,
+            providerSetting: ProviderSetting,
             messages: [UIMessage],
             params: TextGenerationParams
         ) async throws -> MessageChunk {

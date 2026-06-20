@@ -105,7 +105,8 @@ struct IOSCouncilRoomLimits: Codable, Equatable {
     func normalized() -> IOSCouncilRoomLimits {
         IOSCouncilRoomLimits(
             maxSeats: min(max(maxSeats, 2), 8),
-            defaultRounds: min(max(defaultRounds, 1), 6),
+            // 总轮次限制 2-5 轮（所有成员发言一遍 = 一轮），避免无限辩论。
+            defaultRounds: min(max(defaultRounds, 2), 5),
             seatTimeoutSeconds: min(max(seatTimeoutSeconds, 15), 180),
             outputBudgetCharacters: min(max(outputBudgetCharacters, 2_000), 40_000)
         )
@@ -355,6 +356,8 @@ enum IOSCouncilRoomEvent: Equatable {
     case roster([IOSCouncilRoomSpeaker], activeSpeakerId: String?, failedSpeakerIds: Set<String>)
     case append(IOSCouncilRoomMessageEvent)
     case updateMessage(id: UUID, body: String, status: IOSCouncilRoomMessageStatus)
+    /// 主持人/任意阶段向用户提问，暂停议会等用户回答。
+    case askUser(question: String)
 }
 
 struct IOSCouncilRoomRunRequest {
@@ -362,7 +365,7 @@ struct IOSCouncilRoomRunRequest {
     let mode: IOSCouncilRoomRunMode
     let settings: IOSCouncilRoomSettings
     let currentModelId: String
-    let providerSetting: ProviderSetting.OpenAI
+    let providerSetting: ProviderSetting
     let searchSettings: Settings?
     let researchConsent: IOSCouncilResearchConsent
 }
@@ -498,7 +501,7 @@ struct IOSCouncilSearchResearcher: IOSCouncilResearching {
 @MainActor
 protocol IOSCouncilTextStreaming: AnyObject {
     func streamText(
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
         onUpdate: @escaping @MainActor (String) -> Void
@@ -509,15 +512,20 @@ protocol IOSCouncilTextStreaming: AnyObject {
 
 @MainActor
 final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
-    private let provider: OpenAIKmpProvider
+    private let openAIProvider: OpenAIKmpProvider
+    private let claudeProvider: ClaudeKmpProvider
     private var job: Kotlinx_coroutines_coreJob?
 
-    init(provider: OpenAIKmpProvider = OpenAIKmpProvider()) {
-        self.provider = provider
+    init(
+        provider: OpenAIKmpProvider = OpenAIKmpProvider(),
+        claudeProvider: ClaudeKmpProvider = ClaudeKmpProvider()
+    ) {
+        self.openAIProvider = provider
+        self.claudeProvider = claudeProvider
     }
 
     func streamText(
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
         onUpdate: @escaping @MainActor (String) -> Void
@@ -531,7 +539,7 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
                 continuation.resume(returning: value)
             }
 
-            job = provider.streamTextCancellable(
+            job = dispatchCouncilStream(
                 providerSetting: providerSetting,
                 messages: messages,
                 params: params,
@@ -551,6 +559,32 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
                 }
             )
         }
+    }
+
+    /// Dispatch a council seat stream to the OpenAI or Claude executor based on
+    /// the resolved provider's sealed type. Both share streamTextCancellable.
+    private func dispatchCouncilStream(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onChunk: @escaping (MessageChunk) -> Void,
+        onComplete: @escaping () -> Void,
+        onError: @escaping (KotlinThrowable) -> Void
+    ) -> Kotlinx_coroutines_coreJob? {
+        if let openAI = providerSetting as? ProviderSetting.OpenAI {
+            return openAIProvider.streamTextCancellable(
+                providerSetting: openAI, messages: messages, params: params,
+                onChunk: onChunk, onComplete: onComplete, onError: onError
+            )
+        }
+        if let claude = providerSetting as? ProviderSetting.Claude {
+            return claudeProvider.streamTextCancellable(
+                providerSetting: claude, messages: messages, params: params,
+                onChunk: onChunk, onComplete: onComplete, onError: onError
+            )
+        }
+        onError(KotlinThrowable(message: "当前服务商类型暂不支持 council"))
+        return nil
     }
 
     func cancel() {
@@ -608,7 +642,8 @@ final class IOSCouncilRoomRunner {
 
     func run(
         request: IOSCouncilRoomRunRequest,
-        onEvent: @escaping @MainActor (IOSCouncilRoomEvent) -> Void = { _ in }
+        onEvent: @escaping @MainActor (IOSCouncilRoomEvent) -> Void = { _ in },
+        onAskUser: ((String) async -> String?)? = nil
     ) async -> IOSCouncilRoomRunSummary {
         isCancelled = false
         let objective = request.objective.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -640,7 +675,8 @@ final class IOSCouncilRoomRunner {
             return IOSCouncilRoomRunSummary(taskId: task.id, status: .failed, finalTopic: "", failedSeats: [], transcript: "")
         }
 
-        guard !request.providerSetting.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard !Self.apiKey(of: request.providerSetting)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             let message = IOSCouncilRoomRunnerError.missingAPIKey.localizedDescription
             onEvent(.append(systemMessage(body: message, subtitle: "配置阻塞", status: .failed)))
             _ = taskStore.updateTask(
@@ -753,12 +789,11 @@ final class IOSCouncilRoomRunner {
             onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
             onEvent(.append(dividerMessage(request.mode == .debate ? "辩论开始" : "自由群聊开始")))
 
-            let rounds = request.mode == .debate ? limits.defaultRounds : 1
+            // 两种模式都用 defaultRounds（normalized 限制 2-5 轮），不再给 freeChat 写死 1 轮。
+            let rounds = limits.defaultRounds
             for round in 1...rounds {
                 try checkCancelled()
-                if request.mode == .debate {
-                    onEvent(.append(dividerMessage("第 \(round) 轮")))
-                }
+                onEvent(.append(dividerMessage("第 \(round) 轮")))
                 for seat in activeSeats where !failedSeatIds.contains(seat.id) {
                     try checkCancelled()
                     onEvent(.state("\(seat.name) 发言中"))
@@ -809,6 +844,65 @@ final class IOSCouncilRoomRunner {
                         taskStore.appendLog(id: task.id, chunk: "[\(seat.name)] failed: \(reason)\n\n")
                     }
                 }
+
+                // 主持人轮末点评：非最后一轮时，主持人对本轮发言做点评
+                // （指出矛盾 / 下轮重点），让下一轮有递进方向。
+                if round < rounds {
+                    try checkCancelled()
+                    onEvent(.state("主持人轮末点评"))
+                    onEvent(.append(dividerMessage("主持人轮末点评")))
+                    let commentaryId = UUID()
+                    onEvent(.append(IOSCouncilRoomMessageEvent(
+                        id: commentaryId,
+                        kind: .host,
+                        speakerId: host.id,
+                        author: host.name,
+                        body: "点评中...",
+                        subtitle: "第 \(round) 轮点评 · \(host.modelId)",
+                        status: .speaking
+                    )))
+                    onEvent(.roster([host] + activeSeats, activeSpeakerId: host.id, failedSpeakerIds: failedSeatIds))
+                    let roundTranscript = transcript.suffix(8).joined(separator: "\n\n")
+                    do {
+                        let commentary = try await streamWithTimeout(
+                            seconds: limits.seatTimeoutSeconds,
+                            timeoutLabel: "主持人点评"
+                        ) {
+                            try await self.stream(
+                                speaker: host,
+                                systemPrompt: self.hostSystemPrompt(settings: settings),
+                                userPrompt: Self.roundEndCommentaryPrompt(
+                                    objective: objective,
+                                    round: round,
+                                    rounds: rounds,
+                                    roundTranscript: roundTranscript
+                                ),
+                                request: request,
+                                temperature: 0.45,
+                                onUpdate: { text in
+                                    onEvent(.updateMessage(id: commentaryId, body: text.isEmpty ? "点评中..." : text, status: .speaking))
+                                }
+                            )
+                        }
+                        onEvent(.updateMessage(id: commentaryId, body: commentary.trimmedOr("主持人未返回点评。"), status: .completed))
+                        transcript.append("[\(host.name) · 第\(round)轮点评] \(commentary)")
+                        taskStore.appendLog(id: task.id, chunk: "[\(host.name) · 第\(round)轮点评] \(commentary)\n\n")
+                    } catch {
+                        onEvent(.updateMessage(id: commentaryId, body: "点评失败：\(error.localizedDescription)", status: .failed))
+                    }
+                    onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
+                }
+                // 主持人轮末点评后，可以问用户是否有补充（任意阶段可暂停提问）。
+                let userReply = await askUser(
+                    "第 \(round) 轮结束，主持人是否需要向用户确认信息？输入问题，或留空跳过。",
+                    onEvent: onEvent,
+                    onAskUser: onAskUser
+                )
+                if let reply = userReply?.trimmedNilIfBlank {
+                    transcript.append("[用户] \(reply)")
+                    onEvent(.append(systemMessage(body: reply, subtitle: "用户回答", status: .completed)))
+                }
+                // 最后一轮不点评，直接进综合（阶段 6）。
             }
 
             try checkCancelled()
@@ -894,7 +988,7 @@ final class IOSCouncilRoomRunner {
         }
     }
 
-    static func makeProviderSetting(baseUrl: String, apiKey: String) -> ProviderSetting.OpenAI {
+    static func makeProviderSetting(baseUrl: String, apiKey: String) -> ProviderSetting {
         ProviderSetting.OpenAI(
             id: KotlinUuid.companion.random(),
             enabled: true,
@@ -1127,6 +1221,36 @@ final class IOSCouncilRoomRunner {
         """
     }
 
+    /// 从 ProviderSetting 提取 API Key（支持 OpenAI / Claude）。
+    private static func apiKey(of setting: ProviderSetting) -> String {
+        if let openAI = setting as? ProviderSetting.OpenAI {
+            return openAI.apiKey ?? ""
+        }
+        if let claude = setting as? ProviderSetting.Claude {
+            return claude.apiKey ?? ""
+        }
+        return ""
+    }
+
+    /// 主持人轮末点评 prompt：总结本轮发言，指出矛盾点和下一轮应聚焦的方向。
+    static func roundEndCommentaryPrompt(
+        objective: String,
+        round: Int,
+        rounds: Int,
+        roundTranscript: String
+    ) -> String {
+        """
+        原始议题：\(objective)
+
+        当前轮次：第 \(round) 轮 / 共 \(rounds) 轮
+
+        本轮发言：
+        \(roundTranscript)
+
+        请作为主持人点评本轮：1) 各席位观点的矛盾或共识；2) 下一轮应聚焦的核心问题或盲区。保持简短（150-250 字），不要重复各席位的原文。
+        """
+    }
+
     private func recordResearchConsent(_ consent: IOSCouncilResearchConsent, objective: String, runId: String) {
         guard consent == .allowed || consent == .denied else { return }
         let action: IOSToolApprovalAction = consent == .allowed ? .allowed : .denied
@@ -1151,6 +1275,19 @@ final class IOSCouncilRoomRunner {
             streamer.cancel()
             throw IOSCouncilRoomRunnerError.cancelled
         }
+    }
+
+    /// 主持人向用户提问。发出 `.askUser` 事件，暂停议会，等用户回答。
+    /// 返回用户的回答；若用户跳过或取消则返回 nil（议会继续，视为"无补充"）。
+    @MainActor
+    private func askUser(
+        _ question: String,
+        onEvent: @escaping @MainActor (IOSCouncilRoomEvent) -> Void,
+        onAskUser: ((String) async -> String?)?
+    ) async -> String? {
+        guard let onAskUser else { return nil }
+        onEvent(.askUser(question: question))
+        return await onAskUser(question)
     }
 
     private func dividerMessage(_ body: String) -> IOSCouncilRoomMessageEvent {

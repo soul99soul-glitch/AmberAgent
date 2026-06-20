@@ -322,7 +322,7 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
     }
 
     func streamText(
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
         onUpdate: @escaping @MainActor (String) -> Void

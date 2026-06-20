@@ -57,7 +57,7 @@ final class IOSDeepReadPipelineTests: XCTestCase {
         init(_ replies: [String]) { self.replies = replies }
 
         func generateText(
-            providerSetting: ProviderSetting.OpenAI,
+            providerSetting: ProviderSetting,
             messages: [UIMessage],
             params: TextGenerationParams
         ) async throws -> MessageChunk {
