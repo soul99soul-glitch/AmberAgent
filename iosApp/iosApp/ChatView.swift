@@ -331,139 +331,141 @@ struct ChatView: View {
                     .lineLimit(3)
             }
 
-            VStack(spacing: 8) {
-                HStack(alignment: .center, spacing: 8) {
-                    Button {
-                        if documentStore != nil {
-                            isImportingSelectedFile = true
-                        } else {
-                            Task {
-                                await viewModel.attachSelectedFilePreviewToNextMessage()
+            AmberGlassGroup(spacing: 18) {
+                VStack(spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Button {
+                            if documentStore != nil {
+                                isImportingSelectedFile = true
+                            } else {
+                                Task {
+                                    await viewModel.attachSelectedFilePreviewToNextMessage()
+                                }
                             }
+                        } label: {
+                            Image(systemName: viewModel.isAttachingSelectedFile ? "paperclip.circle.fill" : "plus")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(AmberTheme.muted)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Circle())
                         }
-                    } label: {
-                        Image(systemName: viewModel.isAttachingSelectedFile ? "paperclip.circle.fill" : "plus")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(AmberTheme.muted)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(
-                        viewModel.isLoading ||
-                            viewModel.isAttachingSelectedFile ||
-                            hasPendingToolApproval
-                    )
+                        .buttonStyle(.plain)
+                        .disabled(
+                            viewModel.isLoading ||
+                                viewModel.isAttachingSelectedFile ||
+                                hasPendingToolApproval
+                        )
 
-                    TextField(inputPlaceholder, text: $viewModel.inputText, axis: .vertical)
-                        .lineLimit(1...5)
-                        .textFieldStyle(.plain)
-                        .font(.body)
-                        .foregroundStyle(AmberTheme.foreground)
-                        .frame(minHeight: 38)
-                        .focused($isInputFocused)
-                        .onSubmit {
-                            if sharedSettings.displaySetting.sendOnEnter {
-                                guard sendEnabled else { return }
+                        TextField(inputPlaceholder, text: $viewModel.inputText, axis: .vertical)
+                            .lineLimit(1...5)
+                            .textFieldStyle(.plain)
+                            .font(.body)
+                            .foregroundStyle(AmberTheme.foreground)
+                            .frame(minHeight: 38)
+                            .focused($isInputFocused)
+                            .onSubmit {
+                                if sharedSettings.displaySetting.sendOnEnter {
+                                    guard sendEnabled else { return }
+                                    viewModel.sendMessage()
+                                }
+                            }
+                            .disabled(hasPendingToolApproval || configurationIssue != nil)
+                            .onChange(of: viewModel.inputText) { _, newText in
+                                let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
+                                if sharedSettings.displaySetting.pasteLongTextAsFile,
+                                   newText.count > threshold,
+                                   !pasteHintShown {
+                                    pasteHintShown = true
+                                }
+                            }
+
+                        if viewModel.isLoading {
+                            AmberGlassIconButton(
+                                systemImage: "stop.fill",
+                                accessibilityLabel: "停止生成",
+                                size: 32,
+                                symbolSize: 14,
+                                tint: AmberTheme.accentRed,
+                                prominent: true
+                            ) {
+                                viewModel.cancelGeneration()
+                            }
+                        } else {
+                            AmberGlassIconButton(
+                                systemImage: "arrow.up",
+                                accessibilityLabel: "发送消息",
+                                size: 32,
+                                symbolSize: 15,
+                                tint: sendEnabled ? AmberTheme.accent : AmberTheme.muted2,
+                                prominent: sendEnabled
+                            ) {
                                 viewModel.sendMessage()
                             }
+                            .disabled(!sendEnabled)
                         }
-                        .disabled(hasPendingToolApproval || configurationIssue != nil)
-                        .onChange(of: viewModel.inputText) { _, newText in
-                            let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
-                            if sharedSettings.displaySetting.pasteLongTextAsFile,
-                               newText.count > threshold,
-                               !pasteHintShown {
-                                pasteHintShown = true
-                            }
-                        }
-
-                    if viewModel.isLoading {
-                        Button {
-                            viewModel.cancelGeneration()
-                        } label: {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 32, height: 32)
-                                .background(AmberTheme.accentRed, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            viewModel.sendMessage()
-                        } label: {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(sendEnabled ? .white : AmberTheme.muted2)
-                                .frame(width: 32, height: 32)
-                                .background(sendEnabled ? AmberTheme.accent : AmberTheme.surface2, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!sendEnabled)
                     }
-                }
-                .padding(.leading, 8)
-                .padding(.trailing, 6)
-                .padding(.vertical, 6)
-                .overlay {
-                    Capsule()
-                        .stroke(
-                            AmberTheme.border.opacity(0.58),
-                            lineWidth: 0.5
-                        )
-                }
-                .amberGlass(cornerRadius: 25)
+                    .padding(.leading, 8)
+                    .padding(.trailing, 6)
+                    .padding(.vertical, 6)
+                    .overlay {
+                        Capsule()
+                            .stroke(
+                                AmberTheme.border.opacity(0.58),
+                                lineWidth: 0.5
+                            )
+                    }
+                    .amberGlass(cornerRadius: 25)
 
-                if showsComposerMeta {
-                    HStack {
-                        Button {
-                            activeComposerPanel = nil
-                            isModelSheetPresented = true
-                        } label: {
-                            Text(composerModelLabel)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(AmberTheme.foreground2)
-                                .lineLimit(1)
-                                .padding(.horizontal, 12)
-                                .frame(height: 30)
-                        }
-                        .buttonStyle(.plain)
-                        .amberGlass(cornerRadius: 15)
-                        .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
-
-                        Spacer()
-
-                        HStack(spacing: 8) {
-                            AmberGlassCircleButton(
-                                systemImage: "sparkles",
-                                accessibilityLabel: "设置思考等级",
-                                size: 34,
-                                symbolSize: 15
-                            ) {
-                                toggleComposerPanel(.thinking)
+                    if showsComposerMeta {
+                        HStack {
+                            Button {
+                                activeComposerPanel = nil
+                                isModelSheetPresented = true
+                            } label: {
+                                Text(composerModelLabel)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.foreground2)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 30)
                             }
-                            .accessibilityValue(reasoningAccessibilityValue)
-                            .popover(isPresented: popoverBinding(for: .thinking), arrowEdge: .bottom) {
-                                ComposerThinkingPanel(
-                                    selectedOption: selectedReasoningBinding,
-                                    isAvailable: viewModel.currentModelSupportsReasoning
-                                ) { _ in activeComposerPanel = nil }
-                                .presentationCompactAdaptation(.popover)
-                            }
+                            .buttonStyle(.plain)
+                            .amberGlass(cornerRadius: 15)
+                            .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
 
-                            ContextRingButton(snapshot: viewModel.contextSnapshot) {
-                                toggleComposerPanel(.context)
-                            }
-                            .popover(isPresented: popoverBinding(for: .context), arrowEdge: .bottom) {
-                                ComposerContextPanel(snapshot: viewModel.contextSnapshot)
+                            Spacer()
+
+                            HStack(spacing: 8) {
+                                AmberGlassCircleButton(
+                                    systemImage: "sparkles",
+                                    accessibilityLabel: "设置思考等级",
+                                    size: 34,
+                                    symbolSize: 15
+                                ) {
+                                    toggleComposerPanel(.thinking)
+                                }
+                                .accessibilityValue(reasoningAccessibilityValue)
+                                .popover(isPresented: popoverBinding(for: .thinking), arrowEdge: .bottom) {
+                                    ComposerThinkingPanel(
+                                        selectedOption: selectedReasoningBinding,
+                                        isAvailable: viewModel.currentModelSupportsReasoning
+                                    ) { _ in activeComposerPanel = nil }
                                     .presentationCompactAdaptation(.popover)
+                                }
+
+                                ContextRingButton(snapshot: viewModel.contextSnapshot) {
+                                    toggleComposerPanel(.context)
+                                }
+                                .popover(isPresented: popoverBinding(for: .context), arrowEdge: .bottom) {
+                                    ComposerContextPanel(snapshot: viewModel.contextSnapshot)
+                                        .presentationCompactAdaptation(.popover)
+                                }
                             }
                         }
+                        .padding(.horizontal, 2)
+                        .padding(.top, 2)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    .padding(.horizontal, 2)
-                    .padding(.top, 2)
-                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
         }
@@ -1105,8 +1107,7 @@ private struct ComposerPopoverSurface<Content: View>: View {
     var body: some View {
         content
             .frame(width: width)
-            .background(AmberTheme.background)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .amberGlass(cornerRadius: 14, interactive: false)
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(AmberTheme.border.opacity(0.75), lineWidth: 0.5)

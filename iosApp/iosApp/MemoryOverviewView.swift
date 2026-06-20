@@ -142,30 +142,32 @@ struct MemoryOverviewView: View {
                 .font(.body)
                 .padding(.horizontal, 12)
                 .frame(height: 44)
-                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+                .amberGlass(cornerRadius: AmberTheme.radiusLarge)
                 .overlay {
                     RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
                         .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
                 }
 
                 ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(IOSMemoryScopeFilter.allCases) { filter in
-                            Button {
-                                scopeFilter = filter
-                            } label: {
-                                Text(filter.title)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(scopeFilter == filter ? .white : AmberTheme.foreground2)
-                                    .padding(.horizontal, 12)
-                                    .frame(height: 30)
-                                    .background(scopeFilter == filter ? AmberTheme.accent : AmberTheme.surface2, in: Capsule())
+                    AmberGlassGroup(spacing: 12) {
+                        HStack(spacing: 8) {
+                            ForEach(IOSMemoryScopeFilter.allCases) { filter in
+                                Button {
+                                    scopeFilter = filter
+                                } label: {
+                                    AmberGlassTextChip(
+                                        title: filter.title,
+                                        isSelected: scopeFilter == filter,
+                                        height: 30,
+                                        horizontalPadding: 12
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(scopeFilter == filter ? .isSelected : [])
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(scopeFilter == filter ? .isSelected : [])
                         }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
                 }
                 .scrollIndicators(.hidden)
             }

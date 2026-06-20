@@ -129,9 +129,128 @@ private struct AmberGlassModifier: ViewModifier {
     }
 }
 
+private struct AmberProminentGlassModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let tint: Color
+    let interactive: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        if #available(iOS 26.0, *) {
+            if interactive {
+                content
+                    .background(tint.opacity(0.24), in: shape)
+                    .glassEffect(.regular.tint(tint.opacity(0.34)).interactive(), in: .rect(cornerRadius: cornerRadius))
+            } else {
+                content
+                    .background(tint.opacity(0.24), in: shape)
+                    .glassEffect(.regular.tint(tint.opacity(0.34)), in: .rect(cornerRadius: cornerRadius))
+            }
+        } else {
+            content
+                .background(tint, in: shape)
+                .shadow(color: tint.opacity(0.32), radius: 18, y: 4)
+        }
+    }
+}
+
 extension View {
     func amberGlass(cornerRadius: CGFloat, interactive: Bool = true) -> some View {
         modifier(AmberGlassModifier(cornerRadius: cornerRadius, interactive: interactive))
+    }
+
+    func amberProminentGlass(
+        cornerRadius: CGFloat,
+        tint: Color = AmberTheme.accent,
+        interactive: Bool = true
+    ) -> some View {
+        modifier(AmberProminentGlassModifier(cornerRadius: cornerRadius, tint: tint, interactive: interactive))
+    }
+}
+
+struct AmberGlassGroup<Content: View>: View {
+    let spacing: CGFloat
+    let content: Content
+
+    init(spacing: CGFloat = 16, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content
+            }
+        } else {
+            content
+        }
+    }
+}
+
+struct AmberGlassIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    var size: CGFloat = 32
+    var symbolSize: CGFloat = 15
+    var tint: Color = AmberTheme.foreground2
+    var prominent = false
+    let action: () -> Void
+
+    var body: some View {
+        if prominent {
+            buttonLabel
+                .amberProminentGlass(cornerRadius: size / 2, tint: tint)
+                .accessibilityLabel(accessibilityLabel)
+        } else {
+            buttonLabel
+                .amberGlass(cornerRadius: size / 2)
+                .accessibilityLabel(accessibilityLabel)
+        }
+    }
+
+    private var buttonLabel: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: symbolSize, weight: .semibold))
+                .foregroundStyle(prominent ? Color.white : tint)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct AmberGlassTextChip: View {
+    let title: String
+    var isSelected = false
+    var tint: Color = AmberTheme.accent
+    var height: CGFloat = 30
+    var horizontalPadding: CGFloat = 12
+    var fillsWidth = false
+    var font: Font = .caption.weight(.semibold)
+
+    var body: some View {
+        if isSelected {
+            label
+                .foregroundStyle(Color.white)
+                .amberProminentGlass(cornerRadius: height / 2, tint: tint)
+        } else {
+            label
+                .foregroundStyle(AmberTheme.foreground2)
+                .amberGlass(cornerRadius: height / 2)
+        }
+    }
+
+    private var label: some View {
+        Text(title)
+            .font(font)
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+            .frame(maxWidth: fillsWidth ? .infinity : nil)
+            .frame(height: height)
+            .padding(.horizontal, horizontalPadding)
     }
 }
 
@@ -359,9 +478,7 @@ struct ConversationsView: View {
                     .frame(width: 56, height: 56)
             }
             .buttonStyle(.plain)
-            .background(AmberTheme.accent, in: Circle())
-            .shadow(color: AmberTheme.accent.opacity(0.38), radius: 20, y: 4)
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+            .amberProminentGlass(cornerRadius: 28, tint: AmberTheme.accent)
             .accessibilityLabel("新建聊天")
             .padding(.trailing, 20)
             .padding(.bottom, 32)
@@ -413,22 +530,25 @@ struct ConversationsView: View {
 
             Spacer()
 
-            HStack(spacing: 8) {
-                AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "设置", size: 34, symbolSize: 16) {
-                    router.navigate(to: .settings)
-                }
+            AmberGlassGroup(spacing: 8) {
+                HStack(spacing: 8) {
+                    AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "设置", size: 34, symbolSize: 16) {
+                        router.navigate(to: .settings)
+                    }
 
-                Button {
-                    router.navigate(to: .account)
-                } label: {
-                    Text("A")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(AmberTheme.foreground)
-                        .frame(width: 34, height: 34)
-                        .background(AmberTheme.surface2, in: Circle())
+                    Button {
+                        router.navigate(to: .account)
+                    } label: {
+                        Text("A")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(AmberTheme.foreground)
+                            .frame(width: 34, height: 34)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .amberGlass(cornerRadius: 17)
+                    .accessibilityLabel("我的账户")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("我的账户")
             }
         }
         .padding(.horizontal, 16)
@@ -464,16 +584,17 @@ struct ConversationsView: View {
         }
         .frame(height: 38)
         .padding(.horizontal, 14)
-        .background(AmberTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .amberGlass(cornerRadius: 13)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
 
     private var shortcutStrip: some View {
-        HStack(spacing: 8) {
-            ForEach(shortcuts) { shortcut in
-                shortcutButton(shortcut)
+        AmberGlassGroup(spacing: 12) {
+            HStack(spacing: 8) {
+                ForEach(shortcuts) { shortcut in
+                    shortcutButton(shortcut)
+                }
             }
         }
         .padding(.horizontal, 8)
@@ -500,6 +621,7 @@ struct ConversationsView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 78)
             .contentShape(Rectangle())
+            .amberGlass(cornerRadius: 18)
         }
         .buttonStyle(.plain)
     }
@@ -727,12 +849,11 @@ struct SearchView: View {
             }
             .frame(height: 38)
             .padding(.horizontal, 12)
-            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .amberGlass(cornerRadius: 12)
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
             }
-            .shadow(color: .white.opacity(0.55), radius: 0, y: -1)
 
             Button("取消") {
                 dismiss()
@@ -749,35 +870,26 @@ struct SearchView: View {
 
     private var filterStrip: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(SearchFilter.allCases) { filter in
-                    Button {
-                        selectedFilter = filter
-                    } label: {
-                        Text(filter.title)
-                            .font(.system(size: 13.5, weight: .medium))
-                            .foregroundStyle(selectedFilter == filter ? .white : AmberTheme.foreground2)
-                            .frame(height: 30)
-                            .padding(.horizontal, 13)
-                            .background(
-                                selectedFilter == filter ? AmberTheme.accent : AmberTheme.surface,
-                                in: Capsule()
+            AmberGlassGroup(spacing: 12) {
+                HStack(spacing: 6) {
+                    ForEach(SearchFilter.allCases) { filter in
+                        Button {
+                            selectedFilter = filter
+                        } label: {
+                            AmberGlassTextChip(
+                                title: filter.title,
+                                isSelected: selectedFilter == filter,
+                                height: 30,
+                                horizontalPadding: 13,
+                                font: .system(size: 13.5, weight: .medium)
                             )
-                            .overlay {
-                                Capsule()
-                                    .stroke(selectedFilter == filter ? .clear : AmberTheme.borderSoft, lineWidth: 0.5)
-                            }
-                            .shadow(
-                                color: selectedFilter == filter ? AmberTheme.accent.opacity(0.28) : .black.opacity(0.04),
-                                radius: selectedFilter == filter ? 6 : 2,
-                                y: selectedFilter == filter ? 2 : 1
-                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
                 }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         }
         .scrollIndicators(.hidden)
         .padding(.bottom, 10)

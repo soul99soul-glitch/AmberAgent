@@ -72,27 +72,28 @@ private struct AppearanceSegmentedControl: View {
     let onSelect: (IOSAppearanceMode) -> Void
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(modes) { mode in
-                Button {
-                    onSelect(mode)
-                } label: {
-                    Text(mode.title)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(selected == mode ? AmberTheme.foreground : AmberTheme.muted)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 32)
-                        .background(
-                            selected == mode ? AmberTheme.background : .clear,
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+        AmberGlassGroup(spacing: 12) {
+            HStack(spacing: 6) {
+                ForEach(modes) { mode in
+                    Button {
+                        onSelect(mode)
+                    } label: {
+                        AmberGlassTextChip(
+                            title: mode.title,
+                            isSelected: selected == mode,
+                            height: 32,
+                            horizontalPadding: 8,
+                            fillsWidth: true,
+                            font: .caption.weight(.medium)
                         )
-                        .shadow(color: selected == mode ? .black.opacity(0.09) : .clear, radius: 4, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityAddTraits(selected == mode ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
             }
+            .padding(2)
         }
-        .padding(2)
-        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }
 

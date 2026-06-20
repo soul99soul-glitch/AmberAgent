@@ -184,30 +184,26 @@ struct MiniAppRunnerView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
-            HStack(spacing: 8) {
-                Button {
-                    loadEditedHtml()
-                } label: {
-                    Label("加载并校验", systemImage: "play.circle.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(AmberTheme.accent, in: RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
+            AmberGlassGroup(spacing: 14) {
+                HStack(spacing: 8) {
+                    Button {
+                        loadEditedHtml()
+                    } label: {
+                        Label("加载并校验", systemImage: "play.circle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
 
-                Button {
-                    saveEditedHtml(app)
-                } label: {
-                    Label("保存新版本", systemImage: "tray.and.arrow.down")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(AmberTheme.accent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10))
+                    Button {
+                        saveEditedHtml(app)
+                    } label: {
+                        Label("保存新版本", systemImage: "tray.and.arrow.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)

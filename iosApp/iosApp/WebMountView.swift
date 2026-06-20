@@ -660,40 +660,44 @@ struct WebMountSiteView: View {
                 WebMountDivider()
                 browserChromeRow
                 WebMountDivider()
-                HStack(spacing: 8) {
-                    TextField("https://example.com/path", text: $openURLText)
-                        .font(.system(size: 13, design: .monospaced))
-                        .textFieldStyle(.plain)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    Button("打开") { Task { await openTypedURL() } }
-                        .buttonStyle(.bordered)
-                        .disabled(isLoading)
+                AmberGlassGroup(spacing: 12) {
+                    HStack(spacing: 8) {
+                        TextField("https://example.com/path", text: $openURLText)
+                            .font(.system(size: 13, design: .monospaced))
+                            .textFieldStyle(.plain)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                        Button("打开") { Task { await openTypedURL() } }
+                            .buttonStyle(.glassProminent)
+                            .disabled(isLoading)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 WebMountDivider()
-                HStack(spacing: 10) {
-                    Button {
-                        Task { _ = await controller.runtime.back() }
-                    } label: {
-                        Label("后退", systemImage: "chevron.left")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!runtime.snapshot.canGoBack)
+                AmberGlassGroup(spacing: 12) {
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { _ = await controller.runtime.back() }
+                        } label: {
+                            Label("后退", systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(!runtime.snapshot.canGoBack)
 
-                    Button {
-                        Task { _ = await controller.runtime.forward() }
-                    } label: {
-                        Label("前进", systemImage: "chevron.right")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!runtime.snapshot.canGoForward)
+                        Button {
+                            Task { _ = await controller.runtime.forward() }
+                        } label: {
+                            Label("前进", systemImage: "chevron.right")
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(!runtime.snapshot.canGoForward)
 
-                    Spacer()
+                        Spacer()
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 11)
@@ -733,16 +737,18 @@ struct WebMountSiteView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "页面内容")
             AmberFormGroup {
-                HStack(spacing: 8) {
-                    Button("状态") { Task { await readState() } }
-                        .buttonStyle(.bordered)
-                    Button("提取正文") { Task { await extractReadable() } }
-                        .buttonStyle(.bordered)
-                    Button("观察") { Task { await self.observePage() } }
-                        .buttonStyle(.bordered)
-                    Button("视觉快照") { Task { await visualSnapshot() } }
-                        .buttonStyle(.bordered)
-                    Spacer()
+                AmberGlassGroup(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Button("状态") { Task { await readState() } }
+                            .buttonStyle(.glass)
+                        Button("提取正文") { Task { await extractReadable() } }
+                            .buttonStyle(.glass)
+                        Button("观察") { Task { await self.observePage() } }
+                            .buttonStyle(.glass)
+                        Button("视觉快照") { Task { await visualSnapshot() } }
+                            .buttonStyle(.glass)
+                        Spacer()
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -772,16 +778,18 @@ struct WebMountSiteView: View {
                 }
                 WebMountCodeBlock(text: self.selectedResultText)
                 WebMountDivider()
-                HStack(spacing: 8) {
-                    TextField("选择器", text: $getSelector)
-                        .font(.system(size: 13, design: .monospaced))
-                        .textFieldStyle(.plain)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
-                        .autocorrectionDisabled()
-                    Button("读取") { Task { await getElement() } }
-                        .buttonStyle(.bordered)
+                AmberGlassGroup(spacing: 12) {
+                    HStack(spacing: 8) {
+                        TextField("选择器", text: $getSelector)
+                            .font(.system(size: 13, design: .monospaced))
+                            .textFieldStyle(.plain)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
+                            .autocorrectionDisabled()
+                        Button("读取") { Task { await getElement() } }
+                            .buttonStyle(.glass)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -805,22 +813,24 @@ struct WebMountSiteView: View {
                     trailing: cookieSummary.map { "\($0.cookieCount)" } ?? "..."
                 )
                 WebMountDivider()
-                HStack(spacing: 8) {
-                    Button {
-                        Task { await openSite() }
-                    } label: {
-                        Label("打开网页登录", systemImage: "person.badge.key")
-                    }
-                    .buttonStyle(.bordered)
+                AmberGlassGroup(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Button {
+                            Task { await openSite() }
+                        } label: {
+                            Label("打开网页登录", systemImage: "person.badge.key")
+                        }
+                        .buttonStyle(.glass)
 
-                    Button {
-                        Task { await refreshCookieSummary() }
-                    } label: {
-                        Label("重新检测 Cookie", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.bordered)
+                        Button {
+                            Task { await refreshCookieSummary() }
+                        } label: {
+                            Label("重新检测 Cookie", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.glass)
 
-                    Spacer()
+                        Spacer()
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -1256,20 +1266,22 @@ private struct WebMountHandoffActions: View {
                 .foregroundStyle(AmberTheme.muted)
                 .lineLimit(2)
 
-            HStack(spacing: 8) {
-                Button(action: onChat) {
-                    Label("转入聊天", systemImage: "bubble.left.and.text.bubble.right")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.bordered)
+            AmberGlassGroup(spacing: 12) {
+                HStack(spacing: 8) {
+                    Button(action: onChat) {
+                        Label("转入聊天", systemImage: "bubble.left.and.text.bubble.right")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.glass)
 
-                Button(action: onDeepRead) {
-                    Label("转入深度阅读", systemImage: "book.pages")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.bordered)
+                    Button(action: onDeepRead) {
+                        Label("转入深度阅读", systemImage: "book.pages")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.glass)
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
             }
         }
         .padding(.horizontal, 14)

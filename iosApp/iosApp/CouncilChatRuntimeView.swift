@@ -452,7 +452,7 @@ private struct CouncilComposerChip: View {
                 .lineLimit(1)
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(AmberTheme.surface, in: Capsule())
+                .amberGlass(cornerRadius: 15)
         }
         .buttonStyle(.plain)
     }

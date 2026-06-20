@@ -184,23 +184,25 @@ struct BoardView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    HStack(spacing: 10) {
-                        Button {
-                            Task { await refreshHotList(force: true) }
-                        } label: {
-                            Label(hotListStore.isRefreshing ? "刷新中" : "刷新", systemImage: "arrow.clockwise")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(hotListStore.isRefreshing)
+                    AmberGlassGroup(spacing: 16) {
+                        HStack(spacing: 10) {
+                            Button {
+                                Task { await refreshHotList(force: true) }
+                            } label: {
+                                Label(hotListStore.isRefreshing ? "刷新中" : "刷新", systemImage: "arrow.clockwise")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .disabled(hotListStore.isRefreshing)
 
-                        Button {
-                            showCustomSourceSheet = true
-                        } label: {
-                            Label("自定义来源", systemImage: "plus")
-                                .frame(maxWidth: .infinity)
+                            Button {
+                                showCustomSourceSheet = true
+                            } label: {
+                                Label("自定义来源", systemImage: "plus")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glass)
                         }
-                        .buttonStyle(.bordered)
                     }
 
                     if let message = deepReadMessage {
@@ -325,33 +327,35 @@ struct BoardView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    HStack(spacing: 10) {
-                        Button {
-                            Task { await createDeepReadTask(includeConversation: true) }
-                        } label: {
-                            Label(isCreatingDeepRead ? "生成中" : "生成", systemImage: isCreatingDeepRead ? "clock.arrow.circlepath" : "sparkles")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isCreatingDeepRead)
+                    AmberGlassGroup(spacing: 16) {
+                        HStack(spacing: 10) {
+                            Button {
+                                Task { await createDeepReadTask(includeConversation: true) }
+                            } label: {
+                                Label(isCreatingDeepRead ? "生成中" : "生成", systemImage: isCreatingDeepRead ? "clock.arrow.circlepath" : "sparkles")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .disabled(isCreatingDeepRead)
 
-                        Button {
-                            isImportingDeepReadFile = true
-                        } label: {
-                            Image(systemName: "doc.badge.plus")
-                                .frame(width: 42)
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel("从文件创建深度阅读")
+                            Button {
+                                isImportingDeepReadFile = true
+                            } label: {
+                                Image(systemName: "doc.badge.plus")
+                                    .frame(width: 42)
+                            }
+                            .buttonStyle(.glass)
+                            .accessibilityLabel("从文件创建深度阅读")
 
-                        Button {
-                            Task { await createFromWebMount() }
-                        } label: {
-                            Image(systemName: "globe")
-                                .frame(width: 42)
+                            Button {
+                                Task { await createFromWebMount() }
+                            } label: {
+                                Image(systemName: "globe")
+                                    .frame(width: 42)
+                            }
+                            .buttonStyle(.glass)
+                            .accessibilityLabel("从当前 WebMount 页面创建深度阅读")
                         }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel("从当前 WebMount 页面创建深度阅读")
                     }
 
                     Button {
@@ -360,7 +364,7 @@ struct BoardView: View {
                         Label("只使用手动文本/搜索", systemImage: "text.badge.checkmark")
                             .font(.caption.weight(.semibold))
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .disabled(isCreatingDeepRead)
 
                     if let deepReadMessage {
