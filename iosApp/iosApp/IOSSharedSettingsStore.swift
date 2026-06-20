@@ -402,6 +402,20 @@ final class IOSSharedSettingsStore {
         return merged.providers.first { ($0.id.description() as String) == providerId }
     }
 
+    /// Switch an existing provider between OpenAI-compatible and Anthropic-compatible
+    /// subtypes, preserving id/name/base URL/key/models. Persists to snapshot.
+    @discardableResult
+    func switchProviderProtocol(providerId: String, protocolOption: ProviderProtocolOption) -> ProviderSetting? {
+        let before = snapshot
+        let merged = IosSettingsMutations.shared.switchProviderProtocol(
+            settings: before,
+            providerId: providerId,
+            protocolType: protocolOption.rawValue
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
     /// Set the global current chat model by model UUID string. Persists to snapshot.
     func setCurrentChatModelId(_ modelId: String) {
         let merged = IosSettingsMutations.shared.setChatModelId(settings: snapshot, modelId: modelId)

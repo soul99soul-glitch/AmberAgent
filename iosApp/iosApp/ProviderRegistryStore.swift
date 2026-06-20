@@ -145,19 +145,23 @@ final class ProviderRegistryStore {
         Self.id(of: provider) == selectedProviderId
     }
 
-    /// Whether this provider can be faithfully projected into the current iOS chat
-    /// chain, which only constructs `ProviderSetting.OpenAI` with `useResponseApi=false`.
-    /// Google/Claude need a provider bridge; xAI needs the Response API; MiMo's bundled
-    /// base is a source-marked placeholder — none can be silently activated yet.
+    /// Whether this provider can be faithfully used by the current iOS chat chain.
+    /// OpenAI-compatible and Claude have KMP executors; xAI needs the Response API,
+    /// Google needs its own executor, and MiMo's bundled base is a placeholder.
     func canActivate(_ provider: ProviderSetting) -> Bool {
-        guard let openAI = provider as? ProviderSetting.OpenAI else { return false }
-        if openAI.useResponseApi { return false }
-        if openAI.brand === OpenAIBrand.mimo { return false }
-        return true
+        if let openAI = provider as? ProviderSetting.OpenAI {
+            if openAI.useResponseApi { return false }
+            if openAI.brand === OpenAIBrand.mimo { return false }
+            return true
+        }
+        if provider is ProviderSetting.Claude {
+            return true
+        }
+        return false
     }
 
     /// A provider can become the active chat provider only when it is both
-    /// representable by today's scalar OpenAI-compatible chain and has a stored key.
+    /// representable by today's chat chain and has a stored key.
     /// This prevents a key-less preset tap from silently clearing the working chat key.
     func canSelect(_ provider: ProviderSetting) -> Bool {
         canActivate(provider) && hasStoredKey(provider)

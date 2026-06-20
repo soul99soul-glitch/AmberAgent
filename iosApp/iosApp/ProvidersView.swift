@@ -398,7 +398,7 @@ private struct ProviderRowModel: Identifiable {
         case .responseAPIPreset:
             return ("预置 · 待 Response API", AmberTheme.muted)
         case .googleProviderPreset:
-            return ("预置 · 待桥接", AmberTheme.muted)
+            return ("预置 · Gemini 执行器待移植", AmberTheme.muted)
         case .current:
             return ("预置", AmberTheme.muted)
         }
@@ -829,7 +829,7 @@ private enum ProviderAddAlert: Identifiable {
     }
 }
 
-private enum ProviderProtocolOption: String, CaseIterable, Identifiable {
+enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     case openAI
     case google
     case anthropic
@@ -842,6 +842,15 @@ private enum ProviderProtocolOption: String, CaseIterable, Identifiable {
         case .openAI: "OpenAI Compatible"
         case .google: "Gemini"
         case .anthropic: "Anthropic"
+        case .custom: "自定义"
+        }
+    }
+
+    var detailTitle: String {
+        switch self {
+        case .openAI: "OpenAI 兼容"
+        case .google: "Gemini"
+        case .anthropic: "Anthropic 兼容"
         case .custom: "自定义"
         }
     }
@@ -860,6 +869,24 @@ private enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     /// KMP executor bridge.
     static var addableCases: [ProviderProtocolOption] {
         [.openAI, .anthropic]
+    }
+
+    static var switchableCases: [ProviderProtocolOption] {
+        [.openAI, .anthropic]
+    }
+
+    static func option(for provider: ProviderSetting?) -> ProviderProtocolOption? {
+        guard let provider else { return nil }
+        if let openAI = provider as? ProviderSetting.OpenAI {
+            return openAI.useResponseApi ? nil : .openAI
+        }
+        if provider is ProviderSetting.Claude {
+            return .anthropic
+        }
+        if provider is ProviderSetting.Google {
+            return .google
+        }
+        return nil
     }
 
     /// The default base URL seeded when the user picks this protocol in the add

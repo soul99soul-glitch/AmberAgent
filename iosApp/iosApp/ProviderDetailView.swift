@@ -16,6 +16,7 @@ struct ProviderDetailView: View {
     @State private var selectedTab: ProviderDetailTab = .config
     @State private var alert: ProviderDetailAlert?
     @State private var connectionStatus: ProviderConnectionStatus = .idle
+    @State private var protocolOverride: ProviderProtocolOption?
 
     var body: some View {
         ZStack {
@@ -61,20 +62,8 @@ struct ProviderDetailView: View {
 
                 Spacer()
 
-                Group {
-                    switch selectedTab {
-                    case .config:
-                        Text(isCurrentProvider ? "自动保存" : "模板")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(AmberTheme.muted)
-                            .frame(width: 58, height: 36)
-                            .accessibilityLabel(isCurrentProvider ? "自动保存" : "预置模板")
-                    case .models:
-                        Color.clear
-                            .frame(width: 44, height: 44)
-                    }
-                }
-                .frame(width: 58, alignment: .trailing)
+                Color.clear
+                    .frame(width: 58, height: 44)
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
@@ -89,18 +78,7 @@ struct ProviderDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 AmberFormGroup {
-                    ProviderStaticRow(
-                        title: "接口协议",
-                        subtitle: "当前聊天使用 OpenAI 兼容接口。",
-                        value: protocolLabel
-                    )
-                    ProviderDetailDivider()
-                    ProviderStaticRow(
-                        title: "使用范围",
-                        subtitle: scopeSubtitle,
-                        value: scopeValue,
-                        valueStyle: .normal
-                    )
+                    protocolRow
                 }
 
                 AmberSectionLabel(text: "连接")
@@ -118,7 +96,7 @@ struct ProviderDetailView: View {
                 AmberFormGroup {
                     ProviderStaticRow(
                         title: "Response API",
-                        subtitle: "当前聊天使用 Chat Completions 路径。",
+                        subtitle: responseAPISubtitle,
                         value: responseAPIValue
                     )
                     ProviderDetailDivider()
@@ -208,10 +186,19 @@ struct ProviderDetailView: View {
         DefaultProvidersKt.DEFAULT_PROVIDERS.first { $0.name == providerName }
     }
 
+    private var currentLiveProvider: ProviderSetting? {
+        let snapshot = sharedSettings.snapshot
+        guard let currentModel = snapshot.getCurrentChatModel() else { return nil }
+        return ChatProviderConfiguration.provider(for: currentModel, providers: snapshot.providers)
+    }
+
     /// The live provider entry from the persisted snapshot matching this preset's
     /// name. The API key lives here once the user fills it (Android model).
     private var matchedLiveProvider: ProviderSetting? {
-        sharedSettings.snapshot.providers.first { ($0.name as String) == providerName }
+        if isCurrentProvider, let currentLiveProvider {
+            return currentLiveProvider
+        }
+        return sharedSettings.snapshot.providers.first { ($0.name as String) == providerName }
     }
 
     /// True if the live snapshot's matching provider already has a non-empty
@@ -268,32 +255,107 @@ struct ProviderDetailView: View {
         providerKind == .responseAPIPreset
     }
 
+    private var routeProtocolOption: ProviderProtocolOption? {
+        switch providerKind {
+        case .openAICompatiblePreset, .current:
+            return .openAI
+        case .claudePreset:
+            return .anthropic
+        case .googleProviderPreset, .responseAPIPreset, .endpointConfirmationPreset:
+            return nil
+        }
+    }
+
+    private var currentProtocolOption: ProviderProtocolOption? {
+        protocolOverride ?? ProviderProtocolOption.option(for: matchedLiveProvider) ?? routeProtocolOption
+    }
+
+    private var canSwitchProtocol: Bool {
+        guard let provider = matchedLiveProvider else { return false }
+        if let openAI = provider as? ProviderSetting.OpenAI {
+            if openAI.useResponseApi { return false }
+            if openAI.brand === OpenAIBrand.mimo { return false }
+            return true
+        }
+        if provider is ProviderSetting.Claude {
+            return true
+        }
+        return false
+    }
+
     private var protocolLabel: String {
-        requiresProviderBridge ? "Google 专用接口" : "OpenAI 兼容"
+        if requiresProviderBridge { return "Google 专用接口" }
+        if requiresResponseAPIBridge { return "OpenAI Response API" }
+        switch currentProtocolOption {
+        case .anthropic:
+            return "Anthropic 兼容"
+        case .openAI:
+            return "OpenAI 兼容"
+        case .google:
+            return "Google 专用接口"
+        case .custom:
+            return "自定义"
+        case nil:
+            return "OpenAI 兼容"
+        }
     }
 
-    private var scopeSubtitle: String {
-        if isCurrentProvider {
-            return "当前聊天正在使用这组配置"
+    private var protocolSubtitle: String {
+        switch currentProtocolOption {
+        case .anthropic:
+            return "使用 Anthropic Messages 接口。"
+        case .openAI:
+            return "使用 OpenAI 兼容 Chat Completions 接口。"
+        case .google:
+            return "使用 Gemini 专用接口。"
+        case .custom:
+            return "使用自定义接口。"
+        case nil:
+            if requiresProviderBridge {
+                return "使用 Gemini 专用接口。"
+            }
+            if requiresResponseAPIBridge {
+                return "这个模板使用 Response API。"
+            }
+            if requiresEndpointConfirmation {
+                return "模板地址需要确认后再使用。"
+            }
+            return "由服务商模板决定。"
         }
-
-        if requiresProviderBridge {
-            return "这个服务商类型暂不支持直接设为当前"
-        }
-
-        if requiresEndpointConfirmation {
-            return "模板地址需要你确认后再使用"
-        }
-
-        if requiresResponseAPIBridge {
-            return "这个模板需要不同的接口模式"
-        }
-
-        return "保存 API Key 后可设为当前"
     }
 
-    private var scopeValue: String {
-        isCurrentProvider ? "当前聊天" : "预置模板"
+    @ViewBuilder
+    private var protocolRow: some View {
+        if canSwitchProtocol {
+            Menu {
+                ForEach(ProviderProtocolOption.switchableCases, id: \.self) { option in
+                    Button {
+                        switchProtocol(to: option)
+                    } label: {
+                        if option == currentProtocolOption {
+                            Label(option.detailTitle, systemImage: "checkmark")
+                        } else {
+                            Text(option.detailTitle)
+                        }
+                    }
+                }
+            } label: {
+                ProviderRowContent(
+                    title: "接口协议",
+                    subtitle: protocolSubtitle,
+                    value: protocolLabel,
+                    valueStyle: .normal,
+                    showsChevron: true
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            ProviderStaticRow(
+                title: "接口协议",
+                subtitle: protocolSubtitle,
+                value: protocolLabel
+            )
+        }
     }
 
     @ViewBuilder
@@ -317,7 +379,7 @@ struct ProviderDetailView: View {
             ProviderStaticRow(
                 title: "路径",
                 subtitle: "由接口协议决定",
-                value: "/chat/completions",
+                value: protocolPathValue,
                 valueStyle: .monoMuted
             )
         } else {
@@ -401,10 +463,18 @@ struct ProviderDetailView: View {
             return "该模板使用不同接口模式"
         }
 
+        if currentProtocolOption == .anthropic {
+            return "Anthropic Messages API"
+        }
+
         return "当前聊天使用"
     }
 
     private var presetPathValue: String {
+        protocolPathValue
+    }
+
+    private var protocolPathValue: String {
         if requiresProviderBridge {
             return "/models/{model}:generateContent"
         }
@@ -413,11 +483,25 @@ struct ProviderDetailView: View {
             return "/responses"
         }
 
+        if currentProtocolOption == .anthropic {
+            return "/messages"
+        }
+
         return "/chat/completions"
     }
 
+    private var responseAPISubtitle: String {
+        if currentProtocolOption == .anthropic {
+            return "Anthropic 协议不使用 Response API。"
+        }
+        return requiresResponseAPIBridge ? "该模板使用 Response API 路径。" : "当前使用 Chat Completions 路径。"
+    }
+
     private var responseAPIValue: String {
-        requiresResponseAPIBridge ? "模板需要" : "未启用"
+        if currentProtocolOption == .anthropic {
+            return "不适用"
+        }
+        return requiresResponseAPIBridge ? "模板需要" : "未启用"
     }
 
     private var connectionFooterText: String {
@@ -437,7 +521,7 @@ struct ProviderDetailView: View {
             return "这个模板需要不同接口模式，当前不会只套用地址。"
         }
 
-        return "API Key 会保存在本机钥匙串。保存后可在列表里设为当前。"
+        return "API Key 会保存到该服务商配置。保存后可在列表里设为当前。"
     }
 
     private var connectionTestSection: some View {
@@ -469,6 +553,23 @@ struct ProviderDetailView: View {
         }
     }
 
+    private func switchProtocol(to option: ProviderProtocolOption) {
+        guard option != currentProtocolOption else { return }
+        guard canSwitchProtocol, let provider = matchedLiveProvider else {
+            alert = .protocolPicker
+            return
+        }
+
+        let providerId = provider.id.description()
+        guard let updated = sharedSettings.switchProviderProtocol(providerId: providerId, protocolOption: option) else {
+            alert = .protocolSwitchFailed
+            return
+        }
+
+        protocolOverride = ProviderProtocolOption.option(for: updated) ?? option
+        connectionStatus = .idle
+    }
+
     private func applyPresetBaseURL() {
         guard !requiresProviderBridge else {
             alert = .providerBridgeRequired(providerName)
@@ -490,6 +591,11 @@ struct ProviderDetailView: View {
     }
 
     private func testCurrentConnection() {
+        if let claude = matchedLiveProvider as? ProviderSetting.Claude {
+            testClaudeConnection(claude)
+            return
+        }
+
         let trimmedKey = settingsStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedKey.isEmpty else {
             connectionStatus = .failure(ChatConfigurationIssue.missingAPIKey.message)
@@ -537,6 +643,51 @@ struct ProviderDetailView: View {
             }
         }
     }
+
+    private func testClaudeConnection(_ setting: ProviderSetting.Claude) {
+        guard !setting.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            connectionStatus = .failure(ChatConfigurationIssue.missingAPIKey.message)
+            return
+        }
+        guard Self.isValidHTTPBaseURL(setting.baseUrl) else {
+            connectionStatus = .failure(ChatConfigurationIssue.invalidBaseURL.message)
+            return
+        }
+
+        connectionStatus = .testing
+        let provider = ClaudeKmpProvider()
+        Task { @MainActor in
+            do {
+                let models = try await provider.listModels(providerSetting: setting)
+                if models.isEmpty {
+                    connectionStatus = .success("连接成功，但服务商没有返回可列出的模型。")
+                } else {
+                    connectionStatus = .success("连接成功，发现 \(models.count) 个模型。")
+                }
+            } catch {
+                connectionStatus = .failure(
+                    ChatViewModel.userFacingGenerationError(
+                        error.localizedDescription,
+                        modelId: settingsStore.modelId
+                    )
+                )
+            }
+        }
+    }
+
+    private static func isValidHTTPBaseURL(_ value: String) -> Bool {
+        guard
+            let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+            let scheme = components.scheme?.lowercased(),
+            scheme == "http" || scheme == "https",
+            let host = components.host,
+            !host.isEmpty
+        else {
+            return false
+        }
+
+        return true
+    }
 }
 
 private enum ProviderDetailTab: String, CaseIterable, Identifiable {
@@ -548,6 +699,7 @@ private enum ProviderDetailTab: String, CaseIterable, Identifiable {
 
 private enum ProviderDetailAlert: Identifiable {
     case protocolPicker
+    case protocolSwitchFailed
     case presetApplied(String)
     case providerBridgeRequired(String)
     case endpointConfirmationRequired(String)
@@ -557,6 +709,8 @@ private enum ProviderDetailAlert: Identifiable {
         switch self {
         case .protocolPicker:
             "protocol-picker"
+        case .protocolSwitchFailed:
+            "protocol-switch-failed"
         case .presetApplied(let provider):
             "preset-applied-\(provider)"
         case .providerBridgeRequired(let provider):
@@ -572,6 +726,8 @@ private enum ProviderDetailAlert: Identifiable {
         switch self {
         case .protocolPicker:
             "暂不能切换接口协议"
+        case .protocolSwitchFailed:
+            "接口协议未切换"
         case .presetApplied:
             "API 地址已套用"
         case .providerBridgeRequired:
@@ -586,9 +742,11 @@ private enum ProviderDetailAlert: Identifiable {
     var message: String {
         switch self {
         case .protocolPicker:
-            "当前版本只支持 OpenAI 兼容接口。"
+            "当前只能在 OpenAI 兼容和 Anthropic 兼容之间切换；Gemini、Response API 和待确认模板暂不支持直接转换。"
+        case .protocolSwitchFailed:
+            "没有找到可更新的服务商配置，请返回服务商列表后重新进入。"
         case .presetApplied(let provider):
-            "\(provider) 的预置 Base URL 已写入当前聊天配置。API Key 仍为空或保持你已有的 Keychain 值；本操作没有发起网络请求。"
+            "\(provider) 的预置 Base URL 已写入当前聊天配置。API Key 不会被本操作修改，也不会发起网络请求。"
         case .providerBridgeRequired(let provider):
             "\(provider) 使用专用接口，当前版本还不能直接设为聊天服务商。"
         case .endpointConfirmationRequired(let provider):

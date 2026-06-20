@@ -3,7 +3,10 @@ package shared
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
+import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
@@ -99,6 +102,34 @@ object IosSettingsMutations {
     fun removeProvider(settings: Settings, id: String): Settings {
         val parsed = kotlin.uuid.Uuid.parse(id)
         return settings.copy(providers = settings.providers.filterNot { it.id == parsed })
+    }
+
+    /**
+     * Switch a provider between the OpenAI-compatible and Anthropic-compatible
+     * protocol subtypes while preserving the user-facing provider identity.
+     *
+     * This is intentionally scoped to the two iOS chat executors that exist today.
+     * Google, Response API, and unknown values are returned unchanged.
+     */
+    fun switchProviderProtocol(
+        settings: Settings,
+        providerId: String,
+        protocolType: String,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val target = protocolType.lowercase()
+        val providers = settings.providers.map { provider ->
+            if (provider.id != parsed) {
+                provider
+            } else {
+                when (target) {
+                    "openai", "openai-compatible", "open_ai" -> provider.asOpenAICompatible()
+                    "anthropic", "claude" -> provider.asClaudeCompatible()
+                    else -> provider
+                }
+            }
+        }
+        return settings.copy(providers = providers)
     }
 
     /**
@@ -246,6 +277,63 @@ object IosSettingsMutations {
             baseUrl = baseUrl,
             models = emptyList(),
             builtIn = false,
+        )
+    }
+
+    private fun ProviderSetting.asOpenAICompatible(): ProviderSetting {
+        if (this is ProviderSetting.OpenAI && !useResponseApi) return this
+        val defaultOpenAI = DEFAULT_PROVIDERS.firstOrNull { it.id == id } as? ProviderSetting.OpenAI
+        val apiKey = when (this) {
+            is ProviderSetting.OpenAI -> apiKey
+            is ProviderSetting.Google -> apiKey
+            is ProviderSetting.Claude -> apiKey
+        }
+        val baseUrl = when (this) {
+            is ProviderSetting.OpenAI -> baseUrl
+            is ProviderSetting.Google -> baseUrl
+            is ProviderSetting.Claude -> baseUrl
+        }
+        return ProviderSetting.OpenAI(
+            id = id,
+            enabled = enabled,
+            name = name,
+            models = models,
+            balanceOption = defaultOpenAI?.balanceOption ?: balanceOption,
+            builtIn = builtIn,
+            descriptionText = descriptionText,
+            shortDescriptionText = shortDescriptionText,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            chatCompletionsPath = defaultOpenAI?.chatCompletionsPath ?: "/chat/completions",
+            useResponseApi = false,
+            authMode = defaultOpenAI?.authMode ?: OpenAIAuthMode.API_KEY,
+            brand = defaultOpenAI?.brand ?: OpenAIBrand.GENERIC,
+        )
+    }
+
+    private fun ProviderSetting.asClaudeCompatible(): ProviderSetting {
+        if (this is ProviderSetting.Claude) return this
+        val apiKey = when (this) {
+            is ProviderSetting.OpenAI -> apiKey
+            is ProviderSetting.Google -> apiKey
+            is ProviderSetting.Claude -> apiKey
+        }
+        val baseUrl = when (this) {
+            is ProviderSetting.OpenAI -> baseUrl
+            is ProviderSetting.Google -> baseUrl
+            is ProviderSetting.Claude -> baseUrl
+        }
+        return ProviderSetting.Claude(
+            id = id,
+            enabled = enabled,
+            name = name,
+            models = models,
+            balanceOption = balanceOption,
+            builtIn = builtIn,
+            descriptionText = descriptionText,
+            shortDescriptionText = shortDescriptionText,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
         )
     }
 
