@@ -8,9 +8,6 @@ import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import app.amber.feature.board.BoardRepository
-import app.amber.feature.board.BoardTaskRepository
-import app.amber.feature.board.OpportunityRepository
-import app.amber.feature.board.OpportunityScanner
 import app.amber.feature.board.agent.BoardAgent
 import app.amber.feature.board.agent.BoardRunResult
 import app.amber.feature.board.agent.DailyReviewAgent
@@ -45,9 +42,6 @@ class BoardWorker(
 
         val aggregator = get<SignalAggregator>()
         val repository = get<BoardRepository>()
-        val taskRepository = get<BoardTaskRepository>()
-        val opportunityRepository = get<OpportunityRepository>()
-        val opportunityScanner = get<OpportunityScanner>()
         val agent = get<BoardAgent>()
         val notifier = get<BoardNotifier>()
         val scheduler = get<BoardScheduler>()
@@ -57,10 +51,7 @@ class BoardWorker(
         // REPLACE on the same unique work name cancels this very run.
         val isAnchor = tags.contains(BoardScheduler.TAG_ANCHOR)
         try {
-            return runCycle(
-                aggregator, repository, taskRepository, opportunityRepository,
-                opportunityScanner, agent, notifier,
-            )
+            return runCycle(aggregator, repository, agent, notifier)
         } finally {
             if (isAnchor && !isStopped) {
                 withContext(NonCancellable) {
@@ -73,9 +64,6 @@ class BoardWorker(
     private suspend fun runCycle(
         aggregator: SignalAggregator,
         repository: BoardRepository,
-        taskRepository: BoardTaskRepository,
-        opportunityRepository: OpportunityRepository,
-        opportunityScanner: OpportunityScanner,
         agent: BoardAgent,
         notifier: BoardNotifier,
     ): Result {
@@ -91,10 +79,7 @@ class BoardWorker(
         val scored = batch.surfaced
         if (scored.isEmpty()) {
             repository.markSignalsProcessed(batch.consideredSignalIds)
-            runCatching { opportunityScanner.scan(boardDate) }
-                .onFailure { android.util.Log.w("BoardWorker", "scan opportunities failed", it) }
-            // No board signals, but daily review can still run (app usage, completed items)
-            pruneOldItems(repository, taskRepository, opportunityRepository, boardDate)
+            pruneOldItems(repository, boardDate)
             maybeRunDailyReview(boardDate)
             return Result.success()
         }
@@ -113,9 +98,7 @@ class BoardWorker(
                     itemCount = result.itemCount,
                     summary = result.summary,
                 )
-                runCatching { opportunityScanner.scan(boardDate) }
-                    .onFailure { android.util.Log.w("BoardWorker", "scan opportunities failed", it) }
-                pruneOldItems(repository, taskRepository, opportunityRepository, boardDate)
+                pruneOldItems(repository, boardDate)
                 maybeRunDailyReview(boardDate)
                 return Result.success()
             }
@@ -126,9 +109,7 @@ class BoardWorker(
                 // re-processing + unbounded table growth (pruneProcessedSignalsBefore
                 // only deletes processed=1 rows).
                 repository.markSignalsProcessed(batch.consideredSignalIds)
-                runCatching { opportunityScanner.scan(boardDate) }
-                    .onFailure { android.util.Log.w("BoardWorker", "scan opportunities failed", it) }
-                pruneOldItems(repository, taskRepository, opportunityRepository, boardDate)
+                pruneOldItems(repository, boardDate)
                 maybeRunDailyReview(boardDate)
                 return Result.success()
             }
@@ -168,8 +149,6 @@ class BoardWorker(
 
     private suspend fun pruneOldItems(
         repository: BoardRepository,
-        taskRepository: BoardTaskRepository,
-        opportunityRepository: OpportunityRepository,
         currentBoardDate: String,
     ) {
         runCatching {
@@ -182,10 +161,6 @@ class BoardWorker(
             // Prune daily reviews older than 30 days.
             val cutoffDate = today.minusDays(30).toString()
             repository.pruneDailyReviews(cutoffDate)
-            val cutoffMs = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
-            taskRepository.pruneOldTerminal(cutoffMs)
-            opportunityRepository.expireSuggested()
-            opportunityRepository.pruneOldTerminal(cutoffMs)
         }
     }
 }

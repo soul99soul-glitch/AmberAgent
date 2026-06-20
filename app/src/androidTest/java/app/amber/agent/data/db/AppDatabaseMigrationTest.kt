@@ -19,105 +19,6 @@ class AppDatabaseMigrationTest {
     )
 
     @Test
-    fun migration_1_2_creates_board_task_tables() {
-        helper.createDatabase(TEST_DB, 1).close()
-
-        val db = helper.runMigrationsAndValidate(
-            TEST_DB,
-            2,
-            true,
-            AppDatabase.MIGRATION_1_2,
-        )
-
-        assertTrue(db.hasTable("board_task"))
-        assertTrue(db.hasTable("board_task_event"))
-        db.close()
-    }
-
-    @Test
-    fun migration_2_3_creates_opportunity_tables_and_archives_suggested_tasks() {
-        val createdAt = 1_000L
-        val version2 = helper.createDatabase(TEST_DB, 2)
-        version2.execSQL(
-            """
-            INSERT INTO board_task (
-                id, source_type, source_ref, title, summary, state, risk_level,
-                chip_text, display_board_date, created_at, updated_at
-            ) VALUES (
-                'suggested-task', 'calendar', 'meeting-1', 'Prepare', '', 'suggested', 'low',
-                '建议处理', '2026-05-30', $createdAt, $createdAt
-            )
-            """.trimIndent()
-        )
-        version2.execSQL(
-            """
-            INSERT INTO board_task (
-                id, source_type, source_ref, title, summary, state, risk_level,
-                chip_text, display_board_date, created_at, updated_at
-            ) VALUES (
-                'active-task', 'calendar', 'meeting-2', 'Prepare active', '', 'in_progress', 'low',
-                '正在处理', '2026-05-30', $createdAt, $createdAt
-            )
-            """.trimIndent()
-        )
-        version2.execSQL(
-            """
-            INSERT INTO board_task_event (
-                id, task_id, type, message, metadata_json, ts
-            ) VALUES (
-                'suggested-event', 'suggested-task', 'created', 'created', '{}', $createdAt
-            )
-            """.trimIndent()
-        )
-        version2.close()
-
-        val db = helper.runMigrationsAndValidate(
-            TEST_DB,
-            3,
-            true,
-            AppDatabase.MIGRATION_2_3,
-        )
-
-        assertTrue(db.hasTable("opportunity"))
-        assertTrue(db.hasTable("reference_anchor"))
-        assertEquals(1, db.countRows("opportunity", "id = 'suggested-task' AND status = 'suggested'"))
-        assertEquals("dismissed", db.stringValue("board_task", "state", "id = 'suggested-task'"))
-        assertEquals(1, db.countRows("board_task_event", "task_id = 'suggested-task'"))
-        assertEquals(1, db.countRows("board_task", "id = 'active-task'"))
-        db.close()
-    }
-
-    @Test
-    fun migration_3_4_adds_artifact_json_and_preserves_board_task_rows() {
-        val createdAt = 2_000L
-        val version3 = helper.createDatabase(TEST_DB, 3)
-        version3.execSQL(
-            """
-            INSERT INTO board_task (
-                id, source_type, source_ref, title, summary, state, risk_level,
-                chip_text, display_board_date, created_at, updated_at
-            ) VALUES (
-                'task-keep', 'opportunity', 'opp-1', 'Prepare', 'summary', 'waiting_user', 'low',
-                '等待确认', '2026-05-31', $createdAt, $createdAt
-            )
-            """.trimIndent()
-        )
-        version3.close()
-
-        val db = helper.runMigrationsAndValidate(
-            TEST_DB,
-            4,
-            true,
-            AppDatabase.MIGRATION_3_4,
-        )
-
-        // Existing row survives the column add, and the new column defaults to NULL.
-        assertEquals(1, db.countRows("board_task", "id = 'task-keep'"))
-        assertEquals(1, db.countRows("board_task", "id = 'task-keep' AND artifact_json IS NULL"))
-        db.close()
-    }
-
-    @Test
     fun migration_4_5_adds_memory_supersede_columns_and_preserves_rows() {
         val createdAt = 3_000L
         val version4 = helper.createDatabase(TEST_DB, 4)
@@ -157,15 +58,6 @@ class AppDatabaseMigrationTest {
         assertEquals(1, db.countRows("memory_dream_plan", "id = 'plan-1'"))
         assertEquals(0, db.intValue("memory_dream_plan", "supersede_count", "id = 'plan-1'"))
         db.close()
-    }
-
-    private fun SupportSQLiteDatabase.hasTable(table: String): Boolean {
-        query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            arrayOf(table),
-        ).use { cursor ->
-            return cursor.moveToFirst()
-        }
     }
 
     private fun SupportSQLiteDatabase.countRows(table: String, where: String): Int {
