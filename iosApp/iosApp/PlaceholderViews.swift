@@ -590,11 +590,9 @@ struct ConversationsView: View {
     }
 
     private var shortcutStrip: some View {
-        AmberGlassGroup(spacing: 12) {
-            HStack(spacing: 8) {
-                ForEach(shortcuts) { shortcut in
-                    shortcutButton(shortcut)
-                }
+        HStack(spacing: 8) {
+            ForEach(shortcuts) { shortcut in
+                shortcutButton(shortcut)
             }
         }
         .padding(.horizontal, 8)
@@ -621,7 +619,6 @@ struct ConversationsView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 78)
             .contentShape(Rectangle())
-            .amberGlass(cornerRadius: 18)
         }
         .buttonStyle(.plain)
     }
