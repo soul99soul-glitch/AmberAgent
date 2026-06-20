@@ -369,7 +369,7 @@ private extension View {
             case .execution:
                 ExecutionSettingsView(sharedSettings: sharedSettings)
             case .providers:
-                ProvidersView(settingsStore: settingsStore, providerRegistry: providerRegistry)
+                ProvidersView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings)
             case .providerAdd:
                 ProviderAddView(providerRegistry: providerRegistry)
             case .providerDetail(let name, let endpoint, let kind):
@@ -424,7 +424,15 @@ private extension View {
             case .memory:
                 MemoryOverviewView(sharedSettings: sharedSettings)
             case .council:
-                CouncilView(sharedSettings: sharedSettings)
+                // 议会入口直接进 room 房间（CouncilChatRuntimeView 在
+                // 70dc5b309 已是完整议会体验：成员、设置、讨论流都在房间内）。
+                // 跳过旧的 CouncilView 中间页（说明 + 单按钮 + 历史）。
+                CouncilChatRuntimeView(
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    providerRegistry: providerRegistry,
+                    permissionStore: permissionStore
+                )
             case .councilChat:
                 CouncilChatRuntimeView(
                     settingsStore: settingsStore,

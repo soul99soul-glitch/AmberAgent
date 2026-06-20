@@ -4,6 +4,7 @@ import Shared
 enum ProviderRouteKind: String, Hashable {
     case current
     case openAICompatiblePreset
+    case claudePreset
     case googleProviderPreset
     case responseAPIPreset
     case endpointConfirmationPreset
@@ -12,6 +13,7 @@ enum ProviderRouteKind: String, Hashable {
 struct ProvidersView: View {
     @Bindable var settingsStore: SettingsStore
     let providerRegistry: ProviderRegistryStore
+    let sharedSettings: IOSSharedSettingsStore
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -119,34 +121,92 @@ struct ProvidersView: View {
     }
 
     private var currentProvider: ProviderRowModel {
-        .init(
-            initial: "O",
-            name: "OpenAI-compatible",
-            endpoint: settingsStore.baseUrl,
-            status: settingsStore.apiKey.isEmpty ? "API Key 未填写" : "API Key 已填写",
-            statusColor: settingsStore.apiKey.isEmpty ? AmberTheme.muted2 : AmberTheme.accentGreen,
+        // Resolve the real current provider/model from the KMP Settings snapshot
+        // (the same source ChatViewModel will consume in Stage 2), instead of a
+        // hardcoded "OpenAI-compatible" label. Falls back to a clear "未配置"
+        // state when no usable provider/model is selected — honest, never fake.
+        let snapshot = sharedSettings.snapshot
+        let currentModel = snapshot.getCurrentChatModel()
+        let currentProviderSetting = currentModel?.findProvider(providers: snapshot.providers, checkOverwrite: true)
+
+        let name: String
+        let endpoint: String
+        let initial: String
+        if let provider = currentProviderSetting {
+            let providerName = provider.name as String
+            name = providerName
+            endpoint = ProviderRegistryStore.baseURL(of: provider)
+            initial = String((providerName.trimmingCharacters(in: .whitespaces) as String).first ?? "?").uppercased()
+        } else {
+            name = "未配置服务商"
+            endpoint = currentModel?.modelId ?? "请选择默认模型"
+            initial = "?"
+        }
+
+        // "has usable key" for status coloring: read the provider's own apiKey
+        // (Android model — the key lives inside the ProviderSetting, not a
+        // separate iOS Keychain slot anymore). Gemini/unsupported -> muted.
+        let hasUsableKey: Bool
+        if let openAI = currentProviderSetting as? ProviderSetting.OpenAI {
+            hasUsableKey = !openAI.apiKey.isEmpty
+        } else if let claude = currentProviderSetting as? ProviderSetting.Claude {
+            hasUsableKey = !claude.apiKey.isEmpty
+        } else if currentProviderSetting != nil {
+            hasUsableKey = false
+        } else {
+            hasUsableKey = false
+        }
+
+        let statusText: String
+        let statusColor: Color
+        if currentProviderSetting == nil {
+            statusText = "点击下方模板配置"
+            statusColor = AmberTheme.muted2
+        } else if !hasUsableKey {
+            statusText = "API Key 未填写"
+            statusColor = AmberTheme.muted2
+        } else {
+            statusText = "已配置"
+            statusColor = AmberTheme.accentGreen
+        }
+
+        return .init(
+            initial: initial,
+            name: name,
+            endpoint: endpoint,
+            status: statusText,
+            statusColor: statusColor,
             kind: .current
         )
     }
 
-    // Real KMP default provider templates plus per-provider Keychain status. Each
-    // row reuses ProviderSetting-derived rendering (name/endpoint/initial). A row
-    // can become active only when the current scalar chat chain can represent it
-    // and a Keychain key already exists for that provider id.
+    // Real KMP default provider templates plus per-provider status. Each row is
+    // tappable and navigates to the provider detail page (mirrors Android's
+    // SettingProviderPage → SettingProviderDetailPage flow), where the user
+    // fills the API Key and (when supported) sets it as current. Only rows whose
+    // protocol genuinely can't run on iOS today (Gemini, awaiting a KMP bridge)
+    // stay disabled — supported presets (OpenAI-compatible + Claude) are always
+    // openable so there is no "need a key to even open the page" deadlock.
     private var savedProvidersSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "服务商模板")
 
             AmberFormGroup {
                 ForEach(Array(providerRegistry.providers.enumerated()), id: \.offset) { index, provider in
+                    let routeKind = ProviderRowModel.routeKind(for: provider)
+                    let openable = routeKind != .googleProviderPreset
                     RegistryProviderRow(
                         model: ProviderRowModel(preset: provider),
                         isSelected: providerRegistry.isSelected(provider),
                         hasStoredKey: providerRegistry.hasStoredKey(provider),
                         canActivate: providerRegistry.canActivate(provider),
-                        canSelect: providerRegistry.canSelect(provider)
+                        canOpen: openable
                     ) {
-                        providerRegistry.select(provider)
+                        router.navigate(to: .providerDetail(
+                            name: provider.name,
+                            endpoint: ProviderRegistryStore.baseURL(of: provider),
+                            kind: routeKind
+                        ))
                     }
 
                     if index < providerRegistry.providers.count - 1 {
@@ -155,13 +215,11 @@ struct ProvidersView: View {
                 }
             }
 
-            ProviderDraftNote("保存 API Key 后，可把支持的模板设为当前聊天服务商。暂不支持的模板会保持灰色。")
+            ProviderDraftNote("点击模板可配置 API Key 和模型。OpenAI 兼容与 Anthropic(Claude) 可直接用于聊天；Gemini 执行器待移植，暂保持灰色。")
         }
-        // hasStoredKey/canSelect read the Keychain via a static helper (not an
-        // observable property), so tying this section's identity to keyRevision
-        // forces a rebuild whenever a per-provider key is written or cleared —
-        // the row status (Key 已/未填写, 设为当前/需要 Key) then re-reads the
-        // Keychain honestly on back-navigation.
+        // hasStoredKey reads the Keychain via a static helper (not an observable
+        // property), so tying this section's identity to keyRevision forces a
+        // rebuild whenever a per-provider key is written or cleared.
         .id(providerRegistry.keyRevision)
     }
 }
@@ -171,12 +229,12 @@ private struct RegistryProviderRow: View {
     let isSelected: Bool
     let hasStoredKey: Bool
     let canActivate: Bool
-    let canSelect: Bool
+    let canOpen: Bool
     let onSelect: () -> Void
 
     var body: some View {
         Button {
-            if canSelect { onSelect() }
+            if canOpen { onSelect() }
         } label: {
             HStack(spacing: 12) {
                 Text(model.initial)
@@ -207,14 +265,14 @@ private struct RegistryProviderRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!canSelect)
-        .opacity(canActivate ? 1 : 0.55)
+        .disabled(!canOpen)
+        .opacity(canOpen ? 1 : 0.55)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(model.name)\(isSelected ? "，当前服务商" : "")")
     }
 
     @ViewBuilder private var trailing: some View {
-        if !canActivate {
+        if !canOpen {
             Text("暂不支持")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(AmberTheme.muted2)
@@ -230,7 +288,7 @@ private struct RegistryProviderRow: View {
                 Text(hasStoredKey ? "Key 已填写" : "Key 未填写")
                     .font(.caption2)
                     .foregroundStyle(hasStoredKey ? AmberTheme.accentGreen : AmberTheme.muted2)
-                Text(hasStoredKey ? "设为当前" : "需要 Key")
+                Text(hasStoredKey ? "点击管理" : "点击配置")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(hasStoredKey ? AmberTheme.accent : AmberTheme.muted2)
             }
@@ -283,14 +341,14 @@ private struct ProviderRowModel: Identifiable {
         self.isDimmed = false
     }
 
-    private static func endpoint(for preset: ProviderSetting) -> String {
+    fileprivate static func endpoint(for preset: ProviderSetting) -> String {
         if let openAI = preset as? ProviderSetting.OpenAI { return openAI.baseUrl }
         if let google = preset as? ProviderSetting.Google { return google.baseUrl }
         if let claude = preset as? ProviderSetting.Claude { return claude.baseUrl }
         return ""
     }
 
-    private static func routeKind(for preset: ProviderSetting) -> ProviderRouteKind {
+    fileprivate static func routeKind(for preset: ProviderSetting) -> ProviderRouteKind {
         if let openAI = preset as? ProviderSetting.OpenAI {
             if openAI.useResponseApi { return .responseAPIPreset }
             // MiMo's bundled baseUrl is a source-marked placeholder ("user can override").
@@ -298,15 +356,15 @@ private struct ProviderRowModel: Identifiable {
             if openAI.brand === OpenAIBrand.mimo { return .endpointConfirmationPreset }
             return .openAICompatiblePreset
         }
+        if preset is ProviderSetting.Claude {
+            return .claudePreset
+        }
         if preset is ProviderSetting.Google {
             return .googleProviderPreset
         }
-        // Only OpenAI and Google appear in DEFAULT_PROVIDERS today. Any other
-        // ProviderSetting type (e.g. Claude) would currently inherit the Google
-        // "待桥接" label/path, which is wrong — it must get its own route kind and
-        // ProviderDetailView label before such a default is added. Until then, fall
-        // back to the bridge-required state so it can never be presented as an
-        // applyable OpenAI-compatible template.
+        // Only OpenAI/Claude/Google appear in DEFAULT_PROVIDERS today. Any other
+        // ProviderSetting type inherits the Google "待桥接" state so it can never
+        // be presented as an applyable template until it gets its own route kind.
         return .googleProviderPreset
     }
 
@@ -319,6 +377,8 @@ private struct ProviderRowModel: Identifiable {
         switch kind {
         case .openAICompatiblePreset:
             return ("预置 · 可套用", AmberTheme.accent)
+        case .claudePreset:
+            return ("预置 · Anthropic", AmberTheme.accent)
         case .endpointConfirmationPreset:
             return ("预置 · Base 待确认", AmberTheme.muted)
         case .responseAPIPreset:
@@ -867,7 +927,7 @@ private struct ProviderDivider: View {
 #Preview {
     let settings = SettingsStore()
     return NavigationStack {
-        ProvidersView(settingsStore: settings, providerRegistry: ProviderRegistryStore(settingsStore: settings))
+        ProvidersView(settingsStore: settings, providerRegistry: ProviderRegistryStore(settingsStore: settings), sharedSettings: IOSSharedSettingsStore())
             .environment(RouterPath())
     }
 }
