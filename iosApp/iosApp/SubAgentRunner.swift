@@ -199,7 +199,7 @@ final class SubAgentRunner {
         objective: String,
         roleId: String = "explorer",
         requestedToolScope: [String] = [],
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         modelId: String,
         baseParams: TextGenerationParams? = nil,
         parentToolExecutors: [String: any IOSToolExecutor],

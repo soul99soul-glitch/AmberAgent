@@ -2639,7 +2639,7 @@ enum IOSDeepReadTemplateDraftGenerator {
     static func generateDraft(
         name: String,
         brief: String,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         modelId: String,
         provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter()
     ) async throws -> IOSDeepReadCustomTemplate {
@@ -2807,7 +2807,7 @@ enum IOSDeepReadDraftGenerator {
     /// like Android). Returns the deterministic fallback when generation fails.
     static func generateViaLLM(
         task: IOSDeepReadTask,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         modelId: String,
         provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
         now: Date = Date()
@@ -2867,7 +2867,7 @@ enum IOSDeepReadDraftGenerator {
         instruction: String,
         sourcesBlock: String,
         priorDraft: String,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         modelId: String,
         provider: IOSAgentTextProvider
     ) async -> String {
