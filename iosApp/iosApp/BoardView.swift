@@ -29,8 +29,8 @@ struct BoardView: View {
     @State private var isImportingDeepReadFile = false
     @State private var showCustomSourceSheet = false
     @State private var showHistorySheet = false
-    // [Board MVP] Guards the .task restore so in-session re-navigation to this
-    // page doesn't overwrite a just-generated state with the persisted restore.
+    // Guards initial foreground refresh so returning to this page does not
+    // restart the hotlist fetch loop.
     @State private var hasRestoredPersistedBoard = false
 
     @Environment(RouterPath.self) private var router
@@ -50,8 +50,6 @@ struct BoardView: View {
                         hotListOverviewSection
                         hotTopicSection
                         hotListProviderSection
-                        manualGenerationSection
-                        collectionStatusSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -106,32 +104,10 @@ struct BoardView: View {
         ) { result in
             handleDeepReadFileImport(result)
         }
-        // [Board MVP] On entry, redisplay the most recent persisted board so a
-        // generated board survives app restart. Honest: if none saved, stays idle.
-        // Guard on idle so in-session navigation back to this page doesn't
-        // clobber a just-generated state with the "重启后恢复" message.
         .task {
             guard !hasRestoredPersistedBoard else { return }
             hasRestoredPersistedBoard = true
-            collectionSnapshot = IOSBoardCollectionSnapshot(
-                statuses: [],
-                recentSignals: IOSBoardSignalRepository.shared.recentSignals(limit: 10),
-                pendingCount: IOSBoardSignalRepository.shared.countUnprocessedSignals(),
-                lastRunAt: nil,
-                lastRunError: nil
-            )
             selectedTemplateId = IOSDeepReadTemplate.normalizedTemplateId(sharedSettings.todayBoard.deepReadTemplateId)
-            if !generationState.isRunning,
-               let recent = IOSBoardPersistence.shared.loadMostRecent(),
-               let output = recent.markdown.isEmpty ? nil : recent.markdown {
-                generationState = BoardGenerationState(
-                    isRunning: false,
-                    message: "上次生成的线索摘要（\(recent.boardDate)，\(recent.signalCount) 条信号）— 重启后恢复显示。",
-                    signals: [],
-                    output: output,
-                    isError: false
-                )
-            }
             consumeWebMountHandoffIfNeeded()
             await refreshHotList(force: false)
         }
@@ -708,121 +684,6 @@ struct BoardView: View {
             return query
         }
         return string
-    }
-
-    private var manualGenerationSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "本地线索摘要")
-            AmberFormGroup {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Image(systemName: generationState.isRunning ? "clock.arrow.circlepath" : "sparkles")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(AmberTheme.accent)
-                            .frame(width: 34, height: 34)
-                            .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("生成本地线索摘要")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                            Text("汇总聊天、日历、提醒事项和热榜信号，作为深度阅读的辅助线索。")
-                                .font(.caption)
-                                .foregroundStyle(AmberTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Button {
-                        runManualGeneration()
-                    } label: {
-                        HStack(spacing: 8) {
-                            if generationState.isRunning {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                            Text(generationState.isRunning ? "正在生成…" : "生成线索摘要")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(AmberTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .foregroundStyle(.white)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(generationState.isRunning)
-
-                    if let message = generationState.message {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(generationState.isError ? AmberTheme.accentAmber : AmberTheme.muted)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    if !generationState.signals.isEmpty {
-                        BoardSignalPreview(signals: generationState.signals)
-                    }
-
-                    if let output = generationState.output, !output.isEmpty {
-                        Text(output)
-                            .font(.footnote)
-                            .foregroundStyle(AmberTheme.foreground2)
-                            .lineSpacing(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(AmberTheme.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            }
-
-            BoardCapabilityNote("这是旧版本地信号摘要，不等同于上方的深度阅读任务；当前只在你点击按钮时刷新。")
-        }
-    }
-
-    private var collectionStatusSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "采集状态")
-            AmberFormGroup {
-                if collectionSnapshot.statuses.isEmpty {
-                    Text(collectionSnapshot.pendingCount > 0 ? "已有 \(collectionSnapshot.pendingCount) 条待使用线索。点击“生成线索摘要”开始整理。" : "尚未生成线索摘要。点击“生成线索摘要”开始整理。")
-                        .font(.caption)
-                        .lineSpacing(3)
-                        .foregroundStyle(AmberTheme.foreground2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                } else {
-                    ForEach(Array(collectionSnapshot.statuses.enumerated()), id: \.element.id) { index, status in
-                        BoardCollectorStatusRow(status: status)
-                        if index < collectionSnapshot.statuses.count - 1 {
-                            BoardCapabilityDivider()
-                        }
-                    }
-                }
-            }
-
-            if !collectionSnapshot.recentSignals.isEmpty {
-                AmberSectionLabel(text: "最近信号")
-                    .padding(.top, 10)
-                AmberFormGroup {
-                    ForEach(Array(collectionSnapshot.recentSignals.enumerated()), id: \.element.id) { index, signal in
-                        BoardRecentSignalRow(signal: signal)
-                        if index < collectionSnapshot.recentSignals.count - 1 {
-                            BoardCapabilityDivider()
-                        }
-                    }
-                }
-            }
-
-            BoardCapabilityNote("已处理的旧线索会自动清理，保留最近一段时间的记录。")
-        }
     }
 
     private func runManualGeneration() {
