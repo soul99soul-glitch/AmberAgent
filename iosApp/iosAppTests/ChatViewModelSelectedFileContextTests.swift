@@ -788,6 +788,53 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(councilText, "council conclusion")
     }
 
+    func testPendingSearchApprovalKeepsCoordinatorActive() throws {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+
+        harness.coordinator.installPendingSearchApprovalForTesting(
+            pending: harness.pending,
+            request: harness.request
+        )
+
+        XCTAssertTrue(harness.coordinator.isRunning)
+        XCTAssertFalse(harness.state.isLoading)
+        XCTAssertNotNil(harness.state.pendingSearchApproval)
+    }
+
+    func testCancelledApprovedSearchDoesNotReplayStaleMessages() async throws {
+        let transport = BlockingChatSearchTransport(response: .html("""
+        <html><body>
+        <a rel="nofollow" class='result-link' href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fexample.com%2Fstale">Stale Result</a>
+        <td class='result-snippet'>Should not be written after cancel.</td>
+        </body></html>
+        """))
+        let harness = makeGenerationCoordinatorHarness(transport: transport)
+        harness.coordinator.installPendingSearchApprovalForTesting(
+            pending: harness.pending,
+            request: harness.request
+        )
+
+        let approvalTask = Task { @MainActor in
+            await harness.coordinator.approvePendingSearchTool()
+        }
+        await transport.waitUntilRequestStarted()
+        XCTAssertTrue(harness.state.isLoading)
+
+        harness.coordinator.cancel()
+        transport.complete()
+        await approvalTask.value
+
+        let finishedTool = try XCTUnwrap(
+            harness.state.messages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        XCTAssertTrue(finishedTool.output.isEmpty)
+        XCTAssertFalse(harness.coordinator.isRunning)
+        XCTAssertFalse(harness.state.isLoading)
+        XCTAssertNil(harness.state.pendingSearchApproval)
+    }
+
     private func textContent(of message: UIMessage) -> String {
         message.parts
             .compactMap { ($0 as? UIMessagePart.Text)?.text }
@@ -826,6 +873,174 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
     }
+
+    private func makeGenerationCoordinatorHarness(
+        transport: any IOSSearchHTTPTransport
+    ) -> ChatGenerationCoordinatorHarness {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        sharedSettings.setEnableWebSearch(true)
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "search-approval-test",
+            toolName: "search_web",
+            input: #"{"query":"swift concurrency","max_results":1}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
+        let seed = UIMessage.companion.assistant(prompt: "")
+        let assistant = UIMessage(
+            id: seed.id,
+            role: seed.role,
+            parts: [toolCall],
+            annotations: seed.annotations,
+            createdAt: seed.createdAt,
+            finishedAt: seed.finishedAt,
+            modelId: seed.modelId,
+            usage: seed.usage,
+            translation: seed.translation
+        )
+        let messages = [UIMessage.companion.user(prompt: "search"), assistant]
+        let state = ChatGenerationBindingState(messages: messages)
+        let coordinator = ChatGenerationCoordinator(
+            dependencies: ChatGenerationDependencies(
+                settingsStore: SettingsStore(),
+                sharedSettings: sharedSettings,
+                localToolExecutor: nil,
+                searchTransport: transport,
+                liveActivityController: .shared,
+                autoGenerateResponses: false,
+                mcpManager: IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared)
+            ),
+            bindings: state.bindings()
+        )
+        let pending = ChatPendingToolApproval(
+            toolCall: toolCall,
+            providerSetting: makeOpenAIProviderSetting(),
+            params: makeTextGenerationParams(),
+            runId: "run-search-approval-test",
+            startedAt: 1,
+            inputDigest: "digest",
+            conversationId: nil,
+            baseMessages: messages
+        )
+        let request = SearchToolApprovalRequest(
+            id: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+            target: "swift concurrency",
+            providerName: "DuckDuckGo Lite",
+            providerType: "duckduckgo_builtin",
+            reason: "Test approval"
+        )
+        return ChatGenerationCoordinatorHarness(
+            coordinator: coordinator,
+            state: state,
+            pending: pending,
+            request: request
+        )
+    }
+
+    private func makeOpenAIProviderSetting() -> ProviderSetting.OpenAI {
+        ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "OpenAI",
+            models: [],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "test-key",
+            baseUrl: "https://example.com",
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+    }
+
+    private func makeTextGenerationParams() -> TextGenerationParams {
+        let model = Model(
+            modelId: "test-model",
+            displayName: "Test Model",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        return TextGenerationParams(
+            model: model,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: ReasoningLevel.off,
+            customHeaders: [],
+            customBody: []
+        )
+    }
+}
+
+private struct ChatGenerationCoordinatorHarness {
+    let coordinator: ChatGenerationCoordinator
+    let state: ChatGenerationBindingState
+    let pending: ChatPendingToolApproval
+    let request: SearchToolApprovalRequest
+}
+
+@MainActor
+private final class ChatGenerationBindingState {
+    var messages: [UIMessage]
+    var messageRevision = 0
+    var isLoading = false
+    var pendingSearchApproval: SearchToolApprovalRequest?
+    var persistedCount = 0
+    var recordedRunStatuses: [String] = []
+
+    init(messages: [UIMessage]) {
+        self.messages = messages
+    }
+
+    func bindings() -> ChatGenerationBindings {
+        ChatGenerationBindings(
+            getMessages: { [weak self] in
+                self?.messages ?? []
+            },
+            setMessages: { [weak self] messages in
+                self?.messages = messages
+            },
+            bumpMessageRevision: { [weak self] in
+                self?.messageRevision += 1
+            },
+            setIsLoading: { [weak self] isLoading in
+                self?.isLoading = isLoading
+            },
+            setPendingMemoryApproval: { _ in },
+            setPendingSearchApproval: { [weak self] request in
+                self?.pendingSearchApproval = request
+            },
+            setPendingWebMountApproval: { _ in },
+            setPendingWorkspaceApproval: { _ in },
+            setPendingMcpApproval: { _ in },
+            persistMessages: { [weak self] _ in
+                self?.persistedCount += 1
+            },
+            recordRun: { [weak self] _, _, status, _ in
+                await MainActor.run {
+                    self?.recordedRunStatuses.append(status)
+                }
+            },
+            startLiveActivity: { _, _ in },
+            saveMiniAppIfPresent: { _, _ in nil },
+            messagesByInjectingRuntimeContext: { messages in messages },
+            userFacingGenerationError: { rawMessage, _ in rawMessage }
+        )
+    }
 }
 
 @MainActor
@@ -861,6 +1076,49 @@ private final class ChatSearchTransport: IOSSearchHTTPTransport {
             headerFields: response.headers
         )!
         return (http, response.body)
+    }
+}
+
+@MainActor
+private final class BlockingChatSearchTransport: IOSSearchHTTPTransport {
+    private let response: ChatSearchTransport.Response
+    private var didStartRequest = false
+    private var requestStartedContinuation: CheckedContinuation<Void, Never>?
+    private var responseContinuation: CheckedContinuation<(HTTPURLResponse, Data), Error>?
+    private(set) var requests: [URLRequest] = []
+
+    init(response: ChatSearchTransport.Response) {
+        self.response = response
+    }
+
+    func waitUntilRequestStarted() async {
+        guard !didStartRequest else { return }
+        await withCheckedContinuation { continuation in
+            requestStartedContinuation = continuation
+        }
+    }
+
+    func complete() {
+        guard let continuation = responseContinuation else { return }
+        responseContinuation = nil
+        let requestURL = requests.last?.url ?? URL(string: "https://example.com")!
+        let http = HTTPURLResponse(
+            url: requestURL,
+            statusCode: response.status,
+            httpVersion: "HTTP/1.1",
+            headerFields: response.headers
+        )!
+        continuation.resume(returning: (http, response.body))
+    }
+
+    func send(_ request: URLRequest) async throws -> (HTTPURLResponse, Data) {
+        requests.append(request)
+        didStartRequest = true
+        requestStartedContinuation?.resume()
+        requestStartedContinuation = nil
+        return try await withCheckedThrowingContinuation { continuation in
+            responseContinuation = continuation
+        }
     }
 }
 

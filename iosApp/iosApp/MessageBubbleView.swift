@@ -24,8 +24,8 @@ struct MessageBubbleView: View {
     }
 
     private var canBranch: Bool {
-        // Disable branching actions while a generation is running, mirroring
-        // the ChatViewModel guard (streamJob == nil).
+        // Disable branch actions while a run is active, including tool approval
+        // pauses where no stream job is currently running.
         !isGenerating
     }
 
@@ -465,6 +465,8 @@ struct ChatConfigurationNoticeCard: View {
             "cpu"
         case .missingProvider:
             "server.rack"
+        case .unsupportedProvider:
+            "exclamationmark.triangle"
         }
     }
 
@@ -478,6 +480,8 @@ struct ChatConfigurationNoticeCard: View {
             "cpu"
         case .missingProvider:
             "server.rack"
+        case .unsupportedProvider:
+            "exclamationmark.triangle.fill"
         }
     }
 
@@ -491,6 +495,8 @@ struct ChatConfigurationNoticeCard: View {
             "选择模型"
         case .missingProvider:
             "配置服务商"
+        case .unsupportedProvider:
+            "切换服务商"
         }
     }
 }

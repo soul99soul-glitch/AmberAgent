@@ -201,7 +201,7 @@ struct ChatView: View {
                                 onEdit: { newText in viewModel.editMessage(atMessageIndex: index, newText: newText) },
                                 onDelete: { viewModel.deleteMessage(atMessageIndex: index) },
                                 onSelectVariant: { variantIndex in viewModel.selectVariant(messageIndex: index, variantIndex: variantIndex) },
-                                isGenerating: viewModel.isLoading
+                                isGenerating: viewModel.isGenerationActive
                             )
                             .id(message.id)
                         }
@@ -484,19 +484,15 @@ struct ChatView: View {
     }
 
     private var sendEnabled: Bool {
-        !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !viewModel.isLoading &&
+            !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !viewModel.isGenerationActive &&
             !viewModel.isAttachingSelectedFile &&
             !hasPendingToolApproval &&
             configurationIssue == nil
     }
 
     private var configurationIssue: ChatConfigurationIssue? {
-        ChatViewModel.chatConfigurationIssue(
-            baseUrl: settingsStore.baseUrl,
-            apiKey: settingsStore.apiKey,
-            modelId: settingsStore.modelId
-        )
+        viewModel.configurationIssue
     }
 
     private var inputPlaceholder: String {
@@ -509,6 +505,8 @@ struct ChatView: View {
             "先选择模型"
         case .missingProvider:
             "先配置服务商"
+        case .unsupportedProvider:
+            "先切换服务商"
         case nil:
             "发消息给 Amber..."
         }
@@ -533,7 +531,7 @@ struct ChatView: View {
     }
 
     private var composerCurrentModelID: String {
-        settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        viewModel.contextSnapshot.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var selectedReasoningOption: ComposerReasoningOption {
@@ -559,7 +557,7 @@ struct ChatView: View {
         switch configurationIssue {
         case .missingModel:
             openModelDefaults()
-        case .missingAPIKey, .invalidBaseURL, .missingProvider, nil:
+        case .missingAPIKey, .invalidBaseURL, .missingProvider, .unsupportedProvider, nil:
             router.navigate(to: .providers)
         }
     }
