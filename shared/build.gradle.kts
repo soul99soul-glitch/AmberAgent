@@ -17,6 +17,7 @@ kotlin {
     val sharedProjects = listOf(
         ":ai-core",
         ":ai-provider-openai",
+        ":ai-provider-claude",
         ":core:types",
         ":core:conversation-storage",
         ":core:ai:api",
