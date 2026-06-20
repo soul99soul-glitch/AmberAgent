@@ -13,6 +13,29 @@ private final class StreamJobBox {
     }
 }
 
+private final class IOSClosureToolExecutor: IOSToolExecutor {
+    private let handler: @MainActor (String, String, Bool) async -> IOSAgentToolOutcome
+
+    init(_ handler: @escaping @MainActor (String, String, Bool) async -> IOSAgentToolOutcome) {
+        self.handler = handler
+    }
+
+    func execute(name: String, arguments: String, isUserInitiated: Bool) async -> IOSAgentToolOutcome {
+        await handler(name, arguments, isUserInitiated)
+    }
+}
+
+private extension IOSLocalToolExecutionOutput {
+    var isSuccessfulToolResult: Bool {
+        switch self {
+        case .selectedFilePreview, .permissionsStatus, .workspaceResult, .webMountResult:
+            true
+        case .needsUserAction, .denied, .failed:
+            false
+        }
+    }
+}
+
 struct ChatContextSnapshot {
     let messageCount: Int
     let modelId: String
@@ -193,6 +216,12 @@ private struct PendingMcpToolApproval {
     let baseMessages: [UIMessage]
 }
 
+private struct PendingAssistantRegeneration {
+    let conversationId: KotlinUuid
+    let targetMessageIndex: Int
+    let generatedMessageIndex: Int
+}
+
 @MainActor
 @Observable
 final class ChatViewModel {
@@ -314,6 +343,7 @@ final class ChatViewModel {
     private var pendingWebMountToolApproval: PendingWebMountToolApproval?
     private var pendingWorkspaceToolApproval: PendingWorkspaceToolApproval?
     private var pendingMcpToolApproval: PendingMcpToolApproval?
+    private var pendingAssistantRegeneration: PendingAssistantRegeneration?
 
     // MARK: - Init
 
@@ -350,12 +380,52 @@ final class ChatViewModel {
         guard let store = conversationStore else { return }
         let snapshot = messages
         let targetConversationId = conversationId ?? store.currentConversation?.id
+        let pendingRegeneration = pendingAssistantRegeneration
         Task { @MainActor in
-            if let targetConversationId {
-                await store.save(messages: snapshot, to: targetConversationId)
-            } else {
-                await store.saveCurrent(messages: snapshot)
+            await persistMessagesSnapshot(
+                snapshot,
+                targetConversationId: targetConversationId,
+                pendingRegeneration: pendingRegeneration,
+                store: store
+            )
+        }
+    }
+
+    private func persistMessagesSnapshot(
+        _ snapshot: [UIMessage],
+        targetConversationId: KotlinUuid?,
+        pendingRegeneration: PendingAssistantRegeneration?,
+        store: IOSConversationStore
+    ) async {
+        if let pendingRegeneration,
+           let targetConversationId,
+           String(describing: targetConversationId) == String(describing: pendingRegeneration.conversationId) {
+            if pendingRegeneration.generatedMessageIndex >= 0,
+               pendingRegeneration.generatedMessageIndex < snapshot.count {
+                let regenerated = snapshot[pendingRegeneration.generatedMessageIndex]
+                if regenerated.role == MessageRole.assistant {
+                    let saved = await store.appendVariantAndTruncateAfter(
+                        messageIndex: pendingRegeneration.targetMessageIndex,
+                        message: regenerated,
+                        conversationId: pendingRegeneration.conversationId
+                    )
+                    if saved {
+                        self.pendingAssistantRegeneration = nil
+                        self.messages = store.currentMessages
+                        self.messageRevision &+= 1
+                        return
+                    }
+                }
             }
+            self.pendingAssistantRegeneration = nil
+            self.messages = store.currentMessages
+            self.messageRevision &+= 1
+            return
+        }
+        if let targetConversationId {
+            await store.save(messages: snapshot, to: targetConversationId)
+        } else {
+            await store.saveCurrent(messages: snapshot)
         }
     }
 
@@ -378,6 +448,7 @@ final class ChatViewModel {
         let prompt = Self.promptText(userText: text, selectedFilePreview: pendingSelectedFilePreview)
         let digest = Self.inputDigest(for: prompt)
         let userMsg = UIMessage.companion.user(prompt: prompt)
+        pendingAssistantRegeneration = nil
         messages.append(userMsg)
         messageRevision &+= 1
         inputText = ""
@@ -588,29 +659,40 @@ final class ChatViewModel {
               index >= 0, index < conversation.messageNodes.count else { return }
 
         let targetNode = conversation.messageNodes[index]
-        let truncateIndex: Int
         if targetNode.role == MessageRole.user {
-            truncateIndex = index
+            Task { @MainActor in
+                pendingAssistantRegeneration = nil
+                await store.truncateAfter(messageIndex: index)
+                // Re-sync the flat projection from the mutated tree.
+                if let updated = store.currentConversation {
+                    self.messages = updated.currentMessages
+                    self.messageRevision &+= 1
+                }
+                let digest = Self.inputDigest(for: regenerateDigestSeed())
+                generateResponse(inputDigest: digest, conversationId: currentConversationId)
+            }
         } else {
             // Assistant: regenerate from the user turn immediately before it.
-            // If there is no preceding user turn, fall back to truncating at
-            // this node (re-run from the assistant slot's own context).
+            // Keep the original assistant node in storage. The new assistant
+            // turn is appended as a variant after streaming completes.
             // messageNodes is a Kotlin List — convert to Swift Array so we can
             // use Swift's lastIndex(where:) on the prefix.
             let nodes = Array(conversation.messageNodes.prefix(index))
-            let precedingUser = nodes.lastIndex { $0.role == MessageRole.user }
-            truncateIndex = precedingUser ?? max(index - 1, 0)
-        }
-
-        Task { @MainActor in
-            await store.truncateAfter(messageIndex: truncateIndex)
-            // Re-sync the flat projection from the mutated tree.
-            if let updated = store.currentConversation {
-                self.messages = updated.currentMessages
-                self.messageRevision &+= 1
+            guard let precedingUser = nodes.lastIndex(where: { $0.role == MessageRole.user }) else {
+                return
             }
-            let digest = Self.inputDigest(for: regenerateDigestSeed())
-            generateResponse(inputDigest: digest, conversationId: currentConversationId)
+            Task { @MainActor in
+                let uploadMessages = Array(conversation.currentMessages.prefix(precedingUser + 1))
+                self.pendingAssistantRegeneration = PendingAssistantRegeneration(
+                    conversationId: conversation.id,
+                    targetMessageIndex: index,
+                    generatedMessageIndex: uploadMessages.count
+                )
+                self.messages = uploadMessages
+                self.messageRevision &+= 1
+                let digest = Self.inputDigest(for: regenerateDigestSeed())
+                generateResponse(inputDigest: digest, conversationId: conversation.id)
+            }
         }
     }
 
@@ -630,6 +712,7 @@ final class ChatViewModel {
 
         let edited = UIMessage.companion.user(prompt: trimmed)
         Task { @MainActor in
+            pendingAssistantRegeneration = nil
             await store.appendVariant(messageIndex: index, message: edited)
             // Truncate anything after the edited user turn (drop stale reply).
             await store.truncateAfter(messageIndex: index)
@@ -1394,7 +1477,7 @@ final class ChatViewModel {
         let slice3Names: Set<String> = ["mcp_call", "subagent_dispatch", "model_council_run"]
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { slice3Names.contains($0.toolName) && isSlice3ToolEnabled($0.toolName) && $0.output.isEmpty }) {
+                .first(where: { slice3Names.contains($0.toolName) && $0.output.isEmpty }) {
                 return toolCall
             }
         }
@@ -1591,6 +1674,148 @@ final class ChatViewModel {
                 reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             )
         }
+    }
+
+    private func subAgentParentToolExecutors() -> [String: any IOSToolExecutor] {
+        Dictionary(uniqueKeysWithValues: IOSSubAgentToolPolicy.readOnlyParentToolNames.map { name in
+            (name, IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+                guard let self else {
+                    return .failed("Chat runtime is unavailable.")
+                }
+                return await self.executeSubAgentParentTool(name: toolName, arguments: arguments)
+            } as any IOSToolExecutor)
+        })
+    }
+
+    private func executeSubAgentParentTool(name: String, arguments: String) async -> IOSAgentToolOutcome {
+        guard IOSSubAgentToolPolicy.readOnlyParentToolNames.contains(name) else {
+            return .denied("SubAgent read-only scope does not allow \(name).")
+        }
+
+        if IOSSearchExecutor.supportedToolNames.contains(name) {
+            let output = await dispatchSearchToolCall(toolCall(name: name, input: arguments))
+            recordSubAgentParentToolApproval(toolName: name, arguments: arguments, action: .allowed)
+            return .filled(output)
+        }
+
+        guard let localToolExecutor else {
+            return .failed("Local iOS tool executor is unavailable.")
+        }
+
+        let request: IOSLocalToolExecutionRequest
+        if name == "file_read_selected" {
+            request = localToolExecutor.requestForCurrentSelectedFile(isUserInitiated: true)
+        } else {
+            request = IOSLocalToolExecutionRequest(
+                toolName: name,
+                operation: arguments,
+                scopeDigest: "subagent",
+                payloadDigest: Self.inputDigest(for: arguments),
+                isUserInitiated: false
+            )
+        }
+        let output = await localToolExecutor.execute(request)
+        recordSubAgentParentToolApproval(
+            toolName: name,
+            arguments: arguments,
+            action: output.isSuccessfulToolResult ? .allowed : .denied
+        )
+        return subAgentOutcome(for: name, output: output)
+    }
+
+    private func recordSubAgentParentToolApproval(
+        toolName: String,
+        arguments: String,
+        action: IOSToolApprovalAction
+    ) {
+        guard let localToolExecutor,
+              let capability = IOSCapabilityRegistry.capability(forToolName: toolName) else { return }
+        localToolExecutor.recordApproval(
+            capabilityId: capability.id,
+            toolName: toolName,
+            action: action,
+            reason: "SubAgent read-only parent tool \(action == .allowed ? "executed" : "denied").",
+            runId: currentRunId ?? "",
+            scopeDigest: "subagent",
+            payloadDigest: Self.inputDigest(for: arguments)
+        )
+    }
+
+    private func recordAdvancedToolApprovalIfNeeded(
+        toolCall: UIMessagePart.Tool,
+        runId: String
+    ) {
+        let capabilityId: String
+        switch toolCall.toolName {
+        case "subagent_dispatch":
+            capabilityId = "ios.agent.subagent_dispatch"
+        case "model_council_run":
+            capabilityId = "ios.agent.model_council_run"
+        default:
+            return
+        }
+        let enabled = isSlice3ToolEnabled(toolCall.toolName)
+        recordToolApproval(
+            capabilityId: capabilityId,
+            toolCall: toolCall,
+            action: enabled ? .allowed : .denied,
+            reason: "\(toolCall.toolName) model tool call \(enabled ? "executed" : "denied").",
+            runId: runId
+        )
+    }
+
+    private func subAgentOutcome(for toolName: String, output: IOSLocalToolExecutionOutput) -> IOSAgentToolOutcome {
+        switch output {
+        case .selectedFilePreview(let read):
+            return .filled(IOSWorkspaceStore.json([
+                "ok": true,
+                "tool": toolName,
+                "file_name": read.fileName,
+                "file_type": read.fileType,
+                "bytes_read": read.bytesRead,
+                "total_bytes": read.totalBytes,
+                "character_count": read.characterCount,
+                "is_truncated": read.isTruncated,
+                "note": read.note ?? "",
+                "preview": read.preview
+            ]))
+        case .permissionsStatus(let snapshot):
+            let capabilities = snapshot.capabilities.map { item in
+                [
+                    "id": item.id,
+                    "title": item.title,
+                    "status": item.status,
+                    "policy": item.policy,
+                    "model_tools": item.modelToolNames,
+                    "blocked_tools": item.blockedToolNames
+                ] as [String: Any]
+            }
+            return .filled(IOSWorkspaceStore.json([
+                "ok": true,
+                "tool": toolName,
+                "platform": snapshot.platform,
+                "capabilities": capabilities
+            ]))
+        case .workspaceResult(let result), .webMountResult(let result):
+            return .filled(result)
+        case .needsUserAction(let reason):
+            return .denied(reason)
+        case .denied(let reason):
+            return .denied(reason)
+        case .failed(let message):
+            return .failed(message)
+        }
+    }
+
+    private func toolCall(name: String, input: String) -> UIMessagePart.Tool {
+        UIMessagePart.Tool(
+            toolCallId: "subagent-\(name)-\(Self.inputDigest(for: input))",
+            toolName: name,
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            metadata: nil
+        )
     }
 
     private func searchApprovalRequest(
@@ -2342,7 +2567,12 @@ final class ChatViewModel {
             return
         }
 
-        let resultText = await dispatchSlice3ToolCall(toolCall)
+        let resultText = await dispatchSlice3ToolCall(
+            toolCall,
+            providerSetting: providerSetting,
+            params: params
+        )
+        recordAdvancedToolApprovalIfNeeded(toolCall: toolCall, runId: runId)
 
         guard currentRunId == runId else { return }
         let resumedMessages = messagesByFinishingToolCall(toolCall, outputText: resultText, in: baseMessages)
@@ -2407,7 +2637,11 @@ final class ChatViewModel {
 
         let resultText: String
         if allow {
-            resultText = await dispatchSlice3ToolCall(pending.toolCall)
+            resultText = await dispatchSlice3ToolCall(
+                pending.toolCall,
+                providerSetting: pending.providerSetting,
+                params: pending.params
+            )
         } else {
             resultText = "用户拒绝执行 MCP 工具。"
         }
@@ -2486,7 +2720,11 @@ final class ChatViewModel {
 
     /// [Slice 3] Routes a Slice-3 tool call to its executor and returns the
     /// result text (or an honest error string — never fabricated success).
-    private func dispatchSlice3ToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
+    private func dispatchSlice3ToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams
+    ) async -> String {
         guard isSlice3ToolEnabled(toolCall.toolName) else {
             return "\(toolCall.toolName) 未开启。请先在设置中启用对应能力。"
         }
@@ -2496,7 +2734,15 @@ final class ChatViewModel {
             let objective = args?["objective"] as? String ?? toolCall.input
             let roleId = args?["role_id"] as? String ?? args?["subagent_id"] as? String ?? "explorer"
             let scope = Self.stringArray(args?["tool_scope"]) ?? Self.stringArray(args?["tools"]) ?? []
-            return await subAgentRunner.run(objective: objective, roleId: roleId, requestedToolScope: scope)
+            return await subAgentRunner.runViaEngine(
+                objective: objective,
+                roleId: roleId,
+                requestedToolScope: scope,
+                providerSetting: providerSetting,
+                modelId: params.model.modelId,
+                baseParams: params,
+                parentToolExecutors: subAgentParentToolExecutors()
+            )
         case "model_council_run":
             let args = jsonObject(toolCall.input)
             let objective = args?["objective"] as? String ?? toolCall.input
@@ -2978,35 +3224,33 @@ final class ChatViewModel {
             toolDeclarations.append(ToolKt.createImageGenToolDeclaration())
         }
         if localToolExecutor != nil {
-            toolDeclarations.append(ToolKt.createWorkspaceFileReadToolDeclaration())
-            toolDeclarations.append(ToolKt.createWorkspaceFileWriteToolDeclaration())
-            toolDeclarations.append(ToolKt.createWorkspaceArtifactReadToolDeclaration())
-            toolDeclarations.append(ToolKt.createWorkspaceArtifactDeleteToolDeclaration())
+            toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+                names: Array(IOSWorkspaceToolCatalog.supportedToolNames).sorted()
+            ))
         }
         if localToolExecutor != nil, isWebMountRuntimeEnabled {
-            toolDeclarations.append(ToolKt.createWebMountStationsToolDeclaration())
-            toolDeclarations.append(ToolKt.createWebMountOpenToolDeclaration())
-            toolDeclarations.append(ToolKt.createWebMountStateToolDeclaration())
-            toolDeclarations.append(ToolKt.createWebMountExtractToolDeclaration())
-            toolDeclarations.append(ToolKt.createWebMountGetToolDeclaration())
-            toolDeclarations.append(ToolKt.createWebMountBackToolDeclaration())
-            toolDeclarations.append(ToolKt.createWebMountForwardToolDeclaration())
-            toolDeclarations.append(ToolKt.createWebMountClearSessionToolDeclaration())
+            toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+                names: Array(IOSWebMountToolCatalog.supportedToolNames).sorted()
+            ))
         }
         if sharedSettings.isCapabilityGateEnabled(.mcp) {
             toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
         }
-        toolDeclarations.append(ToolKt.createSubAgentDispatchToolDeclaration())
-        toolDeclarations.append(ToolKt.createModelCouncilRunToolDeclaration())
+        if isSlice3ToolEnabled("subagent_dispatch") {
+            toolDeclarations.append(ToolKt.createSubAgentDispatchToolDeclaration())
+        }
+        if isSlice3ToolEnabled("model_council_run") {
+            toolDeclarations.append(ToolKt.createModelCouncilRunToolDeclaration())
+        }
         // Real params: temperature/topP from Assistant, maxTokens from
         // resolveSessionDefaults (Assistant → group default), reasoningLevel
         // resolved, custom headers/bodies merged. Mirrors GenerationHandler.
         let resolvedReasoningLevel = modelAbilities.contains(.reasoning) ? resolved.reasoningLevel : ReasoningLevel.off
         return TextGenerationParams(
             model: model,
-            temperature: assistant.temperature.map { KotlinFloat(value: Float($0)) },
-            topP: assistant.topP.map { KotlinFloat(value: Float($0)) },
-            maxTokens: resolved.maxTokens.map { KotlinInt(value: Int32($0)) },
+            temperature: assistant.temperature.map { KotlinFloat(value: Float(truncating: $0)) },
+            topP: assistant.topP.map { KotlinFloat(value: Float(truncating: $0)) },
+            maxTokens: resolved.maxTokens.map { KotlinInt(value: Int32(truncating: $0)) },
             tools: toolDeclarations,
             reasoningLevel: resolvedReasoningLevel,
             customHeaders: mergedHeaders,
@@ -3023,6 +3267,28 @@ final class ChatViewModel {
     /// Assistant/Model values + resolveSessionDefaults).
     func textGenerationParamsForTesting() -> TextGenerationParams {
         makeTextGenerationParams()
+    }
+
+    func persistPendingAssistantRegenerationForTesting(
+        conversationId: KotlinUuid,
+        targetMessageIndex: Int,
+        generatedMessageIndex: Int,
+        snapshot: [UIMessage]
+    ) async {
+        guard let store = conversationStore else { return }
+        let pending = PendingAssistantRegeneration(
+            conversationId: conversationId,
+            targetMessageIndex: targetMessageIndex,
+            generatedMessageIndex: generatedMessageIndex
+        )
+        pendingAssistantRegeneration = pending
+        messages = snapshot
+        await persistMessagesSnapshot(
+            snapshot,
+            targetConversationId: conversationId,
+            pendingRegeneration: pending,
+            store: store
+        )
     }
     #endif
 

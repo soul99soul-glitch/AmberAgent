@@ -932,6 +932,10 @@ private final class ChatWebMountRuntime: IOSWebMountRuntimeServicing {
         ["ok": true, "method": method, "found": true, "message": "mock interaction"]
     }
 
+    func screenshot() async throws -> IOSWebMountScreenshotCapture {
+        IOSWebMountScreenshotCapture(data: Data([0x89, 0x50, 0x4E, 0x47]), width: 320, height: 640, format: "png")
+    }
+
     func back() async -> IOSWebMountRuntimeSnapshot {
         snapshot
     }

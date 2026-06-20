@@ -617,7 +617,12 @@ private struct McpServerRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Toggle("", isOn: Binding(get: { server.enabled }, set: onToggle))
+            Toggle("", isOn: Binding(
+                get: { server.enabled },
+                set: { value in
+                    Task { @MainActor in onToggle(value) }
+                }
+            ))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(server.name.isEmpty ? "MCP 服务器" : server.name)
@@ -682,7 +687,12 @@ private struct McpToolToggleRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Toggle("", isOn: Binding(get: { discovered.tool.enabled }, set: onToggle))
+            Toggle("", isOn: Binding(
+                get: { discovered.tool.enabled },
+                set: { value in
+                    Task { @MainActor in onToggle(value) }
+                }
+            ))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(discovered.tool.name)

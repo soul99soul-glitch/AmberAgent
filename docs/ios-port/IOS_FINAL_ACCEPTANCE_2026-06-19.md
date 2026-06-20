@@ -1,21 +1,38 @@
 # AmberAgent iOS Final Acceptance 2026-06-19
 
 Branch: `codex/ios-port-wip`
-HEAD: `70e1a7260` — docs(ios): re-verify parity closure on HEAD a81876885
+Baseline HEAD: `70e1a7260` — docs(ios): re-verify parity closure on HEAD a81876885
+Current tool-closure recheck: `HEAD 476f8f1ec` plus uncommitted working-tree changes from 2026-06-20.
 Prior baseline: `a81876885` (warning cleanup), `68192b345` (test regressions), `2802c7fb4` (handoff doc)
 Scope: parity closure **验收与发布前收口**（不扩大功能范围）
 
-## Automated verification (re-run 2026-06-19, acceptance agent)
+## Tool Closure re-verification (2026-06-20)
 
-All four gate commands run fresh in this session. Working tree was clean before
-and after (no code changes this session — warning cleanup confirmed already
-done on `a81876885`, only AmberNative native-lib warnings remain, which require
-a native rebuild and are out of parity scope).
+This pass supersedes the older warning/test-count statements below for the current working tree. Scope was limited to the Tool Closure plan: KMP tool declarations, iOS permission/tool catalog consistency, Chat tool declaration wiring, SubAgent engine execution, assistant regenerate branching, targeted warning cleanup, and docs calibration.
 
 | Check | Command | Result |
 | --- | --- | --- |
 | Whitespace | `git diff --check` | **Pass** (exit 0) |
-| iOS build | `xcodebuild … generic/platform=iOS Simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build` | **Pass** — `BUILD SUCCEEDED`; 0 Swift compiler warnings; 34 `ld` warnings all `libamber_ffi.a` object files built for iOS-sim 26.5 vs linked 26.0 (native, out of scope) |
+| KMP iOS | `JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :shared:compileKotlinIosSimulatorArm64 :shared:linkDebugFrameworkIosSimulatorArm64 --no-daemon` | **Pass** — `BUILD SUCCESSFUL` |
+| Full tests | `env JAVA_HOME=/opt/homebrew/opt/openjdk@17 xcodebuild -quiet -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination "platform=iOS Simulator,name=iPhone 17" -derivedDataPath /tmp/amberagent-tool-closure-test-3 ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO test` | **Pass** — **352 passed, 1 skipped, 0 failed** |
+
+Warning status for this pass:
+
+- Cleaned targeted Swift warnings in scope: Toggle Sendable closures, Kotlin numeric bridging via `init(truncating:)`, unused binding/node, and `IOSSyncBackup` UIDevice main-actor access.
+- Remaining warnings observed in earlier full build output are AmberNative simulator deployment-target linker warnings (`libamber_ffi.a` built for iOS-sim 26.5 vs linked 26.0). These require a native rebuild or deployment-target decision and are not fixed by the iOS tool-closure work.
+- Real API key/account/manual smoke remains out of autonomous scope: SubAgent true-model quality, Council true-model debate, DeepRead true-model synthesis, MCP real server reconnect, and WebMount logged-in page interaction.
+
+## Automated verification (re-run 2026-06-19, acceptance agent)
+
+Historical baseline: all four gate commands ran fresh in that session. Working tree was clean before
+and after (no code changes this session — warning cleanup confirmed already
+done on `a81876885`, only AmberNative native-lib warnings remained, which require
+a native rebuild and are out of parity scope). For current working-tree status, use the 2026-06-20 section above.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Whitespace | `git diff --check` | **Pass** (exit 0) |
+| iOS build | `xcodebuild … generic/platform=iOS Simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build` | **Pass** — `BUILD SUCCEEDED`; targeted Swift warnings were clean at that baseline; 34 `ld` warnings all `libamber_ffi.a` object files built for iOS-sim 26.5 vs linked 26.0 (native, out of scope) |
 | KMP iOS | `./gradlew :shared:compileKotlinIosSimulatorArm64 :shared:linkDebugFrameworkIosSimulatorArm64` | **Pass** — `BUILD SUCCESSFUL`, exit 0 |
 | Full tests | `xcodebuild … -destination "platform=iOS Simulator,name=iPhone 17" -derivedDataPath /tmp/amberagent-test-full-final … test` | **Pass** — `TEST SUCCEEDED`; **290 passed, 1 skipped, 0 failed** |
 
@@ -25,7 +42,7 @@ Gradle did not require elevated `~/.gradle` permissions on this machine.
 
 - `ChatViewModel` / `BoardView` / `MiniAppRunnerView` unused `try? saveArtifact` — already fixed on `a81876885` (`_ = try? …`).
 - `IOSSyncBackup` `UIDevice` main-actor warning — already fixed on `a81876885` (`IOSDeviceLabel.current` main-sync).
-- `WebMountView` / `McpServersView` Toggle non-Sendable closure — **no longer emitted** (build log has 0 Swift warnings). The `onToggle: (Bool) -> Void` closures run in `@MainActor` view context; no Swift 6 concurrency warning.
+- `WebMountView` / `McpServersView` Toggle non-Sendable closure — fixed in the current 2026-06-20 tool-closure pass.
 - Remaining: `libamber_ffi.a` iOS-sim 26.5 vs link 26.0 linker warnings (native rebuild required — **do not** address without a native build + product decision on deployment target).
 
 Simulator launch smoke: build to `/tmp/amberagent-smoke-launch`, install + `simctl launch` on **iPhone 17** → `app.amber.ios` started (no crash on cold launch).
@@ -94,7 +111,7 @@ Static checks: `SettingsHomeView` uses **高级功能** (not 实验区); `Conver
 
 ### P0 (release blockers for parity closure)
 
-None identified in automated verification, static IA review, or cold-launch smoke on current HEAD (`70e1a7260`).
+None identified in the 2026-06-19 automated verification, static IA review, or cold-launch smoke on baseline HEAD (`70e1a7260`). Current tool-closure working tree also passes the automated gates listed at the top of this document.
 
 ### P1 (should fix before external PR review)
 
@@ -109,7 +126,7 @@ None identified in automated verification, static IA review, or cold-launch smok
 
 **Resolved this / prior pass (no longer open):**
 
-- ~~Toggle non-Sendable warnings in `WebMountView.swift`, `McpServersView.swift`~~ — build log shows **0 Swift warnings**; closures run in `@MainActor` context.
+- ~~Toggle non-Sendable warnings in `WebMountView.swift`, `McpServersView.swift`~~ — fixed by the 2026-06-20 tool-closure pass.
 - ~~`ChatViewModel`/`BoardView`/`MiniAppRunnerView` unused `try? saveArtifact`~~ — fixed on `a81876885`.
 - ~~`IOSSyncBackup` `UIDevice` main-actor warning~~ — fixed on `a81876885`.
 

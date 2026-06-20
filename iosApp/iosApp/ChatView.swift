@@ -1453,12 +1453,20 @@ struct ChatToolStepModel: Identifiable {
     private static func webMountPendingTitle(for toolName: String) -> String {
         switch toolName {
         case "wm_open": "准备打开网页"
+        case "wm_tab_list": "准备读取网页标签页"
+        case "wm_tab_new": "准备新建网页标签页"
+        case "wm_tab_close": "准备关闭网页标签页"
+        case "wm_observe": "准备观察网页"
         case "wm_extract": "准备提取网页"
         case "wm_get": "准备读取网页节点"
+        case "wm_visual_snapshot": "准备读取视觉快照"
+        case "wm_screenshot": "准备截取网页视口"
         case "wm_state": "准备读取网页状态"
         case "wm_back": "准备后退"
         case "wm_forward": "准备前进"
         case "wm_clear_session": "准备清理 WebMount Session"
+        case "wm_site_add": "准备添加 WebMount 站点"
+        case "wm_site_remove": "准备移除 WebMount 站点"
         case "wm_stations": "准备读取 WebMount 站点"
         default: toolName
         }
@@ -1467,12 +1475,20 @@ struct ChatToolStepModel: Identifiable {
     private static func webMountCompletedTitle(for tool: UIMessagePart.Tool) -> String {
         switch tool.toolName {
         case "wm_open": "网页已打开"
+        case "wm_tab_list": "网页标签页已读取"
+        case "wm_tab_new": "网页标签页已新建"
+        case "wm_tab_close": "网页标签页已关闭"
+        case "wm_observe": "网页观察已完成"
         case "wm_extract": "网页内容已提取"
         case "wm_get": "网页节点已读取"
+        case "wm_visual_snapshot": "视觉快照已读取"
+        case "wm_screenshot": "网页视口截图已保存"
         case "wm_state": "网页状态已读取"
         case "wm_back": "WebMount 已后退"
         case "wm_forward": "WebMount 已前进"
         case "wm_clear_session": "WebMount Session 已处理"
+        case "wm_site_add": "WebMount 站点已添加"
+        case "wm_site_remove": "WebMount 站点已移除"
         case "wm_stations": "WebMount 站点已读取"
         default: tool.toolName
         }
@@ -1561,8 +1577,22 @@ struct ChatToolStepModel: Identifiable {
             let url = object["url"] as? String
             return [status, url].compactMap { $0?.nilIfBlank }.joined(separator: " · ")
         }
+        if let artifact = object["artifact"] as? [String: Any],
+           let artifactId = artifact["artifact_id"] as? String {
+            let size = artifact["size_bytes"].map { "\($0) bytes" }
+            return [artifactId, size].compactMap { $0?.nilIfBlank }.joined(separator: " · ")
+        }
+        if let closed = object["closed_session_id"] as? String {
+            return "已关闭 \(closed)"
+        }
         if let count = object["count"] as? Int {
+            if object["sessions"] != nil {
+                return "\(count) 个网页会话"
+            }
             return "\(count) 个站点"
+        }
+        if let sessionId = object["session_id"] as? String {
+            return "会话：\(sessionId)"
         }
         if let siteId = object["site_id"] as? String {
             return "站点：\(siteId)"

@@ -531,6 +531,45 @@ final class IOSConversationStore {
         return messageIndex
     }
 
+    /// Append an assistant regeneration as a sibling variant of the original
+    /// assistant node, select it, and drop stale nodes after that reply.
+    @discardableResult
+    func appendVariantAndTruncateAfter(messageIndex: Int, message: UIMessage, conversationId: KotlinUuid) async -> Bool {
+        let conversation: Conversation?
+        if currentConversation?.id == conversationId {
+            conversation = currentConversation
+        } else {
+            do {
+                conversation = try await storage.loadConversation(id: conversationId)
+            } catch {
+                lastIOError = IOSConversationIOError(operation: "保存重新生成分支", detail: "\(conversationId): \(error)")
+                conversation = nil
+            }
+        }
+        guard let conversation,
+              messageIndex >= 0,
+              messageIndex < conversation.messageNodes.count else {
+            return false
+        }
+        var nodes = Array(conversation.messageNodes.prefix(messageIndex + 1))
+        let node = nodes[messageIndex]
+        var variants = node.messages
+        variants.append(message)
+        nodes[messageIndex] = MessageNode(
+            id: node.id,
+            messages: variants,
+            selectIndex: Int32(variants.count - 1),
+            isFavorite: node.isFavorite
+        )
+        let updated = conversationWithNodes(conversation, nodes: nodes)
+        await persist(updated)
+        if currentConversation?.id == conversationId {
+            setCurrent(updated)
+        }
+        await refreshSummaries()
+        return true
+    }
+
     /// Remove a message from its node. If the node becomes empty it is removed
     /// (and selectIndex clamped). Mirrors `ChatService.deleteMessage`.
     func deleteMessage(messageIndex: Int) async {
@@ -539,7 +578,6 @@ final class IOSConversationStore {
             return
         }
         var nodes = conversation.messageNodes
-        let node = nodes[messageIndex]
         // A node only ever holds the currently-selected variant for deletion
         // purposes on iOS (the flat list shows the selected variant); drop the
         // whole node. If we later support per-variant delete, this is where the

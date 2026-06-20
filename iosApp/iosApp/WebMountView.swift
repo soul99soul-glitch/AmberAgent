@@ -152,6 +152,44 @@ final class IOSWebMountContentHandoffStore {
 }
 
 @MainActor
+@Observable
+final class IOSWebMountActivityStore {
+    static let shared = IOSWebMountActivityStore()
+
+    var recentExtractionTitle = "尚未提取"
+    var recentExtractionDetail = "打开站点后可读取正文、链接和视觉候选。"
+    var recentExtractionAtMillis: Int64 = 0
+
+    private init() {}
+
+    func recordExtraction(siteName: String, title: String?, characterCount: Int, linkCount: Int) {
+        recentExtractionTitle = title?.nilIfBlank ?? siteName
+        recentExtractionDetail = "\(siteName) · \(characterCount) 字符 · \(linkCount) 链接"
+        recentExtractionAtMillis = IOSWebMountClock.nowMillis()
+    }
+}
+
+private enum WebMountResultTab: String, CaseIterable, Identifiable {
+    case text
+    case links
+    case interactive
+    case visual
+    case debug
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .text: "正文"
+        case .links: "链接"
+        case .interactive: "交互"
+        case .visual: "视觉"
+        case .debug: "调试"
+        }
+    }
+}
+
+@MainActor
 struct WebMountView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
@@ -163,6 +201,9 @@ struct WebMountView: View {
     @State private var addNeedsLogin = true
     @State private var addCookieName = ""
     @State private var banner: String?
+    @State private var activityStore = IOSWebMountActivityStore.shared
+    @State private var loginStatusSummary = "未检测"
+    @State private var sessionRefreshTick = 0
 
     private var registry: IOSWebMountRegistry { controller.registry }
     private var settings: IOSWebMountSettings { controller.settings }
@@ -184,6 +225,7 @@ struct WebMountView: View {
                             WebMountBanner(text: banner)
                                 .padding(.top, 4)
                         }
+                        workbenchSection
                         settingsSection
                         stationSection
                     }
@@ -196,6 +238,9 @@ struct WebMountView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showAddSite) {
             addSiteSheet
+        }
+        .task {
+            await refreshLoginStatusSummary()
         }
     }
 
@@ -233,6 +278,60 @@ struct WebMountView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 10)
+    }
+
+    private var workbenchSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "工作台")
+            AmberFormGroup {
+                WebMountInfoRow(
+                    title: "活动 Session",
+                    subtitle: controller.sessionStore.records.isEmpty ? "当前没有活动网页会话。" : controller.sessionStore.records.map { $0.title }.joined(separator: " / "),
+                    systemImage: "rectangle.stack",
+                    tint: AmberTheme.accentCyan,
+                    trailing: "\(controller.sessionStore.records.count)/\(controller.sessionStore.maxSessions)"
+                )
+                if !controller.sessionStore.records.isEmpty {
+                    WebMountDivider()
+                    ForEach(Array(controller.sessionStore.records.enumerated()), id: \.element.id) { index, record in
+                        WebMountSessionRow(
+                            record: record,
+                            onClose: {
+                                Task { await closeSession(record.id) }
+                            }
+                        )
+                        if index < controller.sessionStore.records.count - 1 {
+                            WebMountDivider()
+                        }
+                    }
+                }
+                WebMountDivider()
+                WebMountInfoRow(
+                    title: "登录状态",
+                    subtitle: loginStatusSummary,
+                    systemImage: "person.crop.circle.badge.checkmark",
+                    tint: AmberTheme.accentAmber,
+                    trailing: "Cookie"
+                )
+                WebMountDivider()
+                WebMountInfoRow(
+                    title: "最近提取",
+                    subtitle: activityStore.recentExtractionDetail,
+                    systemImage: "doc.text.magnifyingglass",
+                    tint: AmberTheme.accentGreen,
+                    trailing: activityStore.recentExtractionTitle
+                )
+                WebMountDivider()
+                WebMountInfoRow(
+                    title: "工具权限",
+                    subtitle: "模型使用 WebMount 仍走前台审批；截图、清 Session、站点增删必须显式确认。",
+                    systemImage: "checkmark.shield",
+                    tint: AmberTheme.accentIndigo,
+                    trailing: "\(IOSWebMountToolCatalog.supportedToolNames.count)"
+                )
+            }
+        }
+        .id(sessionRefreshTick)
     }
 
     private var settingsSection: some View {
@@ -388,6 +487,50 @@ struct WebMountView: View {
             banner = "已移除 \(site.displayName)。"
         }
     }
+
+    private func closeSession(_ sessionId: String) async {
+        let output = await controller.execute(
+            toolName: "wm_tab_close",
+            input: IOSWebMountController.json(["session_id": sessionId]),
+            isUserInitiated: true
+        )
+        if let object = Self.jsonObject(output),
+           object["ok"] as? Bool == false {
+            banner = object["error"] as? String ?? "关闭 Session 失败。"
+        } else {
+            banner = "已关闭 \(sessionId)。"
+            sessionRefreshTick &+= 1
+        }
+    }
+
+    private func refreshLoginStatusSummary() async {
+        var loggedIn = 0
+        var loggedOut = 0
+        var unknown = 0
+        for site in registry.sites {
+            let summary = await controller.cookieStore.summary(for: site)
+            switch site.authKind {
+            case .anonymous:
+                loggedIn += 1
+            case .cookie:
+                if summary.hasLoginCookie == true {
+                    loggedIn += 1
+                } else if summary.hasLoginCookie == false {
+                    loggedOut += 1
+                } else {
+                    unknown += 1
+                }
+            case .oauth:
+                unknown += 1
+            }
+        }
+        loginStatusSummary = "\(loggedIn) 已登录 / \(loggedOut) 未登录 / \(unknown) 未知"
+    }
+
+    private static func jsonObject(_ text: String) -> [String: Any]? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
 }
 
 @MainActor
@@ -402,7 +545,11 @@ struct WebMountSiteView: View {
     @State private var cookieSummary: IOSWebMountCookieSummary?
     @State private var bridgeState = ""
     @State private var extractText = ""
+    @State private var linksText = ""
+    @State private var interactiveText = ""
     @State private var visualSnapshotText = ""
+    @State private var debugJSONText = ""
+    @State private var selectedResultTab: WebMountResultTab = .text
     @State private var getSelector = "body"
     @State private var getText = ""
     @State private var openURLText = ""
@@ -511,6 +658,8 @@ struct WebMountSiteView: View {
                     trailing: runtime.snapshot.title?.nilIfBlank ?? "\(Int(runtime.snapshot.estimatedProgress * 100))%"
                 )
                 WebMountDivider()
+                browserChromeRow
+                WebMountDivider()
                 HStack(spacing: 8) {
                     TextField("https://example.com/path", text: $openURLText)
                         .font(.system(size: 13, design: .monospaced))
@@ -552,6 +701,20 @@ struct WebMountSiteView: View {
         }
     }
 
+    private var browserChromeRow: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                WebMountBadge(text: resolvedSite.homepageHost, systemImage: "network", tint: AmberTheme.accentCyan)
+                WebMountBadge(text: loginBadgeText, systemImage: "person.crop.circle", tint: loginBadgeTint)
+                WebMountBadge(text: resolvedSite.enabled ? "allowlisted" : "blocked", systemImage: resolvedSite.enabled ? "checkmark.shield" : "xmark.shield", tint: resolvedSite.enabled ? AmberTheme.accentGreen : AmberTheme.accentRed)
+                WebMountBadge(text: runtime.snapshot.sessionId, systemImage: "rectangle.stack", tint: AmberTheme.accentIndigo)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .scrollIndicators(.hidden)
+    }
+
     private var webViewSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "网页")
@@ -575,6 +738,8 @@ struct WebMountSiteView: View {
                         .buttonStyle(.bordered)
                     Button("提取正文") { Task { await extractReadable() } }
                         .buttonStyle(.bordered)
+                    Button("观察") { Task { await self.observePage() } }
+                        .buttonStyle(.bordered)
                     Button("视觉快照") { Task { await visualSnapshot() } }
                         .buttonStyle(.bordered)
                     Spacer()
@@ -582,32 +747,31 @@ struct WebMountSiteView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
 
-                if !bridgeState.isEmpty {
-                    WebMountCodeBlock(text: bridgeState)
-                    WebMountDivider()
-                }
-                if !extractText.isEmpty {
-                    if let contentHandoff {
-                        WebMountHandoffActions(
-                            handoff: contentHandoff,
-                            onChat: {
-                                IOSWebMountContentHandoffStore.shared.prepareChat(contentHandoff)
-                                router.navigate(to: .chat)
-                            },
-                            onDeepRead: {
-                                IOSWebMountContentHandoffStore.shared.prepareDeepRead(contentHandoff)
-                                router.navigate(to: .board)
-                            }
-                        )
-                        WebMountDivider()
+                Picker("页面内容", selection: $selectedResultTab) {
+                    ForEach(WebMountResultTab.allCases) { tab in
+                        Text(tab.title).tag(tab)
                     }
-                    WebMountCodeBlock(text: extractText)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+
+                if let contentHandoff, selectedResultTab == .text {
+                    WebMountHandoffActions(
+                        handoff: contentHandoff,
+                        onChat: {
+                            IOSWebMountContentHandoffStore.shared.prepareChat(contentHandoff)
+                            router.navigate(to: .chat)
+                        },
+                        onDeepRead: {
+                            IOSWebMountContentHandoffStore.shared.prepareDeepRead(contentHandoff)
+                            router.navigate(to: .board)
+                        }
+                    )
                     WebMountDivider()
                 }
-                if !visualSnapshotText.isEmpty {
-                    WebMountCodeBlock(text: visualSnapshotText)
-                    WebMountDivider()
-                }
+                WebMountCodeBlock(text: self.selectedResultText)
+                WebMountDivider()
                 HStack(spacing: 8) {
                     TextField("选择器", text: $getSelector)
                         .font(.system(size: 13, design: .monospaced))
@@ -622,6 +786,7 @@ struct WebMountSiteView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 if !getText.isEmpty {
+                    WebMountDivider()
                     WebMountCodeBlock(text: getText)
                 }
             }
@@ -639,6 +804,26 @@ struct WebMountSiteView: View {
                     tint: AmberTheme.accentAmber,
                     trailing: cookieSummary.map { "\($0.cookieCount)" } ?? "..."
                 )
+                WebMountDivider()
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await openSite() }
+                    } label: {
+                        Label("打开网页登录", systemImage: "person.badge.key")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        Task { await refreshCookieSummary() }
+                    } label: {
+                        Label("重新检测 Cookie", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
                 WebMountDivider()
                 Button(role: .destructive) {
                     Task { await clearSession() }
@@ -683,6 +868,35 @@ struct WebMountSiteView: View {
         return "\(login) · \(names)"
     }
 
+    private var selectedResultText: String {
+        switch selectedResultTab {
+        case .text:
+            return extractText.nilIfBlank ?? "尚未提取正文。"
+        case .links:
+            return linksText.nilIfBlank ?? "尚未读取链接。"
+        case .interactive:
+            return interactiveText.nilIfBlank ?? "尚未观察可交互元素。"
+        case .visual:
+            return visualSnapshotText.nilIfBlank ?? "尚未读取视觉快照。"
+        case .debug:
+            return debugJSONText.nilIfBlank ?? bridgeState.nilIfBlank ?? "尚无调试 JSON。"
+        }
+    }
+
+    private var loginBadgeText: String {
+        guard let cookieSummary else { return "login unknown" }
+        if cookieSummary.hasLoginCookie == true { return "logged in" }
+        if cookieSummary.hasLoginCookie == false { return "logged out" }
+        return "login unknown"
+    }
+
+    private var loginBadgeTint: Color {
+        guard let cookieSummary else { return AmberTheme.muted2 }
+        if cookieSummary.hasLoginCookie == true { return AmberTheme.accentGreen }
+        if cookieSummary.hasLoginCookie == false { return AmberTheme.accentRed }
+        return AmberTheme.accentAmber
+    }
+
     private func openSite() async {
         isLoading = true
         _ = await controller.openForUser(site: resolvedSite)
@@ -721,8 +935,12 @@ struct WebMountSiteView: View {
         do {
             let state = try await controller.runtime.state()
             bridgeState = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(state))
+            debugJSONText = bridgeState
+            selectedResultTab = .debug
         } catch {
             bridgeState = IOSWebMountController.json(["ok": false, "error": error.localizedDescription])
+            debugJSONText = bridgeState
+            selectedResultTab = .debug
         }
     }
 
@@ -730,24 +948,61 @@ struct WebMountSiteView: View {
         do {
             let result = try await controller.runtime.extract(mode: "readable", maxChars: 4_000, maxLinks: 12)
             let redacted = IOSWebMountRedactor.redactedJSONObject(result)
-            extractText = IOSWebMountController.json(redacted)
+            extractText = IOSWebMountRedactor.redactedText((result["text"] as? String) ?? "")
+            linksText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(result["links"] ?? []))
+            debugJSONText = IOSWebMountController.json(redacted)
             contentHandoff = IOSWebMountContentHandoff.from(
                 site: resolvedSite,
                 snapshot: runtime.snapshot,
                 extraction: result
             )
+            IOSWebMountActivityStore.shared.recordExtraction(
+                siteName: resolvedSite.displayName,
+                title: result["title"] as? String,
+                characterCount: extractText.count,
+                linkCount: (result["links"] as? [[String: Any]])?.count ?? 0
+            )
+            selectedResultTab = .text
         } catch {
             extractText = IOSWebMountController.json(["ok": false, "error": error.localizedDescription])
+            debugJSONText = extractText
             contentHandoff = nil
+            selectedResultTab = .debug
+        }
+    }
+
+    private func observePage() async {
+        do {
+            let readable = try await controller.runtime.extract(mode: "readable", maxChars: 2_000, maxLinks: 20)
+            let interactive = try await controller.runtime.extract(mode: "interactive", maxChars: 0, maxLinks: 80)
+            let visual = try await controller.runtime.extract(mode: "snapshot", maxChars: 0, maxLinks: 80)
+            extractText = IOSWebMountRedactor.redactedText((readable["text"] as? String) ?? extractText)
+            linksText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(readable["links"] ?? []))
+            interactiveText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(interactive["nodes"] ?? []))
+            visualSnapshotText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(visual["visual_candidates"] ?? visual))
+            debugJSONText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject([
+                "readable": readable,
+                "interactive": interactive,
+                "visual": visual
+            ]))
+            selectedResultTab = .interactive
+        } catch {
+            debugJSONText = IOSWebMountController.json(["ok": false, "error": error.localizedDescription])
+            selectedResultTab = .debug
         }
     }
 
     private func visualSnapshot() async {
         do {
             let result = try await controller.runtime.extract(mode: "snapshot", maxChars: 4_000, maxLinks: 24)
-            visualSnapshotText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(result))
+            visualSnapshotText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(result["visual_candidates"] ?? result))
+            interactiveText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(result["interactive_nodes"] ?? []))
+            debugJSONText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(result))
+            selectedResultTab = .visual
         } catch {
             visualSnapshotText = IOSWebMountController.json(["ok": false, "error": error.localizedDescription])
+            debugJSONText = visualSnapshotText
+            selectedResultTab = .debug
         }
     }
 
@@ -761,8 +1016,10 @@ struct WebMountSiteView: View {
                 maxChars: 4_000
             )
             getText = IOSWebMountController.json(IOSWebMountRedactor.redactedJSONObject(result))
+            debugJSONText = getText
         } catch {
             getText = IOSWebMountController.json(["ok": false, "error": error.localizedDescription])
+            debugJSONText = getText
         }
     }
 
@@ -787,6 +1044,22 @@ private struct WebMountRuntimeWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+
+private struct WebMountBadge: View {
+    let text: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.12), in: Capsule())
+    }
 }
 
 private struct WebMountStationRow: View {
@@ -819,7 +1092,12 @@ private struct WebMountStationRow: View {
             }
             .buttonStyle(.plain)
 
-            Toggle("", isOn: Binding(get: { site.enabled }, set: onToggle))
+            Toggle("", isOn: Binding(
+                get: { site.enabled },
+                set: { value in
+                    Task { @MainActor in onToggle(value) }
+                }
+            ))
                 .labelsHidden()
                 .toggleStyle(.switch)
 
@@ -849,6 +1127,52 @@ private struct WebMountStationRow: View {
         case .cookie: AmberTheme.accentAmber
         case .oauth: AmberTheme.accentIndigo
         }
+    }
+}
+
+private struct WebMountSessionRow: View {
+    let record: IOSWebMountSessionRecord
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: record.isCurrent ? "rectangle.inset.filled" : "rectangle")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(record.isCurrent ? AmberTheme.accentCyan : AmberTheme.muted2)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(record.title.nilIfBlank ?? "Untitled")
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text(sessionSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(record.status)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(record.status == "ready" ? AmberTheme.accentGreen : AmberTheme.accentAmber)
+
+            Button(role: .destructive, action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accentRed)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var sessionSubtitle: String {
+        let site = record.siteName?.nilIfBlank ?? "WebMount"
+        let url = record.redactedURL.nilIfBlank ?? record.id
+        return "\(site) · \(url)"
     }
 }
 

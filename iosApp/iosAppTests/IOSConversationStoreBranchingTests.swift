@@ -171,4 +171,60 @@ final class IOSConversationStoreBranchingTests: XCTestCase {
         XCTAssertEqual(reopened.variantInfo(forMessageIndex: 1)?.selectedIndex, 0)
         XCTAssertEqual(reopened.currentMessages[1].toText(), "4")
     }
+
+    func testAssistantRegenerateAppendsVariantAndDropsStaleNodes() async throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await store.newConversation()
+        let messages = [
+            UIMessage.companion.user(prompt: "question"),
+            UIMessage.companion.assistant(prompt: "old answer"),
+            UIMessage.companion.user(prompt: "stale follow up")
+        ]
+        await store.saveCurrent(messages: messages)
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+
+        let saved = await store.appendVariantAndTruncateAfter(
+            messageIndex: 1,
+            message: UIMessage.companion.assistant(prompt: "new answer"),
+            conversationId: conversationId
+        )
+
+        XCTAssertTrue(saved)
+        XCTAssertEqual(store.currentMessages.count, 2, "nodes after the regenerated assistant reply must be dropped")
+        XCTAssertEqual(store.variantInfo(forMessageIndex: 1)?.variantCount, 2)
+        XCTAssertEqual(store.variantInfo(forMessageIndex: 1)?.selectedIndex, 1)
+        XCTAssertEqual(store.currentMessages[1].toText(), "new answer")
+
+        await store.selectVariant(messageIndex: 1, variantIndex: 0)
+        XCTAssertEqual(store.currentMessages[1].toText(), "old answer")
+
+        let reopened = IOSConversationStore(baseDirectory: dir)
+        await reopened.selectConversation(id: conversationId)
+        XCTAssertEqual(reopened.currentMessages.count, 2)
+        XCTAssertEqual(reopened.variantInfo(forMessageIndex: 1)?.variantCount, 2)
+    }
+
+    func testPendingAssistantRegenerateWithoutAssistantOutputDoesNotPersistPrefix() async throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await seedUserAssistantPair(store)
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+
+        await viewModel.persistPendingAssistantRegenerationForTesting(
+            conversationId: conversationId,
+            targetMessageIndex: 1,
+            generatedMessageIndex: 1,
+            snapshot: [store.currentMessages[0]]
+        )
+
+        XCTAssertEqual(store.currentMessages.map { $0.toText() }, ["what is 2+2", "4"])
+        XCTAssertEqual(viewModel.messages.map { $0.toText() }, ["what is 2+2", "4"])
+    }
 }

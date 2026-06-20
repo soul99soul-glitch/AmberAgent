@@ -34,6 +34,11 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
     final class ScriptedProvider: IOSAgentTextProvider, @unchecked Sendable {
         private var script: [UIMessage]
         private(set) var callCount = 0
+        private(set) var seenToolNames: [String] = []
+        private(set) var seenModelId: String?
+        private(set) var seenTemperature: Float?
+        private(set) var seenMaxTokens: Int32?
+        private(set) var seenCustomHeaderNames: [String] = []
         init(_ script: [UIMessage]) { self.script = script }
 
         func generateText(
@@ -42,6 +47,11 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
             params: TextGenerationParams
         ) async throws -> MessageChunk {
             callCount += 1
+            seenToolNames = params.tools.map(\.name)
+            seenModelId = params.model.modelId
+            seenTemperature = params.temperature.map { Float(truncating: $0) }
+            seenMaxTokens = params.maxTokens.map { Int32(truncating: $0) }
+            seenCustomHeaderNames = params.customHeaders.map(\.name)
             if !script.isEmpty {
                 let msg = script.removeFirst()
                 return chunk(with: msg)
@@ -191,5 +201,126 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
             params: params
         )
         XCTAssertNil(reportCapture.captured)
+    }
+
+    func testRunViaEngineDeclaresReportToolsListAndAllowlistTools() async {
+        let toolsListCall = makeMessage(
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Tool(
+                toolCallId: "tools-1",
+                toolName: "tools_list",
+                input: "{}",
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                metadata: nil
+            )]
+        )
+        let reportCall = makeMessage(
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Tool(
+                toolCallId: "rep-1",
+                toolName: "subagent_report",
+                input: "{\"summary\":\"tools listed\"}",
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                metadata: nil
+            )]
+        )
+        let finalText = makeMessage(role: MessageRole.assistant, parts: [UIMessagePart.Text(text: "Done.", metadata: nil)])
+        let provider = ScriptedProvider([toolsListCall, reportCall, finalText])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(userDefaults: UserDefaults(suiteName: "subagent-\(UUID().uuidString)")!, storageKey: "tasks"))
+
+        let result = await runner.runViaEngine(
+            objective: "List tools and report",
+            roleId: "explorer",
+            requestedToolScope: ["search_web"],
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        let declared = Set(provider.seenToolNames)
+        XCTAssertTrue(declared.contains("subagent_report"))
+        XCTAssertTrue(declared.contains("tools_list"))
+        XCTAssertTrue(declared.contains("search_web"))
+        XCTAssertTrue(result.contains("\"report_captured\":true"))
+        XCTAssertGreaterThanOrEqual(provider.callCount, 2)
+    }
+
+    func testRunViaEngineDeniesRequestedWriteOrSensitiveToolsBeforeModelCall() async {
+        let provider = ScriptedProvider([])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(userDefaults: UserDefaults(suiteName: "subagent-denied-\(UUID().uuidString)")!, storageKey: "tasks"))
+
+        let result = await runner.runViaEngine(
+            objective: "Write a file",
+            roleId: "explorer",
+            requestedToolScope: ["workspace_file_write", "wm_click"],
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        XCTAssertEqual(provider.callCount, 0)
+        XCTAssertTrue(result.contains("\"denied\":true"))
+        XCTAssertTrue(result.contains("workspace_file_write"))
+        XCTAssertTrue(result.contains("wm_click"))
+    }
+
+    func testRunViaEngineInheritsParentGenerationParams() async {
+        let reportCall = makeMessage(
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Tool(
+                toolCallId: "rep-params",
+                toolName: "subagent_report",
+                input: "{\"summary\":\"params inherited\"}",
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                metadata: nil
+            )]
+        )
+        let provider = ScriptedProvider([reportCall])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(userDefaults: UserDefaults(suiteName: "subagent-params-\(UUID().uuidString)")!, storageKey: "tasks"))
+        let baseParams = TextGenerationParams(
+            model: Model(
+                modelId: "parent-model",
+                displayName: "Parent Model",
+                id: KotlinUuid.companion.random(),
+                type: ModelType.chat,
+                customHeaders: [CustomHeader(name: "X-Parent", value: "1")],
+                customBodies: [],
+                inputModalities: [],
+                outputModalities: [],
+                abilities: [],
+                tools: Set<BuiltInTools>(),
+                contextWindowTokens: nil,
+                providerOverwrite: nil
+            ),
+            temperature: KotlinFloat(value: 0.25),
+            topP: nil,
+            maxTokens: KotlinInt(value: 321),
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [CustomHeader(name: "X-Parent", value: "1")],
+            customBody: []
+        )
+
+        _ = await runner.runViaEngine(
+            objective: "Check inherited params",
+            roleId: "explorer",
+            requestedToolScope: [],
+            providerSetting: makeProviderSetting(),
+            modelId: "fallback-model",
+            baseParams: baseParams,
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        XCTAssertEqual(provider.seenModelId, "parent-model")
+        XCTAssertEqual(Double(provider.seenTemperature ?? -1), 0.25, accuracy: 0.001)
+        XCTAssertEqual(provider.seenMaxTokens, 321)
+        XCTAssertTrue(provider.seenCustomHeaderNames.contains("X-Parent"))
+        XCTAssertTrue(provider.seenToolNames.contains("subagent_report"))
     }
 }

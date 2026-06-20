@@ -2,6 +2,15 @@ import Foundation
 import Observation
 @preconcurrency import Shared
 
+private func subAgentJSON(_ object: [String: Any]) -> String {
+    guard JSONSerialization.isValidJSONObject(object),
+          let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+          let text = String(data: data, encoding: .utf8) else {
+        return String(describing: object)
+    }
+    return text
+}
+
 struct IOSSubAgentRoleDescriptor: Identifiable, Equatable {
     let id: String
     let name: String
@@ -22,7 +31,11 @@ enum IOSSubAgentRoleCatalog {
             summary: "跨多源快速并行侦察，速度优先。",
             systemPrompt: "快速侦察范围、列出证据和未知数，优先用只读来源。",
             routing: "范围广、不确定、需要先摸清有哪些信息时调用。",
-            toolAllowlist: ["tools_list", "search_web", "scrape_web", "file_read_selected", "permissions_status"],
+            toolAllowlist: [
+                "tools_list", "search_web", "scrape_web", "file_read_selected", "permissions_status",
+                "workspace_file_read", "workspace_file_list", "workspace_file_search", "workspace_artifact_read",
+                "wm_stations", "wm_state", "wm_extract", "wm_get", "wm_find", "wm_wait", "wm_back", "wm_forward"
+            ],
             maxTurns: 4,
             timeoutSeconds: 300,
             outputBudgetChars: 12_000
@@ -44,7 +57,7 @@ enum IOSSubAgentRoleCatalog {
             summary: "架构取舍、风险复议、提交前评审。",
             systemPrompt: "进行高判断力复议，重点给出风险、反例和取舍。",
             routing: "长期影响大的决定、高风险重构、提交前二次复议时调用。",
-            toolAllowlist: ["tools_list", "file_read_selected", "permissions_status"],
+            toolAllowlist: ["tools_list", "file_read_selected", "permissions_status", "workspace_file_read", "workspace_file_search", "workspace_artifact_read"],
             maxTurns: 4,
             timeoutSeconds: 300,
             outputBudgetChars: 12_000
@@ -55,7 +68,7 @@ enum IOSSubAgentRoleCatalog {
             summary: "视觉产出规格、版式、配色和信息密度审查。",
             systemPrompt: "从视觉质量、信息层级和移动端可用性评审输出。",
             routing: "生成或评审视觉产物，并且在意版式和信息密度时调用。",
-            toolAllowlist: ["tools_list", "file_read_selected"],
+            toolAllowlist: ["tools_list", "file_read_selected", "workspace_file_read", "workspace_artifact_read"],
             maxTurns: 3,
             timeoutSeconds: 240,
             outputBudgetChars: 8_000
@@ -66,7 +79,7 @@ enum IOSSubAgentRoleCatalog {
             summary: "中文写作、文案润色、故事与风格改写。",
             systemPrompt: "以中文表达质量为第一目标，保留事实边界。",
             routing: "中文写作、润色、邮件、文案或故事表达时调用。",
-            toolAllowlist: ["tools_list", "file_read_selected"],
+            toolAllowlist: ["tools_list", "file_read_selected", "workspace_file_read", "workspace_artifact_read"],
             maxTurns: 3,
             timeoutSeconds: 240,
             outputBudgetChars: 8_000
@@ -87,6 +100,25 @@ enum IOSSubAgentRoleCatalog {
     static func resolve(roleId: String?) -> IOSSubAgentRoleDescriptor {
         let normalized = roleId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         return builtIns.first { $0.id == normalized } ?? builtIns[0]
+    }
+}
+
+enum IOSSubAgentToolPolicy {
+    static let readOnlyParentToolNames: Set<String> = [
+        "search_web", "scrape_web",
+        "file_read_selected", "permissions_status",
+        "workspace_file_read", "workspace_file_list", "workspace_file_search", "workspace_artifact_read",
+        "wm_stations", "wm_state", "wm_extract", "wm_get", "wm_find", "wm_wait", "wm_back", "wm_forward"
+    ]
+
+    static let deniedToolNames: Set<String> = [
+        "workspace_file_write", "workspace_file_edit", "workspace_file_move", "workspace_artifact_delete",
+        "wm_open", "wm_clear_session", "wm_click", "wm_tap", "wm_type", "wm_keys", "wm_scroll", "wm_select",
+        "mcp_call", "memory_tool", "generate_image", "subagent_dispatch", "model_council_run"
+    ]
+
+    static func isDenied(_ name: String) -> Bool {
+        deniedToolNames.contains(name)
     }
 }
 
@@ -169,13 +201,29 @@ final class SubAgentRunner {
         requestedToolScope: [String] = [],
         providerSetting: ProviderSetting.OpenAI,
         modelId: String,
-        parentToolExecutors: [String: any IOSToolExecutor]
+        baseParams: TextGenerationParams? = nil,
+        parentToolExecutors: [String: any IOSToolExecutor],
+        provider: any IOSAgentTextProvider = OpenAIKmpProviderAdapter()
     ) async -> String {
         let role = IOSSubAgentRoleCatalog.resolve(roleId: roleId)
-        let scopedTools = requestedToolScope.isEmpty
+        let requested = requestedToolScope
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let deniedRequested = requested.filter(IOSSubAgentToolPolicy.isDenied)
+        if !deniedRequested.isEmpty {
+            return Self.json([
+                "ok": false,
+                "denied": true,
+                "reason": "SubAgent read-only scope does not execute write, destructive, nested-agent, or sensitive WebMount tools.",
+                "requested_tools": deniedRequested
+            ])
+        }
+        let scopedTools = requested.isEmpty
             ? role.toolAllowlist
-            : requestedToolScope.filter { role.toolAllowlist.contains($0) }
-        let tools = scopedTools.isEmpty ? role.toolAllowlist : scopedTools
+            : requested.filter { role.toolAllowlist.contains($0) }
+        let tools = Self.uniqueTools((["tools_list"] + scopedTools).filter { tool in
+            tool == "tools_list" || IOSSubAgentToolPolicy.readOnlyParentToolNames.contains(tool)
+        })
 
         let task = taskStore.startTask(
             kind: .subAgent,
@@ -200,11 +248,13 @@ final class SubAgentRunner {
         // allowed tools get executors; others fall through to the engine's
         // "unregistered tool" honest-failure path.
         let reportCapture = SubAgentReportCaptureExecutor()
+        let toolsList = SubAgentToolsListExecutor(tools: tools)
         var executors: [String: any IOSToolExecutor] = [
-            SUBAGENT_REPORT_TOOL_NAME_swift: reportCapture
+            SUBAGENT_REPORT_TOOL_NAME_swift: reportCapture,
+            "tools_list": toolsList
         ]
         for name in tools {
-            if let parent = parentToolExecutors[name] {
+            if name != "tools_list", let parent = parentToolExecutors[name] {
                 executors[name] = parent
             }
         }
@@ -228,8 +278,8 @@ final class SubAgentRunner {
             UIMessage.companion.user(prompt: userPrompt)
         ]
 
-        let params = TextGenerationParams(
-            model: Model(
+        let fallbackMaxTokens = KotlinInt(value: Int32(role.outputBudgetChars / 4))
+        let fallbackModel = Model(
                 modelId: modelId,
                 displayName: modelId,
                 id: KotlinUuid.companion.random(),
@@ -242,18 +292,20 @@ final class SubAgentRunner {
                 tools: Set<BuiltInTools>(),
                 contextWindowTokens: nil,
                 providerOverwrite: nil
-            ),
-            temperature: KotlinFloat(value: 0.7),
-            topP: nil,
-            maxTokens: KotlinInt(value: Int32(role.outputBudgetChars / 4)),
-            tools: [],
-            reasoningLevel: .off,
-            customHeaders: [],
-            customBody: []
+        )
+        let params = TextGenerationParams(
+            model: baseParams?.model ?? fallbackModel,
+            temperature: baseParams?.temperature,
+            topP: baseParams?.topP,
+            maxTokens: baseParams?.maxTokens ?? fallbackMaxTokens,
+            tools: ToolKt.iosToolDeclarations(names: [SUBAGENT_REPORT_TOOL_NAME_swift] + tools),
+            reasoningLevel: baseParams?.reasoningLevel ?? .off,
+            customHeaders: baseParams?.customHeaders ?? [],
+            customBody: baseParams?.customBody ?? []
         )
 
         let engine = IOSAgentToolEngine(
-            provider: OpenAIKmpProviderAdapter(),
+            provider: provider,
             executors: executors,
             configuration: .init(maxSteps: role.maxTurns + 1, honorApprovalPause: false)
         )
@@ -314,6 +366,16 @@ final class SubAgentRunner {
 
     /// The KMP `subagent_report` tool name as visible in Swift.
     private var SUBAGENT_REPORT_TOOL_NAME_swift: String { "subagent_report" }
+
+    private static func uniqueTools(_ names: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for name in names where seen.insert(name).inserted {
+            result.append(name)
+        }
+        return result
+    }
+
     func run(objective: String, roleId: String = "explorer", requestedToolScope: [String] = []) async -> String {
         guard let m = ensureManager() else {
             return "SubAgent 不可用：无法构造 Manager（文档目录不可用）。"
@@ -476,13 +538,8 @@ final class SubAgentRunner {
         return .completed
     }
 
-    private static func json(_ object: [String: Any]) -> String {
-        guard JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else {
-            return String(describing: object)
-        }
-        return text
+    static func json(_ object: [String: Any]) -> String {
+        subAgentJSON(object)
     }
 }
 
@@ -502,5 +559,49 @@ final class SubAgentReportCaptureExecutor: IOSToolExecutor {
         }
         captured = trimmed
         return .filled("{\"status\":\"ok\",\"message\":\"Structured subagent report recorded.\"}")
+    }
+}
+
+final class SubAgentToolsListExecutor: IOSToolExecutor {
+    private let tools: [String]
+
+    init(tools: [String]) {
+        self.tools = tools
+    }
+
+    func execute(name: String, arguments: String, isUserInitiated: Bool) async -> IOSAgentToolOutcome {
+        let items = tools.map { tool in
+            [
+                "name": tool,
+                "description": Self.description(for: tool)
+            ]
+        }
+        return .filled(subAgentJSON([
+            "ok": true,
+            "tools": items
+        ]))
+    }
+
+    private static func description(for tool: String) -> String {
+        switch tool {
+        case "tools_list": "List tools available in this sub-agent run."
+        case "search_web": "Search the public web through configured iOS search providers."
+        case "scrape_web": "Extract readable text from a public http/https URL."
+        case "file_read_selected": "Read the user's currently selected foreground file preview."
+        case "permissions_status": "Read iOS capability and permission status."
+        case "workspace_file_read": "Read an imported Workspace file."
+        case "workspace_file_list": "List imported Workspace files."
+        case "workspace_file_search": "Search imported Workspace file previews."
+        case "workspace_artifact_read": "Read a saved Workspace artifact."
+        case "wm_stations": "List configured WebMount stations."
+        case "wm_state": "Read current WebMount page state."
+        case "wm_extract": "Extract readable or interactive WebMount page content."
+        case "wm_get": "Read one safe WebMount element value/text/attribute."
+        case "wm_find": "Find text or selector matches on the current WebMount page."
+        case "wm_wait": "Wait briefly for WebMount page activity."
+        case "wm_back": "Navigate WebMount backward."
+        case "wm_forward": "Navigate WebMount forward."
+        default: "Available iOS sub-agent tool."
+        }
     }
 }

@@ -84,8 +84,12 @@ final class IOSCapabilityRegistryTests: XCTestCase {
             "scrape_web",
             "mcp_call",
             "workspace_file_read",
+            "workspace_file_list",
+            "workspace_file_search",
             "workspace_artifact_read",
             "workspace_file_write",
+            "workspace_file_edit",
+            "workspace_file_move",
             "workspace_artifact_delete"
         ]).union(IOSWebMountToolCatalog.supportedToolNames)
         XCTAssertEqual(IOSCapabilityRegistry.executableToolNames, expected)
@@ -173,7 +177,7 @@ final class IOSCapabilityRegistryTests: XCTestCase {
             "calendar_create",
             "wm_eval",
             "wm_signed_fetch",
-            "wm_visual_snapshot"
+            "wm_visual_read"
         ]
 
         for toolName in blocked {
@@ -209,7 +213,10 @@ final class IOSCapabilityRegistryTests: XCTestCase {
         XCTAssertEqual(Set(capability.modelToolNames), IOSWebMountToolCatalog.supportedToolNames)
         XCTAssertTrue(capability.blockedToolNames.contains("wm_eval"))
         XCTAssertTrue(capability.blockedToolNames.contains("wm_signed_fetch"))
+        XCTAssertTrue(capability.blockedToolNames.contains("wm_network_inspect"))
         XCTAssertTrue(capability.blockedToolNames.contains("wm_visual_read"))
+        XCTAssertTrue(capability.modelToolNames.contains("wm_visual_snapshot"))
+        XCTAssertTrue(capability.modelToolNames.contains("wm_screenshot"))
         XCTAssertEqual(capability.risk, .high)
     }
 

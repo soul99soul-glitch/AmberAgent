@@ -267,7 +267,7 @@ struct IOSCapabilityRegistry {
             risk: .sensitive,
             requestKind: .foregroundSession,
             requestEntryPoint: "Chat Workspace read approval",
-            modelToolNames: ["workspace_file_read", "workspace_artifact_read"],
+            modelToolNames: ["workspace_file_read", "workspace_file_list", "workspace_file_search", "workspace_artifact_read"],
             defaultEnabled: true,
             gate: reusableSensitiveGate
         ),
@@ -280,7 +280,7 @@ struct IOSCapabilityRegistry {
             risk: .high,
             requestKind: .foregroundSession,
             requestEntryPoint: "Chat Workspace write approval",
-            modelToolNames: ["workspace_file_write", "workspace_artifact_delete"],
+            modelToolNames: ["workspace_file_write", "workspace_file_edit", "workspace_file_move", "workspace_artifact_delete"],
             defaultEnabled: true,
             gate: freshHighRiskGate
         ),

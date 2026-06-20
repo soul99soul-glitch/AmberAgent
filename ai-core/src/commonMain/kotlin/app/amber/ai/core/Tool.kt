@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -83,6 +84,30 @@ fun createWorkspaceFileWriteToolDeclaration(): Tool = workspaceTool(
     parameters = workspaceFileWriteParameters()
 )
 
+fun createWorkspaceFileEditToolDeclaration(): Tool = workspaceTool(
+    name = "workspace_file_edit",
+    description = "Replace text inside an existing AmberAgent iOS Workspace file. Requires foreground approval.",
+    parameters = workspaceFileEditParameters()
+)
+
+fun createWorkspaceFileListToolDeclaration(): Tool = workspaceTool(
+    name = "workspace_file_list",
+    description = "List files currently stored in AmberAgent iOS Workspace, optionally under a path prefix.",
+    parameters = workspaceFileListParameters()
+)
+
+fun createWorkspaceFileSearchToolDeclaration(): Tool = workspaceTool(
+    name = "workspace_file_search",
+    description = "Search text previews of AmberAgent iOS Workspace files.",
+    parameters = workspaceFileSearchParameters()
+)
+
+fun createWorkspaceFileMoveToolDeclaration(): Tool = workspaceTool(
+    name = "workspace_file_move",
+    description = "Move or rename an AmberAgent iOS Workspace file. Requires foreground approval.",
+    parameters = workspaceFileMoveParameters()
+)
+
 fun createWorkspaceArtifactReadToolDeclaration(): Tool = workspaceTool(
     name = "workspace_artifact_read",
     description = "Read a saved AmberAgent iOS Workspace artifact by `artifact_id`.",
@@ -114,6 +139,24 @@ fun createWebMountStationsToolDeclaration(): Tool = webMountTool(
     parameters = webMountStationsParameters()
 )
 
+fun createWebMountTabListToolDeclaration(): Tool = webMountTool(
+    name = "wm_tab_list",
+    description = "List up to three foreground iOS WebMount sessions with redacted URLs, titles, status, and navigation state.",
+    parameters = emptyObjectParameters()
+)
+
+fun createWebMountTabNewToolDeclaration(): Tool = webMountTool(
+    name = "wm_tab_new",
+    description = "Create a new foreground iOS WebMount session. iOS keeps at most three sessions and evicts least-recently-used sessions.",
+    parameters = webMountTabNewParameters()
+)
+
+fun createWebMountTabCloseToolDeclaration(): Tool = webMountTool(
+    name = "wm_tab_close",
+    description = "Close a foreground iOS WebMount session by session_id. If omitted, closes the current foreground session.",
+    parameters = webMountTabCloseParameters()
+)
+
 fun createWebMountOpenToolDeclaration(): Tool = webMountTool(
     name = "wm_open",
     description = """
@@ -126,7 +169,13 @@ fun createWebMountOpenToolDeclaration(): Tool = webMountTool(
 fun createWebMountStateToolDeclaration(): Tool = webMountTool(
     name = "wm_state",
     description = "Read current iOS WebMount WKWebView status, title, redacted URL, and basic page state.",
-    parameters = emptyObjectParameters()
+    parameters = webMountSessionParameters()
+)
+
+fun createWebMountObserveToolDeclaration(): Tool = webMountTool(
+    name = "wm_observe",
+    description = "Observe the current iOS WebMount page: state, visible text, link summary, interactive elements, and DOM visual candidates. Does not expose cookies, tokens, or headers.",
+    parameters = webMountSessionParameters()
 )
 
 fun createWebMountExtractToolDeclaration(): Tool = webMountTool(
@@ -141,16 +190,29 @@ fun createWebMountGetToolDeclaration(): Tool = webMountTool(
     parameters = webMountGetParameters()
 )
 
+fun createWebMountVisualSnapshotToolDeclaration(): Tool = webMountTool(
+    name = "wm_visual_snapshot",
+    description = "Return visible DOM visual candidates such as image, iframe, canvas, video, SVG, and text block rectangles. No external vision model is called.",
+    parameters = webMountSessionParameters()
+)
+
+fun createWebMountScreenshotToolDeclaration(): Tool = webMountTool(
+    name = "wm_screenshot",
+    description = "Capture only the current iOS WebMount viewport to a local artifact. Returns artifact metadata, not base64 image data.",
+    parameters = webMountSessionParameters(),
+    needsApproval = true
+)
+
 fun createWebMountBackToolDeclaration(): Tool = webMountTool(
     name = "wm_back",
     description = "Navigate the current iOS WebMount WKWebView session backward.",
-    parameters = emptyObjectParameters()
+    parameters = webMountSessionParameters()
 )
 
 fun createWebMountForwardToolDeclaration(): Tool = webMountTool(
     name = "wm_forward",
     description = "Navigate the current iOS WebMount WKWebView session forward.",
-    parameters = emptyObjectParameters()
+    parameters = webMountSessionParameters()
 )
 
 fun createWebMountClearSessionToolDeclaration(): Tool = webMountTool(
@@ -162,6 +224,148 @@ fun createWebMountClearSessionToolDeclaration(): Tool = webMountTool(
     parameters = webMountClearSessionParameters(),
     needsApproval = true
 )
+
+fun createWebMountSiteAddToolDeclaration(): Tool = webMountTool(
+    name = "wm_site_add",
+    description = "Add and enable a local iOS WebMount station after foreground approval. The URL allowlist is synced; no login or OAuth is performed.",
+    parameters = webMountSiteAddParameters(),
+    needsApproval = true
+)
+
+fun createWebMountSiteRemoveToolDeclaration(): Tool = webMountTool(
+    name = "wm_site_remove",
+    description = "Remove a local iOS WebMount station after foreground approval. This does not clear cookies or website data.",
+    parameters = webMountSiteRemoveParameters(),
+    needsApproval = true
+)
+
+fun createWebMountClickToolDeclaration(): Tool = webMountTool(
+    name = "wm_click",
+    description = "Click a visible element on the current iOS WebMount page by selector or target ref.",
+    parameters = webMountTargetParameters()
+)
+
+fun createWebMountTapToolDeclaration(): Tool = webMountTool(
+    name = "wm_tap",
+    description = "Tap a coordinate or target on the current iOS WebMount page; prefer wm_click when a selector/ref exists.",
+    parameters = webMountTargetParameters(includeCoordinates = true)
+)
+
+fun createWebMountTypeToolDeclaration(): Tool = webMountTool(
+    name = "wm_type",
+    description = "Type text into an input element on the current iOS WebMount page.",
+    parameters = webMountTextInteractionParameters()
+)
+
+fun createWebMountKeysToolDeclaration(): Tool = webMountTool(
+    name = "wm_keys",
+    description = "Send a short key sequence to the current iOS WebMount page or focused field.",
+    parameters = webMountTextInteractionParameters()
+)
+
+fun createWebMountScrollToolDeclaration(): Tool = webMountTool(
+    name = "wm_scroll",
+    description = "Scroll the current iOS WebMount page or an element into view.",
+    parameters = webMountScrollParameters()
+)
+
+fun createWebMountSelectToolDeclaration(): Tool = webMountTool(
+    name = "wm_select",
+    description = "Select an option value in a select element on the current iOS WebMount page.",
+    parameters = webMountTextInteractionParameters()
+)
+
+fun createWebMountFindToolDeclaration(): Tool = webMountTool(
+    name = "wm_find",
+    description = "Find whether a selector or text appears on the current iOS WebMount page.",
+    parameters = webMountFindParameters()
+)
+
+fun createWebMountWaitToolDeclaration(): Tool = webMountTool(
+    name = "wm_wait",
+    description = "Wait briefly for the current iOS WebMount page to settle before the next action.",
+    parameters = webMountWaitParameters()
+)
+
+fun createSelectedFileReadToolDeclaration(): Tool = Tool(
+    name = "file_read_selected",
+    description = "Read the text preview of the file the user explicitly selected in AmberAgent iOS.",
+    parameters = { emptyObjectParameters() },
+    execute = { emptyList() }
+)
+
+fun createPermissionsStatusToolDeclaration(): Tool = Tool(
+    name = "permissions_status",
+    description = "Return AmberAgent iOS capability and permission status for tools available on this device.",
+    parameters = { emptyObjectParameters() },
+    execute = { emptyList() }
+)
+
+fun createToolsListToolDeclaration(): Tool = Tool(
+    name = "tools_list",
+    description = "List the tools currently exposed to this iOS sub-agent run and their intended use.",
+    parameters = { emptyObjectParameters() },
+    execute = { emptyList() }
+)
+
+fun createSubAgentReportToolDeclaration(): Tool = Tool(
+    name = "subagent_report",
+    description = """
+        Finish a sub-agent run by reporting a compact structured result for the supervisor.
+        Include summary, findings, evidence, risks, recommended_next_steps, and confidence when available.
+    """.trimIndent(),
+    parameters = { subAgentReportParameters() },
+    execute = { emptyList() }
+)
+
+fun iosToolDeclaration(name: String): Tool? = when (name) {
+    "search_web" -> createSearchWebToolDeclaration()
+    "scrape_web" -> createScrapeWebToolDeclaration()
+    "memory_tool" -> createMemoryToolDeclaration()
+    "workspace_file_read" -> createWorkspaceFileReadToolDeclaration()
+    "workspace_file_write" -> createWorkspaceFileWriteToolDeclaration()
+    "workspace_file_edit" -> createWorkspaceFileEditToolDeclaration()
+    "workspace_file_list" -> createWorkspaceFileListToolDeclaration()
+    "workspace_file_search" -> createWorkspaceFileSearchToolDeclaration()
+    "workspace_file_move" -> createWorkspaceFileMoveToolDeclaration()
+    "workspace_artifact_read" -> createWorkspaceArtifactReadToolDeclaration()
+    "workspace_artifact_delete" -> createWorkspaceArtifactDeleteToolDeclaration()
+    "generate_image" -> createImageGenToolDeclaration()
+    "wm_stations" -> createWebMountStationsToolDeclaration()
+    "wm_tab_list" -> createWebMountTabListToolDeclaration()
+    "wm_tab_new" -> createWebMountTabNewToolDeclaration()
+    "wm_tab_close" -> createWebMountTabCloseToolDeclaration()
+    "wm_open" -> createWebMountOpenToolDeclaration()
+    "wm_state" -> createWebMountStateToolDeclaration()
+    "wm_observe" -> createWebMountObserveToolDeclaration()
+    "wm_extract" -> createWebMountExtractToolDeclaration()
+    "wm_get" -> createWebMountGetToolDeclaration()
+    "wm_visual_snapshot" -> createWebMountVisualSnapshotToolDeclaration()
+    "wm_screenshot" -> createWebMountScreenshotToolDeclaration()
+    "wm_back" -> createWebMountBackToolDeclaration()
+    "wm_forward" -> createWebMountForwardToolDeclaration()
+    "wm_clear_session" -> createWebMountClearSessionToolDeclaration()
+    "wm_site_add" -> createWebMountSiteAddToolDeclaration()
+    "wm_site_remove" -> createWebMountSiteRemoveToolDeclaration()
+    "wm_click" -> createWebMountClickToolDeclaration()
+    "wm_tap" -> createWebMountTapToolDeclaration()
+    "wm_type" -> createWebMountTypeToolDeclaration()
+    "wm_keys" -> createWebMountKeysToolDeclaration()
+    "wm_scroll" -> createWebMountScrollToolDeclaration()
+    "wm_select" -> createWebMountSelectToolDeclaration()
+    "wm_find" -> createWebMountFindToolDeclaration()
+    "wm_wait" -> createWebMountWaitToolDeclaration()
+    "mcp_call" -> createMcpCallToolDeclaration()
+    "subagent_dispatch" -> createSubAgentDispatchToolDeclaration()
+    "model_council_run" -> createModelCouncilRunToolDeclaration()
+    "file_read_selected" -> createSelectedFileReadToolDeclaration()
+    "permissions_status" -> createPermissionsStatusToolDeclaration()
+    "tools_list" -> createToolsListToolDeclaration()
+    "subagent_report" -> createSubAgentReportToolDeclaration()
+    else -> null
+}
+
+fun iosToolDeclarations(names: List<String>): List<Tool> = names.distinct().mapNotNull(::iosToolDeclaration)
 
 /**
  * [Slice 3] Tool declaration for dispatching a sub-agent task.
@@ -435,6 +639,73 @@ private fun workspaceFileWriteParameters(): InputSchema = InputSchema.Obj(
     required = listOf("path", "content")
 )
 
+private fun workspaceFileEditParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("file_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace file id; optional when `path` is provided")
+        })
+        put("path", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace path such as /workspace/notes/summary.md")
+        })
+        put("find", buildJsonObject {
+            put("type", "string")
+            put("description", "Text to replace")
+        })
+        put("replace", buildJsonObject {
+            put("type", "string")
+            put("description", "Replacement text")
+        })
+    },
+    required = listOf("find", "replace")
+)
+
+private fun workspaceFileListParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("path", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional Workspace path prefix")
+        })
+        put("limit", buildJsonObject {
+            put("type", "integer")
+            put("description", "Maximum files to return")
+        })
+    }
+)
+
+private fun workspaceFileSearchParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("query", buildJsonObject {
+            put("type", "string")
+            put("description", "Text to search for in Workspace file previews")
+        })
+        put("limit", buildJsonObject {
+            put("type", "integer")
+            put("description", "Maximum matches to return")
+        })
+    },
+    required = listOf("query")
+)
+
+private fun workspaceFileMoveParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("file_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace file id; optional when `path` is provided")
+        })
+        put("path", buildJsonObject {
+            put("type", "string")
+            put("description", "Current Workspace path")
+        })
+        put("destination_path", buildJsonObject {
+            put("type", "string")
+            put("description", "Destination Workspace path")
+        })
+    },
+    required = listOf("destination_path")
+)
+
 private fun workspaceArtifactReadParameters(): InputSchema = InputSchema.Obj(
     properties = buildJsonObject {
         put("artifact_id", buildJsonObject {
@@ -522,8 +793,37 @@ private fun webMountStationsParameters(): InputSchema = InputSchema.Obj(
     }
 )
 
+private fun JsonObjectBuilder.putWebMountSessionId() {
+    put("session_id", buildJsonObject {
+        put("type", "string")
+        put("description", "optional WebMount session id from wm_tab_list; omit to use the current foreground session")
+    })
+}
+
+private fun webMountSessionParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        putWebMountSessionId()
+    }
+)
+
+private fun webMountTabNewParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("site_id", buildJsonObject {
+            put("type", "string")
+            put("description", "optional station id to associate with the new session")
+        })
+    }
+)
+
+private fun webMountTabCloseParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        putWebMountSessionId()
+    }
+)
+
 private fun webMountOpenParameters(): InputSchema = InputSchema.Obj(
     properties = buildJsonObject {
+        putWebMountSessionId()
         put("site_id", buildJsonObject {
             put("type", "string")
             put("description", "optional station id from wm_stations, e.g. github")
@@ -541,6 +841,7 @@ private fun webMountOpenParameters(): InputSchema = InputSchema.Obj(
 
 private fun webMountExtractParameters(): InputSchema = InputSchema.Obj(
     properties = buildJsonObject {
+        putWebMountSessionId()
         put("mode", buildJsonObject {
             put("type", "string")
             put("description", "readable text, interactive element summary, or snapshot")
@@ -563,6 +864,7 @@ private fun webMountExtractParameters(): InputSchema = InputSchema.Obj(
 
 private fun webMountGetParameters(): InputSchema = InputSchema.Obj(
     properties = buildJsonObject {
+        putWebMountSessionId()
         put("selector", buildJsonObject {
             put("type", "string")
             put("description", "CSS selector to read")
@@ -600,6 +902,178 @@ private fun webMountClearSessionParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("site_id")
+)
+
+private fun webMountSiteAddParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("display_name", buildJsonObject {
+            put("type", "string")
+            put("description", "station display name")
+        })
+        put("name", buildJsonObject {
+            put("type", "string")
+            put("description", "alias for display_name")
+        })
+        put("homepage_url", buildJsonObject {
+            put("type", "string")
+            put("description", "http(s) homepage URL for the station")
+        })
+        put("url", buildJsonObject {
+            put("type", "string")
+            put("description", "alias for homepage_url")
+        })
+        put("needs_login", buildJsonObject {
+            put("type", "boolean")
+            put("description", "whether the site should be treated as cookie-login based")
+        })
+        put("login_cookie_name", buildJsonObject {
+            put("type", "string")
+            put("description", "optional cookie name hint; values are never exposed")
+        })
+        put("enabled", buildJsonObject {
+            put("type", "boolean")
+            put("description", "whether to enable the station immediately; defaults to true after approval")
+        })
+    }
+)
+
+private fun webMountSiteRemoveParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("site_id", buildJsonObject {
+            put("type", "string")
+            put("description", "station id from wm_stations")
+        })
+    },
+    required = listOf("site_id")
+)
+
+private fun webMountTargetParameters(includeCoordinates: Boolean = false): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        putWebMountSessionId()
+        put("selector", buildJsonObject {
+            put("type", "string")
+            put("description", "CSS selector for the target element")
+        })
+        put("target", buildJsonObject {
+            put("type", "string")
+            put("description", "Target ref from wm_extract/wm_find, when available")
+        })
+        if (includeCoordinates) {
+            put("x", buildJsonObject {
+                put("type", "number")
+                put("description", "X coordinate in viewport pixels")
+            })
+            put("y", buildJsonObject {
+                put("type", "number")
+                put("description", "Y coordinate in viewport pixels")
+            })
+        }
+    }
+)
+
+private fun webMountTextInteractionParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        putWebMountSessionId()
+        put("selector", buildJsonObject {
+            put("type", "string")
+            put("description", "CSS selector for the target element")
+        })
+        put("target", buildJsonObject {
+            put("type", "string")
+            put("description", "Target ref from wm_extract/wm_find, when available")
+        })
+        put("text", buildJsonObject {
+            put("type", "string")
+            put("description", "Text, keys, or option value to send")
+        })
+        put("value", buildJsonObject {
+            put("type", "string")
+            put("description", "Alias for text when selecting or typing a value")
+        })
+    }
+)
+
+private fun webMountScrollParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        putWebMountSessionId()
+        put("selector", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional CSS selector to scroll")
+        })
+        put("target", buildJsonObject {
+            put("type", "string")
+            put("description", "Target ref from wm_extract/wm_find")
+        })
+        put("to", buildJsonObject {
+            put("type", "string")
+            put("description", "Named position such as top, bottom, or visible")
+        })
+        put("by_y", buildJsonObject {
+            put("type", "number")
+            put("description", "Vertical pixel delta")
+        })
+    }
+)
+
+private fun webMountFindParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        putWebMountSessionId()
+        put("selector", buildJsonObject {
+            put("type", "string")
+            put("description", "CSS selector to find")
+        })
+        put("text", buildJsonObject {
+            put("type", "string")
+            put("description", "Text to find on the page")
+        })
+        put("max_results", buildJsonObject {
+            put("type", "integer")
+            put("description", "Maximum matches to return")
+        })
+    }
+)
+
+private fun webMountWaitParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        putWebMountSessionId()
+        put("timeout_ms", buildJsonObject {
+            put("type", "integer")
+            put("description", "Wait duration in milliseconds, clamped by iOS")
+        })
+    }
+)
+
+private fun subAgentReportParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("summary", buildJsonObject {
+            put("type", "string")
+            put("description", "Concise final summary")
+        })
+        put("findings", buildJsonObject {
+            put("type", "array")
+            put("description", "Key findings")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+        put("evidence", buildJsonObject {
+            put("type", "array")
+            put("description", "Evidence or source references")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+        put("risks", buildJsonObject {
+            put("type", "array")
+            put("description", "Risks, uncertainty, or limitations")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+        put("recommended_next_steps", buildJsonObject {
+            put("type", "array")
+            put("description", "Recommended next steps")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+        put("confidence", buildJsonObject {
+            put("type", "number")
+            put("description", "Confidence from 0 to 1")
+        })
+    }
 )
 
 @Serializable

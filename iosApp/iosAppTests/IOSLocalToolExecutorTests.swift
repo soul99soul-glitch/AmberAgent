@@ -326,13 +326,50 @@ final class IOSLocalToolExecutorTests: XCTestCase {
     }
 
     func testWebMountToolCatalogAndUnsupportedResult() {
-        // 8 base tools + 6 interaction tools (wm_click/type/scroll/select/find/wait).
-        XCTAssertEqual(IOSWebMountToolCatalog.supportedToolNames.count, 14)
+        XCTAssertEqual(IOSWebMountToolCatalog.supportedToolNames.count, 24)
         XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_open"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_tab_list"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_tab_new"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_tab_close"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_observe"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_visual_snapshot"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_screenshot"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_site_add"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_site_remove"))
         XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_click"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_tap"))
         XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_type"))
+        XCTAssertTrue(IOSWebMountToolCatalog.supportedToolNames.contains("wm_keys"))
         XCTAssertTrue(IOSWebMountToolCatalog.unsupportedToolNames.contains("wm_eval"))
+        XCTAssertTrue(IOSWebMountToolCatalog.unsupportedToolNames.contains("wm_visual_read"))
+        XCTAssertTrue(IOSWebMountToolCatalog.unsupportedToolNames.contains("wm_signed_fetch"))
         XCTAssertTrue(IOSWebMountController.unsupportedToolResult(toolName: "wm_eval").contains("unsupported"))
+    }
+
+    func testWebMountInteractionAcceptsDeclaredArgumentAliases() async throws {
+        let runtime = MockWebMountRuntime()
+        let controller = IOSWebMountController(
+            registry: IOSWebMountRegistry(userDefaults: isolatedDefaults()),
+            settings: IOSWebMountSettings(userDefaults: isolatedDefaults()),
+            runtime: runtime
+        )
+
+        _ = await controller.execute(
+            toolName: "wm_scroll",
+            input: ##"{"target":"#main","by_y":240}"##,
+            isUserInitiated: true
+        )
+        XCTAssertEqual(runtime.lastInteraction?.method, "scroll")
+        XCTAssertEqual(runtime.lastInteraction?.selector, "#main")
+        XCTAssertEqual(runtime.lastInteraction?.options["dy"] as? Int, 240)
+
+        _ = await controller.execute(
+            toolName: "wm_wait",
+            input: #"{"timeout_ms":1200}"#,
+            isUserInitiated: true
+        )
+        XCTAssertEqual(runtime.lastInteraction?.method, "wait")
+        XCTAssertEqual(runtime.lastInteraction?.options["wait_ms"] as? Int, 1200)
     }
 
     func testWebMountStationsUsesRegistryAndRedactedCookieSummary() async throws {
@@ -345,6 +382,9 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         XCTAssertFalse(output.contains("cookie-value"))
         let stations = try XCTUnwrap(object["stations"] as? [[String: Any]])
         XCTAssertTrue(stations.contains { ($0["id"] as? String) == "github" })
+        let feishu = try XCTUnwrap(stations.first { ($0["id"] as? String) == "feishu_docs" })
+        XCTAssertEqual(feishu["login_status"] as? String, "unknown")
+        XCTAssertEqual(feishu["oauth_token_present"] as? Bool, false)
     }
 
     func testWebMountOpenAndExtractUseMockRuntimeAndRedactURLs() async throws {
@@ -373,6 +413,108 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         let result = try XCTUnwrap(getObject["result"] as? [String: Any])
         XCTAssertEqual(result["selector"] as? String, "h1")
         XCTAssertEqual(result["value"] as? String, "Hello from mock")
+    }
+
+    func testWebMountTabLifecycleAndClosedSessionFailure() async throws {
+        let controller = makeWebMountController(globalEnabled: true)
+
+        let firstList = try jsonObject(await controller.execute(toolName: "wm_tab_list", input: "{}", isUserInitiated: true))
+        XCTAssertEqual(firstList["count"] as? Int, 1)
+
+        let firstNew = try jsonObject(await controller.execute(toolName: "wm_tab_new", input: "{}", isUserInitiated: true))
+        let firstSessionId = try XCTUnwrap(firstNew["session_id"] as? String)
+        let secondNew = try jsonObject(await controller.execute(toolName: "wm_tab_new", input: "{}", isUserInitiated: true))
+        let secondSessionId = try XCTUnwrap(secondNew["session_id"] as? String)
+        _ = await controller.execute(toolName: "wm_tab_new", input: "{}", isUserInitiated: true)
+
+        let list = try jsonObject(await controller.execute(toolName: "wm_tab_list", input: "{}", isUserInitiated: true))
+        XCTAssertLessThanOrEqual(list["count"] as? Int ?? 0, 3)
+
+        let closed = try jsonObject(await controller.execute(
+            toolName: "wm_tab_close",
+            input: IOSWebMountController.json(["session_id": firstSessionId]),
+            isUserInitiated: true
+        ))
+        XCTAssertEqual(closed["closed_session_id"] as? String, firstSessionId)
+
+        let staleState = try jsonObject(await controller.execute(
+            toolName: "wm_state",
+            input: IOSWebMountController.json(["session_id": firstSessionId]),
+            isUserInitiated: true
+        ))
+        XCTAssertEqual(staleState["ok"] as? Bool, false)
+        XCTAssertTrue((staleState["error"] as? String)?.contains(firstSessionId) == true)
+
+        let liveState = try jsonObject(await controller.execute(
+            toolName: "wm_state",
+            input: IOSWebMountController.json(["session_id": secondSessionId]),
+            isUserInitiated: true
+        ))
+        XCTAssertEqual(liveState["ok"] as? Bool, true)
+        XCTAssertEqual(liveState["session_id"] as? String, secondSessionId)
+    }
+
+    func testWebMountObserveSnapshotAndScreenshotAreRedacted() async throws {
+        let controller = makeWebMountController(globalEnabled: true)
+        controller.registry.setEnabled(id: "github", enabled: true)
+        _ = await controller.execute(
+            toolName: "wm_open",
+            input: #"{"site_id":"github","url":"https://github.com/login?token=secret"}"#,
+            isUserInitiated: true
+        )
+
+        let observe = await controller.execute(toolName: "wm_observe", input: "{}", isUserInitiated: true)
+        XCTAssertTrue(observe.contains("Hello from mock"))
+        XCTAssertFalse(observe.contains("token=secret"))
+
+        let visual = await controller.execute(toolName: "wm_visual_snapshot", input: "{}", isUserInitiated: true)
+        XCTAssertTrue(visual.contains("visual_candidates"))
+        XCTAssertFalse(visual.contains("token=secret"))
+
+        let blockedScreenshot = try jsonObject(await controller.execute(toolName: "wm_screenshot", input: "{}", isUserInitiated: false))
+        XCTAssertEqual(blockedScreenshot["needs_user_action"] as? Bool, true)
+
+        let screenshot = try jsonObject(await controller.execute(toolName: "wm_screenshot", input: "{}", isUserInitiated: true))
+        XCTAssertEqual(screenshot["ok"] as? Bool, true)
+        let artifact = try XCTUnwrap(screenshot["artifact"] as? [String: Any])
+        XCTAssertEqual(artifact["format"] as? String, "png")
+        XCTAssertEqual(artifact["width"] as? Int, 390)
+        XCTAssertEqual(artifact["height"] as? Int, 844)
+        XCTAssertEqual(artifact["size_bytes"] as? Int, 4)
+        XCTAssertFalse(IOSWebMountController.json(screenshot).contains("base64"))
+    }
+
+    func testWebMountSiteAddRemoveSyncsAllowlistAndDoesNotClearCookies() async throws {
+        let controller = makeWebMountController(globalEnabled: true)
+        let cookieStore = try XCTUnwrap(controller.cookieStore as? MockWebMountCookieStore)
+
+        let blockedAdd = try jsonObject(await controller.execute(
+            toolName: "wm_site_add",
+            input: #"{"display_name":"Example","homepage_url":"https://docs.example.com/a?token=secret"}"#,
+            isUserInitiated: false
+        ))
+        XCTAssertEqual(blockedAdd["needs_user_action"] as? Bool, true)
+
+        let added = try jsonObject(await controller.execute(
+            toolName: "wm_site_add",
+            input: #"{"display_name":"Example","homepage_url":"https://docs.example.com/a?token=secret","login_cookie_name":"sid"}"#,
+            isUserInitiated: true
+        ))
+        XCTAssertEqual(added["ok"] as? Bool, true)
+        let siteId = try XCTUnwrap(added["site_id"] as? String)
+        XCTAssertEqual(added["enabled"] as? Bool, true)
+        XCTAssertTrue(controller.settings.allowedHosts.contains("docs.example.com"))
+        XCTAssertFalse(IOSWebMountController.json(added).contains("token=secret"))
+
+        let removed = try jsonObject(await controller.execute(
+            toolName: "wm_site_remove",
+            input: IOSWebMountController.json(["site_id": siteId]),
+            isUserInitiated: true
+        ))
+        XCTAssertEqual(removed["removed"] as? Bool, true)
+        XCTAssertEqual(removed["cookies_cleared"] as? Bool, false)
+        XCTAssertFalse(controller.settings.allowedHosts.contains("docs.example.com"))
+        XCTAssertTrue(cookieStore.clearedSiteIds.isEmpty)
     }
 
     func testWebMountExecutorRequiresApprovalAndClearRequiresUserAction() async throws {
@@ -406,6 +548,34 @@ final class IOSLocalToolExecutorTests: XCTestCase {
             return XCTFail("Expected needsUserAction, got \(clearOutput)")
         }
         XCTAssertTrue(clearReason.contains("Clearing WebMount cookies"))
+
+        let screenshotOutput = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "wm_screenshot",
+                operation: "{}",
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+        guard case .needsUserAction(let screenshotReason) = screenshotOutput else {
+            return XCTFail("Expected needsUserAction, got \(screenshotOutput)")
+        }
+        XCTAssertTrue(screenshotReason.contains("wm_screenshot"))
+
+        let siteAddOutput = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "wm_site_add",
+                operation: #"{"display_name":"Example","homepage_url":"https://example.com"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+        guard case .needsUserAction(let siteAddReason) = siteAddOutput else {
+            return XCTFail("Expected needsUserAction, got \(siteAddOutput)")
+        }
+        XCTAssertTrue(siteAddReason.contains("wm_site_add"))
     }
 
     func testWebMountExecutorAllowsToolsAfterForegroundApproval() async throws {
@@ -741,7 +911,8 @@ final class IOSLocalToolExecutorTests: XCTestCase {
             registry: registry,
             settings: settings,
             cookieStore: MockWebMountCookieStore(),
-            runtime: MockWebMountRuntime()
+            runtime: MockWebMountRuntime(),
+            runtimeFactory: { MockWebMountRuntime() }
         )
     }
 
@@ -819,14 +990,22 @@ private final class MockWebMountCookieStore: IOSWebMountCookieStoreProtocol {
 
 @MainActor
 private final class MockWebMountRuntime: IOSWebMountRuntimeServicing {
-    var snapshot = IOSWebMountRuntimeSnapshot.idle(sessionId: "mock")
+    private static var nextId = 0
+
+    var snapshot: IOSWebMountRuntimeSnapshot
     var webView: WKWebView? { nil }
     var openedURLs: [URL] = []
+    var lastInteraction: (method: String, selector: String?, text: String?, options: [String: Any])?
+
+    init() {
+        Self.nextId += 1
+        snapshot = IOSWebMountRuntimeSnapshot.idle(sessionId: "mock-\(Self.nextId)")
+    }
 
     func open(_ url: URL, timeoutMillis: UInt64) async -> IOSWebMountRuntimeSnapshot {
         openedURLs.append(url)
         snapshot = IOSWebMountRuntimeSnapshot(
-            sessionId: "mock",
+            sessionId: snapshot.sessionId,
             status: .ready,
             requestedURL: IOSWebMountRedactor.redactedURL(url.absoluteString),
             currentURL: IOSWebMountRedactor.redactedURL(url.absoluteString),
@@ -852,6 +1031,12 @@ private final class MockWebMountRuntime: IOSWebMountRuntimeServicing {
         [
             "mode": mode,
             "text": "Hello from mock",
+            "nodes": [
+                ["ref": "css:button", "tag": "button", "text": "Sign in"]
+            ],
+            "visual_candidates": [
+                ["ref": "css:img", "tag": "img", "alt": "Logo", "rect": ["width": 120, "height": 40]]
+            ],
             "links": [
                 ["href": "https://github.com/settings?token=secret", "text": "settings"]
             ]
@@ -868,7 +1053,12 @@ private final class MockWebMountRuntime: IOSWebMountRuntimeServicing {
     }
 
     func interact(method: String, selector: String?, text: String?, options: [String: Any]) async throws -> [String: Any] {
-        ["ok": true, "method": method, "found": true, "message": "mock interaction"]
+        lastInteraction = (method, selector, text, options)
+        return ["ok": true, "method": method, "found": true, "message": "mock interaction"]
+    }
+
+    func screenshot() async throws -> IOSWebMountScreenshotCapture {
+        IOSWebMountScreenshotCapture(data: Data([0x89, 0x50, 0x4E, 0x47]), width: 390, height: 844, format: "png")
     }
 
     func back() async -> IOSWebMountRuntimeSnapshot {

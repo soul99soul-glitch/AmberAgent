@@ -144,7 +144,7 @@
 ### 验证状态
 
 - 全量 iosAppTests:**323 passed, 1 skipped, 0 failed**(原 290 + 本轮新增 33)。
-- 0 Swift warnings。
+- 本轮目标 Swift warning 已清理；AmberNative simulator deployment-target linker warnings 仍需 native rebuild 或 deployment target 决策，不在本轮自动修复范围。
 - KMP shared framework 编译/链接通过。
 - 工作区干净,领先 origin 30 提交。
 
@@ -173,7 +173,20 @@
 | P1-7 WebMount 交互工具 | `7de8c74d6` | wm_click/type/scroll/select/find/wait(受限 JS 桥接) |
 | P1-6 Hotlist 提供商 | `f148f2537` | ArxivAI/InfoqAI/36Kr/HFPapers/GithubTrending(+HN 共 6 家) |
 
-验证:全量 iosAppTests **336 passed, 1 skipped, 0 failed**(本轮新增 13 个 P1 单测),0 Swift warning。
+验证:全量 iosAppTests **336 passed, 1 skipped, 0 failed**(本轮新增 13 个 P1 单测)。后续 Tool Closure 复核见下一节；不要把历史测试数量或 warning 状态当作当前 HEAD 结论。
+
+### 2026-06-20 Tool Closure 复核(本轮工作树)
+
+本轮专门修正工具闭环断点:KMP tool declaration、iOS permission registry、Chat params tool declaration、SubAgent engine route、parent tool executor allowlist、assistant regenerate branch persistence、以及既有 Swift warning。当前是 `HEAD 476f8f1ec` 上的未提交工作树复核。
+
+验证:
+
+- `git diff --check`: pass。
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :shared:compileKotlinIosSimulatorArm64 :shared:linkDebugFrameworkIosSimulatorArm64 --no-daemon`: pass。
+- `env JAVA_HOME=/opt/homebrew/opt/openjdk@17 xcodebuild -quiet -project iosApp/AmberAgent.xcodeproj -scheme iosApp -destination "platform=iOS Simulator,name=iPhone 17" -derivedDataPath /tmp/amberagent-tool-closure-test-3 ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO test`: pass,**352 passed, 1 skipped, 0 failed**。
+- 本轮目标 warning(Toggle Sendable、Kotlin numeric `init(truncating:)`、unused binding/node、`IOSSyncBackup` UIDevice main actor)已清理；`libamber_ffi.a` iOS-sim 26.5 vs link 26.0 linker warnings 仍是 native artifact/deployment-target 问题，不能在本工具闭环里伪装为已解决。
+
+真实 API Key/账号/付费服务 smoke 仍只列手动验证:SubAgent 真模型多轮质量、Council 真模型辩论、DeepRead 真模型综合、MCP 真 server 重连、WebMount 登录态页面交互。
 
 ### 仍为 P2 / 明确不做(更新后)
 

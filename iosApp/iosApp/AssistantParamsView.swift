@@ -48,9 +48,9 @@ struct AssistantParamsSection: View {
         systemPromptDraft = assistant.systemPrompt
         messageTemplateDraft = assistant.messageTemplate
         // temperature/topP are KotlinFloat?; convert via Float() then String.
-        temperatureDraft = assistant.temperature.map { String(Float($0)) } ?? ""
-        topPDraft = assistant.topP.map { String(Float($0)) } ?? ""
-        maxTokensDraft = assistant.maxTokens.map { String(Int($0)) } ?? ""
+        temperatureDraft = assistant.temperature.map { String(Float(truncating: $0)) } ?? ""
+        topPDraft = assistant.topP.map { String(Float(truncating: $0)) } ?? ""
+        maxTokensDraft = assistant.maxTokens.map { String(Int(truncating: $0)) } ?? ""
         contextMessageSizeDraft = String(Int(assistant.contextMessageSize))
     }
 

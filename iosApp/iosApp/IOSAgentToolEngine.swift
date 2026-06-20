@@ -262,7 +262,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         var firstApproval: IOSPendingToolApproval?
 
         for tool in tools {
-            if let approval = firstApproval {
+            if firstApproval != nil {
                 // Once an approval is pending, leave subsequent tools unfilled
                 // (they will be re-executed when the caller resumes the loop).
                 continue

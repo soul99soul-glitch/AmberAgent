@@ -14,6 +14,18 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         return UserDefaults(suiteName: suite)!
     }
 
+    private func localToolExecutor(
+        permissionStore: IOSPermissionStore? = nil
+    ) -> IOSLocalToolExecutor {
+        IOSLocalToolExecutor(
+            permissionStore: permissionStore ?? IOSPermissionStore(userDefaults: isolatedDefaults()),
+            documentStore: DocumentAccessStore(),
+            workspaceStore: IOSWorkspaceStore(
+                baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            )
+        )
+    }
+
     /// The default seeded Amber Assistant carries a non-empty systemPrompt.
     /// The upload context must include it as a leading system message so the
     /// model receives the assistant's persona/instructions (Android parity).
@@ -46,6 +58,7 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             sharedSettings: sharedSettings,
+            localToolExecutor: localToolExecutor(),
             autoGenerateResponses: false
         )
         viewModel.inputText = "hello"
@@ -84,10 +97,71 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             sharedSettings: sharedSettings,
+            localToolExecutor: localToolExecutor(),
             autoGenerateResponses: false
         )
         let names = Set(viewModel.currentToolDeclarationNames())
         XCTAssertTrue(names.contains("subagent_dispatch"))
         XCTAssertTrue(names.contains("model_council_run"))
+        XCTAssertTrue(names.contains("workspace_file_list"))
+        XCTAssertTrue(names.contains("workspace_file_search"))
+        XCTAssertTrue(names.contains("workspace_file_edit"))
+        XCTAssertTrue(names.contains("workspace_file_move"))
+        XCTAssertTrue(names.contains("wm_tab_list"))
+        XCTAssertTrue(names.contains("wm_tab_new"))
+        XCTAssertTrue(names.contains("wm_tab_close"))
+        XCTAssertTrue(names.contains("wm_observe"))
+        XCTAssertTrue(names.contains("wm_visual_snapshot"))
+        XCTAssertTrue(names.contains("wm_screenshot"))
+        XCTAssertTrue(names.contains("wm_site_add"))
+        XCTAssertTrue(names.contains("wm_site_remove"))
+        XCTAssertTrue(names.contains("wm_click"))
+        XCTAssertTrue(names.contains("wm_tap"))
+        XCTAssertTrue(names.contains("wm_type"))
+        XCTAssertTrue(names.contains("wm_keys"))
+        XCTAssertTrue(names.contains("wm_scroll"))
+        XCTAssertTrue(names.contains("wm_select"))
+        XCTAssertTrue(names.contains("wm_find"))
+        XCTAssertTrue(names.contains("wm_wait"))
+    }
+
+    func testDisabledAdvancedCapabilityIsNotDeclaredToModel() throws {
+        let permissionStore = IOSPermissionStore(userDefaults: isolatedDefaults())
+        let subAgent = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.agent.subagent_dispatch" }
+        )
+        let council = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.agent.model_council_run" }
+        )
+        permissionStore.setPolicy(.disabled, for: subAgent)
+        permissionStore.setPolicy(.disabled, for: council)
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: localToolExecutor(permissionStore: permissionStore),
+            autoGenerateResponses: false
+        )
+        let names = Set(viewModel.currentToolDeclarationNames())
+
+        XCTAssertFalse(names.contains("subagent_dispatch"))
+        XCTAssertFalse(names.contains("model_council_run"))
+    }
+
+    func testLocalToolDeclarationsMatchCatalogAndCapabilityRegistry() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: localToolExecutor(),
+            autoGenerateResponses: false
+        )
+        let paramsNames = Set(viewModel.currentToolDeclarationNames())
+        let executableNames = IOSCapabilityRegistry.executableToolNames
+        let workspaceNames = IOSWorkspaceToolCatalog.supportedToolNames
+        let webMountNames = IOSWebMountToolCatalog.supportedToolNames
+
+        XCTAssertEqual(paramsNames.intersection(workspaceNames), workspaceNames)
+        XCTAssertEqual(paramsNames.intersection(webMountNames), webMountNames)
+        XCTAssertEqual(executableNames.intersection(workspaceNames), workspaceNames)
+        XCTAssertEqual(executableNames.intersection(webMountNames), webMountNames)
     }
 }
