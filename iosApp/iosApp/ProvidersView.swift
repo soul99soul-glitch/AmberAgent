@@ -8,6 +8,20 @@ enum ProviderRouteKind: String, Hashable {
     case googleProviderPreset
     case responseAPIPreset
     case endpointConfirmationPreset
+
+    /// A preset provider whose protocol can actually run in the iOS chat chain
+    /// today, so its API Key is worth editing and it can be set as current.
+    /// OpenAI-compatible (non-Response-API, non-MiMo-placeholder) and Claude
+    /// qualify. Gemini / Response-API / MiMo-placeholder do not.
+    static func isEditablePreset(_ preset: ProviderSetting) -> Bool {
+        if let openAI = preset as? ProviderSetting.OpenAI {
+            if openAI.useResponseApi { return false }
+            if openAI.brand === OpenAIBrand.mimo { return false }
+            return true
+        }
+        if preset is ProviderSetting.Claude { return true }
+        return false
+    }
 }
 
 struct ProvidersView: View {
@@ -479,16 +493,16 @@ private struct ProviderStatusRow: View {
 
 struct ProviderAddView: View {
     let providerRegistry: ProviderRegistryStore
+    let sharedSettings: IOSSharedSettingsStore
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = "New Provider"
     @State private var protocolOption: ProviderProtocolOption = .openAI
-    @State private var apiBase = "https://api.example.com/v1"
+    @State private var apiBase = "https://api.openai.com/v1"
     @State private var apiKey = ""
-    @State private var path = "/chat/completions"
-    @State private var responseAPI = false
-    @State private var balanceRefresh = false
+    @State private var modelName = ""
+    @State private var modelId = ""
     @State private var alert: ProviderAddAlert?
 
     var body: some View {
@@ -502,6 +516,7 @@ struct ProviderAddView: View {
                     VStack(spacing: 0) {
                         introSection
                         connectionSection
+                        modelSection
                         credentialSection
                     }
                     .padding(.bottom, 36)
@@ -595,26 +610,72 @@ struct ProviderAddView: View {
                 ProviderDraftTextFieldRow(
                     title: "名称",
                     text: $name,
-                    placeholder: "例如 DeepSeek"
+                    placeholder: "例如 DeepSeek / Claude"
                 )
                 ProviderDivider()
-                ProviderDraftValueRow(title: "接口协议", value: "OpenAI-compatible")
+                // Protocol picker — OpenAI-compatible or Anthropic. Switching
+                // updates the API address placeholder/default to match the chosen
+                // protocol. Path is implied by the protocol (OpenAI →
+                // /chat/completions, Anthropic → /messages), shown read-only.
+                Menu {
+                    ForEach(ProviderProtocolOption.addableCases, id: \.self) { option in
+                        Button {
+                            switchProtocol(to: option)
+                        } label: {
+                            if option == protocolOption {
+                                Label(option.title, systemImage: "checkmark")
+                            } else {
+                                Text(option.title)
+                            }
+                        }
+                    }
+                } label: {
+                    ProviderDraftValueRow(
+                        title: "接口协议",
+                        value: protocolOption.title,
+                        showsChevron: true
+                    )
+                }
                 ProviderDivider()
                 ProviderDraftTextFieldRow(
                     title: "API 地址",
                     text: $apiBase,
-                    placeholder: "https://api.example.com/v1",
+                    placeholder: protocolOption.defaultBaseURLPlaceholder,
                     monospace: true
                 )
                 ProviderDivider()
                 ProviderDraftValueRow(
                     title: "路径",
-                    value: "/chat/completions",
+                    value: protocolOption.defaultPath,
                     monospace: true
                 )
             }
 
-            ProviderDraftNote("当前 iOS 聊天链路只消费 OpenAI-compatible base URL，并固定使用 /chat/completions；其它协议、自定义路径和 Response API 不再作为可选项展示。")
+            ProviderDraftNote(protocolOption == .anthropic
+                ? "Anthropic 协议使用 /messages 端点（SSE 流式），支持 thinking、工具调用与 prompt caching。"
+                : "OpenAI 兼容协议使用 /chat/completions 端点。")
+        }
+    }
+
+    private var modelSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "模型")
+            AmberFormGroup {
+                ProviderDraftTextFieldRow(
+                    title: "模型 ID",
+                    text: $modelId,
+                    placeholder: protocolOption == .anthropic ? "claude-sonnet-4-5" : "deepseek-chat",
+                    monospace: true
+                )
+                ProviderDivider()
+                ProviderDraftTextFieldRow(
+                    title: "显示名称",
+                    text: $modelName,
+                    placeholder: "例如 Claude Sonnet 4.5"
+                )
+            }
+
+            ProviderDraftNote("至少填写一个模型，保存后会作为该服务商的聊天模型；可在服务商详情页继续管理模型。")
         }
     }
 
@@ -625,47 +686,77 @@ struct ProviderAddView: View {
                 ProviderDraftTextFieldRow(
                     title: "API Key",
                     text: $apiKey,
-                    placeholder: "sk-...",
+                    placeholder: protocolOption == .anthropic ? "sk-ant-..." : "sk-...",
                     isSecure: true,
                     monospace: true
                 )
             }
 
-            ProviderDraftNote("API Key 留空时只保存服务商模板，不会设为当前；填写后会保存到该 provider id 对应的 Keychain 项。")
+            ProviderDraftNote("API Key 保存到该服务商配置中。留空时只保存服务商模板，不会设为当前。")
         }
     }
 
+    private func switchProtocol(to option: ProviderProtocolOption) {
+        // When the user switches protocol, reset the base URL to the protocol's
+        // default IF the current value is still the previous protocol's default
+        // (i.e. the user hasn't customized it). This keeps custom URLs intact.
+        if apiBase == protocolOption.defaultBaseURL {
+            apiBase = option.defaultBaseURL
+        }
+        protocolOption = option
+    }
+
     private func save() {
-        guard protocolOption == .openAI else {
-            alert = .unsupportedProtocol(protocolOption.title)
-            return
-        }
-        guard !responseAPI else {
-            alert = .unsupportedResponseAPI
-            return
-        }
-
-        let normalizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalizedPath == "/chat/completions" else {
-            alert = .unsupportedPath
-            return
-        }
-
         let normalizedBase = Self.normalizedBaseURL(apiBase)
         guard Self.isValidHTTPBaseURL(normalizedBase) else {
             alert = .invalidBaseURL
             return
         }
 
-        let activated = providerRegistry.addOpenAICompatibleProvider(
-            name: name,
-            baseUrl: normalizedBase,
-            apiKey: apiKey,
-            activate: true
-        )
-        guard activated || apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            alert = .activationFailed
+        let trimmedModelId = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedModelId.isEmpty else {
+            alert = .modelRequired
             return
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmedName.isEmpty ? protocolOption.defaultName : trimmedName
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Build the provider via KMP (OpenAI-compatible or Claude), add it to the
+        // real Settings.providers snapshot, and persist.
+        let provider: ProviderSetting
+        switch protocolOption {
+        case .openAI:
+            provider = IosSettingsMutations.shared.buildOpenAIProvider(
+                name: finalName,
+                apiKey: trimmedKey,
+                baseUrl: normalizedBase,
+                modelName: trimmedModelName.isEmpty ? trimmedModelId : trimmedModelName,
+                modelId: trimmedModelId
+            )
+        case .anthropic:
+            provider = IosSettingsMutations.shared.buildClaudeProvider(
+                name: finalName,
+                apiKey: trimmedKey,
+                baseUrl: normalizedBase,
+                modelName: trimmedModelName.isEmpty ? trimmedModelId : trimmedModelName,
+                modelId: trimmedModelId
+            )
+        default:
+            alert = .unsupportedProtocol(protocolOption.title)
+            return
+        }
+
+        let added = sharedSettings.addProvider(provider)
+
+        // When a key was provided, set this provider's first chat model as the
+        // current chat model (mirrors Android: choosing a model resolves to its
+        // provider). This makes the new provider immediately usable for chat.
+        if !trimmedKey.isEmpty,
+           let chatModel = added.models.first(where: { $0.type == ModelType.chat }) {
+            sharedSettings.setCurrentChatModelId(chatModel.id.description())
         }
         dismiss()
     }
@@ -696,6 +787,7 @@ private enum ProviderAddAlert: Identifiable {
     case unsupportedPath
     case invalidBaseURL
     case activationFailed
+    case modelRequired
 
     var id: String {
         switch self {
@@ -704,6 +796,7 @@ private enum ProviderAddAlert: Identifiable {
         case .unsupportedPath: "path"
         case .invalidBaseURL: "base-url"
         case .activationFailed: "activation"
+        case .modelRequired: "model-required"
         }
     }
 
@@ -714,6 +807,7 @@ private enum ProviderAddAlert: Identifiable {
         case .unsupportedPath: "暂不支持自定义路径"
         case .invalidBaseURL: "API 地址无效"
         case .activationFailed: "服务商未激活"
+        case .modelRequired: "需要填写模型"
         }
     }
 
@@ -729,6 +823,8 @@ private enum ProviderAddAlert: Identifiable {
             "请填写包含 http 或 https scheme 且带 host 的 base URL，例如 https://api.openai.com/v1。"
         case .activationFailed:
             "API Key 没有成功保存到本机钥匙串，当前聊天服务商未切换。请重新保存一次。"
+        case .modelRequired:
+            "请至少填写一个模型 ID，例如 claude-sonnet-4-5 或 deepseek-chat。"
         }
     }
 }
@@ -756,6 +852,37 @@ private enum ProviderProtocolOption: String, CaseIterable, Identifiable {
         case .google: "/models/{model}:generateContent"
         case .anthropic: "/messages"
         case .custom: "/chat/completions"
+        }
+    }
+
+    /// Protocols the "add provider" flow can actually create and run in the iOS
+    /// chat chain today. Gemini/Custom stay out of the picker until they get a
+    /// KMP executor bridge.
+    static var addableCases: [ProviderProtocolOption] {
+        [.openAI, .anthropic]
+    }
+
+    /// The default base URL seeded when the user picks this protocol in the add
+    /// flow (and the value `switchProtocol` resets to).
+    var defaultBaseURL: String {
+        switch self {
+        case .openAI: "https://api.openai.com/v1"
+        case .anthropic: "https://api.anthropic.com/v1"
+        case .google: "https://generativelanguage.googleapis.com/v1beta"
+        case .custom: "https://api.example.com/v1"
+        }
+    }
+
+    var defaultBaseURLPlaceholder: String {
+        defaultBaseURL
+    }
+
+    var defaultName: String {
+        switch self {
+        case .openAI: "OpenAI Compatible"
+        case .anthropic: "Claude"
+        case .google: "Gemini"
+        case .custom: "Custom"
         }
     }
 }
@@ -826,18 +953,28 @@ private struct ProviderDraftValueRow: View {
     let title: String
     let value: String
     var monospace = false
+    var showsChevron = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted)
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
 
-            Text(value)
-                .font(monospace ? .system(size: 14, weight: .regular, design: .monospaced) : .body)
-                .foregroundStyle(AmberTheme.foreground)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
+                Text(value)
+                    .font(monospace ? .system(size: 14, weight: .regular, design: .monospaced) : .body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if showsChevron {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 58)

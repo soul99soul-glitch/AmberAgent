@@ -371,11 +371,11 @@ private extension View {
             case .providers:
                 ProvidersView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings)
             case .providerAdd:
-                ProviderAddView(providerRegistry: providerRegistry)
+                ProviderAddView(providerRegistry: providerRegistry, sharedSettings: sharedSettings)
             case .providerDetail(let name, let endpoint, let kind):
-                ProviderDetailView(settingsStore: settingsStore, providerRegistry: providerRegistry, providerName: name, endpoint: endpoint, providerKind: kind)
+                ProviderDetailView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings, providerName: name, endpoint: endpoint, providerKind: kind)
             case .providerKeyEditor(let name):
-                ProviderKeyEditView(providerRegistry: providerRegistry, providerName: name)
+                ProviderKeyEditView(providerRegistry: providerRegistry, sharedSettings: sharedSettings, providerName: name)
             case .modelDefaults:
                 ModelDefaultsView(
                     settingsStore: settingsStore,

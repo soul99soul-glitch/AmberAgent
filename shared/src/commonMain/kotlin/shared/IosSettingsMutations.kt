@@ -102,6 +102,104 @@ object IosSettingsMutations {
     }
 
     /**
+     * Construct an Anthropic Claude [ProviderSetting.Claude] with a single model.
+     * iOS counterpart of [buildOpenAIProvider] for the Anthropic protocol.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun buildClaudeProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+        modelName: String,
+        modelId: String,
+    ): ProviderSetting.Claude {
+        val model = Model(
+            modelId = modelId,
+            displayName = modelName,
+            id = kotlin.uuid.Uuid.random(),
+            type = ModelType.CHAT,
+        )
+        return ProviderSetting.Claude(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = listOf(model),
+            builtIn = false,
+        )
+    }
+
+    /**
+     * Write an API key onto the provider identified by [providerId] inside
+     * `settings.providers`, preserving every other field. Works for OpenAI,
+     * Google, and Claude provider subtypes (dispatched by sealed type). Returns
+     * the original snapshot unchanged if the id is not found. This is the
+     * Swift-facing equivalent of `provider.copy(apiKey = ...)` (KMP data-class
+     * copy is not exposed to ObjC).
+     */
+    fun updateProviderApiKey(settings: Settings, providerId: String, apiKey: String): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val providers = settings.providers.map { provider ->
+            if (provider.id != parsed) {
+                provider
+            } else {
+                when (provider) {
+                    is ProviderSetting.OpenAI -> provider.copy(apiKey = apiKey)
+                    is ProviderSetting.Google -> provider.copy(apiKey = apiKey)
+                    is ProviderSetting.Claude -> provider.copy(apiKey = apiKey)
+                }
+            }
+        }
+        return settings.copy(providers = providers)
+    }
+
+    /**
+     * Replace the chat-typed models on the provider identified by [providerId].
+     * Used by the iOS provider editor's model field to set/update the models a
+     * provider exposes. Non-chat models on the provider are preserved.
+     * Returns the original snapshot unchanged if the id is not found.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun updateProviderChatModels(
+        settings: Settings,
+        providerId: String,
+        modelIds: List<Pair<String, String>>,  // (modelId, displayName)
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val newChatModels = modelIds.map { (modelId, displayName) ->
+            Model(
+                modelId = modelId,
+                displayName = displayName,
+                id = kotlin.uuid.Uuid.random(),
+                type = ModelType.CHAT,
+            )
+        }
+        val providers = settings.providers.map { provider ->
+            if (provider.id != parsed) {
+                provider
+            } else {
+                val nonChat = provider.models.filter { it.type != ModelType.CHAT }
+                val merged = nonChat + newChatModels
+                when (provider) {
+                    is ProviderSetting.OpenAI -> provider.copy(models = merged)
+                    is ProviderSetting.Google -> provider.copy(models = merged)
+                    is ProviderSetting.Claude -> provider.copy(models = merged)
+                }
+            }
+        }
+        return settings.copy(providers = providers)
+    }
+
+    /**
+     * Set the global `settings.chatModelId` to a specific model UUID string. iOS
+     * uses this when the user picks the current chat model. Returns a new snapshot.
+     */
+    fun setChatModelId(settings: Settings, modelId: String): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(modelId) }.getOrNull() ?: return settings
+        return settings.copy(chatModelId = parsed)
+    }
+
+    /**
      * Construct an OpenAI-compatible [ProviderSetting.OpenAI] with a single
      * model. This is what iOS "add custom model" maps to: a user-added model
      * lives in its own OpenAI-compatible provider entry (builtIn=false,

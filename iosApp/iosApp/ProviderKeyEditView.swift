@@ -26,13 +26,14 @@ import Shared
 /// provider that can never be projected.
 struct ProviderKeyEditView: View {
     @Bindable var providerRegistry: ProviderRegistryStore
+    let sharedSettings: IOSSharedSettingsStore
     let providerName: String
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var keyInput: String = ""
     @State private var didSave: Bool = false
-    @State private var hasExistingKey: Bool = false
+    @State private var didSetCurrent: Bool = false
 
     var body: some View {
         ZStack {
@@ -41,7 +42,7 @@ struct ProviderKeyEditView: View {
             VStack(spacing: 0) {
                 header
 
-                if let preset = matchedPreset, providerRegistry.canActivate(preset) {
+                if let preset = matchedPreset, ProviderRouteKind.isEditablePreset(preset) {
                     ScrollView {
                         VStack(spacing: 0) {
                             editorSection(preset: preset)
@@ -57,7 +58,7 @@ struct ProviderKeyEditView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .onAppear { hydrateFromKeychain() }
+        .onAppear { hydrateFromSnapshot() }
     }
 
     private var header: some View {
@@ -132,6 +133,22 @@ struct ProviderKeyEditView: View {
 
                 ProviderKeyEditDivider()
 
+                Button {
+                    setAsCurrent(preset: preset)
+                } label: {
+                    Text("设为当前聊天服务商")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(canSetCurrent ? AmberTheme.accent : AmberTheme.muted2)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 48)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSetCurrent)
+                .opacity(canSetCurrent ? 1 : 0.5)
+
+                ProviderKeyEditDivider()
+
                 Button(role: .destructive) {
                     delete(preset: preset)
                 } label: {
@@ -153,13 +170,19 @@ struct ProviderKeyEditView: View {
     private var noteSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             if didSave {
-                Label("API Key 已保存。返回列表可将这个服务商设为当前。",
+                Label("API Key 已保存到该服务商。",
                       systemImage: "checkmark.seal")
                     .font(.footnote)
                     .foregroundStyle(AmberTheme.accentGreen)
             }
+            if didSetCurrent {
+                Label("已设为当前聊天服务商。",
+                      systemImage: "checkmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.accentGreen)
+            }
 
-            Text("API Key 只保存在本机钥匙串。保存不会自动切换当前服务商，也不会发起测试请求。")
+            Text("API Key 保存到本机的服务商配置中。保存不会发起测试请求。")
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.muted)
         }
@@ -194,52 +217,81 @@ struct ProviderKeyEditView: View {
         DefaultProvidersKt.DEFAULT_PROVIDERS.first { $0.name == providerName }
     }
 
+    /// The live provider entry from the persisted snapshot matching this name.
+    private var matchedLiveProvider: ProviderSetting? {
+        sharedSettings.snapshot.providers.first { ($0.name as String) == providerName }
+    }
+
+    private var hasExistingKey: Bool {
+        guard let live = matchedLiveProvider else { return false }
+        if let openAI = live as? ProviderSetting.OpenAI { return !openAI.apiKey.isEmpty }
+        if let claude = live as? ProviderSetting.Claude { return !claude.apiKey.isEmpty }
+        if let google = live as? ProviderSetting.Google { return !google.apiKey.isEmpty }
+        return false
+    }
+
     private var canDelete: Bool {
         hasExistingKey
     }
 
+    /// Can be set as current once the key is saved AND the provider exposes at
+    /// least one chat-typed model (Android resolves the current provider from
+    /// the current chat model id, so a model must exist to point at).
+    private var canSetCurrent: Bool {
+        guard hasExistingKey, let live = matchedLiveProvider else { return false }
+        return live.models.contains { $0.type == ModelType.chat }
+    }
+
     private var saveButtonTitle: String {
-        hasExistingKey ? "替换 Keychain 中的 Key" : "保存到 Keychain"
+        hasExistingKey ? "替换 API Key" : "保存 API Key"
     }
 
     private var deleteButtonTitle: String {
-        "清除已保存的 Key"
+        "清除 API Key"
     }
 
     private var saveFooterText: String {
         if hasExistingKey {
             return "已保存 API Key。输入新值并保存会替换它；清除后需要重新填写才能设为当前。"
         }
-        return "保存后即可在服务商列表将该模板设为当前。"
+        return "保存后可把这个服务商设为当前聊天服务商。"
     }
 
     // MARK: - Actions
 
-    private func hydrateFromKeychain() {
-        guard let preset = matchedPreset else {
-            hasExistingKey = false
-            return
-        }
-        let stored = providerRegistry.storedKey(for: preset) ?? ""
-        hasExistingKey = !stored.isEmpty
-        keyInput = ""  // never prefill the key into the editable field
+    private func hydrateFromSnapshot() {
+        // Key is read-only here; never prefill it into the editable field.
+        keyInput = ""
         didSave = false
+        didSetCurrent = false
     }
 
     private func save(preset: ProviderSetting) {
         let trimmed = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        providerRegistry.saveKey(trimmed, for: preset)
-        hasExistingKey = true
+        guard !trimmed.isEmpty, let live = matchedLiveProvider else { return }
+        let id = live.id.description()
+        sharedSettings.updateProviderApiKey(providerId: id, apiKey: trimmed)
         keyInput = ""
         didSave = true
     }
 
+    private func setAsCurrent(preset: ProviderSetting) {
+        guard let live = matchedLiveProvider else { return }
+        // Pick the first chat model on this provider as the current chat model
+        // (mirrors Android: setting current means choosing a model, which then
+        // resolves back to this provider via findProvider).
+        guard let chatModel = live.models.first(where: { $0.type == ModelType.chat }) else { return }
+        sharedSettings.setCurrentChatModelId(chatModel.id.description())
+        didSetCurrent = true
+    }
+
     private func delete(preset: ProviderSetting) {
-        providerRegistry.saveKey("", for: preset)  // saveKey skips empty writes (delete semantics)
-        hasExistingKey = providerRegistry.hasStoredKey(preset)
+        guard let live = matchedLiveProvider else { return }
+        let id = live.id.description()
+        sharedSettings.updateProviderApiKey(providerId: id, apiKey: "")
         keyInput = ""
         didSave = false
+        didSetCurrent = false
     }
 }
 
@@ -275,6 +327,7 @@ private struct ProviderKeyEditDivider: View {
     return NavigationStack {
         ProviderKeyEditView(
             providerRegistry: ProviderRegistryStore(settingsStore: settings),
+            sharedSettings: IOSSharedSettingsStore(),
             providerName: "DeepSeek"
         )
             .environment(RouterPath())

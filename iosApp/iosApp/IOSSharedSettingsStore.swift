@@ -366,6 +366,57 @@ final class IOSSharedSettingsStore {
         }
     }
 
+    // MARK: - Provider (Settings.providers) write-back
+
+    /// Write an API key onto the provider identified by [providerId] inside the
+    /// real `Settings.providers` snapshot, then persist. Works for OpenAI,
+    /// Claude, and Google subtypes. The key now lives inside the ProviderSetting
+    /// itself (Android model) rather than a separate iOS per-provider Keychain
+    /// slot — so the chat chain can read it directly when resolving the current
+    /// model's provider. Returns the provider that was updated, if found.
+    @discardableResult
+    func updateProviderApiKey(providerId: String, apiKey: String) -> ProviderSetting? {
+        let before = snapshot
+        let merged = IosSettingsMutations.shared.updateProviderApiKey(
+            settings: before, providerId: providerId, apiKey: apiKey
+        )
+        restoreSnapshot(merged)
+        // Identify the updated provider by id description equality (KMP parses
+        // the string internally; we match the same provider here without needing
+        // a Swift-side Uuid parser).
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
+    /// Replace the chat-typed models on provider [providerId]. Each entry is
+    /// (modelId, displayName). Non-chat models are preserved. Persists to snapshot.
+    @discardableResult
+    func updateProviderChatModels(providerId: String, models: [(modelId: String, displayName: String)]) -> ProviderSetting? {
+        let before = snapshot
+        let pairs = models.map {
+            KotlinPair(first: $0.modelId as NSString, second: $0.displayName as NSString)
+        }
+        let merged = IosSettingsMutations.shared.updateProviderChatModels(
+            settings: before, providerId: providerId, modelIds: pairs
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
+    /// Set the global current chat model by model UUID string. Persists to snapshot.
+    func setCurrentChatModelId(_ modelId: String) {
+        let merged = IosSettingsMutations.shared.setChatModelId(settings: snapshot, modelId: modelId)
+        restoreSnapshot(merged)
+    }
+
+    /// Add a new provider (already-constructed ProviderSetting) and persist.
+    /// Returns the added provider so callers can read its generated id.
+    @discardableResult
+    func addProvider(_ provider: ProviderSetting) -> ProviderSetting {
+        let merged = IosSettingsMutations.shared.addProvider(settings: snapshot, provider: provider)
+        restoreSnapshot(merged)
+        return provider
+    }
+
     // MARK: - Custom search providers write-back
 
     private let searchProvidersKey = "app.amber.ios.customSearchProviders"

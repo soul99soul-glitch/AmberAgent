@@ -4,6 +4,7 @@ import Shared
 struct ProviderDetailView: View {
     @Bindable var settingsStore: SettingsStore
     let providerRegistry: ProviderRegistryStore
+    let sharedSettings: IOSSharedSettingsStore
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -207,6 +208,22 @@ struct ProviderDetailView: View {
         DefaultProvidersKt.DEFAULT_PROVIDERS.first { $0.name == providerName }
     }
 
+    /// The live provider entry from the persisted snapshot matching this preset's
+    /// name. The API key lives here once the user fills it (Android model).
+    private var matchedLiveProvider: ProviderSetting? {
+        sharedSettings.snapshot.providers.first { ($0.name as String) == providerName }
+    }
+
+    /// True if the live snapshot's matching provider already has a non-empty
+    /// API key in its ProviderSetting.
+    private func presetHasApiKey(_ preset: ProviderSetting) -> Bool {
+        guard let live = matchedLiveProvider else { return false }
+        if let openAI = live as? ProviderSetting.OpenAI { return !openAI.apiKey.isEmpty }
+        if let claude = live as? ProviderSetting.Claude { return !claude.apiKey.isEmpty }
+        if let google = live as? ProviderSetting.Google { return !google.apiKey.isEmpty }
+        return false
+    }
+
     private var apiKeyRow: some View {
         ProviderEditableTextFieldRow(
             title: "API Key",
@@ -332,23 +349,20 @@ struct ProviderDetailView: View {
 
     /// API Key row for a preset provider.
     ///
-    /// Only presets the current scalar chat chain can faithfully represent
-    /// (`canActivate`: OpenAI-compatible, non-Response-API, non-MiMo) get a real
-    /// Key editor that writes the per-provider Keychain slot. Providers the chain
-    /// cannot represent (Gemini Google type, xAI Response API, MiMo placeholder)
-    /// keep the static "未预置" state, because even with a key they could not be
-    /// projected without faking provider identity.
+    /// Presets whose protocol iOS can actually run in chat — OpenAI-compatible
+    /// and Anthropic/Claude (after the :ai-provider-claude bridge) — get a real
+    /// Key editor that writes the key into the provider's own ProviderSetting in
+    /// the persistent `Settings.providers` snapshot (Android model; the key no
+    /// longer lives in a separate iOS per-provider Keychain slot). Protocols that
+    /// genuinely can't run yet (Gemini Google type, xAI Response API, MiMo
+    /// placeholder base) keep the static "未预置" state.
     @ViewBuilder
     private var presetAPIKeyRow: some View {
-        // Track keyRevision so the row re-renders after the Key editor writes a
-        // key (hasStoredKey reads the Keychain via a static helper, not an
-        // observable property, so the revision is the tracked dependency).
-        let _ = providerRegistry.keyRevision
-        if let preset = matchedPreset, providerRegistry.canActivate(preset) {
-            let hasKey = providerRegistry.hasStoredKey(preset)
+        if let preset = matchedPreset, ProviderRouteKind.isEditablePreset(preset) {
+            let hasKey = presetHasApiKey(preset)
             ProviderValueRow(
                 title: "API Key",
-                value: hasKey ? "已保存（Keychain）" : "未保存",
+                value: hasKey ? "已保存" : "未保存",
                 showsChevron: true
             ) {
                 router.navigate(to: .providerKeyEditor(name: providerName))
@@ -962,6 +976,7 @@ private struct ProviderModelRow: View {
         ProviderDetailView(
             settingsStore: settings,
             providerRegistry: ProviderRegistryStore(settingsStore: settings),
+            sharedSettings: IOSSharedSettingsStore(),
             providerName: "OpenAI-compatible",
             endpoint: "https://api.openai.com/v1",
             providerKind: .current
