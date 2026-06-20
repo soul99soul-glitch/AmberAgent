@@ -505,6 +505,8 @@ struct ChatView: View {
             "先修正服务商地址"
         case .missingModel:
             "先选择模型"
+        case .missingProvider:
+            "先配置服务商"
         case nil:
             "发消息给 Amber..."
         }
@@ -555,7 +557,7 @@ struct ChatView: View {
         switch configurationIssue {
         case .missingModel:
             openModelDefaults()
-        case .missingAPIKey, .invalidBaseURL, nil:
+        case .missingAPIKey, .invalidBaseURL, .missingProvider, nil:
             router.navigate(to: .providers)
         }
     }

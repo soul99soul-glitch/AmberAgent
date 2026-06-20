@@ -55,6 +55,7 @@ enum ChatConfigurationIssue: Equatable {
     case missingAPIKey
     case invalidBaseURL
     case missingModel
+    case missingProvider
 
     var title: String {
         switch self {
@@ -64,6 +65,8 @@ enum ChatConfigurationIssue: Equatable {
             "API 地址无效"
         case .missingModel:
             "还没有选择模型"
+        case .missingProvider:
+            "还没有配置服务商"
         }
     }
 
@@ -75,6 +78,8 @@ enum ChatConfigurationIssue: Equatable {
             "当前服务商 API 地址不是有效的 http/https URL，请修正后再试。"
         case .missingModel:
             "请选择当前服务商可用的聊天模型，或填写服务商文档中的 Model ID。"
+        case .missingProvider:
+            "请先在设置里添加一个服务商（并填写 API Key 与模型），再发送消息。"
         }
     }
 }
@@ -163,7 +168,7 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
 
 private struct PendingMemoryToolApproval {
     let toolCall: UIMessagePart.Tool
-    let providerSetting: ProviderSetting.OpenAI
+    let providerSetting: ProviderSetting
     let params: TextGenerationParams
     let runId: String
     let startedAt: Int64
@@ -174,7 +179,7 @@ private struct PendingMemoryToolApproval {
 
 private struct PendingWebMountToolApproval {
     let toolCall: UIMessagePart.Tool
-    let providerSetting: ProviderSetting.OpenAI
+    let providerSetting: ProviderSetting
     let params: TextGenerationParams
     let runId: String
     let startedAt: Int64
@@ -185,7 +190,7 @@ private struct PendingWebMountToolApproval {
 
 private struct PendingWorkspaceToolApproval {
     let toolCall: UIMessagePart.Tool
-    let providerSetting: ProviderSetting.OpenAI
+    let providerSetting: ProviderSetting
     let params: TextGenerationParams
     let runId: String
     let startedAt: Int64
@@ -196,7 +201,7 @@ private struct PendingWorkspaceToolApproval {
 
 private struct PendingSearchToolApproval {
     let toolCall: UIMessagePart.Tool
-    let providerSetting: ProviderSetting.OpenAI
+    let providerSetting: ProviderSetting
     let params: TextGenerationParams
     let runId: String
     let startedAt: Int64
@@ -207,7 +212,7 @@ private struct PendingSearchToolApproval {
 
 private struct PendingMcpToolApproval {
     let toolCall: UIMessagePart.Tool
-    let providerSetting: ProviderSetting.OpenAI
+    let providerSetting: ProviderSetting
     let params: TextGenerationParams
     let runId: String
     let startedAt: Int64
@@ -281,8 +286,17 @@ final class ChatViewModel {
         currentModelAbilities.contains(.reasoning)
     }
 
+    // Set when the current chat model can't be resolved to a configured provider
+    // (Android-style findProvider). configurationIssue reads this so the UI shows
+    // an honest "未配置服务商" instead of falling through to scalar-based checks.
+    private var resolvedProviderMissing: Bool = false
+
     var configurationIssue: ChatConfigurationIssue? {
-        Self.chatConfigurationIssue(
+        // The provider/model could not be resolved from the KMP snapshot
+        // (Android-style findProvider returned nothing) — takes priority, since
+        // even valid scalar values are meaningless without a real provider.
+        if resolvedProviderMissing { return .missingProvider }
+        return Self.chatConfigurationIssue(
             baseUrl: settingsStore.baseUrl,
             apiKey: settingsStore.apiKey,
             modelId: settingsStore.modelId
@@ -299,6 +313,10 @@ final class ChatViewModel {
     private let autoGenerateResponses: Bool
     private let liveActivityController: AgentLiveActivityController
     @ObservationIgnored private lazy var provider = OpenAIKmpProvider()
+    // Claude (Anthropic) executor — used when the current chat model resolves
+    // to a ProviderSetting.Claude. Mirrors provider; both expose the same
+    // Swift-friendly streamTextCancellable signature.
+    @ObservationIgnored private lazy var claudeProvider = ClaudeKmpProvider()
     @ObservationIgnored private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
     @ObservationIgnored private let streamJobBox = StreamJobBox()
     // [Slice 3] Dispatch targets for chat-injected tools. Lazily built so a
@@ -773,6 +791,15 @@ final class ChatViewModel {
         let runId = UUID().uuidString
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
 
+        // If the current model can't be resolved to a configured provider
+        // (Android-style findProvider), surface an honest configuration issue
+        // instead of faking an OpenAI provider with empty credentials.
+        guard let resolvedProvider = providerSetting else {
+            isLoading = false
+            resolvedProviderMissing = true
+            return
+        }
+
         currentRunId = runId
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
@@ -789,7 +816,7 @@ final class ChatViewModel {
             }
             guard self.currentRunId == runId else { return }
             self.startStreaming(
-                providerSetting: providerSetting,
+                providerSetting: resolvedProvider,
                 params: params,
                 runId: runId,
                 startedAt: startedAt,
@@ -801,7 +828,7 @@ final class ChatViewModel {
     }
 
     private func startStreaming(
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -816,7 +843,7 @@ final class ChatViewModel {
         var detectedToolCallIds = Set<String>()
         let preparedUploadMessages = messagesByInjectingRuntimeContext(uploadMessages)
 
-        streamJob = provider.streamTextCancellable(
+        streamJob = dispatchStream(
             providerSetting: providerSetting,
             messages: preparedUploadMessages,
             params: params,
@@ -1022,6 +1049,47 @@ final class ChatViewModel {
                 }
             }
         )
+    }
+
+    /// Dispatch streaming to the executor matching the resolved provider's
+    /// type. OpenAI-compatible -> OpenAIKmpProvider; Anthropic/Claude ->
+    /// ClaudeKmpProvider. Both expose the same Swift-friendly
+    /// streamTextCancellable signature, so the onChunk/onComplete/onError
+    /// closures are forwarded identically. Returns the Kotlin Job for cancel,
+    /// or nil if the provider type is unsupported (the caller surfaces an error).
+    private func dispatchStream(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onChunk: @escaping (MessageChunk) -> Void,
+        onComplete: @escaping () -> Void,
+        onError: @escaping (KotlinThrowable) -> Void
+    ) -> Kotlinx_coroutines_coreJob? {
+        if let openAI = providerSetting as? ProviderSetting.OpenAI {
+            return provider.streamTextCancellable(
+                providerSetting: openAI,
+                messages: messages,
+                params: params,
+                onChunk: onChunk,
+                onComplete: onComplete,
+                onError: onError
+            )
+        }
+        if let claude = providerSetting as? ProviderSetting.Claude {
+            return claudeProvider.streamTextCancellable(
+                providerSetting: claude,
+                messages: messages,
+                params: params,
+                onChunk: onChunk,
+                onComplete: onComplete,
+                onError: onError
+            )
+        }
+        // Google / unsupported types: surface an error rather than crash.
+        // This shouldn't happen for chat (such providers aren't selectable), but
+        // guards against a stale resolved provider.
+        onError(KotlinThrowable(message: "当前服务商类型暂不支持聊天"))
+        return nil
     }
 
     private func finishStreaming() {
@@ -1523,7 +1591,7 @@ final class ChatViewModel {
 
     private func executeSearchToolCall(
         _ toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -1570,7 +1638,7 @@ final class ChatViewModel {
     private func pauseForSearchToolApproval(
         _ request: SearchToolApprovalRequest,
         toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -1856,7 +1924,7 @@ final class ChatViewModel {
 
     private func executeWorkspaceToolCall(
         _ toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -1968,7 +2036,7 @@ final class ChatViewModel {
     private func pauseForWorkspaceToolApproval(
         _ request: WorkspaceToolApprovalRequest,
         toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -2076,7 +2144,7 @@ final class ChatViewModel {
 
     private func executeWebMountToolCall(
         _ toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -2193,7 +2261,7 @@ final class ChatViewModel {
     private func pauseForWebMountToolApproval(
         _ request: WebMountToolApprovalRequest,
         toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -2286,7 +2354,7 @@ final class ChatViewModel {
 
     private func executeMemoryToolCall(
         _ toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -2331,7 +2399,7 @@ final class ChatViewModel {
 
     private func executeImageToolCall(
         _ toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -2386,7 +2454,7 @@ final class ChatViewModel {
     private func pauseForMemoryToolApproval(
         _ request: MemoryToolApprovalRequest,
         toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -2543,7 +2611,7 @@ final class ChatViewModel {
     /// the model provided.
     private func executeSlice3ToolCall(
         _ toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -2593,7 +2661,7 @@ final class ChatViewModel {
     private func pauseForMcpToolApproval(
         _ request: McpToolApprovalRequest,
         toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String,
         startedAt: Int64,
@@ -2722,7 +2790,7 @@ final class ChatViewModel {
     /// result text (or an honest error string — never fabricated success).
     private func dispatchSlice3ToolCall(
         _ toolCall: UIMessagePart.Tool,
-        providerSetting: ProviderSetting.OpenAI,
+        providerSetting: ProviderSetting,
         params: TextGenerationParams
     ) async -> String {
         guard isSlice3ToolEnabled(toolCall.toolName) else {
@@ -2734,11 +2802,17 @@ final class ChatViewModel {
             let objective = args?["objective"] as? String ?? toolCall.input
             let roleId = args?["role_id"] as? String ?? args?["subagent_id"] as? String ?? "explorer"
             let scope = Self.stringArray(args?["tool_scope"]) ?? Self.stringArray(args?["tools"]) ?? []
+            // Sub-agent engine currently runs on the OpenAI-compatible executor
+            // (Stage 5 generalizes IOSAgentToolEngine to Claude). For an OpenAI
+            // provider, pass it through; otherwise fall back to the legacy
+            // scalar-derived OpenAI provider so sub-agents keep working.
+            let subAgentProvider = (providerSetting as? ProviderSetting.OpenAI)
+                ?? makeLegacyOpenAIProviderSetting()
             return await subAgentRunner.runViaEngine(
                 objective: objective,
                 roleId: roleId,
                 requestedToolScope: scope,
-                providerSetting: providerSetting,
+                providerSetting: subAgentProvider,
                 modelId: params.model.modelId,
                 baseParams: params,
                 parentToolExecutors: subAgentParentToolExecutors()
@@ -3136,7 +3210,23 @@ final class ChatViewModel {
         }
     }
 
-    private func makeProviderSetting() -> ProviderSetting.OpenAI {
+    /// Resolve the provider for the current chat model, Android-style:
+    ///   current chat model  ->  model.findProvider(settings.providers)
+    /// The resolved ProviderSetting carries its own apiKey/baseUrl (the key now
+    /// lives inside the provider, not in an iOS per-provider Keychain slot).
+    /// Returns nil when the current model can't be resolved to a provider
+    /// (e.g. fresh install with no configured provider/model) — the caller
+    /// surfaces an honest configuration issue rather than faking an OpenAI one.
+    private func makeProviderSetting() -> ProviderSetting? {
+        let snapshot = sharedSettings.snapshot
+        guard let currentModel = snapshot.getCurrentChatModel() else { return nil }
+        return currentModel.findProvider(providers: snapshot.providers, checkOverwrite: true)
+    }
+
+    /// A fallback OpenAI-compatible ProviderSetting for legacy callers that
+    /// still operate on the scalar SettingsStore (baseUrl/apiKey/modelId). New
+    /// code should use makeProviderSetting() instead.
+    private func makeLegacyOpenAIProviderSetting() -> ProviderSetting.OpenAI {
         ProviderSetting.OpenAI(
             id: KotlinUuid.companion.random(),
             enabled: true,

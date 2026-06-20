@@ -463,6 +463,8 @@ struct ChatConfigurationNoticeCard: View {
             "link.badge.plus"
         case .missingModel:
             "cpu"
+        case .missingProvider:
+            "server.rack"
         }
     }
 
@@ -474,6 +476,8 @@ struct ChatConfigurationNoticeCard: View {
             "server.rack"
         case .missingModel:
             "cpu"
+        case .missingProvider:
+            "server.rack"
         }
     }
 
@@ -485,6 +489,8 @@ struct ChatConfigurationNoticeCard: View {
             "修正服务商"
         case .missingModel:
             "选择模型"
+        case .missingProvider:
+            "配置服务商"
         }
     }
 }
