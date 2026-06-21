@@ -49,11 +49,10 @@ struct ChatView: View {
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                navBar
-                messageList
-            }
+            messageList
+        }
+        .safeAreaBar(edge: .top, spacing: 0) {
+            topBar
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inputBar
@@ -139,11 +138,9 @@ struct ChatView: View {
         }
     }
 
-    private var navBar: some View {
+    private var topBar: some View {
         HStack {
-            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 38, symbolSize: 18) {
-                dismiss()
-            }
+            backToolbarButton
 
             Spacer()
 
@@ -153,17 +150,26 @@ struct ChatView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "square.and.pencil", accessibilityLabel: "新建对话", size: 38, symbolSize: 16) {
-                viewModel.cancelGeneration()
-                Task { @MainActor in
-                    await conversationStore.newConversation()
-                    viewModel.reloadFromStore()
-                }
+            newChatToolbarButton
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 54)
+    }
+
+    private var backToolbarButton: some View {
+        ChatToolbarIconButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 38, symbolSize: 18) {
+            dismiss()
+        }
+    }
+
+    private var newChatToolbarButton: some View {
+        ChatToolbarIconButton(systemImage: "square.and.pencil", accessibilityLabel: "新建对话", size: 38, symbolSize: 16) {
+            viewModel.cancelGeneration()
+            Task { @MainActor in
+                await conversationStore.newConversation()
+                viewModel.reloadFromStore()
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
     }
 
     // MARK: - Message List
@@ -584,6 +590,45 @@ struct ChatView: View {
                 }
             }
         )
+    }
+}
+
+private struct ChatToolbarIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    var size: CGFloat
+    var symbolSize: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: symbolSize, weight: .semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            circleGlass
+        }
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    @ViewBuilder
+    private var circleGlass: some View {
+        if #available(iOS 26.0, *) {
+            Circle()
+                .fill(AmberTheme.glass.opacity(0.16))
+                .glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            Circle()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Circle()
+                        .stroke(AmberTheme.border.opacity(0.28), lineWidth: 0.5)
+                }
+        }
     }
 }
 
