@@ -59,7 +59,7 @@ final class IOSP1BatchTests: XCTestCase {
     // MARK: - P1-3 Memory recall relevance scoring
 
     func testRecallTokensSplitsLatinAndCJK() {
-        let tokens = ChatViewModel.recallTokensForTesting("Hello world 你好 记忆")
+        let tokens = ChatMemoryContextBuilder.recallTokens(from: "Hello world 你好 记忆")
         // Latin words kept (length>1); CJK chars each become a token.
         XCTAssertTrue(tokens.contains("hello"))
         XCTAssertTrue(tokens.contains("world"))
@@ -72,7 +72,7 @@ final class IOSP1BatchTests: XCTestCase {
     }
 
     func testRecallTokensDropsStopwords() {
-        let tokens = ChatViewModel.recallTokensForTesting("the user likes coffee")
+        let tokens = ChatMemoryContextBuilder.recallTokens(from: "the user likes coffee")
         XCTAssertFalse(tokens.contains("the"))
         XCTAssertTrue(tokens.contains("user"))
         XCTAssertTrue(tokens.contains("likes"))
@@ -86,11 +86,11 @@ final class IOSP1BatchTests: XCTestCase {
         let relevant = makeMemoryRecord(content: "user prefers dark mode and swift", pinned: false, updatedAt: now - 1_000_000)
         let unrelated = makeMemoryRecord(content: "weather is nice today", pinned: false, updatedAt: now - 1_000_000)
 
-        let scored = ChatViewModel.scoredByRelevanceForTesting(
+        let scored = ChatMemoryContextBuilder.scoredByRelevance(
             [pinned, relevant, unrelated],
             queryText: "what dark mode settings does the user prefer",
             now: now
-        )
+        ).sorted { $0.score > $1.score }
         // Pinned must rank first (large constant boost).
         XCTAssertEqual(scored.first?.record, pinned)
         // Relevant must outrank unrelated (keyword overlap).

@@ -6,6 +6,9 @@ struct PermissionsApprovalView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
+    @AppStorage("app.amber.ios.globalAutoApprove") private var globalAutoApprove = false
+    @AppStorage("app.amber.ios.highRiskAutoApprove") private var highRiskAutoApprove = false
+
     private var approvalCapabilities: [IOSPlatformCapability] {
         [
             "ios.files.selected_read",
@@ -40,6 +43,7 @@ struct PermissionsApprovalView: View {
                         .padding(.bottom, 16)
 
                     systemPermissionsSection
+                    globalApprovalSection
                     approvalPolicySection
                 }
                 .padding(.bottom, 36)
@@ -92,6 +96,50 @@ struct PermissionsApprovalView: View {
         }
     }
 
+    /// 全局自动批准 + 高风险自动批准开关。
+    private var globalApprovalSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "快速批准")
+            AmberFormGroup {
+                AmberFormRow(
+                    systemImage: globalAutoApprove ? "checkmark.shield.fill" : "shield",
+                    iconColor: globalAutoApprove ? AmberTheme.accentGreen : AmberTheme.muted,
+                    title: "全局自动批准",
+                    subtitle: "普通工具自动放行",
+                    trailing: nil,
+                    showsChevron: false
+                ) {
+                    withAnimation { globalAutoApprove.toggle() }
+                }
+                .overlay(alignment: .trailing) {
+                    Image(systemName: globalAutoApprove ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(globalAutoApprove ? AmberTheme.accentGreen : AmberTheme.muted2)
+                        .padding(.trailing, 14)
+                }
+
+                Divider().overlay(AmberTheme.borderSoft).padding(.leading, 58)
+
+                AmberFormRow(
+                    systemImage: highRiskAutoApprove ? "exclamationmark.shield.fill" : "exclamationmark.triangle",
+                    iconColor: highRiskAutoApprove ? AmberTheme.accentRed : AmberTheme.muted,
+                    title: "高风险自动批准",
+                    subtitle: "含远程命令、清会话等",
+                    trailing: nil,
+                    showsChevron: false
+                ) {
+                    withAnimation { highRiskAutoApprove.toggle() }
+                }
+                .overlay(alignment: .trailing) {
+                    Image(systemName: highRiskAutoApprove ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(highRiskAutoApprove ? AmberTheme.accentRed : AmberTheme.muted2)
+                        .padding(.trailing, 14)
+                }
+            }
+        }
+    }
+
     private var approvalPolicySection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "工具批准")
@@ -122,20 +170,22 @@ struct PermissionsApprovalView: View {
         permissionStore.availablePolicies(for: capability).filter { $0 != .allowOncePerRun }
     }
 
-    private func displayedPolicy(for capability: IOSPlatformCapability) -> IOSAgentPermissionPolicy {
-        let policy = permissionStore.policy(for: capability)
-        return policy == .allowOncePerRun ? .askEveryTime : policy
-    }
-
     private func displayedDecisionSummary(for capability: IOSPlatformCapability) -> String {
         switch displayedPolicy(for: capability) {
         case .disabled:
-            "已禁用"
-        case .askEveryTime:
-            "使用前询问"
-        case .allowOncePerRun:
-            "使用前询问"
+            "禁用"
+        case .askEveryTime, .allowOncePerRun:
+            "询问"
+        case .autoApprove:
+            "自动"
+        case .autoApproveHighRisk:
+            "自动·高风险"
         }
+    }
+
+    private func displayedPolicy(for capability: IOSPlatformCapability) -> IOSAgentPermissionPolicy {
+        let policy = permissionStore.policy(for: capability)
+        return policy == .allowOncePerRun ? .askEveryTime : policy
     }
 
     private func displayedLastApprovalSummary(for capability: IOSPlatformCapability) -> String? {
@@ -179,7 +229,8 @@ private struct PermissionPolicyRow: View {
                     Text(permissionSummary)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -221,37 +272,32 @@ private struct PermissionPolicyRow: View {
     }
 
     private var permissionSummary: String {
+        // 只显示简短说明（capability.summary 已是短句）。
+        // 右侧胶囊已显示策略状态（禁用/询问/自动），这里不再重复拼接。
         switch capability.id {
         case "ios.files.selected_read":
-            return "读取你主动选择的文件 · \(decisionSummary)"
+            return "读取用户选取的文件"
         case "ios.workspace.file_read":
-            return approvalAware("读取 Workspace 文件和 Artifact")
+            return "读取文件和产出"
         case "ios.workspace.file_write":
-            return approvalAware("写入 Workspace 文件或删除 Artifact")
+            return "写入文件、删除产出"
         case "ios.agent.memory_write":
-            return "新增、修改或删除记忆 · \(decisionSummary)"
+            return "新增、编辑或删除记忆"
         case "ios.network.search_tools":
-            return approvalAware("搜索和网页读取")
+            return "联网搜索和网页抓取"
         case "ios.mcp.tool_call":
-            return approvalAware("外部 MCP 工具调用")
+            return "调用已配置的 MCP 服务"
         case "ios.webmount.browser":
-            return approvalAware("读取或操作已打开的网页会话")
+            return "读取或操作网页会话"
         case "ios.remote.command":
-            return approvalAware("Remote SSH 单条命令")
+            return "SSH 远程执行单条命令"
         case "ios.agent.subagent_dispatch":
-            return approvalAware("委派给受限工具范围的角色")
+            return "委托任务给子代理"
         case "ios.agent.model_council_run":
-            return approvalAware("启动多席位讨论")
+            return "发起议会讨论"
         default:
-            return "\(capability.requestKind.title) · \(decisionSummary)"
+            return capability.summary
         }
-    }
-
-    private func approvalAware(_ prefix: String) -> String {
-        if let lastApprovalSummary {
-            return "\(prefix) · \(decisionSummary) · \(lastApprovalSummary)"
-        }
-        return "\(prefix) · \(decisionSummary)"
     }
 }
 
@@ -261,6 +307,8 @@ private extension IOSAgentPermissionPolicy {
         case .disabled: "禁用"
         case .askEveryTime: "每次询问"
         case .allowOncePerRun: "每次询问"
+        case .autoApprove: "自动批准"
+        case .autoApproveHighRisk: "自动批准·高风险"
         }
     }
 }

@@ -108,6 +108,7 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
                 input: "{\"summary\":\"found 3 sources\",\"findings\":[\"a\",\"b\"]}",
                 output: [],
                 approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
                 metadata: nil
             )]
         )
@@ -154,7 +155,7 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
         let parentExecutor = RecordingExecutor()
         let searchCall = makeMessage(
             role: MessageRole.assistant,
-            parts: [UIMessagePart.Tool(toolCallId: "s-1", toolName: "search_web", input: "{\"query\":\"x\"}", output: [], approvalState: ToolApprovalState.Auto.shared, metadata: nil)]
+            parts: [UIMessagePart.Tool(toolCallId: "s-1", toolName: "search_web", input: "{\"query\":\"x\"}", output: [], approvalState: ToolApprovalState.Auto.shared, streamIndex: nil, metadata: nil)]
         )
         let finalText = makeMessage(role: MessageRole.assistant, parts: [UIMessagePart.Text(text: "Done.", metadata: nil)])
         let provider = ScriptedProvider([searchCall, finalText])
@@ -212,6 +213,7 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
                 input: "{}",
                 output: [],
                 approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
                 metadata: nil
             )]
         )
@@ -223,6 +225,7 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
                 input: "{\"summary\":\"tools listed\"}",
                 output: [],
                 approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
                 metadata: nil
             )]
         )
@@ -277,6 +280,7 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
                 input: "{\"summary\":\"params inherited\"}",
                 output: [],
                 approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
                 metadata: nil
             )]
         )

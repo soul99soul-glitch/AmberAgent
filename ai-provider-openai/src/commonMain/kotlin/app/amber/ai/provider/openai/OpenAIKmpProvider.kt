@@ -396,6 +396,7 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
                             toolName = toolName ?: "",
                             input = arguments ?: "",
                             output = emptyList(),
+                            streamIndex = toolCallIndex,
                             metadata = toolCallIndex?.let {
                                 buildJsonObject { put(STREAM_TOOL_INDEX_METADATA_KEY, it) }
                             },

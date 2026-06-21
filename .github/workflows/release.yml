@@ -12,6 +12,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify JNI symbol parity
+        run: python3 scripts/check_jni_parity.py
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:

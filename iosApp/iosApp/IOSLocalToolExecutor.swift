@@ -85,6 +85,16 @@ final class IOSLocalToolExecutor {
     private let webMountController: IOSWebMountController
     private let workspaceStore: IOSWorkspaceStore
 
+    /// 全局自动批准：开启后普通工具自动放行。
+    static var isGlobalAutoApproveEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "app.amber.ios.globalAutoApprove")
+    }
+
+    /// 高风险自动批准：开启后高风险工具也自动放行。
+    static var isHighRiskAutoApproveEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "app.amber.ios.highRiskAutoApprove")
+    }
+
     init(
         permissionStore: IOSPermissionStore,
         documentStore: DocumentAccessStore,
@@ -197,6 +207,10 @@ final class IOSLocalToolExecutor {
         if policy == .disabled {
             return .deny(reason: "Disabled by AmberAgent policy")
         }
+        // 自动批准策略直接放行。
+        if policy == .autoApprove || policy == .autoApproveHighRisk {
+            return .allow(capabilityId: capability.id)
+        }
         if !request.isUserInitiated {
             if request.toolName == "wm_clear_session" {
                 return .needsUserAction(reason: "Clearing WebMount cookies requires an explicit foreground user action")
@@ -205,6 +219,9 @@ final class IOSLocalToolExecutor {
                 return .needsUserAction(reason: "This WebMount action requires explicit foreground user approval: \(request.toolName)")
             }
             if policy == .askEveryTime || capability.gate.requiresFreshUserPresence {
+                if Self.isGlobalAutoApproveEnabled && (capability.risk != .high || Self.isHighRiskAutoApproveEnabled) {
+                    return .allow(capabilityId: capability.id)
+                }
                 return .needsUserAction(reason: "WebMount browser tools require explicit foreground approval before the model can use the page session.")
             }
         }
@@ -219,11 +236,20 @@ final class IOSLocalToolExecutor {
         if policy == .disabled {
             return .deny(reason: "Disabled by AmberAgent Workspace tool policy")
         }
+        // 自动批准策略直接放行。
+        if policy == .autoApprove || policy == .autoApproveHighRisk {
+            return .allow(capabilityId: capability.id)
+        }
         if !request.isUserInitiated {
             if IOSWorkspaceToolCatalog.writeToolNames.contains(request.toolName) {
-                return .needsUserAction(reason: "Workspace writes and deletes require explicit foreground approval.")
+                if !(policy == .autoApprove || policy == .autoApproveHighRisk) {
+                    return .needsUserAction(reason: "Workspace writes and deletes require explicit foreground approval.")
+                }
             }
             if policy == .askEveryTime || capability.gate.requiresFreshUserPresence {
+                if Self.isGlobalAutoApproveEnabled && (capability.risk != .high || Self.isHighRiskAutoApproveEnabled) {
+                    return .allow(capabilityId: capability.id)
+                }
                 return .needsUserAction(reason: "Workspace reads require explicit foreground approval before the model can use saved files or artifacts.")
             }
         }
@@ -321,6 +347,8 @@ final class IOSLocalToolExecutor {
                 return .allow
             }
             return .needsUserAction("Memory writes require explicit foreground approval before the model can change saved memories.")
+        case .autoApprove, .autoApproveHighRisk:
+            return .allow
         }
     }
 
@@ -1626,7 +1654,7 @@ final class IOSWebMountSessionStore {
                     id: sessionId,
                     siteId: siteIds[sessionId],
                     siteName: siteNames[sessionId],
-                    title: snapshot.title?.nilIfBlank ?? "Untitled",
+                    title: snapshot.title?.nilIfBlank ?? "未命名页面",
                     redactedURL: snapshot.currentURL ?? snapshot.requestedURL ?? "",
                     status: snapshot.status.rawValue,
                     canGoBack: snapshot.canGoBack,

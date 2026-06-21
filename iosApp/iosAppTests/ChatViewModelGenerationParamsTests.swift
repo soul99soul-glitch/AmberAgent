@@ -105,8 +105,10 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertTrue(names.contains("model_council_run"))
         XCTAssertTrue(names.contains("workspace_file_list"))
         XCTAssertTrue(names.contains("workspace_file_search"))
-        XCTAssertTrue(names.contains("workspace_file_edit"))
-        XCTAssertTrue(names.contains("workspace_file_move"))
+        XCTAssertFalse(names.contains("workspace_file_write"))
+        XCTAssertFalse(names.contains("workspace_file_edit"))
+        XCTAssertFalse(names.contains("workspace_file_move"))
+        XCTAssertFalse(names.contains("workspace_artifact_delete"))
         XCTAssertTrue(names.contains("wm_tab_list"))
         XCTAssertTrue(names.contains("wm_tab_new"))
         XCTAssertTrue(names.contains("wm_tab_close"))
@@ -123,6 +125,39 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertTrue(names.contains("wm_select"))
         XCTAssertTrue(names.contains("wm_find"))
         XCTAssertTrue(names.contains("wm_wait"))
+    }
+
+    func testWorkspaceWriteToolsRequireExplicitFileWriteRequest() {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            localToolExecutor: localToolExecutor(),
+            autoGenerateResponses: false
+        )
+
+        viewModel.inputText = "试试 Markdown，写几个格式示例"
+        viewModel.sendMessage()
+
+        let markdownDemoNames = Set(viewModel.currentToolDeclarationNames())
+        XCTAssertTrue(markdownDemoNames.contains("workspace_file_list"))
+        XCTAssertFalse(markdownDemoNames.contains("workspace_file_write"))
+        XCTAssertFalse(markdownDemoNames.contains("workspace_file_edit"))
+
+        let explicitWriteViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            localToolExecutor: localToolExecutor(),
+            autoGenerateResponses: false
+        )
+        explicitWriteViewModel.inputText = "把上面的 Markdown 保存到 Workspace 文件 /workspace/notes/demo.md"
+        explicitWriteViewModel.sendMessage()
+
+        let explicitWriteNames = Set(explicitWriteViewModel.currentToolDeclarationNames())
+        XCTAssertTrue(explicitWriteNames.contains("workspace_file_write"))
+        XCTAssertTrue(explicitWriteNames.contains("workspace_file_edit"))
+        XCTAssertTrue(explicitWriteNames.contains("workspace_file_move"))
+        XCTAssertTrue(explicitWriteNames.contains("workspace_artifact_delete"))
     }
 
     func testDisabledAdvancedCapabilityIsNotDeclaredToModel() throws {
@@ -159,9 +194,14 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let workspaceNames = IOSWorkspaceToolCatalog.supportedToolNames
         let webMountNames = IOSWebMountToolCatalog.supportedToolNames
 
-        XCTAssertEqual(paramsNames.intersection(workspaceNames), workspaceNames)
+        XCTAssertEqual(paramsNames.intersection(workspaceNames), IOSWorkspaceToolCatalog.readToolNames)
         XCTAssertEqual(paramsNames.intersection(webMountNames), webMountNames)
         XCTAssertEqual(executableNames.intersection(workspaceNames), workspaceNames)
         XCTAssertEqual(executableNames.intersection(webMountNames), webMountNames)
+
+        viewModel.inputText = "创建 Workspace 文件 /workspace/check.md"
+        viewModel.sendMessage()
+        let explicitWriteNames = Set(viewModel.currentToolDeclarationNames())
+        XCTAssertEqual(explicitWriteNames.intersection(workspaceNames), workspaceNames)
     }
 }

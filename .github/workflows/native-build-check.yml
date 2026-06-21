@@ -14,6 +14,16 @@ on:
     branches: [main]
     paths:
       - 'native/**'
+      - 'scripts/check_jni_parity.py'
+      - 'highlight/src/main/java/app/amber/highlight/nativebridge/**'
+      - 'document/src/main/java/app/amber/document/nativebridge/**'
+      - 'common/src/main/java/app/amber/core/json/expr/**'
+      - 'core/llm/src/jvmMain/kotlin/app/amber/core/llm/TokenCounterNative.kt'
+      - 'app/src/main/java/app/amber/feature/deepread/nativebridge/**'
+      - 'app/src/main/java/app/amber/core/sync/core/SyncCryptoNative.kt'
+      - 'app/src/main/java/app/amber/agent/ui/components/richtext/nativebridge/**'
+      - 'app/src/main/java/app/amber/feature/ui/components/richtext/nativebridge/**'
+      - 'app/src/main/java/app/amber/agent/data/model/nativebridge/**'
       - 'app/**/Cargo.toml'
       - 'document/build.gradle.kts'
       - 'highlight/build.gradle.kts'
@@ -25,6 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify JNI symbol parity
+        run: python3 scripts/check_jni_parity.py
 
       - name: Set up JDK
         uses: actions/setup-java@v4

@@ -9,6 +9,7 @@ struct DisplayFontSettingsView: View {
     @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
     @AppStorage(IOSDisplayPreferenceKeys.agentName) private var agentName = true
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
 
     private var selectedFont: IOSChatFont {
         IOSChatFont(rawValue: chatFont) ?? .default
@@ -132,6 +133,14 @@ struct DisplayFontSettingsView: View {
             AmberSectionLabel(text: "渲染与交互")
             AmberFormGroup {
                 DisplayToggleRow(title: "生成时跟随滚动", isOn: followGeneration) { followGeneration.toggle() }
+                DisplayDivider()
+                DisplayToggleRow(
+                    title: "使用微软流式 MD 渲染库",
+                    subtitle: "实验选项；仅影响聊天中的助手 Markdown 正文。",
+                    isOn: microsoftStreamingMarkdown
+                ) {
+                    microsoftStreamingMarkdown.toggle()
+                }
             }
         }
     }

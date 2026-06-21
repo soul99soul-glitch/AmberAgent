@@ -460,6 +460,7 @@ sealed class UIMessagePart {
         val input: String,
         val output: List<UIMessagePart> = emptyList(),
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
+        val streamIndex: Int? = null,
         override var metadata: JsonObject? = null
     ) : UIMessagePart() {
         /** Whether the tool has been executed (has output) */
@@ -483,6 +484,7 @@ sealed class UIMessagePart {
                 input = input + other.input,
                 output = output + other.output,
                 approvalState = approvalState,
+                streamIndex = other.streamIndex ?: streamIndex,
                 metadata = if (other.metadata != null) other.metadata else metadata,
             )
         }
@@ -490,7 +492,7 @@ sealed class UIMessagePart {
 }
 
 fun UIMessagePart.Tool.streamToolIndex(): Int? =
-    metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
+    streamIndex ?: metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
 
 fun UIMessage.finishReasoning(): UIMessage {
     return copy(

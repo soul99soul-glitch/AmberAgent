@@ -24,6 +24,9 @@ struct ChatView: View {
     @Environment(RouterPath.self) private var router
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
     @State private var pasteHintShown = false
+    @State private var pendingInitialScrollToBottom = false
+    @State private var followPaused = false
+    @State private var userDragging = false
     @Environment(IOSConversationStore.self) private var conversationStore
 
     init(
@@ -91,7 +94,10 @@ struct ChatView: View {
         .onAppear {
             // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
             viewModel.conversationStore = conversationStore
+            followPaused = false
+            pendingInitialScrollToBottom = true
             viewModel.reloadFromStore()
+            repairCurrentChatModelIfNeeded()
             if let handoff = IOSWebMountContentHandoffStore.shared.consumeChatHandoff() {
                 viewModel.inputText = handoff.chatPrompt
                 viewModel.selectedFileContextError = nil
@@ -100,7 +106,13 @@ struct ChatView: View {
         // 会话切换（store.currentRevision 变化）时重新灌入历史消息。
         // 用 Int 修订号而非 KotlinUuid——后者是否被 Swift 当作 Equatable 不可靠。
         .onChange(of: conversationStore.currentRevision) { _, _ in
+            followPaused = false
+            pendingInitialScrollToBottom = true
             viewModel.reloadFromStore()
+        }
+        .onChange(of: sharedSettings.revision) { _, _ in
+            repairCurrentChatModelIfNeeded()
+            viewModel.messageRevision &+= 1
         }
     }
 
@@ -166,6 +178,7 @@ struct ChatView: View {
         ChatToolbarIconButton(systemImage: "square.and.pencil", accessibilityLabel: "新建对话", size: 38, symbolSize: 16) {
             viewModel.cancelGeneration()
             Task { @MainActor in
+                followPaused = false
                 await conversationStore.newConversation()
                 viewModel.reloadFromStore()
             }
@@ -200,33 +213,100 @@ struct ChatView: View {
                             )
                         }
                         ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
-                            MessageBubbleView(
-                                message: message,
-                                messageIndex: index,
-                                variantInfo: viewModel.variantInfo(atMessageIndex: index),
-                                displaySetting: sharedSettings.displaySetting,
-                                onRegenerate: { viewModel.regenerate(atMessageIndex: index) },
-                                onEdit: { newText in viewModel.editMessage(atMessageIndex: index, newText: newText) },
-                                onDelete: { viewModel.deleteMessage(atMessageIndex: index) },
-                                onSelectVariant: { variantIndex in viewModel.selectVariant(messageIndex: index, variantIndex: variantIndex) },
-                                isGenerating: viewModel.isGenerationActive
-                            )
+                            let isLastStreamingMessage = index == viewModel.messages.count - 1 && isStreamingFollowActive
+
+                            VStack(spacing: 0) {
+                                MessageBubbleView(
+                                    message: message,
+                                    messageIndex: index,
+                                    variantInfo: viewModel.variantInfo(atMessageIndex: index),
+                                    displaySetting: sharedSettings.displaySetting,
+                                    onRegenerate: { viewModel.regenerate(atMessageIndex: index) },
+                                    onEdit: { newText in viewModel.editMessage(atMessageIndex: index, newText: newText) },
+                                    onDelete: { viewModel.deleteMessage(atMessageIndex: index) },
+                                    onSelectVariant: { variantIndex in viewModel.selectVariant(messageIndex: index, variantIndex: variantIndex) },
+                                    isGenerating: viewModel.isGenerationActive
+                                )
+
+                                if isLastStreamingMessage {
+                                    Color.clear
+                                        .frame(height: ChatLayout.followBottomGap)
+                                        .allowsHitTesting(false)
+                                        .accessibilityHidden(true)
+                                }
+                            }
                             .id(message.id)
                         }
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, ChatLayout.contentHorizontalInset)
                 .padding(.vertical, 12)
                 .padding(.bottom, 18)
             }
-            .onChange(of: viewModel.messageRevision) { _, _ in
-                guard followGeneration, !viewModel.messages.isEmpty else { return }
-                withAnimation {
-                    if let lastId = viewModel.messages.last?.id {
-                        proxy.scrollTo(lastId, anchor: .bottom)
-                    }
+            .onScrollPhaseChange { _, phase in
+                switch phase {
+                case .interacting:
+                    userDragging = true
+                case .idle:
+                    userDragging = false
+                default:
+                    break
                 }
             }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height - geometry.visibleRect.maxY <= ChatLayout.bottomStickThreshold
+            } action: { _, atBottom in
+                if userDragging {
+                    followPaused = !atBottom
+                }
+            }
+            .onChange(of: viewModel.messageRevision) { _, _ in
+                if pendingInitialScrollToBottom {
+                    pendingInitialScrollToBottom = false
+                    scrollToLatestMessage(proxy, animated: false, deferred: true)
+                } else if followGeneration, !followPaused {
+                    scrollToLatestMessage(proxy, animated: true, deferred: false)
+                }
+            }
+            .onChange(of: isInputFocused) { _, focused in
+                guard focused, !followPaused, !viewModel.messages.isEmpty else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !followPaused else { return }
+                    scrollToLatestMessage(proxy, animated: true, deferred: false)
+                }
+            }
+        }
+    }
+
+    private var isStreamingFollowActive: Bool {
+        viewModel.isGenerationActive || viewModel.isLoading
+    }
+
+    private func scrollToLatestMessage(
+        _ proxy: ScrollViewProxy,
+        animated: Bool,
+        deferred: Bool
+    ) {
+        guard !viewModel.messages.isEmpty, let lastId = viewModel.messages.last?.id else { return }
+        let action = {
+            if animated {
+                withAnimation {
+                    proxy.scrollTo(lastId, anchor: .bottom)
+                }
+            } else {
+                var transaction = Transaction()
+                transaction.animation = nil
+                withTransaction(transaction) {
+                    proxy.scrollTo(lastId, anchor: .bottom)
+                }
+            }
+        }
+
+        if deferred {
+            Task { @MainActor in action() }
+        } else {
+            action()
         }
     }
 
@@ -339,8 +419,7 @@ struct ChatView: View {
                     .lineLimit(3)
             }
 
-            AmberGlassGroup(spacing: 18) {
-                VStack(spacing: 8) {
+            VStack(spacing: 8) {
                     HStack(alignment: .center, spacing: 8) {
                         Button {
                             if documentStore != nil {
@@ -374,6 +453,7 @@ struct ChatView: View {
                             .onSubmit {
                                 if sharedSettings.displaySetting.sendOnEnter {
                                     guard sendEnabled else { return }
+                                    followPaused = false
                                     viewModel.sendMessage()
                                 }
                             }
@@ -388,7 +468,7 @@ struct ChatView: View {
                             }
 
                         if viewModel.isLoading {
-                            AmberGlassIconButton(
+                            ComposerIconButton(
                                 systemImage: "stop.fill",
                                 accessibilityLabel: "停止生成",
                                 size: 32,
@@ -399,7 +479,7 @@ struct ChatView: View {
                                 viewModel.cancelGeneration()
                             }
                         } else {
-                            AmberGlassIconButton(
+                            ComposerIconButton(
                                 systemImage: "arrow.up",
                                 accessibilityLabel: "发送消息",
                                 size: 32,
@@ -407,6 +487,7 @@ struct ChatView: View {
                                 tint: sendEnabled ? AmberTheme.accent : AmberTheme.muted2,
                                 prominent: sendEnabled
                             ) {
+                                followPaused = false
                                 viewModel.sendMessage()
                             }
                             .disabled(!sendEnabled)
@@ -415,14 +496,7 @@ struct ChatView: View {
                     .padding(.leading, 8)
                     .padding(.trailing, 6)
                     .padding(.vertical, 6)
-                    .overlay {
-                        Capsule()
-                            .stroke(
-                                AmberTheme.border.opacity(0.58),
-                                lineWidth: 0.5
-                            )
-                    }
-                    .amberGlass(cornerRadius: 25)
+                    .composerStableSurface(cornerRadius: 25)
 
                     if showsComposerMeta {
                         HStack {
@@ -438,17 +512,17 @@ struct ChatView: View {
                                     .frame(height: 30)
                             }
                             .buttonStyle(.plain)
-                            .amberGlass(cornerRadius: 15)
+                            .composerStableSurface(cornerRadius: 15)
                             .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
 
                             Spacer()
 
                             HStack(spacing: 8) {
-                                AmberGlassCircleButton(
-                                    systemImage: "sparkles",
+                                ComposerIconButton(
+                                    systemImage: "brain.head.profile",
                                     accessibilityLabel: "设置思考等级",
                                     size: 34,
-                                    symbolSize: 15
+                                    symbolSize: 14
                                 ) {
                                     toggleComposerPanel(.thinking)
                                 }
@@ -474,25 +548,22 @@ struct ChatView: View {
                         .padding(.top, 2)
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, ChatLayout.contentHorizontalInset)
         .padding(.top, 8)
         .padding(.bottom, 8)
-        .background {
-            LinearGradient(
-                colors: [AmberTheme.background.opacity(0), AmberTheme.background.opacity(0.96), AmberTheme.background],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-        }
+        // Step 2 baseline: the previous StreamingBottomBoundaryGlass was attached here as a
+        // `.background` of the whole inputBar, i.e. *behind* the `.thinMaterial` composer pills,
+        // which double-frosted and washed out the controls. Removed to restore a crisp baseline.
+        // The bottom Liquid Glass boundary is reintroduced in step 4 as a sibling layer that sits
+        // BELOW the composer (between scroll content and controls), never behind the controls.
         .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showsComposerMeta)
     }
 
     private var sendEnabled: Bool {
-            !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        _ = sharedSettings.revision
+        return !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !viewModel.isGenerationActive &&
             !viewModel.isAttachingSelectedFile &&
             !hasPendingToolApproval &&
@@ -500,7 +571,8 @@ struct ChatView: View {
     }
 
     private var configurationIssue: ChatConfigurationIssue? {
-        viewModel.configurationIssue
+        _ = sharedSettings.revision
+        return viewModel.configurationIssue
     }
 
     private var inputPlaceholder: String {
@@ -579,6 +651,11 @@ struct ChatView: View {
         router.navigate(to: .modelDefaults)
     }
 
+    @discardableResult
+    private func repairCurrentChatModelIfNeeded() -> Bool {
+        sharedSettings.repairCurrentChatModelIfNeeded(settingsStore)
+    }
+
     private func popoverBinding(for panel: ComposerPanel) -> Binding<Bool> {
         Binding(
             get: { activeComposerPanel == panel },
@@ -590,6 +667,72 @@ struct ChatView: View {
                 }
             }
         )
+    }
+}
+
+private extension View {
+    func composerStableSurface(cornerRadius: CGFloat) -> some View {
+        background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
+    }
+}
+
+private struct StreamingBottomBoundaryGlass: View {
+    var body: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                Rectangle()
+                    .fill(AmberTheme.background.opacity(0.32))
+                    .glassEffect(.regular.tint(AmberTheme.background.opacity(0.32)), in: .rect(cornerRadius: 0))
+            } else {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .background(AmberTheme.background.opacity(0.32))
+            }
+        }
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black.opacity(0.78), location: 0.28),
+                    .init(color: .black, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+}
+
+private struct ComposerIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    var size: CGFloat = 34
+    var symbolSize: CGFloat = 15
+    var tint: Color = AmberTheme.foreground2
+    var prominent = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: symbolSize, weight: .semibold))
+                .foregroundStyle(prominent ? Color.white : tint)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .background(prominent ? tint : AmberTheme.surface.opacity(0.72), in: Circle())
+        .overlay {
+            Circle()
+                .stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -638,19 +781,14 @@ private struct ContextRingButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Circle()
-                    .stroke(AmberTheme.surface2, lineWidth: 3)
-                Image(systemName: "chart.pie")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AmberTheme.muted)
-            }
-            .frame(width: 20, height: 20)
+            Circle()
+                .stroke(AmberTheme.surface2, lineWidth: 4)
+                .frame(width: 16, height: 16)
             .frame(width: 34, height: 34)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .amberGlass(cornerRadius: 17)
+        .composerStableSurface(cornerRadius: 17)
         .accessibilityLabel("上下文统计")
         .accessibilityValue("\(snapshot.messageCount) 条消息，\(snapshot.totalTokens) tokens")
     }
@@ -1053,83 +1191,63 @@ private struct ComposerContextPanel: View {
     let snapshot: ChatContextSnapshot
 
     var body: some View {
-        ComposerPopoverSurface(width: 232) {
-            VStack(spacing: 0) {
-                VStack(spacing: 7) {
+        ComposerPopoverSurface(width: 248) {
+            HStack(spacing: 14) {
+                VStack {
                     ZStack {
                         Circle()
-                            .stroke(AmberTheme.surface2, lineWidth: 5)
+                            .stroke(AmberTheme.surface2, lineWidth: 8)
                         Circle()
                             // [Slice 5] 用量环按已用/上限比例填充（上限 8K 作视觉参考，
                             // 非硬上限）。0 token 时环为空（诚实）。
                             .trim(from: 0, to: min(CGFloat(snapshot.totalTokens) / 8_000.0, 1.0))
-                            .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                            .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 8, lineCap: .round))
                             .rotationEffect(.degrees(-90))
-
-                        Image(systemName: "chart.pie")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(AmberTheme.muted)
                     }
-                    .frame(width: 60, height: 60)
+                    .frame(width: 52, height: 52)
+                }
+                .frame(width: 68)
 
-                    // [Slice 5] 真实 token 总数：聚合 messages.usage.totalTokens。
-                    Text("\(snapshot.totalTokens) tokens")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AmberTheme.foreground)
-
-                    Text(snapshot.totalTokens > 0 ? "本会话累计用量" : "尚无用量记录")
-                        .font(.caption2)
-                        .foregroundStyle(AmberTheme.muted)
+                VStack(spacing: 8) {
+                    ComposerContextCompactStatRow(label: "总消息数", value: "\(snapshot.messageCount)")
+                    ComposerContextCompactStatRow(label: "总 token", value: "\(snapshot.totalTokens)")
+                    ComposerContextCompactStatRow(label: "速度", value: speedText)
+                    ComposerContextCompactStatRow(label: "缓存命中率", value: cacheHitRateText)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 16)
-                .padding(.top, 18)
-                .padding(.bottom, 12)
-
-                Divider()
-                    .overlay(AmberTheme.borderSoft)
-
-                VStack(spacing: 0) {
-                    ComposerContextStatRow(label: "当前消息", value: "\(snapshot.messageCount) 条")
-                    ComposerContextStatRow(label: "当前模型", value: snapshot.modelId)
-                    ComposerContextStatRow(label: "推理", value: snapshot.supportsReasoning ? "可用" : "不可用")
-                    ComposerContextStatRow(label: "待附加文件", value: pendingFileValue)
-                    // [Slice 5] 拆分 token 统计（来自 messages.usage）。
-                    ComposerContextStatRow(label: "输入", value: "\(snapshot.promptTokens)")
-                    ComposerContextStatRow(label: "输出", value: "\(snapshot.completionTokens)")
-                    if snapshot.cachedTokens > 0 {
-                        ComposerContextStatRow(label: "缓存", value: "\(snapshot.cachedTokens)")
-                    }
-                }
-                .padding(.vertical, 4)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 18)
         }
     }
 
-    private var pendingFileValue: String {
-        guard let fileName = snapshot.pendingSelectedFileName else {
-            return "无"
+    private var cacheHitRateText: String {
+        guard snapshot.promptTokens > 0 else {
+            return "0%"
         }
+        let rate = Double(snapshot.cachedTokens) / Double(snapshot.promptTokens)
+        return "\(Int((rate * 100).rounded()))%"
+    }
 
-        if let bytes = snapshot.pendingSelectedFileBytesText {
-            return "\(fileName) · \(bytes)"
+    private var speedText: String {
+        guard let tokensPerSecond = snapshot.tokensPerSecond else {
+            return "暂无"
         }
-
-        return fileName
+        return String(format: "%.1f token/s", tokensPerSecond)
     }
 }
 
-private struct ComposerContextStatRow: View {
+private struct ComposerContextCompactStatRow: View {
     let label: String
     let value: String
 
     var body: some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline) {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(AmberTheme.muted)
 
-            Spacer()
+            Spacer(minLength: 10)
 
             Text(value)
                 .font(.caption.weight(.semibold).monospacedDigit())
@@ -1137,8 +1255,6 @@ private struct ComposerContextStatRow: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 32)
     }
 }
 
@@ -1196,8 +1312,12 @@ private struct ComposerPopoverSurface<Content: View>: View {
 }
 
 enum ChatLayout {
-    static let assistantMaxWidth: CGFloat = 296
-    static let userMaxWidth: CGFloat = 312
+    static let contentHorizontalInset: CGFloat = 22
+    static let userMaxWidth: CGFloat = 300
+    static let streamingBoundaryFadeHeight: CGFloat = 220
+    static let streamingBoundaryBottomOffset: CGFloat = 54
+    static let followBottomGap: CGFloat = 96
+    static let bottomStickThreshold: CGFloat = 40
 }
 
 struct ChatAssistantStack<Content: View>: View {
@@ -1211,7 +1331,6 @@ struct ChatAssistantStack<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             content
         }
-        .frame(maxWidth: ChatLayout.assistantMaxWidth, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

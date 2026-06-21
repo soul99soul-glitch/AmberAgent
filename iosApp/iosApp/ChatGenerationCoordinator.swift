@@ -242,17 +242,17 @@ final class ChatGenerationCoordinator {
             messages: preparedUploadMessages,
             params: params,
             onChunk: { chunk in
-                accumulator.append(chunk: chunk)
-                let toolCalls = Self.toolCalls(in: chunk)
-                    .filter { toolCall in
-                        let key = chatToolCallKey(toolCall)
-                        guard !detectedToolCallIds.contains(key) else { return false }
-                        detectedToolCallIds.insert(key)
-                        return true
-                    }
-                let snapshot = accumulator.snapshot()
                 Task { @MainActor [weak self] in
                     guard let self, self.currentRunId == runId else { return }
+                    accumulator.append(chunk: chunk)
+                    let toolCalls = Self.toolCalls(in: chunk)
+                        .filter { toolCall in
+                            let key = chatToolCallKey(toolCall)
+                            guard !detectedToolCallIds.contains(key) else { return false }
+                            detectedToolCallIds.insert(key)
+                            return true
+                        }
+                    let snapshot = accumulator.snapshot()
                     if !toolCalls.isEmpty {
                         self.handleDetectedToolCalls(toolCalls, runId: runId)
                     }
@@ -261,9 +261,9 @@ final class ChatGenerationCoordinator {
                 }
             },
             onComplete: {
-                let snapshot = accumulator.snapshot()
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    let snapshot = accumulator.snapshot()
                     await self.handleCompletedStream(
                         snapshot: snapshot,
                         providerSetting: providerSetting,

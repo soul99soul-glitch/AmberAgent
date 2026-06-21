@@ -201,6 +201,46 @@ final class ProviderRegistryStoreTests: XCTestCase {
         XCTAssertTrue(viewModel.configurationError?.contains("模型") == true)
     }
 
+    func testChatConfigurationUsesSelectedSharedProviderWhenAvailable() {
+        let settings = makeSettings(apiKey: "", modelId: "")
+        let sharedSettings = makeSharedSettingsWithClaudeProvider(apiKey: "sk-ant-test")
+        let viewModel = ChatViewModel(
+            settingsStore: settings,
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: false
+        )
+
+        XCTAssertNil(viewModel.configurationIssue)
+        XCTAssertEqual(viewModel.contextSnapshot.modelId, "claude-sonnet-4-5")
+        XCTAssertEqual(viewModel.textGenerationParamsForTesting().model.modelId, "claude-sonnet-4-5")
+    }
+
+    func testCurrentSharedProviderMissingKeyIsNotMaskedByLegacySettingsStore() {
+        let settings = makeSettings(apiKey: "sk-legacy-test", modelId: "legacy-model")
+        let sharedSettings = makeSharedSettingsWithClaudeProvider(apiKey: "")
+        let viewModel = ChatViewModel(
+            settingsStore: settings,
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: false
+        )
+
+        XCTAssertEqual(viewModel.configurationIssue, .missingAPIKey)
+    }
+
+    func testUnsupportedSharedProviderIsReportedBeforeSending() {
+        let settings = makeSettings(apiKey: "sk-legacy-test", modelId: "legacy-model")
+        let sharedSettings = makeSharedSettingsWithGoogleChatProvider(apiKey: "AIza-test")
+        let viewModel = ChatViewModel(settingsStore: settings, sharedSettings: sharedSettings)
+        viewModel.inputText = "Hello"
+
+        XCTAssertEqual(viewModel.configurationIssue, .unsupportedProvider)
+
+        viewModel.sendMessage()
+
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertEqual(viewModel.configurationError, ChatConfigurationIssue.unsupportedProvider.message)
+    }
+
     func testUserFacingGenerationErrorsMapCommonProviderFailures() {
         XCTAssertTrue(
             ChatViewModel.userFacingGenerationError("401 Unauthorized: invalid API key")
@@ -263,6 +303,41 @@ final class ProviderRegistryStoreTests: XCTestCase {
         settings.apiKey = apiKey
         settings.modelId = modelId
         return settings
+    }
+
+    private func makeSharedSettingsWithClaudeProvider(apiKey: String) -> IOSSharedSettingsStore {
+        let namespace = "SharedClaudeProvider-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: namespace)!
+        defaults.removePersistentDomain(forName: namespace)
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: defaults)
+        let provider = IosSettingsMutations.shared.buildClaudeProvider(
+            name: "Claude Test",
+            apiKey: apiKey,
+            baseUrl: "https://api.anthropic.com/v1",
+            modelName: "Claude Sonnet 4.5",
+            modelId: "claude-sonnet-4-5"
+        )
+        let added = sharedSettings.addProvider(provider)
+        let chatModel = added.models.first { $0.type == ModelType.chat }!
+        sharedSettings.setCurrentChatModelId(chatModel.id.description())
+        return sharedSettings
+    }
+
+    private func makeSharedSettingsWithGoogleChatProvider(apiKey: String) -> IOSSharedSettingsStore {
+        let namespace = "SharedGoogleProvider-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: namespace)!
+        defaults.removePersistentDomain(forName: namespace)
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: defaults)
+        let google = sharedSettings.snapshot.providers.first { $0 is ProviderSetting.Google }!
+        let providerId = google.id.description()
+        sharedSettings.updateProviderApiKey(providerId: providerId, apiKey: apiKey)
+        let updated = sharedSettings.updateProviderChatModels(
+            providerId: providerId,
+            models: [(modelId: "gemini-test-chat", displayName: "Gemini Test Chat")]
+        )!
+        let chatModel = updated.models.first { $0.type == ModelType.chat }!
+        sharedSettings.setCurrentChatModelId(chatModel.id.description())
+        return sharedSettings
     }
 
     private func makeChatModel(_ modelId: String) -> Model {

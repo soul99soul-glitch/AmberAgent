@@ -22,6 +22,9 @@ packages:
   swift-nio-ssh:
     url: https://github.com/apple/swift-nio-ssh.git
     exactVersion: 0.13.0
+  SwiftStreamingMarkdown:
+    url: https://github.com/microsoft/SwiftStreamingMarkdown
+    branch: main
 
 targets:
   iosApp:
@@ -40,6 +43,17 @@ targets:
             *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
           esac
           build_type="${CONFIGURATION:-Debug}"
+          if [ -z "${JAVA_HOME:-}" ]; then
+            for candidate in /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 /opt/homebrew/opt/openjdk /usr/local/opt/openjdk; do
+              if [ -x "$candidate/bin/java" ]; then
+                export JAVA_HOME="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -n "${JAVA_HOME:-}" ]; then
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
           cd "${SRCROOT}/.."
           ./gradlew ":shared:link${build_type}Framework${kotlin_target}"
       - name: Validate Entitlement Diagnostics
@@ -108,6 +122,8 @@ targets:
         product: NIOPosix
       - package: swift-nio-ssh
         product: NIOSSH
+      - package: SwiftStreamingMarkdown
+        product: SwiftStreamingMarkdown
       - target: AmberAgentActivityWidget
     scheme:
       gatherCoverageData: false
@@ -197,6 +213,17 @@ targets:
             *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
           esac
           build_type="${CONFIGURATION:-Debug}"
+          if [ -z "${JAVA_HOME:-}" ]; then
+            for candidate in /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 /opt/homebrew/opt/openjdk /usr/local/opt/openjdk; do
+              if [ -x "$candidate/bin/java" ]; then
+                export JAVA_HOME="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -n "${JAVA_HOME:-}" ]; then
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
           cd "${SRCROOT}/.."
           ./gradlew ":shared:link${build_type}Framework${kotlin_target}"
       - name: Validate Entitlement Diagnostics
@@ -265,6 +292,8 @@ targets:
         product: NIOPosix
       - package: swift-nio-ssh
         product: NIOSSH
+      - package: SwiftStreamingMarkdown
+        product: SwiftStreamingMarkdown
       - target: AmberAgentActivityWidgetExperimentalGPL
     scheme:
       gatherCoverageData: false

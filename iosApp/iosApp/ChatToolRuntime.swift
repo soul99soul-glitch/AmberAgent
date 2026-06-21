@@ -720,6 +720,7 @@ final class ChatToolRuntime {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
     }
@@ -767,7 +768,8 @@ final class ChatToolRuntime {
                     input: toolPart.input,
                     output: outputParts,
                     approvalState: toolPart.approvalState,
-                    metadata: toolPart.metadata
+                    streamIndex: toolPart.streamIndex,
+                    metadata: nil
                 )
             }
 
@@ -825,6 +827,7 @@ final class ChatToolRuntime {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         return dispatchMemoryToolCall(
@@ -840,6 +843,7 @@ final class ChatToolRuntime {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         guard case .needsUserAction(let reason) = memoryToolWritePolicy(input: input, isUserInitiated: false) else {
@@ -867,6 +871,7 @@ final class ChatToolRuntime {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         if !isUserInitiated {
@@ -886,6 +891,7 @@ final class ChatToolRuntime {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         let output = await webMountToolExecutionOutput(toolCall, isUserInitiated: false)
@@ -908,6 +914,7 @@ final class ChatToolRuntime {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         guard allow else {
@@ -933,6 +940,7 @@ final class ChatToolRuntime {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         return ChatToolApprovalRequestBuilder.search(
@@ -953,6 +961,7 @@ final class ChatToolRuntime {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         guard allow else {

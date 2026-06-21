@@ -44,6 +44,17 @@ enum ChatProviderConfiguration {
         model.findProvider(providers: providers, checkOverwrite: true)
     }
 
+    static func configuredChatModels(in providers: [ProviderSetting]) -> [(provider: ProviderSetting, models: [Model])] {
+        providers.compactMap { provider in
+            guard provider.enabled, supportsChatStreaming(provider) else { return nil }
+            let models = provider.models.filter { model in
+                model.type == ModelType.chat && issue(for: model, provider: provider) == nil
+            }
+            guard !models.isEmpty else { return nil }
+            return (provider, models)
+        }
+    }
+
     static func issue(for model: Model, provider: ProviderSetting?) -> ChatConfigurationIssue? {
         guard let provider else { return .missingProvider }
         guard supportsChatStreaming(provider) else { return .unsupportedProvider }
@@ -99,5 +110,30 @@ enum ChatProviderConfiguration {
         if let claude = provider as? ProviderSetting.Claude { return claude.baseUrl }
         if let google = provider as? ProviderSetting.Google { return google.baseUrl }
         return ""
+    }
+}
+
+extension IOSSharedSettingsStore {
+    @discardableResult
+    func repairCurrentChatModelIfNeeded(_ settingsStore: SettingsStore? = nil) -> Bool {
+        if let currentModel = snapshot.getCurrentChatModel(),
+           let provider = ChatProviderConfiguration.provider(for: currentModel, providers: snapshot.providers),
+           ChatProviderConfiguration.issue(for: currentModel, provider: provider) == nil {
+            if let settingsStore {
+                syncLegacySettingsStoreForCurrentChat(settingsStore)
+            }
+            return false
+        }
+
+        let configuredProviders = ChatProviderConfiguration.configuredChatModels(in: snapshot.providers)
+        guard configuredProviders.count == 1,
+              let model = configuredProviders[0].models.first else {
+            return false
+        }
+        setCurrentChatModelId(model.id.description())
+        if let settingsStore {
+            syncLegacySettingsStoreForCurrentChat(settingsStore)
+        }
+        return true
     }
 }

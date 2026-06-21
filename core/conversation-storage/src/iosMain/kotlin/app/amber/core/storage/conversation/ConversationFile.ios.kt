@@ -30,8 +30,10 @@ actual class ConversationFile actual constructor(actual val path: String) {
 
     actual fun exists(): Boolean = fm.fileExistsAtPath(path)
 
-    actual fun delete(): Boolean =
-        runCatching { fm.removeItemAtPath(path, error = null) }.isSuccess
+    actual fun delete(): Boolean {
+        if (!exists()) return false
+        return fm.removeItemAtPath(path, error = null)
+    }
 
     actual fun writeText(text: String) {
         // writeToFile(atomically: true) 走 tmp 文件 + rename，Foundation 原子写。

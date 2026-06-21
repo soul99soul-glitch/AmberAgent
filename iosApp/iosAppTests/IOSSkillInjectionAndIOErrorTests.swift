@@ -58,14 +58,14 @@ final class IOSSkillInjectionAndIOErrorTests: XCTestCase {
 
         // The markdown body extraction strips frontmatter.
         let markdown = try store.readSkillMarkdown(dirName: "summarize")
-        let body = ChatViewModel.skillBodyFromMarkdown(markdown)
+        let body = ChatRuntimeContextBuilder.skillBodyFromMarkdown(markdown)
         XCTAssertTrue(body.contains("Summarize any text concisely."))
         XCTAssertFalse(body.contains("description:"))
     }
 
     func testSkillBodyExtractionHandlesMissingFrontmatter() {
         // No frontmatter → whole content is the body.
-        let body = ChatViewModel.skillBodyFromMarkdown("# Plain skill\nDo the thing.")
+        let body = ChatRuntimeContextBuilder.skillBodyFromMarkdown("# Plain skill\nDo the thing.")
         XCTAssertTrue(body.contains("Do the thing."))
     }
 

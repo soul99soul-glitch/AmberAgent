@@ -757,6 +757,7 @@ class ChatCompletionsAPI(
                             toolName = toolName ?: "",
                             input = arguments ?: "",
                             output = emptyList(),
+                            streamIndex = toolCallIndex,
                             metadata = toolCallIndex?.let { index ->
                                 buildJsonObject {
                                     put(STREAM_TOOL_INDEX_METADATA_KEY, index)

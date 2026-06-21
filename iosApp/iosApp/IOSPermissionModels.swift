@@ -128,6 +128,8 @@ enum IOSAgentPermissionPolicy: String, CaseIterable, Identifiable {
     case disabled
     case askEveryTime
     case allowOncePerRun
+    case autoApprove
+    case autoApproveHighRisk
 
     var id: String { rawValue }
 
@@ -136,6 +138,8 @@ enum IOSAgentPermissionPolicy: String, CaseIterable, Identifiable {
         case .disabled: "Disabled"
         case .askEveryTime: "Ask every time"
         case .allowOncePerRun: "Allow once per run"
+        case .autoApprove: "Auto approve"
+        case .autoApproveHighRisk: "Auto approve (high risk)"
         }
     }
 }
@@ -180,8 +184,8 @@ struct IOSCapabilityRegistry {
     static let capabilities: [IOSPlatformCapability] = [
         capability(
             id: "ios.agent.memory_write",
-            title: "Agent memory writes",
-            summary: "Allow the model to create, edit, or delete AmberAgent local memories. Listing memories stays read-only.",
+            title: "记忆写入",
+            summary: "新建、编辑或删除记忆",
             domain: .agentMemory,
             status: .supported,
             risk: .high,
@@ -193,8 +197,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.agent.subagent_dispatch",
-            title: "SubAgent dispatch",
-            summary: "Let the model delegate a bounded task to a configured SubAgent role. iOS SubAgents use narrowed tool scopes and persisted task records.",
+            title: "子代理调度",
+            summary: "委托任务给子代理角色",
             domain: .networkAndConnectivity,
             status: .supported,
             risk: .sensitive,
@@ -206,8 +210,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.agent.model_council_run",
-            title: "Model Council run",
-            summary: "Let the model start a bounded Model Council discussion and return a persisted discussion result.",
+            title: "模型议会",
+            summary: "发起议会讨论并返回结果",
             domain: .networkAndConnectivity,
             status: .supported,
             risk: .sensitive,
@@ -219,8 +223,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.network.search_tools",
-            title: "Search and webpage reads",
-            summary: "Allow model-dispatched public web search and webpage scrape calls through configured iOS search providers.",
+            title: "搜索与网页读取",
+            summary: "联网搜索和网页抓取",
             domain: .networkAndConnectivity,
             status: .supported,
             risk: .sensitive,
@@ -232,8 +236,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.mcp.tool_call",
-            title: "MCP tool calls",
-            summary: "Allow model-dispatched MCP calls to configured servers. Server tools may reach external services and require per-call approval.",
+            title: "MCP 调用",
+            summary: "调用已配置的 MCP 服务",
             domain: .networkAndConnectivity,
             status: .supported,
             risk: .high,
@@ -245,8 +249,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.files.selected_read",
-            title: "Selected file read",
-            summary: "Read a single file selected by the user through the foreground document picker.",
+            title: "文件选取读取",
+            summary: "读取用户选取的文件",
             domain: .filesAndPhotos,
             status: .supported,
             risk: .sensitive,
@@ -260,8 +264,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.workspace.file_read",
-            title: "Workspace reads",
-            summary: "Allow the model to read user-imported Workspace files and saved artifacts after foreground approval.",
+            title: "Workspace 读取",
+            summary: "读取工作区文件和产出",
             domain: .filesAndPhotos,
             status: .supported,
             risk: .sensitive,
@@ -273,8 +277,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.workspace.file_write",
-            title: "Workspace writes",
-            summary: "Allow the model to write local Workspace files or delete saved artifacts only after explicit approval.",
+            title: "Workspace 写入",
+            summary: "写入文件或删除产出",
             domain: .filesAndPhotos,
             status: .supported,
             risk: .high,
@@ -286,8 +290,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.files.security_scoped",
-            title: "Security-scoped files",
-            summary: "Access user-selected files or directories through security-scoped URLs or bookmarks.",
+            title: "安全范围文件",
+            summary: "通过安全书签访问文件",
             domain: .filesAndPhotos,
             status: .degraded,
             risk: .high,
@@ -300,8 +304,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.files.export",
-            title: "File export",
-            summary: "Export or share a file copy using a foreground system sheet.",
+            title: "文件导出",
+            summary: "导出或分享文件副本",
             domain: .filesAndPhotos,
             status: .degraded,
             risk: .high,
@@ -313,8 +317,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.photos.library_read",
-            title: "Photo library read",
-            summary: "Request full or limited access to the user's photo and video library.",
+            title: "相册读取",
+            summary: "访问照片和视频",
             domain: .filesAndPhotos,
             status: .supported,
             risk: .sensitive,
@@ -328,8 +332,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.photos.library_add",
-            title: "Photo library add-only",
-            summary: "Request permission to save images or videos to the photo library.",
+            title: "相册写入",
+            summary: "保存图片或视频到相册",
             domain: .filesAndPhotos,
             status: .supported,
             risk: .sensitive,
@@ -342,8 +346,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.photos.limited_library_management",
-            title: "Limited photo library management",
-            summary: "Let the user update the limited photo library selection from foreground UI.",
+            title: "受限相册管理",
+            summary: "更新受限相册选择",
             domain: .filesAndPhotos,
             status: .degraded,
             risk: .sensitive,
@@ -356,8 +360,8 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.photos.picker",
-            title: "Photo and video picker",
-            summary: "Let the user select one or more photos or videos without granting full library access.",
+            title: "照片视频选取",
+            summary: "选取照片或视频",
             domain: .filesAndPhotos,
             status: .supported,
             risk: .sensitive,
@@ -370,7 +374,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.files.external_storage_capture",
-            title: "External storage capture",
+            title: "外部存储",
             summary: "Request authorization to capture media directly onto a connected external storage device.",
             domain: .filesAndPhotos,
             status: .supported,
@@ -383,7 +387,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.image_capture.contents",
-            title: "Image Capture contents",
+            title: "Image Capture 内容",
             summary: "Request access to contents on an attached external media device.",
             domain: .filesAndPhotos,
             status: .supported,
@@ -396,7 +400,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.image_capture.control",
-            title: "Image Capture control",
+            title: "Image Capture 控制",
             summary: "Request authorization to control an attached camera device through ImageCaptureCore.",
             domain: .filesAndPhotos,
             status: .supported,
@@ -409,7 +413,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.journaling_suggestions.picker",
-            title: "Journaling Suggestions picker",
+            title: "日记建议",
             summary: "Present Apple's Journaling Suggestions picker for user-selected suggestions.",
             domain: .filesAndPhotos,
             status: .degraded,
@@ -423,7 +427,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.location.when_in_use",
-            title: "Location when in use",
+            title: "使用时定位",
             summary: "Request foreground location access for current location, regions, and beacons.",
             domain: .location,
             status: .supported,
@@ -438,7 +442,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.location.always",
-            title: "Location always",
+            title: "始终定位",
             summary: "Request always/background location access.",
             domain: .location,
             status: .supported,
@@ -454,7 +458,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.location.temporary_precise",
-            title: "Temporary precise location",
+            title: "临时精确定位",
             summary: "Request temporary full-accuracy location when the user has granted approximate location.",
             domain: .location,
             status: .supported,
@@ -468,7 +472,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.location.wilderness_safety",
-            title: "Wilderness safety location",
+            title: "野外安全定位",
             summary: "Location capability for wilderness safety features when the entitlement is provisioned.",
             domain: .location,
             status: .requiresEntitlement,
@@ -484,7 +488,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.camera.capture",
-            title: "Camera",
+            title: "相机",
             summary: "Request access to camera capture for photos, video, scanning, and AR camera feed.",
             domain: .cameraAndMicrophone,
             status: .supported,
@@ -499,7 +503,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.microphone.record",
-            title: "Microphone",
+            title: "麦克风",
             summary: "Request microphone access for audio recording, speech input, and audio/video capture.",
             domain: .cameraAndMicrophone,
             status: .supported,
@@ -514,7 +518,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.camera.multitasking",
-            title: "Multitasking camera access",
+            title: "多任务相机",
             summary: "Entitlement-gated AVFoundation multitasking camera access.",
             domain: .cameraAndMicrophone,
             status: .requiresEntitlement,
@@ -528,7 +532,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.camera.external_uvc",
-            title: "External UVC camera",
+            title: "外接摄像头",
             summary: "Use external USB Video Class camera devices when the entitlement is provisioned.",
             domain: .cameraAndMicrophone,
             status: .requiresEntitlement,
@@ -543,7 +547,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.speech.recognition",
-            title: "Speech recognition",
+            title: "语音识别",
             summary: "Request Apple Speech framework authorization for speech-to-text.",
             domain: .speechAndMedia,
             status: .supported,
@@ -557,7 +561,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.speech.personal_voice",
-            title: "Personal Voice",
+            title: "个人声音",
             summary: "Request authorization to use the user's Personal Voice for speech synthesis.",
             domain: .speechAndMedia,
             status: .supported,
@@ -570,7 +574,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.media.apple_music",
-            title: "Apple Music and media library",
+            title: "Apple Music 媒体库",
             summary: "Request access to Apple Music and the user's media library.",
             domain: .speechAndMedia,
             status: .supported,
@@ -584,7 +588,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.video_subscriber.account",
-            title: "Video subscriber account",
+            title: "视频订阅",
             summary: "Request TV provider subscription account access.",
             domain: .speechAndMedia,
             status: .supported,
@@ -599,7 +603,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.contacts.full",
-            title: "Contacts",
+            title: "通讯录",
             summary: "Request Contacts framework access for reading, creating, and updating contacts.",
             domain: .contacts,
             status: .supported,
@@ -614,7 +618,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.contacts.limited",
-            title: "Contacts limited access",
+            title: "通讯录受限访问",
             summary: "Represent iOS limited contacts authorization when the user grants a subset of contacts.",
             domain: .contacts,
             status: .supported,
@@ -628,7 +632,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.contacts.picker",
-            title: "Contacts picker",
+            title: "通讯录选取",
             summary: "Let the user select one or more contacts through a foreground system picker without broad contacts access.",
             domain: .contacts,
             status: .degraded,
@@ -642,7 +646,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.calendar.full",
-            title: "Calendar full access",
+            title: "日历完全访问",
             summary: "Request full EventKit access to read and write calendar events.",
             domain: .calendarAndReminders,
             status: .supported,
@@ -657,7 +661,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.calendar.write_only",
-            title: "Calendar write-only",
+            title: "日历仅写入",
             summary: "Request EventKit write-only access to create events without reading full calendars.",
             domain: .calendarAndReminders,
             status: .supported,
@@ -672,7 +676,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.reminders.full",
-            title: "Reminders",
+            title: "提醒事项",
             summary: "Request full EventKit access to reminders.",
             domain: .calendarAndReminders,
             status: .supported,
@@ -687,7 +691,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.health.read",
-            title: "HealthKit read",
+            title: "健康数据读取",
             summary: "Request read authorization for selected HealthKit sample types.",
             domain: .healthAndMotion,
             status: .requiresEntitlement,
@@ -703,7 +707,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.health.write",
-            title: "HealthKit write",
+            title: "健康数据写入",
             summary: "Request write authorization for selected HealthKit sample types.",
             domain: .healthAndMotion,
             status: .requiresEntitlement,
@@ -718,7 +722,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.motion.fitness",
-            title: "Motion and fitness",
+            title: "运动与健身",
             summary: "Request access to Core Motion activity and pedometer data.",
             domain: .healthAndMotion,
             status: .supported,
@@ -733,7 +737,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.workoutkit.scheduler",
-            title: "WorkoutKit scheduler",
+            title: "健身计划",
             summary: "Request authorization to schedule workouts through WorkoutKit.",
             domain: .healthAndMotion,
             status: .supported,
@@ -746,7 +750,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.motion.fall_detection",
-            title: "Fall Detection",
+            title: "跌倒检测",
             summary: "Receive Apple Watch Fall Detection events from a watchOS app target when Apple grants the entitlement.",
             domain: .healthAndMotion,
             status: .requiresExtensionTarget,
@@ -762,7 +766,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.finance.financekit",
-            title: "FinanceKit",
+            title: "财务数据",
             summary: "Request entitlement-gated access to supported financial data.",
             domain: .healthAndMotion,
             status: .requiresEntitlement,
@@ -776,7 +780,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.alarmkit.alarms",
-            title: "AlarmKit alarms",
+            title: "闹钟",
             summary: "Request authorization to schedule alarms and timers through AlarmKit.",
             domain: .healthAndMotion,
             status: .supported,
@@ -790,7 +794,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.notifications.alerts",
-            title: "Notifications",
+            title: "通知",
             summary: "Request alert, sound, and badge notification authorization.",
             domain: .notifications,
             status: .supported,
@@ -804,7 +808,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.notifications.provisional",
-            title: "Provisional notifications",
+            title: "临时通知",
             summary: "Request provisional notification authorization.",
             domain: .notifications,
             status: .supported,
@@ -817,7 +821,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.notifications.critical",
-            title: "Critical alerts",
+            title: "紧急警报",
             summary: "Request critical alert authorization when the entitlement is provisioned.",
             domain: .notifications,
             status: .requiresEntitlement,
@@ -831,7 +835,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.notifications.time_sensitive",
-            title: "Time Sensitive notifications",
+            title: "时效性通知",
             summary: "Inspect and use Time Sensitive notification settings when available.",
             domain: .notifications,
             status: .requiresEntitlement,
@@ -845,7 +849,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.notifications.live_activities",
-            title: "Live Activities",
+            title: "实时活动",
             summary: "Inspect Live Activities availability and settings for ActivityKit.",
             domain: .notifications,
             status: .supported,
@@ -858,7 +862,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.notifications.communication",
-            title: "Communication notifications",
+            title: "通信通知",
             summary: "Entitlement-gated communication notification features.",
             domain: .notifications,
             status: .requiresEntitlement,
@@ -872,7 +876,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.messages.critical_sms",
-            title: "Critical SMS",
+            title: "紧急短信",
             summary: "Request per-recipient authorization for Critical SMS messaging.",
             domain: .notifications,
             status: .degraded,
@@ -886,7 +890,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.bluetooth.ble",
-            title: "Bluetooth",
+            title: "蓝牙",
             summary: "Request Bluetooth authorization for BLE scanning, connection, and peripheral interaction.",
             domain: .networkAndConnectivity,
             status: .supported,
@@ -900,7 +904,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.network.local",
-            title: "Local Network",
+            title: "本地网络",
             summary: "Request local network access by starting a foreground Bonjour/NWBrowser probe.",
             domain: .networkAndConnectivity,
             status: .supported,
@@ -914,7 +918,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.network.wifi_sharing",
-            title: "Wi-Fi sharing authorization",
+            title: "Wi-Fi 共享",
             summary: "Request Wi-Fi sharing authorization for a selected AccessorySetupKit accessory.",
             domain: .networkAndConnectivity,
             status: .degraded,
@@ -928,7 +932,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.network.wifi_info",
-            title: "Wi-Fi information",
+            title: "Wi-Fi 信息",
             summary: "Read current SSID/BSSID when the Wi-Fi information entitlement is provisioned.",
             domain: .networkAndConnectivity,
             status: .requiresEntitlement,
@@ -942,7 +946,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.network.hotspot_configuration",
-            title: "Hotspot configuration",
+            title: "热点配置",
             summary: "Configure Wi-Fi hotspots when the entitlement is provisioned.",
             domain: .networkAndConnectivity,
             status: .requiresEntitlement,
@@ -956,7 +960,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.network.hotspot_helper",
-            title: "Hotspot Helper",
+            title: "热点助手",
             summary: "Special entitlement-gated Wi-Fi hotspot helper integration.",
             domain: .networkAndConnectivity,
             status: .requiresEntitlement,
@@ -970,7 +974,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.network_extension.vpn_dns_filter",
-            title: "Network Extension",
+            title: "网络扩展",
             summary: "VPN, DNS proxy, app proxy, and content filter capabilities.",
             domain: .networkAndConnectivity,
             status: .requiresEntitlement,
@@ -985,7 +989,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.network.multipath",
-            title: "Multipath networking",
+            title: "多路径网络",
             summary: "Use Multipath TCP when the entitlement is provisioned.",
             domain: .networkAndConnectivity,
             status: .requiresEntitlement,
@@ -999,7 +1003,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.nfc.reader",
-            title: "NFC reader",
+            title: "NFC",
             summary: "Use foreground NFC reader sessions for supported tags.",
             domain: .networkAndConnectivity,
             status: .requiresEntitlement,
@@ -1015,7 +1019,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.tracking.app_tracking",
-            title: "App Tracking Transparency",
+            title: "跟踪许可",
             summary: "Request tracking authorization for IDFA and cross-app/site tracking.",
             domain: .identityAndAuthentication,
             status: .supported,
@@ -1029,7 +1033,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.authentication.face_id",
-            title: "Face ID",
+            title: "面容 ID",
             summary: "Request local biometric authentication with Face ID.",
             domain: .identityAndAuthentication,
             status: .supported,
@@ -1043,7 +1047,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.focus.status",
-            title: "Focus Status",
+            title: "专注状态",
             summary: "Request authorization to access and share the user's Focus status.",
             domain: .identityAndAuthentication,
             status: .supported,
@@ -1056,7 +1060,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.authentication.passkeys_platform_credentials",
-            title: "Platform passkeys",
+            title: "通行密钥",
             summary: "Request authorization for browser-class access to platform public key credentials.",
             domain: .identityAndAuthentication,
             status: .degraded,
@@ -1069,7 +1073,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.identity",
-            title: "Identity",
+            title: "身份认证",
             summary: "Identity-related entitlement-gated APIs.",
             domain: .identityAndAuthentication,
             status: .requiresEntitlement,
@@ -1084,7 +1088,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.game_center.friends",
-            title: "Game Center friends",
+            title: "Game Center 好友",
             summary: "Request access to the Game Center friend list.",
             domain: .identityAndAuthentication,
             status: .supported,
@@ -1098,7 +1102,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.screen_time.family_controls",
-            title: "Family Controls",
+            title: "家庭控制",
             summary: "Request Screen Time / Family Controls authorization.",
             domain: .identityAndAuthentication,
             status: .requiresEntitlement,
@@ -1112,7 +1116,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.sensitive_content_analysis",
-            title: "Sensitive Content Analysis",
+            title: "敏感内容分析",
             summary: "Entitlement-gated sensitive content analysis capability.",
             domain: .identityAndAuthentication,
             status: .requiresEntitlement,
@@ -1142,7 +1146,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.nearby.interaction",
-            title: "Nearby Interaction",
+            title: "近距离交互",
             summary: "Use UWB/Nearby Interaction sessions where supported.",
             domain: .homeAndNearby,
             status: .requiresEntitlement,
@@ -1157,7 +1161,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.matter.setup",
-            title: "Matter setup",
+            title: "Matter 配对",
             summary: "Use Matter setup payload capability when provisioned.",
             domain: .homeAndNearby,
             status: .requiresEntitlement,
@@ -1171,7 +1175,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.accessory.setup",
-            title: "Accessory setup",
+            title: "配件设置",
             summary: "Use accessory setup discovery and transport extensions.",
             domain: .homeAndNearby,
             status: .requiresEntitlement,
@@ -1189,7 +1193,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.accessory.media_device_discovery",
-            title: "Media device discovery extension",
+            title: "媒体设备发现",
             summary: "Discover media devices through an entitlement-gated extension.",
             domain: .homeAndNearby,
             status: .requiresEntitlement,
@@ -1205,7 +1209,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.siri.shortcuts",
-            title: "Siri and Shortcuts",
+            title: "Siri 与快捷指令",
             summary: "Integrate with SiriKit, App Intents, and Shortcuts.",
             domain: .extensionsAndEntitlements,
             status: .supported,
@@ -1219,7 +1223,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.call_directory",
-            title: "Call Directory",
+            title: "来电拦截",
             summary: "Provide caller identification and blocking through a Call Directory extension.",
             domain: .extensionsAndEntitlements,
             status: .requiresExtensionTarget,
@@ -1233,7 +1237,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.sms_filter",
-            title: "SMS Filter",
+            title: "短信过滤",
             summary: "Filter messages from unknown senders through a Message Filter extension.",
             domain: .extensionsAndEntitlements,
             status: .requiresExtensionTarget,
@@ -1247,7 +1251,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.keyboard.full_access",
-            title: "Keyboard full access",
+            title: "键盘完全访问",
             summary: "Allow a third-party keyboard extension to request open access.",
             domain: .extensionsAndEntitlements,
             status: .requiresExtensionTarget,
@@ -1261,7 +1265,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.replaykit.record",
-            title: "ReplayKit recording",
+            title: "屏幕录制",
             summary: "Use ReplayKit recording or broadcast picker from foreground UI.",
             domain: .extensionsAndEntitlements,
             status: .degraded,
@@ -1275,7 +1279,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.wallet.pass_library",
-            title: "Pass library",
+            title: "钱包凭证",
             summary: "Request or inspect access to Wallet pass library features where supported.",
             domain: .extensionsAndEntitlements,
             status: .supported,
@@ -1288,7 +1292,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.wallet.apple_pay",
-            title: "Apple Pay merchant",
+            title: "Apple Pay",
             summary: "Use Apple Pay merchant payment authorization when the merchant entitlement is provisioned.",
             domain: .extensionsAndEntitlements,
             status: .requiresEntitlement,
@@ -1302,7 +1306,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.system_extension",
-            title: "System Extension",
+            title: "系统扩展",
             summary: "System-extension style capabilities where the platform supports them.",
             domain: .extensionsAndEntitlements,
             status: .requiresEntitlement,
@@ -1317,7 +1321,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.autofill_credential_provider",
-            title: "AutoFill credential provider",
+            title: "自动填充密码",
             summary: "Provide credentials through the AutoFill credential provider extension.",
             domain: .extensionsAndEntitlements,
             status: .requiresExtensionTarget,
@@ -1332,7 +1336,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.push_to_talk",
-            title: "Push to Talk",
+            title: "一键通话",
             summary: "Entitlement-gated Push to Talk capability.",
             domain: .extensionsAndEntitlements,
             status: .requiresEntitlement,
@@ -1347,7 +1351,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.location_push",
-            title: "Location Push Service",
+            title: "定位推送",
             summary: "Entitlement-gated location push service capability.",
             domain: .extensionsAndEntitlements,
             status: .requiresEntitlement,
@@ -1362,7 +1366,7 @@ struct IOSCapabilityRegistry {
 
         capability(
             id: "ios.external.sms_compose",
-            title: "SMS compose draft",
+            title: "短信草稿",
             summary: "Present a system message composer. iOS keeps final send confirmation with the user.",
             domain: .externalApps,
             status: .degraded,
@@ -1376,7 +1380,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.external.phone_dialer",
-            title: "Phone dialer prompt",
+            title: "拨打电话",
             summary: "Open a tel URL. iOS keeps final call confirmation with the user.",
             domain: .externalApps,
             status: .degraded,
@@ -1390,7 +1394,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.external.share",
-            title: "External share",
+            title: "外部分享",
             summary: "Open a foreground system share sheet or whitelisted URL scheme.",
             domain: .externalApps,
             status: .degraded,
@@ -1403,7 +1407,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.webmount.browser",
-            title: "WebMount browser tools",
+            title: "WebMount 浏览器",
             summary: "Use a local WKWebView session for allowlisted WebMount stations. Cookie values, tokens, Authorization headers, arbitrary JavaScript, OAuth, and signed fetch are not exposed.",
             domain: .networkAndConnectivity,
             status: .supported,
@@ -1418,7 +1422,7 @@ struct IOSCapabilityRegistry {
         ),
         capability(
             id: "ios.remote.command",
-            title: "Remote command tasks",
+            title: "远程命令",
             summary: "Run a single command on a trusted Remote SSH profile from foreground UI. Model-dispatched terminal tools remain blocked on iOS.",
             domain: .networkAndConnectivity,
             status: .supported,
@@ -1432,61 +1436,61 @@ struct IOSCapabilityRegistry {
 
         unsupported(
             id: "android.sms.read",
-            title: "SMS database read",
+            title: "短信数据库读取",
             toolNames: ["sms_list", "sms_read"],
             reason: "iOS does not allow third-party apps to read the SMS database."
         ),
         unsupported(
             id: "android.call_log.read",
-            title: "Call log read",
+            title: "通话记录读取",
             toolNames: ["call_log_list"],
             reason: "iOS does not allow third-party apps to read call history."
         ),
         unsupported(
             id: "android.phone_state",
-            title: "Phone and SIM state",
+            title: "电话与 SIM 状态",
             toolNames: ["device_phone_state"],
             reason: "iOS has no equivalent public API for SIM, phone number, or call state inspection."
         ),
         unsupported(
             id: "android.notification.listener",
-            title: "Other app notifications",
+            title: "其他应用通知",
             toolNames: ["notification_list"],
             reason: "iOS apps cannot read notifications from other apps."
         ),
         unsupported(
             id: "android.usage_stats",
-            title: "App usage stats",
+            title: "应用使用统计",
             toolNames: ["usage_stats_list"],
             reason: "iOS has no general UsageStats equivalent for third-party apps."
         ),
         unsupported(
             id: "android.manage_all_files",
-            title: "All files access",
+            title: "所有文件访问",
             toolNames: ["external_file_list", "external_file_read", "external_file_write", "external_file_delete"],
             reason: "需要用户选择文件或导出副本后才能访问。"
         ),
         unsupported(
             id: "android.terminal",
-            title: "External terminal process",
+            title: "外部终端进程",
             toolNames: ["terminal_execute", "terminal_job_start", "terminal_session_exec"],
             reason: "iOS does not support Termux-style external process execution."
         ),
         unsupported(
             id: "android.screen_automation",
-            title: "Cross-app screen automation",
+            title: "跨应用屏幕自动化",
             toolNames: ["screen_capture", "screen_screenshot", "screen_click", "screen_tap", "screen_type", "vlm_task"],
             reason: "iOS does not provide production cross-app accessibility automation to third-party apps."
         ),
         unsupported(
             id: "android.installed_apps",
-            title: "Installed apps full list",
+            title: "已安装应用列表",
             toolNames: ["apps_installed_list"],
             reason: "iOS does not allow third-party apps to enumerate all installed apps."
         ),
         unsupported(
             id: "android.overlay",
-            title: "Cross-app overlay",
+            title: "跨应用悬浮窗",
             toolNames: [],
             reason: "iOS does not allow apps to draw floating controls above other apps."
         )
@@ -1812,9 +1816,11 @@ final class IOSPermissionStore {
             return [.disabled]
         }
         if capability.risk == .high || capability.gate.requiresFreshUserPresence {
-            return [.disabled, .askEveryTime]
+            // 高风险工具：禁用 / 每次询问 / 高风险自动批准
+            return [.disabled, .askEveryTime, .autoApproveHighRisk]
         }
-        return [.disabled, .askEveryTime]
+        // 普通工具：禁用 / 每次询问 / 自动批准
+        return [.disabled, .askEveryTime, .autoApprove]
     }
 
     static func defaultPolicy(for capability: IOSPlatformCapability) -> IOSAgentPermissionPolicy {

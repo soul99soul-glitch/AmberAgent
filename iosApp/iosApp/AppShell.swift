@@ -76,6 +76,7 @@ struct AppShell: View {
             // 仅做一次——SwiftUI .task 在 view identity 存活期间重启时会重跑，
             // 但 bootstrap 是幂等的（选最近一条 / 无历史新建）。
             await conversationStore.bootstrap()
+            sharedSettings.repairCurrentChatModelIfNeeded(settingsStore)
         }
     }
 

@@ -36,8 +36,6 @@ struct CouncilChatRuntimeView: View {
 
             VStack(spacing: 0) {
                 header
-                modeStrip
-                roster
                 transcript
             }
         }
@@ -90,94 +88,113 @@ struct CouncilChatRuntimeView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(item: $viewModel.pendingAskUser) { state in
+            askUserSheet(state)
+        }
+    }
+
+    /// 主持人提问 sheet：用户输入回答或跳过，恢复议会。
+    private func askUserSheet(_ state: IOSCouncilAskUserState) -> some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Label("主持人提问", systemImage: "questionmark.bubble")
+                    .font(.headline)
+                    .foregroundStyle(AmberTheme.accent)
+
+                Text(state.question)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                TextEditor(text: Binding(
+                    get: { viewModel.pendingAskUser?.answerDraft ?? "" },
+                    set: { viewModel.pendingAskUser?.answerDraft = $0 }
+                ))
+                .font(.body)
+                .frame(minHeight: 80)
+                .padding(8)
+                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+            }
+            .padding(16)
+            .navigationTitle("议会暂停")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("跳过") { viewModel.skipAskUser() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("回答") { viewModel.submitAskUserAnswer() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(true)
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
-                dismiss()
-            }
-
-            VStack(spacing: 2) {
-                Text("实时议会")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AmberTheme.foreground)
-
-                HStack(spacing: 5) {
-                    Text("主持 · \(viewModel.hostDisplayName)")
-                    Text("·")
-                    Text(viewModel.roomStateText)
+        AmberGlassGroup(spacing: 16) {
+            HStack(spacing: 10) {
+                AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
+                    dismiss()
                 }
-                .font(.system(size: 11.5))
-                .foregroundStyle(AmberTheme.muted)
-                .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity)
 
-            AmberGlassCircleButton(systemImage: "person.3", accessibilityLabel: "席位成员", size: 44, symbolSize: 17) {
-                viewModel.showMembers()
-            }
+                VStack(spacing: 2) {
+                    // 标题位置：显示当前模式（自由群聊/辩论），点击切换
+                    Menu {
+                        ForEach(CouncilDiscussionMode.allCases) { mode in
+                            Button {
+                                viewModel.selectedMode = mode
+                            } label: {
+                                if viewModel.selectedMode == mode {
+                                    Label(mode.title, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(viewModel.selectedMode.title)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(AmberTheme.muted)
+                        }
+                    }
+                    .disabled(viewModel.isRunning)
+                    .accessibilityLabel("切换议会模式")
 
-            if viewModel.isRunning {
-                AmberGlassCircleButton(systemImage: "stop.fill", accessibilityLabel: "停止议会", size: 44, symbolSize: 15) {
-                    viewModel.cancelDiscussion()
+                    // 小字位置：成员数 · 第几轮，点击唤起成员 sheet
+                    Button {
+                        viewModel.showMembers()
+                    } label: {
+                        Text("\(viewModel.participants.count) 位成员 · 第 \(viewModel.discussionRound) 轮")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isRunning)
+                    .accessibilityLabel("席位成员")
                 }
-            } else {
-                AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "议会设置", size: 44, symbolSize: 18) {
-                    viewModel.showSettings()
+                .frame(maxWidth: .infinity)
+
+                if viewModel.isRunning {
+                    AmberGlassCircleButton(systemImage: "stop.fill", accessibilityLabel: "停止议会", size: 44, symbolSize: 15) {
+                        viewModel.cancelDiscussion()
+                    }
+                } else {
+                    AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "议会设置", size: 44, symbolSize: 18) {
+                        viewModel.showSettings()
+                    }
                 }
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
-    }
-
-    private var modeStrip: some View {
-        HStack(spacing: 6) {
-            ForEach(CouncilDiscussionMode.allCases) { mode in
-                Button {
-                    viewModel.selectedMode = mode
-                } label: {
-                    Label(mode.title, systemImage: mode.systemImage)
-                        .font(.caption.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(viewModel.selectedMode == mode ? .white : AmberTheme.foreground2)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 34)
-                        .background(
-                            viewModel.selectedMode == mode ? mode.tint : AmberTheme.surface,
-                            in: Capsule()
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.isRunning)
-                .accessibilityLabel(mode.accessibilityLabel)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
-    }
-
-    private var roster: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(viewModel.participants) { participant in
-                    CouncilParticipantChip(
-                        participant: participant,
-                        state: viewModel.state(for: participant),
-                        currentModelId: viewModel.currentModelId
-                    ) {
-                        viewModel.insertMention(participant)
-                        isComposerFocused = true
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
-        }
-        .padding(.bottom, 6)
     }
 
     private var transcript: some View {
@@ -206,66 +223,66 @@ struct CouncilChatRuntimeView: View {
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            controlStrip
+        AmberGlassGroup(spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                controlStrip
 
-            HStack(alignment: .bottom, spacing: 10) {
-                Button {
-                    viewModel.insertHostMention()
-                    isComposerFocused = true
-                } label: {
-                    Image(systemName: "at")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(AmberTheme.muted)
-                        .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.isRunning)
-
-                TextField("发给模型议会...", text: $viewModel.inputText, axis: .vertical)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.plain)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                    .frame(minHeight: 38)
-                    .focused($isComposerFocused)
+                HStack(alignment: .bottom, spacing: 10) {
+                    Button {
+                        viewModel.insertHostMention()
+                        isComposerFocused = true
+                    } label: {
+                        Image(systemName: "at")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(AmberTheme.muted)
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
                     .disabled(viewModel.isRunning)
 
-                if viewModel.isRunning {
-                    Button {
-                        viewModel.cancelDiscussion()
-                    } label: {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(AmberTheme.accentRed, in: Circle())
+                    TextField("输入议题开始", text: $viewModel.inputText, axis: .vertical)
+                        .lineLimit(1...5)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                        .frame(minHeight: 38)
+                        .focused($isComposerFocused)
+                        .disabled(viewModel.isRunning)
+
+                    if viewModel.isRunning {
+                        AmberGlassIconButton(
+                            systemImage: "stop.fill",
+                            accessibilityLabel: "停止议会",
+                            size: 32,
+                            symbolSize: 14,
+                            tint: AmberTheme.accentRed,
+                            prominent: true
+                        ) {
+                            viewModel.cancelDiscussion()
+                        }
+                    } else {
+                        AmberGlassIconButton(
+                            systemImage: "arrow.up",
+                            accessibilityLabel: "发送给议会",
+                            size: 32,
+                            symbolSize: 15,
+                            tint: viewModel.canSend ? AmberTheme.accent : AmberTheme.muted2,
+                            prominent: viewModel.canSend
+                        ) {
+                            viewModel.send()
+                        }
+                        .disabled(!viewModel.canSend)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("停止议会")
-                } else {
-                    Button {
-                        viewModel.send()
-                    } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(viewModel.canSend ? .white : AmberTheme.muted2)
-                            .frame(width: 32, height: 32)
-                            .background(viewModel.canSend ? AmberTheme.accent : AmberTheme.surface2, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!viewModel.canSend)
-                    .accessibilityLabel("发送给议会")
                 }
+                .padding(.leading, 8)
+                .padding(.trailing, 6)
+                .padding(.vertical, 6)
+                .overlay {
+                    Capsule()
+                        .stroke(AmberTheme.border.opacity(0.58), lineWidth: 0.5)
+                }
+                .amberGlass(cornerRadius: 25)
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 6)
-            .padding(.vertical, 6)
-            .overlay {
-                Capsule()
-                    .stroke(AmberTheme.border.opacity(0.58), lineWidth: 0.5)
-            }
-            .amberGlass(cornerRadius: 25)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -290,9 +307,6 @@ struct CouncilChatRuntimeView: View {
                 CouncilComposerChip(title: "邀请席位", systemImage: "person.badge.plus") {
                     viewModel.insertInviteTemplate()
                     isComposerFocused = true
-                }
-                CouncilComposerChip(title: "成员", systemImage: "person.3") {
-                    viewModel.showMembers()
                 }
                 CouncilComposerChip(title: "重新开始", systemImage: "arrow.counterclockwise") {
                     viewModel.restartLastDiscussion()
@@ -789,6 +803,21 @@ enum CouncilRuntimeSheet: Identifiable {
     }
 }
 
+/// 议会暂停等用户回答时的状态。持有 continuation，用户回答/跳过后 resume。
+struct IOSCouncilAskUserState: Identifiable {
+    let id = UUID()
+    let question: String
+    /// 用户的回答输入草稿。
+    var answerDraft: String = ""
+    fileprivate let continuation: CheckedContinuation<String?, Never>
+
+    /// 用户确认回答（或留空跳过）后调用，恢复议会。
+    func resume() {
+        let trimmed = answerDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        continuation.resume(returning: trimmed.isEmpty ? nil : trimmed)
+    }
+}
+
 @MainActor
 @Observable
 final class CouncilChatViewModel {
@@ -798,6 +827,8 @@ final class CouncilChatViewModel {
     var isRunning = false
     var activeSheet: CouncilRuntimeSheet?
     var isResearchConsentPresented = false
+    /// 主持人向用户提问时的暂停状态（非 nil = 议会暂停中，等用户回答）。
+    var pendingAskUser: IOSCouncilAskUserState?
     var participants: [CouncilParticipant] = []
     var failedSpeakerIds: Set<String> = []
 
@@ -831,16 +862,7 @@ final class CouncilChatViewModel {
         self.providerRegistry = providerRegistry
         self.roomSettingsStore = roomSettingsStore
         self.runner = runner ?? IOSCouncilRoomRunner(permissionStore: permissionStore)
-        self.messages = [
-            CouncilChatMessage(
-                kind: .system,
-                author: "议会",
-                body: "模型议会已就绪。输入议题后，主持人会先调研和完善议题，再拉起席位讨论。",
-                systemImage: "person.3.sequence",
-                tint: AmberTheme.accentIndigo,
-                subtitle: "就绪"
-            )
-        ]
+        self.messages = []
         refreshSettingsBackedParticipants()
     }
 
@@ -848,6 +870,21 @@ final class CouncilChatViewModel {
         !isRunning &&
             !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 用户提交对主持人提问的回答，恢复议会。
+    func submitAskUserAnswer() {
+        guard var pending = pendingAskUser else { return }
+        pendingAskUser = nil
+        pending.resume()
+    }
+
+    /// 用户跳过提问，恢复议会（视为无补充）。
+    func skipAskUser() {
+        guard var pending = pendingAskUser else { return }
+        pendingAskUser = nil
+        pending.answerDraft = ""
+        pending.resume()
     }
 
     var currentModelId: String {
@@ -872,6 +909,12 @@ final class CouncilChatViewModel {
 
     var lastMessageBody: String {
         messages.last?.body ?? ""
+    }
+
+    /// 当前讨论轮次：统计 divider 消息数量（每次 appendDivider 标记一轮开场/结束）。
+    var discussionRound: Int {
+        let dividerCount = messages.filter { $0.kind == .divider }.count
+        return max(1, dividerCount)
     }
 
     var availableModelIds: [String] {
@@ -1030,9 +1073,18 @@ final class CouncilChatViewModel {
                 ? (researchAllowed ? .allowed : .denied)
                 : .unavailable
         )
-        let summary = await runner.run(request: request) { [weak self] event in
+        let summary = await runner.run(request: request, onEvent: { [weak self] event in
             self?.handle(event)
-        }
+        }, onAskUser: { [weak self] question in
+            // 暂停议会，等用户回答。用户回答后恢复；跳过则返回 nil。
+            guard let self else { return nil }
+            return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+                self.pendingAskUser = IOSCouncilAskUserState(
+                    question: question,
+                    continuation: continuation
+                )
+            }
+        })
         if currentTaskId == nil {
             currentTaskId = summary.taskId
         }
@@ -1113,6 +1165,9 @@ final class CouncilChatViewModel {
             appendMessage(event)
         case .updateMessage(let id, let body, let status):
             updateMessage(id, body: body, status: CouncilMessageStatus(status))
+        case .askUser:
+            // 实际的暂停/恢复由 onAskUser 回调驱动，这里不做额外处理。
+            break
         }
     }
 

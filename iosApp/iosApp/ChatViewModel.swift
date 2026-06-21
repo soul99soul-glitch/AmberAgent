@@ -17,6 +17,7 @@ struct ChatContextSnapshot {
     let completionTokens: Int
     let totalTokens: Int
     let cachedTokens: Int
+    let tokensPerSecond: Double?
 }
 
 private struct PendingAssistantRegeneration {
@@ -61,11 +62,18 @@ final class ChatViewModel {
         var prompt = 0
         var completion = 0
         var cached = 0
+        var timedCompletionTokens = 0
+        var generationDuration = 0.0
         for message in messages {
             guard let usage = message.usage else { continue }
             prompt += Int(usage.promptTokens)
             completion += Int(usage.completionTokens)
             cached += Int(usage.cachedTokens)
+            if let duration = Self.durationSeconds(from: message.createdAt, to: message.finishedAt),
+               duration > 0 {
+                timedCompletionTokens += Int(usage.completionTokens)
+                generationDuration += duration
+            }
         }
         return ChatContextSnapshot(
             messageCount: messages.count,
@@ -76,8 +84,35 @@ final class ChatViewModel {
             promptTokens: prompt,
             completionTokens: completion,
             totalTokens: prompt + completion,
-            cachedTokens: cached
+            cachedTokens: cached,
+            tokensPerSecond: generationDuration > 0 ? Double(timedCompletionTokens) / generationDuration : nil
         )
+    }
+
+    private static func durationSeconds(
+        from start: Kotlinx_datetimeLocalDateTime,
+        to end: Kotlinx_datetimeLocalDateTime?
+    ) -> TimeInterval? {
+        guard let end,
+              let startDate = date(from: start),
+              let endDate = date(from: end) else {
+            return nil
+        }
+        return endDate.timeIntervalSince(startDate)
+    }
+
+    private static func date(from localDateTime: Kotlinx_datetimeLocalDateTime) -> Date? {
+        var components = DateComponents()
+        components.calendar = Calendar.current
+        components.timeZone = TimeZone.current
+        components.year = Int(localDateTime.year)
+        components.month = Int(localDateTime.month.ordinal) + 1
+        components.day = Int(localDateTime.day)
+        components.hour = Int(localDateTime.hour)
+        components.minute = Int(localDateTime.minute)
+        components.second = Int(localDateTime.second)
+        components.nanosecond = Int(localDateTime.nanosecond)
+        return components.date
     }
 
     var currentModelSupportsReasoning: Bool {
@@ -97,6 +132,10 @@ final class ChatViewModel {
                     providers: sharedSettings.snapshot.providers
                 )
             )
+        }
+
+        if !ChatProviderConfiguration.configuredChatModels(in: sharedSettings.snapshot.providers).isEmpty {
+            return .missingModel
         }
 
         // Legacy scalar fallback for callers that have not selected a KMP
@@ -941,7 +980,7 @@ final class ChatViewModel {
         }
         if localToolExecutor != nil {
             toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
-                names: Array(IOSWorkspaceToolCatalog.supportedToolNames).sorted()
+                names: workspaceToolNamesForCurrentTurn()
             ))
         }
         if localToolExecutor != nil, isWebMountRuntimeEnabled {
@@ -976,6 +1015,33 @@ final class ChatViewModel {
 
     func currentToolDeclarationNames() -> [String] {
         makeTextGenerationParams().tools.map(\.name)
+    }
+
+    private func workspaceToolNamesForCurrentTurn() -> [String] {
+        let names = latestUserMessageRequestsWorkspaceWrite()
+            ? IOSWorkspaceToolCatalog.supportedToolNames
+            : IOSWorkspaceToolCatalog.readToolNames
+        return Array(names).sorted()
+    }
+
+    private func latestUserMessageRequestsWorkspaceWrite() -> Bool {
+        guard let text = messages.reversed()
+            .first(where: { $0.role == MessageRole.user })?
+            .toText()
+            .lowercased()
+        else { return false }
+
+        let hasWriteAction = [
+            "保存", "存到", "存入", "写入", "新建", "创建", "生成文件", "导出",
+            "修改", "编辑", "删除", "移动", "重命名", "落盘",
+            "save", "write", "create", "export", "edit", "delete", "move", "rename"
+        ].contains { text.contains($0) }
+        guard hasWriteAction else { return false }
+
+        return [
+            "workspace", "工作区", "/workspace", "文件", "文档",
+            ".md", ".txt", ".json", ".html", ".csv"
+        ].contains { text.contains($0) }
     }
 
     #if DEBUG

@@ -156,8 +156,8 @@ final class IOSWebMountContentHandoffStore {
 final class IOSWebMountActivityStore {
     static let shared = IOSWebMountActivityStore()
 
-    var recentExtractionTitle = "尚未提取"
-    var recentExtractionDetail = "打开站点后可读取正文、链接和视觉候选。"
+    var recentExtractionTitle = "—"
+    var recentExtractionDetail = "暂无"
     var recentExtractionAtMillis: Int64 = 0
 
     private init() {}
@@ -201,9 +201,6 @@ struct WebMountView: View {
     @State private var addNeedsLogin = true
     @State private var addCookieName = ""
     @State private var banner: String?
-    @State private var activityStore = IOSWebMountActivityStore.shared
-    @State private var loginStatusSummary = "未检测"
-    @State private var sessionRefreshTick = 0
 
     private var registry: IOSWebMountRegistry { controller.registry }
     private var settings: IOSWebMountSettings { controller.settings }
@@ -225,8 +222,6 @@ struct WebMountView: View {
                             WebMountBanner(text: banner)
                                 .padding(.top, 4)
                         }
-                        workbenchSection
-                        settingsSection
                         stationSection
                     }
                     .padding(.bottom, 36)
@@ -238,9 +233,6 @@ struct WebMountView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showAddSite) {
             addSiteSheet
-        }
-        .task {
-            await refreshLoginStatusSummary()
         }
     }
 
@@ -278,91 +270,6 @@ struct WebMountView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 10)
-    }
-
-    private var workbenchSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "工作台")
-            AmberFormGroup {
-                WebMountInfoRow(
-                    title: "活动 Session",
-                    subtitle: controller.sessionStore.records.isEmpty ? "当前没有活动网页会话。" : controller.sessionStore.records.map { $0.title }.joined(separator: " / "),
-                    systemImage: "rectangle.stack",
-                    tint: AmberTheme.accentCyan,
-                    trailing: "\(controller.sessionStore.records.count)/\(controller.sessionStore.maxSessions)"
-                )
-                if !controller.sessionStore.records.isEmpty {
-                    WebMountDivider()
-                    ForEach(Array(controller.sessionStore.records.enumerated()), id: \.element.id) { index, record in
-                        WebMountSessionRow(
-                            record: record,
-                            onClose: {
-                                Task { await closeSession(record.id) }
-                            }
-                        )
-                        if index < controller.sessionStore.records.count - 1 {
-                            WebMountDivider()
-                        }
-                    }
-                }
-                WebMountDivider()
-                WebMountInfoRow(
-                    title: "登录状态",
-                    subtitle: loginStatusSummary,
-                    systemImage: "person.crop.circle.badge.checkmark",
-                    tint: AmberTheme.accentAmber,
-                    trailing: "Cookie"
-                )
-                WebMountDivider()
-                WebMountInfoRow(
-                    title: "最近提取",
-                    subtitle: activityStore.recentExtractionDetail,
-                    systemImage: "doc.text.magnifyingglass",
-                    tint: AmberTheme.accentGreen,
-                    trailing: activityStore.recentExtractionTitle
-                )
-                WebMountDivider()
-                WebMountInfoRow(
-                    title: "工具权限",
-                    subtitle: "模型使用 WebMount 仍走前台审批；截图、清 Session、站点增删必须显式确认。",
-                    systemImage: "checkmark.shield",
-                    tint: AmberTheme.accentIndigo,
-                    trailing: "\(IOSWebMountToolCatalog.supportedToolNames.count)"
-                )
-            }
-        }
-        .id(sessionRefreshTick)
-    }
-
-    private var settingsSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "Agent 工具")
-            AmberFormGroup {
-                WebMountInfoRow(
-                    title: "正式能力",
-                    subtitle: "WebMount 工具会按「权限与批准」策略执行；模型读取页面前默认需要前台确认。",
-                    systemImage: "checkmark.shield",
-                    tint: AmberTheme.accentGreen,
-                    trailing: "可用"
-                )
-                WebMountDivider()
-                WebMountInfoRow(
-                    title: "wm_eval",
-                    subtitle: "任意 JavaScript 未声明，也不会默认开启。OAuth / signed fetch / adapter 工具会返回 unsupported。",
-                    systemImage: "curlybraces",
-                    tint: AmberTheme.accentRed,
-                    trailing: "关闭"
-                )
-                WebMountDivider()
-                WebMountInfoRow(
-                    title: "URL allowlist",
-                    subtitle: "仅允许当前站点注册表里的 http(s) host；移除站点后 direct URL 也会被拒绝。",
-                    systemImage: "link.badge.plus",
-                    tint: AmberTheme.accentCyan,
-                    trailing: "\(settings.allowedHosts.count)"
-                )
-            }
-        }
     }
 
     private var stationSection: some View {
@@ -486,45 +393,6 @@ struct WebMountView: View {
             settings.syncAllowedHosts(registry.sites.flatMap(\.allowedHosts))
             banner = "已移除 \(site.displayName)。"
         }
-    }
-
-    private func closeSession(_ sessionId: String) async {
-        let output = await controller.execute(
-            toolName: "wm_tab_close",
-            input: IOSWebMountController.json(["session_id": sessionId]),
-            isUserInitiated: true
-        )
-        if let object = Self.jsonObject(output),
-           object["ok"] as? Bool == false {
-            banner = object["error"] as? String ?? "关闭 Session 失败。"
-        } else {
-            banner = "已关闭 \(sessionId)。"
-            sessionRefreshTick &+= 1
-        }
-    }
-
-    private func refreshLoginStatusSummary() async {
-        var loggedIn = 0
-        var loggedOut = 0
-        var unknown = 0
-        for site in registry.sites {
-            let summary = await controller.cookieStore.summary(for: site)
-            switch site.authKind {
-            case .anonymous:
-                loggedIn += 1
-            case .cookie:
-                if summary.hasLoginCookie == true {
-                    loggedIn += 1
-                } else if summary.hasLoginCookie == false {
-                    loggedOut += 1
-                } else {
-                    unknown += 1
-                }
-            case .oauth:
-                unknown += 1
-            }
-        }
-        loginStatusSummary = "\(loggedIn) 已登录 / \(loggedOut) 未登录 / \(unknown) 未知"
     }
 
     private static func jsonObject(_ text: String) -> [String: Any]? {
@@ -1137,52 +1005,6 @@ private struct WebMountStationRow: View {
         case .cookie: AmberTheme.accentAmber
         case .oauth: AmberTheme.accentIndigo
         }
-    }
-}
-
-private struct WebMountSessionRow: View {
-    let record: IOSWebMountSessionRecord
-    let onClose: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: record.isCurrent ? "rectangle.inset.filled" : "rectangle")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(record.isCurrent ? AmberTheme.accentCyan : AmberTheme.muted2)
-                .frame(width: 28, height: 28)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(record.title.nilIfBlank ?? "Untitled")
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                    .lineLimit(1)
-                Text(sessionSubtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(record.status)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(record.status == "ready" ? AmberTheme.accentGreen : AmberTheme.accentAmber)
-
-            Button(role: .destructive, action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AmberTheme.accentRed)
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private var sessionSubtitle: String {
-        let site = record.siteName?.nilIfBlank ?? "WebMount"
-        let url = record.redactedURL.nilIfBlank ?? record.id
-        return "\(site) · \(url)"
     }
 }
 

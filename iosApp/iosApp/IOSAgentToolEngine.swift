@@ -346,7 +346,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     input: toolPart.input,
                     output: newOutput,
                     approvalState: toolPart.approvalState,
-                    metadata: toolPart.metadata
+                    streamIndex: toolPart.streamIndex,
+                    metadata: nil
                 )
             }
             guard didChange else { return message }

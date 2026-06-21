@@ -118,8 +118,19 @@ struct ChatRuntimeContextBuilder {
         prepared = messagesByInjectingMcpContext(prepared)
         prepared = messagesByInjectingMemoryContext(prepared)
         prepared = messagesByInjectingSkillContext(prepared)
+        prepared = messagesByInjectingWorkspaceToolPolicy(prepared)
         prepared = messagesByInjectingSystemPrompt(prepared)
         return prepared
+    }
+
+    private func messagesByInjectingWorkspaceToolPolicy(_ messages: [UIMessage]) -> [UIMessage] {
+        guard sharedSettings.isCapabilityGateEnabled(.workspace) else { return messages }
+        let prompt = """
+        Workspace tools are optional. For ordinary writing, drafting, translation, Markdown examples, or formatted answers, reply directly in chat.
+        Do not call Workspace write, edit, move, or delete tools unless the latest user message explicitly asks to save, export, create, modify, rename, move, or delete a Workspace file.
+        Use Workspace read, list, or search tools only when the user asks about existing Workspace files or artifacts.
+        """
+        return [UIMessage.companion.system(prompt: prompt)] + messages
     }
 
     private func messagesByInjectingSkillContext(_ messages: [UIMessage]) -> [UIMessage] {

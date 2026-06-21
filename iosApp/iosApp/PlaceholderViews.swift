@@ -63,6 +63,7 @@ enum IOSDisplayPreferenceKeys {
     static let chatFont = "app.amber.ios.display.chatFont"
     static let agentName = "app.amber.ios.display.agentName"
     static let followGeneration = "app.amber.ios.display.followGeneration"
+    static let microsoftStreamingMarkdown = "app.amber.ios.display.microsoftStreamingMarkdown"
 }
 
 enum IOSChatFont: String, CaseIterable, Identifiable {
@@ -407,12 +408,6 @@ struct ConversationsView: View {
                 systemImage: "square.grid.2x2",
                 color: AmberTheme.accent,
                 route: .miniApps
-            ),
-            .init(
-                title: "图片",
-                systemImage: "photo.on.rectangle",
-                color: AmberTheme.accentRed,
-                route: .imageGeneration
             ),
             .init(
                 title: "核心记忆",
@@ -1179,8 +1174,6 @@ struct SettingsHomeView: View {
             .init(title: "核心记忆", subtitle: nil, value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
             .init(title: "执行与任务", subtitle: nil, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
             .init(title: "技能", subtitle: nil, value: nil, systemImage: "wrench.and.screwdriver", color: AmberTheme.accentAmber, route: .skills),
-            .init(title: "MCP", subtitle: nil, value: nil, systemImage: "network", color: AmberTheme.accentRed, route: .mcpServers),
-            .init(title: "注入与 Lorebook", subtitle: nil, value: nil, systemImage: "text.badge.plus", color: AmberTheme.accentIndigo, route: .promptInjection),
             .init(title: "权限与批准", subtitle: nil, value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions)
         ]
     }

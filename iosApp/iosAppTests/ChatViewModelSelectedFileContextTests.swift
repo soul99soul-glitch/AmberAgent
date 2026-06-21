@@ -613,6 +613,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             input: input,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         let step = ChatToolStepModel(tool: toolCall)
@@ -711,6 +712,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
                 input: #"{"objective":"check resume"}"#,
                 output: [],
                 approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
                 metadata: nil
             )
             let assistantSeed = UIMessage.companion.assistant(prompt: "")
@@ -751,6 +753,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             input: #"{"objective":"audit runtime","role_id":"explorer"}"#,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         let councilCall = UIMessagePart.Tool(
@@ -759,6 +762,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             input: #"{"objective":"decide fallback","mode":"parallel"}"#,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         let seed = UIMessage.companion.assistant(prompt: "")
@@ -885,6 +889,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             input: #"{"query":"swift concurrency","max_results":1}"#,
             output: [],
             approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
             metadata: nil
         )
         let seed = UIMessage.companion.assistant(prompt: "")

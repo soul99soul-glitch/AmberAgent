@@ -248,11 +248,17 @@ struct ProviderDetailView: View {
     private var configActions: some View {
         VStack(spacing: 10) {
             Button {
-                saveConfig(showSuccess: true)
+                saveAndFetchModels()
             } label: {
-                ProviderActionRow(systemImage: "square.and.arrow.down", title: "保存配置", tint: AmberTheme.accent)
+                ProviderActionRow(
+                    systemImage: fetchState.isLoading ? "hourglass" : "square.and.arrow.down",
+                    title: fetchState.isLoading ? "正在获取模型" : "保存并获取模型",
+                    tint: AmberTheme.accent
+                )
             }
             .buttonStyle(.plain)
+            .disabled(fetchState.isLoading)
+            .opacity(fetchState.isLoading ? 0.65 : 1)
 
             Button {
                 testConnection()
@@ -318,20 +324,25 @@ struct ProviderDetailView: View {
                     AmberSectionLabel(text: "可用模型")
                     AmberFormGroup {
                         ForEach(Array(availableModels.enumerated()), id: \.offset) { index, model in
-                            let selected = chatModels.contains { $0.modelId == model.modelId }
+                            let enabledModel = chatModels.first { $0.modelId == model.modelId }
+                            let isCurrent = enabledModel?.id == currentModel?.id
                             Button {
-                                addFetchedModel(model)
+                                if let enabledModel {
+                                    setCurrent(enabledModel)
+                                } else {
+                                    addFetchedModel(model)
+                                }
                             } label: {
                                 ProviderRowContent(
                                     title: displayName(for: model),
                                     subtitle: model.modelId,
-                                    value: selected ? "已启用" : "添加",
-                                    valueStyle: selected ? .body : .accent,
+                                    value: isCurrent ? "当前" : (enabledModel == nil ? "添加并使用" : "使用"),
+                                    valueStyle: isCurrent ? .body : .accent,
                                     showsChevron: false
                                 )
                             }
                             .buttonStyle(.plain)
-                            .disabled(selected)
+                            .disabled(isCurrent)
 
                             if index < availableModels.count - 1 {
                                 ProviderDetailDivider()
@@ -402,7 +413,7 @@ struct ProviderDetailView: View {
     }
 
     @discardableResult
-    private func saveConfig(showSuccess: Bool) -> Bool {
+    private func saveConfig(showSuccess: Bool, forceEnabled: Bool = false) -> Bool {
         guard let provider else { return false }
         let name = draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? provider.name : draftName.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseURL = normalizedBaseURL(draftBaseURL)
@@ -411,7 +422,11 @@ struct ProviderDetailView: View {
             return false
         }
         let path = draftChatPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "/chat/completions" : draftChatPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        _ = sharedSettings.updateProviderBasics(providerId: providerId, name: name, enabled: draftEnabled)
+        let enabled = forceEnabled || draftEnabled
+        _ = sharedSettings.updateProviderBasics(providerId: providerId, name: name, enabled: enabled)
+        if forceEnabled {
+            draftEnabled = true
+        }
         _ = sharedSettings.updateProviderApiKey(providerId: providerId, apiKey: draftApiKey.trimmingCharacters(in: .whitespacesAndNewlines))
         _ = sharedSettings.updateProviderEndpoint(
             providerId: providerId,
@@ -427,6 +442,16 @@ struct ProviderDetailView: View {
             alert = .saved
         }
         return true
+    }
+
+    private func saveAndFetchModels() {
+        guard saveConfig(showSuccess: false) else { return }
+        guard let provider else { return }
+        guard !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            alert = .saved
+            return
+        }
+        fetchModels(saveBeforeFetch: false, revealModels: true)
     }
 
     private func switchProtocol(to option: ProviderProtocolOption) {
@@ -446,9 +471,14 @@ struct ProviderDetailView: View {
         loadDraft()
     }
 
-    private func fetchModels() {
-        guard saveConfig(showSuccess: false) else { return }
+    private func fetchModels(saveBeforeFetch: Bool = true, revealModels: Bool = false) {
+        if saveBeforeFetch {
+            guard saveConfig(showSuccess: false) else { return }
+        }
         guard let provider else { return }
+        if revealModels {
+            selectedTab = .models
+        }
         guard ChatProviderConfiguration.supportsChatStreaming(provider) else {
             fetchState = .failure("这个 Provider 类型的 iOS 模型获取尚未移植。")
             return
@@ -477,39 +507,58 @@ struct ProviderDetailView: View {
     }
 
     private func addFetchedModel(_ model: Model) {
+        guard saveConfig(showSuccess: false, forceEnabled: true) else { return }
         let displayName = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model.modelId : model.displayName
-        _ = sharedSettings.upsertProviderChatModel(
+        guard let updatedProvider = sharedSettings.upsertProviderChatModel(
             providerId: providerId,
             modelUuid: nil,
             modelId: model.modelId,
             displayName: displayName,
             contextWindowTokens: intValue(model.contextWindowTokens),
             headers: model.customHeaders.map { ($0.name, $0.value) }
-        )
+        ) else { return }
+        guard let savedModel = updatedProvider.models.first(where: { $0.type == .chat && $0.modelId == model.modelId }) else { return }
+        selectCurrent(savedModel, showAlert: true)
     }
 
-    private func saveModelDraft(_ draft: ProviderModelDraft) {
+    @discardableResult
+    private func saveModelDraft(_ draft: ProviderModelDraft) -> Bool {
         let modelId = draft.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !modelId.isEmpty else {
             alert = .modelRequired
-            return
+            return false
         }
+        let wasCurrent = currentModel?.id.description() == draft.modelUuid
+        let shouldSelect = draft.modelUuid == nil || wasCurrent
+        guard saveConfig(showSuccess: false, forceEnabled: shouldSelect) else { return false }
         let displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? modelId : draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        _ = sharedSettings.upsertProviderChatModel(
+        guard let updatedProvider = sharedSettings.upsertProviderChatModel(
             providerId: providerId,
             modelUuid: draft.modelUuid,
             modelId: modelId,
             displayName: displayName,
             contextWindowTokens: draft.contextWindowTokens,
             headers: draft.headers.map { ($0.name, $0.value) }
-        )
+        ) else { return false }
+        if shouldSelect,
+           let savedModel = updatedProvider.models.first(where: { $0.type == .chat && $0.modelId == modelId }) {
+            selectCurrent(savedModel, showAlert: draft.modelUuid == nil)
+        }
         modelDraft = nil
+        return true
     }
 
     private func setCurrent(_ model: Model) {
+        guard saveConfig(showSuccess: false, forceEnabled: true) else { return }
+        selectCurrent(model, showAlert: true)
+    }
+
+    private func selectCurrent(_ model: Model, showAlert: Bool) {
         sharedSettings.setCurrentChatModelId(model.id.description())
         sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
-        alert = .currentModelSet(model.modelId)
+        if showAlert {
+            alert = .currentModelSet(model.modelId)
+        }
     }
 
     private func deleteModel(_ model: Model) {
@@ -781,9 +830,9 @@ private struct ProviderSegmentedControl: View {
 private struct ProviderModelEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ProviderModelDraft
-    let onSave: (ProviderModelDraft) -> Void
+    let onSave: (ProviderModelDraft) -> Bool
 
-    init(draft: ProviderModelDraft, onSave: @escaping (ProviderModelDraft) -> Void) {
+    init(draft: ProviderModelDraft, onSave: @escaping (ProviderModelDraft) -> Bool) {
         self._draft = State(initialValue: draft)
         self.onSave = onSave
     }
@@ -861,8 +910,9 @@ private struct ProviderModelEditorSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        onSave(draft)
-                        dismiss()
+                        if onSave(draft) {
+                            dismiss()
+                        }
                     }
                 }
             }

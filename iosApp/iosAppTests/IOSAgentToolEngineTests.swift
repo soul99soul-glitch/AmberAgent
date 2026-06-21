@@ -101,6 +101,7 @@ final class IOSAgentToolEngineTests: XCTestCase {
                 input: input,
                 output: [],
                 approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
                 metadata: nil
             )]
         )
@@ -236,8 +237,8 @@ final class IOSAgentToolEngineTests: XCTestCase {
         let twoToolMessage = makeMessage(
             role: MessageRole.assistant,
             parts: [
-                UIMessagePart.Tool(toolCallId: "a", toolName: "echo", input: "{}", output: [], approvalState: ToolApprovalState.Auto.shared, metadata: nil),
-                UIMessagePart.Tool(toolCallId: "b", toolName: "echo", input: "{}", output: [], approvalState: ToolApprovalState.Auto.shared, metadata: nil)
+                UIMessagePart.Tool(toolCallId: "a", toolName: "echo", input: "{}", output: [], approvalState: ToolApprovalState.Auto.shared, streamIndex: nil, metadata: nil),
+                UIMessagePart.Tool(toolCallId: "b", toolName: "echo", input: "{}", output: [], approvalState: ToolApprovalState.Auto.shared, streamIndex: nil, metadata: nil)
             ]
         )
         let provider = ScriptedProvider([twoToolMessage, assistantText("done")])
@@ -310,8 +311,8 @@ final class IOSAgentToolEngineTests: XCTestCase {
         let twoToolMessage = makeMessage(
             role: MessageRole.assistant,
             parts: [
-                UIMessagePart.Tool(toolCallId: "d", toolName: "deniedTool", input: "{}", output: [], approvalState: ToolApprovalState.Auto.shared, metadata: nil),
-                UIMessagePart.Tool(toolCallId: "f", toolName: "failedTool", input: "{}", output: [], approvalState: ToolApprovalState.Auto.shared, metadata: nil)
+                UIMessagePart.Tool(toolCallId: "d", toolName: "deniedTool", input: "{}", output: [], approvalState: ToolApprovalState.Auto.shared, streamIndex: nil, metadata: nil),
+                UIMessagePart.Tool(toolCallId: "f", toolName: "failedTool", input: "{}", output: [], approvalState: ToolApprovalState.Auto.shared, streamIndex: nil, metadata: nil)
             ]
         )
         let provider = ScriptedProvider([twoToolMessage, assistantText("done")])

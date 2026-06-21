@@ -1,5 +1,6 @@
 import SwiftUI
 import Shared
+import SwiftStreamingMarkdown
 
 struct MessageBubbleView: View {
 
@@ -18,6 +19,7 @@ struct MessageBubbleView: View {
     @Environment(IOSWorkspaceStore.self) private var workspaceStore
     @State private var editing: Bool = false
     @State private var editDraft: String = ""
+    @State private var workspaceSaveAlert: WorkspaceSaveAlert?
 
     private var isUser: Bool {
         message.role == MessageRole.user
@@ -30,33 +32,43 @@ struct MessageBubbleView: View {
     }
 
     var body: some View {
-        if isUser {
-            HStack {
-                Spacer(minLength: 48)
+        Group {
+            if isUser {
+                HStack {
+                    Spacer(minLength: 48)
 
-                VStack(alignment: .trailing, spacing: 4) {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        variantSwitcher
+                        messageParts
+                    }
+                    .frame(maxWidth: ChatLayout.userMaxWidth, alignment: .trailing)
+                }
+                .contextMenu { messageActions }
+                .sheet(isPresented: $editing) {
+                    editSheet
+                }
+            } else {
+                ChatAssistantStack {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        ChatAgentName()
+                        if variantInfo?.hasMultipleVariants == true {
+                            variantBadge
+                        }
+                    }
                     variantSwitcher
                     messageParts
+                    annotationsBlock
                 }
-                .frame(maxWidth: ChatLayout.userMaxWidth, alignment: .trailing)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contextMenu { messageActions }
             }
-            .contextMenu { messageActions }
-            .sheet(isPresented: $editing) {
-                editSheet
-            }
-        } else {
-            ChatAssistantStack {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    ChatAgentName()
-                    if variantInfo?.hasMultipleVariants == true {
-                        variantBadge
-                    }
-                }
-                variantSwitcher
-                messageParts
-                annotationsBlock
-            }
-            .contextMenu { messageActions }
+        }
+        .alert(item: $workspaceSaveAlert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("好"))
+            )
         }
     }
 
@@ -163,6 +175,13 @@ struct MessageBubbleView: View {
                 } label: {
                     Label("重新生成", systemImage: "arrow.clockwise")
                 }
+                if assistantArtifactText != nil {
+                    Button {
+                        saveAssistantMessageToWorkspace()
+                    } label: {
+                        Label("保存到 Workspace", systemImage: "tray.and.arrow.down")
+                    }
+                }
             }
             Button(role: .destructive) {
                 onDelete()
@@ -217,13 +236,8 @@ struct MessageBubbleView: View {
                     ChatUserBubble(text: textPart.text)
                 } else {
                     ChatAssistantText {
-                        MarkdownView(markdown: textPart.text, displaySetting: displaySetting)
+                        ChatAssistantMarkdownView(markdown: textPart.text, displaySetting: displaySetting)
                     }
-                    ChatMessageArtifactButton(
-                        text: textPart.text,
-                        messageId: String(describing: message.id),
-                        workspaceStore: workspaceStore
-                    )
                 }
             } else if let reasoning = part as? UIMessagePart.Reasoning, !reasoning.reasoning.isEmpty {
                 ChatReasoningCard(
@@ -244,48 +258,36 @@ struct MessageBubbleView: View {
             }
         }
     }
-}
 
-private struct ChatMessageArtifactButton: View {
-    let text: String
-    let messageId: String
-    @Bindable var workspaceStore: IOSWorkspaceStore
-
-    @State private var statusText: String?
-
-    var body: some View {
-        Button {
-            save()
-        } label: {
-            Label(statusText ?? "保存到 Workspace", systemImage: statusText == nil ? "tray.and.arrow.down" : "checkmark")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(statusText == nil ? AmberTheme.accent : AmberTheme.accentGreen)
-                .lineLimit(1)
-                .padding(.horizontal, 9)
-                .frame(height: 26)
-                .background((statusText == nil ? AmberTheme.accentTint : AmberTheme.accentGreen.opacity(0.10)), in: Capsule())
+    private var assistantArtifactText: String? {
+        guard !isUser else { return nil }
+        let text = message.parts.compactMap { part -> String? in
+            guard let textPart = part as? UIMessagePart.Text else { return nil }
+            let trimmed = textPart.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : textPart.text
         }
-        .buttonStyle(.plain)
-        .disabled(statusText != nil)
-        .accessibilityLabel("保存助手回复到 Workspace")
+        .joined(separator: "\n\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 
-    private func save() {
+    private func saveAssistantMessageToWorkspace() {
+        guard let text = assistantArtifactText else { return }
         do {
             _ = try workspaceStore.saveArtifact(
-                title: artifactTitle,
+                title: artifactTitle(for: text),
                 content: text,
                 type: .chat,
                 sourceKind: "chat_message",
-                sourceId: messageId
+                sourceId: String(describing: message.id)
             )
-            statusText = "已保存"
+            workspaceSaveAlert = .saved
         } catch {
-            statusText = "保存失败"
+            workspaceSaveAlert = .failed(error.localizedDescription)
         }
     }
 
-    private var artifactTitle: String {
+    private func artifactTitle(for text: String) -> String {
         let firstLine = text
             .split(whereSeparator: \.isNewline)
             .first
@@ -293,6 +295,50 @@ private struct ChatMessageArtifactButton: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let firstLine, !firstLine.isEmpty else { return "Chat Artifact" }
         return String(firstLine.prefix(80))
+    }
+}
+
+private struct ChatAssistantMarkdownView: View {
+    let markdown: String
+    var displaySetting: DisplaySetting?
+
+    @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
+
+    var body: some View {
+        if microsoftStreamingMarkdown {
+            SwiftStreamingMarkdown.MarkdownView(text: markdown)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            MarkdownView(markdown: markdown, displaySetting: displaySetting)
+        }
+    }
+}
+
+private enum WorkspaceSaveAlert: Identifiable {
+    case saved
+    case failed(String)
+
+    var id: String {
+        switch self {
+        case .saved: "saved"
+        case .failed(let message): "failed-\(message)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .saved: "已保存"
+        case .failed: "保存失败"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .saved:
+            "助手回复已保存到 Workspace。"
+        case .failed(let message):
+            message
+        }
     }
 }
 
