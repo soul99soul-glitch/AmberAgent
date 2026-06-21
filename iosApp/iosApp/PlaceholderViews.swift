@@ -254,6 +254,53 @@ struct AmberGlassTextChip: View {
     }
 }
 
+struct AmberTopGlassFade: View {
+    var height: CGFloat = 116
+
+    var body: some View {
+        glassLayer
+            .frame(height: height)
+            .mask {
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black.opacity(0.96), location: 0.55),
+                        .init(color: .black.opacity(0.0), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var glassLayer: some View {
+        if #available(iOS 26.0, *) {
+            Rectangle()
+                .fill(AmberTheme.glass.opacity(0.32))
+                .glassEffect(.regular, in: .rect(cornerRadius: 0))
+        } else {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Rectangle()
+                        .fill(AmberTheme.background.opacity(0.24))
+                }
+        }
+    }
+}
+
+extension View {
+    func amberTopGlassFade(height: CGFloat = 116) -> some View {
+        overlay(alignment: .top) {
+            AmberTopGlassFade(height: height)
+                .ignoresSafeArea(edges: .top)
+        }
+    }
+}
+
 struct AmberGlassCircleButton: View {
     let systemImage: String
     let accessibilityLabel: String

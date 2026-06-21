@@ -62,6 +62,7 @@ struct AppShell: View {
                     localToolExecutor: localToolExecutor
                 )
         }
+        .amberTopGlassFade()
         .sheet(item: Binding(get: { rootRouter.presentedSheet }, set: { rootRouter.presentedSheet = $0 })) { sheet in
             sheetView(sheet)
         }
