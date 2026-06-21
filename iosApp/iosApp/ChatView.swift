@@ -550,8 +550,8 @@ struct ChatView: View {
                             ComposerIconButton(
                                 systemImage: "stop.fill",
                                 accessibilityLabel: "停止生成",
-                                size: 32,
-                                symbolSize: 14,
+                                size: 38,
+                                symbolSize: 16,
                                 tint: AmberTheme.accentRed,
                                 prominent: true
                             ) {
@@ -561,8 +561,8 @@ struct ChatView: View {
                             ComposerIconButton(
                                 systemImage: "arrow.up",
                                 accessibilityLabel: "发送消息",
-                                size: 32,
-                                symbolSize: 15,
+                                size: 38,
+                                symbolSize: 17,
                                 tint: sendEnabled ? AmberTheme.accent : AmberTheme.muted2,
                                 prominent: sendEnabled
                             ) {
