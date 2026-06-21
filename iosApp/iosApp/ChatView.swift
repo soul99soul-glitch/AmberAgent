@@ -263,7 +263,7 @@ struct ChatView: View {
             .onChange(of: viewModel.messageRevision) { _, _ in
                 if pendingInitialScrollToBottom {
                     pendingInitialScrollToBottom = false
-                    scrollToLatestMessage(proxy, animated: false, deferred: true)
+                    scrollToLatestSettled(proxy)
                 } else if followGeneration, !followPaused {
                     scrollToLatestMessage(proxy, animated: true, deferred: false)
                 }
@@ -276,6 +276,20 @@ struct ChatView: View {
                     scrollToLatestMessage(proxy, animated: true, deferred: false)
                 }
             }
+        }
+        // Step 4: bottom Liquid Glass boundary as a SIBLING overlay on the scroll area.
+        // Z-order: messages < this glass < composer. The composer is a `.safeAreaInset`
+        // applied in `body`, so it composites ABOVE this overlay and stays crisp; the glass
+        // is never behind the composer's `.thinMaterial` pills, which is what washed them out
+        // before. History content frosts into the bottom boundary as it scrolls behind the
+        // glass (mirroring the top bar) — without shrinking or clipping the ScrollView. The
+        // fade height is kept below `followBottomGap` so the actively-streaming line (held that
+        // far above the composer) never sits in the frosted zone.
+        .overlay(alignment: .bottom) {
+            StreamingBottomBoundaryGlass()
+                .frame(height: ChatLayout.streamingBoundaryFadeHeight)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
     }
 
@@ -307,6 +321,28 @@ struct ChatView: View {
             Task { @MainActor in action() }
         } else {
             action()
+        }
+    }
+
+    /// Initial-load / conversation-switch scroll. A single deferred `scrollTo` to the last row
+    /// can land short on a long conversation, because LazyVStack may not have realized/measured
+    /// that row on the first runloop hop. So jump once immediately, then once more after layout
+    /// settles. Both jumps are non-animated. This runs only when `pendingInitialScrollToBottom`
+    /// was set (open/switch a session) — it is a one-shot, not a follow loop, and never reads
+    /// inputBar height.
+    private func scrollToLatestSettled(_ proxy: ScrollViewProxy) {
+        func jump() {
+            guard let lastId = viewModel.messages.last?.id else { return }
+            var transaction = Transaction()
+            transaction.animation = nil
+            withTransaction(transaction) {
+                proxy.scrollTo(lastId, anchor: .bottom)
+            }
+        }
+        Task { @MainActor in
+            jump()
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            jump()
         }
     }
 
@@ -1314,8 +1350,10 @@ private struct ComposerPopoverSurface<Content: View>: View {
 enum ChatLayout {
     static let contentHorizontalInset: CGFloat = 22
     static let userMaxWidth: CGFloat = 300
-    static let streamingBoundaryFadeHeight: CGFloat = 220
-    static let streamingBoundaryBottomOffset: CGFloat = 54
+    // Height of the bottom Liquid Glass boundary fade. Kept below `followBottomGap` so the
+    // actively-streaming line (held `followBottomGap` above the composer) is never frosted;
+    // when idle, the resting last message gently fades into the composer boundary.
+    static let streamingBoundaryFadeHeight: CGFloat = 72
     static let followBottomGap: CGFloat = 96
     static let bottomStickThreshold: CGFloat = 40
 }
