@@ -2,7 +2,6 @@ import SwiftUI
 import Shared
 
 enum ProviderRouteKind: String, Hashable {
-    case current
     case openAICompatiblePreset
     case claudePreset
     case googleProviderPreset
@@ -40,7 +39,6 @@ struct ProvidersView: View {
                 VStack(spacing: 0) {
                     header
                     searchPill
-                    providerSection(title: "当前聊天配置", rows: [currentProvider])
                     savedProvidersSection
                 }
                 .padding(.bottom, 40)
@@ -94,7 +92,7 @@ struct ProvidersView: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(AmberTheme.muted.opacity(0.72))
 
-            Text("预置模板；可添加 OpenAI 兼容服务商")
+            Text("搜索服务商")
                 .font(.subheadline)
                 .foregroundStyle(AmberTheme.muted)
 
@@ -116,125 +114,44 @@ struct ProvidersView: View {
         .accessibilityLabel("搜索服务商")
     }
 
-    private func providerSection(title: String, rows: [ProviderRowModel]) -> some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: title)
-
-            AmberFormGroup {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, provider in
-                    ProviderRow(provider: provider) {
-                        router.navigate(to: .providerDetail(name: provider.name, endpoint: provider.endpoint, kind: provider.kind))
-                    }
-
-                    if index < rows.count - 1 {
-                        ProviderDivider()
-                    }
-                }
-            }
-        }
+    private var sharedProviders: [ProviderSetting] {
+        _ = sharedSettings.revision
+        return sharedSettings.snapshot.providers.filter(ChatProviderConfiguration.supportsChatStreaming)
     }
 
-    private var currentProvider: ProviderRowModel {
-        // Resolve the real current provider/model from the KMP Settings snapshot
-        // (the same source ChatViewModel will consume in Stage 2), instead of a
-        // hardcoded "OpenAI-compatible" label. Falls back to a clear "未配置"
-        // state when no usable provider/model is selected — honest, never fake.
+    private var currentProviderId: String? {
+        _ = sharedSettings.revision
         let snapshot = sharedSettings.snapshot
-        let currentModel = snapshot.getCurrentChatModel()
-        let currentProviderSetting = currentModel?.findProvider(providers: snapshot.providers, checkOverwrite: true)
-
-        let name: String
-        let endpoint: String
-        let initial: String
-        if let provider = currentProviderSetting {
-            let providerName = provider.name as String
-            name = providerName
-            endpoint = ProviderRegistryStore.baseURL(of: provider)
-            initial = String((providerName.trimmingCharacters(in: .whitespaces) as String).first ?? "?").uppercased()
-        } else {
-            name = "未配置服务商"
-            endpoint = currentModel?.modelId ?? "请选择默认模型"
-            initial = "?"
+        guard let currentModel = snapshot.getCurrentChatModel(),
+              let provider = currentModel.findProvider(providers: snapshot.providers, checkOverwrite: true) else {
+            return nil
         }
-
-        // "has usable key" for status coloring: read the provider's own apiKey
-        // (Android model — the key lives inside the ProviderSetting, not a
-        // separate iOS Keychain slot anymore). Gemini/unsupported -> muted.
-        let hasUsableKey: Bool
-        if let openAI = currentProviderSetting as? ProviderSetting.OpenAI {
-            hasUsableKey = !openAI.apiKey.isEmpty
-        } else if let claude = currentProviderSetting as? ProviderSetting.Claude {
-            hasUsableKey = !claude.apiKey.isEmpty
-        } else if currentProviderSetting != nil {
-            hasUsableKey = false
-        } else {
-            hasUsableKey = false
-        }
-
-        let statusText: String
-        let statusColor: Color
-        if currentProviderSetting == nil {
-            statusText = "点击下方模板配置"
-            statusColor = AmberTheme.muted2
-        } else if !hasUsableKey {
-            statusText = "API Key 未填写"
-            statusColor = AmberTheme.muted2
-        } else {
-            statusText = "已配置"
-            statusColor = AmberTheme.accentGreen
-        }
-
-        return .init(
-            initial: initial,
-            name: name,
-            endpoint: endpoint,
-            status: statusText,
-            statusColor: statusColor,
-            kind: .current
-        )
+        return provider.id.description()
     }
 
-    // Real KMP default provider templates plus per-provider status. Each row is
-    // tappable and navigates to the provider detail page (mirrors Android's
-    // SettingProviderPage → SettingProviderDetailPage flow), where the user
-    // fills the API Key and (when supported) sets it as current. Only rows whose
-    // protocol genuinely can't run on iOS today (Gemini, awaiting a KMP bridge)
-    // stay disabled — supported presets (OpenAI-compatible + Claude) are always
-    // openable so there is no "need a key to even open the page" deadlock.
     private var savedProvidersSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "服务商模板")
 
             AmberFormGroup {
-                ForEach(Array(providerRegistry.providers.enumerated()), id: \.offset) { index, provider in
-                    let routeKind = ProviderRowModel.routeKind(for: provider)
-                    let openable = routeKind != .googleProviderPreset
+                ForEach(Array(sharedProviders.enumerated()), id: \.offset) { index, provider in
+                    let hasKey = ProviderRowModel.hasUsableKey(provider)
                     RegistryProviderRow(
                         model: ProviderRowModel(preset: provider),
-                        isSelected: providerRegistry.isSelected(provider),
-                        hasStoredKey: providerRegistry.hasStoredKey(provider),
-                        canActivate: providerRegistry.canActivate(provider),
-                        canOpen: openable
+                        isSelected: currentProviderId == provider.id.description(),
+                        hasStoredKey: hasKey
                     ) {
-                        router.navigate(to: .providerDetail(
-                            name: provider.name,
-                            endpoint: ProviderRegistryStore.baseURL(of: provider),
-                            kind: routeKind
-                        ))
+                        router.navigate(to: .providerDetail(id: provider.id.description()))
                     }
 
-                    if index < providerRegistry.providers.count - 1 {
+                    if index < sharedProviders.count - 1 {
                         ProviderDivider()
                     }
                 }
             }
 
-            ProviderDraftNote("点击模板可配置 API Key 和模型。OpenAI 兼容与 Anthropic(Claude) 可直接用于聊天；Gemini 执行器待移植，暂保持灰色。")
         }
-        // hasStoredKey reads the Keychain via a static helper (not an observable
-        // property), so tying this section's identity to keyRevision forces a
-        // rebuild whenever a per-provider key is written or cleared.
-        .id(providerRegistry.keyRevision)
+        .id(sharedSettings.revision)
     }
 }
 
@@ -242,14 +159,10 @@ private struct RegistryProviderRow: View {
     let model: ProviderRowModel
     let isSelected: Bool
     let hasStoredKey: Bool
-    let canActivate: Bool
-    let canOpen: Bool
     let onSelect: () -> Void
 
     var body: some View {
-        Button {
-            if canOpen { onSelect() }
-        } label: {
+        Button(action: onSelect) {
             HStack(spacing: 12) {
                 Text(model.initial)
                     .font(.subheadline.weight(.semibold))
@@ -279,18 +192,12 @@ private struct RegistryProviderRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!canOpen)
-        .opacity(canOpen ? 1 : 0.55)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(model.name)\(isSelected ? "，当前服务商" : "")")
     }
 
     @ViewBuilder private var trailing: some View {
-        if !canOpen {
-            Text("暂不支持")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted2)
-        } else if isSelected {
+        if isSelected {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill")
                 Text("当前")
@@ -298,14 +205,9 @@ private struct RegistryProviderRow: View {
             .font(.caption2.weight(.semibold))
             .foregroundStyle(AmberTheme.accentGreen)
         } else {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(hasStoredKey ? "Key 已填写" : "Key 未填写")
-                    .font(.caption2)
-                    .foregroundStyle(hasStoredKey ? AmberTheme.accentGreen : AmberTheme.muted2)
-                Text(hasStoredKey ? "点击管理" : "点击配置")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(hasStoredKey ? AmberTheme.accent : AmberTheme.muted2)
-            }
+            Text(hasStoredKey ? "已配置" : "未填写")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(hasStoredKey ? AmberTheme.accentGreen : AmberTheme.muted2)
         }
     }
 }
@@ -315,44 +217,16 @@ private struct ProviderRowModel: Identifiable {
     let initial: String
     let name: String
     let endpoint: String
-    var status: String
-    var statusColor: Color
-    var kind: ProviderRouteKind
-    var isDimmed = false
-
-    init(
-        initial: String,
-        name: String,
-        endpoint: String,
-        status: String,
-        statusColor: Color,
-        kind: ProviderRouteKind = .openAICompatiblePreset,
-        isDimmed: Bool = false
-    ) {
-        self.id = "\(name)-\(endpoint)"
-        self.initial = initial
-        self.name = name
-        self.endpoint = endpoint
-        self.status = status
-        self.statusColor = statusColor
-        self.kind = kind
-        self.isDimmed = isDimmed
-    }
 
     // Build a no-key preset row from a real Android/KMP ProviderSetting.
     init(preset: ProviderSetting) {
         let providerName = preset.name
         let providerEndpoint = Self.endpoint(for: preset)
-        let routeKind = Self.routeKind(for: preset)
-        let descriptor = Self.statusDescriptor(for: routeKind)
-        self.id = "preset-\(providerName)-\(providerEndpoint)"
+        let providerID = preset.id.description()
+        self.id = providerID
         self.initial = Self.initial(for: providerName)
         self.name = providerName
         self.endpoint = providerEndpoint
-        self.status = descriptor.text
-        self.statusColor = descriptor.color
-        self.kind = routeKind
-        self.isDimmed = false
     }
 
     fileprivate static func endpoint(for preset: ProviderSetting) -> String {
@@ -362,140 +236,29 @@ private struct ProviderRowModel: Identifiable {
         return ""
     }
 
-    fileprivate static func routeKind(for preset: ProviderSetting) -> ProviderRouteKind {
-        if let openAI = preset as? ProviderSetting.OpenAI {
-            if openAI.useResponseApi { return .responseAPIPreset }
-            // MiMo's bundled baseUrl is a source-marked placeholder ("user can override").
-            // Identity compare the enum singleton to avoid relying on NSObject equality.
-            if openAI.brand === OpenAIBrand.mimo { return .endpointConfirmationPreset }
-            return .openAICompatiblePreset
-        }
-        if preset is ProviderSetting.Claude {
-            return .claudePreset
-        }
-        if preset is ProviderSetting.Google {
-            return .googleProviderPreset
-        }
-        // Only OpenAI/Claude/Google appear in DEFAULT_PROVIDERS today. Any other
-        // ProviderSetting type inherits the Google "待桥接" state so it can never
-        // be presented as an applyable template until it gets its own route kind.
-        return .googleProviderPreset
-    }
-
     private static func initial(for name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         return String(trimmed.prefix(1)).uppercased()
     }
 
-    private static func statusDescriptor(for kind: ProviderRouteKind) -> (text: String, color: Color) {
-        switch kind {
-        case .openAICompatiblePreset:
-            return ("预置 · 可套用", AmberTheme.accent)
-        case .claudePreset:
-            return ("预置 · Anthropic", AmberTheme.accent)
-        case .endpointConfirmationPreset:
-            return ("预置 · Base 待确认", AmberTheme.muted)
-        case .responseAPIPreset:
-            return ("预置 · 待 Response API", AmberTheme.muted)
-        case .googleProviderPreset:
-            return ("预置 · Gemini 执行器待移植", AmberTheme.muted)
-        case .current:
-            return ("预置", AmberTheme.muted)
+    fileprivate static func hasUsableKey(_ provider: ProviderSetting) -> Bool {
+        if let openAI = provider as? ProviderSetting.OpenAI {
+            return !openAI.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-    }
-}
-
-private struct ProviderRow: View {
-    let provider: ProviderRowModel
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Text(provider.initial)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .frame(width: 32, height: 32)
-                    .background(AmberTheme.surface2, in: Circle())
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(provider.name)
-                        .font(.body)
-                        .foregroundStyle(AmberTheme.foreground)
-                        .lineLimit(1)
-
-                    Text(provider.endpoint)
-                        .font(.system(size: 11.5, weight: .regular, design: .monospaced))
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text(provider.status)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(provider.statusColor)
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted2)
-            }
-            .frame(minHeight: 56)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
+        if let claude = provider as? ProviderSetting.Claude {
+            return !claude.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        .buttonStyle(.plain)
-        .opacity(provider.isDimmed ? 0.6 : 1)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(provider.name)，\(provider.endpoint)")
-    }
-}
-
-private struct ProviderStatusRow: View {
-    let title: String
-    let subtitle: String
-    let badge: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "server.rack")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(AmberTheme.accent)
-                .frame(width: 32, height: 32)
-                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(AmberTheme.foreground)
-
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(badge)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(minHeight: 78)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        return false
     }
 }
 
 struct ProviderAddView: View {
+    let settingsStore: SettingsStore
     let providerRegistry: ProviderRegistryStore
     let sharedSettings: IOSSharedSettingsStore
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(RouterPath.self) private var router
 
     @State private var name = "New Provider"
     @State private var protocolOption: ProviderProtocolOption = .openAI
@@ -514,10 +277,9 @@ struct ProviderAddView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        introSection
                         connectionSection
-                        modelSection
                         credentialSection
+                        modelSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -573,36 +335,6 @@ struct ProviderAddView: View {
         .padding(.bottom, 10)
     }
 
-    private var introSection: some View {
-        VStack(spacing: 0) {
-            AmberFormGroup {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "server.rack")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(AmberTheme.accent)
-                        .frame(width: 34, height: 34)
-                        .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("OpenAI-compatible")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(AmberTheme.foreground)
-
-                        Text("保存后会加入服务商列表；API Key 写入本机 Keychain。填写 Key 时会立即设为当前聊天服务商，不发起网络测试。")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 13)
-            }
-            .padding(.top, 4)
-        }
-    }
-
     private var connectionSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "连接")
@@ -613,10 +345,6 @@ struct ProviderAddView: View {
                     placeholder: "例如 DeepSeek / Claude"
                 )
                 ProviderDivider()
-                // Protocol picker — OpenAI-compatible or Anthropic. Switching
-                // updates the API address placeholder/default to match the chosen
-                // protocol. Path is implied by the protocol (OpenAI →
-                // /chat/completions, Anthropic → /messages), shown read-only.
                 Menu {
                     ForEach(ProviderProtocolOption.addableCases, id: \.self) { option in
                         Button {
@@ -643,17 +371,7 @@ struct ProviderAddView: View {
                     placeholder: protocolOption.defaultBaseURLPlaceholder,
                     monospace: true
                 )
-                ProviderDivider()
-                ProviderDraftValueRow(
-                    title: "路径",
-                    value: protocolOption.defaultPath,
-                    monospace: true
-                )
             }
-
-            ProviderDraftNote(protocolOption == .anthropic
-                ? "Anthropic 协议使用 /messages 端点（SSE 流式），支持 thinking、工具调用与 prompt caching。"
-                : "OpenAI 兼容协议使用 /chat/completions 端点。")
         }
     }
 
@@ -674,8 +392,6 @@ struct ProviderAddView: View {
                     placeholder: "例如 Claude Sonnet 4.5"
                 )
             }
-
-            ProviderDraftNote("至少填写一个模型，保存后会作为该服务商的聊天模型；可在服务商详情页继续管理模型。")
         }
     }
 
@@ -691,8 +407,6 @@ struct ProviderAddView: View {
                     monospace: true
                 )
             }
-
-            ProviderDraftNote("API Key 保存到该服务商配置中。留空时只保存服务商模板，不会设为当前。")
         }
     }
 
@@ -715,10 +429,6 @@ struct ProviderAddView: View {
 
         let trimmedModelId = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedModelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedModelId.isEmpty else {
-            alert = .modelRequired
-            return
-        }
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmedName.isEmpty ? protocolOption.defaultName : trimmedName
@@ -729,21 +439,37 @@ struct ProviderAddView: View {
         let provider: ProviderSetting
         switch protocolOption {
         case .openAI:
-            provider = IosSettingsMutations.shared.buildOpenAIProvider(
-                name: finalName,
-                apiKey: trimmedKey,
-                baseUrl: normalizedBase,
-                modelName: trimmedModelName.isEmpty ? trimmedModelId : trimmedModelName,
-                modelId: trimmedModelId
-            )
+            if trimmedModelId.isEmpty {
+                provider = IosSettingsMutations.shared.buildBlankOpenAIProvider(
+                    name: finalName,
+                    apiKey: trimmedKey,
+                    baseUrl: normalizedBase
+                )
+            } else {
+                provider = IosSettingsMutations.shared.buildOpenAIProvider(
+                    name: finalName,
+                    apiKey: trimmedKey,
+                    baseUrl: normalizedBase,
+                    modelName: trimmedModelName.isEmpty ? trimmedModelId : trimmedModelName,
+                    modelId: trimmedModelId
+                )
+            }
         case .anthropic:
-            provider = IosSettingsMutations.shared.buildClaudeProvider(
-                name: finalName,
-                apiKey: trimmedKey,
-                baseUrl: normalizedBase,
-                modelName: trimmedModelName.isEmpty ? trimmedModelId : trimmedModelName,
-                modelId: trimmedModelId
-            )
+            if trimmedModelId.isEmpty {
+                provider = IosSettingsMutations.shared.buildBlankClaudeProvider(
+                    name: finalName,
+                    apiKey: trimmedKey,
+                    baseUrl: normalizedBase
+                )
+            } else {
+                provider = IosSettingsMutations.shared.buildClaudeProvider(
+                    name: finalName,
+                    apiKey: trimmedKey,
+                    baseUrl: normalizedBase,
+                    modelName: trimmedModelName.isEmpty ? trimmedModelId : trimmedModelName,
+                    modelId: trimmedModelId
+                )
+            }
         default:
             alert = .unsupportedProtocol(protocolOption.title)
             return
@@ -757,8 +483,13 @@ struct ProviderAddView: View {
         if !trimmedKey.isEmpty,
            let chatModel = added.models.first(where: { $0.type == ModelType.chat }) {
             sharedSettings.setCurrentChatModelId(chatModel.id.description())
+            sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
         }
+        let providerId = added.id.description()
         dismiss()
+        DispatchQueue.main.async {
+            router.navigate(to: .providerDetail(id: providerId))
+        }
     }
 
     private static func normalizedBaseURL(_ value: String) -> String {

@@ -118,6 +118,7 @@ struct IOSCapabilityGateSettings: Codable, Equatable {
 final class IOSSharedSettingsStore {
 
     @ObservationIgnored private(set) var snapshot: Settings
+    private(set) var revision: Int = 0
 
     private let defaults: UserDefaults
     private let fullSettingsJsonKey = "app.amber.ios.sharedSettingsJson"
@@ -146,6 +147,7 @@ final class IOSSharedSettingsStore {
     func restoreSnapshot(_ settings: Settings) {
         snapshot = settings
         defaults.set(IosSettingsJsonBridge.shared.encode(settings: settings), forKey: fullSettingsJsonKey)
+        revision &+= 1
     }
 
     func isCapabilityGateEnabled(_ gate: IOSCapabilityGate) -> Bool {
@@ -387,6 +389,38 @@ final class IOSSharedSettingsStore {
         return merged.providers.first { ($0.id.description() as String) == providerId }
     }
 
+    @discardableResult
+    func updateProviderBasics(providerId: String, name: String, enabled: Bool) -> ProviderSetting? {
+        let merged = IosSettingsMutations.shared.updateProviderBasics(
+            settings: snapshot,
+            providerId: providerId,
+            name: name,
+            enabled: enabled
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
+    @discardableResult
+    func updateProviderEndpoint(
+        providerId: String,
+        baseUrl: String,
+        chatCompletionsPath: String,
+        useResponseApi: Bool,
+        promptCaching: Bool
+    ) -> ProviderSetting? {
+        let merged = IosSettingsMutations.shared.updateProviderEndpoint(
+            settings: snapshot,
+            providerId: providerId,
+            baseUrl: baseUrl,
+            chatCompletionsPath: chatCompletionsPath,
+            useResponseApi: useResponseApi,
+            promptCaching: promptCaching
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
     /// Replace the chat-typed models on provider [providerId]. Each entry is
     /// (modelId, displayName). Non-chat models are preserved. Persists to snapshot.
     @discardableResult
@@ -407,10 +441,46 @@ final class IOSSharedSettingsStore {
     @discardableResult
     func switchProviderProtocol(providerId: String, protocolOption: ProviderProtocolOption) -> ProviderSetting? {
         let before = snapshot
-        let merged = IosSettingsMutations.shared.switchProviderProtocol(
+        let merged = IosSettingsMutations.shared.convertProviderProtocol(
             settings: before,
             providerId: providerId,
-            protocolType: protocolOption.rawValue
+            target: protocolOption.rawValue
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
+    @discardableResult
+    func upsertProviderChatModel(
+        providerId: String,
+        modelUuid: String?,
+        modelId: String,
+        displayName: String,
+        contextWindowTokens: Int?,
+        headers: [(name: String, value: String)]
+    ) -> ProviderSetting? {
+        let pairs = headers.map {
+            KotlinPair(first: $0.name as NSString, second: $0.value as NSString)
+        }
+        let merged = IosSettingsMutations.shared.upsertProviderChatModel(
+            settings: snapshot,
+            providerId: providerId,
+            modelUuid: modelUuid,
+            modelId: modelId,
+            displayName: displayName,
+            contextWindowTokens: contextWindowTokens.map { KotlinInt(value: Int32($0)) },
+            headerPairs: pairs
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
+    @discardableResult
+    func removeProviderChatModel(providerId: String, modelUuid: String) -> ProviderSetting? {
+        let merged = IosSettingsMutations.shared.removeProviderChatModel(
+            settings: snapshot,
+            providerId: providerId,
+            modelUuid: modelUuid
         )
         restoreSnapshot(merged)
         return merged.providers.first { ($0.id.description() as String) == providerId }
@@ -429,6 +499,21 @@ final class IOSSharedSettingsStore {
         let merged = IosSettingsMutations.shared.addProvider(settings: snapshot, provider: provider)
         restoreSnapshot(merged)
         return provider
+    }
+
+    func syncLegacySettingsStoreForCurrentChat(_ settingsStore: SettingsStore) {
+        guard let model = snapshot.getCurrentChatModel(),
+              let provider = model.findProvider(providers: snapshot.providers, checkOverwrite: true) else {
+            return
+        }
+        settingsStore.modelId = model.modelId
+        if let openAI = provider as? ProviderSetting.OpenAI {
+            settingsStore.baseUrl = openAI.baseUrl
+            settingsStore.apiKey = openAI.apiKey
+        } else if let claude = provider as? ProviderSetting.Claude {
+            settingsStore.baseUrl = claude.baseUrl
+            settingsStore.apiKey = claude.apiKey
+        }
     }
 
     // MARK: - Custom search providers write-back

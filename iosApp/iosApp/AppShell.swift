@@ -236,7 +236,7 @@ enum Route: Hashable {
     case execution
     case providers
     case providerAdd
-    case providerDetail(name: String, endpoint: String, kind: ProviderRouteKind)
+    case providerDetail(id: String)
     case providerKeyEditor(name: String)
     case modelDefaults
     case imageGeneration
@@ -371,9 +371,9 @@ private extension View {
             case .providers:
                 ProvidersView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings)
             case .providerAdd:
-                ProviderAddView(providerRegistry: providerRegistry, sharedSettings: sharedSettings)
-            case .providerDetail(let name, let endpoint, let kind):
-                ProviderDetailView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings, providerName: name, endpoint: endpoint, providerKind: kind)
+                ProviderAddView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings)
+            case .providerDetail(let id):
+                ProviderDetailView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings, providerId: id)
             case .providerKeyEditor(let name):
                 ProviderKeyEditView(providerRegistry: providerRegistry, sharedSettings: sharedSettings, providerName: name)
             case .modelDefaults:

@@ -1,6 +1,7 @@
 package shared
 
 import app.amber.ai.core.MessageRole
+import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIBrand
@@ -98,6 +99,13 @@ object IosSettingsMutations {
         return settings.copy(providers = settings.providers + provider)
     }
 
+    /** Replace an existing provider by id; no-op if the provider is not present. */
+    fun replaceProvider(settings: Settings, provider: ProviderSetting): Settings {
+        return settings.copy(
+            providers = settings.providers.map { if (it.id == provider.id) provider else it }
+        )
+    }
+
     /** Remove a provider by [id] (Uuid string); no-op if not found. */
     fun removeProvider(settings: Settings, id: String): Settings {
         val parsed = kotlin.uuid.Uuid.parse(id)
@@ -132,6 +140,61 @@ object IosSettingsMutations {
         return settings.copy(providers = providers)
     }
 
+    fun convertProviderProtocol(
+        settings: Settings,
+        providerId: String,
+        target: String,
+    ): Settings = switchProviderProtocol(settings, providerId, target)
+
+    fun updateProviderBasics(
+        settings: Settings,
+        providerId: String,
+        name: String,
+        enabled: Boolean,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id == parsed) {
+                    provider.copyProvider(name = name, enabled = enabled)
+                } else {
+                    provider
+                }
+            }
+        )
+    }
+
+    fun updateProviderEndpoint(
+        settings: Settings,
+        providerId: String,
+        baseUrl: String,
+        chatCompletionsPath: String,
+        useResponseApi: Boolean,
+        promptCaching: Boolean,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed) {
+                    provider
+                } else {
+                    when (provider) {
+                        is ProviderSetting.OpenAI -> provider.copy(
+                            baseUrl = baseUrl,
+                            chatCompletionsPath = chatCompletionsPath,
+                            useResponseApi = useResponseApi,
+                        )
+                        is ProviderSetting.Google -> provider.copy(baseUrl = baseUrl)
+                        is ProviderSetting.Claude -> provider.copy(
+                            baseUrl = baseUrl,
+                            promptCaching = promptCaching,
+                        )
+                    }
+                }
+            }
+        )
+    }
+
     /**
      * Construct an Anthropic Claude [ProviderSetting.Claude] with a single model.
      * iOS counterpart of [buildOpenAIProvider] for the Anthropic protocol.
@@ -156,6 +219,21 @@ object IosSettingsMutations {
             apiKey = apiKey,
             baseUrl = baseUrl,
             models = listOf(model),
+            builtIn = false,
+        )
+    }
+
+    fun buildBlankClaudeProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+    ): ProviderSetting.Claude {
+        return ProviderSetting.Claude(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = emptyList(),
             builtIn = false,
         )
     }
@@ -221,6 +299,78 @@ object IosSettingsMutations {
         return settings.copy(providers = providers)
     }
 
+    fun upsertProviderChatModel(
+        settings: Settings,
+        providerId: String,
+        modelUuid: String?,
+        modelId: String,
+        displayName: String,
+        contextWindowTokens: Int?,
+        headerPairs: List<Pair<String, String>>,
+    ): Settings {
+        val parsedProvider = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val parsedModel = modelUuid?.takeIf { it.isNotBlank() }?.let {
+            runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull()
+        }
+        val headers = headerPairs
+            .filter { (name, _) -> name.isNotBlank() }
+            .map { (name, value) -> CustomHeader(name = name, value = value) }
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsedProvider) {
+                    provider
+                } else {
+                    val existing = provider.models.firstOrNull { model ->
+                        (parsedModel != null && model.id == parsedModel) ||
+                            (parsedModel == null && model.modelId == modelId && model.type == ModelType.CHAT)
+                    }
+                    val updated = if (existing != null) {
+                        existing.copy(
+                            modelId = modelId,
+                            displayName = displayName.ifBlank { modelId },
+                            type = ModelType.CHAT,
+                            contextWindowTokens = contextWindowTokens,
+                            customHeaders = headers,
+                        )
+                    } else {
+                        Model(
+                            modelId = modelId,
+                            displayName = displayName.ifBlank { modelId },
+                            id = kotlin.uuid.Uuid.random(),
+                            type = ModelType.CHAT,
+                            customHeaders = headers,
+                            contextWindowTokens = contextWindowTokens,
+                        )
+                    }
+                    val models = if (existing != null) {
+                        provider.models.map { if (it.id == existing.id) updated else it }
+                    } else {
+                        provider.models + updated
+                    }
+                    provider.copyProvider(models = models)
+                }
+            }
+        )
+    }
+
+    fun removeProviderChatModel(
+        settings: Settings,
+        providerId: String,
+        modelUuid: String,
+    ): Settings {
+        val parsedProvider = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val parsedModel = runCatching { kotlin.uuid.Uuid.parse(modelUuid) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id == parsedProvider) {
+                    provider.copyProvider(models = provider.models.filterNot { it.id == parsedModel })
+                } else {
+                    provider
+                }
+            }
+        )
+    }
+
     /**
      * Set the global `settings.chatModelId` to a specific model UUID string. iOS
      * uses this when the user picks the current chat model. Returns a new snapshot.
@@ -260,6 +410,22 @@ object IosSettingsMutations {
         )
     }
 
+    fun buildBlankOpenAIProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+    ): ProviderSetting.OpenAI {
+        return ProviderSetting.OpenAI(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = emptyList(),
+            builtIn = false,
+            brand = OpenAIBrand.GENERIC,
+        )
+    }
+
     /**
      * Construct a key-less OpenAI-compatible provider with a stable id supplied
      * by iOS. Used by the Provider registry so a custom provider can survive
@@ -288,11 +454,12 @@ object IosSettingsMutations {
             is ProviderSetting.Google -> apiKey
             is ProviderSetting.Claude -> apiKey
         }
-        val baseUrl = when (this) {
+        val sourceBaseUrl = when (this) {
             is ProviderSetting.OpenAI -> baseUrl
             is ProviderSetting.Google -> baseUrl
             is ProviderSetting.Claude -> baseUrl
         }
+        val targetDefaultBaseUrl = defaultOpenAI?.baseUrl ?: ProviderSetting.OpenAI().baseUrl
         return ProviderSetting.OpenAI(
             id = id,
             enabled = enabled,
@@ -303,7 +470,7 @@ object IosSettingsMutations {
             descriptionText = descriptionText,
             shortDescriptionText = shortDescriptionText,
             apiKey = apiKey,
-            baseUrl = baseUrl,
+            baseUrl = sourceBaseUrl.convertToTargetBaseUrl(targetDefaultBaseUrl),
             chatCompletionsPath = defaultOpenAI?.chatCompletionsPath ?: "/chat/completions",
             useResponseApi = false,
             authMode = defaultOpenAI?.authMode ?: OpenAIAuthMode.API_KEY,
@@ -318,7 +485,7 @@ object IosSettingsMutations {
             is ProviderSetting.Google -> apiKey
             is ProviderSetting.Claude -> apiKey
         }
-        val baseUrl = when (this) {
+        val sourceBaseUrl = when (this) {
             is ProviderSetting.OpenAI -> baseUrl
             is ProviderSetting.Google -> baseUrl
             is ProviderSetting.Claude -> baseUrl
@@ -333,9 +500,63 @@ object IosSettingsMutations {
             descriptionText = descriptionText,
             shortDescriptionText = shortDescriptionText,
             apiKey = apiKey,
-            baseUrl = baseUrl,
+            baseUrl = sourceBaseUrl.convertToTargetBaseUrl(ProviderSetting.Claude().baseUrl),
         )
     }
+
+    private fun String.convertToTargetBaseUrl(targetDefaultBaseUrl: String): String {
+        val source = parseBaseUrl(trim().trimEnd('/')) ?: return this
+        if (source.host in OFFICIAL_PROVIDER_HOSTS) {
+            return targetDefaultBaseUrl
+        }
+        val target = parseBaseUrl(targetDefaultBaseUrl) ?: return this
+        val convertedPath = source.path.convertToTargetPath(target.path)
+        return source.origin + convertedPath
+    }
+
+    private fun String.convertToTargetPath(targetPath: String): String {
+        val source = normalizePath()
+        val target = targetPath.normalizePath()
+        val replaced = when {
+            source.lowercase().endsWith(V1_BETA_SUFFIX) -> source.dropLast(V1_BETA_SUFFIX.length) + target
+            source.lowercase().endsWith(V1_SUFFIX) -> source.dropLast(V1_SUFFIX.length) + target
+            source.isBlank() -> target
+            else -> source + target
+        }
+        return replaced.normalizePath()
+    }
+
+    private fun String.normalizePath(): String {
+        val value = trim()
+        if (value.isEmpty() || value == "/") return ""
+        val path = if (value.startsWith("/")) value else "/$value"
+        return path.trimEnd('/')
+    }
+
+    private data class ParsedBaseUrl(
+        val origin: String,
+        val host: String,
+        val path: String,
+    )
+
+    private fun parseBaseUrl(value: String): ParsedBaseUrl? {
+        val match = Regex("^([A-Za-z][A-Za-z0-9+.-]*://([^/?#]+))([^?#]*)").find(value) ?: return null
+        val origin = match.groupValues[1].trimEnd('/')
+        val host = match.groupValues[2].substringBefore(':').lowercase()
+        val path = match.groupValues[3]
+        return ParsedBaseUrl(origin = origin, host = host, path = path)
+    }
+
+    private const val OPENAI_OFFICIAL_HOST = "api.openai.com"
+    private const val GOOGLE_OFFICIAL_HOST = "generativelanguage.googleapis.com"
+    private const val CLAUDE_OFFICIAL_HOST = "api.anthropic.com"
+    private const val V1_SUFFIX = "/v1"
+    private const val V1_BETA_SUFFIX = "/v1beta"
+    private val OFFICIAL_PROVIDER_HOSTS = setOf(
+        OPENAI_OFFICIAL_HOST,
+        GOOGLE_OFFICIAL_HOST,
+        CLAUDE_OFFICIAL_HOST,
+    )
 
     // ---- TTS providers (settings.ttsProviders: List<TTSProviderSetting>) ----
 

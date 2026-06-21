@@ -1,18 +1,18 @@
 import SwiftUI
 import Shared
 
-enum ModelDefaultsChatModelSource {
-    static func chatModelIds(for provider: ProviderSetting?) -> [String] {
-        guard let provider else { return [] }
-        var seen = Set<String>()
-        var ids: [String] = []
-        for model in provider.models where model.type == ModelType.chat {
-            let modelID = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !modelID.isEmpty else { continue }
-            guard seen.insert(modelID).inserted else { continue }
-            ids.append(modelID)
-        }
-        return ids
+private struct ModelDefaultOption: Identifiable {
+    let id: String
+    let providerName: String
+    let modelId: String
+    let displayName: String
+
+    var title: String {
+        displayName.isEmpty ? modelId : displayName
+    }
+
+    var menuTitle: String {
+        "\(providerName) · \(title)"
     }
 }
 
@@ -91,35 +91,27 @@ struct ModelDefaultsView: View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "聊天")
             AmberFormGroup {
-                if !hasConfiguredProvider {
+                if chatModelOptions.isEmpty {
                     ModelDefaultStaticRow(
-                        systemImage: "key",
-                        iconColor: AmberTheme.accentAmber,
-                        title: "聊天模型",
-                        subtitle: "先添加 API Key 并设为当前服务商",
-                        value: "需要配置",
-                        valueStyle: AmberTheme.accentAmber
-                    )
-                } else if chatModelOptions.isEmpty {
-                    ModelDefaultTextFieldRow(
                         systemImage: "cpu",
                         iconColor: AmberTheme.accent,
                         title: "聊天模型",
-                        subtitle: "当前服务商未提供模型列表，请填写服务商文档中的 Model ID",
-                        text: $settingsStore.modelId,
-                        placeholder: "例如 gpt-4o-mini"
+                        subtitle: "先在服务商详情自动获取或手动添加模型",
+                        value: "未添加",
+                        valueStyle: AmberTheme.accentAmber
                     )
                 } else {
                     ModelDefaultMenuRow(
                         systemImage: "cpu",
                         iconColor: AmberTheme.accent,
                         title: "聊天模型",
-                        subtitle: "只显示当前服务商可用的聊天模型",
+                        subtitle: "来自已启用服务商的聊天模型",
                         value: currentChatModel
                     ) {
-                        ForEach(chatModelOptions, id: \.self) { modelID in
-                            Button(modelID) {
-                                settingsStore.modelId = modelID
+                        ForEach(chatModelOptions) { option in
+                            Button(option.menuTitle) {
+                                sharedSettings.setCurrentChatModelId(option.id)
+                                sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
                             }
                         }
                     }
@@ -131,35 +123,58 @@ struct ModelDefaultsView: View {
     }
 
     private var currentChatModel: String {
-        let trimmed = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "未选择" : trimmed
-    }
-
-    private var chatModelOptions: [String] {
-        ModelDefaultsChatModelSource.chatModelIds(for: providerRegistry?.selectedProvider)
-    }
-
-    private var hasConfiguredProvider: Bool {
-        if let providerRegistry, let selected = providerRegistry.selectedProvider {
-            return providerRegistry.canSelect(selected)
+        _ = sharedSettings.revision
+        guard let model = sharedSettings.snapshot.getCurrentChatModel() else {
+            return "未选择"
         }
-        return !settingsStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let displayName = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return displayName.isEmpty ? model.modelId : displayName
+    }
+
+    private var chatModelOptions: [ModelDefaultOption] {
+        _ = sharedSettings.revision
+        var seen = Set<String>()
+        var options: [ModelDefaultOption] = []
+        for provider in sharedSettings.snapshot.providers where provider.enabled && ChatProviderConfiguration.supportsChatStreaming(provider) {
+            for model in provider.models where model.type == ModelType.chat {
+                let uuid = model.id.description()
+                guard seen.insert(uuid).inserted else { continue }
+                let modelID = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !modelID.isEmpty else { continue }
+                options.append(
+                    ModelDefaultOption(
+                        id: uuid,
+                        providerName: provider.name,
+                        modelId: modelID,
+                        displayName: model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                )
+            }
+        }
+        return options
+    }
+
+    private var enabledChatProviderCount: Int {
+        _ = sharedSettings.revision
+        return sharedSettings.snapshot.providers.filter {
+            $0.enabled && ChatProviderConfiguration.supportsChatStreaming($0)
+        }.count
     }
 
     private var modelListNote: String {
-        guard hasConfiguredProvider else {
-            return "添加 API Key 后，再选择当前服务商支持的聊天模型。"
-        }
-        guard let selected = providerRegistry?.selectedProvider else {
-            return "当前配置没有可读取的服务商模型列表；请手动填写 Model ID。"
+        if enabledChatProviderCount == 0 {
+            return "先添加或启用 OpenAI-compatible / Anthropic-compatible 服务商。"
         }
         if chatModelOptions.isEmpty {
-            return "\(selected.name) 没有提供可读取的聊天模型列表；请手动填写 Model ID。"
+            return "进入服务商详情后，可自动获取模型；获取失败时也可以手动添加 Model ID。"
         }
-        if !chatModelOptions.contains(settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            return "当前 Model ID 不在 \(selected.name) 的模型列表中，请选择列表里的模型。"
+        guard let model = sharedSettings.snapshot.getCurrentChatModel() else {
+            return "选择一个模型后，新的聊天会默认使用它。"
         }
-        return "模型列表来自当前已配置服务商：\(selected.name)。"
+        if chatModelOptions.contains(where: { $0.id == model.id.description() }) {
+            return "新的聊天会默认使用当前选择的模型。"
+        }
+        return "当前保存的模型不在已启用服务商列表中，请重新选择。"
     }
 }
 

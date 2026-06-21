@@ -6,17 +6,24 @@ struct ProviderDetailView: View {
     let providerRegistry: ProviderRegistryStore
     let sharedSettings: IOSSharedSettingsStore
 
-    @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
 
-    let providerName: String
-    let endpoint: String
-    let providerKind: ProviderRouteKind
+    let providerId: String
 
     @State private var selectedTab: ProviderDetailTab = .config
     @State private var alert: ProviderDetailAlert?
     @State private var connectionStatus: ProviderConnectionStatus = .idle
-    @State private var protocolOverride: ProviderProtocolOption?
+    @State private var fetchState: ProviderModelFetchState = .idle
+    @State private var availableModels: [Model] = []
+    @State private var modelDraft: ProviderModelDraft?
+
+    @State private var draftName = ""
+    @State private var draftEnabled = true
+    @State private var draftApiKey = ""
+    @State private var draftBaseURL = ""
+    @State private var draftChatPath = "/chat/completions"
+    @State private var draftUseResponseAPI = false
+    @State private var draftPromptCaching = false
 
     var body: some View {
         ZStack {
@@ -26,17 +33,23 @@ struct ProviderDetailView: View {
                 chrome
 
                 Group {
-                    switch selectedTab {
-                    case .config:
-                        configPanel
-                    case .models:
-                        modelsPanel
+                    if provider == nil {
+                        missingProviderPanel
+                    } else {
+                        switch selectedTab {
+                        case .config:
+                            configPanel
+                        case .models:
+                            modelsPanel
+                        }
                     }
                 }
             }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear(perform: loadDraft)
+        .onChange(of: sharedSettings.revision) { _, _ in loadDraft() }
         .alert(item: $alert) { alert in
             Alert(
                 title: Text(alert.title),
@@ -44,6 +57,39 @@ struct ProviderDetailView: View {
                 dismissButton: .default(Text("知道了"))
             )
         }
+        .sheet(item: $modelDraft) { draft in
+            ProviderModelEditorSheet(
+                draft: draft,
+                onSave: saveModelDraft
+            )
+        }
+    }
+
+    private var provider: ProviderSetting? {
+        _ = sharedSettings.revision
+        return sharedSettings.snapshot.providers.first { $0.id.description() == providerId }
+    }
+
+    private var providerName: String {
+        provider?.name ?? "服务商"
+    }
+
+    private var currentModel: Model? {
+        _ = sharedSettings.revision
+        return sharedSettings.snapshot.getCurrentChatModel()
+    }
+
+    private var isCurrentProvider: Bool {
+        guard let provider, let currentModel else { return false }
+        return currentModel.findProvider(providers: sharedSettings.snapshot.providers, checkOverwrite: true)?.id == provider.id
+    }
+
+    private var protocolOption: ProviderProtocolOption? {
+        ProviderProtocolOption.option(for: provider)
+    }
+
+    private var chatModels: [Model] {
+        provider?.models.filter { $0.type == ModelType.chat } ?? []
     }
 
     private var chrome: some View {
@@ -63,7 +109,7 @@ struct ProviderDetailView: View {
                 Spacer()
 
                 Color.clear
-                    .frame(width: 58, height: 44)
+                    .frame(width: 44, height: 44)
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
@@ -74,608 +120,464 @@ struct ProviderDetailView: View {
         }
     }
 
+    private var missingProviderPanel: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(AmberTheme.accentAmber)
+            Text("找不到这个服务商")
+                .font(.headline)
+                .foregroundStyle(AmberTheme.foreground)
+            Text("它可能已经被删除，请返回服务商列表重新选择。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+    }
+
     private var configPanel: some View {
         ScrollView {
             VStack(spacing: 0) {
+                AmberSectionLabel(text: "配置")
                 AmberFormGroup {
+                    ProviderToggleRow(title: "启用", isOn: $draftEnabled)
+                    ProviderDetailDivider()
+                    ProviderEditableTextFieldRow(
+                        title: "名称",
+                        text: $draftName,
+                        placeholder: "Provider"
+                    )
+                    ProviderDetailDivider()
                     protocolRow
                 }
 
                 AmberSectionLabel(text: "连接")
                 AmberFormGroup {
-                    connectionRows
-                }
-
-                ProviderDetailFooter(connectionFooterText)
-
-                if isCurrentProvider {
-                    connectionTestSection
-                }
-
-                AmberSectionLabel(text: "选项")
-                AmberFormGroup {
-                    ProviderStaticRow(
-                        title: "Response API",
-                        subtitle: responseAPISubtitle,
-                        value: responseAPIValue
+                    ProviderEditableTextFieldRow(
+                        title: "API Key",
+                        text: $draftApiKey,
+                        placeholder: protocolOption == .anthropic ? "sk-ant-..." : "sk-...",
+                        isSecure: true,
+                        monospace: true
                     )
                     ProviderDetailDivider()
-                    ProviderStaticRow(
-                        title: "账户余额",
-                        subtitle: "不会自动向服务商查询余额。",
-                        value: "未查询"
+                    ProviderEditableTextFieldRow(
+                        title: "API 地址",
+                        text: $draftBaseURL,
+                        placeholder: protocolOption?.defaultBaseURL ?? "https://api.openai.com/v1",
+                        monospace: true
                     )
+                    if provider is ProviderSetting.OpenAI {
+                        ProviderDetailDivider()
+                        ProviderEditableTextFieldRow(
+                            title: "路径",
+                            text: $draftChatPath,
+                            placeholder: "/chat/completions",
+                            monospace: true
+                        )
+                    }
                 }
+
+                legacyKeyImportSection
+
+                if provider is ProviderSetting.Claude {
+                    AmberSectionLabel(text: "选项")
+                    AmberFormGroup {
+                        ProviderToggleRow(title: "Prompt Caching", isOn: $draftPromptCaching)
+                    }
+                }
+
+                configActions
             }
             .padding(.bottom, 36)
         }
         .scrollIndicators(.hidden)
     }
 
-    @ViewBuilder
-    private var modelsPanel: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                if isCurrentProvider {
-                    AmberFormGroup {
-                        ProviderModelRow(
-                            systemImage: "cpu",
-                            name: currentModelID,
-                            badge: "当前聊天模型",
-                            summary: "当前聊天会默认使用这个模型"
-                        ) {
-                            router.navigate(to: .modelDefaults)
-                        }
-                    }
-
-                    Text("需要更换模型时，请到默认模型页选择。")
-                        .font(.footnote)
-                        .foregroundStyle(AmberTheme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 10)
-                } else {
-                    AmberFormGroup {
-                        if presetSeededModels.isEmpty {
-                            ProviderStaticRow(
-                                title: "内置模型",
-                                subtitle: "这个模板暂未提供模型列表",
-                                value: "无"
-                            )
-                        } else {
-                            ForEach(Array(presetSeededModels.enumerated()), id: \.offset) { index, model in
-                                ProviderStaticRow(
-                                    title: model.displayName,
-                                    subtitle: "模板提供的模型",
-                                    value: model.modelId,
-                                    valueStyle: .mono
-                                )
-                                if index < presetSeededModels.count - 1 {
-                                    ProviderDetailDivider()
-                                }
-                            }
-                        }
-                    }
-
-                    Text("模板模型仅用于参考；当前聊天模型请在默认模型页选择。")
-                        .font(.footnote)
-                        .foregroundStyle(AmberTheme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 10)
-                }
-            }
-            .padding(.top, 10)
-            .padding(.bottom, 36)
-        }
-        .scrollIndicators(.hidden)
-    }
-
-    // Real seeded models the matched Android/KMP DEFAULT_PROVIDERS entry ships
-    // for this preset (read-only; iOS does not persist a model list). Matched by
-    // name — DEFAULT_PROVIDERS names are unique, and the "current" config row uses
-    // a different name so it never reaches this preset-only path.
-    private var presetSeededModels: [Model] {
-        DefaultProvidersKt.DEFAULT_PROVIDERS.first { $0.name == providerName }?.models ?? []
-    }
-
-    /// The real KMP `ProviderSetting` for this preset, matched by unique name, or
-    /// nil if this row is not a DEFAULT_PROVIDERS preset. The "current" config row
-    /// uses name "OpenAI-compatible", which never matches a preset name.
-    private var matchedPreset: ProviderSetting? {
-        DefaultProvidersKt.DEFAULT_PROVIDERS.first { $0.name == providerName }
-    }
-
-    private var currentLiveProvider: ProviderSetting? {
-        let snapshot = sharedSettings.snapshot
-        guard let currentModel = snapshot.getCurrentChatModel() else { return nil }
-        return ChatProviderConfiguration.provider(for: currentModel, providers: snapshot.providers)
-    }
-
-    /// The live provider entry from the persisted snapshot matching this preset's
-    /// name. The API key lives here once the user fills it (Android model).
-    private var matchedLiveProvider: ProviderSetting? {
-        if isCurrentProvider, let currentLiveProvider {
-            return currentLiveProvider
-        }
-        return sharedSettings.snapshot.providers.first { ($0.name as String) == providerName }
-    }
-
-    /// True if the live snapshot's matching provider already has a non-empty
-    /// API key in its ProviderSetting.
-    private func presetHasApiKey(_ preset: ProviderSetting) -> Bool {
-        guard let live = matchedLiveProvider else { return false }
-        if let openAI = live as? ProviderSetting.OpenAI { return !openAI.apiKey.isEmpty }
-        if let claude = live as? ProviderSetting.Claude { return !claude.apiKey.isEmpty }
-        if let google = live as? ProviderSetting.Google { return !google.apiKey.isEmpty }
-        return false
-    }
-
-    private var apiKeyRow: some View {
-        ProviderEditableTextFieldRow(
-            title: "API Key",
-            text: $settingsStore.apiKey,
-            placeholder: "sk-...",
-            isSecure: true,
-            monospace: true
-        )
-    }
-
-    private var currentModelID: String {
-        settingsStore.modelId.isEmpty ? "gpt-4o" : settingsStore.modelId
-    }
-
-    private var isBaseUrlValid: Bool {
-        guard
-            let components = URLComponents(string: settingsStore.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)),
-            let scheme = components.scheme?.lowercased(),
-            scheme == "http" || scheme == "https",
-            let host = components.host,
-            !host.isEmpty
-        else {
-            return false
-        }
-
-        return true
-    }
-
-    private var isCurrentProvider: Bool {
-        providerKind == .current
-    }
-
-    private var requiresProviderBridge: Bool {
-        providerKind == .googleProviderPreset
-    }
-
-    private var requiresEndpointConfirmation: Bool {
-        providerKind == .endpointConfirmationPreset
-    }
-
-    private var requiresResponseAPIBridge: Bool {
-        providerKind == .responseAPIPreset
-    }
-
-    private var routeProtocolOption: ProviderProtocolOption? {
-        switch providerKind {
-        case .openAICompatiblePreset, .current:
-            return .openAI
-        case .claudePreset:
-            return .anthropic
-        case .googleProviderPreset, .responseAPIPreset, .endpointConfirmationPreset:
-            return nil
-        }
-    }
-
-    private var currentProtocolOption: ProviderProtocolOption? {
-        protocolOverride ?? ProviderProtocolOption.option(for: matchedLiveProvider) ?? routeProtocolOption
-    }
-
-    private var canSwitchProtocol: Bool {
-        guard let provider = matchedLiveProvider else { return false }
-        if let openAI = provider as? ProviderSetting.OpenAI {
-            if openAI.useResponseApi { return false }
-            if openAI.brand === OpenAIBrand.mimo { return false }
-            return true
-        }
-        if provider is ProviderSetting.Claude {
-            return true
-        }
-        return false
-    }
-
-    private var protocolLabel: String {
-        if requiresProviderBridge { return "Google 专用接口" }
-        if requiresResponseAPIBridge { return "OpenAI Response API" }
-        switch currentProtocolOption {
-        case .anthropic:
-            return "Anthropic 兼容"
-        case .openAI:
-            return "OpenAI 兼容"
-        case .google:
-            return "Google 专用接口"
-        case .custom:
-            return "自定义"
-        case nil:
-            return "OpenAI 兼容"
-        }
-    }
-
-    private var protocolSubtitle: String {
-        switch currentProtocolOption {
-        case .anthropic:
-            return "使用 Anthropic Messages 接口。"
-        case .openAI:
-            return "使用 OpenAI 兼容 Chat Completions 接口。"
-        case .google:
-            return "使用 Gemini 专用接口。"
-        case .custom:
-            return "使用自定义接口。"
-        case nil:
-            if requiresProviderBridge {
-                return "使用 Gemini 专用接口。"
-            }
-            if requiresResponseAPIBridge {
-                return "这个模板使用 Response API。"
-            }
-            if requiresEndpointConfirmation {
-                return "模板地址需要确认后再使用。"
-            }
-            return "由服务商模板决定。"
-        }
-    }
-
-    @ViewBuilder
     private var protocolRow: some View {
-        if canSwitchProtocol {
-            Menu {
-                ForEach(ProviderProtocolOption.switchableCases, id: \.self) { option in
-                    Button {
-                        switchProtocol(to: option)
-                    } label: {
-                        if option == currentProtocolOption {
-                            Label(option.detailTitle, systemImage: "checkmark")
-                        } else {
-                            Text(option.detailTitle)
-                        }
+        Menu {
+            ForEach(ProviderProtocolOption.switchableCases, id: \.self) { option in
+                Button {
+                    switchProtocol(to: option)
+                } label: {
+                    if option == protocolOption {
+                        Label(option.title, systemImage: "checkmark")
+                    } else {
+                        Text(option.title)
                     }
                 }
+            }
+        } label: {
+            ProviderRowContent(
+                title: "接口协议",
+                subtitle: "",
+                value: protocolOption?.title ?? "待移植",
+                valueStyle: .body,
+                showsChevron: provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!(provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude))
+    }
+
+    @ViewBuilder
+    private var legacyKeyImportSection: some View {
+        let oldKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let providerKey = apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !oldKey.isEmpty, providerKey.isEmpty {
+            Button {
+                draftApiKey = oldKey
+                saveConfig(showSuccess: false)
+                alert = .legacyKeyImported
             } label: {
                 ProviderRowContent(
-                    title: "接口协议",
-                    subtitle: protocolSubtitle,
-                    value: protocolLabel,
-                    valueStyle: .normal,
-                    showsChevron: true
+                    title: "导入旧 API Key",
+                    subtitle: "",
+                    value: "导入",
+                    valueStyle: .accent,
+                    showsChevron: false
                 )
             }
             .buttonStyle(.plain)
-        } else {
-            ProviderStaticRow(
-                title: "接口协议",
-                subtitle: protocolSubtitle,
-                value: protocolLabel
-            )
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
         }
     }
 
-    @ViewBuilder
-    private var connectionRows: some View {
-        ProviderStaticRow(title: "名称", subtitle: nil, value: providerName)
-        ProviderDetailDivider()
-
-        if isCurrentProvider {
-            apiKeyRow
-            ProviderDetailDivider()
-            ProviderEditableTextFieldRow(
-                title: "API 地址",
-                text: $settingsStore.baseUrl,
-                placeholder: "https://api.openai.com/v1",
-                monospace: true
-            )
-            if !isBaseUrlValid {
-                ProviderInlineWarning("URL 格式无效，请修正后再发送消息。")
+    private var configActions: some View {
+        VStack(spacing: 10) {
+            Button {
+                saveConfig(showSuccess: true)
+            } label: {
+                ProviderActionRow(systemImage: "square.and.arrow.down", title: "保存配置", tint: AmberTheme.accent)
             }
-            ProviderDetailDivider()
-            ProviderStaticRow(
-                title: "路径",
-                subtitle: "由接口协议决定",
-                value: protocolPathValue,
-                valueStyle: .monoMuted
-            )
-        } else {
-            presetAPIKeyRow
-            ProviderDetailDivider()
-            ProviderStaticRow(
-                title: "预置 API 地址",
-                subtitle: "服务商模板地址",
-                value: endpoint,
-                valueStyle: .mono
-            )
-            ProviderDetailDivider()
-            ProviderValueRow(
-                title: "套用 API 地址",
-                value: presetApplyValue,
-                showsChevron: true
-            ) {
-                applyPresetBaseURL()
+            .buttonStyle(.plain)
+
+            Button {
+                testConnection()
+            } label: {
+                ProviderActionRow(
+                    systemImage: connectionStatus.isTesting ? "hourglass" : "bolt.horizontal",
+                    title: connectionStatus.isTesting ? "正在测试" : "测试连接",
+                    tint: AmberTheme.accentAmber
+                )
             }
-            ProviderDetailDivider()
-            ProviderStaticRow(
-                title: "路径",
-                subtitle: presetPathSubtitle,
-                value: presetPathValue,
-                valueStyle: .monoMuted
-            )
-        }
-    }
+            .buttonStyle(.plain)
+            .disabled(connectionStatus.isTesting)
+            .opacity(connectionStatus.isTesting ? 0.65 : 1)
 
-    /// API Key row for a preset provider.
-    ///
-    /// Presets whose protocol iOS can actually run in chat — OpenAI-compatible
-    /// and Anthropic/Claude (after the :ai-provider-claude bridge) — get a real
-    /// Key editor that writes the key into the provider's own ProviderSetting in
-    /// the persistent `Settings.providers` snapshot (Android model; the key no
-    /// longer lives in a separate iOS per-provider Keychain slot). Protocols that
-    /// genuinely can't run yet (Gemini Google type, xAI Response API, MiMo
-    /// placeholder base) keep the static "未预置" state.
-    @ViewBuilder
-    private var presetAPIKeyRow: some View {
-        if let preset = matchedPreset, ProviderRouteKind.isEditablePreset(preset) {
-            let hasKey = presetHasApiKey(preset)
-            ProviderValueRow(
-                title: "API Key",
-                value: hasKey ? "已保存" : "未保存",
-                showsChevron: true
-            ) {
-                router.navigate(to: .providerKeyEditor(name: providerName))
+            if let message = connectionStatus.message {
+                ProviderConnectionResultRow(status: connectionStatus, message: message)
+                    .padding(.horizontal, 16)
             }
-        } else {
-            ProviderStaticRow(
-                title: "API Key",
-                subtitle: "模板不会自带你的密钥",
-                value: "未预置"
-            )
         }
+        .padding(.top, 16)
     }
 
-    private var presetApplyValue: String {
-        if requiresProviderBridge {
-            return "暂不支持"
-        }
+    private var modelsPanel: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                AmberSectionLabel(text: "已启用模型")
+                AmberFormGroup {
+                    if chatModels.isEmpty {
+                        ProviderStaticRow(
+                            title: "没有模型",
+                            subtitle: "可自动获取模型，也可手动添加服务商文档中的 Model ID。",
+                            value: "空"
+                        )
+                    } else {
+                        ForEach(Array(chatModels.enumerated()), id: \.offset) { index, model in
+                            let isCurrent = model.id == currentModel?.id
+                            ProviderModelRow(
+                                systemImage: isCurrent ? "checkmark.circle.fill" : "cpu",
+                                name: displayName(for: model),
+                                badge: isCurrent ? "当前" : model.modelId,
+                                summary: modelSummary(model),
+                                isCurrent: isCurrent,
+                                onEdit: {
+                                    modelDraft = ProviderModelDraft(model: model)
+                                },
+                                onSetCurrent: {
+                                    setCurrent(model)
+                                },
+                                onDelete: {
+                                    deleteModel(model)
+                                }
+                            )
+                            if index < chatModels.count - 1 {
+                                ProviderDetailDivider()
+                            }
+                        }
+                    }
+                }
 
-        if requiresEndpointConfirmation {
-            return "需要确认"
-        }
+                modelActions
 
-        if requiresResponseAPIBridge {
-            return "暂不支持"
-        }
+                if !availableModels.isEmpty {
+                    AmberSectionLabel(text: "可用模型")
+                    AmberFormGroup {
+                        ForEach(Array(availableModels.enumerated()), id: \.offset) { index, model in
+                            let selected = chatModels.contains { $0.modelId == model.modelId }
+                            Button {
+                                addFetchedModel(model)
+                            } label: {
+                                ProviderRowContent(
+                                    title: displayName(for: model),
+                                    subtitle: model.modelId,
+                                    value: selected ? "已启用" : "添加",
+                                    valueStyle: selected ? .body : .accent,
+                                    showsChevron: false
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(selected)
 
-        return settingsStore.baseUrl == endpoint ? "已是当前地址" : "写入当前配置"
+                            if index < availableModels.count - 1 {
+                                ProviderDetailDivider()
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, 36)
+        }
+        .scrollIndicators(.hidden)
     }
 
-    private var presetPathSubtitle: String {
-        if requiresProviderBridge {
-            return "该服务商使用专用接口"
-        }
-
-        if requiresResponseAPIBridge {
-            return "该模板使用不同接口模式"
-        }
-
-        if currentProtocolOption == .anthropic {
-            return "Anthropic Messages API"
-        }
-
-        return "当前聊天使用"
-    }
-
-    private var presetPathValue: String {
-        protocolPathValue
-    }
-
-    private var protocolPathValue: String {
-        if requiresProviderBridge {
-            return "/models/{model}:generateContent"
-        }
-
-        if requiresResponseAPIBridge {
-            return "/responses"
-        }
-
-        if currentProtocolOption == .anthropic {
-            return "/messages"
-        }
-
-        return "/chat/completions"
-    }
-
-    private var responseAPISubtitle: String {
-        if currentProtocolOption == .anthropic {
-            return "Anthropic 协议不使用 Response API。"
-        }
-        return requiresResponseAPIBridge ? "该模板使用 Response API 路径。" : "当前使用 Chat Completions 路径。"
-    }
-
-    private var responseAPIValue: String {
-        if currentProtocolOption == .anthropic {
-            return "不适用"
-        }
-        return requiresResponseAPIBridge ? "模板需要" : "未启用"
-    }
-
-    private var connectionFooterText: String {
-        if isCurrentProvider {
-            return "这里编辑当前聊天服务商。新增服务商请从服务商列表右上角 + 创建。"
-        }
-
-        if requiresProviderBridge {
-            return "这个模板当前仅供查看，暂不能设为聊天服务商。"
-        }
-
-        if requiresEndpointConfirmation {
-            return "这个模板的地址需要确认，当前不会一键写入聊天配置。"
-        }
-
-        if requiresResponseAPIBridge {
-            return "这个模板需要不同接口模式，当前不会只套用地址。"
-        }
-
-        return "API Key 会保存到该服务商配置。保存后可在列表里设为当前。"
-    }
-
-    private var connectionTestSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "验证")
-            AmberFormGroup {
+    private var modelActions: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
                 Button {
-                    testCurrentConnection()
+                    fetchModels()
                 } label: {
-                    ProviderRowContent(
-                        title: "测试连接",
-                        subtitle: "调用模型列表接口，不发送聊天内容",
-                        value: connectionStatus.buttonValue,
-                        valueStyle: .normal,
-                        showsChevron: false
+                    ProviderActionRow(
+                        systemImage: fetchState.isLoading ? "hourglass" : "arrow.down.circle",
+                        title: fetchState.isLoading ? "正在获取" : "自动获取",
+                        tint: AmberTheme.accent
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(connectionStatus.isTesting)
-                .opacity(connectionStatus.isTesting ? 0.65 : 1)
+                .disabled(fetchState.isLoading)
 
-                if let message = connectionStatus.message {
-                    ProviderDetailDivider()
-                    ProviderConnectionResultRow(status: connectionStatus, message: message)
+                Button {
+                    modelDraft = ProviderModelDraft()
+                } label: {
+                    ProviderActionRow(systemImage: "plus.circle", title: "手动添加", tint: AmberTheme.accentAmber)
                 }
+                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
 
-            ProviderDetailFooter("测试结果来自服务商真实响应；保存 API Key 不会被当作连接成功。")
+            if let message = fetchState.message {
+                ProviderDetailFooter(message)
+            }
         }
+    }
+
+    private func loadDraft() {
+        guard let provider else { return }
+        draftName = provider.name
+        draftEnabled = provider.enabled
+        if let openAI = provider as? ProviderSetting.OpenAI {
+            draftApiKey = openAI.apiKey
+            draftBaseURL = openAI.baseUrl
+            draftChatPath = openAI.chatCompletionsPath
+            draftUseResponseAPI = openAI.useResponseApi
+            draftPromptCaching = false
+        } else if let claude = provider as? ProviderSetting.Claude {
+            draftApiKey = claude.apiKey
+            draftBaseURL = claude.baseUrl
+            draftChatPath = "/messages"
+            draftUseResponseAPI = false
+            draftPromptCaching = claude.promptCaching
+        } else if let google = provider as? ProviderSetting.Google {
+            draftApiKey = google.apiKey
+            draftBaseURL = google.baseUrl
+            draftChatPath = ""
+            draftUseResponseAPI = false
+            draftPromptCaching = false
+        }
+    }
+
+    @discardableResult
+    private func saveConfig(showSuccess: Bool) -> Bool {
+        guard let provider else { return false }
+        let name = draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? provider.name : draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = normalizedBaseURL(draftBaseURL)
+        guard isValidHTTPBaseURL(baseURL) else {
+            alert = .invalidBaseURL
+            return false
+        }
+        let path = draftChatPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "/chat/completions" : draftChatPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = sharedSettings.updateProviderBasics(providerId: providerId, name: name, enabled: draftEnabled)
+        _ = sharedSettings.updateProviderApiKey(providerId: providerId, apiKey: draftApiKey.trimmingCharacters(in: .whitespacesAndNewlines))
+        _ = sharedSettings.updateProviderEndpoint(
+            providerId: providerId,
+            baseUrl: baseURL,
+            chatCompletionsPath: path,
+            useResponseApi: draftUseResponseAPI,
+            promptCaching: draftPromptCaching
+        )
+        if isCurrentProvider {
+            sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+        }
+        if showSuccess {
+            alert = .saved
+        }
+        return true
     }
 
     private func switchProtocol(to option: ProviderProtocolOption) {
-        guard option != currentProtocolOption else { return }
-        guard canSwitchProtocol, let provider = matchedLiveProvider else {
-            alert = .protocolPicker
+        guard option != protocolOption else { return }
+        guard provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude else {
+            alert = .unsupportedProtocol
             return
         }
-
-        let providerId = provider.id.description()
-        guard let updated = sharedSettings.switchProviderProtocol(providerId: providerId, protocolOption: option) else {
+        guard saveConfig(showSuccess: false) else { return }
+        guard sharedSettings.switchProviderProtocol(providerId: providerId, protocolOption: option) != nil else {
             alert = .protocolSwitchFailed
             return
         }
-
-        protocolOverride = ProviderProtocolOption.option(for: updated) ?? option
         connectionStatus = .idle
+        availableModels = []
+        fetchState = .idle
+        loadDraft()
     }
 
-    private func applyPresetBaseURL() {
-        guard !requiresProviderBridge else {
-            alert = .providerBridgeRequired(providerName)
+    private func fetchModels() {
+        guard saveConfig(showSuccess: false) else { return }
+        guard let provider else { return }
+        guard ChatProviderConfiguration.supportsChatStreaming(provider) else {
+            fetchState = .failure("这个 Provider 类型的 iOS 模型获取尚未移植。")
             return
         }
-
-        guard !requiresEndpointConfirmation else {
-            alert = .endpointConfirmationRequired(providerName)
+        guard !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            fetchState = .failure(ChatConfigurationIssue.missingAPIKey.message)
             return
         }
-
-        guard !requiresResponseAPIBridge else {
-            alert = .responseAPIRequired(providerName)
-            return
+        fetchState = .loading
+        Task { @MainActor in
+            do {
+                let models: [Model]
+                if let openAI = provider as? ProviderSetting.OpenAI {
+                    models = try await OpenAIKmpProvider().listModels(providerSetting: openAI)
+                } else if let claude = provider as? ProviderSetting.Claude {
+                    models = try await ClaudeKmpProvider().listModels(providerSetting: claude)
+                } else {
+                    models = []
+                }
+                availableModels = models
+                fetchState = .success(models.isEmpty ? "连接成功，但服务商没有返回可列出的模型。可手动添加 Model ID。" : "发现 \(models.count) 个模型。")
+            } catch {
+                fetchState = .failure(ChatViewModel.userFacingGenerationError(error.localizedDescription, modelId: nil))
+            }
         }
-
-        settingsStore.baseUrl = endpoint
-        alert = .presetApplied(providerName)
     }
 
-    private func testCurrentConnection() {
-        if let claude = matchedLiveProvider as? ProviderSetting.Claude {
-            testClaudeConnection(claude)
-            return
-        }
-
-        let trimmedKey = settingsStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedKey.isEmpty else {
-            connectionStatus = .failure(ChatConfigurationIssue.missingAPIKey.message)
-            return
-        }
-        guard isBaseUrlValid else {
-            connectionStatus = .failure(ChatConfigurationIssue.invalidBaseURL.message)
-            return
-        }
-
-        connectionStatus = .testing
-        let provider = OpenAIKmpProvider()
-        let setting = ProviderSetting.OpenAI(
-            id: KotlinUuid.companion.random(),
-            enabled: true,
-            name: "OpenAI",
-            models: [],
-            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-            builtIn: false,
-            descriptionText: nil,
-            shortDescriptionText: nil,
-            apiKey: trimmedKey,
-            baseUrl: settingsStore.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines),
-            chatCompletionsPath: "/chat/completions",
-            useResponseApi: false,
-            authMode: OpenAIAuthMode.apiKey,
-            brand: OpenAIBrand.generic
+    private func addFetchedModel(_ model: Model) {
+        let displayName = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model.modelId : model.displayName
+        _ = sharedSettings.upsertProviderChatModel(
+            providerId: providerId,
+            modelUuid: nil,
+            modelId: model.modelId,
+            displayName: displayName,
+            contextWindowTokens: intValue(model.contextWindowTokens),
+            headers: model.customHeaders.map { ($0.name, $0.value) }
         )
+    }
 
-        Task { @MainActor in
-            do {
-                let models = try await provider.listModels(providerSetting: setting)
-                if models.isEmpty {
-                    connectionStatus = .success("连接成功，但服务商没有返回可列出的模型。")
-                } else {
-                    connectionStatus = .success("连接成功，发现 \(models.count) 个模型。")
-                }
-            } catch {
-                connectionStatus = .failure(
-                    ChatViewModel.userFacingGenerationError(
-                        error.localizedDescription,
-                        modelId: settingsStore.modelId
-                    )
-                )
-            }
+    private func saveModelDraft(_ draft: ProviderModelDraft) {
+        let modelId = draft.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !modelId.isEmpty else {
+            alert = .modelRequired
+            return
+        }
+        let displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? modelId : draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = sharedSettings.upsertProviderChatModel(
+            providerId: providerId,
+            modelUuid: draft.modelUuid,
+            modelId: modelId,
+            displayName: displayName,
+            contextWindowTokens: draft.contextWindowTokens,
+            headers: draft.headers.map { ($0.name, $0.value) }
+        )
+        modelDraft = nil
+    }
+
+    private func setCurrent(_ model: Model) {
+        sharedSettings.setCurrentChatModelId(model.id.description())
+        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+        alert = .currentModelSet(model.modelId)
+    }
+
+    private func deleteModel(_ model: Model) {
+        _ = sharedSettings.removeProviderChatModel(providerId: providerId, modelUuid: model.id.description())
+        if currentModel?.id == model.id {
+            alert = .currentModelDeleted
         }
     }
 
-    private func testClaudeConnection(_ setting: ProviderSetting.Claude) {
-        guard !setting.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    private func testConnection() {
+        guard saveConfig(showSuccess: false) else { return }
+        guard let provider else { return }
+        guard ChatProviderConfiguration.supportsChatStreaming(provider) else {
+            connectionStatus = .failure(ChatConfigurationIssue.unsupportedProvider.message)
+            return
+        }
+        guard apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
             connectionStatus = .failure(ChatConfigurationIssue.missingAPIKey.message)
             return
         }
-        guard Self.isValidHTTPBaseURL(setting.baseUrl) else {
+        guard isValidHTTPBaseURL(baseURL(of: provider)) else {
             connectionStatus = .failure(ChatConfigurationIssue.invalidBaseURL.message)
             return
         }
-
         connectionStatus = .testing
-        let provider = ClaudeKmpProvider()
-        Task { @MainActor in
-            do {
-                let models = try await provider.listModels(providerSetting: setting)
-                if models.isEmpty {
-                    connectionStatus = .success("连接成功，但服务商没有返回可列出的模型。")
-                } else {
-                    connectionStatus = .success("连接成功，发现 \(models.count) 个模型。")
-                }
-            } catch {
-                connectionStatus = .failure(
-                    ChatViewModel.userFacingGenerationError(
-                        error.localizedDescription,
-                        modelId: settingsStore.modelId
-                    )
-                )
-            }
-        }
+        fetchModels()
+        connectionStatus = .success("连接测试已发起；模型获取结果会显示在模型页。")
     }
 
-    private static func isValidHTTPBaseURL(_ value: String) -> Bool {
+    private func displayName(for model: Model) -> String {
+        let name = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? model.modelId : name
+    }
+
+    private func modelSummary(_ model: Model) -> String {
+        var parts: [String] = [model.modelId]
+        if let context = intValue(model.contextWindowTokens) {
+            parts.append("\(context) ctx")
+        }
+        if !model.customHeaders.isEmpty {
+            parts.append("\(model.customHeaders.count) headers")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func apiKey(of provider: ProviderSetting?) -> String {
+        if let openAI = provider as? ProviderSetting.OpenAI { return openAI.apiKey }
+        if let claude = provider as? ProviderSetting.Claude { return claude.apiKey }
+        if let google = provider as? ProviderSetting.Google { return google.apiKey }
+        return ""
+    }
+
+    private func baseURL(of provider: ProviderSetting) -> String {
+        if let openAI = provider as? ProviderSetting.OpenAI { return openAI.baseUrl }
+        if let claude = provider as? ProviderSetting.Claude { return claude.baseUrl }
+        if let google = provider as? ProviderSetting.Google { return google.baseUrl }
+        return ""
+    }
+
+    private func normalizedBaseURL(_ value: String) -> String {
+        var baseURL = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        while baseURL.hasSuffix("/") {
+            baseURL.removeLast()
+        }
+        return baseURL
+    }
+
+    private func isValidHTTPBaseURL(_ value: String) -> Bool {
         guard
             let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
             let scheme = components.scheme?.lowercased(),
@@ -685,74 +587,24 @@ struct ProviderDetailView: View {
         else {
             return false
         }
-
         return true
+    }
+
+    private func intValue(_ value: KotlinInt?) -> Int? {
+        value.map { Int(truncating: $0) }
     }
 }
 
 private enum ProviderDetailTab: String, CaseIterable, Identifiable {
-    case config = "配置"
-    case models = "模型"
+    case config
+    case models
 
     var id: String { rawValue }
-}
-
-private enum ProviderDetailAlert: Identifiable {
-    case protocolPicker
-    case protocolSwitchFailed
-    case presetApplied(String)
-    case providerBridgeRequired(String)
-    case endpointConfirmationRequired(String)
-    case responseAPIRequired(String)
-
-    var id: String {
-        switch self {
-        case .protocolPicker:
-            "protocol-picker"
-        case .protocolSwitchFailed:
-            "protocol-switch-failed"
-        case .presetApplied(let provider):
-            "preset-applied-\(provider)"
-        case .providerBridgeRequired(let provider):
-            "provider-bridge-required-\(provider)"
-        case .endpointConfirmationRequired(let provider):
-            "endpoint-confirmation-required-\(provider)"
-        case .responseAPIRequired(let provider):
-            "response-api-required-\(provider)"
-        }
-    }
 
     var title: String {
         switch self {
-        case .protocolPicker:
-            "暂不能切换接口协议"
-        case .protocolSwitchFailed:
-            "接口协议未切换"
-        case .presetApplied:
-            "API 地址已套用"
-        case .providerBridgeRequired:
-            "暂不支持这个服务商类型"
-        case .endpointConfirmationRequired:
-            "Base URL 需要确认"
-        case .responseAPIRequired:
-            "暂不支持这个接口模式"
-        }
-    }
-
-    var message: String {
-        switch self {
-        case .protocolPicker:
-            "当前只能在 OpenAI 兼容和 Anthropic 兼容之间切换；Gemini、Response API 和待确认模板暂不支持直接转换。"
-        case .protocolSwitchFailed:
-            "没有找到可更新的服务商配置，请返回服务商列表后重新进入。"
-        case .presetApplied(let provider):
-            "\(provider) 的预置 Base URL 已写入当前聊天配置。API Key 不会被本操作修改，也不会发起网络请求。"
-        case .providerBridgeRequired(let provider):
-            "\(provider) 使用专用接口，当前版本还不能直接设为聊天服务商。"
-        case .endpointConfirmationRequired(let provider):
-            "\(provider) 的模板地址需要确认，当前不会写入聊天配置。"
-        case .responseAPIRequired(let provider):
-            "\(provider) 使用不同接口模式，当前不能只套用 Base URL。"
+        case .config: "配置"
+        case .models: "模型"
         }
     }
 }
@@ -764,42 +616,136 @@ private enum ProviderConnectionStatus: Equatable {
     case failure(String)
 
     var isTesting: Bool {
-        if case .testing = self { return true }
-        return false
-    }
-
-    var buttonValue: String {
-        switch self {
-        case .idle:
-            "开始"
-        case .testing:
-            "测试中"
-        case .success:
-            "成功"
-        case .failure:
-            "失败"
-        }
+        self == .testing
     }
 
     var message: String? {
         switch self {
         case .idle, .testing:
-            return nil
+            nil
         case .success(let message), .failure(let message):
-            return message
+            message
+        }
+    }
+}
+
+private enum ProviderModelFetchState: Equatable {
+    case idle
+    case loading
+    case success(String)
+    case failure(String)
+
+    var isLoading: Bool {
+        self == .loading
+    }
+
+    var message: String? {
+        switch self {
+        case .idle, .loading:
+            nil
+        case .success(let message), .failure(let message):
+            message
+        }
+    }
+}
+
+private enum ProviderDetailAlert: Identifiable {
+    case saved
+    case invalidBaseURL
+    case protocolSwitchFailed
+    case unsupportedProtocol
+    case modelRequired
+    case currentModelSet(String)
+    case currentModelDeleted
+    case legacyKeyImported
+
+    var id: String {
+        switch self {
+        case .saved: "saved"
+        case .invalidBaseURL: "invalid-base-url"
+        case .protocolSwitchFailed: "protocol-switch-failed"
+        case .unsupportedProtocol: "unsupported-protocol"
+        case .modelRequired: "model-required"
+        case .currentModelSet(let model): "current-model-\(model)"
+        case .currentModelDeleted: "current-model-deleted"
+        case .legacyKeyImported: "legacy-key-imported"
         }
     }
 
-    var color: Color {
+    var title: String {
         switch self {
-        case .success:
-            AmberTheme.accentGreen
-        case .failure:
-            AmberTheme.accentRed
-        case .idle, .testing:
-            AmberTheme.muted
+        case .saved: "已保存"
+        case .invalidBaseURL: "API 地址无效"
+        case .protocolSwitchFailed: "协议切换失败"
+        case .unsupportedProtocol: "暂不支持"
+        case .modelRequired: "需要 Model ID"
+        case .currentModelSet: "已设为当前"
+        case .currentModelDeleted: "当前模型已删除"
+        case .legacyKeyImported: "已导入"
         }
     }
+
+    var message: String {
+        switch self {
+        case .saved:
+            "服务商配置已写入当前设置。"
+        case .invalidBaseURL:
+            "请输入有效的 http/https API 地址。"
+        case .protocolSwitchFailed:
+            "没有找到可切换的服务商配置。"
+        case .unsupportedProtocol:
+            "这个 Provider 类型的 iOS 聊天执行器尚未移植。"
+        case .modelRequired:
+            "请填写服务商文档中的 Model ID。"
+        case .currentModelSet(let model):
+            "新的聊天会默认使用 \(model)。"
+        case .currentModelDeleted:
+            "你删除的是当前聊天模型，请在模型页重新选择一个当前模型。"
+        case .legacyKeyImported:
+            "旧 API Key 已写入当前服务商。"
+        }
+    }
+}
+
+private struct ProviderModelDraft: Identifiable {
+    let id = UUID()
+    var modelUuid: String?
+    var modelId: String
+    var displayName: String
+    var contextWindowText: String
+    var headers: [ProviderHeaderDraft]
+
+    init() {
+        self.modelUuid = nil
+        self.modelId = ""
+        self.displayName = ""
+        self.contextWindowText = ""
+        self.headers = []
+    }
+
+    init(model: Model) {
+        self.modelUuid = model.id.description()
+        self.modelId = model.modelId
+        self.displayName = model.displayName
+        if let context = model.contextWindowTokens {
+            self.contextWindowText = "\(Int(truncating: context))"
+        } else {
+            self.contextWindowText = ""
+        }
+        self.headers = model.customHeaders.map { ProviderHeaderDraft(name: $0.name, value: $0.value) }
+    }
+
+    var contextWindowTokens: Int? {
+        let trimmed = contextWindowText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return Int(trimmed.replacingOccurrences(of: ",", with: ""))
+    }
+}
+
+private struct ProviderHeaderDraft: Identifiable, Equatable {
+    let id = UUID()
+    var name: String
+    var value: String
 }
 
 private struct ProviderSegmentedControl: View {
@@ -811,77 +757,162 @@ private struct ProviderSegmentedControl: View {
                 Button {
                     selection = tab
                 } label: {
-                    Text(tab.rawValue)
-                        .font(.subheadline.weight(selection == tab ? .semibold : .medium))
+                    Text(tab.title)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(selection == tab ? AmberTheme.foreground : AmberTheme.muted)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 31)
-                        .background {
-                            if selection == tab {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(AmberTheme.background)
-                                    .shadow(color: .black.opacity(0.05), radius: 4, y: 1)
-                            }
-                        }
+                        .frame(height: 42)
+                        .background(
+                            selection == tab ? AmberTheme.surface : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
         }
         .padding(3)
-        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .background(
+            AmberTheme.surface2.opacity(0.88),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
     }
 }
 
-private enum ProviderValueStyle {
-    case normal
-    case mono
-    case monoMuted
+private struct ProviderModelEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: ProviderModelDraft
+    let onSave: (ProviderModelDraft) -> Void
+
+    init(draft: ProviderModelDraft, onSave: @escaping (ProviderModelDraft) -> Void) {
+        self._draft = State(initialValue: draft)
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AmberTheme.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 0) {
+                        AmberSectionLabel(text: "模型")
+                        AmberFormGroup {
+                            ProviderEditableTextFieldRow(
+                                title: "Model ID",
+                                text: $draft.modelId,
+                                placeholder: "例如 deepseek-chat",
+                                monospace: true
+                            )
+                            ProviderDetailDivider()
+                            ProviderEditableTextFieldRow(
+                                title: "显示名称",
+                                text: $draft.displayName,
+                                placeholder: "留空时使用 Model ID"
+                            )
+                            ProviderDetailDivider()
+                            ProviderEditableTextFieldRow(
+                                title: "上下文",
+                                text: $draft.contextWindowText,
+                                placeholder: "例如 128000",
+                                monospace: true
+                            )
+                        }
+
+                        AmberSectionLabel(text: "Headers")
+                        AmberFormGroup {
+                            if draft.headers.isEmpty {
+                                ProviderStaticRow(title: "自定义 Header", subtitle: "当前没有模型级请求头。", value: "无")
+                            } else {
+                                ForEach($draft.headers) { $header in
+                                    VStack(spacing: 8) {
+                                        ProviderEditableTextFieldRow(
+                                            title: "名称",
+                                            text: $header.name,
+                                            placeholder: "Header name",
+                                            monospace: true
+                                        )
+                                        ProviderEditableTextFieldRow(
+                                            title: "值",
+                                            text: $header.value,
+                                            placeholder: "Header value",
+                                            monospace: true
+                                        )
+                                    }
+                                    .padding(.vertical, 6)
+                                }
+                            }
+                        }
+
+                        Button {
+                            draft.headers.append(ProviderHeaderDraft(name: "", value: ""))
+                        } label: {
+                            ProviderActionRow(systemImage: "plus.circle", title: "添加 Header", tint: AmberTheme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 16)
+                    }
+                    .padding(.bottom, 30)
+                }
+            }
+            .navigationTitle(draft.modelUuid == nil ? "添加模型" : "编辑模型")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        onSave(draft)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ProviderActionRow: View {
+    let systemImage: String
+    let title: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Spacer()
+        }
+        .foregroundStyle(tint)
+        .frame(maxWidth: .infinity)
+        .frame(height: 46)
+        .padding(.horizontal, 14)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
+        .padding(.horizontal, 16)
+    }
 }
 
 private struct ProviderDetailDivider: View {
     var body: some View {
-        Divider()
-            .overlay(AmberTheme.borderSoft)
+        Rectangle()
+            .fill(AmberTheme.borderSoft)
+            .frame(height: 0.5)
             .padding(.leading, 14)
-    }
-}
-
-private struct ProviderValueRow: View {
-    let title: String
-    let value: String
-    var valueStyle: ProviderValueStyle = .normal
-    var showsChevron = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            ProviderRowContent(
-                title: title,
-                subtitle: nil,
-                value: value,
-                valueStyle: valueStyle,
-                showsChevron: showsChevron
-            )
-        }
-        .buttonStyle(.plain)
     }
 }
 
 private struct ProviderStaticRow: View {
     let title: String
-    let subtitle: String?
+    let subtitle: String
     let value: String
-    var valueStyle: ProviderValueStyle = .normal
+    var valueStyle: ProviderRowValueStyle = .body
 
     var body: some View {
-        ProviderRowContent(
-            title: title,
-            subtitle: subtitle,
-            value: value,
-            valueStyle: valueStyle,
-            showsChevron: false
-        )
+        ProviderRowContent(title: title, subtitle: subtitle, value: value, valueStyle: valueStyle, showsChevron: false)
     }
 }
 
@@ -893,45 +924,44 @@ private struct ProviderEditableTextFieldRow: View {
     var monospace = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(title)
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(width: 86, alignment: .leading)
 
             Group {
                 if isSecure {
                     SecureField(placeholder, text: $text)
                 } else {
-                    TextField(placeholder, text: $text)
+                    TextField(placeholder, text: $text, axis: .vertical)
                 }
             }
-            .font(monospace ? .system(size: 14, weight: .regular, design: .monospaced) : .body)
+            .font(monospace ? .system(size: 13, weight: .regular, design: .monospaced) : .body)
             .foregroundStyle(AmberTheme.foreground)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
+            .multilineTextAlignment(.trailing)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 58)
-        .padding(.horizontal, 15)
-        .padding(.vertical, 8)
+        .frame(minHeight: 50)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
     }
 }
 
-private struct ProviderInlineWarning: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
-    }
+private struct ProviderToggleRow: View {
+    let title: String
+    @Binding var isOn: Bool
 
     var body: some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(AmberTheme.accentAmber)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 8)
+        Toggle(isOn: $isOn) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+        }
+        .toggleStyle(.switch)
+        .frame(minHeight: 50)
+        .padding(.horizontal, 14)
     }
 }
 
@@ -940,13 +970,34 @@ private struct ProviderConnectionResultRow: View {
     let message: String
 
     var body: some View {
-        Text(message)
-            .font(.caption)
-            .foregroundStyle(status.color)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(color)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.foreground2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .padding(12)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var icon: String {
+        switch status {
+        case .success: "checkmark.circle.fill"
+        case .failure: "xmark.octagon.fill"
+        default: "info.circle"
+        }
+    }
+
+    private var color: Color {
+        switch status {
+        case .success: AmberTheme.accentGreen
+        case .failure: AmberTheme.accentAmber
+        default: AmberTheme.muted
+        }
     }
 }
 
@@ -965,37 +1016,44 @@ private struct ProviderDetailFooter: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.top, 7)
+            .padding(.top, 10)
     }
+}
+
+private enum ProviderRowValueStyle {
+    case body
+    case mono
+    case accent
 }
 
 private struct ProviderRowContent: View {
     let title: String
-    let subtitle: String?
+    let subtitle: String
     let value: String
-    let valueStyle: ProviderValueStyle
-    let showsChevron: Bool
+    var valueStyle: ProviderRowValueStyle = .body
+    var showsChevron = true
 
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.body)
-                    .foregroundStyle(subtitle == nil ? AmberTheme.foreground : AmberTheme.foreground2)
-
-                if let subtitle {
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(value)
-                .font(valueFont)
-                .foregroundStyle(valueColor)
+                .font(font)
+                .foregroundStyle(color)
                 .lineLimit(1)
-                .minimumScaleFactor(0.72)
+                .minimumScaleFactor(0.78)
 
             if showsChevron {
                 Image(systemName: "chevron.right")
@@ -1003,73 +1061,27 @@ private struct ProviderRowContent: View {
                     .foregroundStyle(AmberTheme.muted2)
             }
         }
-        .frame(minHeight: 52)
+        .frame(minHeight: 58)
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
-        .contentShape(Rectangle())
     }
 
-    private var valueFont: Font {
+    private var font: Font {
         switch valueStyle {
-        case .normal:
-            .subheadline
-        case .mono, .monoMuted:
-            .system(size: 11.5, weight: .regular, design: .monospaced)
+        case .body, .accent:
+            .body
+        case .mono:
+            .system(size: 13, weight: .regular, design: .monospaced)
         }
     }
 
-    private var valueColor: Color {
+    private var color: Color {
         switch valueStyle {
-        case .normal, .mono:
+        case .body, .mono:
             AmberTheme.muted
-        case .monoMuted:
-            AmberTheme.muted2
+        case .accent:
+            AmberTheme.accent
         }
-    }
-}
-
-private struct ProviderToggleRow: View {
-    let title: String
-    var subtitle: String?
-    let isOn: Bool
-    var highlightsSubtitle = false
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(highlightsSubtitle ? AmberTheme.muted : AmberTheme.muted)
-                        .lineLimit(2)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button(action: action) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isOn ? AmberTheme.accent : AmberTheme.border)
-                    .frame(width: 48, height: 30)
-                    .overlay(alignment: isOn ? .trailing : .leading) {
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 26, height: 26)
-                            .shadow(color: .black.opacity(0.14), radius: 3, y: 1)
-                            .padding(2)
-                    }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(title)
-            .accessibilityValue(isOn ? "开启" : "关闭")
-        }
-        .frame(minHeight: 52)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
     }
 }
 
@@ -1078,67 +1090,56 @@ private struct ProviderModelRow: View {
     let name: String
     let badge: String
     let summary: String
-    let action: () -> Void
+    let isCurrent: Bool
+    let onEdit: () -> Void
+    let onSetCurrent: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .medium))
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(isCurrent ? AmberTheme.accentGreen : AmberTheme.accent)
+                .frame(width: 32, height: 32)
+                .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text(summary)
+                    .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
-                    .frame(width: 36, height: 36)
-                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-                    }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(name)
-                        .font(.system(size: 13.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(AmberTheme.foreground)
-                        .lineLimit(1)
-
-                    HStack(spacing: 6) {
-                        Text(badge)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(AmberTheme.muted2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-
-                        Text(summary)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(AmberTheme.muted2)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted2)
+                    .lineLimit(1)
             }
-            .frame(minHeight: 58)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-#Preview {
-    let settings = SettingsStore()
-    return NavigationStack {
-        ProviderDetailView(
-            settingsStore: settings,
-            providerRegistry: ProviderRegistryStore(settingsStore: settings),
-            sharedSettings: IOSSharedSettingsStore(),
-            providerName: "OpenAI-compatible",
-            endpoint: "https://api.openai.com/v1",
-            providerKind: .current
-        )
-            .environment(RouterPath())
+            Text(badge)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(1)
+
+            Menu {
+                Button("编辑", action: onEdit)
+                if !isCurrent {
+                    Button("设为当前", action: onSetCurrent)
+                }
+                Button("删除", role: .destructive, action: onDelete)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(AmberTheme.muted)
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(minHeight: 58)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onEdit()
+        }
     }
 }

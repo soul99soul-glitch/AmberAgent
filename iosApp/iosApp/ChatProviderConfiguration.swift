@@ -68,7 +68,10 @@ enum ChatProviderConfiguration {
     }
 
     static func supportsChatStreaming(_ provider: ProviderSetting) -> Bool {
-        provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude
+        if let openAI = provider as? ProviderSetting.OpenAI {
+            return !openAI.useResponseApi
+        }
+        return provider is ProviderSetting.Claude
     }
 
     private static func isValidHTTPBaseURL(_ value: String) -> Bool {

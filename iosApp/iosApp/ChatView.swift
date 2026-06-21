@@ -59,8 +59,10 @@ struct ChatView: View {
             inputBar
         }
         .sheet(isPresented: $isModelSheetPresented) {
-            ComposerModelSheet(currentModel: composerCurrentModelID) { model in
-                settingsStore.modelId = model.id
+            ComposerModelSheet(sharedSettings: sharedSettings, currentModel: composerCurrentModelSelection) { model in
+                sharedSettings.setCurrentChatModelId(model.id)
+                sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                viewModel.messageRevision &+= 1
                 isModelSheetPresented = false
             }
             .presentationDetents([.fraction(0.72), .large])
@@ -534,6 +536,11 @@ struct ChatView: View {
         viewModel.contextSnapshot.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var composerCurrentModelSelection: String {
+        _ = sharedSettings.revision
+        return sharedSettings.snapshot.getCurrentChatModel()?.id.description() ?? composerCurrentModelID
+    }
+
     private var selectedReasoningOption: ComposerReasoningOption {
         ComposerReasoningOption(reasoningLevel: viewModel.reasoningLevel)
     }
@@ -607,21 +614,24 @@ private struct ContextRingButton: View {
 private struct ComposerModelSheet: View {
     @Environment(\.dismiss) private var dismiss
 
+    let sharedSettings: IOSSharedSettingsStore
     let currentModel: String
     let onPick: (ComposerModelOption) -> Void
 
     @State private var expandedProviderIDs: Set<String>
 
     private var providers: [ComposerProviderGroup] {
-        ComposerProviderGroup.currentConfiguration(currentModel: currentModel)
+        _ = sharedSettings.revision
+        return ComposerProviderGroup.currentConfiguration(sharedSettings: sharedSettings, currentModel: currentModel)
     }
 
-    init(currentModel: String, onPick: @escaping (ComposerModelOption) -> Void) {
+    init(sharedSettings: IOSSharedSettingsStore, currentModel: String, onPick: @escaping (ComposerModelOption) -> Void) {
+        self.sharedSettings = sharedSettings
         self.currentModel = currentModel
         self.onPick = onPick
         let selectedProviderID = Self.selectedProviderID(
             for: currentModel,
-            providers: ComposerProviderGroup.currentConfiguration(currentModel: currentModel)
+            providers: ComposerProviderGroup.currentConfiguration(sharedSettings: sharedSettings, currentModel: currentModel)
         )
         self._expandedProviderIDs = State(initialValue: Set([selectedProviderID]))
     }
@@ -667,35 +677,52 @@ private struct ComposerModelSheet: View {
                 .overlay(AmberTheme.borderSoft)
 
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
-                        ComposerProviderGroupView(
-                            provider: provider,
-                            currentModel: currentModel,
-                            isExpanded: expandedProviderIDs.contains(provider.id),
-                            onToggle: {
-                                toggleProvider(provider.id)
-                            },
-                            onPick: { model in
-                                onPick(model)
-                            }
-                        )
+                if providers.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accent)
+                        Text("还没有可用模型")
+                            .font(.headline)
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text("请先在服务商详情自动获取或手动添加模型。")
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 38)
+                    .padding(.horizontal, 16)
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                            ComposerProviderGroupView(
+                                provider: provider,
+                                currentModel: currentModel,
+                                isExpanded: expandedProviderIDs.contains(provider.id),
+                                onToggle: {
+                                    toggleProvider(provider.id)
+                                },
+                                onPick: { model in
+                                    onPick(model)
+                                }
+                            )
 
-                        if index < providers.count - 1 {
-                            Divider()
-                                .overlay(AmberTheme.borderSoft)
+                            if index < providers.count - 1 {
+                                Divider()
+                                    .overlay(AmberTheme.borderSoft)
+                            }
                         }
                     }
+                    .background(AmberTheme.background.opacity(0.72))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 28)
                 }
-                .background(AmberTheme.background.opacity(0.72))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 28)
             }
             .scrollIndicators(.hidden)
         }
@@ -827,37 +854,46 @@ private struct ComposerProviderGroup: Identifiable {
     let name: String
     let models: [ComposerModelOption]
 
-    static func currentConfiguration(currentModel: String) -> [ComposerProviderGroup] {
-        let defaultModels = [
-            ComposerModelOption(id: "gpt-4o", name: "gpt-4o", context: "128K")
-        ]
-        let trimmedCurrentModel = currentModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let models: [ComposerModelOption]
-        if trimmedCurrentModel.isEmpty || defaultModels.contains(where: { $0.matches(trimmedCurrentModel) }) {
-            models = defaultModels
-        } else {
-            models = [
-                ComposerModelOption(id: trimmedCurrentModel, name: trimmedCurrentModel, context: nil)
-            ] + defaultModels
+    static func currentConfiguration(sharedSettings: IOSSharedSettingsStore, currentModel: String) -> [ComposerProviderGroup] {
+        sharedSettings.snapshot.providers.compactMap { provider in
+            guard provider.enabled, ChatProviderConfiguration.supportsChatStreaming(provider) else { return nil }
+            let models = provider.models
+                .filter { $0.type == ModelType.chat }
+                .map { model in
+                    ComposerModelOption(
+                        id: model.id.description(),
+                        name: displayName(for: model),
+                        modelId: model.modelId,
+                        context: contextLabel(for: model)
+                    )
+                }
+            guard !models.isEmpty else { return nil }
+            return ComposerProviderGroup(id: provider.id.description(), name: provider.name, models: models)
         }
-        return [
-            ComposerProviderGroup(
-                id: "current",
-                name: "当前 OpenAI-compatible 配置",
-                models: models
-            )
-        ]
+    }
+
+    private static func displayName(for model: Model) -> String {
+        let name = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? model.modelId : name
+    }
+
+    private static func contextLabel(for model: Model) -> String? {
+        guard let tokens = model.contextWindowTokens else { return nil }
+        return "\(Int(truncating: tokens)) ctx"
     }
 }
 
 private struct ComposerModelOption: Identifiable, Hashable {
     let id: String
     let name: String
+    let modelId: String
     let context: String?
 
     func matches(_ value: String) -> Bool {
         let normalizedValue = Self.normalize(value)
-        return Self.normalize(id) == normalizedValue || Self.normalize(name) == normalizedValue
+        return Self.normalize(id) == normalizedValue ||
+            Self.normalize(name) == normalizedValue ||
+            Self.normalize(modelId) == normalizedValue
     }
 
     private static func normalize(_ value: String) -> String {
