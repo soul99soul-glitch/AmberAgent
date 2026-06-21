@@ -22,6 +22,10 @@ kotlin {
             api(project(":core:agent-runtime"))
             api(project(":core:agent-utils"))
         }
+
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 
     // Apply opt-in to all targets (JVM + iOS native)

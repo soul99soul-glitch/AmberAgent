@@ -100,7 +100,7 @@ mod jni_bridge {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_app_amber_highlight_nativebridge_HighlighterNative_supportedLanguages<'local>(
+    pub extern "system" fn Java_app_amber_highlight_nativebridge_HighlighterNative_supportedLanguagesNative<'local>(
         mut env: JNIEnv<'local>,
         _class: JClass<'local>,
     ) -> jobjectArray {

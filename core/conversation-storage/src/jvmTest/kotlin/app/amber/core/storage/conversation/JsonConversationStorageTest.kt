@@ -218,6 +218,46 @@ class JsonConversationStorageTest {
         assertTrue(tempFiles.isEmpty(), "atomic write tmp files must be cleaned up")
     }
 
+    /**
+     * P3+ 风险拦截（Surface A / 跨端 actual 行为分叉）：
+     *
+     * `ConversationFile.delete()` 的 KDoc 契约（ConversationFile.kt:23-26）是
+     * "删除。不存在返回 false"。jvmMain actual = `File.delete()`，iOS actual =
+     * `NSFileManager.removeItemAtPath`。两者对**不存在的路径**返回值一致（false），
+     * 但对**非空目录**语义分叉：
+     *   - JVM `File.delete()` 在非空目录上返回 false（不抛、不递归删）
+     *   - iOS `removeItemAtPath` 会递归删除整个目录树并返回 true
+     *
+     * 本测试钉死 JVM 侧契约：删除一个**不存在**的文件必须返回 false。
+     * 它是跨端一致性回归网的一部分——若未来 iOS actual 被改成"不存在返回 true"
+     * 或 JVM actual 被改成"不存在返回 true"，与 KDoc 契约矛盾，本测试会失败。
+     *
+     * 注意：仅靠 jvmTest 无法直接断言 iOS actual 的行为（需 iosSimulatorArm64Test），
+     * 但本测试至少保证 JVM 不偏离 KDoc 契约——这是跨端对齐的基线。
+     */
+    @Test
+    fun deleteNonExistentFileReturnsFalsePerContract() {
+        val ghost = tempDir.child("does-not-exist.json")
+        assertFalse(ghost.exists(), "前置条件：文件确实不存在")
+        // KDoc 契约：不存在返回 false。若 JVM actual 改成返回 true，此断言失败。
+        assertFalse(ghost.delete(), "delete() 在不存在的路径上必须返回 false（见 ConversationFile.kt:25 契约）")
+    }
+
+    /**
+     * 钉死「删除已存在的普通文件返回 true」契约——防止任何一端把 delete() 改成
+     * 永远返回 false（静默吞删除），导致 JsonConversationStorage.deleteConversation()
+     * (JsonConversationStorage.kt:71-75) 调用 delete() 后 removeFromIndex() 仍执行，
+     * 造成 index 与文件不一致（文件还在但 index 里没了 → 幽灵会话）。
+     */
+    @Test
+    fun deleteExistingFileReturnsTrueAndRemovesIt() {
+        val f = tempDir.child("deletable.json")
+        f.writeText("payload")
+        assertTrue(f.exists())
+        assertTrue(f.delete(), "delete() 删除已存在文件必须返回 true")
+        assertFalse(f.exists(), "delete() 后文件必须不存在")
+    }
+
     // ---- 构造助手 ----
 
     /**

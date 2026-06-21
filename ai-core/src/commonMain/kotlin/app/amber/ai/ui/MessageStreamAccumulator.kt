@@ -80,7 +80,18 @@ class MessageStreamAccumulator(
                     is UIMessagePart.Image -> appendImage(deltaPart)
                     is UIMessagePart.Reasoning -> appendReasoning(deltaPart)
                     is UIMessagePart.Tool -> appendTool(deltaPart)
-                    else -> println("delta part append not supported: $deltaPart")
+                    // Multi-modal parts that have no streaming-merge semantics are appended
+                    // verbatim as static parts so they are NOT silently dropped. Previously
+                    // this was `else -> println(...)` which discarded Video/Audio/Document/
+                    // MiniApp parts on every chunk — a silent data-loss path on the main
+                    // generation streaming route (GenerationHandler / OpenAIProvider).
+                    // Enumerating all remaining sealed subtypes (no `else`) makes this
+                    // exhaustive: adding a new UIMessagePart subclass becomes a compile
+                    // error here, forcing an explicit accumulation decision.
+                    is UIMessagePart.Video -> parts += MutablePart.Static(deltaPart)
+                    is UIMessagePart.Audio -> parts += MutablePart.Static(deltaPart)
+                    is UIMessagePart.Document -> parts += MutablePart.Static(deltaPart)
+                    is UIMessagePart.MiniApp -> parts += MutablePart.Static(deltaPart)
                 }
             }
 

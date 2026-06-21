@@ -15,8 +15,18 @@ import app.amber.ai.ui.UIMessage
 interface Provider<T : ProviderSetting> {
     suspend fun listModels(providerSetting: T): List<Model>
 
+    /**
+     * 查询 provider 余额。默认实现抛 [UnsupportedOperationException]：未 override 的
+     * provider（如 KMP 的 Claude/OpenAI、Google）明确不支持余额查询，而不是静默返回
+     * 占位字符串。此前默认返回 "TODO"，iOS 侧若经 :shared 调用会把字面量 "TODO" 显示
+     * 给用户——P3 契约陷阱。调用方应先判 [ProviderSetting.balanceOption].enabled，
+     * 或 catch 本异常。
+     */
     suspend fun getBalance(providerSetting: T): String {
-        return "TODO"
+        throw UnsupportedOperationException(
+            "Provider ${this::class.simpleName} does not implement getBalance; " +
+                "override it or check balanceOption.enabled before calling."
+        )
     }
 
     suspend fun generateText(
