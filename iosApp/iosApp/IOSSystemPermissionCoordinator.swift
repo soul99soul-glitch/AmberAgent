@@ -583,25 +583,22 @@ private extension IOSSystemPermissionCoordinator {
     }
 
     func imageCaptureContentsStatus(for capability: IOSPlatformCapability, now: Date) -> IOSSystemPermissionResult {
-        #if canImport(ImageCaptureCore)
-        if #available(iOS 14.0, *) {
-            return result(capability, mapImageCaptureAuthorization(ICDeviceBrowser().contentsAuthorizationStatus), "ImageCaptureCore contents authorization status.", now)
-        }
-        return result(capability, .unavailableOnDevice, "ImageCaptureCore contents authorization requires iOS 14 or newer.", now)
-        #else
-        return result(capability, .unavailableOnDevice, "ImageCaptureCore is unavailable.", now)
-        #endif
+        // IMPORTANT: do NOT read `ICDeviceBrowser().contentsAuthorizationStatus` here. Instantiating
+        // ICDeviceBrowser / touching ImageCaptureCore authorization triggers a system Camera prompt
+        // (via icprefd) even for a passive status read. This status function is hit by the per-send
+        // capability sweep (`permissionsStatus`), and because `cachedStatus` never stores the result
+        // it fell through here on every send — popping the Camera dialog on every message sent.
+        // Status checks must never prompt: report `.notDetermined` and let the real authorization be
+        // acquired on demand in `requestImageCaptureContents`, which only runs from the explicit
+        // permissions UI.
+        result(capability, .notDetermined, "ImageCaptureCore contents authorization is requested on demand.", now)
     }
 
     func imageCaptureControlStatus(for capability: IOSPlatformCapability, now: Date) -> IOSSystemPermissionResult {
-        #if canImport(ImageCaptureCore)
-        if #available(iOS 14.0, *) {
-            return result(capability, mapImageCaptureAuthorization(ICDeviceBrowser().controlAuthorizationStatus), "ImageCaptureCore control authorization status.", now)
-        }
-        return result(capability, .unavailableOnDevice, "ImageCaptureCore control authorization requires iOS 14 or newer.", now)
-        #else
-        return result(capability, .unavailableOnDevice, "ImageCaptureCore is unavailable.", now)
-        #endif
+        // See `imageCaptureContentsStatus`: reading ICDeviceBrowser().controlAuthorizationStatus
+        // would prompt for Camera on a passive status check. Report `.notDetermined`; the real
+        // request happens on demand in `requestImageCaptureControl` (explicit permissions UI only).
+        result(capability, .notDetermined, "ImageCaptureCore control authorization is requested on demand.", now)
     }
 
     func requestImageCaptureContents(_ capability: IOSPlatformCapability, now: Date) async -> IOSSystemPermissionResult {

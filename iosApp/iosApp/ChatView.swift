@@ -1,5 +1,6 @@
 import SwiftUI
 import Shared
+import UIKit
 import UniformTypeIdentifiers
 
 private enum ComposerPanel: String, Identifiable {
@@ -53,12 +54,38 @@ struct ChatView: View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
             messageList
+            // Bottom-edge gradient blur, re-added as a NON-INTERACTIVE background layer (not a
+            // safeAreaBar). It sits in front of the messages but behind the composer (which is a
+            // `.safeAreaInset` composited on top of the whole ZStack), so message content fades
+            // into the bottom edge while the composer controls stay crisp — never clipped and
+            // never focus-stolen, because this layer takes no hits and has no layout relationship
+            // with the composer. Pinned light so it doesn't adapt dark over the terracotta
+            // backdrop.
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                StreamingBottomBoundaryGlass()
+                    .frame(height: ChatLayout.bottomGlassHeight)
+            }
+            .ignoresSafeArea(edges: .bottom)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .environment(\.colorScheme, .light)
         }
         .safeAreaBar(edge: .top, spacing: 0) {
             topBar
         }
+        // Composer pinned to the bottom safe area via `.safeAreaInset` (NOT `.safeAreaBar`).
+        // safeAreaBar added an adaptive Liquid Glass bar, but it caused two problems: (a) it
+        // flipped to its dark variant over the terracotta backdrop, and (b) its under-bar
+        // scrolling content overlapped the composer, so the expanding model / thinking / context
+        // controls were clipped and the keyboard-dismiss tap could resign the field's focus the
+        // moment it gained it — hiding those controls. safeAreaInset keeps the composer correctly
+        // sized on its own crisp surfaces and does not overlap the scroll content.
         .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Keep the composer's glass controls (the `.glassEffect(.regular.interactive())`
+            // buttons) in the light appearance so they don't adapt dark over the warm backdrop.
             inputBar
+                .environment(\.colorScheme, .light)
         }
         .sheet(isPresented: $isModelSheetPresented) {
             ComposerModelSheet(sharedSettings: sharedSettings, currentModel: composerCurrentModelSelection) { model in
@@ -242,7 +269,25 @@ struct ChatView: View {
                 .padding(.horizontal, ChatLayout.contentHorizontalInset)
                 .padding(.vertical, 12)
                 .padding(.bottom, 18)
+                // Tap anywhere in the message content to dismiss the keyboard. Attached to the
+                // content (not the ScrollView) so it reliably fires; simultaneousGesture so
+                // message bubbles/buttons still receive their taps; contentShape makes the gaps
+                // between messages tappable too.
+                .frame(maxWidth: .infinity, minHeight: 0)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        // Only dismiss when the keyboard is already up. This prevents a tap that
+                        // is GAINING focus on the input field from immediately resigning it
+                        // (which would hide the composer controls).
+                        if isInputFocused { dismissKeyboard() }
+                    }
+                )
             }
+            // Drag the messages to dismiss the keyboard (iMessage-style). Tap-to-dismiss is
+            // attached to the content (LazyVStack) below instead of here, because a TapGesture
+            // on the ScrollView itself does not reliably fire — the UIScrollView swallows it.
+            .scrollDismissesKeyboard(.interactively)
             .onScrollPhaseChange { _, phase in
                 switch phase {
                 case .interacting:
@@ -276,20 +321,6 @@ struct ChatView: View {
                     scrollToLatestMessage(proxy, animated: true, deferred: false)
                 }
             }
-        }
-        // Step 4: bottom Liquid Glass boundary as a SIBLING overlay on the scroll area.
-        // Z-order: messages < this glass < composer. The composer is a `.safeAreaInset`
-        // applied in `body`, so it composites ABOVE this overlay and stays crisp; the glass
-        // is never behind the composer's `.thinMaterial` pills, which is what washed them out
-        // before. History content frosts into the bottom boundary as it scrolls behind the
-        // glass (mirroring the top bar) — without shrinking or clipping the ScrollView. The
-        // fade height is kept below `followBottomGap` so the actively-streaming line (held that
-        // far above the composer) never sits in the frosted zone.
-        .overlay(alignment: .bottom) {
-            StreamingBottomBoundaryGlass()
-                .frame(height: ChatLayout.streamingBoundaryFadeHeight)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
         }
     }
 
@@ -344,6 +375,16 @@ struct ChatView: View {
             try? await Task.sleep(nanoseconds: 120_000_000)
             jump()
         }
+    }
+
+    /// Forcefully dismiss the keyboard. Clears the SwiftUI focus binding and also resigns the
+    /// UIKit first responder directly — the latter guarantees dismissal even if the focus
+    /// binding alone does not take effect.
+    private func dismissKeyboard() {
+        isInputFocused = false
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+        )
     }
 
     // MARK: - Input Bar
@@ -762,7 +803,14 @@ private struct ComposerIconButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .background(prominent ? tint : AmberTheme.surface.opacity(0.72), in: Circle())
+        // Match the model chip and context ring, which use composerStableSurface's `.thinMaterial`
+        // fill. Non-prominent icon buttons (e.g. the thinking button) previously used a more
+        // opaque AmberTheme.surface fill, which read inconsistently next to them. The stroke and
+        // shadow below already match composerStableSurface; only the fill differed. Prominent
+        // buttons (send / stop) keep their solid accent tint.
+        .background {
+            Circle().fill(prominent ? AnyShapeStyle(tint) : AnyShapeStyle(.thinMaterial))
+        }
         .overlay {
             Circle()
                 .stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
@@ -1350,10 +1398,10 @@ private struct ComposerPopoverSurface<Content: View>: View {
 enum ChatLayout {
     static let contentHorizontalInset: CGFloat = 22
     static let userMaxWidth: CGFloat = 300
-    // Height of the bottom Liquid Glass boundary fade. Kept below `followBottomGap` so the
-    // actively-streaming line (held `followBottomGap` above the composer) is never frosted;
-    // when idle, the resting last message gently fades into the composer boundary.
-    static let streamingBoundaryFadeHeight: CGFloat = 72
+    // Height of the bottom-edge gradient blur layer. Covers the composer area plus a fade zone
+    // above it; StreamingBottomBoundaryGlass's gradient mask fades clear (top) → frosted (bottom)
+    // so message content dissolves into the bottom edge behind the composer.
+    static let bottomGlassHeight: CGFloat = 150
     static let followBottomGap: CGFloat = 96
     static let bottomStickThreshold: CGFloat = 40
 }
