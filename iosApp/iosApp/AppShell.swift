@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 struct AppShell: View {
@@ -17,7 +18,7 @@ struct AppShell: View {
     @State private var mcpConfigStore: IOSMcpConfigStore
     @State private var conversationStore: IOSConversationStore
     @State private var rootRouter = RouterPath()
-    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = "light"
+    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.system.rawValue
 
     init(settingsStore: SettingsStore) {
         let permissionStore = IOSPermissionStore()
@@ -491,5 +492,21 @@ private extension View {
                 PromptInjectionEditorView(sharedSettings: sharedSettings)
             }
         }
+    }
+}
+
+// Re-enable iOS's interactive pop (edge-swipe-to-go-back) gesture app-wide. NavigationStack pages
+// that hide the nav bar / use a custom back button (`navigationBarBackButtonHidden(true)` +
+// `toolbar(.hidden, for: .navigationBar)`) otherwise lose the default swipe-back, leaving only the
+// top-left button. We become the gesture's delegate and only allow it when there is a page to pop,
+// so the root view is unaffected and no horizontal content gestures are hijacked.
+extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
+    override open func viewDidLoad() {
+        super.viewDidLoad()
+        interactivePopGestureRecognizer?.delegate = self
+    }
+
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        viewControllers.count > 1
     }
 }

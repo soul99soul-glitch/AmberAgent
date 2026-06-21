@@ -1,33 +1,148 @@
 import SwiftUI
+import UIKit
 @preconcurrency import Shared
 import UniformTypeIdentifiers
 
+/// A full set of canvas tokens for one appearance (warm paper / neutral / dark).
+struct AmberPalette {
+    let background, surface, surface2, foreground, foreground2, muted, muted2, border, borderSoft: UInt32
+}
+
+// Theme tokens are dynamic: the canvas (paper vs neutral) + accent come from AmberThemeRuntime,
+// and light/dark is resolved by a UIColor dynamicProvider. Because the color getters read the
+// @Observable runtime, any SwiftUI body that reads AmberTheme.* auto-tracks theme changes and
+// re-renders — with zero changes at the ~1500 existing call sites.
 enum AmberTheme {
-    static let background = Color(hex: 0xFBF7F1)
-    static let surface = Color(hex: 0xF2EADE)
-    static let surface2 = Color(hex: 0xE7DBCB)
-    static let card = surface
-    static let foreground = Color(hex: 0x2A2320)
-    static let foreground2 = Color(hex: 0x4A4039)
-    static let muted = Color(hex: 0x6E6254)
-    static let muted2 = Color(hex: 0xA89A88)
-    static let border = Color(hex: 0xDBCEBC)
-    static let borderSoft = Color(hex: 0xECE3D6)
-    static let accent = Color(hex: 0xB5532C)
-    static let accentTint = Color(hex: 0xB5532C, alpha: 0.12)
+    // Warm paper (default).
+    static let paperLight = AmberPalette(
+        background: 0xFBF7F1, surface: 0xF2EADE, surface2: 0xE7DBCB,
+        foreground: 0x2A2320, foreground2: 0x4A4039, muted: 0x6E6254, muted2: 0xA89A88,
+        border: 0xDBCEBC, borderSoft: 0xECE3D6
+    )
+    // Neutral white (systemGroupedBackground family).
+    static let neutralLight = AmberPalette(
+        background: 0xF2F2F7, surface: 0xFFFFFF, surface2: 0xEFEFF4,
+        foreground: 0x1C1C1E, foreground2: 0x3A3A3C, muted: 0x6C6C70, muted2: 0xAEAEB2,
+        border: 0xD8D8DD, borderSoft: 0xE5E5EA
+    )
+    // Warm dark (HIG: not pure black / not pure white; hairlines via near-bg surfaces).
+    static let darkPalette = AmberPalette(
+        background: 0x0E0D10, surface: 0x1B1A1E, surface2: 0x26242A,
+        foreground: 0xF4EFE7, foreground2: 0xCFC8BD, muted: 0x9A9189, muted2: 0x6E6760,
+        border: 0x3A3741, borderSoft: 0x2A2830
+    )
+
+    private static func base(_ key: KeyPath<AmberPalette, UInt32>, alpha: Double = 1) -> Color {
+        let lightHex = (AmberThemeRuntime.shared.paper == .neutral ? neutralLight : paperLight)[keyPath: key]
+        let darkHex = darkPalette[keyPath: key]
+        return Color(uiColor: UIColor { trait in
+            UIColor(hex: trait.userInterfaceStyle == .dark ? darkHex : lightHex, alpha: alpha)
+        })
+    }
+
+    static var background: Color { base(\.background) }
+    static var surface: Color { base(\.surface) }
+    static var surface2: Color { base(\.surface2) }
+    static var card: Color { base(\.surface) }
+    static var foreground: Color { base(\.foreground) }
+    static var foreground2: Color { base(\.foreground2) }
+    static var muted: Color { base(\.muted) }
+    static var muted2: Color { base(\.muted2) }
+    static var border: Color { base(\.border) }
+    static var borderSoft: Color { base(\.borderSoft) }
+
+    // Runtime accent (the user's swatch). accentInk = on-accent text/icon color.
+    static var accent: Color { Color(hex: AmberThemeRuntime.shared.accentHex) }
+    static var accentTint: Color { Color(hex: AmberThemeRuntime.shared.accentHex, alpha: 0.12) }
+    static var accentInk: Color { Color(hex: AmberThemeRuntime.shared.accentInkHex) }
+
+    // Semantic status colors stay fixed (status is always color + symbol/label elsewhere).
     static let accentIndigo = Color(hex: 0x5856D6)
     static let accentAmber = Color(hex: 0xD98324)
     static let accentGreen = Color(hex: 0x3DA35D)
     static let accentCyan = Color(hex: 0x2AA0BC)
     static let accentRed = Color(hex: 0xC8402F)
-    static let glass = Color(hex: 0xFBF7F1, alpha: 0.72)
-    static let glassStrong = Color(hex: 0xFBF7F1, alpha: 0.85)
+
+    static var glass: Color { base(\.background, alpha: 0.72) }
+    static var glassStrong: Color { base(\.background, alpha: 0.85) }
 
     static let radiusSmall: CGFloat = 6
     static let radiusMedium: CGFloat = 8
     static let radiusLarge: CGFloat = 12
     static let radiusXLarge: CGFloat = 18
     static let radiusPill: CGFloat = 980
+}
+
+/// Persisted, observable theme state: canvas (paper vs neutral) + accent. Light/dark is handled
+/// separately via `IOSAppearanceMode` → `.preferredColorScheme` (+ the dynamicProvider above).
+@Observable
+final class AmberThemeRuntime {
+    // Read/written only from main-actor view bodies and tap handlers; the dynamicProvider color
+    // closure does not touch it. nonisolated(unsafe) keeps the shared singleton accessible from
+    // AmberTheme.* getters without forcing @MainActor onto all ~1500 call sites.
+    nonisolated(unsafe) static let shared = AmberThemeRuntime()
+
+    enum Paper: String { case paper, neutral }
+
+    var paper: Paper { didSet { UserDefaults.standard.set(paper.rawValue, forKey: Keys.paper) } }
+    var accentHex: UInt32 { didSet { UserDefaults.standard.set(Int(accentHex), forKey: Keys.accent) } }
+    var accentInkHex: UInt32 { didSet { UserDefaults.standard.set(Int(accentInkHex), forKey: Keys.accentInk) } }
+
+    private enum Keys {
+        static let paper = "app.amber.ios.theme.paper"
+        static let accent = "app.amber.ios.theme.accentHex"
+        static let accentInk = "app.amber.ios.theme.accentInkHex"
+    }
+
+    private init() {
+        let d = UserDefaults.standard
+        paper = Paper(rawValue: d.string(forKey: Keys.paper) ?? "") ?? .paper
+        accentHex = (d.object(forKey: Keys.accent) as? Int).map { UInt32($0) } ?? AmberAccentOption.terracotta.accentHex
+        accentInkHex = (d.object(forKey: Keys.accentInk) as? Int).map { UInt32($0) } ?? AmberAccentOption.terracotta.inkHex
+    }
+
+    func apply(_ option: AmberAccentOption) {
+        accentHex = option.accentHex
+        accentInkHex = option.inkHex
+    }
+}
+
+/// Authoritative accent set + paired ink (redesign/aa-base.jsx ACCENT_INK). High-luminance hues
+/// (sage, amber gold) pair with dark ink; the rest with white — never a blanket white.
+enum AmberAccentOption: String, CaseIterable, Identifiable {
+    case terracotta, sage, mistBlue, wisteria, rose, amberGold
+
+    var id: String { rawValue }
+
+    var accentHex: UInt32 {
+        switch self {
+        case .terracotta: 0xB8623A
+        case .sage:       0x5E9C6E
+        case .mistBlue:   0x4F86D6
+        case .wisteria:   0x9277C4
+        case .rose:       0xC2607A
+        case .amberGold:  0xC79A4A
+        }
+    }
+
+    var inkHex: UInt32 {
+        switch self {
+        case .sage:      0x0F150E
+        case .amberGold: 0x1A1408
+        default:         0xFFFFFF
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .terracotta: "陶土"
+        case .sage:       "鼠尾草绿"
+        case .mistBlue:   "雾蓝"
+        case .wisteria:   "紫藤"
+        case .rose:       "玫红"
+        case .amberGold:  "琥珀金"
+        }
+    }
 }
 
 enum IOSAppearancePreferenceKeys {
@@ -97,6 +212,17 @@ extension Color {
             green: Double((hex >> 8) & 0xff) / 255.0,
             blue: Double(hex & 0xff) / 255.0,
             opacity: alpha
+        )
+    }
+}
+
+extension UIColor {
+    convenience init(hex: UInt32, alpha: Double = 1.0) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xff) / 255.0,
+            green: CGFloat((hex >> 8) & 0xff) / 255.0,
+            blue: CGFloat(hex & 0xff) / 255.0,
+            alpha: CGFloat(alpha)
         )
     }
 }
@@ -1168,7 +1294,7 @@ struct SettingsHomeView: View {
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.light.rawValue
+    @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.system.rawValue
 
     private var generalEntries: [SettingsHomeEntry] {
         [
