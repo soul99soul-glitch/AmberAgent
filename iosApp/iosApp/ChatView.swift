@@ -252,7 +252,9 @@ struct ChatView: View {
                                     onEdit: { newText in viewModel.editMessage(atMessageIndex: index, newText: newText) },
                                     onDelete: { viewModel.deleteMessage(atMessageIndex: index) },
                                     onSelectVariant: { variantIndex in viewModel.selectVariant(messageIndex: index, variantIndex: variantIndex) },
-                                    isGenerating: viewModel.isGenerationActive
+                                    isGenerating: viewModel.isGenerationActive,
+                                    isLastMessage: index == viewModel.messages.count - 1,
+                                    reasoningLevelLabel: composerReasoningLabel
                                 )
 
                                 if isLastStreamingMessage {
@@ -698,6 +700,13 @@ struct ChatView: View {
 
     private var selectedReasoningOption: ComposerReasoningOption {
         ComposerReasoningOption(reasoningLevel: viewModel.reasoningLevel)
+    }
+
+    // Reasoning effort shown on the thinking pill (e.g. "Auto"); nil when reasoning is off.
+    private var composerReasoningLabel: String? {
+        let option = selectedReasoningOption
+        guard option != .off else { return nil }
+        return option.title
     }
 
     private var selectedReasoningBinding: Binding<ComposerReasoningOption> {
@@ -1506,62 +1515,136 @@ struct ChatAssistantText<Content: View>: View {
 }
 
 struct ChatReasoningCard: View {
-    let title: String
     let bodyText: String
+    var isThinking: Bool = false
+    var startedAt: Date? = nil
+    var finishedSeconds: Int? = nil
+    var levelLabel: String? = nil
     var autoCloseThinking: Bool = true
     @State private var isExpanded: Bool
+    @State private var userToggled = false
 
-    init(title: String, bodyText: String, autoCloseThinking: Bool = true) {
-        self.title = title
+    init(
+        bodyText: String,
+        isThinking: Bool = false,
+        startedAt: Date? = nil,
+        finishedSeconds: Int? = nil,
+        levelLabel: String? = nil,
+        autoCloseThinking: Bool = true
+    ) {
         self.bodyText = bodyText
+        self.isThinking = isThinking
+        self.startedAt = startedAt
+        self.finishedSeconds = finishedSeconds
+        self.levelLabel = levelLabel
         self.autoCloseThinking = autoCloseThinking
-        // When autoCloseThinking is true (default), reasoning starts collapsed.
-        // When false, reasoning starts expanded so user sees it immediately.
-        self._isExpanded = State(initialValue: !autoCloseThinking)
+        // Expanded while streaming so the reasoning is visible as it generates; otherwise follow
+        // the autoCloseThinking setting.
+        self._isExpanded = State(initialValue: isThinking ? true : !autoCloseThinking)
     }
 
+    private var levelSuffix: String {
+        guard let levelLabel, !levelLabel.isEmpty else { return "" }
+        return " · \(levelLabel)"
+    }
+
+    private func titleText(elapsed: Int?) -> String {
+        if isThinking {
+            if let elapsed { return "思考中 \(elapsed) 秒\(levelSuffix)" }
+            return "思考中\(levelSuffix)"
+        }
+        if let finishedSeconds { return "思考了 \(finishedSeconds) 秒\(levelSuffix)" }
+        return "思考过程\(levelSuffix)"
+    }
+
+    @ViewBuilder
+    private var titleLabel: some View {
+        if isThinking, let startedAt {
+            // Live ticking elapsed counter while the model is thinking.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(titleText(elapsed: Int(max(0, context.date.timeIntervalSince(startedAt)))))
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+            }
+        } else {
+            Text(titleText(elapsed: nil))
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground2)
+        }
+    }
+
+    // Compact cream pill: amber clock + "思考中 N 秒 · Auto" (live) / "思考了 N 秒 · Auto" (done) +
+    // chevron. Expands to a height-capped, auto-scrolling view of the streaming reasoning text.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    isExpanded.toggle()
-                }
+                userToggled = true
+                withAnimation(.easeInOut(duration: 0.22)) { isExpanded.toggle() }
             } label: {
-                HStack {
-                    Text(title)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(AmberTheme.muted)
+                HStack(spacing: 7) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accentAmber)
 
-                    Spacer()
+                    titleLabel
+
+                    // Collapsed: hug content (chevron sits right after the title). Expanded: push
+                    // the chevron to the right edge, matching the full-width reading area below.
+                    if isExpanded { Spacer(minLength: 6) }
 
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AmberTheme.foreground)
-                        .rotationEffect(.degrees(isExpanded ? 180 : -90))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if isExpanded {
-                Text(bodyText)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineSpacing(3)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .overlay(alignment: .top) {
-                        Divider()
-                            .overlay(AmberTheme.borderSoft)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(bodyText)
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .lineSpacing(3)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Color.clear.frame(height: 1).id("reasoning-bottom")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 2)
+                        .padding(.bottom, 10)
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .frame(maxHeight: 220)
+                    .onChange(of: bodyText) { _, _ in
+                        // Follow the streaming reasoning tail while it generates.
+                        if isThinking {
+                            withAnimation(.linear(duration: 0.15)) {
+                                proxy.scrollTo("reasoning-bottom", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                // Fade in place (no upward move) so the collapsing text doesn't slide up over
+                // the header.
+                .transition(.opacity)
             }
         }
-        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+        .background(
+            AmberTheme.surface,
+            in: RoundedRectangle(cornerRadius: isExpanded ? AmberTheme.radiusLarge : 17, style: .continuous)
+        )
+        // Clip to the capsule so the collapsing content can never render outside / through it.
+        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? AmberTheme.radiusLarge : 17, style: .continuous))
+        .onChange(of: isThinking) { _, nowThinking in
+            // Auto-collapse when generation finishes, unless the user opened it themselves.
+            if !nowThinking, autoCloseThinking, !userToggled {
+                withAnimation(.easeInOut(duration: 0.22)) { isExpanded = false }
+            }
+        }
     }
 }
 
@@ -1641,21 +1724,46 @@ struct ChatToolStepModel: Identifiable {
     let title: String
     let detail: String?
     let state: ChatToolStepState
+    let isSubAgent: Bool
+    /// Carried for subagent steps so the detail sheet can read the live prompt + streaming output.
+    let tool: UIMessagePart.Tool?
 
-    init(systemImage: String, title: String, detail: String? = nil, state: ChatToolStepState) {
+    init(
+        systemImage: String,
+        title: String,
+        detail: String? = nil,
+        state: ChatToolStepState,
+        isSubAgent: Bool = false,
+        tool: UIMessagePart.Tool? = nil
+    ) {
         self.systemImage = systemImage
         self.title = title
         self.detail = detail
         self.state = state
+        self.isSubAgent = isSubAgent
+        self.tool = tool
     }
 
     init(tool: UIMessagePart.Tool) {
+        if tool.toolName == "subagent_dispatch" {
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "person.2.fill",
+                title: Self.subAgentTitle(from: tool.input),
+                detail: Self.subAgentDetail(from: tool.input),
+                state: executed ? .done : .active,
+                isSubAgent: true,
+                tool: tool
+            )
+            return
+        }
+
         if tool.toolName == "search_web" {
             let query = Self.searchQuery(from: tool.input)
             let executed = !tool.output.isEmpty
             self.init(
                 systemImage: "magnifyingglass",
-                title: executed ? "搜索完成" : "正在搜索",
+                title: Self.combinedLine(executed ? "已搜索" : "正在搜索", query),
                 detail: executed ? Self.searchResultSummary(from: tool.output) : query.map { "关键词：\($0)" },
                 state: executed ? .done : .active
             )
@@ -1668,7 +1776,7 @@ struct ChatToolStepModel: Identifiable {
             let executed = !tool.output.isEmpty
             self.init(
                 systemImage: "photo.on.rectangle",
-                title: executed ? "图片已生成" : "正在生成图片",
+                title: Self.combinedLine(executed ? "图片已生成" : "正在生成图片", prompt),
                 detail: executed ? "\(max(imageCount, 1)) 张图片" : prompt.map { "提示词：\($0)" },
                 state: executed ? .done : .active
             )
@@ -1679,7 +1787,10 @@ struct ChatToolStepModel: Identifiable {
             let executed = !tool.output.isEmpty
             self.init(
                 systemImage: "globe.badge.chevron.backward",
-                title: executed ? Self.webMountCompletedTitle(for: tool) : Self.webMountPendingTitle(for: tool.toolName),
+                title: Self.combinedLine(
+                    executed ? Self.webMountCompletedTitle(for: tool) : Self.webMountPendingTitle(for: tool.toolName),
+                    Self.webMountInputSummary(from: tool.input)
+                ),
                 detail: executed ? Self.webMountResultSummary(from: tool.output) : Self.webMountInputSummary(from: tool.input),
                 state: executed ? .done : .active
             )
@@ -1690,7 +1801,10 @@ struct ChatToolStepModel: Identifiable {
             let executed = !tool.output.isEmpty
             self.init(
                 systemImage: "folder",
-                title: executed ? Self.workspaceCompletedTitle(for: tool.toolName) : Self.workspacePendingTitle(for: tool.toolName),
+                title: Self.combinedLine(
+                    executed ? Self.workspaceCompletedTitle(for: tool.toolName) : Self.workspacePendingTitle(for: tool.toolName),
+                    Self.workspaceInputSummary(from: tool.input)
+                ),
                 detail: executed ? Self.workspaceResultSummary(from: tool.output) : Self.workspaceInputSummary(from: tool.input),
                 state: executed ? .done : .active
             )
@@ -1704,6 +1818,54 @@ struct ChatToolStepModel: Identifiable {
             detail: tool.input.isEmpty ? nil : tool.input,
             state: tool.output.isEmpty ? .active : .done
         )
+    }
+
+    private static func subAgentArgs(from input: String) -> [String: Any]? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    static func subAgentRole(from input: String) -> String? {
+        let args = subAgentArgs(from: input)
+        let role = (args?["role_id"] as? String) ?? (args?["subagent_id"] as? String)
+        guard let role, !role.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return role
+    }
+
+    static func subAgentTask(from input: String) -> String? {
+        let args = subAgentArgs(from: input)
+        for key in ["task", "prompt", "instruction", "objective", "input", "query"] {
+            if let value = args?[key] as? String,
+               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return value
+            }
+        }
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func subAgentTitle(from input: String) -> String {
+        let role = subAgentRole(from: input)
+        if let task = subAgentTask(from: input) {
+            let oneLine = String(task.replacingOccurrences(of: "\n", with: " ").prefix(56))
+            return role.map { "@\($0) \(oneLine)" } ?? oneLine
+        }
+        return role.map { "SubAgent · \($0)" } ?? "SubAgent"
+    }
+
+    private static func subAgentDetail(from input: String) -> String? {
+        guard let task = subAgentTask(from: input) else { return nil }
+        return String(task.replacingOccurrences(of: "\n", with: " ").prefix(80))
+    }
+
+    /// "<verb> <subject>" on one line; the subject (query / prompt / target / task) is folded in
+    /// so the pill reads like the action, not just a status word. Trimmed and length-capped.
+    private static func combinedLine(_ verb: String, _ subject: String?) -> String {
+        guard let subject else { return verb }
+        let oneLine = subject.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        guard !oneLine.isEmpty else { return verb }
+        return "\(verb) \(String(oneLine.prefix(56)))"
     }
 
     private static func searchQuery(from input: String) -> String? {
@@ -1905,53 +2067,74 @@ struct ChatToolStepModel: Identifiable {
 
 struct ChatToolTimeline: View {
     let steps: [ChatToolStepModel]
+    /// Tapping a step (used for subagent steps, which open a detail sheet). nil = not tappable.
+    var onTapStep: ((ChatToolStepModel) -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(steps) { step in
-                HStack(spacing: 8) {
-                    Image(systemName: step.systemImage)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(step.state.color)
-                        .frame(width: 20, height: 20)
-                        .background(step.state.iconFill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(step.title)
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.foreground2)
-                            .lineLimit(1)
-
-                        if let detail = step.detail, !detail.isEmpty {
-                            Text(detail)
-                                .font(.caption2)
-                                .foregroundStyle(AmberTheme.muted)
-                                .lineLimit(2)
-                        }
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: step.state.iconName)
-                        .font(.system(size: step.state.iconSize, weight: .bold))
-                        .foregroundStyle(step.state.color)
-                        .frame(width: 16, height: 16)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    step.state.rowFill,
-                    in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
-                        .stroke(step.state.stroke, lineWidth: 0.5)
+                let tappable = onTapStep != nil && step.isSubAgent
+                if tappable {
+                    Button { onTapStep?(step) } label: { row(step, chevron: true) }
+                        .buttonStyle(.plain)
+                } else {
+                    row(step, chevron: false)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
+    }
+
+    // Cream capsule: colored tool icon (no backing square) + title (+ optional detail) + trailing
+    // status (green check when done, spinner while active, ! on failure). Matches the requested
+    // pill style shared with the reasoning card.
+    @ViewBuilder
+    private func row(_ step: ChatToolStepModel, chevron: Bool) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: step.systemImage)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(step.state.color)
+                .frame(width: 16)
+
+            Text(step.title)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground2)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            trailingStatus(for: step.state)
+
+            if chevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(AmberTheme.muted)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        // Hug content (chip-style); a long title still truncates because the message column
+        // bounds the available width. No maxWidth:.infinity → pills don't stretch full-width.
+        .background(AmberTheme.surface, in: Capsule(style: .continuous))
+        .contentShape(Capsule(style: .continuous))
+    }
+
+    @ViewBuilder
+    private func trailingStatus(for state: ChatToolStepState) -> some View {
+        switch state {
+        case .done:
+            Image(systemName: "checkmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(AmberTheme.accentGreen)
+        case .active:
+            ProgressView()
+                .controlSize(.mini)
+                .tint(AmberTheme.accent)
+        case .failed:
+            Image(systemName: "exclamationmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(AmberTheme.accentRed)
+        }
     }
 }
 
@@ -2039,8 +2222,8 @@ private struct SampleAssistantTurn: View {
             ChatAgentName()
             ToolTimelineSample()
             ChatReasoningCard(
-                title: "思考了 3.0 秒 · auto",
-                bodyText: "我正在整理界面状态、消息记录和工具结果，确保这次回复能继续当前上下文。"
+                bodyText: "我正在整理界面状态、消息记录和工具结果，确保这次回复能继续当前上下文。",
+                finishedSeconds: 3
             )
             ChatAssistantText {
                 Text("已经实现了。代码里 `mutableStateOf(false)` 就是默认折叠，点击箭头展开。")

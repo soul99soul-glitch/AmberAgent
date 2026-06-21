@@ -139,14 +139,17 @@ private struct AmberProminentGlassModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
         if #available(iOS 26.0, *) {
+            // Solid accent fill + a full-tint glass sheen so prominent buttons (the new-chat FAB,
+            // prominent icon/pill buttons) actually read as the standard accent instead of the
+            // washed-out 0.24/0.34-opacity tint they had before.
             if interactive {
                 content
-                    .background(tint.opacity(0.24), in: shape)
-                    .glassEffect(.regular.tint(tint.opacity(0.34)).interactive(), in: .rect(cornerRadius: cornerRadius))
+                    .background(tint, in: shape)
+                    .glassEffect(.regular.tint(tint).interactive(), in: .rect(cornerRadius: cornerRadius))
             } else {
                 content
-                    .background(tint.opacity(0.24), in: shape)
-                    .glassEffect(.regular.tint(tint.opacity(0.34)), in: .rect(cornerRadius: cornerRadius))
+                    .background(tint, in: shape)
+                    .glassEffect(.regular.tint(tint), in: .rect(cornerRadius: cornerRadius))
             }
         } else {
             content
@@ -450,7 +453,10 @@ struct ConversationsView: View {
                     header
                     searchField
                     shortcutStrip
+                    // Pull the 会话 header (and the list below it) up a touch — the shared
+                    // AmberSectionLabel bakes in 20pt of top padding.
                     AmberSectionLabel(text: "会话")
+                        .padding(.top, -10)
                     if filteredSummaries.isEmpty {
                         emptyState
                     } else {
@@ -591,8 +597,10 @@ struct ConversationsView: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.top, 2)
-        .padding(.bottom, 16)
+        // Sit a little lower under the search field and tighten the gap to the 会话 header
+        // (which itself adds 20pt top), so the row isn't pushed high with a big void below.
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     private func shortcutButton(_ shortcut: ConversationShortcut) -> some View {

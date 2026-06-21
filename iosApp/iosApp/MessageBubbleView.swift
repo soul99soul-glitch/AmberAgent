@@ -15,6 +15,11 @@ struct MessageBubbleView: View {
     var onDelete: () -> Void = {}
     var onSelectVariant: (Int) -> Void = { _ in }
     var isGenerating: Bool = false
+    /// True only for the last message — gates the live "thinking" timer so a stopped/older
+    /// reasoning (whose finishedAt was never set on cancel) doesn't keep counting.
+    var isLastMessage: Bool = false
+    /// Reasoning effort label (e.g. "Auto") shown on the thinking pill. nil hides the suffix.
+    var reasoningLevelLabel: String? = nil
 
     @Environment(IOSWorkspaceStore.self) private var workspaceStore
     @State private var editing: Bool = false
@@ -241,8 +246,11 @@ struct MessageBubbleView: View {
                 }
             } else if let reasoning = part as? UIMessagePart.Reasoning, !reasoning.reasoning.isEmpty {
                 ChatReasoningCard(
-                    title: "思考 · \(reasoning.reasoning.count) chars",
                     bodyText: reasoning.reasoning,
+                    isThinking: reasoning.finishedAt == nil && isGenerating && isLastMessage,
+                    startedAt: Self.instantToDate(reasoning.createdAt),
+                    finishedSeconds: Self.reasoningDurationSeconds(reasoning),
+                    levelLabel: reasoningLevelLabel,
                     autoCloseThinking: displaySetting?.autoCloseThinking ?? true
                 )
             } else if let image = part as? UIMessagePart.Image {
@@ -295,6 +303,18 @@ struct MessageBubbleView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let firstLine, !firstLine.isEmpty else { return "Chat Artifact" }
         return String(firstLine.prefix(80))
+    }
+
+    private static func reasoningDurationSeconds(_ reasoning: UIMessagePart.Reasoning) -> Int? {
+        guard let end = reasoning.finishedAt else { return nil }
+        let start = instantToDate(reasoning.createdAt)
+        let endDate = instantToDate(end)
+        return max(0, Int(endDate.timeIntervalSince(start).rounded()))
+    }
+
+    static func instantToDate(_ instant: KotlinInstant) -> Date {
+        Date(timeIntervalSince1970:
+            Double(instant.epochSeconds) + Double(instant.nanosecondsOfSecond) / 1_000_000_000)
     }
 }
 
