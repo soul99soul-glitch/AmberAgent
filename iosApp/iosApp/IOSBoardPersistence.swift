@@ -2895,6 +2895,29 @@ enum IOSDeepReadDraftGenerator {
         let failureReason: String
     }
 
+    /// Terminal outcome of a deep-read run, decoupled from the caller's
+    /// side-effects (navigation/banner). Both the create and retry view paths
+    /// route their `GenerationResult` through `outcome(for:offlineFallback:)`,
+    /// so the "didFail → .failed, else → completed draft" decision is a single
+    /// unit-tested source of truth — a caller can no longer silently drop
+    /// `didFail` and mark an all-failed run succeeded (closes the
+    /// deepread.honest_fail caller-honoring gap on BOTH surfaces).
+    enum DeepReadOutcome: Equatable {
+        case completed(markdown: String)
+        case failed(reason: String)
+    }
+
+    /// Maps a `GenerationResult` to a terminal `DeepReadOutcome`. An honest
+    /// failure (every stage threw/empty) becomes `.failed`; otherwise the run
+    /// completes, substituting the deterministic offline draft only when the
+    /// model produced empty markdown (never fabricating success).
+    static func outcome(for result: GenerationResult, offlineFallback: String) -> DeepReadOutcome {
+        if result.didFail {
+            return .failed(reason: result.failureReason)
+        }
+        return .completed(markdown: result.markdown.isEmpty ? offlineFallback : result.markdown)
+    }
+
     /// Same stage pipeline as `generateViaLLM`, but reports honest failure:
     /// `didFail` is true when every stage either threw or produced empty output.
     /// A run where at least one stage produced usable text is NOT a failure
@@ -2972,6 +2995,32 @@ enum IOSDeepReadDraftGenerator {
             reason = ""
         }
         return GenerationResult(markdown: body, didFail: didFail, failureReason: reason)
+    }
+
+    /// Retry-generation decision as a testable static seam: given the already-
+    /// resolved (non-optional) provider — the caller resolves it on the MainActor
+    /// via `resolveProviderSetting` and passes the unwrapped fresh value in,
+    /// mirroring the create path's concurrency shape so it can cross the async
+    /// boundary without a data race — runs the staged pipeline and maps the
+    /// result to a terminal `DeepReadOutcome` (didFail → `.failed`, else a
+    /// completed draft). The caller handles the no-provider/no-key offline
+    /// fallback. The decision lives here so it is unit-tested end-to-end (closes
+    /// the deepread retry-path dual leak: provider_real + honest_fail).
+    static func retryOutcome(
+        resolvedProvider: ProviderSetting,
+        modelId: String,
+        task: IOSDeepReadTask,
+        provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
+        now: Date = Date()
+    ) async -> DeepReadOutcome {
+        let result = await generateViaLLMResult(
+            task: task,
+            providerSetting: resolvedProvider,
+            modelId: modelId,
+            provider: provider,
+            now: now
+        )
+        return outcome(for: result, offlineFallback: generate(task: task, now: now))
     }
 
     /// One LLM synthesis call for a single stage. Returns the model text, or an

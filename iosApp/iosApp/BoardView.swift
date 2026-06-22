@@ -526,16 +526,23 @@ struct BoardView: View {
                     providerSetting: providerSetting,
                     modelId: modelResolution.modelId
                 )
-                if result.didFail {
+                // The didFail → .failed decision is shared with the retry path
+                // via IOSDeepReadDraftGenerator.outcome (single source of truth).
+                switch IOSDeepReadDraftGenerator.outcome(
+                    for: result,
+                    offlineFallback: IOSDeepReadDraftGenerator.generate(task: running)
+                ) {
+                case .failed(let reason):
                     // Honest failure: surface it, persist nothing as a "completed"
                     // draft (the user sees a clear failure, not fake success).
-                    self.deepReadStore.fail(id: task.id, message: "深度阅读生成失败：\(result.failureReason)")
-                    self.deepReadMessage = "深度阅读生成失败：\(result.failureReason)"
+                    self.deepReadStore.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
+                    self.deepReadMessage = "深度阅读生成失败：\(reason)"
                     self.deepReadMessageIsError = true
                     self.router.navigate(to: .deepReadTask(id: task.id))
                     return
+                case .completed(let markdown):
+                    output = markdown
                 }
-                output = result.markdown.isEmpty ? IOSDeepReadDraftGenerator.generate(task: running) : result.markdown
             } else {
                 output = IOSDeepReadDraftGenerator.generate(task: running)
             }
@@ -1298,16 +1305,24 @@ struct IOSDeepReadTaskDetailView: View {
             store.prepareRetry(id: task.id)
             store.markRunning(id: task.id)
             if let running = store.task(id: task.id) {
-                let output = await generateRetryOutput(task: running)
-                store.complete(id: task.id, markdown: output)
-                _ = try? IOSWorkspaceStore.shared.saveArtifact(
-                    title: running.title,
-                    content: output,
-                    type: .deepRead,
-                    sourceKind: "deep_read_retry",
-                    sourceId: running.id
-                )
-                banner = "已重试并更新结果。"
+                // Honor the honest-fail outcome: an all-stages-failed retry is
+                // marked .failed (not completed with empty sections), parity with
+                // the create path.
+                switch await generateRetryOutput(task: running) {
+                case .failed(let reason):
+                    store.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
+                    banner = "深度阅读重试失败：\(reason)"
+                case .completed(let markdown):
+                    store.complete(id: task.id, markdown: markdown)
+                    _ = try? IOSWorkspaceStore.shared.saveArtifact(
+                        title: running.title,
+                        content: markdown,
+                        type: .deepRead,
+                        sourceKind: "deep_read_retry",
+                        sourceId: running.id
+                    )
+                    banner = "已重试并更新结果。"
+                }
             }
         }
     }
@@ -1326,35 +1341,28 @@ struct IOSDeepReadTaskDetailView: View {
         )
     }
 
-    private func generateRetryOutput(task: IOSDeepReadTask) async -> String {
-        guard let settingsStore else { return IOSDeepReadDraftGenerator.generate(task: task) }
+    private func generateRetryOutput(task: IOSDeepReadTask) async -> IOSDeepReadDraftGenerator.DeepReadOutcome {
+        let offline = IOSDeepReadDraftGenerator.generate(task: task)
+        guard let settingsStore else { return .completed(markdown: offline) }
         let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let modelId = retryModelId()
-        guard !apiKey.isEmpty, !modelId.isEmpty else {
-            return IOSDeepReadDraftGenerator.generate(task: task)
+        // Resolve synchronously on the MainActor and unwrap to a non-optional
+        // (mirrors the create path's concurrency shape) so the fresh provider can
+        // be sent across the async boundary without a data race. Honors the
+        // selected sealed type → Claude dispatches to native /messages, never a
+        // rebuilt OpenAI /chat/completions; degrades to the offline draft when no
+        // usable provider/key/model is available.
+        guard !apiKey.isEmpty, !modelId.isEmpty,
+              let providerSetting = IOSDeepReadDraftGenerator.resolveProviderSetting(
+                  selected: providerRegistry?.selectedProvider
+              ) else {
+            return .completed(markdown: offline)
         }
-        let providerSetting = ProviderSetting.OpenAI(
-            id: KotlinUuid.companion.random(),
-            enabled: true,
-            name: "DeepRead",
-            models: [],
-            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-            builtIn: false,
-            descriptionText: nil,
-            shortDescriptionText: nil,
-            apiKey: settingsStore.apiKey,
-            baseUrl: settingsStore.baseUrl,
-            chatCompletionsPath: "/chat/completions",
-            useResponseApi: false,
-            authMode: OpenAIAuthMode.apiKey,
-            brand: OpenAIBrand.generic
+        return await IOSDeepReadDraftGenerator.retryOutcome(
+            resolvedProvider: providerSetting,
+            modelId: modelId,
+            task: task
         )
-        let llmDraft = await IOSDeepReadDraftGenerator.generateViaLLM(
-            task: task,
-            providerSetting: providerSetting,
-            modelId: modelId
-        )
-        return llmDraft.isEmpty ? IOSDeepReadDraftGenerator.generate(task: task) : llmDraft
     }
 
     private func retryModelId() -> String {

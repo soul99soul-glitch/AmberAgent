@@ -117,12 +117,14 @@ final class IOSParityRedLightTests: XCTestCase {
             modelId: "any-model",
             provider: failingProvider
         )
-        // Apply the pipeline result the way createAndGenerateTask now does:
-        // honest failure when every stage threw, instead of marking succeeded.
-        if result.didFail {
-            store.fail(id: running.id, message: "所有生成阶段失败：\(result.failureReason)")
-        } else {
-            store.complete(id: running.id, markdown: result.markdown)
+        // Apply the result via the SAME production decision function the create
+        // and retry view paths use (IOSDeepReadDraftGenerator.outcome), not a
+        // re-implemented branch — so this guards caller-honoring, not a copy.
+        switch IOSDeepReadDraftGenerator.outcome(for: result, offlineFallback: "") {
+        case .failed(let reason):
+            store.fail(id: running.id, message: "所有生成阶段失败：\(reason)")
+        case .completed(let markdown):
+            store.complete(id: running.id, markdown: markdown)
         }
         let final = store.task(id: running.id)
 
@@ -161,11 +163,13 @@ final class IOSParityRedLightTests: XCTestCase {
             modelId: "any-model",
             provider: emptyProvider
         )
-        // Empty-output run must surface as honest failure, not succeeded/ready.
-        if result.didFail {
+        // Empty-output run must surface as honest failure, not succeeded/ready —
+        // decided by the production outcome function, not a test-local branch.
+        switch IOSDeepReadDraftGenerator.outcome(for: result, offlineFallback: "") {
+        case .failed:
             store.fail(id: running.id, message: "生成内容为空：所有阶段未产出可用内容")
-        } else {
-            store.complete(id: running.id, markdown: result.markdown)
+        case .completed(let markdown):
+            store.complete(id: running.id, markdown: markdown)
         }
         let final = store.task(id: running.id)
 
@@ -175,6 +179,41 @@ final class IOSParityRedLightTests: XCTestCase {
             "A run whose every stage was empty must not be marked succeeded/ready. "
                 + "Got: \(String(describing: final?.status)) — honest-fail state machine (P0.5)."
         )
+    }
+
+    /// GREEN guard for the Deep Read RETRY surface (parity fix, this change).
+    /// Cell: deepread.honest_fail (retry path).
+    ///
+    /// The retry button previously called a thin wrapper that discarded
+    /// `didFail` and always `complete(...)`d, so an all-stages-failed retry was
+    /// marked succeeded with empty sections. `retryOutcome` now propagates the
+    /// failure. Driving a failing provider end-to-end through the real retry
+    /// decision must yield `.failed` — this exercises the actual production seam
+    /// (`IOSDeepReadDraftGenerator.retryOutcome`), not a re-implemented branch.
+    func test_deepread_retry_allStagesThrow_returnsFailed() async {
+        let outcome = await IOSDeepReadDraftGenerator.retryOutcome(
+            resolvedProvider: makeOpenAIProvider(),
+            modelId: "any-model",
+            task: makeDeepReadTask(),
+            provider: FailingTextProvider()
+        )
+        guard case .failed = outcome else {
+            return XCTFail("All-stages-failed retry must return .failed, got \(outcome)")
+        }
+    }
+
+    /// GREEN guard: a successful retry returns `.completed` with the model text.
+    func test_deepread_retry_success_returnsCompleted() async {
+        let outcome = await IOSDeepReadDraftGenerator.retryOutcome(
+            resolvedProvider: makeOpenAIProvider(),
+            modelId: "any-model",
+            task: makeDeepReadTask(),
+            provider: IOSDeepReadPipelineTests.StageProvider(["ov", "na", "an"])
+        )
+        guard case .completed(let markdown) = outcome else {
+            return XCTFail("Successful retry must return .completed, got \(outcome)")
+        }
+        XCTAssertTrue(markdown.contains("ov"), "Completed retry must carry the model output.")
     }
 
     /// P0 REGRESSION GUARD (GREEN now). Green target: stays green through P4.
