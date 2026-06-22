@@ -825,6 +825,42 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    /// GREEN (P2 rehydration). Cell: chat.secure_store (restart-survival aspect).
+    ///
+    /// Scheme B redacts provider apiKeys in the persisted JSON (mask sentinel)
+    /// and stores the real key in the Keychain side-table. On restart, the
+    /// loaded snapshot must REHYDRATE the real apiKey from the side-table — so
+    /// a provider added before restart is still usable after, with its real key
+    /// (not the mask). This binds that contract: add a provider with a real key,
+    /// reload the store from the same UserDefaults, and assert the reloaded
+    /// snapshot carries the REAL key (not the mask).
+    func test_providerApiKey_rehydratedFromKeychainOnReload() {
+        let secret = "sk-rehydrate-SECRET-\(UUID().uuidString)"
+        let namespace = "redlight-rehydrate-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: namespace)!
+        let store = IOSSharedSettingsStore(userDefaults: defaults)
+        let provider = makeOpenAIProvider(apiKey: secret)
+        store.addProvider(provider)
+        let providerId = provider.id.description() as String
+
+        // Reload from the same UserDefaults (simulates restart). The persisted
+        // JSON is redacted; the reload must rehydrate the real key from Keychain.
+        let reloaded = IOSSharedSettingsStore(userDefaults: defaults)
+        let reloadedProvider = reloaded.snapshot.providers.first {
+            ($0.id.description() as String) == providerId
+        }
+
+        XCTAssertNotNil(reloadedProvider, "Provider must survive restart.")
+        let reloadedKey = (reloadedProvider as? ProviderSetting.OpenAI)?.apiKey
+            ?? (reloadedProvider as? ProviderSetting.Claude)?.apiKey
+            ?? ""
+        XCTAssertEqual(
+            reloadedKey, secret,
+            "Provider apiKey must be rehydrated from the Keychain side-table on reload, "
+                + "not left as the redactor mask. Got: \(reloadedKey) (P2 scheme B rehydration)."
+        )
+    }
+
     // MARK: - helpers / probe types
 
     /// Isolated temp directory for per-test DeepRead stores (avoids polluting

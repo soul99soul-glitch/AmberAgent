@@ -142,14 +142,67 @@ final class IOSSharedSettingsStore {
         } else {
             self.snapshot = IosSettingsDefaults.shared.defaultSeededSettings()
         }
+        // Scheme B rehydration: the persisted JSON is redacted (provider apiKeys
+        // are the mask sentinel). Rehydrate the real apiKeys from the Keychain
+        // side-table so the in-memory snapshot carries usable credentials. Also
+        // migrates any pre-redactor plaintext values still in the JSON: if a
+        // provider's apiKey is non-empty AND non-mask, store it to the side-table
+        // now (so the next persist redacts it), then keep it in memory.
+        Self.rehydrateProviderApiKeys(into: &self.snapshot)
+    }
+
+    /// Rehydrates provider apiKeys in a snapshot from the Keychain side-table
+    /// (scheme B). Masked values are replaced with the real key; non-empty non-
+    /// mask values are migrated to the side-table (first-time migration from a
+    /// pre-redactor plaintext store).
+    private static func rehydrateProviderApiKeys(into snapshot: inout Settings) {
+        for provider in snapshot.providers {
+            let providerId = provider.id.description() as String
+            let current = apiKey(of: provider)
+            if current == IOSCredentialRedactor.mask {
+                // Redacted on disk → rehydrate real key from Keychain.
+                if let real = IOSCredentialSideTable.load(key: IOSCredentialSideTable.providerApiKey(providerId: providerId)) {
+                    snapshot = IosSettingsMutations.shared.updateProviderApiKey(settings: snapshot, providerId: providerId, apiKey: real)
+                }
+            } else if !current.isEmpty {
+                // Pre-redactor plaintext still in the JSON → migrate to side-table
+                // (next persist will redact it). Real value stays in memory.
+                IOSCredentialSideTable.store(key: IOSCredentialSideTable.providerApiKey(providerId: providerId), value: current)
+            }
+        }
+    }
+
+    /// Reads the apiKey from a provider by sealed type.
+    private static func apiKey(of provider: ProviderSetting) -> String {
+        if let openAI = provider as? ProviderSetting.OpenAI { return openAI.apiKey }
+        if let claude = provider as? ProviderSetting.Claude { return claude.apiKey }
+        if let google = provider as? ProviderSetting.Google { return google.apiKey }
+        return ""
     }
 
     func restoreSnapshot(_ settings: Settings) {
         snapshot = settings
-        // Scheme B: redact credentials BEFORE persisting (in-memory snapshot keeps
-        // real values; the UserDefaults form is credential-free). iOS-only; the
-        // shared ProviderSetting is not modified. (parity with Android
-        // BackupSettingsRedactor.) See IOSCredentialRedactor.
+        // Scheme B: store real credentials in the Keychain side-table BEFORE
+        // redacting, so they survive restart (load rehydrates from here). Covers
+        // provider apiKey + model customHeaders (Authorization-like). iOS-only;
+        // the shared ProviderSetting is not modified.
+        for provider in settings.providers {
+            let providerId = provider.id.description() as String
+            let apiKey = Self.apiKey(of: provider)
+            if !apiKey.isEmpty {
+                IOSCredentialSideTable.store(key: IOSCredentialSideTable.providerApiKey(providerId: providerId), value: apiKey)
+            }
+        }
+        for provider in settings.providers {
+            let providerId = provider.id.description() as String
+            let apiKey = Self.apiKey(of: provider)
+            if !apiKey.isEmpty {
+                IOSCredentialSideTable.store(key: IOSCredentialSideTable.providerApiKey(providerId: providerId), value: apiKey)
+            }
+        }
+        // Redact credentials BEFORE persisting (in-memory snapshot keeps real
+        // values; the UserDefaults form is credential-free). (parity with
+        // Android BackupSettingsRedactor.) See IOSCredentialRedactor.
         let redactedJson = IOSCredentialRedactor.redact(
             IosSettingsJsonBridge.shared.encode(settings: settings)
         )
