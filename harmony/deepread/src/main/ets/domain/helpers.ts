@@ -1,6 +1,6 @@
 // Deep Read 纯函数辅助 — HarmonyOS port of Android DeepReadModels.kt helpers
 import { DeepReadOutput, DeepReadSectionState } from './models.ts';
-import { STAGE_ORDER, DeepReadGenerationStage, DeepReadSectionStatus } from './enums.ts';
+import { STAGE_ORDER, DeepReadGenerationStage, DeepReadSectionStatus, IMAGE_CONFIDENCE } from './enums.ts';
 
 export const statusOf = (o: DeepReadOutput, stage: DeepReadGenerationStage): DeepReadSectionStatus => {
   return o.sectionStates[stage]?.status ?? 'PENDING';
@@ -91,4 +91,45 @@ export const withInferredSectionStates = (o: DeepReadOutput): DeepReadOutput => 
   const merged: DeepReadOutput = { ...o, sectionStates: states };
   const recomputedComplete = legacyComplete && sectionsReady(merged);
   return { ...merged, generationComplete: recomputedComplete };
+};
+
+const isHttpUrl = (url: string): boolean => {
+  return url.startsWith('http://') || url.startsWith('https://');
+};
+
+export const verifiedImageUrls = (o: DeepReadOutput): Set<string> => {
+  // Android DeepReadModels.kt:334-339
+  const result = new Set<string>();
+  for (const a of o.imageAssets) {
+    if (a.confidence !== IMAGE_CONFIDENCE.REJECT && isHttpUrl(a.url)) {
+      result.add(a.url);
+    }
+  }
+  return result;
+};
+
+export const displayHeroImageUrl = (o: DeepReadOutput): string | null => {
+  // Android DeepReadModels.kt:341-347
+  const safe = verifiedImageUrls(o);
+  if (o.heroImageUrl && safe.has(o.heroImageUrl) && o.heroImageConfidence === IMAGE_CONFIDENCE.HERO) {
+    return o.heroImageUrl;
+  }
+  for (const a of o.imageAssets) {
+    if (safe.has(a.url)) return a.url;
+  }
+  return null;
+};
+
+export const displayHeroCaption = (o: DeepReadOutput, imageUrl: string | null = displayHeroImageUrl(o)): string | null => {
+  // Android DeepReadModels.kt:349-353
+  if (imageUrl === null) return null;
+  if (o.heroImageUrl === imageUrl && o.heroCaption && o.heroCaption.trim().length > 0) {
+    return o.heroCaption;
+  }
+  for (const a of o.imageAssets) {
+    if (a.url === imageUrl && a.caption && a.caption.trim().length > 0) {
+      return a.caption;
+    }
+  }
+  return null;
 };
