@@ -164,19 +164,15 @@ export const hasEnoughChinese = (text: string): boolean => {
 };
 
 export const hasReadableArticle = (o: DeepReadOutput): boolean => {
-  // Android DeepReadModels.kt:309-322
+  // Android DeepReadModels.kt:309-322 — 注意:Android 用 AND 逻辑(三项都满足)
   if (o.summary.trim().length < 80) return false;
   if (containsAny(o.summary, LOW_INFORMATION_FALLBACK_PHRASES)) return false;
 
-  const timelineCount = o.timeline?.filter(e => e.event.length >= 20).length ?? 0;
-  const corePointsCount = o.corePoints?.filter(p => p.point.length >= 10 && (p.supporting?.length ?? 0) >= 30).length ?? 0;
-  if (timelineCount < 2 && corePointsCount < 2) return false;
-
-  const analysisOk =
+  const hasTimeline = (o.timeline?.filter(e => e.event.trim().length >= 20).length ?? 0) >= 2;
+  const hasCorePoints = (o.corePoints?.filter(p => p.point.trim().length >= 10 && (p.supporting?.trim().length ?? 0) >= 30).length ?? 0) >= 2;
+  const hasAnalysis =
     (o.analysis.coreDispute?.trim().length ?? 0) >= 40 ||
     (o.analysis.implications?.trim().length ?? 0) >= 40 ||
-    o.analysis.perspectives.some(p => p.viewpoint.trim().length >= 30);
-  if (!analysisOk) return false;
-
-  return true;
+    o.analysis.perspectives.filter(p => p.viewpoint.trim().length >= 30).length >= 2;
+  return hasTimeline && hasCorePoints && hasAnalysis;
 };
