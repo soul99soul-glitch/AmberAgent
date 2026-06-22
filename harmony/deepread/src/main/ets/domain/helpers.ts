@@ -1,0 +1,57 @@
+// Deep Read 纯函数辅助 — HarmonyOS port of Android DeepReadModels.kt helpers
+import { DeepReadOutput, DeepReadSectionState } from './models.ts';
+import { STAGE_ORDER, DeepReadGenerationStage, DeepReadSectionStatus } from './enums.ts';
+
+export const statusOf = (o: DeepReadOutput, stage: DeepReadGenerationStage): DeepReadSectionStatus => {
+  return o.sectionStates[stage]?.status ?? 'PENDING';
+};
+
+export const sectionsReady = (o: DeepReadOutput): boolean => {
+  // 严格:4 个 stage 都必须存在且 READY (Android DeepReadModels.kt:109-110)
+  return STAGE_ORDER.every(s => o.sectionStates[s]?.status === 'READY');
+};
+
+export const hasAnyReadySection = (o: DeepReadOutput): boolean => {
+  return STAGE_ORDER.some(s => o.sectionStates[s]?.status === 'READY');
+};
+
+export const isComplete = (o: DeepReadOutput): boolean => {
+  // Android isComplete = generationComplete && isVerifiedComplete()
+  // isVerifiedComplete = sectionsReady() (verificationState 不参与,design 0.1)
+  return o.generationComplete && sectionsReady(o);
+};
+
+export const firstFailureMessage = (o: DeepReadOutput): string | null => {
+  // Android sectionFailureMessage:声明顺序第一个 FAILED
+  for (const s of STAGE_ORDER) {
+    const state = o.sectionStates[s];
+    if (state?.status === 'FAILED') return state.errorMessage;
+  }
+  return null;
+};
+
+export const withSectionStatus = (
+  o: DeepReadOutput,
+  stage: DeepReadGenerationStage,
+  status: DeepReadSectionStatus,
+  errorMessage: string | null = null,
+): DeepReadOutput => {
+  const newState: DeepReadSectionState = { status, errorMessage };
+  return { ...o, sectionStates: { ...o.sectionStates, [stage]: newState } };
+};
+
+export const withSectionQuality = (
+  o: DeepReadOutput,
+  stage: DeepReadGenerationStage,
+  quality: string,
+): DeepReadOutput => {
+  return { ...o, sectionQualities: { ...o.sectionQualities, [stage]: quality } };
+};
+
+export const withPhase = (
+  o: DeepReadOutput,
+  phase: DeepReadOutput['generationPhase'],
+  extra: Partial<DeepReadOutput> = {},
+): DeepReadOutput => {
+  return { ...o, generationPhase: phase, ...extra };
+};
