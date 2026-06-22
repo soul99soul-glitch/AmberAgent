@@ -20,7 +20,7 @@
   "heroCaption": "图片说明",
   "heroImageConfidence": "hero",
   "imageAssets": [
-    { "url": "https://example.com/hero.jpg", "caption": "图片说明", "confidence": "hero", "score": 0.9, "source": "source-1", "qualityHint": "high", "selectionReason": "topic match" }
+    { "url": "https://example.com/hero.jpg", "caption": "图片说明", "confidence": "hero", "score": 90, "source": "source-1", "qualityHint": "high", "selectionReason": "topic match", "relatedEntities": [], "relatedTimelineIndex": null }
   ],
   "diagram": {
     "type": "causal_chain", "title": "因果链", "reason": "展示事件因果",

@@ -35,3 +35,25 @@ test('DeepReadOutput survives JSON round-trip', () => {
   assert.equal(parsed.sectionStates['OVERVIEW']!.status, 'READY');
   assert.equal(parsed.heroImageConfidence, 'hero');
 });
+
+test('DeepReadOutput with empty sectionStates survives round-trip', () => {
+  const minimal = { ...makeEmptyDeepReadOutput() };
+  const roundTripped = JSON.parse(JSON.stringify(minimal)) as DeepReadOutput;
+  assert.deepEqual(roundTripped.sectionStates, {});
+});
+
+test('DeepReadOutput with partial sectionStates (one stage) survives round-trip', () => {
+  const o = makeEmptyDeepReadOutput();
+  o.sectionStates = { OVERVIEW: { status: 'READY', errorMessage: null } };
+  const roundTripped = JSON.parse(JSON.stringify(o)) as DeepReadOutput;
+  assert.deepEqual(roundTripped.sectionStates, { OVERVIEW: { status: 'READY', errorMessage: null } });
+  assert.equal(roundTripped.sectionStates['NARRATIVE'], undefined);
+});
+
+test('corePoints null vs absent both parse to null/undefined consistently', () => {
+  const withNull = JSON.parse('{"corePoints": null}') as Partial<DeepReadOutput>;
+  const absent = JSON.parse('{}') as Partial<DeepReadOutput>;
+  assert.equal(withNull.corePoints, null);
+  assert.equal(absent.corePoints, undefined);
+  // 两种"无 corePoints"情况,helper 应通过可选链统一处理
+});

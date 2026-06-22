@@ -1,6 +1,8 @@
 // Deep Read output data model — HarmonyOS port of Android DeepReadModels.kt
 // ArkTS: interface + factory functions, no runtime mutation
 
+import type { DeepReadSectionStatus, DeepReadGenerationPhase } from './enums.ts';
+
 export interface TimelineEvent {
   date: string;
   event: string;
@@ -16,6 +18,8 @@ export interface CorePoint {
   imageCaption: string | null;
 }
 
+// ReadingLink: Android 只有 title/url/source; publishedAt 是鸿蒙扩展
+// (prefetcher 从 OG meta 标签提取发布时间,Android 忽略此字段)
 export interface ReadingLink {
   title: string;
   url: string;
@@ -40,14 +44,18 @@ export interface DeepAnalysis {
   quotes: Quote[];
 }
 
+// DeepReadImageAsset: 对应 Android DeepReadModels.kt:198-208
+// score: Android 是 Int? = null,鸿蒙用 number | null
 export interface DeepReadImageAsset {
   url: string;
   caption: string | null;
   confidence: string;
-  score: number;
+  score: number | null;
   source: string | null;
   qualityHint: string | null;
   selectionReason: string | null;
+  relatedEntities: string[];
+  relatedTimelineIndex: number | null;
 }
 
 export interface DiagramNode {
@@ -96,14 +104,14 @@ export interface DeepReadVisualDiagnostics {
 }
 
 export interface DeepReadSectionState {
-  status: string;
+  status: DeepReadSectionStatus;
   errorMessage: string | null;
 }
 
 export interface DeepReadOutput {
   topicType: string;
   generationComplete: boolean;
-  generationPhase: string;
+  generationPhase: DeepReadGenerationPhase;
   summary: string;
   keyEntities: string[];
   timeline: TimelineEvent[] | null;

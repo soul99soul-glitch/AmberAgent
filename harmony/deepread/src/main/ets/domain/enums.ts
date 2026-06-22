@@ -31,6 +31,7 @@ export const VISUALS_TOOL_NAME = 'deep_read_write_visuals';
 export const DIAGRAM_TOOL_NAME = 'deep_read_write_diagram';
 export const FINISH_TOOL_NAME = 'deep_read_finish';
 
+// Per-stage 超时(ms) — 照搬 Android DeepReadAgentRunManager.collectRunTimeoutFor
 export const STAGE_TIMEOUT_MS: Record<DeepReadGenerationStage, number> = {
   OVERVIEW: 90_000,
   NARRATIVE: 110_000,
@@ -38,6 +39,8 @@ export const STAGE_TIMEOUT_MS: Record<DeepReadGenerationStage, number> = {
   EXTENDED_READING: 90_000,
 };
 
+// Per-stage prompt source 数量上限 — 照搬 Android DeepReadAgentRunManager.promptSourceLimit (1109-1114)
+// 注意:Android 另有一张 DeepReadPrompt.sourceLimit (226-231) 是 scraper source cap(5/10/10/12),与此不同
 export const STAGE_SOURCE_LIMIT: Record<DeepReadGenerationStage, number> = {
   OVERVIEW: 6,
   NARRATIVE: 9,
@@ -45,6 +48,7 @@ export const STAGE_SOURCE_LIMIT: Record<DeepReadGenerationStage, number> = {
   EXTENDED_READING: 12,
 };
 
+// Per-stage evidence excerpt 截断长度 — 照搬 Android DeepReadAgentRunManager.promptExcerptLimit
 export const STAGE_EXCERPT_LIMIT: Record<DeepReadGenerationStage, number> = {
   OVERVIEW: 1000,
   NARRATIVE: 1400,
@@ -73,11 +77,16 @@ export const RETRY_JITTER_RATIO = 0.15;
 export const DEEP_READ_TTL_MS = 24 * 60 * 60 * 1_000;
 export const DEEP_READ_HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
+// Prefetch — 照搬 Android DeepReadSourcePrefetcher
+// PREFETCH_WALL_BUDGET_MS = Android SOURCE_COLLECTION_TIMEOUT_MS (DeepReadSourcePrefetcher.kt:688)
+// PREFETCH_LRU_TTL_MS / MAX_ENTRIES = Android CACHE_TTL_MS / CACHE_MAX_ENTRIES (DeepReadSourcePrefetcher.kt:719-720)
 export const PREFETCH_WALL_BUDGET_MS = 36_000;
 export const PREFETCH_LRU_TTL_MS = 10 * 60 * 1_000;
 export const PREFETCH_LRU_MAX_ENTRIES = 16;
+// MAX_SOURCES = Android DeepReadSourcePrefetcher.MAX_SOURCES = 12 (区别于 SearchOrchestrator.MAX_SOURCES = 5)
 export const MAX_SOURCES = 12;
 export const MAX_SEARCH_RESULTS = 14;
 export const MIN_SOURCE_CHARS = 280;
 export const MIN_SEED_SOURCE_CHARS = 15;
+// READER_NATIVE_MIN_CHARS: Android 用裸 >= 18 字面量 (DeepReadSourcePrefetcher.kt:657, 673)
 export const READER_NATIVE_MIN_CHARS = 18;
