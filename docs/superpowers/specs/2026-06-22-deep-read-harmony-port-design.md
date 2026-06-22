@@ -30,7 +30,9 @@ review 1 担心"verification/coverage tail 被砍"。精读源码确认:
 - `TransientTask` 单次上限 **3 分钟**,日配额 ~10 分钟,且**必须在切后台 5 秒内申请**
 - 实践者一致结论:**纯后台 LLM 长跑在鸿蒙上不可行**
 
-**结论**:鸿蒙版 Deep Read **不支持 WorkManager 式后台无感生成**。采用「**前台跑 + stage 边界暂停 + WorkScheduler 护航**」混合策略(用户选择,见 §0.4)。
+**结论**:鸿蒙版 Deep Read **不支持 WorkManager 式后台无感生成**。采用「**前台跑 + stage 边界暂停 + 回前台续跑**」策略。详见 §6。
+
+> 关于 WorkScheduler 护航:在评估阶段我们一度考虑过用它作为"切后台后尽力推进"的补充路径。但 WorkScheduler 是非实时调度(基于 app active group tier,后台越久触发越慢),实测延迟分布不可信(模拟器不严格实施后台限制,真机数据需要签名证书才能拿)。结论是 WorkScheduler 护航的体验**比"明说请回到 app 继续"更差**(用户预期落空),故**不采用**。
 
 ### 0.3 stage 是顺序 `if`,不是循环
 
@@ -41,7 +43,7 @@ Android `generateStages` 用 4 个顺序 `if (OVERVIEW in stages) ...` 保证 st
 | 决策点 | 选择 | 理由 |
 |---|---|---|
 | 范围 | 路径 A 完整版 | 不是 MVP,要 4 阶段 + visuals + diagram + 完整 schema |
-| 后台行为 | 前台 + WorkScheduler 护航 | 平台硬约束下最接近 Android 体验的方案 |
+| 后台行为 | 前台跑 + 切后台暂停 + 回前台续跑 | 平台硬约束下最诚实可预期的方案(见 0.2、§6) |
 | 入口 | share/deep link + 手动输入话题 | 不依赖 hot-list 上游 |
 | 预取 | 全多 provider + Rust reader-extractor | 体验等价 Android |
 | 原生库 | 带 Rust reader-extractor(NAPI) | 正文提取质量保证 |
@@ -838,27 +840,26 @@ function extractReadableText(html: string, url: string | null): string {
 
 ---
 
-## 6. 后台任务:前台 + WorkScheduler 护航
+## 6. 后台任务:前台跑 + 切后台暂停 + 回前台续跑
 
 ### 6.1 策略总览
 
 | 路径 | 触发 | 行为 |
 |---|---|---|
-| **前台主路径** | 用户在 app 内点"开始深读" | UIAbility 内 async 跑完整 pipeline;切后台 → 下个 stage 边界暂停 + RDB 持久化 + 通知 |
-| **回前台续跑** | 用户从通知/launcher 回到 app | 检测 phase ∈ {COLLECTING,PLANNING,WRITING} 且无活跃 run → 从最后完成 stage 续跑 |
-| **WorkScheduler 护航** | 切后台时,为每个未完成 stage 注册一个 WorkScheduler job | 每个 job 单次 ≤2min 跑一个 stage;非实时调度(可能等几分钟到几小时);网络约束 |
+| **前台主路径** | 用户在 app 内点"开始深读" | UIAbility 内 async 跑完整 pipeline;切后台 → 下个 stage 边界暂停 + RDB 持久化 + 通知"请回到 app 继续" |
+| **回前台续跑** | 用户从通知/launcher 回到 app | 检测 phase ∈ {COLLECTING,PLANNING,WRITING} 且无活跃 run → 弹框"上次未完成,是否继续?"→ 从最后完成 stage 续跑 |
 
 ### 6.2 WorkManager → 鸿蒙映射
 
 | WorkManager 特性 | 鸿蒙状态 | 补偿方案 |
 |---|---|---|
 | `ExistingWorkPolicy.REPLACE`/`KEEP` | 无 | 自建 `Map<topicId, AbortController>` + topicMutex;REPLACE = abort 现有 + 启新 |
-| `Result.retry()` + 指数退避 | 无 | RDB 存 `attempt_count` + `last_error`,resume 时按 retryClassifier 决定是否重试 |
+| `Result.retry()` + 指数退避 | 无 | RDB 存 `attempt_count` + `last_error`,回前台续跑时按 retryClassifier 决定是否重试 |
 | `runAttemptCount` | 无 | `deep_read_cache.attempt_count` 列 |
-| `getWorkInfosForUniqueWorkFlow` (reactive) | 仅 `getWorkStatus`(one-shot) | derive 自 RDB observe(topicId)的 phase + sectionStates |
-| 长无界 run(6-10min) | 2min cap | stage 分片(每 stage 已独立可跑,§4.11) |
+| `getWorkInfosForUniqueWorkFlow` (reactive) | 无 | derive 自 RDB observe(topicId)的 phase + sectionStates |
+| 长无界 run(6-10min) | 不支持后台 | 前台跑完整 pipeline;切后台即暂停 |
 | `FOREGROUND_SERVICE_TYPE_SPECIAL_USE` | 无 | 退化为普通 ongoing notification(不再绑 fg-service 义务) |
-| `NetworkType.CONNECTED` 约束 | WorkScheduler 支持 | 保留,前台路径自检 connectivity |
+| `NetworkType.CONNECTED` 约束 | (无 WorkScheduler) | 前台路径自检 connectivity |
 
 ### 6.3 `DeepReadScheduler` interface(修正 review P0-7)
 
@@ -888,24 +889,23 @@ async run(topicId, title, opts):
   controller = new AbortController()
   runningJobs.set(topicId, controller)
 
-  // 申请 ContinuousTask?—— 不申请(0.2:LLM 不符合任何合法 BackgroundMode)
+  // 不申请 ContinuousTask(0.2:LLM 不符合任何合法 BackgroundMode)
   // 只显示 ongoing notification
   await notifier.notifyRunning(topicId, title)
 
   try:
     result = await runManager.run(topicId, title, { ...opts, signal: controller.signal })
     await notifier.notifyCompleted(topicId, title, isComplete(result.output))
-    // 切过后台?注册 WorkScheduler 护航剩余 stage
-    if wasBackgrounded && !isComplete(result.output):
-      await scheduleWorkSchedulerGuard(topicId, title, missingStages(result.output))
   finally:
     runningJobs.delete(topicId)
-    if wasBackgrounded: await notifier.cancelRunning(topicId)
+    await notifier.cancelRunning(topicId)
 ```
 
-### 6.5 中断检测与续跑
+### 6.5 切后台暂停 + 回前台续跑
 
-UIAbility `onForeground` 回调时:
+UIAbility `onBackground` 回调:不主动暂停(让当前 stage 跑完),但**下一个 stage 边界**自动暂停。实现方式:在 `runStageSupervisorLoop` 的 stage 循环之间检查 `isBackgrounded` 标志,若为 true 则 break + 写 phase 到 RDB。
+
+UIAbility `onForeground` 回调:
 ```
 async onForeground():
   for each topicId in recentActiveTopics:
@@ -916,36 +916,7 @@ async onForeground():
         await scheduler.run(topicId, ...)   // 走 SHORT-CIRCUIT #2/#3 或继续 missing stages
 ```
 
-### 6.6 WorkScheduler 护航实现
-
-```
-async scheduleWorkSchedulerGuard(topicId, title, stages: Stage[]):
-  for stage of stages:
-    workId = `deepread_${topicId}_${stage}`
-    await workScheduler.addWork(workId, {
-      type: WorkSchedulerType.NETWORK_AVAILABLE,
-      callbackAbility: 'DeepReadWorkSchedulerAbility',
-      extras: { topicId, title, stage, seedUrl: null },
-      // 注意:单次 onWorkStart ≤ 2min,系统非实时调度
-    })
-
-// DeepReadWorkSchedulerAbility.onWorkStart(workInfo):
-async onWorkStart(workInfo):
-  const { topicId, title, stage } = workInfo.extras
-  // 2min budget
-  const controller = new AbortController()
-  setTimeout(() => controller.abort(), 110_000)   // 110s,留 10s 余量
-  try:
-    await runManager.runSection(topicId, title, stage, { signal: controller.signal })
-  catch error:
-    if isRetryable(error):
-      await repository.incrementAttempt(topicId, error.message)
-      // 不自动 re-enqueue(WorkScheduler 无 retry),等下次前台或下个 WorkScheduler 周期
-```
-
-**已知限制**:WorkScheduler 非实时调度,可能等很久才触发。**用户预期**:切后台后文章可能不会自动完成,回 app 才能续跑。WorkScheduler 是"尽力而为"的补充,不是保证。
-
-### 6.7 通知
+### 6.6 通知
 
 照搬 Android `DeepReadNotifier` 3 类通知:
 - **Running**(ongoing):"正在深度阅读:..." → 点击回 app 文章页
@@ -1090,14 +1061,9 @@ export interface SearchProviderRegistry {
 }
 ```
 
-### 8.7 `BackgroundTaskRunner`
+### 8.7 后台任务
 
-```typescript
-export interface BackgroundTaskRunner {
-  scheduleWorkGuard(topicId: string, stages: Stage[]): Promise<void>
-  cancelWorkGuard(topicId: string): Promise<void>
-}
-```
+不抽象为 interface——切后台暂停是 UIAbility 生命周期回调 + RunManager 的 `isBackgrounded` 标志协同,无独立 platform 组件。`BackgroundTaskRunner` 不存在。
 
 ### 8.8 `Notifier`
 
@@ -1153,7 +1119,7 @@ stage tool 参数校验用(§4.7)。鸿蒙无原生 JSON schema,自建轻量 val
 
 | ID | 风险 | 缓解 |
 |---|---|---|
-| R-BG-1 | 后台生成不可行(0.2) | 已转化为前台+WorkScheduler 策略(§6) |
+| R-BG-1 | 后台生成不可行(0.2) | 已转化为前台+切后台暂停策略(§6) |
 | R-NATIVE-1 | Rust NAPI + aarch64-linux-ohos 交叉编译 | 阶段 1 用 ArkTS fallback,不阻塞 MVP(§5.2) |
 | R-SSE-1 | RCP chunk 边界处理 | SseAssembler 显式 buffer(§8.2) |
 | R-ARK-1 | ArkTS 禁运行时改对象布局,UIMessage streaming 合并复杂 | appendChunk/merge/findToolMergeTarget 用纯函数 + 不可变 interface |
@@ -1165,7 +1131,7 @@ stage tool 参数校验用(§4.7)。鸿蒙无原生 JSON schema,自建轻量 val
 | R-MD-1 | 鸿蒙 markdown 渲染生态不成熟 | MVP 用 RichText + 轻量 parser,或自建 |
 | R-ABORT-1 | AbortController 不自动向下传播 | 每 async 调用点显式检查 signal.aborted |
 | R-OBSERVE-1 | 1s 轮询延迟,section-by-section 体验不如 Flow | MVP 接受,后续可上事件总线 |
-| R-WORK-1 | WorkScheduler 非实时调度,护航可能等很久 | UI 明示"回 app 才能继续",WorkScheduler 是 best-effort |
+| R-WORK-1 | (已移除,不采用 WorkScheduler 护航) | — |
 
 ### 10.3 未决项(实现时再定)
 
@@ -1183,7 +1149,7 @@ stage tool 参数校验用(§4.7)。鸿蒙无原生 JSON schema,自建轻量 val
 4. **Phase 4 - SectionWriterTools + SupervisorLoop**:7 个 tool 完整 schema / runStageSupervisorLoop / tryFallbackAfterStageFailure
 5. **Phase 5 - RunManager + Scheduler**:run/runSection/generateStages/finishIfPossible/scheduleBackgroundFill + 前台主路径 + 中断检测
 6. **Phase 6 - UI**:3 个 ArkUI 页面 + 文章渲染组件 + 进度 UI
-7. **Phase 7 - WorkScheduler 护航 + 通知**:DeepReadWorkSchedulerAbility / notifier / Want 契约
+7. **Phase 7 - 通知**:notifier 3 类通知 + Want 契约 + 切后台暂停/回前台续跑的 UI 提示
 8. **Phase 8 - Rust NAPI reader-extractor**:阶段 2 升级,替换 ArkTS fallback
 
 ---
