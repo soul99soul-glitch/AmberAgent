@@ -216,12 +216,11 @@ struct CouncilSettingsView: View {
     private var availableModelIds: [String] {
         var seen = Set<String>()
         var ids: [String] = []
-        if let selected = providerRegistry?.selectedProvider {
-            for model in selected.models where model.type == ModelType.chat {
-                let id = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !id.isEmpty, seen.insert(id).inserted else { continue }
-                ids.append(id)
-            }
+        // All chat models across every configured provider (shared settings),
+        // not just the legacy registry's single selected provider.
+        for option in sharedSettings.availableChatModels() {
+            guard seen.insert(option.modelId).inserted else { continue }
+            ids.append(option.modelId)
         }
         if seen.insert(currentModelId).inserted {
             ids.insert(currentModelId, at: 0)

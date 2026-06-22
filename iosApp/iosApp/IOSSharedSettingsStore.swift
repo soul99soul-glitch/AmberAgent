@@ -607,6 +607,41 @@ final class IOSSharedSettingsStore {
         return (model.modelId, provider)
     }
 
+    /// A chat model offered for selection in pickers, resolved from the shared
+    /// snapshot across ALL configured providers — the canonical source the formal
+    /// Provider UI writes. Replaces ProviderRegistryStore.selectedProvider.models
+    /// (which only saw a single provider's models).
+    struct ChatModelOption: Identifiable, Equatable {
+        let id: String          // hex-dash UUID of the model
+        let modelId: String     // wire id (e.g. "gpt-4o")
+        let displayName: String
+        let providerName: String
+    }
+
+    /// All chat models across every configured provider in the shared snapshot,
+    /// de-duplicated by model UUID. Pickers (Board / Council seat / etc.) should
+    /// use this instead of the legacy registry's single-provider model list.
+    func availableChatModels() -> [ChatModelOption] {
+        var seen = Set<String>()
+        var options: [ChatModelOption] = []
+        for provider in snapshot.providers {
+            for model in provider.models where model.type == ModelType.chat {
+                let wire = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !wire.isEmpty else { continue }
+                let hexId = model.id.toHexDashString()
+                guard seen.insert(hexId).inserted else { continue }
+                let display = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                options.append(ChatModelOption(
+                    id: hexId,
+                    modelId: wire,
+                    displayName: display.isEmpty ? wire : display,
+                    providerName: provider.name
+                ))
+            }
+        }
+        return options
+    }
+
     func syncLegacySettingsStoreForCurrentChat(_ settingsStore: SettingsStore) {
         guard let model = snapshot.getCurrentChatModel(),
               let provider = model.findProvider(providers: snapshot.providers, checkOverwrite: true) else {

@@ -379,16 +379,15 @@ struct BoardSettingsView: View {
     }
 
     private var modelOptions: [BoardModelOption] {
-        guard let provider = providerRegistry?.selectedProvider else { return [] }
-        return provider.models
-            .filter { $0.type == ModelType.chat }
-            .map { model in
-                BoardModelOption(
-                    id: model.id.toHexDashString(),
-                    displayName: model.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model.modelId : model.displayName,
-                    modelId: model.modelId
-                )
-            }
+        // All chat models across every configured provider (shared settings),
+        // not just the legacy registry's single selected provider.
+        sharedSettings.availableChatModels().map { option in
+            BoardModelOption(
+                id: option.id,
+                displayName: option.displayName,
+                modelId: option.modelId
+            )
+        }
     }
 
     private var currentModelLabel: String {
@@ -401,13 +400,10 @@ struct BoardSettingsView: View {
     }
 
     private var modelSubtitle: String {
-        guard let provider = providerRegistry?.selectedProvider else {
-            return "没有当前服务商，生成时会回退当前聊天模型或本地草稿。"
-        }
         if modelOptions.isEmpty {
-            return "\(provider.name) 没有可读取的聊天模型列表。"
+            return "没有可读取的聊天模型，生成时会回退当前聊天模型或本地草稿。"
         }
-        return "只显示当前服务商 \(provider.name) 的聊天模型。"
+        return "显示所有已配置服务商的聊天模型。"
     }
 
     private var effectiveEnabledSources: Set<String> {
@@ -804,16 +800,14 @@ private struct BoardTemplateWorkbenchSheet: View {
     private func resolvedModelId() -> String {
         let fallback = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let boardModelId = sharedSettings.todayBoard.boardModelId?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !boardModelId.isEmpty,
-              let selectedProvider = providerRegistry?.selectedProvider else {
+              !boardModelId.isEmpty else {
             return fallback
         }
-        for model in selectedProvider.models where model.type == ModelType.chat {
-            if model.id.toHexDashString().caseInsensitiveCompare(boardModelId) == .orderedSame {
-                return model.modelId
-            }
-        }
-        return fallback
+        // Resolve the board model across all configured providers (shared
+        // settings), not just the legacy registry's selected provider.
+        return sharedSettings.availableChatModels()
+            .first { $0.id.caseInsensitiveCompare(boardModelId) == .orderedSame }?.modelId
+            ?? fallback
     }
 
     private func previewTask(templateId: String) -> IOSDeepReadTask {
