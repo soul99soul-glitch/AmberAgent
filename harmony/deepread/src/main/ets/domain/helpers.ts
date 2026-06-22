@@ -133,3 +133,50 @@ export const displayHeroCaption = (o: DeepReadOutput, imageUrl: string | null = 
   }
   return null;
 };
+
+// Android DeepReadModels.kt:374-387 lowInformationFallbackPhrases
+const LOW_INFORMATION_FALLBACK_PHRASES: string[] = [
+  '当前可抓取信息仍偏薄',
+  '可用信息不足以形成稳定脉络',
+  '抓取摘要不足',
+  '来源提供了相关背景线索',
+  '来源链接统一收在扩展阅读',
+  '避免把来源列表误写成深度分析',
+  '后续深读应围绕',
+  '模型输出格式不稳定',
+  '目前来源未覆盖',
+  '更多材料',
+  '链接见扩展阅读',
+  '来源见扩展阅读',
+];
+
+const containsAny = (text: string, phrases: string[]): boolean => {
+  return phrases.some(p => text.includes(p));
+};
+
+export const hasEnoughChinese = (text: string): boolean => {
+  // Android DeepReadModels.kt:324-332 (接受字符串参数,调用方传入待检文本)
+  const cjk = (text.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const latin = (text.match(/[a-zA-Z]/g) ?? []).length;
+  if (cjk >= 80) return true;
+  if (cjk < 12 && latin > 30) return false;
+  return cjk / (cjk + latin) >= 0.35;
+};
+
+export const hasReadableArticle = (o: DeepReadOutput): boolean => {
+  // Android DeepReadModels.kt:309-322
+  if (o.summary.trim().length < 80) return false;
+  if (containsAny(o.summary, LOW_INFORMATION_FALLBACK_PHRASES)) return false;
+
+  const timelineCount = o.timeline?.filter(e => e.event.length >= 20).length ?? 0;
+  const corePointsCount = o.corePoints?.filter(p => p.point.length >= 10 && (p.supporting?.length ?? 0) >= 30).length ?? 0;
+  if (timelineCount < 2 && corePointsCount < 2) return false;
+
+  const analysisOk =
+    (o.analysis.coreDispute?.trim().length ?? 0) >= 40 ||
+    (o.analysis.implications?.trim().length ?? 0) >= 40 ||
+    o.analysis.perspectives.some(p => p.viewpoint.trim().length >= 30);
+  if (!analysisOk) return false;
+
+  return true;
+};

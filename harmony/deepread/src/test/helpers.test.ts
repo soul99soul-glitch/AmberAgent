@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import { makeEmptyDeepReadOutput } from '../main/ets/domain/models.ts';
 import {
   isComplete, sectionsReady, hasAnyReadySection, statusOf,
+  hasReadableArticle, hasEnoughChinese,
 } from '../main/ets/domain/helpers.ts';
 import { STAGE_ORDER } from '../main/ets/domain/enums.ts';
 
@@ -65,4 +66,51 @@ test('statusOf returns actual status', () => {
   const o = makeEmptyDeepReadOutput();
   o.sectionStates['OVERVIEW'] = { status: 'FAILED', errorMessage: 'timeout' };
   assert.equal(statusOf(o, 'OVERVIEW'), 'FAILED');
+});
+
+test('hasReadableArticle false on empty output', () => {
+  assert.equal(hasReadableArticle(makeEmptyDeepReadOutput()), false);
+});
+
+test('hasReadableArticle true with rich content', () => {
+  const o = makeEmptyDeepReadOutput();
+  // summary genuinely >= 80 chars (Android :310 threshold)
+  o.summary = '本段摘要内容长度必须达到并确实超过八十个字符门槛以便顺利通过可读性深度检查环节要求条件本段摘要内容长度必须达到并确实超过八十个字符门槛以便顺利通过可读性深度检查环节要求条件';
+  o.timeline = [
+    { date: '2026-06-01', event: '事件一发生并且描述足够长确实超过二十个字符', isHighlight: false, imageUrl: null, imageCaption: null },
+    { date: '2026-06-02', event: '事件二发生并且描述足够长确实超过二十个字符', isHighlight: false, imageUrl: null, imageCaption: null },
+  ];
+  // analysis content to satisfy the analysis gate (Android :316-320)
+  o.analysis = {
+    coreDispute: null,
+    implications: null,
+    perspectives: [{ holder: null, viewpoint: '本观点文字长度同样需要超过三十个字符以满足分析维度门槛条件要求' }],
+    quotes: [],
+  };
+  assert.equal(hasReadableArticle(o), true);
+});
+
+test('hasReadableArticle false when summary contains fallback phrase', () => {
+  const o = makeEmptyDeepReadOutput();
+  // summary starts with a low-information fallback phrase -> rejected at phrase check
+  o.summary = '当前可抓取信息仍偏薄' + '本段摘要内容长度必须达到并确实超过八十个字符门槛以便顺利通过可读性深度检查环节要求条件本段摘要内容长度必须达到并确实超过八十个字符门槛以便顺利通过可读性深度检查环节要求条件';
+  o.timeline = [
+    { date: '2026-06-01', event: '事件一发生并且描述足够长确实超过二十个字符', isHighlight: false, imageUrl: null, imageCaption: null },
+    { date: '2026-06-02', event: '事件二发生并且描述足够长确实超过二十个字符', isHighlight: false, imageUrl: null, imageCaption: null },
+  ];
+  o.analysis = {
+    coreDispute: null,
+    implications: null,
+    perspectives: [{ holder: null, viewpoint: '本观点文字长度同样需要超过三十个字符以满足分析维度门槛条件要求' }],
+    quotes: [],
+  };
+  assert.equal(hasReadableArticle(o), false);
+});
+
+test('hasEnoughChinese true for predominantly CJK text', () => {
+  assert.equal(hasEnoughChinese('这是一段中文内容,字符数超过八十这是一段中文内容,字符数超过八十这是一段中文内容,字符数超过八十'), true);
+});
+
+test('hasEnoughChinese false for predominantly latin text', () => {
+  assert.equal(hasEnoughChinese('This is english text with some 中文 twelve chars'), false);
 });
