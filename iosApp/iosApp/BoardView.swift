@@ -507,24 +507,22 @@ struct BoardView: View {
             // Real LLM pipeline when a provider/key is configured; deterministic
             // offline draft otherwise (honest degradation, no fabricated output).
             let output: String
-            let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let modelResolution = resolvedDeepReadModelId()
-            // Reuse the user's actually-selected provider (parity fix for
-            // deepread.provider_real): honor the selected sealed type so Claude
-            // dispatches to native /messages, not a rebuilt OpenAI /chat/completions.
-            // Falls back to the deterministic offline draft when no usable
-            // provider is resolved (interim safeguard for non-OpenAI-compatible
-            // providers — honest degradation, never silent /chat/completions).
-            let resolvedProvider = IOSDeepReadDraftGenerator.resolveProviderSetting(
-                selected: providerRegistry?.selectedProvider
+            // Resolve the board's Deep Read model + its provider from the shared
+            // settings store (canonical: formal Provider UI writes it, chat reads
+            // it) so a provider configured in Settings is honored — fixes the
+            // dual-source bug (legacy ProviderRegistryStore was key-LESS + ignored
+            // the selected model). nil → deterministic offline draft (honest
+            // degradation, never a silent /chat/completions).
+            let resolved = sharedSettings.resolveBoardDeepReadModel(
+                boardModelId: sharedSettings.todayBoard.boardModelId
             )
-            if !apiKey.isEmpty, !modelResolution.modelId.isEmpty, let providerSetting = resolvedProvider {
+            if let (modelId, providerSetting) = resolved {
                 // Honest-fail state machine: when every stage threw or was empty,
                 // mark the task .failed (never mark empty output .succeeded).
                 let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
                     task: running,
                     providerSetting: providerSetting,
-                    modelId: modelResolution.modelId
+                    modelId: modelId
                 )
                 // The didFail → .failed decision is shared with the retry path
                 // via IOSDeepReadDraftGenerator.outcome (single source of truth).
@@ -555,7 +553,7 @@ struct BoardView: View {
                 sourceKind: "deep_read",
                 sourceId: running.id
             )
-            self.deepReadMessage = modelResolution.notice ?? "已生成并保存深度阅读。"
+            self.deepReadMessage = "已生成并保存深度阅读。"
             self.deepReadMessageIsError = false
             self.deepReadTitle = ""
             self.router.navigate(to: .deepReadTask(id: task.id))
@@ -611,25 +609,6 @@ struct BoardView: View {
             return "{}"
         }
         return string
-    }
-
-    private func resolvedDeepReadModelId() -> (modelId: String, notice: String?) {
-        let fallback = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let boardModelId = sharedSettings.todayBoard.boardModelId?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !boardModelId.isEmpty else {
-            return (fallback, nil)
-        }
-        if let selectedProvider = providerRegistry?.selectedProvider {
-            for model in selectedProvider.models where model.type == ModelType.chat {
-                if model.id.toHexDashString().caseInsensitiveCompare(boardModelId) == .orderedSame {
-                    return (model.modelId, nil)
-                }
-            }
-        }
-        let notice = fallback.isEmpty
-            ? "设置里的深度阅读模型不属于当前服务商，且当前聊天模型为空；已生成本地草稿。"
-            : "设置里的深度阅读模型不属于当前服务商，已回退当前聊天模型生成。"
-        return (fallback, notice)
     }
 
     private func createFromWebMount() async {
@@ -1343,41 +1322,22 @@ struct IOSDeepReadTaskDetailView: View {
 
     private func generateRetryOutput(task: IOSDeepReadTask) async -> IOSDeepReadDraftGenerator.DeepReadOutcome {
         let offline = IOSDeepReadDraftGenerator.generate(task: task)
-        guard let settingsStore else { return .completed(markdown: offline) }
-        let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let modelId = retryModelId()
-        // Resolve synchronously on the MainActor and unwrap to a non-optional
-        // (mirrors the create path's concurrency shape) so the fresh provider can
-        // be sent across the async boundary without a data race. Honors the
-        // selected sealed type → Claude dispatches to native /messages, never a
-        // rebuilt OpenAI /chat/completions; degrades to the offline draft when no
-        // usable provider/key/model is available.
-        guard !apiKey.isEmpty, !modelId.isEmpty,
-              let providerSetting = IOSDeepReadDraftGenerator.resolveProviderSetting(
-                  selected: providerRegistry?.selectedProvider
-              ) else {
+        // Resolve the board model + provider from the shared settings store
+        // (canonical source the formal Provider UI writes and chat reads), unwrap
+        // to a non-optional on the MainActor (mirrors the create path's
+        // concurrency shape) so the fresh provider crosses the async boundary
+        // without a data race. nil → offline draft (honest degradation). Fixes the
+        // retry-surface half of the dual-source bug.
+        guard let resolved = sharedSettings?.resolveBoardDeepReadModel(
+            boardModelId: sharedSettings?.todayBoard.boardModelId
+        ) else {
             return .completed(markdown: offline)
         }
         return await IOSDeepReadDraftGenerator.retryOutcome(
-            resolvedProvider: providerSetting,
-            modelId: modelId,
+            resolvedProvider: resolved.provider,
+            modelId: resolved.modelId,
             task: task
         )
-    }
-
-    private func retryModelId() -> String {
-        let fallback = settingsStore?.modelId.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard let boardModelId = sharedSettings?.todayBoard.boardModelId?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !boardModelId.isEmpty,
-              let selectedProvider = providerRegistry?.selectedProvider else {
-            return fallback
-        }
-        for model in selectedProvider.models where model.type == ModelType.chat {
-            if model.id.toHexDashString().caseInsensitiveCompare(boardModelId) == .orderedSame {
-                return model.modelId
-            }
-        }
-        return fallback
     }
 
     private func copyResult(_ task: IOSDeepReadTask) {

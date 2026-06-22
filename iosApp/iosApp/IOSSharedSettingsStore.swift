@@ -580,6 +580,33 @@ final class IOSSharedSettingsStore {
         snapshot.getCurrentChatModel()?.modelId ?? ""
     }
 
+    /// Resolve the (wire modelId, provider) pair for a board Deep Read run.
+    /// `boardModelId` is the per-board model override (a hex-dash UUID); when it
+    /// is empty or not found, falls back to the current chat model. Resolves from
+    /// the canonical shared snapshot (mirrors chat), so a provider+model the user
+    /// configured in Settings is honored — not the legacy key-LESS
+    /// ProviderRegistryStore. Returns nil when no usable model/provider/key is
+    /// configured, so the caller can degrade to the deterministic offline draft
+    /// (honest degradation, never a silent /chat/completions).
+    func resolveBoardDeepReadModel(boardModelId: String?) -> (modelId: String, provider: ProviderSetting)? {
+        let model: Model?
+        if let id = boardModelId?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
+            model = snapshot.providers
+                .flatMap { $0.models }
+                .first { $0.type == ModelType.chat && $0.id.toHexDashString().caseInsensitiveCompare(id) == .orderedSame }
+                ?? snapshot.getCurrentChatModel()
+        } else {
+            model = snapshot.getCurrentChatModel()
+        }
+        guard let model,
+              let provider = model.findProvider(providers: snapshot.providers, checkOverwrite: true),
+              !Self.apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !model.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return (model.modelId, provider)
+    }
+
     func syncLegacySettingsStoreForCurrentChat(_ settingsStore: SettingsStore) {
         guard let model = snapshot.getCurrentChatModel(),
               let provider = model.findProvider(providers: snapshot.providers, checkOverwrite: true) else {
