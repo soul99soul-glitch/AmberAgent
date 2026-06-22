@@ -36,8 +36,10 @@ export const withSectionStatus = (
   status: DeepReadSectionStatus,
   errorMessage: string | null = null,
 ): DeepReadOutput => {
+  // Android DeepReadModels.kt:70-79:更新 sectionStates 后重算 generationComplete
   const newState: DeepReadSectionState = { status, errorMessage };
-  return { ...o, sectionStates: { ...o.sectionStates, [stage]: newState } };
+  const merged: DeepReadOutput = { ...o, sectionStates: { ...o.sectionStates, [stage]: newState } };
+  return { ...merged, generationComplete: o.generationComplete && sectionsReady(merged) };
 };
 
 export const withSectionQuality = (
@@ -155,18 +157,34 @@ const containsAny = (text: string, phrases: string[]): boolean => {
 };
 
 export const hasEnoughChinese = (text: string): boolean => {
-  // Android DeepReadModels.kt:324-332 (接受字符串参数,调用方传入待检文本)
+  // Android DeepReadModels.kt:324-332
   const cjk = (text.match(/[\u4e00-\u9fff]/g) ?? []).length;
   const latin = (text.match(/[a-zA-Z]/g) ?? []).length;
   if (cjk >= 80) return true;
   if (cjk < 12 && latin > 30) return false;
-  return cjk / (cjk + latin) >= 0.35;
+  const denom = Math.max(cjk + latin, 1);  // 防 0/0=NaN(Android coerceAtLeast(1))
+  return cjk / denom >= 0.35;
+};
+
+// 拼接文章全文本用于语言检查 — 对应 Android articleTextForQualityCheck()
+const articleTextForQualityCheck = (o: DeepReadOutput): string => {
+  const parts: string[] = [o.summary];
+  parts.push(...o.keyEntities);
+  if (o.timeline) parts.push(...o.timeline.map(t => t.event));
+  if (o.corePoints) parts.push(...o.corePoints.map(p => `${p.point} ${p.supporting ?? ''}`));
+  parts.push(o.analysis.coreDispute ?? '');
+  parts.push(o.analysis.implications ?? '');
+  parts.push(...o.analysis.perspectives.map(p => p.viewpoint));
+  parts.push(...o.analysis.quotes.map(q => q.text));
+  return parts.join(' ');
 };
 
 export const hasReadableArticle = (o: DeepReadOutput): boolean => {
   // Android DeepReadModels.kt:309-322 — 注意:Android 用 AND 逻辑(三项都满足)
   if (o.summary.trim().length < 80) return false;
-  if (containsAny(o.summary, LOW_INFORMATION_FALLBACK_PHRASES)) return false;
+  // Android :311 检查 visibleTextForLanguageCheck() 全文,不只 summary
+  const visibleText = articleTextForQualityCheck(o);
+  if (containsAny(visibleText, LOW_INFORMATION_FALLBACK_PHRASES)) return false;
 
   const hasTimeline = (o.timeline?.filter(e => e.event.trim().length >= 20).length ?? 0) >= 2;
   const hasCorePoints = (o.corePoints?.filter(p => p.point.trim().length >= 10 && (p.supporting?.trim().length ?? 0) >= 30).length ?? 0) >= 2;
