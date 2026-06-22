@@ -340,3 +340,36 @@ DONE 主体（P0_block 全绿）+ P0 named-9 成功标准 + P5 recover 附加目
 ### 已知非阻塞偏离（记录供审计）
 1. P1 merge 后置（integration 分支不存在 + 33 文件冲突）——待人工，不影响 P0_block/DONE。
 2. verify/refute 由 Explore agent 担任对抗（本环境无独立 sonnet/opus 进程），但所有结论基于真实测试运行 + git diff + 独立 agent 对抗裁决，非自报。
+
+---
+
+## P1 merge 实际执行 — ⛔ ESCALATE（架构分歧，非安全自动 merge）
+
+### 执行记录（已尝试，已安全 abort）
+- 创建 `integration/ios-main-convergence` 分支，执行 `git merge --no-ff origin/main`。
+- 32 文件冲突解决：30 android-only 文件用 theirs（main 版本）；2 shared-KMP（Message.kt + MessageStreamAccumulator.kt）手工 merge（保留我分支 streamIndex 逻辑 + 整合 main 新增 const）。
+- **KMP framework 构建失败**：main 的 `feature/modelcouncil/src/commonMain/` council 源文件（我取 theirs）含 **Android/JVM-only API**（`android.*`、`java.*`、`Dispatchers.IO`、`System`、`userImageParts`）—— 这些在 iOS KMP target 下不编译。
+
+### 根本原因（架构分歧，非 trivial 冲突）
+- **我分支**：把 `feature:modelcouncil` + `feature:live:api` 重构为 KMP-common（jvm + iosArm64 + iosSimulatorArm64），源在 commonMain，iOS 兼容。`shared` 模块依赖它们。
+- **main**：同一模块仍是 Android-feature（源含 android-only API，不为 iOS 编译）。
+- 两分支对 council/live 模块是 **KMP-iOS 化 vs Android-only** 的相反方向。merge main 的 council 源 = 破坏 iOS KMP 构建。
+
+### 安全 abort + 状态恢复
+- `git merge --abort` + 删除 convergence 分支 + 切回 `feat/ios-provider-parity-claude`。
+- 状态恢复到 `0b08b06b5`（全绿）。Shared framework 构建通过。iOS red-light suite **19 tests 0 failures**（含 P2 rehydration 测试）。
+
+### 为何 ESCALATE（spec 依据）
+- spec loop_policy：达 max_iterations 仍未过 gate = ESCALATE。
+- 安全 merge main 的 council/live Android 代码需要架构决策（移植到 KMP / 排除出 iOS / 双模块），**不能无风险自主决策**——这正是 spec「33 文件冲突 merge」警告的高风险场景，且 global_intercept 防「悄悄弱化已绑定断言」。
+- **P0_block 全绿 + named-9 全绿 + recover 绿 + P2 rehydration 完成** 不受影响（merge 是独立 concern）。
+
+### P1 merge 路径（需人工决策）
+1. **移植**：把 main 的 council/live 变更手工移植到我分支的 KMP-common 结构（保留 iOS 兼容）。工作量大，需逐文件适配。
+2. **排除**：让 iOS `shared` 不依赖 modelcouncil/live（iOS 用自己的 IOSCouncilRoomRunner 等 Swift 实现，不依赖 KMP council）。可能已部分如此——需核查 shared 是否真需 modelcouncil。
+3. **后置**：保持 P0_block 全绿状态，merge 留到专门收敛任务。
+
+## P2 (credentials) EXIT — 裁决: **PASS**
+- secure_store 列全行绿（18 red-light tests + rehydration test，全 GREEN）。
+- UserDefaults/备份 dump 无明文凭据（redactor 接入所有 persist 路径）。
+- **P2 known-gap 已闭合**：`IOSSharedSettingsStore` load 路径从 Keychain side-table 回灌 `snapshot.providers[*].apiKey`（`rehydrateProviderApiKeys`），旧明文值首次 load 迁移到 Keychain。`test_providerApiKey_rehydratedFromKeychainOnReload` GREEN。
