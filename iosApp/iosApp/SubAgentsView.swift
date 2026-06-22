@@ -6,10 +6,10 @@ struct SubAgentsView: View {
     /// P0 baseline marker (truth_matrix: subagent_standalone.exec_real).
     /// `true` once the standalone page dispatches runs through
     /// `SubAgentRunner.runViaEngine` (the IOSAgentToolEngine path) instead of the
-    /// legacy `run` (SubAgentManager/KMP path). Today the page calls `run`
-    /// (SubAgentsView.swift:127,178), so this is `false`. P4 flips it to `true`.
+    /// legacy `run` (SubAgentManager/KMP path). P4 flipped this to `true` by
+    /// routing both dispatch sites through `runStandaloneViaEngine`.
     /// Tracked by `test_subagent_standalone_usesEnginePath`.
-    static let standaloneDispatchUsesEnginePath = false
+    static let standaloneDispatchUsesEnginePath = true
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +21,36 @@ struct SubAgentsView: View {
         IOSSubAgentRoleCatalog.builtIns.map {
             .init(name: $0.name, handle: $0.id, summary: $0.summary)
         }
+    }
+
+    /// P4 parity fix (truth_matrix: subagent_standalone.exec_real): the
+    /// standalone page now dispatches through `SubAgentRunner.runViaEngine`
+    /// (IOSAgentToolEngine path), not the legacy `run` (SubAgentManager/KMP).
+    /// Reuses the user's selected provider (SLICE_TEMPLATE pattern 1) so a
+    /// Claude selection dispatches natively. The standalone page has no parent
+    /// tools (independent run), so `parentToolExecutors` is empty.
+    @MainActor
+    private func runStandaloneViaEngine(objective: String, roleId: String) async -> String {
+        let settingsStore = SettingsStore()
+        let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelId = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Resolve the selected provider (honor sealed type) — mirrors DeepRead/
+        // council resolvers. Falls back to a legacy OpenAI-shaped setting from
+        // baseUrl+apiKey when no selected provider is available, preserving the
+        // pre-P4 behavior for unconfigured-provider cases (honest degradation).
+        let registry = ProviderRegistryStore(settingsStore: settingsStore)
+        let resolved = IOSDeepReadDraftGenerator.resolveProviderSetting(selected: registry.selectedProvider)
+            ?? IOSCouncilRoomRunner.makeProviderSetting(baseUrl: settingsStore.baseUrl, apiKey: apiKey)
+        guard !apiKey.isEmpty, !modelId.isEmpty else {
+            return "SubAgent 不可用：请先配置服务商 API Key 与模型。"
+        }
+        return await runner.runViaEngine(
+            objective: objective,
+            roleId: roleId,
+            providerSetting: resolved,
+            modelId: modelId,
+            parentToolExecutors: [:]
+        )
     }
 
     var body: some View {
@@ -132,7 +162,7 @@ struct SubAgentsView: View {
                                 let objective = taskObjective.trimmingCharacters(in: .whitespacesAndNewlines)
                                 guard !objective.isEmpty else { return }
                                 Task {
-                                    runner.lastRunResult = await runner.run(objective: objective, roleId: selectedRoleId)
+                                    runner.lastRunResult = await runStandaloneViaEngine(objective: objective, roleId: selectedRoleId)
                                 }
                             } label: {
                                 Label("启动任务", systemImage: "person.2.wave.2.fill")
@@ -183,7 +213,7 @@ struct SubAgentsView: View {
                             selectedRoleId = task.roleId ?? "explorer"
                             taskObjective = task.objective
                             Task {
-                                runner.lastRunResult = await runner.run(
+                                runner.lastRunResult = await runStandaloneViaEngine(
                                     objective: task.objective,
                                     roleId: task.roleId ?? "explorer"
                                 )

@@ -105,8 +105,9 @@ struct IOSCouncilRoomLimits: Codable, Equatable {
     func normalized() -> IOSCouncilRoomLimits {
         IOSCouncilRoomLimits(
             maxSeats: min(max(maxSeats, 2), 8),
-            // 总轮次限制 2-5 轮（所有成员发言一遍 = 一轮），避免无限辩论。
-            defaultRounds: min(max(defaultRounds, 2), 5),
+            // 总轮次限制 1-5 轮（所有成员发言一遍 = 一轮），避免无限辩论。
+            // 下限放宽到 1：freeChat/debate 都允许单轮快速议会（parity 修复）。
+            defaultRounds: min(max(defaultRounds, 1), 5),
             seatTimeoutSeconds: min(max(seatTimeoutSeconds, 15), 180),
             outputBudgetCharacters: min(max(outputBudgetCharacters, 2_000), 40_000)
         )
@@ -789,8 +790,10 @@ final class IOSCouncilRoomRunner {
             onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
             onEvent(.append(dividerMessage(request.mode == .debate ? "辩论开始" : "自由群聊开始")))
 
-            // 两种模式都用 defaultRounds（normalized 限制 2-5 轮），不再给 freeChat 写死 1 轮。
-            let rounds = limits.defaultRounds
+            // freeChat 用单轮（host 议题 + 各席位 + host 总结 = 一轮）；debate 用
+            // defaultRounds（normalized 限制 1-5 轮）。parity 修复：避免 freeChat 重复
+            // 跑席位导致消息翻倍。
+            let rounds = request.mode == .freeChat ? 1 : limits.defaultRounds
             for round in 1...rounds {
                 try checkCancelled()
                 onEvent(.append(dividerMessage("第 \(round) 轮")))

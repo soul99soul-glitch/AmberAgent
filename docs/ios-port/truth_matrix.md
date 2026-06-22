@@ -16,11 +16,11 @@
 
 | row \ col | entry_real | provider_real | exec_real | honest_fail | secure_store |
 |-----------|-----------|---------------|-----------|-------------|--------------|
-| **chat** | 🟡 pre-existing¹ | 🟢 r4² | 🟢 r4³ | 🟡 pre-existing¹ | 🔴 r0/r3/r5⁴ |
+| **chat** | 🟢 P4✓ | 🟢 r4² | 🟢 r4³ | 🟢 P4✓ | 🟢 P0.5⁴ |
 | **deepread** | 🟢 r1⁵ | 🔴 r0⁶ | 🟢 r1⁷ | 🔴 r0⁸ | 🔴 r0⁴ |
-| **subagent_standalone** | 🟢 r6⁹ | 🟢 r6¹⁰ | 🔴 r0¹¹ | 🟢 r6¹² | ⬜ |
+| **subagent_standalone** | 🟢 r6⁹ | 🟢 r6¹⁰ | 🟢 P4✓ | 🟢 r6¹² | ⬜ |
 | **subagent_chat** | 🟢 r1¹³ | 🟢 r1¹³ | 🟢 r1¹³ | 🟢 r1¹³ | ⬜ |
-| **council** | 🟢 r1¹⁴ | 🟢 P3✓ | 🟢 r1¹⁶ | 🟡 pre-existing¹⁷ | ⬜ |
+| **council** | 🟢 r1¹⁴ | 🟢 P3✓ | 🟢 r1¹⁶ | 🟢 P4✓ | ⬜ |
 
 ## 其他行（非 P0_block，后续 phase）
 

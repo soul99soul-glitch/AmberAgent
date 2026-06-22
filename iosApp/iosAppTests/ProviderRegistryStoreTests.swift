@@ -165,8 +165,16 @@ final class ProviderRegistryStoreTests: XCTestCase {
     }
 
     func testChatSendRequiresApiKeyBeforeAppendingUserMessage() {
-        let settings = makeSettings(apiKey: "", modelId: "gpt-4o")
-        let viewModel = ChatViewModel(settingsStore: settings)
+        // Config source is the shared (KMP) provider, not the legacy SettingsStore.
+        // A Claude provider with an empty apiKey must surface .missingAPIKey and
+        // block the send (message not appended, input preserved).
+        let settings = makeSettings(apiKey: "", modelId: "claude-sonnet-4-5")
+        let sharedSettings = makeSharedSettingsWithClaudeProvider(apiKey: "")
+        let viewModel = ChatViewModel(
+            settingsStore: settings,
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: true
+        )
         viewModel.inputText = "Hello"
 
         viewModel.sendMessage()
@@ -178,8 +186,14 @@ final class ProviderRegistryStoreTests: XCTestCase {
     }
 
     func testChatSendRequiresValidBaseURL() {
-        let settings = makeSettings(baseUrl: "not a url", apiKey: "sk-test", modelId: "gpt-4o")
-        let viewModel = ChatViewModel(settingsStore: settings)
+        // A Claude provider with an invalid baseUrl must surface .invalidBaseURL.
+        let settings = makeSettings(baseUrl: "not a url", apiKey: "sk-test", modelId: "claude-sonnet-4-5")
+        let sharedSettings = makeSharedSettingsWithClaudeProviderInvalidBaseUrl()
+        let viewModel = ChatViewModel(
+            settingsStore: settings,
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: true
+        )
         viewModel.inputText = "Hello"
 
         viewModel.sendMessage()
@@ -190,8 +204,15 @@ final class ProviderRegistryStoreTests: XCTestCase {
     }
 
     func testChatSendRequiresModelId() {
+        // No selected chat model + no configured chat providers must surface
+        // .missingModel.
         let settings = makeSettings(apiKey: "sk-test", modelId: "")
-        let viewModel = ChatViewModel(settingsStore: settings)
+        let sharedSettings = makeEmptySharedSettings()
+        let viewModel = ChatViewModel(
+            settingsStore: settings,
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: true
+        )
         viewModel.inputText = "Hello"
 
         viewModel.sendMessage()
@@ -337,6 +358,35 @@ final class ProviderRegistryStoreTests: XCTestCase {
         let chatModel = added.models.first { $0.type == ModelType.chat }!
         sharedSettings.setCurrentChatModelId(chatModel.id.description())
         return sharedSettings
+    }
+
+    /// A Claude provider with a configured key but an INVALID base URL — drives
+    /// the `.invalidBaseURL` configuration issue.
+    private func makeSharedSettingsWithClaudeProviderInvalidBaseUrl() -> IOSSharedSettingsStore {
+        let namespace = "SharedClaudeBadUrl-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: namespace)!
+        defaults.removePersistentDomain(forName: namespace)
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: defaults)
+        let provider = IosSettingsMutations.shared.buildClaudeProvider(
+            name: "Claude Bad URL",
+            apiKey: "sk-ant-test",
+            baseUrl: "not a url",
+            modelName: "Claude Sonnet 4.5",
+            modelId: "claude-sonnet-4-5"
+        )
+        let added = sharedSettings.addProvider(provider)
+        let chatModel = added.models.first { $0.type == ModelType.chat }!
+        sharedSettings.setCurrentChatModelId(chatModel.id.description())
+        return sharedSettings
+    }
+
+    /// An empty shared-settings store (no providers, no selected model) — drives
+    /// the `.missingModel` configuration issue.
+    private func makeEmptySharedSettings() -> IOSSharedSettingsStore {
+        let namespace = "EmptyShared-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: namespace)!
+        defaults.removePersistentDomain(forName: namespace)
+        return IOSSharedSettingsStore(userDefaults: defaults)
     }
 
     private func makeSharedSettingsWithGoogleChatProvider(apiKey: String) -> IOSSharedSettingsStore {

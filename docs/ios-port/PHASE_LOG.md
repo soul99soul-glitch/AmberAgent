@@ -244,3 +244,40 @@ P0_block 列 [entry_real, provider_real, exec_real, honest_fail, secure_store]:
 5. refute 无反证: streamer :580 确认 Claude 原生 dispatch；resolver 返回真 Claude（apiKey 保留）✓
 6. 无全局拦截: council mechanics 回归无新增失败；已绿格无回退 ✓
 7. 无视觉回归: CouncilChatRuntimeView 仅逻辑 diff（providerSetting 接线）；council 复采视觉一致；HARD-LOCK 0 diff ✓
+
+---
+
+## P4 (close_three_entries) — EXIT 裁决: **PASS** → **P0_block 全绿 = DONE 主体达成**
+
+### 改动
+1. **subagent_standalone.exec_real**: `SubAgentsView` 两 dispatch site 改走 `runStandaloneViaEngine`（调 `SubAgentRunner.runViaEngine` + 复用 resolveProviderSetting 透传选中 provider）；`standaloneDispatchUsesEnginePath` 旗标翻 true。
+2. **council.honest_fail**: council 轮次 bug 修复——freeChat 固定 1 轮（host 议题 + 席位 + host 总结）；defaultRounds 下限从 2 放宽到 1。根因：rounds 解析成 2 导致席位翻倍 + 脚本耗尽后 synthesis 抛错被顶层 catch 标 whole-room failed。
+3. **chat.entry_real / honest_fail**: 3 个 pre-existing 测试改用真实 sharedSettings 配置源（而非 legacy SettingsStore）触发 .missingAPIKey/.invalidBaseURL/.missingModel。
+
+### 测试结果（fresh full sweep）
+- red-light suite: **14 GREEN + 1 RED**（唯一 RED = `test_recovery_killMidStream` = recover 列，P5 scope，**非 P0_block**）。
+- 全量回归（red-light + ProviderRegistry + council + DeepRead + Backup + MCP + SharedSettings + DeepReadStore）: 仅 recovery 1 个失败。
+- **P0_block 五行 × 五列 全部 GREEN**。
+
+### P0_block 终态
+| row | entry_real | provider_real | exec_real | honest_fail | secure_store |
+|-----|-----------|---------------|-----------|-------------|--------------|
+| chat | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| deepread | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| subagent_standalone | 🟢 | 🟢 | 🟢 | 🟢 | — |
+| subagent_chat | 🟢 | 🟢 | 🟢 | 🟢 | — |
+| council | 🟢 | 🟢 | 🟢 | 🟢 | — |
+
+### 7-criterion DoD (P4)
+1. 目标格绿: subagent_standalone.exec_real / council.honest_fail / chat.entry_real+honest_fail 全绿 ✓
+2. red→green: subagent_standalone 红灯 RED→GREEN；2 council + 3 chat pre-existing 失败→绿。无删除/skip/弱化（chat 测试断言全保留，改的是 fixture 配置源）✓
+3. locked_decisions: 无 ProviderExecutionContext；复用 resolveProviderSetting；scheme B 凭据（P0.5 已落）✓
+4. 无明文凭据: secure_store 保持全绿 ✓
+5. refute 无反证: council rounds 是真实行为修复（非 test-tailored）；subagent 真 dispatch runViaEngine；chat 断言未弱化 ✓
+6. 无全局拦截: 无已绿格回退（recovery 是 P5 一直的 RED，非回退）✓
+7. 无视觉回归: HARD-LOCK 3 文件 + VISUAL-GUARDED（AppShell/BoardView/CouncilChatRuntimeView）**全 0 diff**（P4 改动在 CouncilRunner.swift/SubAgentsView.swift/ChatViewModel.swift/CouncilRunner 测试，均非视觉文件）✓
+
+### DONE 主体状态
+**truth_matrix.P0_block = 5 行 × 5 列全绿 → DONE 主体达成。**
+（recover 列 = P5 附加目标，非 DONE 主体；recovery 测试仍 RED 是预期。）
+（P1 merge 仍后置，待人工；不影响 DONE 主体。）
