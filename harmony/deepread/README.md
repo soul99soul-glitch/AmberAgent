@@ -36,3 +36,18 @@ npm test
 
 Plan 1.2 处理 Platform skeleton(interfaces + RDB schema + SSE assembler + JsonSchemaValidator)。
 crypto adapter 替换 node `crypto` 为 `@ohos.security.cryptoHash` 在 Platform 层注入。
+
+## Platform 层(Phase 1.2 — 已完成)
+
+- `platform/http.ts` — HttpClient interface(RCP 封装契约,实现留后续)
+- `platform/database.ts` — Database interface + `DEEP_READ_SCHEMA_SQL`
+- `platform/storage.ts` — Storage interface(preferences + Asset Store)
+- `platform/notifier.ts` — Notifier interface(3 类通知契约)
+- `platform/search.ts` — SearchProvider interface
+- `platform/ai_client.ts` — AiClient interface(UIMessage 占位待 Plan 2)
+- `platform/repository.ts` — DeepReadRepository interface
+- `platform/observable.ts` — `Observable<T>` + 轮询实现 ✅
+- `platform/sse_assembler.ts` — `SseAssembler`(ArrayBuffer chunk 边界 buffer) ✅
+- `platform/json_schema_validator.ts` — `JsonSchemaValidator`(轻量) ✅
+
+后续:RcpHttpClient / RdbDatabase / AssetStorage / 真实 SearchProvider 实现等 DevEco 工具链就绪。
