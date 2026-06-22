@@ -179,3 +179,32 @@ spec 允许 `swift-snapshot-testing` 或模拟器截图二者之一。当前 `pr
 ### 注意 / 待后续 phase
 - P2 收尾: `IOSSharedSettingsStore` load 路径未从 side-table 回灌 `snapshot.providers[*].apiKey`（当前重启后读成 mask）—— P2 补回灌 + 旧明文迁移。
 - council/subagent standalone: P3/P4 按 SLICE_TEMPLATE 模式 1 复制。
+
+---
+
+## P1 (protected_main_merge) — ⛔ ENTRY GATE BLOCKED → ESCALATE 等人工
+
+### Entry gate 检查（实证）
+- **`integration/ios-main-convergence` 分支不存在**: 本地 + `origin` 远程全分支枚举，无 `convergence`/`integration`/`ios-main` 任何变体。
+- **当前分支与 main 严重分叉**: `feat/ios-provider-parity-claude` 领先 origin/main **229 commits**，落后 **80 commits**；main 不是 HEAD 的 ancestor（双向分叉）。
+- **冲突面 = 33 文件**（两分支同时改动），与 spec line 96「逐一核对 32 个冲突文件」吻合。冲突文件集中在 council/board/deep-read/chat provider —— main 仍在活跃开发这些能力（`3d7bb3133` council stream host review、`cedae0a7c` remove task-flow、`b51648c93` Room schema v7）。
+
+### 为何停在这里（spec 依据）
+- spec P1 exit（line 92）明确要求「`integration/ios-main-convergence` 分支：merge（非 squash）完成」—— 该分支不存在 = exit 不可达。
+- spec loop_policy（line 16）：达 max_iterations 仍未过 gate = ESCALATE（停止自主循环，报卡点 + truth_matrix 快照，等人工）。
+- 33 文件冲突的非 squash merge，若擅自执行，极易**悄悄弱化** P0/P0.5 已绑定的断言（global_intercept line 14 / P1 verify line 96 正是防此）—— main 80 commits 改的正是 council/deep-read/chat provider 文件，与本 goal 红灯直接重叠。
+
+### 当前 truth_matrix 快照（P0.5 EXIT 后）
+P0_block 列 [entry_real, provider_real, exec_real, honest_fail, secure_store]:
+- chat: entry_real 🟡 / provider_real 🟢 / exec_real 🟢 / honest_fail 🟡 / secure_store 🟢
+- deepread: 🟢🟢🟢🟢🟢（P0.5 全绿）
+- subagent_standalone: entry_real 🟢 / provider_real 🟢 / exec_real 🔴(P4) / honest_fail 🟢 / secure_store —
+- subagent_chat: 🟢🟢🟢🟢(无 secure_store 红格)
+- council: entry_real 🟢 / provider_real 🔴(P3) / exec_real 🟢 / honest_fail 🟡(P4) / secure_store —
+
+未绿格: council.provider_real(P3)、council.honest_fail(P4 pre-existing)、subagent_standalone.exec_real(P4)、chat.entry_real/honest_fail(P3/P4 pre-existing)。
+
+### 等人工决策的选项
+1. 创建 `integration/ios-main-convergence` 分支并由人工/我分块 merge（spec 原路径）—— 需要逐块解决 33 文件冲突并验证红灯存活，高风险。
+2. 跳过 P1 merge，直接推进 P3（council.provider_real 翻绿）—— 偏离 spec phase 序列，但 P3 不依赖 merge（council 红灯的修复代码在本分支）。
+3. 先把 main 的 80 commits rebase/cherry-pick 进当前分支的相关部分（仅 council/deep-read/chat provider），再继续。
