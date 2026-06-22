@@ -64,11 +64,11 @@ enum IOSCredentialSideTable {
     }
 
     // MARK: - key builders (stable credential refs)
-
-    /// Provider API key credential ref.
-    static func providerApiKey(providerId: String) -> String {
-        "provider.\(providerId).apiKey"
-    }
+    //
+    // NOTE: provider apiKeys are NOT routed through this side-table — they are
+    // preserved by the separate, pre-existing `KeychainProviderRegistryKeyStore`
+    // (per-provider Keychain). This side-table is used for credential classes
+    // that have no dedicated Keychain wrapper (currently MCP server headers).
 
     /// MCP server header credential ref.
     static func mcpHeader(serverName: String, headerName: String) -> String {

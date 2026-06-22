@@ -402,20 +402,18 @@ final class IOSParityRedLightTests: XCTestCase {
 
     /// RED for P0. GREEN target: P5.
     /// Cell: chat.recover.
+    /// RED for P0. GREEN target: P5 (now GREEN).
+    /// Cell: chat.recover.
     ///
-    /// A run killed mid-stream must be left in an interrupted-or-resumable state
-    /// — NOT silently lost or frozen as "running" forever. Today there is NO
-    /// startup recovery sweep: `ChatGenerationCoordinator.start()` writes no DB
-    /// row at start (only at terminal events), and `AgentRuntimeDao.markInterrupted`
-    /// / `listUnfinished` exist but are never called from Swift. So an orphaned
-    /// "running" row stays "running" across launches. P5 adds a startup sweep
-    /// that reclassifies orphaned non-terminal rows to interrupted.
+    /// A run killed mid-stream must be reclassified to an interrupted-or-
+    /// resumable state — NOT silently lost or frozen as "running" forever. P5
+    /// added `IOSRunRecovery.recoverInterruptedRuns()` — a startup sweep that
+    /// reads `listUnfinished` (non-terminal rows) and calls `markInterrupted` on
+    /// each, so a killed run surfaces honestly on next launch.
     ///
-    /// This test inserts a "running" row (simulating a mid-stream kill where
-    /// start() eventually persists a row), then asks the recovery surface
-    /// (`listUnfinished`) what state the run is in. The parity target is that a
-    /// killed run is reclassified to interrupted/resumable. Today listUnfinished
-    /// returns the raw "running" row untouched → the assertion fails (no sweep).
+    /// This test inserts a "running" row (simulating a mid-stream kill), runs
+    /// the recovery sweep, then asserts the run was reclassified to
+    /// interrupted/resumable (not still "running").
     func test_recovery_killMidStream_runInterruptedOrResumed() async throws {
         let db = IosDatabaseFactory.shared.createDatabase()
         let dao = db.agentRuntimeDao()
@@ -448,29 +446,25 @@ final class IOSParityRedLightTests: XCTestCase {
             }
         }
 
-        // On next launch, the recovery surface must surface this killed run as
-        // interrupted-or-resumable. We model "the sweep" via a goal-level entry
-        // point; today that entry point does NOT reclassify, so listUnfinished
-        // returns the row still in "running" state. P5's sweep calls
-        // markInterrupted on such rows. Assert via listUnfinished (the read path
-        // the startup hook will use) — the row must NOT remain "running".
-        let unfinishedStatuses = await withCheckedContinuation { (cont: CheckedContinuation<[String], Never>) in
-            dao.listUnfinished { result, _ in
-                // Extract only Sendable String fields inside the callback.
-                let statuses = (result ?? [])
-                    .filter { $0.runId == runId }
-                    .map { $0.status }
-                cont.resume(returning: statuses)
+        // On next launch, the recovery sweep (IOSRunRecovery.recoverInterruptedRuns)
+        // reclassifies orphaned non-terminal rows to "interrupted". This is the
+        // P5 parity target: a killed run surfaces as interrupted-or-resumable.
+        _ = await IOSRunRecovery.recoverInterruptedRuns(reason: "process_killed", now: now)
+
+        // After the sweep, the run must be reclassified — read its status.
+        let recoveredStatus = await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            dao.getRun(id: runId) { result, _ in
+                cont.resume(returning: result?.status)
             }
         }
 
-        // Parity target: after a kill + restart, the run must be in a terminal-
-        // or resumable state. If it is still "running", no sweep ran (the gap).
-        let stillRunning = unfinishedStatuses.contains { $0 == "running" }
-        XCTAssertFalse(
-            stillRunning,
-            "A run killed mid-stream must be reclassified to interrupted/resumable on next launch, "
-                + "not left frozen as 'running'. listUnfinished returned it still 'running' (P5)."
+        // Parity target: after a kill + the recovery sweep, the run must be in an
+        // interrupted-or-resumable state, not left frozen as "running".
+        let isInterruptedOrResumed = recoveredStatus == "interrupted" || recoveredStatus == "resumed"
+        XCTAssertTrue(
+            isInterruptedOrResumed,
+            "A run killed mid-stream must be reclassified to interrupted/resumable by the recovery "
+                + "sweep, not left frozen as 'running'. Recovered status: \(recoveredStatus ?? "<nil>") (P5)."
         )
     }
 

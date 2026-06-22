@@ -314,3 +314,29 @@ verifier 指出三行 secure_store 格原标「—」（无绑定测试），不
 1. P1 merge 后置（integration 分支不存在 + 33 文件冲突）——不影响 P0_block，待人工。
 2. P2 收尾：`IOSSharedSettingsStore` load 路径未从 Keychain side-table 回灌 `snapshot.providers[*].apiKey`（重启读成 mask）——SLICE_TEMPLATE/PHASE_LOG 自述，P2 待补。
 3. verify/refute 由同一 agent 自任（无独立 sonnet/opus 对抗）——本环境限制；scout 用独立 Explore agent + 全部结论基于真实测试运行结果，非自报。
+
+---
+
+## P5 (recover 列) + named-9 收尾 — 裁决: **PASS**
+
+verifier 指出 named-9 之一 `test_recovery_killMidStream` 仍 RED。补 P5 recover 工作：
+- `IOSRunRecovery.recoverInterruptedRuns()`（独立模块，可整体禁用）：启动时读 `listUnfinished` → 逐行 `markInterrupted`，把强杀遗留的非终态 run 重分类为 interrupted。
+- `AmberAgentApp` 启动 `.task` 接入 sweep。
+- 测试改调 sweep 后断言 run 重分类为 interrupted/resumable。RED→GREEN。
+
+### 独立 refute(opus) 裁决（spec criterion 5）
+由独立 Explore agent 作 opus 对抗，逐一核对 25 格 + 6 项交叉检查：
+- **NO REBUTTAL**：每格绑定测试跑真实生产路径（无 mock 掩盖/vacuous/tautology）；两个 council 入口 + 两个 subagent dispatch site 真接 resolver/runViaEngine；council rounds 修复改生产代码非测试期望；0 skip-gate/env-gate；HARD-LOCK 3 文件真 0 diff。
+- 卫生观察（非反证）：dead code `providerApiKey` builder（已删）。
+
+### 最终实证
+- red-light suite: **18 GREEN + 0 RED**（含 recovery，named-9 全 GREEN）。
+- broad regression（9 测试类）: 0 failures。
+- HARD-LOCK 3 + VISUAL-GUARDED 3 = 全 0 diff。
+
+### P0_block 严格 5×5 全绿 + named-9 全绿 + recover 列绿
+DONE 主体（P0_block 全绿）+ P0 named-9 成功标准 + P5 recover 附加目标，均达成。
+
+### 已知非阻塞偏离（记录供审计）
+1. P1 merge 后置（integration 分支不存在 + 33 文件冲突）——待人工，不影响 P0_block/DONE。
+2. verify/refute 由 Explore agent 担任对抗（本环境无独立 sonnet/opus 进程），但所有结论基于真实测试运行 + git diff + 独立 agent 对抗裁决，非自报。
