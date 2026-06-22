@@ -37,6 +37,8 @@ final class ChatViewModel {
     var isLoading: Bool = false
     var isAttachingSelectedFile: Bool = false
     var pendingSelectedFilePreview: SelectedDocumentReadResult?
+    var pendingImages: [PendingChatImage] = []
+    var isRecognizingImages = false
     var selectedFileContextError: String?
     var reasoningLevel: ReasoningLevel = .off
     var messageRevision: Int = 0
@@ -340,9 +342,11 @@ final class ChatViewModel {
 
     func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty,
+        let hasImages = !pendingImages.isEmpty
+        guard (!text.isEmpty || hasImages),
               !generationCoordinator.isRunning,
               !isAttachingSelectedFile,
+              !isRecognizingImages,
               pendingMemoryApproval == nil,
               pendingSearchApproval == nil,
               pendingWebMountApproval == nil,
@@ -353,22 +357,181 @@ final class ChatViewModel {
             configurationError = configurationIssue.message
             return
         }
+        // 发图前先按模型视觉能力判断（对齐安卓 ImageAttachmentValidator）：
+        // ready→直接发；fallback→先用视觉模型识别成文字再发；blocked→拦下提示，绝不静默丢弃。
+        if hasImages {
+            switch imageAttachmentState {
+            case .blocked(let reason):
+                selectedFileContextError = reason
+                return
+            case .fallback:
+                configurationError = nil
+                startVisionFallbackAndSend(text: text, images: pendingImages)
+                return
+            case .ready, .none:
+                break
+            }
+        }
         configurationError = nil
+        sendUserMessage(text: text, images: pendingImages)
+    }
 
+    /// Appends the user message (keeping image parts for in-bubble display) and persists it.
+    /// Returns the input digest + conversation id so the caller can start generation.
+    @discardableResult
+    private func appendUserMessage(text: String, images: [PendingChatImage]) -> (digest: String, conversationId: KotlinUuid?) {
         let prompt = Self.promptText(userText: text, selectedFilePreview: pendingSelectedFilePreview)
-        let digest = chatInputDigest(for: prompt)
-        let userMsg = UIMessage.companion.user(prompt: prompt)
+        let digest = chatInputDigest(for: prompt.isEmpty ? "[image]" : prompt)
+        let userMsg = makeUserMessage(prompt: prompt, images: images)
         pendingAssistantRegeneration = nil
         messages.append(userMsg)
         messageRevision &+= 1
         inputText = ""
         pendingSelectedFilePreview = nil
+        clearPendingImages()
         selectedFileContextError = nil
         let runConversationId = currentConversationId
         // 用户消息立即落盘：即使随后生成崩溃/被杀进程，用户输入也不会丢。
         persistMessages(conversationId: runConversationId)
+        return (digest, runConversationId)
+    }
+
+    /// Sends the user message and kicks off generation. For non-vision models the image
+    /// parts are swapped for the cached recognition text inside
+    /// `messagesByInjectingRuntimeContext` before the request leaves for the provider.
+    private func sendUserMessage(text: String, images: [PendingChatImage]) {
+        let (digest, conversationId) = appendUserMessage(text: text, images: images)
         guard autoGenerateResponses else { return }
-        generateResponse(inputDigest: digest, conversationId: runConversationId)
+        generateResponse(inputDigest: digest, conversationId: conversationId)
+    }
+
+    /// OCR fallback: the user message (with its image) is shown in the chat immediately;
+    /// a recognition indicator runs on the user side while the vision model reads each
+    /// image, then the main model responds. On failure the message stays and an error shows.
+    private func startVisionFallbackAndSend(text: String, images: [PendingChatImage]) {
+        let (digest, conversationId) = appendUserMessage(text: text, images: images)
+        guard autoGenerateResponses else { return }
+        isRecognizingImages = true
+        Task {
+            let result = await performVisionRecognition(images: images)
+            await MainActor.run {
+                isRecognizingImages = false
+                switch result {
+                case .failure(let error):
+                    selectedFileContextError = error.message
+                case .success(let texts):
+                    for (key, value) in texts { visionRecognitionTexts[key] = value }
+                    generateResponse(inputDigest: digest, conversationId: conversationId)
+                }
+            }
+        }
+    }
+
+    struct VisionRecognitionError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Calls the configured vision model once per image and returns the wrapped
+    /// recognition text keyed by the image's `data:` URL (Android OcrTransformer parity).
+    private func performVisionRecognition(
+        images: [PendingChatImage]
+    ) async -> Result<[String: String], VisionRecognitionError> {
+        let snapshot = sharedSettings.snapshot
+        guard let visionModel = snapshot.findModelById(uuid: snapshot.ocrModelId) else {
+            return .failure(VisionRecognitionError(message: "请先在「默认模型 → 辅助任务」配置视觉识别模型"))
+        }
+        guard let providerSetting = ChatProviderConfiguration.provider(
+            for: visionModel,
+            providers: snapshot.providers
+        ) else {
+            return .failure(VisionRecognitionError(message: "视觉识别模型的服务商不可用"))
+        }
+        let prompt = OcrPromptKt.resolveVisionRecognitionPrompt(prompt: snapshot.ocrPrompt)
+        let params = TextGenerationParams(
+            model: visionModel,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: ReasoningLevel.off,
+            customHeaders: [],
+            customBody: []
+        )
+        let adapter = OpenAIKmpProviderAdapter()
+        var results: [String: String] = [:]
+        for image in images {
+            if let cached = visionRecognitionTexts[image.dataUrl] {
+                results[image.dataUrl] = cached
+                continue
+            }
+            let requestMessages = [
+                UIMessage.companion.system(prompt: prompt),
+                makeImageOnlyUserMessage(dataUrl: image.dataUrl)
+            ]
+            do {
+                let chunk = try await adapter.generateText(
+                    providerSetting: providerSetting,
+                    messages: requestMessages,
+                    params: params
+                )
+                let text = chunk.choices.first?.message?.toText()
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !text.isEmpty else {
+                    return .failure(VisionRecognitionError(message: "视觉识别模型没有返回可用内容"))
+                }
+                results[image.dataUrl] = """
+                <image_context>
+                \(text)
+                </image_context>
+                * 以上 image_context 是对用户上传图片的视觉识别结果，不是用户的提问。
+                """
+            } catch {
+                return .failure(VisionRecognitionError(message: "视觉识别失败：\((error as NSError).localizedDescription)"))
+            }
+        }
+        return .success(results)
+    }
+
+    private func makeImageOnlyUserMessage(dataUrl: String) -> UIMessage {
+        UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.user,
+            parts: [UIMessagePart.Image(url: dataUrl, metadata: nil)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
+    /// Builds the user message: a plain text message when there are no images, or a
+    /// multi-part message (text + `UIMessagePart.Image`) the KMP providers turn into
+    /// real image blocks. Image URLs are self-contained `data:` URLs.
+    private func makeUserMessage(prompt: String, images: [PendingChatImage]) -> UIMessage {
+        guard !images.isEmpty else {
+            return UIMessage.companion.user(prompt: prompt)
+        }
+        var parts: [UIMessagePart] = []
+        if !prompt.isEmpty {
+            parts.append(UIMessagePart.Text(text: prompt, metadata: nil))
+        }
+        for image in images {
+            parts.append(UIMessagePart.Image(url: image.dataUrl, metadata: nil))
+        }
+        return UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.user,
+            parts: parts,
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
     }
 
     func attachSelectedFilePreviewToNextMessage() async {
@@ -450,6 +613,79 @@ final class ChatViewModel {
     func clearPendingSelectedFilePreview() {
         pendingSelectedFilePreview = nil
         selectedFileContextError = nil
+    }
+
+    // MARK: - Image attachments
+
+    static let maxImagesPerMessage = 4
+
+    struct PendingChatImage: Identifiable, Equatable {
+        let id = UUID()
+        /// `data:<mime>;base64,...` — self-contained so it survives persistence and regeneration.
+        let dataUrl: String
+        /// Small JPEG bytes used only to render the composer thumbnail.
+        let previewData: Data
+    }
+
+    enum ImageAttachmentState: Equatable {
+        case none
+        /// The current chat model accepts image input — send the image directly.
+        case ready
+        /// The current model is text-only but a vision model is configured — the image
+        /// is recognized into text by the vision model first, then sent to the current model.
+        case fallback
+        case blocked(String)
+    }
+
+    /// Cached `<image_context>` recognition text per image `data:` URL, so the vision
+    /// model is called once per image (covers regeneration within the session too).
+    @ObservationIgnored private var visionRecognitionTexts: [String: String] = [:]
+
+    func addPendingImage(dataUrl: String, previewData: Data) {
+        guard pendingImages.count < Self.maxImagesPerMessage else {
+            selectedFileContextError = "一次最多发送 \(Self.maxImagesPerMessage) 张图片"
+            return
+        }
+        pendingImages.append(PendingChatImage(dataUrl: dataUrl, previewData: previewData))
+        selectedFileContextError = nil
+    }
+
+    func removePendingImage(_ id: PendingChatImage.ID) {
+        pendingImages.removeAll { $0.id == id }
+    }
+
+    func clearPendingImages() {
+        pendingImages.removeAll()
+    }
+
+    /// Mirrors Android `ImageAttachmentValidator`: the current model having image input
+    /// means the image is ready to send; otherwise a configured vision model is required,
+    /// and failing that the send is blocked with a prompt (never silently dropped).
+    var imageAttachmentState: ImageAttachmentState {
+        guard !pendingImages.isEmpty else { return .none }
+        if pendingImages.count > Self.maxImagesPerMessage {
+            return .blocked("一次最多发送 \(Self.maxImagesPerMessage) 张图片")
+        }
+        let snapshot = sharedSettings.snapshot
+        guard let model = snapshot.getCurrentChatModel() else {
+            return .blocked("请先选择模型")
+        }
+        if Self.modelSupportsImageInput(model) { return .ready }
+        // The user explicitly configured a vision model for this purpose — trust it
+        // (capability metadata isn't reliably known for every model id), only requiring
+        // that it resolves and has a usable provider.
+        if let vision = snapshot.findModelById(uuid: snapshot.ocrModelId),
+           ChatProviderConfiguration.provider(for: vision, providers: snapshot.providers) != nil {
+            return .fallback
+        }
+        return .blocked("当前模型不支持图片，请先在「默认模型 → 辅助任务」配置视觉识别模型")
+    }
+
+    private static func modelSupportsImageInput(_ model: Model) -> Bool {
+        let modalities = model.inputModalities.isEmpty
+            ? (ModelRegistry.shared.MODEL_INPUT_MODALITIES.getData(modelId: model.modelId) as? [Modality] ?? [])
+            : model.inputModalities
+        return modalities.contains { $0.name == "IMAGE" }
     }
 
     func approvePendingMemoryTool() {
@@ -663,12 +899,46 @@ final class ChatViewModel {
     }
 
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
-        ChatRuntimeContextBuilder(
+        let withContext = ChatRuntimeContextBuilder(
             sharedSettings: sharedSettings,
             mcpTools: mcpManager.tools,
             miniAppRepository: miniAppRepository,
             miniAppRuntimeEnabled: isMiniAppRuntimeEnabled
         ).injectingRuntimeContext(into: messages)
+        return replacingImagesForNonVisionModel(withContext)
+    }
+
+    /// The stored/displayed messages keep their image parts (so the user sees the photo in
+    /// the bubble), but a text-only chat model cannot receive image blocks. When the current
+    /// model has no image input, swap each image part for its cached vision-recognition text
+    /// before the request leaves for the provider.
+    private func replacingImagesForNonVisionModel(_ messages: [UIMessage]) -> [UIMessage] {
+        guard let model = sharedSettings.snapshot.getCurrentChatModel(),
+              !Self.modelSupportsImageInput(model) else {
+            return messages
+        }
+        guard messages.contains(where: { $0.parts.contains { $0 is UIMessagePart.Image } }) else {
+            return messages
+        }
+        return messages.map { message in
+            guard message.parts.contains(where: { $0 is UIMessagePart.Image }) else { return message }
+            let newParts: [UIMessagePart] = message.parts.map { part in
+                guard let image = part as? UIMessagePart.Image else { return part }
+                let recognized = visionRecognitionTexts[image.url] ?? "[图片未能识别]"
+                return UIMessagePart.Text(text: recognized, metadata: nil)
+            }
+            return UIMessage(
+                id: message.id,
+                role: message.role,
+                parts: newParts,
+                annotations: message.annotations,
+                createdAt: message.createdAt,
+                finishedAt: message.finishedAt,
+                modelId: message.modelId,
+                usage: message.usage,
+                translation: message.translation
+            )
+        }
     }
 
 #if DEBUG

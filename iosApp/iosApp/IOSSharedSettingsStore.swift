@@ -149,6 +149,9 @@ final class IOSSharedSettingsStore {
         // provider's apiKey is non-empty AND non-mask, store it to the side-table
         // now (so the next persist redacts it), then keep it in memory.
         Self.rehydrateProviderApiKeys(into: &self.snapshot)
+        // iOS identity: introduce as "Amber" and don't claim to run on Android.
+        // Applied on every load (idempotent) so persisted snapshots are rebranded too.
+        self.snapshot = IosSettingsMutations.shared.rebrandAmberIdentity(settings: self.snapshot)
     }
 
     /// Rehydrates provider apiKeys in a snapshot from the Keychain side-table
@@ -550,6 +553,24 @@ final class IOSSharedSettingsStore {
     func setCurrentChatModelId(_ modelId: String) {
         let merged = IosSettingsMutations.shared.setChatModelId(settings: snapshot, modelId: modelId)
         restoreSnapshot(merged)
+    }
+
+    /// Auxiliary-task model slots. Pass a model UUID string to set, or "" to clear
+    /// (clearing falls back to the current chat model at run time).
+    func setOcrModelId(_ modelId: String) {
+        restoreSnapshot(IosSettingsMutations.shared.setOcrModelId(settings: snapshot, modelId: modelId))
+    }
+
+    func setTitleModelId(_ modelId: String) {
+        restoreSnapshot(IosSettingsMutations.shared.setTitleModelId(settings: snapshot, modelId: modelId))
+    }
+
+    func setSuggestionModelId(_ modelId: String) {
+        restoreSnapshot(IosSettingsMutations.shared.setSuggestionModelId(settings: snapshot, modelId: modelId))
+    }
+
+    func setCompressModelId(_ modelId: String) {
+        restoreSnapshot(IosSettingsMutations.shared.setCompressModelId(settings: snapshot, modelId: modelId))
     }
 
     /// Add a new provider (already-constructed ProviderSetting) and persist.

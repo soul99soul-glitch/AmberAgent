@@ -381,6 +381,62 @@ object IosSettingsMutations {
     }
 
     /**
+     * iOS-only identity rebrand applied on every snapshot load: the shared defaults
+     * call the assistant "AmberAgent" and describe it as an "Android assistant"; on iOS
+     * it should introduce itself simply as "Amber" and not claim to run on Android.
+     * Idempotent (running it again is a no-op). Android keeps the shared defaults.
+     */
+    fun rebrandAmberIdentity(settings: Settings): Settings {
+        fun String.rebranded(): String = this
+            .replace("AmberAgent", "Amber")
+            .replace("an agent-only Android assistant", "an agent-only iOS assistant")
+            .replace("Android System WebView", "the system WebView")
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                agentSoulMarkdown = settings.agentRuntime.agentSoulMarkdown.rebranded()
+            ),
+            assistants = settings.assistants.map { assistant ->
+                assistant.copy(
+                    name = if (assistant.name == "AmberAgent" || assistant.name == "Amberagent") {
+                        "Amber"
+                    } else {
+                        assistant.name
+                    },
+                    systemPrompt = assistant.systemPrompt.rebranded(),
+                )
+            },
+        )
+    }
+
+    /// Auxiliary-task model slots (title / suggestion / vision-OCR / compress). A blank
+    /// modelId "clears" the slot to a fresh random Uuid that resolves to no model, which
+    /// the resolvers treat as "unset → fall back to the current chat model".
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    private fun resolveAuxModelId(modelId: String): kotlin.uuid.Uuid? =
+        if (modelId.isBlank()) kotlin.uuid.Uuid.random()
+        else runCatching { kotlin.uuid.Uuid.parse(modelId) }.getOrNull()
+
+    fun setTitleModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(titleModelId = parsed)
+    }
+
+    fun setSuggestionModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(suggestionModelId = parsed)
+    }
+
+    fun setOcrModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(ocrModelId = parsed)
+    }
+
+    fun setCompressModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(compressModelId = parsed)
+    }
+
+    /**
      * Construct an OpenAI-compatible [ProviderSetting.OpenAI] with a single
      * model. This is what iOS "add custom model" maps to: a user-added model
      * lives in its own OpenAI-compatible provider entry (builtIn=false,

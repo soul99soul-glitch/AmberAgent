@@ -243,6 +243,10 @@ final class IOSLocalToolExecutor {
         if !request.isUserInitiated {
             if IOSWorkspaceToolCatalog.writeToolNames.contains(request.toolName) {
                 if !(policy == .autoApprove || policy == .autoApproveHighRisk) {
+                    // Honor the global / high-risk auto-approve switches (writes are high-risk).
+                    if Self.isGlobalAutoApproveEnabled && (capability.risk != .high || Self.isHighRiskAutoApproveEnabled) {
+                        return .allow(capabilityId: capability.id)
+                    }
                     return .needsUserAction(reason: "Workspace writes and deletes require explicit foreground approval.")
                 }
             }
@@ -344,6 +348,10 @@ final class IOSLocalToolExecutor {
             return .denied("Memory writes are disabled in AmberAgent tool policy.")
         case .askEveryTime, .allowOncePerRun:
             if isUserInitiated {
+                return .allow
+            }
+            // Honor the global / high-risk auto-approve switches (writes are high-risk).
+            if Self.isGlobalAutoApproveEnabled && (capability.risk != .high || Self.isHighRiskAutoApproveEnabled) {
                 return .allow
             }
             return .needsUserAction("Memory writes require explicit foreground approval before the model can change saved memories.")

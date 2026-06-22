@@ -43,7 +43,7 @@ struct ModelDefaultsView: View {
                     VStack(spacing: 0) {
                         intro
                         chatSection
-                        AssistantParamsSection(sharedSettings: sharedSettings)
+                        auxiliarySection
                     }
                     .padding(.bottom, 36)
                 }
@@ -176,6 +176,89 @@ struct ModelDefaultsView: View {
         }
         return "当前保存的模型不在已启用服务商列表中，请重新选择。"
     }
+
+    // MARK: 辅助任务 (auxiliary-task model slots)
+
+    private var auxiliarySection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "辅助任务")
+            AmberFormGroup {
+                auxRow(
+                    icon: "eye",
+                    title: "视觉识别模型",
+                    subtitle: "当前模型不支持图片时使用",
+                    currentId: sharedSettings.snapshot.ocrModelId,
+                    set: { sharedSettings.setOcrModelId($0) }
+                )
+                ModelDefaultsDivider()
+                auxRow(
+                    icon: "text.line.first.and.arrowtriangle.forward",
+                    title: "标题总结模型",
+                    subtitle: "总结对话标题",
+                    currentId: sharedSettings.snapshot.titleModelId,
+                    set: { sharedSettings.setTitleModelId($0) }
+                )
+                ModelDefaultsDivider()
+                auxRow(
+                    icon: "lightbulb",
+                    title: "聊天建议模型",
+                    subtitle: "生成对话建议",
+                    currentId: sharedSettings.snapshot.suggestionModelId,
+                    set: { sharedSettings.setSuggestionModelId($0) }
+                )
+                ModelDefaultsDivider()
+                auxRow(
+                    icon: "doc.zipper",
+                    title: "压缩模型",
+                    subtitle: "压缩对话历史",
+                    currentId: sharedSettings.snapshot.compressModelId,
+                    set: { sharedSettings.setCompressModelId($0) }
+                )
+            }
+            ModelDefaultsNote("辅助任务模型留空时会回退到当前聊天模型。「视觉识别模型」用于当前聊天模型看不了图片时，先把图片识别成文字。")
+        }
+    }
+
+    @ViewBuilder
+    private func auxRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        currentId: KotlinUuid,
+        set: @escaping (String) -> Void
+    ) -> some View {
+        if chatModelOptions.isEmpty {
+            ModelDefaultStaticRow(
+                systemImage: icon,
+                iconColor: AmberTheme.accent,
+                title: title,
+                subtitle: subtitle,
+                value: "未添加",
+                valueStyle: AmberTheme.accentAmber
+            )
+        } else {
+            ModelDefaultMenuRow(
+                systemImage: icon,
+                iconColor: AmberTheme.accent,
+                title: title,
+                subtitle: subtitle,
+                value: auxModelName(currentId)
+            ) {
+                ForEach(chatModelOptions) { option in
+                    Button(option.menuTitle) { set(option.id) }
+                }
+                Divider()
+                Button("清除（回退当前聊天模型）", role: .destructive) { set("") }
+            }
+        }
+    }
+
+    private func auxModelName(_ id: KotlinUuid) -> String {
+        _ = sharedSettings.revision
+        guard let model = sharedSettings.snapshot.findModelById(uuid: id) else { return "未设置" }
+        let name = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? model.modelId : name
+    }
 }
 
 private struct ModelDefaultMenuRow<MenuContent: View>: View {
@@ -283,10 +366,14 @@ private struct ModelDefaultRowContent: View {
                 Text(title)
                     .font(.body)
                     .foregroundStyle(AmberTheme.foreground)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
+                    .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

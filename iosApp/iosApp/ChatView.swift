@@ -2,6 +2,7 @@ import SwiftUI
 import Shared
 import UIKit
 import UniformTypeIdentifiers
+import PhotosUI
 
 private enum ComposerPanel: String, Identifiable {
     case thinking
@@ -20,6 +21,10 @@ struct ChatView: View {
     @State private var activeComposerPanel: ComposerPanel?
     @State private var isModelSheetPresented = false
     @State private var isImportingSelectedFile = false
+    @State private var isAttachExpanded = false
+    @State private var isCameraPresented = false
+    @State private var isPhotoPickerPresented = false
+    @State private var photoPickerItems: [PhotosPickerItem] = []
     @FocusState private var isInputFocused: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
@@ -54,6 +59,19 @@ struct ChatView: View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
             messageList
+
+            // Tap-outside scrim for the attachment glass panel.
+            if isAttachExpanded {
+                Color.black.opacity(0.06)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.bouncy(duration: 0.38, extraBounce: 0.1)) {
+                            isAttachExpanded = false
+                        }
+                    }
+                    .transition(.opacity)
+            }
             // Bottom-edge gradient blur, re-added as a NON-INTERACTIVE background layer (not a
             // safeAreaBar). It sits in front of the messages but behind the composer (which is a
             // `.safeAreaInset` composited on top of the whole ZStack), so message content fades
@@ -105,6 +123,22 @@ struct ChatView: View {
             allowsMultipleSelection: false
         ) { result in
             handleSelectedFileImport(result)
+        }
+        .photosPicker(
+            isPresented: $isPhotoPickerPresented,
+            selection: $photoPickerItems,
+            maxSelectionCount: ChatViewModel.maxImagesPerMessage,
+            matching: .images
+        )
+        .onChange(of: photoPickerItems) { _, items in
+            handlePhotoPickerSelection(items)
+        }
+        .fullScreenCover(isPresented: $isCameraPresented) {
+            CameraPicker { image in
+                if let image { attachPickedImage(image) }
+                isCameraPresented = false
+            }
+            .ignoresSafeArea()
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -175,6 +209,92 @@ struct ChatView: View {
             documentStore.recordSelectionError(message)
             viewModel.selectedFileContextError = message
         }
+    }
+
+    // MARK: - Attachment panel actions
+
+    private func presentFileImporter() {
+        if documentStore != nil {
+            isImportingSelectedFile = true
+        } else {
+            Task { await viewModel.attachSelectedFilePreviewToNextMessage() }
+        }
+    }
+
+    private func presentCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            viewModel.selectedFileContextError = "此设备不支持相机。"
+            return
+        }
+        isCameraPresented = true
+    }
+
+    private func handlePhotoPickerSelection(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                      let image = UIImage(data: data),
+                      let encoded = ChatImageEncoder.encode(image) else { continue }
+                await MainActor.run {
+                    viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
+                }
+            }
+            await MainActor.run { photoPickerItems = [] }
+        }
+    }
+
+    /// Camera path (already on the main thread): compress + encode and attach.
+    private func attachPickedImage(_ image: UIImage) {
+        guard let encoded = ChatImageEncoder.encode(image) else {
+            viewModel.selectedFileContextError = "图片处理失败。"
+            return
+        }
+        viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
+    }
+
+    /// Liquid Glass attachment panel that springs out from the "+" with the native
+    /// `.glassEffect` material; it sits just above the input row (composer grows upward).
+    private var attachmentGlassPanel: some View {
+        VStack(spacing: 0) {
+            attachmentRow(title: "拍照", icon: "camera") { presentCamera() }
+            attachmentDivider
+            attachmentRow(title: "照片", icon: "photo.on.rectangle") { isPhotoPickerPresented = true }
+            attachmentDivider
+            attachmentRow(title: "文件", icon: "doc") { presentFileImporter() }
+        }
+        .frame(width: 220)
+        .clipShape(.rect(cornerRadius: 22))
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 2)
+        .padding(.bottom, 2)
+    }
+
+    private var attachmentDivider: some View {
+        Divider().overlay(AmberTheme.borderSoft).padding(.leading, 52)
+    }
+
+    private func attachmentRow(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.bouncy(duration: 0.36, extraBounce: 0.1)) { isAttachExpanded = false }
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(AmberTheme.foreground)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var topBar: some View {
@@ -266,11 +386,18 @@ struct ChatView: View {
                             }
                             .id(message.id)
                         }
+
+                        if viewModel.isRecognizingImages {
+                            VisionRecognitionIndicator()
+                                .id("vision-recognition-indicator")
+                                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                        }
                     }
                 }
                 .padding(.horizontal, ChatLayout.contentHorizontalInset)
                 .padding(.vertical, 12)
                 .padding(.bottom, 18)
+                .animation(.spring(response: 0.35, dampingFraction: 0.82), value: viewModel.isRecognizingImages)
                 // Tap anywhere in the message content to dismiss the keyboard. Attached to the
                 // content (not the ScrollView) so it reliably fires; simultaneousGesture so
                 // message bubbles/buttons still receive their taps; contentShape makes the gaps
@@ -458,6 +585,50 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if !viewModel.pendingImages.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(viewModel.pendingImages) { image in
+                            ZStack(alignment: .topTrailing) {
+                                if let ui = UIImage(data: image.previewData) {
+                                    Image(uiImage: ui)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 56, height: 56)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                                Button {
+                                    viewModel.removePendingImage(image.id)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(.white, .black.opacity(0.45))
+                                        .padding(3)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                switch viewModel.imageAttachmentState {
+                case .blocked(let message):
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(AmberTheme.accentAmber)
+                        .lineLimit(2)
+                        .padding(.horizontal, 2)
+                case .fallback:
+                    Label("当前模型不支持图片，将先用视觉模型识别后再发送", systemImage: "wand.and.stars")
+                        .font(.caption2)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(2)
+                        .padding(.horizontal, 2)
+                case .ready, .none:
+                    EmptyView()
+                }
+            }
+
             if let preview = viewModel.pendingSelectedFilePreview {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
@@ -498,15 +669,16 @@ struct ChatView: View {
                     .lineLimit(3)
             }
 
+            if isAttachExpanded {
+                attachmentGlassPanel
+                    .transition(.scale(scale: 0.75, anchor: .bottomLeading).combined(with: .opacity))
+            }
+
             VStack(spacing: 8) {
                     HStack(alignment: .center, spacing: 8) {
                         Button {
-                            if documentStore != nil {
-                                isImportingSelectedFile = true
-                            } else {
-                                Task {
-                                    await viewModel.attachSelectedFilePreviewToNextMessage()
-                                }
+                            withAnimation(.bouncy(duration: 0.42, extraBounce: 0.14)) {
+                                isAttachExpanded.toggle()
                             }
                         } label: {
                             Image(systemName: viewModel.isAttachingSelectedFile ? "paperclip.circle.fill" : "plus")
@@ -514,6 +686,7 @@ struct ChatView: View {
                                 .foregroundStyle(AmberTheme.muted)
                                 .frame(width: 28, height: 28)
                                 .contentShape(Circle())
+                                .rotationEffect(.degrees(isAttachExpanded ? 45 : 0))
                         }
                         .buttonStyle(.plain)
                         .disabled(
@@ -2242,5 +2415,99 @@ private struct ToolTimelineSample: View {
 
     var body: some View {
         ChatToolTimeline(steps: steps)
+    }
+}
+
+// MARK: - Image attachment helpers
+
+/// Compresses an image into a self-contained `data:` URL (sent to the model) plus a small
+/// JPEG used only for the composer thumbnail. Downscaling keeps the persisted payload small.
+private enum ChatImageEncoder {
+    static let maxSendDimension: CGFloat = 1536
+    static let maxThumbnailDimension: CGFloat = 160
+
+    static func encode(_ image: UIImage) -> (dataUrl: String, previewData: Data)? {
+        let sized = downscaled(image, maxDimension: maxSendDimension)
+        guard let jpeg = sized.jpegData(compressionQuality: 0.7) else { return nil }
+        let dataUrl = "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+        let thumb = downscaled(image, maxDimension: maxThumbnailDimension)
+        let previewData = thumb.jpegData(compressionQuality: 0.6) ?? jpeg
+        return (dataUrl, previewData)
+    }
+
+    private static func downscaled(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        let longest = max(size.width, size.height)
+        guard longest > maxDimension, longest > 0 else { return image }
+        let scale = maxDimension / longest
+        let target = CGSize(width: size.width * scale, height: size.height * scale)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+    }
+}
+
+/// Right-aligned "visual recognition in progress" indicator shown on the user side while
+/// the OCR-fallback vision model reads the image, with a breathing animation.
+private struct VisionRecognitionIndicator: View {
+    @State private var pulse = false
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 40)
+            HStack(spacing: 7) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .scaleEffect(pulse ? 1.18 : 0.86)
+                    .opacity(pulse ? 1.0 : 0.55)
+                Text("视觉识别中…")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(AmberTheme.surface, in: Capsule())
+            .overlay(Capsule().stroke(AmberTheme.borderSoft, lineWidth: 1))
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+/// Thin SwiftUI wrapper over `UIImagePickerController` for the 拍照 (camera) path.
+private struct CameraPicker: UIViewControllerRepresentable {
+    let onComplete: (UIImage?) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onComplete: onComplete) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onComplete: (UIImage?) -> Void
+        init(onComplete: @escaping (UIImage?) -> Void) { self.onComplete = onComplete }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            onComplete(info[.originalImage] as? UIImage)
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onComplete(nil)
+        }
     }
 }

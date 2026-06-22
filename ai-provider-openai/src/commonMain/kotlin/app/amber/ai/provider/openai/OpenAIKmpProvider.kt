@@ -332,18 +332,33 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         add(buildJsonObject {
             put("role", message.role.name.lowercase())
             val texts = message.parts.filterIsInstance<UIMessagePart.Text>()
-            if (message.role == MessageRole.SYSTEM && texts.isNotEmpty()) {
-                put("content", texts.joinToString("\n\n") { it.text })
-            } else if (texts.size == 1) {
-                put("content", texts.first().text)
-            } else if (texts.isEmpty()) {
-                put("content", "")
-            } else {
-                putJsonArray("content") {
+            // Images: the iOS composer encodes each attachment as a `data:` URL
+            // (or passes an http(s) URL); OpenAI accepts both directly.
+            val images = message.parts.filterIsInstance<UIMessagePart.Image>()
+                .mapNotNull { it.imageUrlBlock() }
+            when {
+                message.role == MessageRole.SYSTEM && texts.isNotEmpty() ->
+                    put("content", texts.joinToString("\n\n") { it.text })
+                images.isNotEmpty() -> putJsonArray("content") {
+                    texts.forEach { add(buildJsonObject { put("type", "text"); put("text", it.text) }) }
+                    images.forEach { add(it) }
+                }
+                texts.size == 1 -> put("content", texts.first().text)
+                texts.isEmpty() -> put("content", "")
+                else -> putJsonArray("content") {
                     texts.forEach { add(buildJsonObject { put("type", "text"); put("text", it.text) }) }
                 }
             }
         })
+    }
+
+    /** OpenAI image_url block from a `data:` base64 URL or an http(s) URL; null otherwise. */
+    private fun UIMessagePart.Image.imageUrlBlock(): JsonObject? {
+        if (!(url.startsWith("data:") || url.startsWith("http://") || url.startsWith("https://"))) return null
+        return buildJsonObject {
+            put("type", "image_url")
+            put("image_url", buildJsonObject { put("url", url) })
+        }
     }
 
     // ---- response parsing ----

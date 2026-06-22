@@ -495,8 +495,42 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
             metadata?.forEach { (key, value) -> put(key, value) }
         }
 
-        // Image support deferred until a KMP base64 helper exists (baseline parity
-        // with the OpenAI KMP provider, which also omits image content).
+        // Image input: the iOS composer encodes each attachment as a `data:`
+        // base64 URL (or passes an http(s) URL), so the provider can emit an
+        // Anthropic image block directly — no platform base64 helper needed.
+        is UIMessagePart.Image -> imageContentBlock(url)
+
+        else -> null
+    }
+
+    /** Anthropic image block from a `data:` (base64) or http(s) URL; null if not usable here. */
+    private fun imageContentBlock(url: String): JsonObject? = when {
+        url.startsWith("data:") -> {
+            val comma = url.indexOf(',')
+            val meta = if (comma >= 0) url.substring("data:".length, comma) else ""
+            val data = if (comma >= 0) url.substring(comma + 1) else ""
+            if (data.isBlank() || !meta.contains("base64")) {
+                null
+            } else {
+                buildJsonObject {
+                    put("type", "image")
+                    put("source", buildJsonObject {
+                        put("type", "base64")
+                        put("media_type", meta.substringBefore(';').ifBlank { "image/jpeg" })
+                        put("data", data)
+                    })
+                }
+            }
+        }
+
+        url.startsWith("http://") || url.startsWith("https://") -> buildJsonObject {
+            put("type", "image")
+            put("source", buildJsonObject {
+                put("type", "url")
+                put("url", url)
+            })
+        }
+
         else -> null
     }
 

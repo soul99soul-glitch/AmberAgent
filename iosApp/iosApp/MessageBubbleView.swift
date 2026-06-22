@@ -254,7 +254,12 @@ struct MessageBubbleView: View {
                     autoCloseThinking: displaySetting?.autoCloseThinking ?? true
                 )
             } else if let image = part as? UIMessagePart.Image {
-                ChatGeneratedImageGrid(images: [image])
+                if isUser {
+                    ChatUserImageTile(urlString: image.url)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                } else {
+                    ChatGeneratedImageGrid(images: [image])
+                }
             } else if let tool = part as? UIMessagePart.Tool {
                 ChatToolTimeline(steps: [ChatToolStepModel(tool: tool)])
                 if tool.toolName == "generate_image" {
@@ -383,35 +388,66 @@ private struct ChatGeneratedImageTile: View {
     let urlString: String
     @Environment(IOSWorkspaceStore.self) private var workspaceStore
     @State private var saved = false
+    @State private var decodedDataImage: UIImage?
+
+    private var isDataURL: Bool { urlString.hasPrefix("data:") }
 
     private var url: URL? {
         URL(string: urlString) ?? URL(fileURLWithPath: urlString)
     }
 
+    /// Decodes a `data:<mime>;base64,...` URL (used by chat image attachments) into a UIImage.
+    /// `AsyncImage` cannot load `data:` URLs, so these are decoded once and cached in state.
+    private static func decodeDataURL(_ string: String) -> UIImage? {
+        guard let comma = string.firstIndex(of: ",") else { return nil }
+        let base64 = String(string[string.index(after: comma)...])
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return UIImage(data: data)
+    }
+
     var body: some View {
         VStack(spacing: 6) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .failure:
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(AmberTheme.accentRed)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .empty:
-                    ProgressView()
-                        .tint(AmberTheme.accent)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                @unknown default:
-                    EmptyView()
+            Group {
+                if isDataURL {
+                    if let decodedDataImage {
+                        Image(uiImage: decodedDataImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        ProgressView()
+                            .tint(AmberTheme.accent)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(AmberTheme.accentRed)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        case .empty:
+                            ProgressView()
+                                .tint(AmberTheme.accent)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
                 }
             }
             .frame(height: 176)
             .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous))
             .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous))
+            .task(id: urlString) {
+                if isDataURL, decodedDataImage == nil {
+                    decodedDataImage = Self.decodeDataURL(urlString)
+                }
+            }
 
             if let url {
                 HStack(spacing: 6) {
@@ -454,6 +490,86 @@ private struct ChatGeneratedImageTile: View {
         } catch {
             saved = false
         }
+    }
+}
+
+/// A user-sent image attachment, right-aligned and width-constrained like a chat bubble
+/// (no share/save chrome). Sized to the image's real aspect ratio so the rounded clip
+/// hugs the picture (no transparent letterbox). Decodes `data:` base64 URLs.
+private struct ChatUserImageTile: View {
+    let urlString: String
+    @State private var decoded: UIImage?
+
+    private var isDataURL: Bool { urlString.hasPrefix("data:") }
+    private var url: URL? { URL(string: urlString) ?? URL(fileURLWithPath: urlString) }
+
+    private static let maxW: CGFloat = 220
+    private static let maxH: CGFloat = 300
+
+    var body: some View {
+        imageView
+            .task(id: urlString) {
+                guard isDataURL, decoded == nil,
+                      let comma = urlString.firstIndex(of: ","),
+                      let data = Data(base64Encoded: String(urlString[urlString.index(after: comma)...]))
+                else { return }
+                decoded = UIImage(data: data)
+            }
+    }
+
+    @ViewBuilder
+    private var imageView: some View {
+        if let decoded {
+            // Fixed frame sized to the image's real aspect (fitted within max), so the
+            // view bounds == the picture and the rounded clip hugs it — no letterbox.
+            let size = Self.fittedSize(decoded.size)
+            Image(uiImage: decoded)
+                .resizable()
+                .frame(width: size.width, height: size.height)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                )
+        } else if !isDataURL, let url {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFit()
+                        .frame(maxWidth: Self.maxW, maxHeight: Self.maxH)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                case .failure:
+                    placeholder(failed: true)
+                default:
+                    placeholder(failed: false)
+                }
+            }
+        } else {
+            placeholder(failed: false)
+        }
+    }
+
+    private func placeholder(failed: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(AmberTheme.surface2)
+            .frame(width: 150, height: 190)
+            .overlay(
+                Group {
+                    if failed {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accentRed)
+                    } else {
+                        ProgressView().tint(AmberTheme.accent)
+                    }
+                }
+            )
+    }
+
+    private static func fittedSize(_ s: CGSize) -> CGSize {
+        guard s.width > 0, s.height > 0 else { return CGSize(width: maxW, height: maxW) }
+        let scale = min(maxW / s.width, maxH / s.height)
+        return CGSize(width: (s.width * scale).rounded(), height: (s.height * scale).rounded())
     }
 }
 

@@ -360,7 +360,12 @@ final class ChatToolRuntime {
     }
 
     private func executeSearchToolCall(_ pending: ChatPendingToolApproval) async -> ChatToolRuntimeResult {
-        if let request = ChatToolApprovalRequestBuilder.search(
+        // Honor the global / high-risk auto-approve switches (Permissions page). When on,
+        // skip the per-call approval card and dispatch directly.
+        let autoApprove = IOSLocalToolExecutor.isGlobalAutoApproveEnabled
+            || IOSLocalToolExecutor.isHighRiskAutoApproveEnabled
+        if !autoApprove,
+           let request = ChatToolApprovalRequestBuilder.search(
             for: pending.toolCall,
             reason: "网络搜索和网页读取会访问外部站点，需要你确认。",
             settings: sharedSettings.snapshot
@@ -439,7 +444,9 @@ final class ChatToolRuntime {
     }
 
     private func executeAdvancedToolCall(_ pending: ChatPendingToolApproval) async -> ChatToolRuntimeResult {
+        // MCP is high-risk (external/remote); auto-approve only when the high-risk switch is on.
         if pending.toolCall.toolName == "mcp_call",
+           !IOSLocalToolExecutor.isHighRiskAutoApproveEnabled,
            let request = ChatToolApprovalRequestBuilder.mcp(
                for: pending.toolCall,
                reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。"
