@@ -4,8 +4,9 @@ import XCTest
 
 /// Deep Read LLM pipeline tests. The real multi-stage synthesis quality needs a
 /// real model (manual smoke); these verify the stage loop MECHANICS with a
-/// scripted provider — 3 sequential synthesis calls, each seeded with the prior
-/// stage's output, and the offline fallback when the provider fails.
+/// scripted provider — 4 sequential synthesis calls (overview/narrative/analysis/
+/// extended-reading, Android parity), each seeded with the prior stage's output,
+/// and the offline fallback when the provider fails.
 @MainActor
 final class IOSDeepReadPipelineTests: XCTestCase {
 
@@ -48,8 +49,8 @@ final class IOSDeepReadPipelineTests: XCTestCase {
     }
 
     /// A scripted provider that returns one canned reply per call and records
-    /// every call so we can assert the stage loop ran 3 times (overview,
-    /// narrative, analysis).
+    /// every call so we can assert the stage loop ran 4 times (overview,
+    /// narrative, analysis, extended reading).
     final class StageProvider: IOSAgentTextProvider, @unchecked Sendable {
         private let replies: [String]
         private(set) var callCount = 0
@@ -86,11 +87,12 @@ final class IOSDeepReadPipelineTests: XCTestCase {
         }
     }
 
-    func testPipelineRunsThreeStagesAndAssemblesMarkdown() async {
+    func testPipelineRunsFourStagesAndAssemblesMarkdown() async {
         let provider = StageProvider([
             "OVERVIEW: two sources describe an iOS agent app.",
             "NARRATIVE: the app has chat, then tools, then deep reading.",
-            "ANALYSIS: gap — no mention of release date; risk — early stage."
+            "ANALYSIS: gap — no mention of release date; risk — early stage.",
+            "EXTENDED: follow the release timeline and competitor comparisons."
         ])
         let draft = await IOSDeepReadDraftGenerator.generateViaLLM(
             task: makeTask(),
@@ -99,10 +101,10 @@ final class IOSDeepReadPipelineTests: XCTestCase {
             provider: provider
         )
 
-        // The pipeline must make exactly 3 synthesis calls (overview/narrative/analysis).
-        XCTAssertEqual(provider.callCount, 3)
-        // The assembled draft must contain all three section headers and the
-        // synthesized text.
+        // The pipeline must make exactly 4 synthesis calls
+        // (overview/narrative/analysis/extended-reading — Android parity).
+        XCTAssertEqual(provider.callCount, 4)
+        // The assembled draft must contain all four section headers and text.
         XCTAssertTrue(draft.contains("# Test Deep Read"))
         XCTAssertTrue(draft.contains("## 摘要"))
         XCTAssertTrue(draft.contains("OVERVIEW:"))
@@ -110,23 +112,27 @@ final class IOSDeepReadPipelineTests: XCTestCase {
         XCTAssertTrue(draft.contains("NARRATIVE:"))
         XCTAssertTrue(draft.contains("## 分析"))
         XCTAssertTrue(draft.contains("ANALYSIS:"))
+        XCTAssertTrue(draft.contains("## 扩展阅读"))
+        XCTAssertTrue(draft.contains("EXTENDED:"))
     }
 
     func testLaterStagesSeededWithEarlierStageOutput() async {
         // The narrative prompt must include the overview text; analysis must
         // include the narrative. Verify via the recorded user prompts.
-        let provider = StageProvider(["overview-text", "narrative-text", "analysis-text"])
+        let provider = StageProvider(["overview-text", "narrative-text", "analysis-text", "extended-text"])
         _ = await IOSDeepReadDraftGenerator.generateViaLLM(
             task: makeTask(),
             providerSetting: makeProviderSetting(),
             modelId: "test-model",
             provider: provider
         )
-        XCTAssertEqual(provider.userPrompts.count, 3)
+        XCTAssertEqual(provider.userPrompts.count, 4)
         // Stage 2 (narrative) prompt should reference the overview output.
         XCTAssertTrue(provider.userPrompts[1].contains("overview-text"))
         // Stage 3 (analysis) prompt should reference the narrative output.
         XCTAssertTrue(provider.userPrompts[2].contains("narrative-text"))
+        // Stage 4 (extended reading) prompt should reference the analysis output.
+        XCTAssertTrue(provider.userPrompts[3].contains("analysis-text"))
     }
 
     func testOfflineFallbackDeterministicDraftStillWorks() {

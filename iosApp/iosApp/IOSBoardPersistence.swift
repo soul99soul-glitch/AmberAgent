@@ -2999,18 +2999,33 @@ enum IOSDeepReadDraftGenerator {
         if analysis.threw { threwCount += 1 } else if analysis.text.isEmpty { emptyCount += 1 }
         sections.append("## 分析\n\(analysis.text)")
 
+        // Stage 4: extended reading (seeded with overview + narrative + analysis).
+        // Parity with Android's EXTENDED_READING stage — a real 4th model call,
+        // not a static placeholder.
+        let extended = await synthesize(
+            stage: "extended_reading",
+            instruction: "基于前面的摘要、脉络与分析，整理「扩展阅读」：列出最值得进一步追踪的角度或线索，并对照来源说明可继续了解的方向（引用来源编号 [n]）。只用来源覆盖到的信息，不要编造链接或事实。",
+            sourcesBlock: sourcesBlock,
+            priorDraft: "\(overview.text)\n\n\(narrative.text)\n\n\(analysis.text)",
+            providerSetting: providerSetting,
+            modelId: modelId,
+            provider: provider
+        )
+        if extended.threw { threwCount += 1 } else if extended.text.isEmpty { emptyCount += 1 }
+        sections.append("## 扩展阅读\n\(extended.text)")
+
         let date = IOSDeepReadDateFormatters.detail.string(from: now)
         let header = "# \(task.title)\n\n版式：\(task.template.name) · 来源：\(task.sources.count) 个 · \(date)\n（由模型分阶段生成）\n"
         let body = header + sections.joined(separator: "\n\n")
 
-        // Honest failure: ALL 3 stages either threw or were empty. A single
+        // Honest failure: ALL 4 stages either threw or were empty. A single
         // usable stage is enough to surface a (partial) completed draft.
-        let allStagesUnusable = (threwCount + emptyCount) == 3
+        let allStagesUnusable = (threwCount + emptyCount) == 4
         let didFail = allStagesUnusable
         let reason: String
-        if threwCount == 3 {
+        if threwCount == 4 {
             reason = "所有阶段调用失败（provider 抛错）"
-        } else if emptyCount == 3 {
+        } else if emptyCount == 4 {
             reason = "所有阶段未产出可用内容（输出为空）"
         } else if allStagesUnusable {
             reason = "所有阶段失败或为空（threw=\(threwCount), empty=\(emptyCount)）"
