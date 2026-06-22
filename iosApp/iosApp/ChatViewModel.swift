@@ -861,7 +861,11 @@ final class ChatViewModel {
         let dao = db.agentRuntimeDao()
 
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let finishedAtValue: KotlinLong? = KotlinLong(value: now)
+        // A "running" record is the up-front, not-yet-finished row written at
+        // start, so an interrupted mid-stream run is detectable by the recovery
+        // sweep; it carries no finishedAt. Terminal statuses finish the run and,
+        // because insertRun is OnConflict.REPLACE, overwrite the running row.
+        let finishedAtValue: KotlinLong? = status == "running" ? nil : KotlinLong(value: now)
         let interruptedReason: String? = status == "interrupted" ? "user_cancelled" : nil
 
         let run = AgentRunEntity(

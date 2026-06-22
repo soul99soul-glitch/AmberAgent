@@ -138,6 +138,12 @@ final class ChatGenerationCoordinator {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // Persist a "running" run record up-front so an interrupted mid-stream
+            // run is detectable (status=running) by IOSRunRecovery's startup sweep,
+            // which marks it interrupted. The terminal recordRun (completion / cancel
+            // / error) REPLACEs this row with the final status + finishedAt
+            // (insertRun is OnConflictStrategy.REPLACE).
+            await self.bindings.recordRun(runId, startedAt, "running", inputDigest)
             if self.dependencies.sharedSettings.isCapabilityGateEnabled(.mcp) {
                 await self.dependencies.mcpManager.syncAll()
             }
