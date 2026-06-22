@@ -113,3 +113,38 @@ spec 第 63 行把 `test_deepread_searchFailure_isSourceFailure` 列为 P0 红�
 spec 允许 `swift-snapshot-testing` 或模拟器截图二者之一。当前 `project.yml` 未引入 swift-snapshot-testing 依赖；采用**模拟器截图**方案（spec-sanctioned），不新增依赖（符合 locked_decisions 反过度工程化）。
 
 （待补：基线快照清单 + 9 条红灯 RED 记录 + discovery loop 记录）
+
+---
+
+## P0 EXIT — verification_protocol 裁决: **PASS**
+
+### scout (fresh evidence, 非自报)
+- 15 测试全跑: 14 RED + 1 回归保护 GREEN（test_deepread_searchFailure）。0 crash。
+- HARD-LOCK 3 文件（ChatView/PlaceholderViews/AppearanceSettingsView）+ VISUAL-GUARDED（AppShell）: 全 0 diff。
+- 9 named 测试全 PRESENT。
+
+### verify (逐条比对 spec line 57-69 exit criteria)
+| exit criterion | verdict |
+|---|---|
+| 真相矩阵建成，P0 行红格全部对应具名测试 | ✅ truth_matrix.md |
+| 9 named 红灯存在且 RED | ✅ 8 RED + 1 回归保护（spec leniency，用户确认）|
+| 视觉基线已建 | ✅ 5 屏 + manifest |
+| visual_protection 锁定清单生效 | ✅ HARD-LOCK/VISUAL-GUARDED 全 0 diff |
+| 工作区未提交改动已 commit/stash | ✅ P0 committed；ChatView+settings stashed |
+| discovery loop-until-dry | ✅ 7 轮 DRY at 6&7 |
+
+### refute (对抗，找假绿/错路径/live-smoke/skip-gate) — 未找到反证
+1. **无 false-green**: 15 测试中无 XCTSkip/env-gate/live-key；2 个 `return` 是 `guard{XCTFail; return}`（先失败再退出，合法）。
+2. **RED 失败原因正确**（非 setup error masquerade）:
+   - council: "resolves to `SharedProviderSettingOpenAI`"（真 rebuild gap）
+   - deepread_allStagesThrow: `succeeded ≠ failed`（真 synthesize 吞错误）
+   - settings_encode: "must not contain plaintext apiKey"（真明文泄漏）
+3. **subagent flag 非 tautology**: `standaloneDispatchUsesEnginePath = false` 真实反映 page 用 legacy `run`；P4 翻 true。
+4. **deepread 断言在真 store**: `IOSDeepReadStore.complete/fail` + `IOSDeepReadTaskStatus.failed/succeeded` 是真 enum/方法。
+5. **视觉基线完整**: 5 文件均 >150KB（真渲染屏，非空白）；AppShell 采集工具完整 revert。
+6. **commit 是干净 rollback 点**: `06f27185e`，工作树 clean。
+
+### pass_rule (spec line 23): refute 未找到反证 → **PASS**。
+### visual_rule (spec line 24): P0 未改动 HARD-LOCK 文件（0 diff）→ 无 BLOCK 触发。
+
+**P0 EXIT PASS。下一 phase: P0.5 (vertical_slice, entry_gate = P0 EXIT 全绿 ✓)。**
