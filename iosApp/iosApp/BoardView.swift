@@ -509,29 +509,33 @@ struct BoardView: View {
             let output: String
             let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             let modelResolution = resolvedDeepReadModelId()
-            if !apiKey.isEmpty, !modelResolution.modelId.isEmpty {
-                let providerSetting = ProviderSetting.OpenAI(
-                    id: KotlinUuid.companion.random(),
-                    enabled: true,
-                    name: "DeepRead",
-                    models: [],
-                    balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-                    builtIn: false,
-                    descriptionText: nil,
-                    shortDescriptionText: nil,
-                    apiKey: settingsStore.apiKey,
-                    baseUrl: settingsStore.baseUrl,
-                    chatCompletionsPath: "/chat/completions",
-                    useResponseApi: false,
-                    authMode: OpenAIAuthMode.apiKey,
-                    brand: OpenAIBrand.generic
-                )
-                let llmDraft = await IOSDeepReadDraftGenerator.generateViaLLM(
+            // Reuse the user's actually-selected provider (parity fix for
+            // deepread.provider_real): honor the selected sealed type so Claude
+            // dispatches to native /messages, not a rebuilt OpenAI /chat/completions.
+            // Falls back to the deterministic offline draft when no usable
+            // provider is resolved (interim safeguard for non-OpenAI-compatible
+            // providers — honest degradation, never silent /chat/completions).
+            let resolvedProvider = IOSDeepReadDraftGenerator.resolveProviderSetting(
+                selected: providerRegistry?.selectedProvider
+            )
+            if !apiKey.isEmpty, !modelResolution.modelId.isEmpty, let providerSetting = resolvedProvider {
+                // Honest-fail state machine: when every stage threw or was empty,
+                // mark the task .failed (never mark empty output .succeeded).
+                let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
                     task: running,
                     providerSetting: providerSetting,
                     modelId: modelResolution.modelId
                 )
-                output = llmDraft.isEmpty ? IOSDeepReadDraftGenerator.generate(task: running) : llmDraft
+                if result.didFail {
+                    // Honest failure: surface it, persist nothing as a "completed"
+                    // draft (the user sees a clear failure, not fake success).
+                    self.deepReadStore.fail(id: task.id, message: "深度阅读生成失败：\(result.failureReason)")
+                    self.deepReadMessage = "深度阅读生成失败：\(result.failureReason)"
+                    self.deepReadMessageIsError = true
+                    self.router.navigate(to: .deepReadTask(id: task.id))
+                    return
+                }
+                output = result.markdown.isEmpty ? IOSDeepReadDraftGenerator.generate(task: running) : result.markdown
             } else {
                 output = IOSDeepReadDraftGenerator.generate(task: running)
             }

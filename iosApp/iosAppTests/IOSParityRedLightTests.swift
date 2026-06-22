@@ -82,11 +82,11 @@ final class IOSParityRedLightTests: XCTestCase {
         let selectedClaude = makeClaudeProvider()
         let resolved = deepReadResolvedProvider(forSelected: selectedClaude)
 
-        // Must be Claude, not a silently-rebuilt OpenAI setting.
+        // Must be Claude, not a silently-rebuilt OpenAI setting (and not nil).
         XCTAssertTrue(
             resolved is ProviderSetting.Claude,
             "Deep Read must use the user's selected Claude provider, not a rebuilt OpenAI setting. "
-                + "Currently resolves to: \(type(of: resolved)) — this is the rebuild gap (P3)."
+                + "Currently resolves to: \(String(describing: resolved.map { String(describing: type(of: $0)) })) — this is the rebuild gap (P3)."
         )
     }
 
@@ -111,23 +111,28 @@ final class IOSParityRedLightTests: XCTestCase {
         )
         store.markRunning(id: running.id)
         let failingProvider = FailingTextProvider()
-        let draft = await IOSDeepReadDraftGenerator.generateViaLLM(
+        let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
             task: store.task(id: running.id) ?? running,
             providerSetting: makeOpenAIProvider(),
             modelId: "any-model",
             provider: failingProvider
         )
-        // Apply the pipeline result the way createAndGenerateTask does.
-        store.complete(id: running.id, markdown: draft)
+        // Apply the pipeline result the way createAndGenerateTask now does:
+        // honest failure when every stage threw, instead of marking succeeded.
+        if result.didFail {
+            store.fail(id: running.id, message: "所有生成阶段失败：\(result.failureReason)")
+        } else {
+            store.complete(id: running.id, markdown: result.markdown)
+        }
         let final = store.task(id: running.id)
 
         // Parity target: when all stages threw, status MUST be .failed, not
-        // .succeeded. Today complete() marks it succeeded regardless.
+        // succeeded.
         XCTAssertEqual(
             final?.status,
             IOSDeepReadTaskStatus.failed,
             "All-stages-threw must surface as status=.failed, not .succeeded. "
-                + "Got: \(String(describing: final?.status)) — synthesize swallows errors (P4)."
+                + "Got: \(String(describing: final?.status)) — honest-fail state machine (P0.5)."
         )
     }
 
@@ -150,30 +155,25 @@ final class IOSParityRedLightTests: XCTestCase {
         store.markRunning(id: running.id)
         // Provider returns empty for every stage.
         let emptyProvider = EmptyTextProvider()
-        let draft = await IOSDeepReadDraftGenerator.generateViaLLM(
+        let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
             task: store.task(id: running.id) ?? running,
             providerSetting: makeOpenAIProvider(),
             modelId: "any-model",
             provider: emptyProvider
         )
-        store.complete(id: running.id, markdown: draft)
+        // Empty-output run must surface as honest failure, not succeeded/ready.
+        if result.didFail {
+            store.fail(id: running.id, message: "生成内容为空：所有阶段未产出可用内容")
+        } else {
+            store.complete(id: running.id, markdown: result.markdown)
+        }
         let final = store.task(id: running.id)
 
-        // Parity target: empty stage output must not yield a "ready"/succeeded
-        // task. The body should not read as a usable synthesized result.
-        let bodyIsEmpty = draft.replacingOccurrences(of: " ", with: "")
-            .components(separatedBy: "\n")
-            .filter { !$0.isEmpty }
-            .allSatisfy { $0.hasPrefix("#") || $0.hasPrefix("##") || $0.contains("：") }
-        XCTAssertTrue(
-            bodyIsEmpty,
-            "Empty stages produced a draft with only headers — precondition for the RED assertion."
-        )
         XCTAssertNotEqual(
             final?.status,
             IOSDeepReadTaskStatus.succeeded,
             "A run whose every stage was empty must not be marked succeeded/ready. "
-                + "Got: \(String(describing: final?.status)) (P4)."
+                + "Got: \(String(describing: final?.status)) — honest-fail state machine (P0.5)."
         )
     }
 
@@ -388,25 +388,19 @@ final class IOSParityRedLightTests: XCTestCase {
             provider: providerWithSecret
         )
 
-        let archive = try IOSSyncBackup.export(settings: settings, passphrase: "pw-\(UUID().uuidString)")
-        // Round-trip decrypt — the redaction target must hold in the DECRYPTED
-        // payload, not just the encrypted bytes.
-        let imported = try IOSSyncBackup.import(data: archive, passphrase: nil)
-        // Try both passphrases (import auto-handles fallback when nil).
-        let decryptedJson: String
-        if let again = try? IOSSyncBackup.import(data: archive, passphrase: "pw-\(UUID().uuidString)"),
-           let body = try? IOSSyncBackup.export(settings: again.settings, passphrase: "x") {
-            // Re-derive the decrypted settings JSON by encoding the imported settings.
-            decryptedJson = IosSettingsJsonBridge.shared.encode(settings: again.settings)
-            _ = body
-        } else {
-            decryptedJson = IosSettingsJsonBridge.shared.encode(settings: imported.settings)
-        }
+        // Export with a known passphrase, then decrypt-import. The redaction
+        // target must hold in the DECRYPTED payload, not just the encrypted
+        // bytes. (Scheme B redacts before encryption; the decrypted form carries
+        // the mask sentinel, never the secret.)
+        let passphrase = "pw-\(UUID().uuidString)"
+        let archive = try IOSSyncBackup.export(settings: settings, passphrase: passphrase)
+        let imported = try IOSSyncBackup.import(data: archive, passphrase: passphrase)
+        let decryptedJson = IosSettingsJsonBridge.shared.encode(settings: imported.settings)
 
         XCTAssertFalse(
             decryptedJson.contains(secret),
             "Default backup (decrypted) must not contain the plaintext apiKey credential. "
-                + "Android masks via BackupSettingsRedactor; iOS export has no redaction (P2)."
+                + "Scheme B redacts before encryption; the decrypted form carries the mask, not the secret."
         )
     }
 
@@ -747,45 +741,12 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
-    /// DeepRead provider resolver. P3 will route DeepRead through the chat
-    /// provider-resolution path (`ChatProviderConfiguration.provider(for:...)`).
-    /// Until then, DeepRead rebuilds OpenAI regardless of selection, so this
-    /// helper models the CURRENT behavior to make the gap observable.
-    private func deepReadResolvedProvider(forSelected selected: ProviderSetting) -> ProviderSetting {
-        // Current behavior (the gap): DeepRead ignores the selection and rebuilds
-        // OpenAI from baseUrl+apiKey. We call the same static factory shape the
-        // pipeline uses (BoardView.swift:513 / parity of CouncilRunner's factory).
-        let apiKey: String = {
-            switch selected {
-            case let o as ProviderSetting.OpenAI: return o.apiKey
-            case let c as ProviderSetting.Claude: return c.apiKey
-            default: return ""
-            }
-        }()
-        let baseUrl: String = {
-            switch selected {
-            case let o as ProviderSetting.OpenAI: return o.baseUrl
-            case let c as ProviderSetting.Claude: return c.baseUrl
-            default: return ""
-            }
-        }()
-        // Mirror BoardView.createAndGenerateTask's rebuild exactly.
-        return ProviderSetting.OpenAI(
-            id: KotlinUuid.companion.random(),
-            enabled: true,
-            name: "DeepRead",
-            models: [],
-            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-            builtIn: false,
-            descriptionText: nil,
-            shortDescriptionText: nil,
-            apiKey: apiKey,
-            baseUrl: baseUrl,
-            chatCompletionsPath: "/chat/completions",
-            useResponseApi: false,
-            authMode: OpenAIAuthMode.apiKey,
-            brand: OpenAIBrand.generic
-        )
+    /// DeepRead provider resolver. Calls the REAL resolver the pipeline now uses
+    /// (`IOSDeepReadDraftGenerator.resolveProviderSetting`), which honors the
+    /// selected sealed type. P0.5 routed BoardView through this; the test asserts
+    /// a Claude selection yields a `ProviderSetting.Claude`.
+    private func deepReadResolvedProvider(forSelected selected: ProviderSetting) -> ProviderSetting? {
+        IOSDeepReadDraftGenerator.resolveProviderSetting(selected: selected)
     }
 
     /// Council provider resolver. Calls the real static factory Council uses.

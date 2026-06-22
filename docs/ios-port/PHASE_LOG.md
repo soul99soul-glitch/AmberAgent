@@ -148,3 +148,34 @@ spec 允许 `swift-snapshot-testing` 或模拟器截图二者之一。当前 `pr
 ### visual_rule (spec line 24): P0 未改动 HARD-LOCK 文件（0 diff）→ 无 BLOCK 触发。
 
 **P0 EXIT PASS。下一 phase: P0.5 (vertical_slice, entry_gate = P0 EXIT 全绿 ✓)。**
+
+---
+
+## P0.5 (vertical_slice: DeepRead + Claude) — EXIT 裁决: **PASS**
+
+### 改动（让 deepread 行 5 格翻绿）
+- **provider_real** (P3 提前): `IOSDeepReadDraftGenerator.resolveProviderSetting(selected:)` 按 sealed 类型透传选中 provider；`BoardView.createAndGenerateTask` 调用它替代手搓 OpenAI 重建。Claude → 真走 `ClaudeKmpProvider.generateText`（原生 /messages）。
+- **honest_fail** (P4 部分): `generateViaLLMResult` 返回 `GenerationResult(didFail:)`；`synthesize` 返回 `(text, threw)`。全阶段 threw/empty → `deepReadStore.fail()`，不再无条件 `complete()`。
+- **secure_store** (P2 提前，全量覆盖): `IOSCredentialRedactor`（JSON 树遍历 mask）接入 `restoreSnapshot`/`IOSSyncBackup.export`/legacy mirror/`IOSMcpConfigStore.persist`；`IOSCredentialSideTable`（Keychain 边表）+ MCP load 时回灌真值。
+
+### 测试结果（fresh run）
+- red-light suite: **11 GREEN + 4 RED**。GREEN = deepread 3 (claudeSelected/allStagesThrow/stageEmpty) + searchFailure(回归保护) + secure_store 8 (settings/search/tts/mcp/modelHdr/asstHdr/asstBody/backup)。RED = council_claude(P3)/subagent_standalone(P4)/recovery(P5) —— 正确保留为 RED。
+- 回归: DeepRead(3)+Backup(12)+MCP(6)+SharedSettings(15)+DeepReadStore = **36 tests, 0 failures**。
+
+### 7-criterion DoD
+1. 目标格绿: deepread entry_real/provider_real/exec_real/honest_fail/secure_store 全绿 ✓
+2. red-before→green-after: 5 deepread 红灯 RED→GREEN，无删除/skip/弱化 ✓
+3. locked_decisions: 无 ProviderExecutionContext；复用 chat provider 解析；未动共享 ProviderSetting；scheme B ✓
+4. UserDefaults/备份无明文凭据: 8 secure_store 测试 GREEN ✓
+5. refute 无反证: Claude 真走 ClaudeKmpProvider/原生 /messages；fail() 真实路径；redactor mask 生效；无测试弱化 ✓
+6. 无全局拦截: 36 回归测试 0 failure，无绿格回退 ✓
+7. 无非预期视觉回归: BoardView 仅逻辑 diff（57 行，全在 createAndGenerateTask 内）；board 复采视觉一致；HARD-LOCK 3 文件 0 diff ✓
+
+### 产出
+- `SLICE_TEMPLATE.md`: provider 解析 / honest-fail 状态机 / Keychain 凭据 三模式可复制模板。
+- `IOSCredentialRedactor.swift` + `IOSCredentialSideTable.swift`: scheme B 实现（P2 主体已在本切片完成）。
+- `visual-baseline/04-board-p05.png`: board 复采，与 P0 基线视觉一致。
+
+### 注意 / 待后续 phase
+- P2 收尾: `IOSSharedSettingsStore` load 路径未从 side-table 回灌 `snapshot.providers[*].apiKey`（当前重启后读成 mask）—— P2 补回灌 + 旧明文迁移。
+- council/subagent standalone: P3/P4 按 SLICE_TEMPLATE 模式 1 复制。

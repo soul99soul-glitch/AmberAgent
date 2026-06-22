@@ -85,7 +85,23 @@ final class IOSMcpConfigStore {
     }
 
     private func persist() {
-        let stored = servers.map(IOSMcpStoredServer.init)
+        // Scheme B: store credential header values in the Keychain side-table,
+        // THEN redact them before persisting to UserDefaults. The in-memory
+        // `servers` keep real headers (the running MCP client needs them); the
+        // persisted form is credential-free. On load, redacted values are
+        // rehydrated from the side-table (see loadServers).
+        for server in servers {
+            for (name, value) in server.headers where !value.isEmpty {
+                if IOSCredentialRedactor.isHeaderSensitive(name) {
+                    IOSCredentialSideTable.store(key: IOSCredentialSideTable.mcpHeader(serverName: server.name, headerName: name), value: value)
+                }
+            }
+        }
+        let stored = servers.map { server -> IOSMcpStoredServer in
+            var entry = IOSMcpStoredServer(server)
+            entry.redactSensitiveHeaders()
+            return entry
+        }
         guard let data = try? JSONEncoder().encode(stored) else { return }
         userDefaults.set(data, forKey: storageKey)
     }
@@ -95,6 +111,24 @@ final class IOSMcpConfigStore {
               let stored = try? JSONDecoder().decode([IOSMcpStoredServer].self, from: data) else {
             return []
         }
-        return stored.map(\.config)
+        // Scheme B: rehydrate credential header values from the Keychain
+        // side-table so the reloaded MCP client can authenticate.
+        return stored.map { storedServer in
+            var config = storedServer.config
+            var headers = config.headers
+            for (name, value) in headers where value == IOSCredentialRedactor.mask {
+                if let real = IOSCredentialSideTable.load(key: IOSCredentialSideTable.mcpHeader(serverName: storedServer.name, headerName: name)) {
+                    headers[name] = real
+                }
+            }
+            // Rebuild the config with rehydrated headers.
+            switch config {
+            case .streamableHTTP(let n, let u, _, let e, let t):
+                config = .streamableHTTP(name: n, url: u, headers: headers, enabled: e, tools: t)
+            case .sse(let n, let u, _, let e, let t):
+                config = .sse(name: n, url: u, headers: headers, enabled: e, tools: t)
+            }
+            return config
+        }
     }
 }

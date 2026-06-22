@@ -146,7 +146,14 @@ final class IOSSharedSettingsStore {
 
     func restoreSnapshot(_ settings: Settings) {
         snapshot = settings
-        defaults.set(IosSettingsJsonBridge.shared.encode(settings: settings), forKey: fullSettingsJsonKey)
+        // Scheme B: redact credentials BEFORE persisting (in-memory snapshot keeps
+        // real values; the UserDefaults form is credential-free). iOS-only; the
+        // shared ProviderSetting is not modified. (parity with Android
+        // BackupSettingsRedactor.) See IOSCredentialRedactor.
+        let redactedJson = IOSCredentialRedactor.redact(
+            IosSettingsJsonBridge.shared.encode(settings: settings)
+        )
+        defaults.set(redactedJson, forKey: fullSettingsJsonKey)
         revision &+= 1
     }
 
@@ -543,7 +550,11 @@ final class IOSSharedSettingsStore {
         providers.append([
             "id": UUID().uuidString,
             "name": name,
-            "apiKey": apiKey,
+            // Scheme B: never persist the real apiKey in the legacy mirror
+            // (full Settings JSON is already redacted by restoreSnapshot). The
+            // real key lives in the in-memory snapshot; the mirror is a
+            // structural record only. (parity with IOSCredentialRedactor.)
+            "apiKey": IOSCredentialRedactor.mask,
             "serviceType": serviceType,
             // KMP-side search service Uuid (string) for removal.
             "serviceId": searchServiceIdString(from: service),
@@ -626,7 +637,8 @@ final class IOSSharedSettingsStore {
                 "id": UUID().uuidString,
                 "name": name,
                 "engineType": engineType,
-                "apiKey": apiKey,
+                // Scheme B: never persist the real apiKey in the legacy mirror.
+                "apiKey": IOSCredentialRedactor.mask,
                 "model": model,
                 // KMP-side TTS provider Uuid (string) for removal.
                 "ttsId": ttsIdString(from: provider),
@@ -640,7 +652,8 @@ final class IOSSharedSettingsStore {
                 "id": UUID().uuidString,
                 "name": name,
                 "engineType": engineType,
-                "apiKey": apiKey,
+                // Scheme B: never persist the real apiKey in the legacy mirror.
+                "apiKey": IOSCredentialRedactor.mask,
                 "model": model,
             ])
             savedTtsEngines = engines

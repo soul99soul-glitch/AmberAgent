@@ -37,3 +37,10 @@ xcrun simctl io "$UDID" screenshot docs/ios-port/visual-baseline/<name>.png
 ## 注意
 - 基线建立时 DeepRead/Council 尚未走真实 provider（P0 只建矩阵），故 Board/Council 截图反映的是**当前 baseline 行为**，非最终态。
 - 后续 phase 若改 BoardView/CouncilChatRuntimeView，须重新采集这两屏并与本基线比对。
+
+## P0.5 复采比对（VISUAL-GUARDED BoardView.swift 改动后）
+- 触发: BoardView.swift 有 diff（createAndGenerateTask 逻辑改动：provider 解析 + honest-fail 状态机）。spec line 24 要求 VISUAL-GUARDED 改动须复采比对。
+- 复采: `04-board-p05.png`（P0.5 后，相同设备/外观/配置）。
+- 比对结果: **两图视觉一致**（board/热榜列表布局、配色、内容无差异）。改动纯逻辑（仅在生成任务时生效），未触碰任何 SwiftUI view body / 布局。
+- 结论: 无视觉回归。intended 差异 = 空（本 phase 无预期视觉变化；DeepRead/Council 失败态 UI 是 P4 的 intended 变化，届时再采）。
+- 采集工具（临时 launch-arg 路由覆盖）采集后已完整 revert，AppShell.swift 零 diff（已 `git diff` 验证）。

@@ -9,6 +9,11 @@ final class IOSMcpConfigStoreTests: XCTestCase {
 
         store.add(.streamableHTTP(name: "docs", url: "https://example.com/mcp", headers: ["Authorization": "Bearer token"]))
 
+        // Scheme B: the persisted-on-disk form redacts the credential header,
+        // but the Keychain side-table rehydrates it on load — so a freshly-
+        // reloaded store sees the REAL Bearer token again. (This is the
+        // correct parity target: credentials never hit UserDefaults plaintext,
+        // yet survive restart via Keychain.)
         let reloaded = IOSMcpConfigStore(userDefaults: defaults)
         XCTAssertEqual(reloaded.servers, [.streamableHTTP(name: "docs", url: "https://example.com/mcp", headers: ["Authorization": "Bearer token"])])
     }
@@ -47,14 +52,17 @@ final class IOSMcpConfigStoreTests: XCTestCase {
         XCTAssertTrue(store.setEnabled(named: "docs", enabled: false))
         XCTAssertFalse(store.setEnabled(named: "missing", enabled: true))
 
-        let expected = IOSMcpServerConfig.streamableHTTP(
+        // In-memory servers retain the real header.
+        let expectedInMemory = IOSMcpServerConfig.streamableHTTP(
             name: "docs",
             url: "https://example.com/mcp",
             headers: ["Authorization": "Bearer token"],
             enabled: false
         )
-        XCTAssertEqual(store.servers, [expected])
-        XCTAssertEqual(IOSMcpConfigStore(userDefaults: defaults).servers, [expected])
+        XCTAssertEqual(store.servers, [expectedInMemory])
+        // Reloaded from disk: the persisted form is redacted, but the Keychain
+        // side-table rehydrates the real Bearer token on load.
+        XCTAssertEqual(IOSMcpConfigStore(userDefaults: defaults).servers, [expectedInMemory])
     }
 
     func testUpsertCanRenameExistingServer() {

@@ -25,9 +25,18 @@ final class IOSSyncBackupTests: XCTestCase {
         XCTAssertNil(String(data: encryptedPayload, encoding: .utf8)?.contains("settings"))
 
         let imported = try IOSSyncBackup.import(data: archive, passphrase: "correct horse battery staple")
-        let originalJson = IosSettingsJsonBridge.shared.encode(settings: settings)
+        // Scheme B: the backup redacts credentials before encryption (parity
+        // with Android BackupSettingsRedactor). So the round-tripped settings
+        // equal the REDACTED original, not the raw original — credentials come
+        // back as the mask sentinel. Compare parsed JSON (not raw bytes) because
+        // the redactor and kotlinx use different serializers/formatting.
+        let redactedOriginalJson = IOSCredentialRedactor.redact(IosSettingsJsonBridge.shared.encode(settings: settings))
         let importedJson = IosSettingsJsonBridge.shared.encode(settings: imported.settings)
-        XCTAssertEqual(importedJson, originalJson)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(importedJson.utf8)) as? NSObject,
+            try JSONSerialization.jsonObject(with: Data(redactedOriginalJson.utf8)) as? NSObject,
+            "Round-tripped settings must equal the redacted original (credentials masked)."
+        )
         XCTAssertEqual(imported.preview.manifest.payloadSha256, manifest.payloadSha256)
     }
 
@@ -113,7 +122,18 @@ final class IOSSyncBackupTests: XCTestCase {
         let snapshot = makeSnapshot(fileName: "remote.amberbackup", revision: "remote-rev", manifest: result.preview.manifest)
         store.recordRemoteDownload(snapshot: snapshot, preview: result.preview)
 
-        XCTAssertEqual(IosSettingsJsonBridge.shared.encode(settings: store.snapshot), originalJson)
+        // Scheme B: the backup redacts credentials. After import+restore the
+        // in-memory snapshot equals the REDACTED original (credentials come back
+        // as the mask sentinel); P2's Keychain side-table will rehydrate the real
+        // values into the in-memory snapshot on load. Compare parsed JSON (not
+        // raw bytes) because the redactor and kotlinx use different serializers.
+        let redactedOriginalJson = IOSCredentialRedactor.redact(originalJson)
+        let restoredJson = IosSettingsJsonBridge.shared.encode(settings: store.snapshot)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: Data(restoredJson.utf8)) as? NSObject,
+            try JSONSerialization.jsonObject(with: Data(redactedOriginalJson.utf8)) as? NSObject,
+            "Restored snapshot must equal the redacted original (credentials masked)."
+        )
         XCTAssertEqual(store.remoteSyncStatus.remoteRevision, "remote-rev")
         XCTAssertGreaterThan(store.remoteSyncStatus.lastDownloadAt, 0)
     }

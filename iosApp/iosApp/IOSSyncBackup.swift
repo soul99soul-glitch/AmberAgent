@@ -60,7 +60,13 @@ struct IOSSyncBackup {
         remoteRevision: String? = nil,
         conversationsZip: Data? = nil
     ) throws -> Data {
-        let settingsJson = IosSettingsJsonBridge.shared.encode(settings: settings)
+        // Scheme B: redact credentials before capturing into the backup payload
+        // (parity with Android BackupSettingsRedactor; iOS uses
+        // IOSCredentialRedactor). Encryption is not a substitute for redaction —
+        // a passphrase-protected backup decrypts back to plaintext credentials.
+        let settingsJson = IOSCredentialRedactor.redact(
+            IosSettingsJsonBridge.shared.encode(settings: settings)
+        )
         let settingsData = Data(settingsJson.utf8)
         var datasets: [IOSSyncDatasetSummary] = [
             IOSSyncDatasetSummary(id: "settings", recordCount: 1, byteCount: Int64(settingsData.count))

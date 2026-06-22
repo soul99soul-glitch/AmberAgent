@@ -96,7 +96,7 @@ struct IOSMcpStoredServer: Codable, Equatable {
     let name: String
     let url: String
     let transport: String
-    let headers: [String: String]
+    var headers: [String: String]
     let enabled: Bool
     let tools: [IOSMcpTool]
 
@@ -114,6 +114,17 @@ struct IOSMcpStoredServer: Codable, Equatable {
             return .sse(name: name, url: url, headers: headers, enabled: enabled, tools: tools)
         }
         return .streamableHTTP(name: name, url: url, headers: headers, enabled: enabled, tools: tools)
+    }
+
+    /// Scheme B: mask values of credential-bearing header names before this
+    /// stored server is persisted to UserDefaults. (parity with
+    /// IOSCredentialRedactor.)
+    mutating func redactSensitiveHeaders() {
+        var redacted: [String: String] = [:]
+        for (name, value) in headers {
+            redacted[name] = IOSCredentialRedactor.redactHeaderValue(headerName: name, value: value)
+        }
+        headers = redacted
     }
 
     enum CodingKeys: String, CodingKey {

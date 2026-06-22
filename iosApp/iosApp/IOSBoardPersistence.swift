@@ -2700,6 +2700,69 @@ enum IOSDeepReadTemplateDraftGenerator {
 }
 
 enum IOSDeepReadDraftGenerator {
+    /// Resolves the provider setting the Deep Read pipeline should use, by
+    /// honoring the user's actually-selected provider — NOT rebuilding an
+    /// OpenAI-shaped setting from scratch. This is the parity fix for
+    /// `deepread.provider_real`: when Claude is selected, the pipeline must
+    /// dispatch through a `ProviderSetting.Claude` (native `/messages`), and
+    /// `OpenAIKmpProviderAdapter.generateText` already downcasts + dispatches on
+    /// the sealed type. Reusing the selected setting (mirroring how chat resolves
+    /// via `ChatProviderConfiguration.provider(for:providers:)`) avoids the
+    /// silent `/chat/completions`-on-Claude gap. (locked_decision: no
+    /// ProviderExecutionContext; only the (provider, model, params) tuple.)
+    ///
+    /// The caller passes the selected provider verbatim (chat already resolved
+    /// it); this returns it unchanged so the sealed type flows to the adapter.
+    /// A nil return signals "no usable provider" → the caller falls back to the
+    /// deterministic offline draft (honest degradation).
+    static func resolveProviderSetting(selected: ProviderSetting?) -> ProviderSetting? {
+        guard let selected else { return nil }
+        // Pass the selected setting through by sealed type so the adapter
+        // dispatches to the right native endpoint. We clone into a clean id to
+        // avoid mutating the shared registry object, but preserve the type +
+        // credentials + endpoint. descriptionText/shortDescriptionText are
+        // abstract on the base ProviderSetting, read once here.
+        let descriptionText = selected.descriptionText
+        let shortDescriptionText = selected.shortDescriptionText
+        switch selected {
+        case let openAI as ProviderSetting.OpenAI:
+            return ProviderSetting.OpenAI(
+                id: KotlinUuid.companion.random(),
+                enabled: openAI.enabled,
+                name: openAI.name,
+                models: openAI.models,
+                balanceOption: openAI.balanceOption,
+                builtIn: openAI.builtIn,
+                descriptionText: descriptionText,
+                shortDescriptionText: shortDescriptionText,
+                apiKey: openAI.apiKey,
+                baseUrl: openAI.baseUrl,
+                chatCompletionsPath: openAI.chatCompletionsPath,
+                useResponseApi: openAI.useResponseApi,
+                authMode: openAI.authMode,
+                brand: openAI.brand
+            )
+        case let claude as ProviderSetting.Claude:
+            return ProviderSetting.Claude(
+                id: KotlinUuid.companion.random(),
+                enabled: claude.enabled,
+                name: claude.name,
+                models: claude.models,
+                balanceOption: claude.balanceOption,
+                builtIn: claude.builtIn,
+                descriptionText: descriptionText,
+                shortDescriptionText: shortDescriptionText,
+                apiKey: claude.apiKey,
+                baseUrl: claude.baseUrl,
+                promptCaching: claude.promptCaching
+            )
+        default:
+            // Unknown/non-OpenAI-compatible sealed type → none usable. The caller
+            // degrades to the deterministic offline draft (interim safeguard).
+            return nil
+        }
+    }
+
     static func generate(task: IOSDeepReadTask, now: Date = Date()) -> String {
         let template = task.template
         let sources = task.sources
@@ -2812,11 +2875,45 @@ enum IOSDeepReadDraftGenerator {
         provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
         now: Date = Date()
     ) async -> String {
+        await generateViaLLMResult(
+            task: task,
+            providerSetting: providerSetting,
+            modelId: modelId,
+            provider: provider,
+            now: now
+        ).markdown
+    }
+
+    /// Structured result of an LLM-driven generation run, exposing whether the
+    /// run honestly failed (every stage threw OR produced empty/whitespace-only
+    /// output). The honest-fail state machine (P0.5 `deepread.honest_fail`)
+    /// requires the caller to mark the task `.failed` when `didFail` is true,
+    /// instead of marking it `.succeeded` with empty sections.
+    struct GenerationResult {
+        let markdown: String
+        let didFail: Bool
+        let failureReason: String
+    }
+
+    /// Same stage pipeline as `generateViaLLM`, but reports honest failure:
+    /// `didFail` is true when every stage either threw or produced empty output.
+    /// A run where at least one stage produced usable text is NOT a failure
+    /// (partial output is still surfaced honestly as a completed draft).
+    static func generateViaLLMResult(
+        task: IOSDeepReadTask,
+        providerSetting: ProviderSetting,
+        modelId: String,
+        provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
+        now: Date = Date()
+    ) async -> GenerationResult {
         let sourcesBlock = task.sources.enumerated().map { index, source in
             "[\(index + 1)] \(source.kind.title)｜\(source.title)\n\(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(1200))"
         }.joined(separator: "\n\n")
 
         var sections: [String] = []
+        var threwCount = 0
+        var emptyCount = 0
+
         // Stage 1: overview.
         let overview = await synthesize(
             stage: "overview",
@@ -2827,41 +2924,60 @@ enum IOSDeepReadDraftGenerator {
             modelId: modelId,
             provider: provider
         )
-        sections.append("## 摘要\n\(overview)")
+        if overview.threw { threwCount += 1 } else if overview.text.isEmpty { emptyCount += 1 }
+        sections.append("## 摘要\n\(overview.text)")
 
         // Stage 2: narrative (seeded with the overview).
         let narrative = await synthesize(
             stage: "narrative",
             instruction: "基于摘要和来源，写出脉络叙述（按时间或逻辑组织，引用来源编号 [n]）。保留事实边界，不要编造。",
             sourcesBlock: sourcesBlock,
-            priorDraft: overview,
+            priorDraft: overview.text,
             providerSetting: providerSetting,
             modelId: modelId,
             provider: provider
         )
-        sections.append("## 脉络\n\(narrative)")
+        if narrative.threw { threwCount += 1 } else if narrative.text.isEmpty { emptyCount += 1 }
+        sections.append("## 脉络\n\(narrative.text)")
 
         // Stage 3: analysis (seeded with overview + narrative).
         let analysis = await synthesize(
             stage: "analysis",
             instruction: "对前面的摘要与脉络做分析：矛盾点、风险、缺失的来源、以及下一步建议。分条列出。",
             sourcesBlock: sourcesBlock,
-            priorDraft: "\(overview)\n\n\(narrative)",
+            priorDraft: "\(overview.text)\n\n\(narrative.text)",
             providerSetting: providerSetting,
             modelId: modelId,
             provider: provider
         )
-        sections.append("## 分析\n\(analysis)")
+        if analysis.threw { threwCount += 1 } else if analysis.text.isEmpty { emptyCount += 1 }
+        sections.append("## 分析\n\(analysis.text)")
 
         let date = IOSDeepReadDateFormatters.detail.string(from: now)
         let header = "# \(task.title)\n\n版式：\(task.template.name) · 来源：\(task.sources.count) 个 · \(date)\n（由模型分阶段生成）\n"
         let body = header + sections.joined(separator: "\n\n")
-        return body
+
+        // Honest failure: ALL 3 stages either threw or were empty. A single
+        // usable stage is enough to surface a (partial) completed draft.
+        let allStagesUnusable = (threwCount + emptyCount) == 3
+        let didFail = allStagesUnusable
+        let reason: String
+        if threwCount == 3 {
+            reason = "所有阶段调用失败（provider 抛错）"
+        } else if emptyCount == 3 {
+            reason = "所有阶段未产出可用内容（输出为空）"
+        } else if allStagesUnusable {
+            reason = "所有阶段失败或为空（threw=\(threwCount), empty=\(emptyCount)）"
+        } else {
+            reason = ""
+        }
+        return GenerationResult(markdown: body, didFail: didFail, failureReason: reason)
     }
 
     /// One LLM synthesis call for a single stage. Returns the model text, or an
-    /// empty string on failure (the caller's section then falls back to the
-    /// deterministic excerpt via the offline generator).
+    /// One LLM synthesis call for a single stage. Returns the model text plus
+    /// whether the call threw (`threw`). On throw, text is "" — the caller's
+    /// honest-fail accounting treats threw+empty as an unusable stage.
     private static func synthesize(
         stage: String,
         instruction: String,
@@ -2870,7 +2986,7 @@ enum IOSDeepReadDraftGenerator {
         providerSetting: ProviderSetting,
         modelId: String,
         provider: IOSAgentTextProvider
-    ) async -> String {
+    ) async -> (text: String, threw: Bool) {
         let system = "你是 AmberAgent 的深度阅读写作助手。只基于提供的来源写作，不编造。"
         var user = "\(instruction)\n\n来源：\n\(sourcesBlock)"
         if !priorDraft.isEmpty {
@@ -2896,9 +3012,9 @@ enum IOSDeepReadDraftGenerator {
                 .compactMap { $0 as? UIMessagePart.Text }
                 .map { $0.text }
                 .joined(separator: "")
-            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (text.trimmingCharacters(in: .whitespacesAndNewlines), false)
         } catch {
-            return ""
+            return ("", true)
         }
     }
 }
