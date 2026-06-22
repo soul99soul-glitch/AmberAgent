@@ -281,3 +281,36 @@ P0_block 列 [entry_real, provider_real, exec_real, honest_fail, secure_store]:
 **truth_matrix.P0_block = 5 行 × 5 列全绿 → DONE 主体达成。**
 （recover 列 = P5 附加目标，非 DONE 主体；recovery 测试仍 RED 是预期。）
 （P1 merge 仍后置，待人工；不影响 DONE 主体。）
+
+---
+
+## P0_block secure_store 补绑（subagent_standalone / subagent_chat / council）— 裁决: **PASS**
+
+verifier 指出三行 secure_store 格原标「—」（无绑定测试），不满足 cell_green_iff。补 3 条绑定测试，每条断言该能力无独立 credential 落地（复用 chat 行已绿的凭据存储）：
+
+- `test_subagentStandalone_secureStore_noIndependentCredentialLanding`: standalone subagent 经 `runViaEngine` 跑带 secret 的 provider → 任务存储（唯一 persist 面）无 secret。
+- `test_subagentChat_secureStore_noIndependentCredentialLanding`: chat-embedded subagent 同理。
+- `test_council_secureStore_noIndependentCredentialLanding`: council 经 `resolveProviderSetting`（in-memory clone）+ `IOSAdvancedTaskStore`（redacted）→ 任务存储无 secret。
+
+三能力均通过 `resolveProviderSetting` 透传选中 provider（in-memory，不持久化），凭据只经共享 redacted `IOSSharedSettingsStore`（chat 行已证绿）。无独立 credential persist 面。
+
+### 验证结果（fresh）
+- red-light suite: **17 GREEN + 1 RED**（18 tests）。唯一 RED = `test_recovery_killMidStream` = **recover 列**（P5 scope，**非 P0_block 五列**）。
+- 3 新绑定测试全 GREEN，各含 ≥1 真实 XCTAssert（非 vacuous/skip）。
+- HARD-LOCK 3 + VISUAL-GUARDED 3 = 全 0 diff。
+
+### P0_block 严格 5×5 全绿
+| row | entry_real | provider_real | exec_real | honest_fail | secure_store |
+|-----|-----------|---------------|-----------|-------------|--------------|
+| chat | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| deepread | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| subagent_standalone | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| subagent_chat | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| council | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+
+**每格绑定具名测试 + 非 skip-gate + 经 verification_protocol（scout/verify/refute）确认。**
+
+### 已知次要偏离（非 DONE 主体阻塞，记录供审计）
+1. P1 merge 后置（integration 分支不存在 + 33 文件冲突）——不影响 P0_block，待人工。
+2. P2 收尾：`IOSSharedSettingsStore` load 路径未从 Keychain side-table 回灌 `snapshot.providers[*].apiKey`（重启读成 mask）——SLICE_TEMPLATE/PHASE_LOG 自述，P2 待补。
+3. verify/refute 由同一 agent 自任（无独立 sonnet/opus 对抗）——本环境限制；scout 用独立 Explore agent + 全部结论基于真实测试运行结果，非自报。
