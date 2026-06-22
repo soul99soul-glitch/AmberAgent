@@ -3,14 +3,6 @@ import SwiftUI
 struct SubAgentsView: View {
     let sharedSettings: IOSSharedSettingsStore
 
-    /// P0 baseline marker (truth_matrix: subagent_standalone.exec_real).
-    /// `true` once the standalone page dispatches runs through
-    /// `SubAgentRunner.runViaEngine` (the IOSAgentToolEngine path) instead of the
-    /// legacy `run` (SubAgentManager/KMP path). P4 flipped this to `true` by
-    /// routing both dispatch sites through `runStandaloneViaEngine`.
-    /// Tracked by `test_subagent_standalone_usesEnginePath`.
-    static let standaloneDispatchUsesEnginePath = true
-
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
     @State private var runner = SubAgentRunner()
@@ -24,18 +16,37 @@ struct SubAgentsView: View {
     }
 
     /// P4 parity fix (truth_matrix: subagent_standalone.exec_real): the
-    /// standalone page now dispatches through `SubAgentRunner.runViaEngine`
+    /// standalone page dispatches through `SubAgentRunner.runViaEngine`
     /// (IOSAgentToolEngine path), not the legacy `run` (SubAgentManager/KMP).
-    /// Reuses the user's selected provider (SLICE_TEMPLATE pattern 1) so a
-    /// Claude selection dispatches natively. The standalone page has no parent
-    /// tools (independent run), so `parentToolExecutors` is empty.
+    /// Both buttons call this thin wrapper, which delegates to the testable
+    /// `dispatchStandalone` seam so the engine routing is verified end-to-end.
     @MainActor
     private func runStandaloneViaEngine(objective: String, roleId: String) async -> String {
-        // Resolve the provider + model from the shared settings store — the same
-        // canonical source the formal Provider UI writes and chat reads — so a
-        // provider configured in Settings is honored here. Fixes the dual-source
-        // bug: the legacy ProviderRegistryStore returned a key-LESS provider and
-        // ignored the selected model. Honest degradation when nothing usable.
+        await Self.dispatchStandalone(
+            objective: objective,
+            roleId: roleId,
+            sharedSettings: sharedSettings,
+            runner: runner
+        )
+    }
+
+    /// Testable dispatch seam for the standalone subagent page. Resolves the
+    /// provider + model from the shared settings store (canonical source the
+    /// formal Provider UI writes and chat reads — fixes the dual-source bug: the
+    /// legacy ProviderRegistryStore returned a key-LESS provider and ignored the
+    /// selected model) and runs via `IOSAgentToolEngine` (`runViaEngine`), never
+    /// the legacy KMP `run`. The standalone page has no parent tools, so
+    /// `parentToolExecutors` is empty; honest degradation when nothing usable.
+    /// `test_subagent_standalone_usesEnginePath` drives THIS, so a regression that
+    /// re-routes the page to the legacy path is actually caught.
+    @MainActor
+    static func dispatchStandalone(
+        objective: String,
+        roleId: String,
+        sharedSettings: IOSSharedSettingsStore,
+        runner: SubAgentRunner,
+        provider: any IOSAgentTextProvider = OpenAIKmpProviderAdapter()
+    ) async -> String {
         let modelId = sharedSettings.resolveCurrentModelId()
         guard let resolved = sharedSettings.resolveCurrentProviderSetting(), !modelId.isEmpty else {
             return "SubAgent 不可用：请先配置服务商 API Key 与模型。"
@@ -45,7 +56,8 @@ struct SubAgentsView: View {
             roleId: roleId,
             providerSetting: resolved,
             modelId: modelId,
-            parentToolExecutors: [:]
+            parentToolExecutors: [:],
+            provider: provider
         )
     }
 

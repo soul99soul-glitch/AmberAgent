@@ -280,66 +280,53 @@ final class IOSParityRedLightTests: XCTestCase {
     /// RED for P0. GREEN target: P4.
     /// Cell: subagent_standalone.exec_real.
     ///
-    /// The STANDALONE subagent page must dispatch through `IOSAgentToolEngine`
-    /// (`runViaEngine`), not the legacy KMP `SubAgentManager` path (`run`).
-    /// Today `SubAgentsView` calls `runner.run(...)` (SubAgentsView.swift:127,178)
-    /// — the legacy path that uses IosSubAgentFactory + SubAgentManager and never
-    /// touches `IOSAgentToolEngine`. Only the CHAT tool path uses `runViaEngine`
-    /// (ChatToolRuntime.swift:590). P4 (spec line 132) routes the standalone
-    /// page to `runViaEngine`.
+    /// GREEN guard for the standalone SubAgent engine path (de-faked this change).
+    /// Cell: subagent_standalone.exec_real.
     ///
-    /// This test verifies the dispatch wiring structurally: the standalone page's
-    /// recorded task must be tagged engine-routed. We drive `runViaEngine` (which
-    /// works in isolation) with a probe and assert BOTH (a) the engine provider is
-    /// invoked and (b) the task carries the engine tag. The legacy `run` path
-    /// (which the page actually calls today) is not executable in a unit test —
-    /// it needs full app context and crashes via KMP serialization — so this test
-    /// proves the engine path is ready; the P4 wiring change makes the page call
-    /// it. The RED today is that the page does NOT call this path yet.
+    /// The standalone SubAgent page must dispatch through `IOSAgentToolEngine`
+    /// (`runViaEngine`), not the legacy KMP `SubAgentManager` path (`run`). Both
+    /// page buttons call `SubAgentsView.runStandaloneViaEngine`, which delegates to
+    /// the testable `dispatchStandalone` seam. This drives that EXACT seam with a
+    /// configured shared-settings store + a probe provider and asserts the engine
+    /// path is taken (provider invoked + task tagged engine) — so a regression that
+    /// re-routes the page to legacy `run` is actually caught. The previous version
+    /// only read a hardcoded `static let = true` constant (fake-green).
     func test_subagent_standalone_usesEnginePath() async {
-        let suite = UserDefaults(suiteName: "redlight-subagent-\(UUID().uuidString)")!
-        let taskStore = IOSAdvancedTaskStore(userDefaults: suite, storageKey: "redlight.tasks")
+        let taskSuite = UserDefaults(suiteName: "redlight-subagent-\(UUID().uuidString)")!
+        let taskStore = IOSAdvancedTaskStore(userDefaults: taskSuite, storageKey: "redlight.tasks")
         let runner = SubAgentRunner(taskStore: taskStore)
         let probe = EngineProbeProvider()
 
-        // Drive the engine path (the path the standalone page SHOULD call).
-        _ = await runner.runViaEngine(
+        // A shared-settings store configured with a provider + selected model —
+        // exactly what the standalone page resolves from.
+        let ssSuite = UserDefaults(suiteName: "redlight-subagent-ss-\(UUID().uuidString)")!
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: ssSuite)
+        sharedSettings.addCustomModel(name: "引擎模型", modelId: "engine-model", providerName: "EngineProvider")
+        if let added = sharedSettings.snapshot.providers.last as? ProviderSetting.OpenAI,
+           let model = added.models.first {
+            sharedSettings.setCurrentChatModelId(model.id.description())
+        }
+
+        // Drive the EXACT dispatch the standalone page's buttons call.
+        _ = await SubAgentsView.dispatchStandalone(
             objective: "explore the objective",
             roleId: "explorer",
-            providerSetting: makeOpenAIProvider(),
-            modelId: "any-model",
-            parentToolExecutors: [:],
+            sharedSettings: sharedSettings,
+            runner: runner,
             provider: probe
         )
 
-        // The standalone page (SubAgentsView) must route runs through the
-        // engine path. Today it calls the legacy `run` which:
-        //   - never invokes IOSAgentTextProvider (probe.callCount stays 0), and
-        //   - records metadata WITHOUT the engine tag.
-        // P4 wires SubAgentsView to runViaEngine. Assert the engine path's
-        // observable contract holds (probe invoked + engine tag set) — this is
-        // the contract the page must adopt. RED until the page calls it.
+        // The engine path must be taken: provider invoked + task tagged engine.
+        // The legacy `run` path would leave probe.callCount==0 and no engine tag.
         XCTAssertGreaterThan(
             probe.callCount,
             0,
-            "Engine path must invoke the provider. (Proves runViaEngine is ready; "
-                + "P4 wires SubAgentsView to call it instead of legacy `run`.)"
+            "Standalone dispatch must invoke the provider via the engine path (runViaEngine)."
         )
-        let recorded = runner.lastTask
         XCTAssertEqual(
-            recorded?.metadata["engine"],
+            runner.lastTask?.metadata["engine"],
             "true",
-            "Standalone subagent must record engine routing. P4 wires SubAgentsView "
-                + "to runViaEngine (today it calls legacy `run` without this tag)."
-        )
-        // The gap itself: the standalone page does NOT yet use the engine path.
-        // We assert the page's source-level dispatch targets runViaEngine. Today
-        // SubAgentsView calls the legacy `run` — so this reflection check fails.
-        let pageDispatchesViaEngine = SubAgentsView.standaloneDispatchUsesEnginePath
-        XCTAssertTrue(
-            pageDispatchesViaEngine,
-            "SubAgentsView (standalone page) must dispatch through runViaEngine, "
-                + "not the legacy `run`. Today it calls runner.run(...) (SubAgentsView.swift:127,178). (P4)"
+            "Standalone dispatch must record engine routing, not legacy `run`."
         )
     }
 
