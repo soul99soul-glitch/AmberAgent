@@ -1,34 +1,57 @@
 # truth_matrix — iOS Parity Closure
 
-> 真相矩阵（spec success_metric, line 31-37）。P0 的产出。每个 cell 绑定具名测试。
-> 绿格 iff: 绑定测试全过 **且** 非 skip-gate **且** 经 verification_protocol 确认（spec line 34）。
-> 当前状态: **P0 baseline** — 所有 P0_block 红格已绑定具名测试（RED），待后续 phase 翻绿。
+> 真相矩阵（spec success_metric, line 31-37）。每个 cell 绑定具名测试。
+> 绿格 iff: 绑定测试全过 **且** 非 skip-gate **且** 经实跑确认。
+> **当前状态: VERIFIED (2026-06-22)** — 工程经 `xcodegen generate` 重建后（pbxproj 是 XcodeGen 生成物、被 gitignore，必须先重建），`xcodebuild test ... -skipMacroValidation` 全量绿：**386 tests / 0 failures**。下方矩阵已基于**实跑 + 本轮修复**刷新，不再是 P0-baseline 的静态自报。原 P0-baseline 的绑定理由保留在文末脚注（历史）。
 
 ## 图例
-- 🔴 = RED（parity gap，绑定测试当前失败）— 这是 P0 的正确状态
-- 🟢 = GREEN（parity 达标，或回归保护测试通过）
-- ⬜ = 非 P0_block 范围（后续 phase 处理）
-- 🟡 = pre-existing 失败已绑定（非 9 条 named，属后续 phase）
+- 🟢 = GREEN（实跑通过，且经审查断言非弱化/假绿）
+- 🟡 = PARTIAL（核心已修，深度部分仍开）
+- 🔴 = 仍开（未实现/已知缺口）
+- ⬜ = 非 P0_block 范围
 
-## P0_block 矩阵（goal 主体，spec line 36）
+## P0_block 矩阵（实跑刷新）
 
 `cols[entry_real..secure_store]` × `[chat, deepread, subagent_standalone, subagent_chat, council]`
 
 | row \ col | entry_real | provider_real | exec_real | honest_fail | secure_store |
 |-----------|-----------|---------------|-----------|-------------|--------------|
-| **chat** | 🟢 P4✓ | 🟢 r4² | 🟢 r4³ | 🟢 P4✓ | 🟢 P0.5⁴ |
-| **deepread** | 🟢 r1⁵ | 🔴 r0⁶ | 🟢 r1⁷ | 🔴 r0⁸ | 🔴 r0⁴ |
-| **subagent_standalone** | 🟢 r6⁹ | 🟢 r6¹⁰ | 🟢 P4✓ | 🟢 r6¹² | 🟢 P4✓ |
-| **subagent_chat** | 🟢 r1¹³ | 🟢 r1¹³ | 🟢 r1¹³ | 🟢 r1¹³ | 🟢 P4✓ |
-| **council** | 🟢 r1¹⁴ | 🟢 P3✓ | 🟢 r1¹⁶ | 🟢 P4✓ | 🟢 P4✓ |
+| **chat** | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| **deepread** | 🟢 | 🟢 ✦ | 🟢 ✦ | 🟢 ✦ | 🟢 |
+| **subagent_standalone** | 🟢 | 🟢 | 🟢 | 🟢 ✦ | 🟢 |
+| **subagent_chat** | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| **council** | 🟢 | 🟢 ✦ | 🟢 | 🟢 | 🟢 |
 
-## 其他行（非 P0_block，后续 phase）
+✦ = 本轮（2026-06-22）修复或去假绿。所有格子均由 386-green 实跑中的具名白盒测试支撑。
 
-| row \ col | entry_real | provider_real | exec_real | honest_fail | secure_store | persist | recover | verified |
-|-----------|-----------|---------------|-----------|-------------|--------------|---------|---------|----------|
-| **search** | ⬜ | ⬜ | ⬜ | ⬜ | 🔴 r1¹⁸ | ⬜ | ⬜ | ⬜ |
-| **backup** | ⬜ | ⬜ | ⬜ | ⬜ | 🔴 r0¹⁹ | ⬜ | ⬜ | ⬜ |
-| **chat.recover** | — | — | — | — | — | — | 🔴 r0²⁰ | — |
+## 其他行（实跑刷新）
+
+| row \ col | provider_real | exec_real | honest_fail | secure_store | persist | recover |
+|-----------|---------------|-----------|-------------|--------------|---------|---------|
+| **search** | 🟢 ✦ | 🔴 (无多源编排, deferred) | — | 🟢 | — | — |
+| **backup** | — | — | — | 🟢 | — | — |
+| **council** | 🟢 ✦ | 🟢 | 🟢 | — | 🔴 (无消息持久化/重开) | — |
+| **chat.recover** | — | — | — | — | — | 🟡 ✦ (running 记录已写, sweep 标 interrupted; 无 resume/checkpoint/幂等) |
+
+## 本轮实跑刷新说明（2026-06-22）
+
+提交序列（均 386-green 验证）：
+- `67edfca9c` deepread 重试双漏（provider_real + honest_fail 的重试面）
+- `ed6111e51`/`e4b6d297b`/`b6f283cea` 双真相源:SubAgent/Council/Board 执行 + 设置 UI 选择器全部统一到 IOSSharedSettingsStore（registry 仅剩 provider 增改 UI）
+- `47793ea1e` search-failure 真失败态（scrape_status=failed + 生成器排除失败源）
+- `2184d9507` subagent_standalone 测试去假绿（驱动真 dispatch seam，删硬编码常量）
+- `f408fbcbf` deepread 第 4 阶段 Extended Reading（4 阶段管线，Android 对齐）
+- `5420d81a8` recovery:start 写 running 记录（sweep 可标 interrupted）
+- `8ef6b152e` WebMount 测试隔离（全绿基线）
+
+**仍开（需独立实现，非本轮）：**
+- `council.persist`: 消息/seats/round/pendingQuestion 持久化 + 重开 Room（需 Color 编码 + 重开 UX 决策）。
+- `chat.recover` 深度: stream checkpoint、auto-resume、tool-call 幂等（runId+toolCallId+inputDigest）。
+- `search.exec_real`: 多源编排（查询变体/并发/合并去重）。
+
+---
+
+## （历史）原 P0-baseline 绑定脚注
 
 ---
 
