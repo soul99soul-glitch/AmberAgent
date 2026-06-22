@@ -4,6 +4,14 @@ import WebKit
 
 @MainActor
 final class IOSLocalToolExecutorTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        // Reset the shared mock session-id counter so each test starts from a
+        // deterministic base (prevents the cross-test pollution that made
+        // testWebMountTabLifecycleAndClosedSessionFailure order-dependent).
+        MockWebMountRuntime.resetSessionCounter()
+    }
+
     func testPermissionsStatusReturnsIOSSnapshot() async throws {
         let defaults = isolatedDefaults()
         let permissionStore = IOSPermissionStore(userDefaults: defaults)
@@ -991,6 +999,12 @@ private final class MockWebMountCookieStore: IOSWebMountCookieStoreProtocol {
 @MainActor
 private final class MockWebMountRuntime: IOSWebMountRuntimeServicing {
     private static var nextId = 0
+
+    /// Reset the shared session-id counter so each test starts from a known
+    /// base. Without this a stale counter shifts the mock ids across tests,
+    /// which made `testWebMountTabLifecycleAndClosedSessionFailure` pass in
+    /// isolation but fail in the full suite (order-dependent test pollution).
+    static func resetSessionCounter() { nextId = 0 }
 
     var snapshot: IOSWebMountRuntimeSnapshot
     var webView: WKWebView? { nil }
