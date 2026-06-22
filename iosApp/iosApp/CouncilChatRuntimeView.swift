@@ -1064,7 +1064,9 @@ final class CouncilChatViewModel {
             mode: selectedMode.runMode,
             settings: roomSettingsStore.settings,
             currentModelId: currentModelId,
-            providerSetting: IOSCouncilRoomRunner.makeProviderSetting(
+            providerSetting: IOSCouncilRoomRunner.resolveProviderSetting(
+                selected: providerRegistry?.selectedProvider
+            ) ?? IOSCouncilRoomRunner.makeProviderSetting(
                 baseUrl: settingsStore.baseUrl,
                 apiKey: settingsStore.currentApiKey
             ),

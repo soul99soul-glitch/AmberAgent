@@ -306,27 +306,23 @@ final class IOSParityRedLightTests: XCTestCase {
 
     // MARK: - Council (truth_matrix row `council`)
 
-    /// RED for P0. GREEN target: P3.
+    /// RED for P0. GREEN target: P3 (now GREEN).
     /// Cell: council.provider_real.
     ///
     /// When the user has selected a Claude provider, Council must construct a
-    /// `ProviderSetting.Claude`, not silently rebuild an OpenAI setting. Today
-    /// `IOSCouncilRoomRunner.makeProviderSetting(baseUrl:apiKey:)`
-    /// (CouncilRunner.swift:991) unconditionally returns `ProviderSetting.OpenAI`.
-    /// The parity target is that, given a Claude selection, the resolver yields
-    /// a Claude setting. This test calls the resolver with Claude-selected
-    /// context and asserts the type.
+    /// `ProviderSetting.Claude` (native /messages), not silently rebuild an
+    /// OpenAI setting. P3 added `IOSCouncilRoomRunner.resolveProviderSetting`
+    /// (SLICE_TEMPLATE pattern 1, copied from DeepRead) and routed both council
+    /// entries through it. The lower-level streamer dispatches on the sealed
+    /// type, so a Claude setting flows to native.
     func test_council_claudeSelected_constructsClaudeSetting() {
         let selectedClaude = makeClaudeProvider()
-        // The resolver Council uses today ignores the selected provider and
-        // rebuilds OpenAI from baseUrl+apiKey. Parity target: it must honor the
-        // selection.
         let resolved = councilResolvedProvider(forSelected: selectedClaude)
 
         XCTAssertTrue(
             resolved is ProviderSetting.Claude,
             "Council must use the user's selected Claude provider, not a rebuilt OpenAI setting. "
-                + "Currently resolves to: \(type(of: resolved)) — makeProviderSetting is hardcoded OpenAI (P3)."
+                + "Currently resolves to: \(String(describing: resolved.map { String(describing: type(of: $0)) })) — council resolver (P3)."
         )
     }
 
@@ -749,23 +745,12 @@ final class IOSParityRedLightTests: XCTestCase {
         IOSDeepReadDraftGenerator.resolveProviderSetting(selected: selected)
     }
 
-    /// Council provider resolver. Calls the real static factory Council uses.
-    private func councilResolvedProvider(forSelected selected: ProviderSetting) -> ProviderSetting {
-        let apiKey: String = {
-            switch selected {
-            case let o as ProviderSetting.OpenAI: return o.apiKey
-            case let c as ProviderSetting.Claude: return c.apiKey
-            default: return ""
-            }
-        }()
-        let baseUrl: String = {
-            switch selected {
-            case let o as ProviderSetting.OpenAI: return o.baseUrl
-            case let c as ProviderSetting.Claude: return c.baseUrl
-            default: return ""
-            }
-        }()
-        return IOSCouncilRoomRunner.makeProviderSetting(baseUrl: baseUrl, apiKey: apiKey)
+    /// Council provider resolver. Calls the REAL resolver the council runtime
+    /// now uses (`IOSCouncilRoomRunner.resolveProviderSetting`), which honors
+    /// the selected sealed type. P3 routed both council entries through it; the
+    /// test asserts a Claude selection yields a `ProviderSetting.Claude`.
+    private func councilResolvedProvider(forSelected selected: ProviderSetting) -> ProviderSetting? {
+        IOSCouncilRoomRunner.resolveProviderSetting(selected: selected)
     }
 
     /// A provider that throws on every call — models all-stages-failed.

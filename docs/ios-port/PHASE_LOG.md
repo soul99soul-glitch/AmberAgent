@@ -219,3 +219,28 @@ P0_block 列 [entry_real, provider_real, exec_real, honest_fail, secure_store]:
 4. P1 不被删除/伪 done，仅后置；后续 phase 仍跑完整 verification_protocol；已绿格回退 = STOP。
 
 注：此为对 spec phase 序列的有意识偏离，基于本仓库 iOS/Android 分层的实际依赖结构。merge 仍是 TODO（后置）。
+
+---
+
+## P3 (unified_provider_resolution, council slice) — EXIT 裁决: **PASS**
+
+### 改动（council.provider_real 翻绿）
+- `IOSCouncilRoomRunner.resolveProviderSetting(selected:)`（SLICE_TEMPLATE 模式 1，复制自 DeepRead 的同名方法）：按 sealed type 透传选中 provider，Claude → `ProviderSetting.Claude`。
+- 两个 council 入口改用它：
+  - standalone `CouncilChatRuntimeView.runDiscussion`（`resolveProviderSetting(providerRegistry?.selectedProvider) ?? makeProviderSetting(...)` 兜底）。
+  - chat tool `CouncilRunner.run(...selectedProvider:)` 新增参数；`ChatToolRuntime` 传入 `providerSetting`（已解析的 chat provider）。
+- streamer（CouncilRunner.swift:580 `if let claude = providerSetting as? ProviderSetting.Claude`）已按 sealed type dispatch → Claude 真走原生。
+
+### 测试结果
+- `test_council_claudeSelected_constructsClaudeSetting`: RED→GREEN。
+- red-light suite: **12 GREEN + 3 RED**（recovery=P5, subagent_standalone=P4, 均正确保留）。
+- 回归: council mechanics 7 tests（5 pass + 2 pre-existing fail = P4 scope honest_fail/persist，与 P0 基线一致，无新增回归）。
+
+### 7-criterion DoD
+1. 目标格绿: council.provider_real ✓
+2. red→green: council claude 红灯 RED→GREEN，无删除/skip/弱化 ✓
+3. locked_decisions: 无 ProviderExecutionContext；复用选中 ProviderSetting；只透传 (provider, model, params) ✓
+4. 无明文凭据: P3 未动 persist 路径，secure_store 保持绿 ✓
+5. refute 无反证: streamer :580 确认 Claude 原生 dispatch；resolver 返回真 Claude（apiKey 保留）✓
+6. 无全局拦截: council mechanics 回归无新增失败；已绿格无回退 ✓
+7. 无视觉回归: CouncilChatRuntimeView 仅逻辑 diff（providerSetting 接线）；council 复采视觉一致；HARD-LOCK 0 diff ✓

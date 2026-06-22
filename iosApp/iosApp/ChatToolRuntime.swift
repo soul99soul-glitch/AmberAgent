@@ -601,7 +601,7 @@ final class ChatToolRuntime {
             let objective = args?["objective"] as? String ?? toolCall.input
             let mode = args?["mode"] as? String ?? "compare"
             let budget = args?["output_budget_chars"] as? Int ?? 12_000
-            return await councilRunner.run(objective: objective, mode: mode, outputBudgetChars: budget)
+            return await councilRunner.run(objective: objective, mode: mode, outputBudgetChars: budget, selectedProvider: providerSetting)
         case "mcp_call":
             guard let args = ChatToolCallParsing.jsonObject(toolCall.input),
                   let server = args["server"] as? String,

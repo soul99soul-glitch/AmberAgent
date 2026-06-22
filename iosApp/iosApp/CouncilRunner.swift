@@ -1007,6 +1007,57 @@ final class IOSCouncilRoomRunner {
         )
     }
 
+    /// Resolves the provider setting Council should use, by honoring the user's
+    /// actually-selected provider — parity fix for `council.provider_real`
+    /// (SLICE_TEMPLATE pattern 1, copied from IOSDeepReadDraftGenerator). When
+    /// Claude is selected, Council dispatches through a `ProviderSetting.Claude`
+    /// (native /messages), not a rebuilt OpenAI /chat/completions. The lower-
+    /// level streamer (`dispatchCouncilStream`) already dispatches on the sealed
+    /// type, so passing a Claude setting flows to native. Returns nil for
+    /// non-OpenAI-compatible selections → caller should disable/guard (interim
+    /// safeguard). (locked_decision: no ProviderExecutionContext; reuse selected
+    /// ProviderSetting; only (provider, model, params) tuple.)
+    static func resolveProviderSetting(selected: ProviderSetting?) -> ProviderSetting? {
+        guard let selected else { return nil }
+        let descriptionText = selected.descriptionText
+        let shortDescriptionText = selected.shortDescriptionText
+        switch selected {
+        case let openAI as ProviderSetting.OpenAI:
+            return ProviderSetting.OpenAI(
+                id: KotlinUuid.companion.random(),
+                enabled: openAI.enabled,
+                name: openAI.name,
+                models: openAI.models,
+                balanceOption: openAI.balanceOption,
+                builtIn: openAI.builtIn,
+                descriptionText: descriptionText,
+                shortDescriptionText: shortDescriptionText,
+                apiKey: openAI.apiKey,
+                baseUrl: openAI.baseUrl,
+                chatCompletionsPath: openAI.chatCompletionsPath,
+                useResponseApi: openAI.useResponseApi,
+                authMode: openAI.authMode,
+                brand: openAI.brand
+            )
+        case let claude as ProviderSetting.Claude:
+            return ProviderSetting.Claude(
+                id: KotlinUuid.companion.random(),
+                enabled: claude.enabled,
+                name: claude.name,
+                models: claude.models,
+                balanceOption: claude.balanceOption,
+                builtIn: claude.builtIn,
+                descriptionText: descriptionText,
+                shortDescriptionText: shortDescriptionText,
+                apiKey: claude.apiKey,
+                baseUrl: claude.baseUrl,
+                promptCaching: claude.promptCaching
+            )
+        default:
+            return nil
+        }
+    }
+
     static func plannedSeats(
         from text: String,
         fallback: [IOSCouncilRoomSpeaker],
@@ -1407,7 +1458,8 @@ final class CouncilRunner {
         objective: String,
         seats: [IOSCouncilSeatDescriptor] = [],
         mode: String = "compare",
-        outputBudgetChars: Int = 12_000
+        outputBudgetChars: Int = 12_000,
+        selectedProvider: ProviderSetting? = nil
     ) async -> String {
         let settingsStore = SettingsStore()
         let currentModelId = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1447,10 +1499,11 @@ final class CouncilRunner {
             mode: mode.lowercased().contains("debate") ? .debate : .freeChat,
             settings: roomSettings,
             currentModelId: currentModelId,
-            providerSetting: IOSCouncilRoomRunner.makeProviderSetting(
-                baseUrl: settingsStore.baseUrl,
-                apiKey: settingsStore.currentApiKey
-            ),
+            providerSetting: IOSCouncilRoomRunner.resolveProviderSetting(selected: selectedProvider)
+                ?? IOSCouncilRoomRunner.makeProviderSetting(
+                    baseUrl: settingsStore.baseUrl,
+                    apiKey: settingsStore.currentApiKey
+                ),
             searchSettings: nil,
             researchConsent: .unavailable
         )

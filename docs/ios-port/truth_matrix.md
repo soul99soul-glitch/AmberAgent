@@ -20,7 +20,7 @@
 | **deepread** | 🟢 r1⁵ | 🔴 r0⁶ | 🟢 r1⁷ | 🔴 r0⁸ | 🔴 r0⁴ |
 | **subagent_standalone** | 🟢 r6⁹ | 🟢 r6¹⁰ | 🔴 r0¹¹ | 🟢 r6¹² | ⬜ |
 | **subagent_chat** | 🟢 r1¹³ | 🟢 r1¹³ | 🟢 r1¹³ | 🟢 r1¹³ | ⬜ |
-| **council** | 🟢 r1¹⁴ | 🔴 r0¹⁵ | 🟢 r1¹⁶ | 🟡 pre-existing¹⁷ | ⬜ |
+| **council** | 🟢 r1¹⁴ | 🟢 P3✓ | 🟢 r1¹⁶ | 🟡 pre-existing¹⁷ | ⬜ |
 
 ## 其他行（非 P0_block，后续 phase）
 
@@ -96,7 +96,9 @@
 ¹⁴ **council.entry_real** = 🟢 GREEN
 - 证据: 两入口（CouncilChatRuntimeView.swift:1052 standalone + ChatToolRuntime.swift:599 chat tool）均构造真实 `IOSCouncilRoomRunRequest` 并调 `IOSCouncilRoomRunner.run`。非 stub。
 
-¹⁵ **council.provider_real** = 🔴 RED (P3 scope)
+¹⁵ **council.provider_real** = 🟢 GREEN (P3 done)
+- 测试: `test_council_claudeSelected_constructsClaudeSetting` (RED→GREEN)
+- 修复: `IOSCouncilRoomRunner.resolveProviderSetting(selected:)`（SLICE_TEMPLATE 模式 1，复制自 DeepRead）透传选中 sealed type；两个 council 入口（CouncilChatRuntimeView standalone + chat tool）改用它。Claude → `ProviderSetting.Claude`，streamer(CouncilRunner.swift:580) dispatch 原生。
 - 测试: `test_council_claudeSelected_constructsClaudeSetting`
 - 证据: `IOSCouncilRoomRunner.makeProviderSetting(baseUrl:apiKey:)` (CouncilRunner.swift:991) 无条件返回 `ProviderSetting.OpenAI`。
 

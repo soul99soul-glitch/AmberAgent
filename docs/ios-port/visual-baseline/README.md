@@ -44,3 +44,9 @@ xcrun simctl io "$UDID" screenshot docs/ios-port/visual-baseline/<name>.png
 - 比对结果: **两图视觉一致**（board/热榜列表布局、配色、内容无差异）。改动纯逻辑（仅在生成任务时生效），未触碰任何 SwiftUI view body / 布局。
 - 结论: 无视觉回归。intended 差异 = 空（本 phase 无预期视觉变化；DeepRead/Council 失败态 UI 是 P4 的 intended 变化，届时再采）。
 - 采集工具（临时 launch-arg 路由覆盖）采集后已完整 revert，AppShell.swift 零 diff（已 `git diff` 验证）。
+
+## P3 复采比对（VISUAL-GUARDED CouncilChatRuntimeView.swift 改动后）
+- 触发: CouncilChatRuntimeView.swift 有 diff（IOSCouncilRoomRunRequest 的 providerSetting 行：makeProviderSetting → resolveProviderSetting 透传选中 provider）。
+- 复采: `05-council-p3.png`（P3 后，相同设备/外观/配置）。
+- 比对: **两图视觉一致**（council 聊天界面布局/配色/内容无差异）。改动纯逻辑（仅 request-builder 的 provider 接线，未触碰任何 SwiftUI view body / 布局）。
+- 结论: 无视觉回归。AppShell 采集工具 revert 后零 diff。
