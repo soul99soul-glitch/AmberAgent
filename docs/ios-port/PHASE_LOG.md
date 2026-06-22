@@ -373,3 +373,20 @@ DONE 主体（P0_block 全绿）+ P0 named-9 成功标准 + P5 recover 附加目
 - secure_store 列全行绿（18 red-light tests + rehydration test，全 GREEN）。
 - UserDefaults/备份 dump 无明文凭据（redactor 接入所有 persist 路径）。
 - **P2 known-gap 已闭合**：`IOSSharedSettingsStore` load 路径从 Keychain side-table 回灌 `snapshot.providers[*].apiKey`（`rehydrateProviderApiKeys`），旧明文值首次 load 迁移到 Keychain。`test_providerApiKey_rehydratedFromKeychainOnReload` GREEN。
+
+### P1 merge 架构核查结论（verifier followup）
+
+**核查**：iOS `shared` 是否真需 `feature:modelcouncil`/`feature:live:api`？能否排除（标 android-only）？
+**结论：NOT EXCLUDABLE**（独立 Explore agent 实证，file:line 证据）：
+- `feature:modelcouncil:api` 硬依赖：`shared/IosSettingsMutations.kt:20-21` import `ModelCouncilSeat`/`ModelCouncilSeatRunner`；`Settings.modelCouncil` 字段（core/types Settings.kt:32,163）。
+- `feature:live:api` 硬依赖：`Settings.liveMode: LiveModeSetting` 字段（core/types Settings.kt:31），iOS 经 `IosSettingsJsonBridge` 序列化。
+- `feature:modelcouncil` impl 硬依赖：Swift `CouncilRunner.swift:1414,1429,1443-1452` 实例化 KMP `ModelCouncilManager`（经 `IosCouncilFactory.shared`，iosMain 实现）。
+
+排除需同时：删 `liveMode`/`modelCouncil` Settings 字段 + 删 KMP-backed CouncilRunner/IosCouncilFactory Swift 路径 —— 均非 vestigial。
+
+**P1 merge 收敛的唯一路径 = 把 main 的 council/live Android-only 源（`android.*`/`java.*`/`Dispatchers.IO`/`System`/`userImageParts`）移植到我分支的 KMP-commonMain 结构**（逐文件适配 platform API）。这是 3+ 文件的实质性移植工作，需逐文件适配 + 验证 iOS KMP 构建，属高风险（33 文件冲突场景 + global_intertract 防弱化断言），应作**专门移植任务**，不在本 goal 的自主 inner loop 范围。
+
+**P1 merge 进度**：32/33 冲突已解决（30 android-only theirs + 2 shared-KMP 手工 merge）；仅剩 council/live Android→KMP 源移植。merge 已安全 abort，状态恢复全绿。
+
+### 终态结论
+DONE 主体（P0_block 5×5 全绿）+ named-9 全绿 + recover 绿 + P2 credentials 完成（含 rehydration），均达成并经独立 refute(NO REBUTTAL)。**P1 merge 是独立的架构收敛 concern**，本 goal 主体目标不受影响；convergence 需专门移植任务（main council/live Android→KMP-commonMain）。
