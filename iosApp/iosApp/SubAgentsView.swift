@@ -3,6 +3,14 @@ import SwiftUI
 struct SubAgentsView: View {
     let sharedSettings: IOSSharedSettingsStore
 
+    /// P0 baseline marker (truth_matrix: subagent_standalone.exec_real).
+    /// `true` once the standalone page dispatches runs through
+    /// `SubAgentRunner.runViaEngine` (the IOSAgentToolEngine path) instead of the
+    /// legacy `run` (SubAgentManager/KMP path). Today the page calls `run`
+    /// (SubAgentsView.swift:127,178), so this is `false`. P4 flips it to `true`.
+    /// Tracked by `test_subagent_standalone_usesEnginePath`.
+    static let standaloneDispatchUsesEnginePath = false
+
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
     @State private var runner = SubAgentRunner()

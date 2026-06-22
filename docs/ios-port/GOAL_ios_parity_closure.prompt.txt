@@ -1,0 +1,107 @@
+iOS Provider Parity Closure — goal 执行契约
+
+## 权威规范
+source_of_truth: docs/ios-port/GOAL_ios_parity_closure.md（唯一真相源，只读，不覆盖本 prompt 的任何约束）。
+本 prompt 已内联足够执行契约：即使 runner 只浅解析规范文件，也必须按以下约束运行。
+
+## DONE 定义（唯一退出条件 / 先看这里）
+truth_matrix.P0_block = 列 [entry_real, provider_real, exec_real, honest_fail, secure_store] × 行 [chat, deepread, subagent_standalone, subagent_chat, council] 全部 green。
+列语义以规范文件 success_metric 为准；cell_green_iff = 该格绑定的具名测试全过 且 非 skip-gate 且 经 verification_protocol 确认。
+P0_block 全绿 = goal 主体完成（DONE）。recover 列达约定阈值为 P5 附加目标，不属 DONE 主体。
+
+每个 phase EXIT 必须满足 7-criterion DoD（列定义见 success_metric；DONE 主体列 = entry_real, provider_real, exec_real, honest_fail, secure_store）：
+1. 该 phase truth_matrix 目标格全绿（无 red / yellow / skip）。
+2. 该 phase 绑定的红灯测试 red-before → green-after（非删除、非 @skip、非弱化断言）。
+3. locked_decisions 无违反（见下方）。
+4. UserDefaults / 默认备份 dump 中无任何 credential 明文。
+5. refute(opus) 本轮无发现。
+6. 无全局拦截触发。
+7. 无非预期视觉回归：受影响屏幕快照 vs baseline 差异为空，或全部为 intended-and-approved（见 Visual Protection）。
+
+## 前置强制步骤（在任何 phase 开始前执行）
+
+### A. Pre-start hygiene
+开跑前把工作区未提交改动（当前为 iosApp/iosApp/AppShell.swift、.claude/settings.local.json）commit 或 stash，从干净状态起步。否则 BLOCK。
+
+### B. TestFlight Assumption Gate
+- 查询：当前 branch 是否已发布到 TestFlight / 有真实用户？
+- 此 gate 不可跳过、不可自报、不可默认假设 pre-release。必须由 verify(sonnet) 用 git log / CI / TestFlight 提交记录给出实证后才能判定；无实证则 BLOCK 在此 gate，不得进入 P0。
+- 判定 = TestFlight / 有用户 → 先执行 P2.hotfix（仅最小凭据修复，不动其他逻辑），前置到 P1 之前，再回 phase 序列。
+- 判定 = pre-release → 直接从 P0 开始。
+
+## North Star
+关闭 iOS 高级能力缺口；P0 release-blockers 优先，再补宽度。以 truth_matrix 变绿为目标，不以"完成步骤"为目标。**已有功能与视觉一律不得被这次重构改坏。**
+
+## Phase 序列（outer loop：每 phase 必过 entry_gate 才可进入；gate 由 verify(sonnet) 实证）
+P0 baseline+red-lights+visual-baseline → P0.5 vertical_slice(DeepRead+Claude, 产出 SLICE_TEMPLATE.md) → P1 protected_main_merge → P2 credentials → P3 unified_provider_resolution → P4 close_three_entries → P5 interruptible_runtime → P6 capability_width → P7 native_and_release
+START: P0。
+
+## P0 成功标准（criteria，非步骤）
+以下 9 条白盒测试（非 live-key）必须先 RED 后 GREEN，缺任何一条 = FAIL：
+- test_deepread_claudeSelected_constructsClaudeSetting
+- test_deepread_allStagesThrow_statusFailed
+- test_deepread_stageEmpty_notMarkedReady
+- test_deepread_searchFailure_isSourceFailure
+- test_subagent_standalone_usesEnginePath
+- test_council_claudeSelected_constructsClaudeSetting
+- test_settings_encode_containsNoCredential
+- test_backup_default_containsNoCredential
+- test_recovery_killMidStream_runInterruptedOrResumed
+
+RED-first 强制：写任何修复代码之前，这 9 条必须先以 RED 落地，且该 RED 由 scout(haiku) 跑出真实失败输出、refute(opus) 确认"非 live-smoke / 非未配 key 而 skip"。未经 refute 确认的 RED 不算 RED。先实现后补测试 = fake-green = BLOCK。
+P0 额外交付：建立**视觉基线**（见 Visual Protection），锁定清单生效。
+P0 discovery loop：对 truth_matrix P0_block 盘点，loop-until-dry（连续 2 轮无新增红格才算 dry）。
+
+## Visual Protection（视觉不回归 —— 与逻辑 gate 同等强制）
+- baseline（P0 建立）：关键屏幕快照存为基线 —— 聊天(Liquid Glass)、Appearance/主题、Board、Council、Provider 列表。机制：swift-snapshot-testing 或模拟器截图（非 live-key 依赖）。
+- locked_visual_files：
+  - HARD-LOCK（禁止修改；本 goal 无任何红格涉及它们 → 出现任何 diff 即 refute BLOCK）：
+    iosApp/iosApp/ChatView.swift、iosApp/iosApp/PlaceholderViews.swift、iosApp/iosApp/AppearanceSettingsView.swift
+  - VISUAL-GUARDED（可因逻辑改动，但任何 diff 必须对受影响屏幕做 baseline 快照比对）：
+    iosApp/iosApp/BoardView.swift(Deep Read)、iosApp/iosApp/CouncilChatRuntimeView.swift(Council)、iosApp/iosApp/AppShell.swift(导航/chrome)
+- 唯一允许的预期视觉变化：P4 的 Deep Read/Council 失败态(failed/partial)展示 + interim_safeguard 的禁用/提示；改动中必须显式标注 intended 并经人工确认。其余一切视觉差异视为回归。
+
+## Interim Safeguard（P0→P4 期间持续生效，针对已发布构建；P4 EXIT 才可移除）
+Deep Read / Council 遇非 OpenAI-compatible provider → 必须显式禁用或提示用户，绝不静默打 /chat/completions。P4 之前移除此防护 = BLOCK。
+
+## Locked Decisions（反过度工程化，runner 与所有 subagent 必须遵守，违反任一 = 立即全局 STOP）
+- 禁止引入 ProviderExecutionContext；复用 chat 已有的 ProviderSetting 解析路径。
+- 禁止添加 capability 字段；只透传 (provider, model, params)。
+- Credentials 用 iOS-only 方案 B（encode 前剥离 credentials + Keychain 边表）；禁止改动共享 ProviderSetting；credentialRef 跨端统一不在 P0 范围。
+
+## 验证协议（每个 phase EXIT 强制执行；自报永不通过）
+scout(haiku)  → 采集绑定测试的真实运行结果 + 改动点真实代码，不下判断。
+verify(sonnet) → 逐条比对 7-criterion DoD vs 真实状态，判 PASS/FAIL；若改动 VISUAL-GUARDED 文件，必须附受影响屏幕的 baseline 快照比对。
+refute(opus)  → 对抗找反证：测试 fake-green（mock 掩盖真实路径）/ 修在错路径 / 双路径仍漏 / live-smoke 未配 key 被 skip / HARD-LOCK 视觉文件出现 diff / VISUAL-GUARDED 出现非 intended 视觉变化。
+pass_rule：仅当 refute 无反证 → PASS；否则 BLOCK，反证回灌 inner loop。
+model_tiering: scout=haiku, verify=sonnet, refute=opus。
+
+## Loop 策略
+- inner（每 phase 内）：while EXIT 未全绿 { 实现 → 跑 gate → red? 诊断+修 : 进 verify }；max_iterations=4，达到仍未过 = ESCALATE（停止自主循环，报卡点 + truth_matrix 快照，等人工）。
+- outer：phase-by-phase，每 phase 过 entry_gate 才推进，每 phase 为一 rollback 点。
+- discovery（仅 P0）：loop-until-dry，见上文。
+
+## 全局 STOP 条件（命中任一 → 立即停整条 goal，输出触发原因 + 当前 truth_matrix 快照，等人工）
+- truth_matrix 任意已绿格回退为 red（回归）。
+- 任意红灯测试被删除 / 加 @skip / env-gate 绕过 / 弱化断言。
+- UserDefaults 或默认备份 dump 中发现明文 credential。
+- inner_loop 达 max_iterations=4 仍未过 gate。
+- locked_decision_violation（见 Locked Decisions）。
+- visual_regression：关键屏幕快照 vs baseline 出现非预期差异（HARD-LOCK 文件任何 diff，或 VISUAL-GUARDED 文件改动导致受影响屏幕非 intended 视觉变化）。
+
+## Entry Gates（每 phase 进入前必过，由 verify(sonnet) 实证）
+- P0: Pre-start hygiene 已完成；TestFlight assumption 已实证确认。
+- P0.5: P0 EXIT 全绿（9 条红灯经 refute 确认为 RED；视觉基线已建；discovery loop 已 dry）。
+- P1: P0.5 EXIT 全绿（deepread 行 entry_real/provider_real/exec_real/honest_fail/secure_store 五格绿，对应红灯 RED→GREEN，SLICE_TEMPLATE.md 已产出，且未触碰任何 HARD-LOCK 视觉文件）。
+- P2: P1 EXIT 全绿（integration/ios-main-convergence 非 squash merge 完成；iOS build + KMP framework 链接通过；AmberNative.xcframework 已重建且无 src 提交晚于 xcframework；P0 红灯全部存活未被冲突弱化；merge 后视觉基线快照无回退）。
+- P3: P2 EXIT 全绿（两条 credential 测试 RED→GREEN；UserDefaults dump 无明文凭据；secure_store 列全行绿）。
+- P4: P3 EXIT 全绿（全仓 grep 不到重建式 OpenAI ProviderSetting；provider_real 列在 [deepread, council, subagent_standalone] 绿；OpenAI×Claude 验收矩阵每格有测试）。
+- P5: P4 EXIT 全绿（三入口达 DoD；honest_fail/persist 列在三行绿；Deep Read/Council 新增失败态 UI 经视觉比对仅含 intended 差异；interim_safeguard 此时已可移除/替换）。
+- P6: P0_block 矩阵目标已达成（= DONE 主体）。
+- P7: P5 EXIT 全绿。
+
+## 执行入口
+1. Pre-start hygiene（commit/stash 未提交改动）→ 执行 TestFlight Assumption Gate（强制，verify 实证，不可跳过/默认）。
+2. 进 P0：建视觉基线 + RED-first 落 9 条红灯测试；inner loop 驱动直到 truth_matrix P0_block 全绿；P0 含 discovery loop-until-dry。
+3. 每个 phase EXIT 跑完整验证协议 scout→verify→refute（含视觉比对）；过 entry_gate 才推进下一 phase。
+4. DONE = P0_block 全绿 + 该 phase 7-criterion DoD 全满足；自报不算数。
