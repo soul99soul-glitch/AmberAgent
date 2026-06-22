@@ -216,29 +216,32 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertTrue(markdown.contains("ov"), "Completed retry must carry the model output.")
     }
 
-    /// P0 REGRESSION GUARD (GREEN now). Green target: stays green through P4.
+    /// GREEN guard for the search-failure source state (de-faked this change).
     /// Cell: deepread.honest_fail (search/source failure mapping).
     ///
-    /// NOTE: spec line 63 lists this among the P0 red-lights, but current iOS
-    /// code ALREADY maps search/scrape failures to a source-level marker
-    /// (BoardView.swift:580 `scrape_status = "failed"` + synthetic "搜索不可用"
-    /// source) and does NOT hard-fail the task. So this is a regression-guard
-    /// test (GREEN), locking the correct behavior so P4's state-machine changes
-    /// don't regress it. Recorded as a spec leniency deviation in PHASE_LOG.md.
-    ///
-    /// A search/scrape failure must be reflected as a SOURCE-level failure, not
-    /// a whole-pipeline failure — and the pipeline must still run over the
-    /// surviving sources. This test pins that contract.
+    /// A failed search must be recorded as a DISTINCT, machine-readable
+    /// source-failure state (scrape_status="failed"), not silently fed to the
+    /// model as factual content — and a single failed source must NOT hard-fail
+    /// the whole task when surviving sources exist. Previously this test passed
+    /// against a hand-built fixture via a title-substring fallback (the production
+    /// catch path wrote no marker); it now drives the production source builder
+    /// (IOSDeepReadSourceNormalizer.searchFailureSource, the same one BoardView's
+    /// catch path uses) and asserts the marker strictly.
     func test_deepread_searchFailure_isSourceFailure() async throws {
         let task = makeDeepReadTask()
         let store = IOSDeepReadStore(baseDirectory: makeTempDir())
-        // One good source + one source whose fetch failed (mirrors BoardView's
-        // synthetic "搜索不可用" / scrape_status="failed" source).
-        var failedSource = IOSDeepReadSource(
-            kind: .searchResult, title: "搜索不可用：query",
-            content: "搜索来源未能读取：network error"
+        // Build the failed-search source exactly the way production does (the
+        // catch path in createDeepReadTask), not a hand-rolled fixture.
+        let failedSource = try IOSDeepReadSourceNormalizer.searchFailureSource(
+            query: "query",
+            error: "network error"
         )
-        failedSource.metadata["scrape_status"] = "failed"
+        // The production builder must stamp the machine-readable failure marker.
+        XCTAssertEqual(
+            failedSource.metadata["scrape_status"],
+            "failed",
+            "A failed search must produce a source carrying scrape_status=failed."
+        )
         let goodSource = task.sources[0]
         let running = try store.createTask(
             title: task.title,
@@ -256,22 +259,19 @@ final class IOSParityRedLightTests: XCTestCase {
         store.complete(id: running.id, markdown: draft)
         let final = store.task(id: running.id)
 
-        // Parity target A: the failed source must carry a source-level marker.
-        let hasSourceFailureMarker = (final?.sources ?? []).contains { source in
-            source.metadata["scrape_status"] == "failed"
-                || source.title.contains("搜索不可用")
-                || source.title.contains("未能读取")
-        }
-        XCTAssertTrue(
-            hasSourceFailureMarker,
-            "A search/scrape failure must be recorded as a source-level marker, not lost. (P4)"
+        // Parity target A: the marker must survive into the persisted task —
+        // asserted STRICTLY via metadata (no title-substring fallback).
+        let persistedFailure = (final?.sources ?? []).first { $0.metadata["scrape_status"] == "failed" }
+        XCTAssertNotNil(
+            persistedFailure,
+            "The failed-search source-level marker must survive into the persisted task."
         )
         // Parity target B: the task must NOT be hard-failed solely because a
         // source failed to fetch (it should run over surviving sources).
         XCTAssertNotEqual(
             final?.status,
             IOSDeepReadTaskStatus.failed,
-            "A source-level search failure must not fail the whole task when surviving sources exist. (P4)"
+            "A source-level search failure must not fail the whole task when surviving sources exist."
         )
     }
 

@@ -2075,6 +2075,23 @@ enum IOSDeepReadSourceNormalizer {
         )
     }
 
+    /// A synthetic source representing a FAILED search — a distinct,
+    /// machine-readable source-failure state (`scrape_status="failed"`, matching
+    /// the scrape-enrichment convention) so a failed search is not silently
+    /// indistinguishable from real manual content. The Deep Read source-collection
+    /// catch path and its test both build the failed source via this, so the
+    /// marker is exercised end-to-end (closes the deepread search-failure fake-green:
+    /// the generator excludes scrape_status=failed sources from the factual block).
+    static func searchFailureSource(query: String, error: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) throws -> IOSDeepReadSource {
+        var source = try manualText(
+            title: "搜索不可用：\(query)",
+            text: "搜索来源未能读取：\(error)",
+            now: now
+        )
+        source.metadata["scrape_status"] = "failed"
+        return source
+    }
+
     static func searchSources(query: String, results: [IOSSearchResult], now: Int64 = IOSBoardSignalRepository.currentEpochMs()) throws -> [IOSDeepReadSource] {
         let cleanQuery = clean(query)
         let sources = results.enumerated().compactMap { index, result -> IOSDeepReadSource? in
@@ -2929,9 +2946,15 @@ enum IOSDeepReadDraftGenerator {
         provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
         now: Date = Date()
     ) async -> GenerationResult {
-        let sourcesBlock = task.sources.enumerated().map { index, source in
-            "[\(index + 1)] \(source.kind.title)｜\(source.title)\n\(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(1200))"
-        }.joined(separator: "\n\n")
+        // Exclude failed-search sources (scrape_status=failed) from the factual
+        // block: their "content" is just an error message, so feeding it to the
+        // model as a source would be dishonest. The marker makes the failure a
+        // real source-failure state, not silent noise.
+        let sourcesBlock = task.sources
+            .filter { $0.metadata["scrape_status"] != "failed" }
+            .enumerated().map { index, source in
+                "[\(index + 1)] \(source.kind.title)｜\(source.title)\n\(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(1200))"
+            }.joined(separator: "\n\n")
 
         var sections: [String] = []
         var threwCount = 0

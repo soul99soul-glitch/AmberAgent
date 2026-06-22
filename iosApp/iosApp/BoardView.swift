@@ -453,9 +453,13 @@ struct BoardView: View {
                         results: execution.results
                     ))
                 } catch {
-                    sources.append(try IOSDeepReadSourceNormalizer.manualText(
-                        title: "搜索不可用：\(searchQuery)",
-                        text: "搜索来源未能读取：\(error.localizedDescription)"
+                    // Record the failed search as a distinct, machine-readable
+                    // source-failure state (scrape_status=failed) instead of a
+                    // plain manual source — so it is not silently fed to the model
+                    // as factual content (the generator excludes it).
+                    sources.append(try IOSDeepReadSourceNormalizer.searchFailureSource(
+                        query: searchQuery,
+                        error: error.localizedDescription
                     ))
                 }
             }
