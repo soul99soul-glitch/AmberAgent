@@ -31,17 +31,13 @@ struct SubAgentsView: View {
     /// tools (independent run), so `parentToolExecutors` is empty.
     @MainActor
     private func runStandaloneViaEngine(objective: String, roleId: String) async -> String {
-        let settingsStore = SettingsStore()
-        let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let modelId = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Resolve the selected provider (honor sealed type) — mirrors DeepRead/
-        // council resolvers. Falls back to a legacy OpenAI-shaped setting from
-        // baseUrl+apiKey when no selected provider is available, preserving the
-        // pre-P4 behavior for unconfigured-provider cases (honest degradation).
-        let registry = ProviderRegistryStore(settingsStore: settingsStore)
-        let resolved = IOSDeepReadDraftGenerator.resolveProviderSetting(selected: registry.selectedProvider)
-            ?? IOSCouncilRoomRunner.makeProviderSetting(baseUrl: settingsStore.baseUrl, apiKey: apiKey)
-        guard !apiKey.isEmpty, !modelId.isEmpty else {
+        // Resolve the provider + model from the shared settings store — the same
+        // canonical source the formal Provider UI writes and chat reads — so a
+        // provider configured in Settings is honored here. Fixes the dual-source
+        // bug: the legacy ProviderRegistryStore returned a key-LESS provider and
+        // ignored the selected model. Honest degradation when nothing usable.
+        let modelId = sharedSettings.resolveCurrentModelId()
+        guard let resolved = sharedSettings.resolveCurrentProviderSetting(), !modelId.isEmpty else {
             return "SubAgent 不可用：请先配置服务商 API Key 与模型。"
         }
         return await runner.runViaEngine(

@@ -561,6 +561,25 @@ final class IOSSharedSettingsStore {
         return provider
     }
 
+    /// Execution-path provider resolution that mirrors chat (the canonical store
+    /// the formal Provider UI writes and chat reads): resolves the current chat
+    /// model's provider — a full `ProviderSetting` with the real apiKey
+    /// (rehydrated from the Keychain side-table) and the user's selected sealed
+    /// type. Agent surfaces (SubAgent / Council / Board) should call this instead
+    /// of the legacy `ProviderRegistryStore`, which returns a key-LESS provider
+    /// and ignores the selected model (the dual-source bug). Returns nil when no
+    /// usable current model/provider is configured.
+    func resolveCurrentProviderSetting() -> ProviderSetting? {
+        guard let model = snapshot.getCurrentChatModel() else { return nil }
+        return model.findProvider(providers: snapshot.providers, checkOverwrite: true)
+    }
+
+    /// The wire model id of the current chat model (e.g. "gpt-4o"), or "" when
+    /// none is selected. Pairs with `resolveCurrentProviderSetting()`.
+    func resolveCurrentModelId() -> String {
+        snapshot.getCurrentChatModel()?.modelId ?? ""
+    }
+
     func syncLegacySettingsStoreForCurrentChat(_ settingsStore: SettingsStore) {
         guard let model = snapshot.getCurrentChatModel(),
               let provider = model.findProvider(providers: snapshot.providers, checkOverwrite: true) else {

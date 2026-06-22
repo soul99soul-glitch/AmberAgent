@@ -1064,12 +1064,15 @@ final class CouncilChatViewModel {
             mode: selectedMode.runMode,
             settings: roomSettingsStore.settings,
             currentModelId: currentModelId,
-            providerSetting: IOSCouncilRoomRunner.resolveProviderSetting(
-                selected: providerRegistry?.selectedProvider
-            ) ?? IOSCouncilRoomRunner.makeProviderSetting(
-                baseUrl: settingsStore.baseUrl,
-                apiKey: settingsStore.currentApiKey
-            ),
+            // Resolve from the shared settings store (canonical: formal Provider
+            // UI writes it, chat reads it) so a provider configured in Settings
+            // is honored — not the legacy ProviderRegistryStore (key-less +
+            // ignores the selected model). Legacy fallback when nothing usable.
+            providerSetting: sharedSettings.resolveCurrentProviderSetting()
+                ?? IOSCouncilRoomRunner.makeProviderSetting(
+                    baseUrl: settingsStore.baseUrl,
+                    apiKey: settingsStore.currentApiKey
+                ),
             searchSettings: sharedSettings.snapshot,
             researchConsent: sharedSettings.snapshot.enableWebSearch
                 ? (researchAllowed ? .allowed : .denied)

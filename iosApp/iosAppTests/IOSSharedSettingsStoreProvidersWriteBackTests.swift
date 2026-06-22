@@ -50,6 +50,31 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         )
     }
 
+    /// Dual-source fix: resolveCurrentProviderSetting() must surface the provider
+    /// configured via the formal Settings store (mirroring chat's resolution), so
+    /// agent surfaces (SubAgent / Council / Board) no longer resolve via the
+    /// legacy key-less ProviderRegistryStore and thus honor a provider the user
+    /// configured in Settings.
+    func testResolveCurrentProviderSettingReturnsConfiguredProvider() throws {
+        let store = makeIsolatedStore()
+        store.addCustomModel(name: "解析模型", modelId: "resolver-model", providerName: "ResolverProvider")
+        let added = try XCTUnwrap(store.snapshot.providers.last as? ProviderSetting.OpenAI)
+        let model = try XCTUnwrap(added.models.first)
+        store.setCurrentChatModelId(model.id.description())
+
+        let resolved = store.resolveCurrentProviderSetting()
+        XCTAssertEqual(
+            resolved?.name,
+            "ResolverProvider",
+            "resolver must return the provider configured in the shared settings store, not the legacy registry"
+        )
+        XCTAssertEqual(
+            store.resolveCurrentModelId(),
+            "resolver-model",
+            "resolveCurrentModelId must return the selected model's wire id"
+        )
+    }
+
     func testAddedProviderSurvivesRestart() {
         let suiteName = "Slice4-Prov-\(UUID().uuidString)"
         let store1 = makeIsolatedStore(suiteName: suiteName)
