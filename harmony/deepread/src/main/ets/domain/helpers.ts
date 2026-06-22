@@ -55,3 +55,40 @@ export const withPhase = (
 ): DeepReadOutput => {
   return { ...o, generationPhase: phase, ...extra };
 };
+
+export const withInferredSectionStates = (o: DeepReadOutput): DeepReadOutput => {
+  // Android DeepReadModels.kt:115-141
+  // sectionStates 已填充 → no-op (同引用早返回)
+  if (Object.keys(o.sectionStates).length > 0) return o;
+
+  const legacyComplete = o.generationComplete;
+
+  // Android 用 isNotBlank() — 任意非空白内容即视为存在,而非长度阈值
+  const overviewReady = o.summary.trim().length > 0;
+  const narrativeReady =
+    (o.timeline?.filter(e => e.event.trim().length > 0).length ?? 0) >= 1 ||
+    (o.corePoints?.filter(p => p.point.trim().length > 0).length ?? 0) >= 1;
+  const analysisReady =
+    (o.analysis.coreDispute?.trim().length ?? 0) > 0 ||
+    (o.analysis.implications?.trim().length ?? 0) > 0 ||
+    o.analysis.perspectives.some(p => p.viewpoint.trim().length > 0) ||
+    o.analysis.quotes.some(q => q.text.trim().length > 0);
+  const readingReady = o.extendedReading.length > 0 || o.references.length > 0;
+
+  const stageReady: Record<DeepReadGenerationStage, boolean> = {
+    OVERVIEW: overviewReady,
+    NARRATIVE: narrativeReady,
+    ANALYSIS: analysisReady,
+    EXTENDED_READING: readingReady,
+  };
+  const states: Record<string, DeepReadSectionState> = {};
+  for (const s of STAGE_ORDER) {
+    if (legacyComplete || stageReady[s]) {
+      states[s] = { status: 'READY', errorMessage: null };
+    }
+  }
+
+  const merged: DeepReadOutput = { ...o, sectionStates: states };
+  const recomputedComplete = legacyComplete && sectionsReady(merged);
+  return { ...merged, generationComplete: recomputedComplete };
+};
