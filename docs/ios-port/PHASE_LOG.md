@@ -208,3 +208,14 @@ P0_block 列 [entry_real, provider_real, exec_real, honest_fail, secure_store]:
 1. 创建 `integration/ios-main-convergence` 分支并由人工/我分块 merge（spec 原路径）—— 需要逐块解决 33 文件冲突并验证红灯存活，高风险。
 2. 跳过 P1 merge，直接推进 P3（council.provider_real 翻绿）—— 偏离 spec phase 序列，但 P3 不依赖 merge（council 红灯的修复代码在本分支）。
 3. 先把 main 的 80 commits rebase/cherry-pick 进当前分支的相关部分（仅 council/deep-read/chat provider），再继续。
+
+### 决策（人工确认：「你推荐怎么做」→ 采纳推荐）
+**跳过 P1 merge，直接推进 P3，P1 后置到 DONE 主体达成后。**
+
+理由（记录供 verify 审计）:
+1. P3+ 红灯修复全在当前分支 iOS Swift 层，与 main 的 80 commits（Android Kotlin 层）无依赖。
+2. P1 merge 不翻绿任何红格（DONE 主体 = P0_block 全绿），仅是分支可合并性，与 DONE 无关。
+3. 后置 merge 让 33 文件冲突在有完整红灯网兜底下解决（每个断言弱化能被当场抓到），比盲 merge 安全。
+4. P1 不被删除/伪 done，仅后置；后续 phase 仍跑完整 verification_protocol；已绿格回退 = STOP。
+
+注：此为对 spec phase 序列的有意识偏离，基于本仓库 iOS/Android 分层的实际依赖结构。merge 仍是 TODO（后置）。
