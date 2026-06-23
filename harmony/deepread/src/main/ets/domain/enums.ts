@@ -66,6 +66,38 @@ export const OVERVIEW_SUMMARY_STORAGE_MAX_CHARS = 1_200;
 export const MAX_DIAGRAM_NODES = 6;
 export const MAX_LINEAR_DIAGRAM_EDGES = 5;
 export const MAX_RELATION_DIAGRAM_EDGES = 6;
+// 照搬 Android DeepReadSectionWriterTools.kt:24-31 图表字段上限
+export const DIAGRAM_TITLE_MAX_CHARS = 64;
+export const DIAGRAM_NODE_LABEL_MAX_CHARS = 34;
+export const DIAGRAM_NODE_NOTE_MAX_CHARS = 96;
+export const DIAGRAM_NODE_GROUP_MAX_CHARS = 40;
+export const DIAGRAM_EDGE_LABEL_MAX_CHARS = 42;
+
+// 照搬 Android DeepReadSectionWriterTools.kt 各 take() 上限
+export const TIMELINE_MAX = 8;
+export const CORE_POINTS_MAX = 8;
+export const PERSPECTIVES_MAX = 8;
+export const QUOTES_MAX = 6;
+export const IMAGE_ASSETS_MAX = 8;
+export const READING_LINKS_REF_MAX = 12;
+export const EXTENDED_READING_MAX = 10;
+export const KEY_ENTITIES_MAX = 12;
+// 照搬 Android 各 cleanText() 字段截断
+export const TOPIC_TYPE_MAX = 32;
+export const ENTITY_MAX_CHARS = 80;
+export const READING_LINK_TITLE_MAX = 160;
+export const READING_LINK_SOURCE_MAX = 80;
+export const TIMELINE_EVENT_MAX = 600;
+export const CORE_POINT_MAX = 280;
+export const CORE_SUPPORTING_MAX = 700;
+export const PERSPECTIVE_VIEWPOINT_MAX = 700;
+export const PERSPECTIVE_HOLDER_MAX = 120;
+export const QUOTE_TEXT_MAX = 420;
+export const QUOTE_ATTR_MAX = 160;
+export const ANALYSIS_DISPUTE_MAX = 1_000;
+export const ANALYSIS_IMPLICATIONS_MAX = 1_600;
+export const HERO_CAPTION_MAX = 180;
+export const HERO_REASON_MAX = 240;
 
 export const MAX_GENERATION_STEPS = 32;
 export const MAX_SUPERVISOR_PASSES = 2;
