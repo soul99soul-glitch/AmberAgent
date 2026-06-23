@@ -114,24 +114,12 @@ struct BoardView: View {
     }
 
     private var header: some View {
+        // Title centered on the full width via overlay so the trailing buttons
+        // (history + settings) don't offset it; subtitle removed per design.
         HStack {
             AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
                 dismiss()
             }
-
-            Spacer()
-
-            VStack(spacing: 2) {
-                Text("深度阅读")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AmberTheme.foreground)
-
-                Text("来源输入 · 历史 · 本地保存")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity)
 
             Spacer()
 
@@ -143,6 +131,11 @@ struct BoardView: View {
                     router.navigate(to: .boardSettings)
                 }
             }
+        }
+        .overlay {
+            Text("深度阅读")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(AmberTheme.foreground)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -1028,12 +1021,6 @@ private struct IOSHotTopicRow: View {
                     .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            Image(systemName: isBusy ? "clock.arrow.circlepath" : "sparkles")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(AmberTheme.accent)
-                .frame(width: 30, height: 30)
-                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
