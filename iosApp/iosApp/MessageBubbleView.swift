@@ -25,6 +25,7 @@ struct MessageBubbleView: View {
     @State private var editing: Bool = false
     @State private var editDraft: String = ""
     @State private var workspaceSaveAlert: WorkspaceSaveAlert?
+    @State private var toolDetailTarget: ToolDetailTarget?
 
     private var isUser: Bool {
         message.role == MessageRole.user
@@ -273,7 +274,10 @@ struct MessageBubbleView: View {
                     ChatGeneratedImageGrid(images: [image])
                 }
             } else if let tool = part as? UIMessagePart.Tool {
-                ChatToolTimeline(steps: [ChatToolStepModel(tool: tool)])
+                ChatToolTimeline(
+                    steps: [ChatToolStepModel(tool: tool)],
+                    onTapStep: { _ in toolDetailTarget = ToolDetailTarget(tool: tool) }
+                )
                 if tool.toolName == "generate_image" {
                     let images = tool.output.compactMap { $0 as? UIMessagePart.Image }
                     if !images.isEmpty {
@@ -281,6 +285,9 @@ struct MessageBubbleView: View {
                     }
                 }
             }
+        }
+        .sheet(item: $toolDetailTarget) { target in
+            ChatToolDetailSheet(tool: target.tool)
         }
     }
 

@@ -45,9 +45,7 @@ struct McpServersView: View {
         .sheet(item: $editingServer) { server in
             McpAddView(configStore: configStore, editingServer: server)
                 .presentationDetents([.fraction(0.82), .large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(26)
-                .presentationBackground(AmberTheme.glassStrong)
+                .presentationDragIndicator(.visible)
         }
     }
 

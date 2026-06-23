@@ -48,8 +48,6 @@ struct CouncilChatRuntimeView: View {
                 CouncilDiscussionDetailSheet(detail: detail)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
-                    .presentationCornerRadius(24)
-                    .presentationBackground(AmberTheme.glassStrong)
             case .members:
                 CouncilMembersSheet(
                     participants: viewModel.participants,
@@ -61,8 +59,6 @@ struct CouncilChatRuntimeView: View {
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .presentationCornerRadius(24)
-                .presentationBackground(AmberTheme.glassStrong)
             case .settings:
                 CouncilRoomSettingsSheet(
                     roomSettingsStore: viewModel.roomSettingsStore,
@@ -72,8 +68,6 @@ struct CouncilChatRuntimeView: View {
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-                .presentationCornerRadius(24)
-                .presentationBackground(AmberTheme.glassStrong)
             }
         }
         .alert("允许本轮主持人联网调研？", isPresented: $viewModel.isResearchConsentPresented) {

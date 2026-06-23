@@ -97,9 +97,7 @@ struct ChatView: View {
                 isModelSheetPresented = false
             }
             .presentationDetents([.fraction(0.72), .large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
-            .presentationBackground(AmberTheme.glassStrong)
+            .presentationDragIndicator(.visible)
         }
         .fileImporter(
             isPresented: $isImportingSelectedFile,
@@ -2428,7 +2426,7 @@ struct ChatToolTimeline: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(steps) { step in
-                let tappable = onTapStep != nil && step.isSubAgent
+                let tappable = onTapStep != nil
                 if tappable {
                     Button { onTapStep?(step) } label: { row(step, chevron: true) }
                         .buttonStyle(.plain)
