@@ -1,0 +1,19 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "arkOptions": {
+      "runtimeOS": "HarmonyOS"
+    }
+  },
+  "buildOptionSet": [
+    {
+      "name": "release",
+      "arkOptions": {
+        "obfuscation": { "ruleOptions": { "enable": false } }
+      }
+    }
+  ],
+  "targets": [
+    { "name": "default", "runtimeOS": "HarmonyOS" }
+  ]
+}

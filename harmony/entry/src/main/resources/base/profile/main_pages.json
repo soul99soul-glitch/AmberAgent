@@ -1,7 +1,5 @@
 {
   "src": [
-    "pages/Index",
-    "pages/DeepReadArticlePage",
-    "pages/HistoryPage"
+    "pages/Index"
   ]
 }

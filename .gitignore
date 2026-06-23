@@ -19,6 +19,14 @@ local.properties
 core/**/build/
 feature/**/build/
 
+# HarmonyOS build artifacts & deps
+harmony/**/build/
+harmony/**/oh_modules/
+harmony/**/.cxx/
+harmony/.hvigor/
+*.hap
+oh-package-lock.json5
+
 # Design handoff reference (large binaries; keep the .md/.css/.jsx specs tracked)
 /amberagent-handoff.zip
 docs/cloud-design/**/uploads/

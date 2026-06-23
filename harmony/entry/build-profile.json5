@@ -1,32 +1,15 @@
 {
   "apiType": "stageMode",
-  "buildOption": {
-    // ArkTS 严格模式(对应 deepread 约定:无 any / interface+factory / spread 不可变)
-    "arkOptions": {
-      "runtimeOS": "HarmonyOS"
-    }
-  },
+  "buildOption": {},
   "buildOptionSet": [
     {
       "name": "release",
       "arkOptions": {
-        "obfuscation": {
-          "ruleOptions": {
-            "enable": false
-          }
-        }
+        "obfuscation": { "ruleOptions": { "enable": false } }
       }
     }
   ],
-  // TODO(toolchain): targets 在 DevEco 打开后由 IDE 校正/补全(API 24)。
-  // 当前基于 HarmonyOS Stage 模型默认配置。
   "targets": [
-    {
-      "name": "default",
-      "runtimeOS": "HarmonyOS"
-    },
-    {
-      "name": "ohosTest"
-    }
+    { "name": "default", "runtimeOS": "HarmonyOS" }
   ]
 }

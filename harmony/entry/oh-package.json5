@@ -1,13 +1,8 @@
 {
   "name": "@amber/deepread-entry",
   "version": "0.0.1",
-  "description": "Deep Read HarmonyOS entry module (UIAbility + ArkUI pages)",
+  "description": "Deep Read HarmonyOS entry module",
   "main": "",
   "license": "Apache-2.0",
-  "dependencies": {
-    // 引入纯逻辑层(domain/agent/research)。
-    // 注意:deepread 当前是 npm-test 包(tsx),ArkTS 编译时需要确认其 ts 源可被 ArkTS 编译器接受
-    // (已在设计 §0.4 记录:纯逻辑层用 interface+factory、无 any,目标就是 ArkTS 兼容)。
-    "@amber/deepread-domain": "file:../deepread"
-  }
+  "dependencies": {}
 }
