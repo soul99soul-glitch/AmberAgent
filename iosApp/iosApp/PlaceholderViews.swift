@@ -603,8 +603,12 @@ struct ConversationsView: View {
         ZStack(alignment: .bottomTrailing) {
             AmberTheme.background.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+            // 用原生 List 承载整屏，会话行才能挂 .swipeActions(Apple Music 同款左右滑动)。
+            // 顶部 header/搜索/快捷区作为清空背景的 List 行铺在上面，玻璃风格不受影响:
+            // .scrollContentBackground(.hidden) + 每行 .listRowBackground(.clear) 让 List 自身
+            // 不画任何底色，保留 AmberTheme.background。
+            List {
+                Group {
                     header
                     searchField
                     shortcutStrip
@@ -612,15 +616,33 @@ struct ConversationsView: View {
                     // AmberSectionLabel bakes in 20pt of top padding.
                     AmberSectionLabel(text: "会话")
                         .padding(.top, -10)
-                    if filteredSummaries.isEmpty {
-                        emptyState
-                    } else {
-                        conversationList
-                    }
                 }
-                .padding(.bottom, 120)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+                if filteredSummaries.isEmpty {
+                    emptyState
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } else {
+                    conversationList
+                }
+
+                // 底部留白，避免最后一行被右下角悬浮「新建」按钮压住。
+                Color.clear
+                    .frame(height: 104)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .scrollIndicators(.hidden)
+            .environment(\.defaultMinListRowHeight, 0)
+            // 顶部原生 Liquid Glass 渐变模糊:滚动内容滑到顶端安全区时柔和虚化(iOS 26 系统效果)。
+            .scrollEdgeEffectStyle(.soft, for: .top)
 
             Button {
                 Task { @MainActor in
@@ -796,31 +818,32 @@ struct ConversationsView: View {
     }
 
     private var conversationList: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(filteredSummaries, id: \.id) { summary in
-                ConversationSummaryRow(
-                    summary: summary,
-                    isCurrent: conversationStore.currentConversation?.id == summary.id,
-                    onTap: {
-                        Task { @MainActor in
-                            await conversationStore.selectConversation(id: summary.id)
-                            router.navigate(to: .chat)
-                        }
-                    },
-                    onRename: {
-                        renameDraft = summary.title
-                        renamingConversationId = summary.id
-                    },
-                    onTogglePin: {
-                        Task { @MainActor in
-                            await conversationStore.togglePin(id: summary.id)
-                        }
-                    },
-                    onDelete: {
-                        deletingConversationId = summary.id
+        ForEach(filteredSummaries, id: \.id) { summary in
+            ConversationSummaryRow(
+                summary: summary,
+                isCurrent: conversationStore.currentConversation?.id == summary.id,
+                onTap: {
+                    Task { @MainActor in
+                        await conversationStore.selectConversation(id: summary.id)
+                        router.navigate(to: .chat)
                     }
-                )
-            }
+                },
+                onRename: {
+                    renameDraft = summary.title
+                    renamingConversationId = summary.id
+                },
+                onTogglePin: {
+                    Task { @MainActor in
+                        await conversationStore.togglePin(id: summary.id)
+                    }
+                },
+                onDelete: {
+                    deletingConversationId = summary.id
+                }
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         }
     }
 }
@@ -880,8 +903,28 @@ private struct ConversationSummaryRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("会话 \(summary.title.isEmpty ? "新对话" : summary.title)，\(summary.messageCount) 条消息\(summary.isPinned ? "，已置顶" : "")")
-        // contextMenu 在 LazyVStack 里可用（swipeActions 仅 List 支持，与玻璃风格背景冲突）。
-        // 长按行弹出：置顶 / 重命名 / 删除。
+        // 主操作:Apple Music 同款左右滑动(原生 List swipeActions，iOS 26 自带 Liquid Glass 渲染)。
+        // 右滑→删除(整行划到底即删) / 重命名;左滑→置顶切换。删除仍走二次确认弹窗，避免误删。
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            // 删除是危险动作:显式 .tint(.red) 强制红色，否则会继承 AppShell 的全局
+            // 强调色 tint(.swipeActions 的 destructive 默认色会被环境 tint 覆盖)。
+            Button(role: .destructive, action: onDelete) {
+                Label("删除", systemImage: "trash")
+            }
+            .tint(.red)
+            Button(action: onRename) {
+                Label("重命名", systemImage: "pencil")
+            }
+            .tint(AmberTheme.accentIndigo)
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button(action: onTogglePin) {
+                Label(summary.isPinned ? "取消置顶" : "置顶",
+                      systemImage: summary.isPinned ? "pin.slash" : "pin")
+            }
+            .tint(AmberTheme.accent)
+        }
+        // 次操作:保留长按上下文菜单(与 Apple Music 一致，两种入口并存)。
         .contextMenu {
             Button {
                 onTogglePin()

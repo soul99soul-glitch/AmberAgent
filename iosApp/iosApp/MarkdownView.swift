@@ -1,9 +1,35 @@
 import SwiftUI
 import Shared
 
+/// Visual treatment for rendered Markdown.
+/// - `.standard`: chat-grade defaults (system font, tight spacing).
+/// - `.magazine`: deep-read reader — serif body, generous line/paragraph
+///   rhythm, larger serif headings, accented pull-quotes.
+enum MarkdownStyle {
+    case standard
+    case magazine
+}
+
+private extension NodeType {
+    /// Block-level nodes get their own layout; everything else is inline content that
+    /// must be coalesced into a flowing Text (see `renderListItemContent`).
+    var isBlockLevel: Bool {
+        switch self {
+        case .paragraph, .heading, .blockquote, .codeBlock,
+             .listOrdered, .listUnordered, .listItem,
+             .table, .tableHead, .tableRow, .tableCell,
+             .horizontalRule, .htmlBlock, .mathBlock:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 struct MarkdownView: View {
     let markdown: String
     var displaySetting: DisplaySetting? = nil
+    var style: MarkdownStyle = .standard
 
     /// Cache the parsed AST to avoid re-parsing on every SwiftUI body evaluation.
     /// Only re-parses when `markdown` content changes.
@@ -49,7 +75,7 @@ struct MarkdownView: View {
 
     /// Renders block-level children in a VStack. Uses AnyView to avoid opaque-type-inference recursion.
     private func blockStack(_ nodes: [PackedAstNode], source: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: style == .magazine ? 16 : 8) {
             ForEach(nodes) { node in
                 renderBlock(node, source: source)
             }
@@ -61,10 +87,21 @@ struct MarkdownView: View {
         switch node.type {
         case .paragraph:
             let t = buildInlineText(node.children, source: source)
+            if style == .magazine {
+                return AnyView(
+                    t.font(.system(size: 17, design: .serif))
+                        .lineSpacing(7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                )
+            }
             return AnyView(t)
 
         case .heading:
             let t = renderHeading(node, source: source)
+            if style == .magazine {
+                // Extra air above headings establishes the magazine section rhythm.
+                return AnyView(t.padding(.top, 10).frame(maxWidth: .infinity, alignment: .leading))
+            }
             return AnyView(t)
 
         case .codeBlock:
@@ -99,10 +136,13 @@ struct MarkdownView: View {
 
     private func renderHeading(_ node: PackedAstNode, source: String) -> Text {
         let level = node.headingLevel() ?? 1
-        let sizes: [CGFloat] = [28, 24, 20, 18, 16, 14]
+        let sizes: [CGFloat] = style == .magazine
+            ? [30, 23, 19, 17, 16, 15]
+            : [28, 24, 20, 18, 16, 14]
         let size = sizes[max(0, min(5, level - 1))]
+        let design: Font.Design = style == .magazine ? .serif : .default
         return buildInlineText(node.children, source: source)
-            .font(.system(size: size, weight: .bold))
+            .font(.system(size: size, weight: .bold, design: design))
     }
 
     // MARK: - Code Block
@@ -159,17 +199,26 @@ struct MarkdownView: View {
     // MARK: - Blockquote
 
     private func renderBlockquote(_ node: PackedAstNode, source: String) -> some View {
-        HStack(spacing: 0) {
+        let isMagazine = style == .magazine
+        return HStack(spacing: 0) {
             RoundedRectangle(cornerRadius: 2)
-                .fill(Color.secondary.opacity(0.4))
-                .frame(width: 4)
+                .fill(isMagazine ? AmberTheme.accent.opacity(0.55) : Color.secondary.opacity(0.4))
+                .frame(width: isMagazine ? 3 : 4)
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(node.children) { child in
                     renderBlock(child, source: source)
                 }
             }
-            .padding(.leading, 12)
+            .padding(.leading, isMagazine ? 16 : 12)
+            .padding(.vertical, isMagazine ? 6 : 0)
             .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, isMagazine ? 4 : 0)
+        .background {
+            if isMagazine {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(AmberTheme.accent.opacity(0.05))
+            }
         }
     }
 
@@ -198,21 +247,62 @@ struct MarkdownView: View {
     }
 
     private func renderListItemContent(_ node: PackedAstNode, source: String) -> AnyView {
-        let blockChildren = node.children.filter { $0.type != .taskListMarker }
-        if blockChildren.allSatisfy({ $0.type == .paragraph }) {
-            let inlineNodes = blockChildren.flatMap(\.children)
-            return AnyView(buildInlineText(inlineNodes, source: source))
-        } else if !blockChildren.isEmpty {
-            return AnyView(
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(blockChildren) { child in
-                        renderBlock(child, source: source)
+        let children = node.children.filter { $0.type != .taskListMarker }
+        // Loose item (all paragraphs) → flatten every paragraph's inline runs into one
+        // flowing Text.
+        if !children.isEmpty, children.allSatisfy({ $0.type == .paragraph }) {
+            return AnyView(buildInlineText(children.flatMap(\.children), source: source))
+        }
+        // Tight item: the parser puts inline content (text/strong/emphasis/link/breaks)
+        // DIRECTLY under the listItem with no paragraph wrapper. Rendering each inline
+        // node as its own block put every fragment — and each `[1]` / `**` token — on a
+        // separate line. Coalesce consecutive inline nodes into ONE flowing Text; keep
+        // genuine block children (nested lists, code) as their own blocks.
+        let segments = listItemSegments(children)
+        if segments.count == 1, case .inline(let nodes) = segments[0] {
+            return AnyView(buildInlineText(nodes, source: source))
+        }
+        return AnyView(
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                    switch segment {
+                    case .inline(let nodes):
+                        buildInlineText(nodes, source: source)
+                    case .block(let blockNode):
+                        renderBlock(blockNode, source: source)
                     }
                 }
-            )
-        } else {
-            return AnyView(buildInlineText(node.children, source: source))
+            }
+        )
+    }
+
+    private enum ListItemSegment {
+        case inline([PackedAstNode])
+        case block(PackedAstNode)
+    }
+
+    /// Split list-item children into consecutive inline runs and block nodes, so a run
+    /// of inline content renders as one flowing Text while genuine block children keep
+    /// their own layout.
+    private func listItemSegments(_ children: [PackedAstNode]) -> [ListItemSegment] {
+        var segments: [ListItemSegment] = []
+        var inlineRun: [PackedAstNode] = []
+        func flushInline() {
+            if !inlineRun.isEmpty {
+                segments.append(.inline(inlineRun))
+                inlineRun.removeAll()
+            }
         }
+        for child in children {
+            if child.type.isBlockLevel {
+                flushInline()
+                segments.append(.block(child))
+            } else {
+                inlineRun.append(child)
+            }
+        }
+        flushInline()
+        return segments
     }
 
     // MARK: - Inline Text Concatenation
@@ -220,13 +310,7 @@ struct MarkdownView: View {
     /// Build a SwiftUI `Text` by constructing an AttributedString from inline children.
     /// Avoids the deprecated `Text + Text` operator (deprecated in iOS 26).
     private func buildInlineText(_ nodes: [PackedAstNode], source: String) -> Text {
-        var attrStr = AttributedString()
-        for node in nodes {
-            if let part = renderInlineAttr(node, source: source) {
-                attrStr.append(part)
-            }
-        }
-        return Text(attrStr)
+        Text(buildInlineAttrString(nodes, source: source))
     }
 
     /// Render a single inline node into an AttributedString fragment.
@@ -238,16 +322,22 @@ struct MarkdownView: View {
             return AttributedString(raw)
 
         case .softBreak, .hardBreak:
-            return AttributedString("\n")
+            // Handled with neighbour context in buildInlineAttrString's loop so a soft
+            // break can collapse to a space (or nothing, between CJK) instead of a hard
+            // newline. Returning nil here keeps the default branch from slicing the raw
+            // "\n" back in.
+            return nil
 
         case .emphasis:
             var result = buildInlineAttrString(node.children, source: source)
-            result.font = .body.italic()
+            // Use a presentation intent (not an absolute font) so italic composes with
+            // the resolved base font — including the magazine serif and heading sizes.
+            result.inlinePresentationIntent = .emphasized
             return result
 
         case .strong:
             var result = buildInlineAttrString(node.children, source: source)
-            result.font = .body.bold()
+            result.inlinePresentationIntent = .stronglyEmphasized
             return result
 
         case .strikethrough:
@@ -285,15 +375,49 @@ struct MarkdownView: View {
         }
     }
 
-    /// Build a plain AttributedString by concatenating inline children (no style).
+    /// Build a plain AttributedString by concatenating inline children.
+    ///
+    /// Soft breaks (single newlines inside a paragraph) are NOT hard line breaks.
+    /// CommonMark renders them as a space; for CJK text a space mid-sentence reads
+    /// wrong, so we only insert a space when the preceding character is non-CJK and
+    /// join with nothing between CJK characters. This stops model-wrapped prose — and
+    /// inline citations like `[1]` — from being shattered onto one fragment per line.
     private func buildInlineAttrString(_ nodes: [PackedAstNode], source: String) -> AttributedString {
         var attrStr = AttributedString()
         for node in nodes {
-            if let part = renderInlineAttr(node, source: source) {
-                attrStr.append(part)
+            switch node.type {
+            case .softBreak:
+                if let last = attrStr.characters.last, !last.isWhitespace, !isCJK(last) {
+                    attrStr.append(AttributedString(" "))
+                }
+            case .hardBreak:
+                attrStr.append(AttributedString("\n"))
+            default:
+                if let part = renderInlineAttr(node, source: source) {
+                    attrStr.append(part)
+                }
             }
         }
         return attrStr
+    }
+
+    /// Whether a character belongs to a CJK script (or CJK/fullwidth punctuation), used
+    /// to decide that a soft break between such characters needs no joining space.
+    private func isCJK(_ c: Character) -> Bool {
+        for scalar in c.unicodeScalars {
+            switch scalar.value {
+            case 0x3000...0x303F,   // CJK symbols & punctuation
+                 0x3040...0x30FF,   // Hiragana + Katakana
+                 0x3400...0x4DBF,   // CJK Unified Ideographs Ext A
+                 0x4E00...0x9FFF,   // CJK Unified Ideographs
+                 0xF900...0xFAFF,   // CJK Compatibility Ideographs
+                 0xFF00...0xFFEF:   // Halfwidth & Fullwidth forms
+                return true
+            default:
+                continue
+            }
+        }
+        return false
     }
 
     // MARK: - Source Slicing

@@ -98,22 +98,41 @@ struct BoardView: View {
             }
             .presentationDetents([.large])
         }
-        .confirmationDialog(
-            topicActionTarget?.title ?? "",
-            isPresented: Binding(
-                get: { topicActionTarget != nil },
-                set: { if !$0 { topicActionTarget = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: topicActionTarget
-        ) { topic in
-            Button("深度阅读") { Task { await createDeepReadTask(topic: topic) } }
-            if let url = topic.sources.compactMap(\.url).first(where: { !$0.isEmpty }),
-               let parsed = URL(string: url) {
-                Button("打开原文") { openURL(parsed) }
+        // 榜单条目的操作改为从底部滑入的 Liquid Glass 面板(原生 confirmationDialog 在
+        // iOS 26 会渲染成居中灰卡、无下沉动效)。.sheet + 小尺寸 detent = 原生上滑动效。
+        .sheet(isPresented: Binding(
+            get: { topicActionTarget != nil },
+            set: { if !$0 { topicActionTarget = nil } }
+        )) {
+            if let topic = topicActionTarget {
+                let sourceURL = topic.sources
+                    .compactMap(\.url)
+                    .first(where: { !$0.isEmpty })
+                    .flatMap { URL(string: $0) }
+                let rowCount = 2 + (sourceURL != nil ? 1 : 0)
+                TopicActionSheet(
+                    title: topic.title,
+                    sourceURL: sourceURL,
+                    onDeepRead: {
+                        topicActionTarget = nil
+                        Task { await createDeepReadTask(topic: topic) }
+                    },
+                    onOpenSource: {
+                        if let sourceURL {
+                            topicActionTarget = nil
+                            openURL(sourceURL)
+                        }
+                    },
+                    onRegenerate: {
+                        topicActionTarget = nil
+                        Task { await createDeepReadTask(topic: topic) }
+                    }
+                )
+                .presentationDetents([.height(CGFloat(96 + rowCount * 64))])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.regularMaterial)
+                .presentationCornerRadius(30)
             }
-            Button("重新生成") { Task { await createDeepReadTask(topic: topic) } }
-            Button("取消", role: .cancel) {}
         }
         .fileImporter(
             isPresented: $isImportingDeepReadFile,
@@ -422,6 +441,10 @@ struct BoardView: View {
                 } else {
                     ForEach(Array(deepReadStore.history.prefix(20).enumerated()), id: \.element.id) { index, task in
                         Button {
+                            // 先收起历史 sheet，再在主导航栈上跳转到文章。两者是独立状态，
+                            // 文章已 push 到 sheet 之下，收起 sheet 即直接露出文章，避免
+                            // 「点了没反应、反复点」的错觉。
+                            showHistorySheet = false
                             router.navigate(to: .deepReadTask(id: task.id))
                         } label: {
                             IOSDeepReadHistoryRow(task: task)
@@ -490,12 +513,15 @@ struct BoardView: View {
         defer { isCreatingDeepRead = false }
 
         do {
+            // 先用基础来源建任务并「立刻」跳转到生成中页面,消除点击后数秒的等待;
+            // 网页抓取增强(enrichHotTopicSourcesWithScrape,逐源联网、耗时)挪到后台
+            // 任务里、生成之前进行(见 createAndGenerateTask 的 enrichHotTopic)。
             let baseSources = try IOSDeepReadSourceNormalizer.hotTopicSources(topic: topic)
-            let sources = await enrichHotTopicSourcesWithScrape(baseSources)
             try createAndGenerateTask(
                 title: topic.title,
-                sources: sources,
-                templateId: sharedSettings.todayBoard.deepReadTemplateId
+                sources: baseSources,
+                templateId: sharedSettings.todayBoard.deepReadTemplateId,
+                enrichHotTopic: true
             )
         } catch {
             deepReadMessage = error.localizedDescription
@@ -506,7 +532,8 @@ struct BoardView: View {
     private func createAndGenerateTask(
         title: String,
         sources: [IOSDeepReadSource],
-        templateId: String
+        templateId: String,
+        enrichHotTopic: Bool = false
     ) throws {
         let task = try deepReadStore.createTask(
             title: title,
@@ -521,6 +548,14 @@ struct BoardView: View {
         router.navigate(to: .deepReadTask(id: task.id))
 
         Task { @MainActor in
+            var running = running
+            if enrichHotTopic {
+                // 后台抓取网页正文增强来源(此前在导航前同步进行 → 点击后卡几秒)。
+                // 抓完写回任务来源(来源卡片会反映 scrape_status),再用于生成。
+                let enriched = await enrichHotTopicSourcesWithScrape(running.sources)
+                deepReadStore.replaceSources(id: task.id, sources: enriched)
+                running.sources = enriched
+            }
             // Real LLM pipeline when a provider/key is configured; deterministic
             // offline draft otherwise (honest degradation, no fabricated output).
             let output: String
@@ -1126,7 +1161,8 @@ struct IOSDeepReadTaskDetailView: View {
                         }
 
                         if let task {
-                            statusSection(task)
+                            actionRow(task)
+                            failureBanner(task)
                             resultSection(task)
                             sourcesSection(task)
                         } else {
@@ -1178,81 +1214,63 @@ struct IOSDeepReadTaskDetailView: View {
         .padding(.bottom, 10)
     }
 
-    private func statusSection(_ task: IOSDeepReadTask) -> some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "状态")
-            AmberFormGroup {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(task.status.title)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(statusTint(task.status))
-                        Spacer()
-                        Text(task.template.name)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AmberTheme.accent)
-                    }
-                    Text(task.sourceSummary.isEmpty ? "没有来源摘要" : task.sourceSummary)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let failure = task.failureMessage, !failure.isEmpty {
-                        Text(failure)
-                            .font(.footnote)
-                            .foregroundStyle(AmberTheme.accentAmber)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    HStack(spacing: 10) {
-                        Button {
-                            copyResult(task)
-                        } label: {
-                            Label("复制", systemImage: "doc.on.doc")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(task.resultMarkdown.isEmpty)
-
-                        Button {
-                            Task { await saveToChat(task) }
-                        } label: {
-                            Label("发回聊天", systemImage: "bubble.left.and.bubble.right")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(task.resultMarkdown.isEmpty)
-                    }
+    // 顶部「状态」卡片已移除(状态已在导航栏标题下显示)。完成后用一条贴右的玻璃胶囊
+    // 行承载「复制 / 发回聊天」,失败时单独一条浅色横幅,正文则是全宽阅读面。
+    @ViewBuilder
+    private func actionRow(_ task: IOSDeepReadTask) -> some View {
+        if !task.resultMarkdown.isEmpty {
+            HStack(spacing: 10) {
+                Spacer(minLength: 0)
+                DeepReadActionChip(icon: "doc.on.doc", title: "复制", enabled: true) {
+                    copyResult(task)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                DeepReadActionChip(icon: "bubble.left.and.bubble.right", title: "发回聊天", enabled: true) {
+                    Task { await saveToChat(task) }
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 2)
+            .padding(.bottom, 6)
         }
     }
 
+    @ViewBuilder
+    private func failureBanner(_ task: IOSDeepReadTask) -> some View {
+        if let failure = task.failureMessage, !failure.isEmpty {
+            Text(failure)
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.accentAmber)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(AmberTheme.accentAmber.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+        }
+    }
+
+    @ViewBuilder
     private func resultSection(_ task: IOSDeepReadTask) -> some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "结果")
+        if task.resultMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // 生成中:杂志骨架放在浅色容器里。
             AmberFormGroup {
-                if task.resultMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(task.status == .running ? "正在生成结果…" : "还没有可显示结果。")
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                } else {
-                    if let html = customTemplateHTML(task) {
-                        IOSDeepReadTemplateWebView(html: html)
-                            .frame(minHeight: 560)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 10)
-                    } else {
-                        MarkdownView(markdown: task.resultMarkdown, displaySetting: sharedSettings?.displaySetting)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 12)
-                    }
-                }
+                DeepReadGeneratingPlaceholder(isRunning: task.status == .running)
             }
+        } else if let html = customTemplateHTML(task) {
+            IOSDeepReadTemplateWebView(html: html)
+                .frame(minHeight: 560)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        } else {
+            // 完成:正文直接铺成全宽阅读面,不再套米色卡片(去掉「设置页」观感)。
+            MarkdownView(markdown: task.resultMarkdown, displaySetting: sharedSettings?.displaySetting, style: .magazine)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18)
+                .padding(.top, 2)
+                .padding(.bottom, 20)
         }
     }
 
@@ -1558,6 +1576,177 @@ private enum BoardSourceLabels {
         default:
             return sourceType
         }
+    }
+}
+
+// MARK: - 榜单条目操作面板(底部滑入)
+
+private struct TopicActionSheet: View {
+    let title: String
+    let sourceURL: URL?
+    let onDeepRead: () -> Void
+    let onOpenSource: () -> Void
+    let onRegenerate: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(AmberTheme.foreground)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.top, 26)
+                .padding(.bottom, 16)
+
+            VStack(spacing: 10) {
+                TopicActionRow(icon: "book.pages", title: "深度阅读", prominent: true, action: onDeepRead)
+                if sourceURL != nil {
+                    TopicActionRow(icon: "safari", title: "打开原文", action: onOpenSource)
+                }
+                TopicActionRow(icon: "arrow.clockwise", title: "重新生成", action: onRegenerate)
+            }
+            .padding(.horizontal, 16)
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct TopicActionRow: View {
+    let icon: String
+    let title: String
+    var prominent: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            rowLabel
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var rowLabel: some View {
+        let base = HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 22)
+            Text(title)
+                .font(.body.weight(.semibold))
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(prominent ? Color.white : AmberTheme.foreground)
+        .padding(.horizontal, 18)
+        .frame(height: 54)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+
+        if prominent {
+            base.amberProminentGlass(cornerRadius: 16, tint: AmberTheme.accent)
+        } else {
+            base.amberGlass(cornerRadius: 16)
+        }
+    }
+}
+
+// MARK: - 详情页:生成中骨架 + 玻璃操作胶囊
+
+private struct DeepReadActionChip: View {
+    let icon: String
+    let title: String
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(enabled ? AmberTheme.accent : AmberTheme.muted2)
+            .padding(.horizontal, 16)
+            .frame(height: 38)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .amberGlass(cornerRadius: 12)
+        .opacity(enabled ? 1 : 0.55)
+        .disabled(!enabled)
+    }
+}
+
+/// 生成过渡态:不是一块呆板的灰条,而是「一篇正在排版的杂志稿」的骨架 ——
+/// 报头标题 + 副标题 + 细分隔线 + 正文段落块 + 小节标题,配柔和脉冲,
+/// 让等待阶段也保有阅读器的精致感。
+private struct DeepReadGeneratingPlaceholder: View {
+    let isRunning: Bool
+    @State private var pulse = false
+
+    var body: some View {
+        if isRunning {
+            VStack(alignment: .leading, spacing: 0) {
+                // 报头:两行标题 + 副标题
+                bar(0.82, 24)
+                bar(0.54, 24).padding(.top, 9)
+                bar(0.36, 12).padding(.top, 15).opacity(0.7)
+
+                Rectangle()
+                    .fill(AmberTheme.surface2)
+                    .frame(height: 1)
+                    .opacity(0.85)
+                    .padding(.top, 16)
+
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(AmberTheme.accent)
+                    Text("正在生成阅读稿…")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.muted)
+                }
+                .padding(.top, 16)
+
+                paragraph([1.0, 1.0, 1.0, 0.62]).padding(.top, 18)
+                bar(0.3, 16).padding(.top, 22)            // 小节标题
+                paragraph([1.0, 1.0, 0.8, 0.46]).padding(.top, 14)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
+            }
+        } else {
+            Text("还没有可显示结果。")
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+        }
+    }
+
+    private func paragraph(_ widths: [CGFloat]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(widths.enumerated()), id: \.offset) { _, w in
+                bar(w, 13)
+            }
+        }
+    }
+
+    private func bar(_ widthFraction: CGFloat, _ height: CGFloat) -> some View {
+        GeometryReader { geo in
+            RoundedRectangle(cornerRadius: height >= 20 ? 7 : 4, style: .continuous)
+                .fill(AmberTheme.surface2)
+                .frame(width: geo.size.width * widthFraction)
+                .opacity(pulse ? 0.38 : 0.85)
+        }
+        .frame(height: height)
     }
 }
 

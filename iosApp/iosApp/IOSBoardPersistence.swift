@@ -2790,14 +2790,13 @@ enum IOSDeepReadDraftGenerator {
     static func generate(task: IOSDeepReadTask, now: Date = Date()) -> String {
         let template = task.template
         let sources = task.sources
-        let totalCharacters = sources.reduce(0) { $0 + $1.content.count }
         let date = IOSDeepReadDateFormatters.detail.string(from: now)
         let grouped = Dictionary(grouping: sources, by: \.kind)
 
         var lines: [String] = []
         lines.append("# \(task.title)")
         lines.append("")
-        lines.append("版式：\(template.name) · 来源：\(sources.count) 个 · 字符：\(totalCharacters) · \(date)")
+        lines.append(date)
         lines.append("")
         lines.append("## 摘要")
         lines.append(summary(from: sources))
@@ -3022,7 +3021,7 @@ enum IOSDeepReadDraftGenerator {
         sections.append("## 扩展阅读\n\(extended.text)")
 
         let date = IOSDeepReadDateFormatters.detail.string(from: now)
-        let header = "# \(task.title)\n\n版式：\(task.template.name) · 来源：\(task.sources.count) 个 · \(date)\n（由模型分阶段生成）\n"
+        let header = "# \(task.title)\n\n\(date)\n"
         let body = header + sections.joined(separator: "\n\n")
 
         // Honest failure: ALL 4 stages either threw or were empty. A single
