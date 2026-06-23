@@ -325,7 +325,12 @@ struct ProviderDetailView: View {
                     AmberFormGroup {
                         ForEach(Array(availableModels.enumerated()), id: \.offset) { index, model in
                             let enabledModel = chatModels.first { $0.modelId == model.modelId }
-                            let isCurrent = enabledModel?.id == currentModel?.id
+                            // Only "current" when the model is actually enabled AND is the
+                            // current one. Guard the nil==nil trap: an un-enabled model
+                            // (enabledModel == nil) with no current model (currentModel == nil)
+                            // would otherwise compare nil == nil → true, mislabel every row
+                            // "当前" and disable it, making models impossible to add.
+                            let isCurrent = enabledModel != nil && enabledModel?.id == currentModel?.id
                             Button {
                                 if let enabledModel {
                                     setCurrent(enabledModel)
@@ -334,9 +339,12 @@ struct ProviderDetailView: View {
                                 }
                             } label: {
                                 ProviderRowContent(
+                                    // Drop the duplicate ID line when the model has no
+                                    // custom display name (name == id) — the big title
+                                    // already shows it; printing it twice is pure clutter.
                                     title: displayName(for: model),
-                                    subtitle: model.modelId,
-                                    value: isCurrent ? "当前" : (enabledModel == nil ? "添加并使用" : "使用"),
+                                    subtitle: displayName(for: model) == model.modelId ? "" : model.modelId,
+                                    value: isCurrent ? "当前" : (enabledModel == nil ? "添加" : "使用"),
                                     valueStyle: isCurrent ? .body : .accent,
                                     showsChevron: false
                                 )
