@@ -90,6 +90,12 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         }
     }
 
+    // @Throws is REQUIRED for the Swift-facing suspend boundary: without it, a
+    // thrown exception (HTTP error, parse failure) is treated by Kotlin/Native as
+    // an UNHANDLED exception and aborts the whole process (SIGABRT) instead of
+    // bridging to Swift as a catchable error. The iOS deep-read / sub-agent paths
+    // call this via `try await`; the annotation lets their do/catch actually run.
+    @Throws(Throwable::class)
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,

@@ -31,6 +31,7 @@ class ProviderGetBalanceDefaultContractTest {
     private class NoBalanceProvider : Provider<ProviderSetting.OpenAI> {
         override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> = emptyList()
         // 故意不 override getBalance —— 测试默认实现
+        @Throws(Throwable::class)
         override suspend fun generateText(
             providerSetting: ProviderSetting.OpenAI,
             messages: List<UIMessage>,

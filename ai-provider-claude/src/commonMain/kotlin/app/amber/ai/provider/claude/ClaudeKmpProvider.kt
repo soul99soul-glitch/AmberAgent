@@ -109,6 +109,9 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
         error("Claude provider does not support image generation")
     }
 
+    // @Throws required for the Swift suspend boundary — see OpenAIKmpProvider.generateText:
+    // without it a thrown error aborts the process (SIGABRT) instead of bridging to Swift.
+    @Throws(Throwable::class)
     override suspend fun generateText(
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,

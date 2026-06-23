@@ -29,6 +29,10 @@ interface Provider<T : ProviderSetting> {
         )
     }
 
+    // @Throws is part of the contract: iOS calls this suspend function from Swift,
+    // where an exception not declared via @Throws aborts the process (SIGABRT)
+    // instead of bridging to a catchable Swift error. Overrides must match.
+    @Throws(Throwable::class)
     suspend fun generateText(
         providerSetting: T,
         messages: List<UIMessage>,
