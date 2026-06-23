@@ -29,6 +29,7 @@ struct BoardView: View {
     @State private var isImportingDeepReadFile = false
     @State private var showCustomSourceSheet = false
     @State private var showHistorySheet = false
+    @State private var topicActionTarget: IOSHotTopic?
     // Guards initial foreground refresh so returning to this page does not
     // restart the hotlist fetch loop.
     @State private var hasRestoredPersistedBoard = false
@@ -37,6 +38,7 @@ struct BoardView: View {
     @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(DocumentAccessStore.self) private var documentStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ZStack {
@@ -96,6 +98,23 @@ struct BoardView: View {
                 }
             }
             .presentationDetents([.large])
+        }
+        .confirmationDialog(
+            topicActionTarget?.title ?? "",
+            isPresented: Binding(
+                get: { topicActionTarget != nil },
+                set: { if !$0 { topicActionTarget = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: topicActionTarget
+        ) { topic in
+            Button("深度阅读") { Task { await createDeepReadTask(topic: topic) } }
+            if let url = topic.sources.compactMap(\.url).first(where: { !$0.isEmpty }),
+               let parsed = URL(string: url) {
+                Button("打开原文") { openURL(parsed) }
+            }
+            Button("重新生成") { Task { await createDeepReadTask(topic: topic) } }
+            Button("取消", role: .cancel) {}
         }
         .fileImporter(
             isPresented: $isImportingDeepReadFile,
@@ -225,12 +244,11 @@ struct BoardView: View {
                 } else {
                     ForEach(Array(hotListStore.dashboard.topics.prefix(20).enumerated()), id: \.element.id) { index, topic in
                         Button {
-                            Task { await createDeepReadTask(topic: topic) }
+                            topicActionTarget = topic
                         } label: {
                             IOSHotTopicRow(topic: topic, isBusy: isCreatingDeepRead)
                         }
                         .buttonStyle(.plain)
-                        .disabled(isCreatingDeepRead)
                         if index < min(hotListStore.dashboard.topics.count, 20) - 1 {
                             BoardCapabilityDivider()
                         }
@@ -251,12 +269,11 @@ struct BoardView: View {
                     } else {
                         ForEach(Array(provider.items.prefix(8).enumerated()), id: \.offset) { index, item in
                             Button {
-                                Task { await createDeepReadTask(topic: IOSHotListDashboardStore.topic(from: provider, item: item)) }
+                                topicActionTarget = IOSHotListDashboardStore.topic(from: provider, item: item)
                             } label: {
                                 IOSHotProviderItemRow(provider: provider, item: item)
                             }
                             .buttonStyle(.plain)
-                            .disabled(isCreatingDeepRead)
                             if index < min(provider.items.count, 8) - 1 {
                                 BoardCapabilityDivider()
                             }
@@ -499,6 +516,10 @@ struct BoardView: View {
         )
         deepReadStore.markRunning(id: task.id)
         guard let running = deepReadStore.task(id: task.id) else { return }
+        // Open the task page immediately so the user watches generation happen in
+        // real time, instead of silent background work that only pops the page
+        // open when it finishes.
+        router.navigate(to: .deepReadTask(id: task.id))
 
         Task { @MainActor in
             // Real LLM pipeline when a provider/key is configured; deterministic
@@ -533,7 +554,6 @@ struct BoardView: View {
                     self.deepReadStore.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
                     self.deepReadMessage = "深度阅读生成失败：\(reason)"
                     self.deepReadMessageIsError = true
-                    self.router.navigate(to: .deepReadTask(id: task.id))
                     return
                 case .completed(let markdown):
                     output = markdown
@@ -553,7 +573,6 @@ struct BoardView: View {
             self.deepReadMessage = "已生成并保存深度阅读。"
             self.deepReadMessageIsError = false
             self.deepReadTitle = ""
-            self.router.navigate(to: .deepReadTask(id: task.id))
         }
     }
 
