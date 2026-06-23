@@ -487,7 +487,7 @@ sealed class UIMessagePart {
         fun merge(other: Tool): Tool {
             return Tool(
                 toolCallId = toolCallId,
-                toolName = toolName + other.toolName,
+                toolName = mergeToolNames(toolName, other.toolName),
                 input = input + other.input,
                 output = output + other.output,
                 approvalState = approvalState,
@@ -500,6 +500,30 @@ sealed class UIMessagePart {
 
 fun UIMessagePart.Tool.streamToolIndex(): Int? =
     streamIndex ?: metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
+
+/**
+ * Combine the tool name of an existing streaming part with that of a [delta].
+ *
+ * The function name is a tool's identity, not an accumulating buffer, yet
+ * OpenAI-compatible gateways disagree on how they stream it:
+ *  - standard: the name appears once, then later deltas carry only arguments;
+ *  - re-send: the full name repeats on every chunk ("search" + "search");
+ *  - progressive: the name grows across chunks ("sea" + "search");
+ *  - fragmented: the name arrives in disjoint pieces ("sea" + "rch").
+ *
+ * Blind concatenation (the previous behaviour) turned a re-send into
+ * "searchsearch", corrupting the echoed tool name and — once it rode along in
+ * the continuation request — the gateway-side call. Combine so every variant
+ * collapses to the single intended name.
+ */
+private fun mergeToolNames(existing: String, delta: String): String = when {
+    delta.isEmpty() -> existing
+    existing.isEmpty() -> delta
+    existing == delta -> existing            // full re-send → no duplication
+    delta.startsWith(existing) -> delta      // progressive re-send ("sea" → "search")
+    existing.startsWith(delta) -> existing   // stale/shorter re-send of the same name
+    else -> existing + delta                 // genuine fragmentation ("sea" + "rch")
+}
 
 /**
  * Whether a streaming [delta] may be merged into this tool part. Two deltas
@@ -520,8 +544,14 @@ fun UIMessagePart.Tool.canMergeDelta(delta: UIMessagePart.Tool): Boolean {
     ) {
         return false
     }
+    // Names must not contradict. A re-sent or progressively-growing name shares a
+    // prefix with what we already have ("sea" → "search"); only treat them as
+    // different calls when neither name is a prefix of the other. Genuinely
+    // distinct parallel calls are already separated by the id check above (they
+    // always carry distinct non-blank ids), so this only guards the id-less path.
     if (toolName.isNotBlank() && delta.toolName.isNotBlank() &&
-        toolName != delta.toolName
+        toolName != delta.toolName &&
+        !toolName.startsWith(delta.toolName) && !delta.toolName.startsWith(toolName)
     ) {
         return false
     }

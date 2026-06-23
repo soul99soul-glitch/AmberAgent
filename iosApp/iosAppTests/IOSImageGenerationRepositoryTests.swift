@@ -1,6 +1,9 @@
 import XCTest
 @testable import iosApp
 
+// 生图重构后:独立的 IOSImageGenerationSettingsStore 已移除,apiKey/baseURL 由调用方
+// (从「辅助任务 → 生图模型」所属 provider 解析后)直接传入 generate(...)。本测试对齐
+// 当前 API:generate(request:apiKey:baseURL:transport:) 与 toolRequest(from:modelId:)。
 @MainActor
 final class IOSImageGenerationRepositoryTests: XCTestCase {
     private var generatedPaths: [String] = []
@@ -13,7 +16,6 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
     }
 
     func testGenerateSavesBase64ImagesAndHistory() async throws {
-        let settingsStore = makeSettingsStore(apiKey: "image-key", baseUrl: "https://api.example.com/v1")
         let history = isolatedHistory()
         let repository = IOSImageGenerationRepository(historyStore: history)
         let transport = MockImageTransport(responses: [
@@ -29,7 +31,8 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
                 style: "watercolor",
                 source: "test"
             ),
-            settingsStore: settingsStore,
+            apiKey: "image-key",
+            baseURL: "https://api.example.com/v1",
             transport: transport
         )
         generatedPaths = record.files.map(\.path)
@@ -49,7 +52,6 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
     }
 
     func testMissingAPIKeyFailsBeforeNetwork() async {
-        let settingsStore = makeSettingsStore(apiKey: "", baseUrl: "https://api.example.com/v1")
         let repository = IOSImageGenerationRepository(historyStore: isolatedHistory())
         let transport = MockImageTransport(responses: [])
 
@@ -63,7 +65,8 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
                     style: "",
                     source: "test"
                 ),
-                settingsStore: settingsStore,
+                apiKey: "",
+                baseURL: "https://api.example.com/v1",
                 transport: transport
             )
             XCTFail("Expected missing API key")
@@ -74,17 +77,13 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
     }
 
     func testToolRequestParsesAspectCountAndStyle() throws {
-        let suiteName = "ImageSettings-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        let settings = IOSImageGenerationSettingsStore(userDefaults: defaults, key: "settings")
-        settings.model = "gpt-image-test"
         let request = try IOSImageGenerationRepository(historyStore: isolatedHistory()).toolRequest(
             from: #"{"prompt":"City at night","aspect_ratio":"9:16","count":12,"style":"cinematic"}"#,
-            settings: settings
+            modelId: "gpt-image-test"
         )
 
         XCTAssertEqual(request.prompt, "City at night")
+        XCTAssertEqual(request.model, "gpt-image-test")
         XCTAssertEqual(request.aspectRatio, .portrait)
         XCTAssertEqual(request.count, 4)
         XCTAssertEqual(request.style, "cinematic")
@@ -112,19 +111,6 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
         XCTAssertTrue(text.contains("file:///tmp/image.png"))
     }
 
-    private func makeSettingsStore(apiKey: String, baseUrl: String) -> SettingsStore {
-        let suiteName = "ImageSettingsStore-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        let store = SettingsStore(
-            userDefaults: defaults,
-            storageKey: "settings",
-            apiKeyStore: FakeSettingsAPIKeyStore(key: apiKey)
-        )
-        store.baseUrl = baseUrl
-        return store
-    }
-
     private func isolatedHistory() -> IOSImageGenerationHistoryStore {
         let suiteName = "ImageHistory-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -134,23 +120,6 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
 
     private func jsonObject(_ data: Data) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-    }
-}
-
-private final class FakeSettingsAPIKeyStore: SettingsAPIKeyStore {
-    private var key: String
-
-    init(key: String) {
-        self.key = key
-    }
-
-    func loadApiKey() -> String? {
-        key
-    }
-
-    func saveApiKey(_ key: String) -> Bool {
-        self.key = key
-        return true
     }
 }
 

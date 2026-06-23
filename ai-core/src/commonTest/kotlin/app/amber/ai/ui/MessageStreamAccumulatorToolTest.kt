@@ -106,6 +106,40 @@ class MessageStreamAccumulatorToolTest {
     }
 
     @Test
+    fun resentToolNameAcrossChunksIsNotDuplicated() {
+        // Regression: some gateways re-send the full id + function name on every
+        // streaming chunk of one call. Blind concatenation produced
+        // "search_websearch_web", corrupting the echoed tool name and the name
+        // carried into the continuation request. The re-send must collapse back
+        // to the single name.
+        val acc = MessageStreamAccumulator(baseMessages(), model = null)
+
+        acc.append(chunk(tool(id = "call_1", name = "search_web", input = "", streamIndex = 0)))
+        acc.append(chunk(tool(id = "call_1", name = "search_web", input = """{"query":"x"}""", streamIndex = 0)))
+
+        val tools = acc.snapshot().last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(1, tools.size)
+        assertEquals("search_web", tools.single().toolName)
+        assertEquals("""{"query":"x"}""", tools.single().input)
+    }
+
+    @Test
+    fun progressivelyGrownToolNameMergesIntoOneCall() {
+        // Regression: some gateways stream the name as it grows ("search" then the
+        // full "search_web") under one id. The strict name guard split this into
+        // two tool parts; a shared prefix means the same call, so it must merge.
+        val acc = MessageStreamAccumulator(baseMessages(), model = null)
+
+        acc.append(chunk(tool(id = "call_1", name = "search", input = "", streamIndex = 0)))
+        acc.append(chunk(tool(id = "call_1", name = "search_web", input = """{"query":"x"}""", streamIndex = 0)))
+
+        val tools = acc.snapshot().last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(1, tools.size)
+        assertEquals("search_web", tools.single().toolName)
+        assertEquals("""{"query":"x"}""", tools.single().input)
+    }
+
+    @Test
     fun streamToolIndexPrefersFieldAndKeepsMetadataFallback() {
         val fieldTool = tool(id = "field", name = "x", input = "{}", streamIndex = 2).copy(
             metadata = buildJsonObject { put(STREAM_TOOL_INDEX_METADATA_KEY, 9) }
