@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 @preconcurrency import Shared
 
 // MARK: - ChatViewModel
@@ -18,6 +19,26 @@ struct ChatContextSnapshot {
     let totalTokens: Int
     let cachedTokens: Int
     let tokensPerSecond: Double?
+    /// 当前模型的真实上下文窗口(token)。模型未声明时为 nil。
+    let contextWindowTokens: Int?
+    /// 当前上下文实际占用(token):取最近一轮的 promptTokens + completionTokens。
+    /// 每轮的 promptTokens 已含到该轮为止的全部历史,所以这就是"现在窗口里有多少",
+    /// 用它驱动用量环 —— 不能用 totalTokens(那是逐轮累加和,会严重重复计数)。
+    let currentContextTokens: Int
+}
+
+extension ChatContextSnapshot {
+    /// 未声明上下文窗口的模型的默认兜底(token)。当下主流模型基本都 ≥100万,
+    /// 几乎不存在比 20万更小的,故用 20万作保守默认 —— 比旧的 8K 合理得多。
+    static let defaultContextWindowTokens: Double = 200_000
+
+    /// 上下文用量比例 [0,1],驱动用量环与上下文面板的填充。分子是"当前占用"
+    /// (currentContextTokens,非累加和);分母优先用模型真实 contextWindow,模型未声明
+    /// 窗口时回退到 defaultContextWindowTokens(20万)。
+    var contextFillFraction: CGFloat {
+        let ceiling = contextWindowTokens.flatMap { $0 > 0 ? Double($0) : nil } ?? Self.defaultContextWindowTokens
+        return min(CGFloat(Double(currentContextTokens) / ceiling), 1.0)
+    }
 }
 
 private struct PendingAssistantRegeneration {
@@ -35,6 +56,9 @@ final class ChatViewModel {
     var messages: [UIMessage] = []
     var inputText: String = ""
     var isLoading: Bool = false
+    /// 助手回复完成后用 suggestionModelId 生成的对话建议(输入框上方胶囊)。
+    /// 用户发送或切换会话时清空。
+    var chatSuggestions: [String] = []
     var isAttachingSelectedFile: Bool = false
     var pendingSelectedFilePreview: SelectedDocumentReadResult?
     var pendingImages: [PendingChatImage] = []
@@ -66,11 +90,14 @@ final class ChatViewModel {
         var cached = 0
         var timedCompletionTokens = 0
         var generationDuration = 0.0
+        // 最近一轮的占用(promptTokens 已含全部历史);遍历中后者覆盖前者,留下最后一条。
+        var latestContextTokens = 0
         for message in messages {
             guard let usage = message.usage else { continue }
             prompt += Int(usage.promptTokens)
             completion += Int(usage.completionTokens)
             cached += Int(usage.cachedTokens)
+            latestContextTokens = Int(usage.promptTokens) + Int(usage.completionTokens)
             if let duration = Self.durationSeconds(from: message.createdAt, to: message.finishedAt),
                duration > 0 {
                 timedCompletionTokens += Int(usage.completionTokens)
@@ -87,7 +114,9 @@ final class ChatViewModel {
             completionTokens: completion,
             totalTokens: prompt + completion,
             cachedTokens: cached,
-            tokensPerSecond: generationDuration > 0 ? Double(timedCompletionTokens) / generationDuration : nil
+            tokensPerSecond: generationDuration > 0 ? Double(timedCompletionTokens) / generationDuration : nil,
+            contextWindowTokens: currentModel?.contextWindowTokens.map { Int(truncating: $0) },
+            currentContextTokens: latestContextTokens
         )
     }
 
@@ -232,7 +261,13 @@ final class ChatViewModel {
                     self?.messageRevision &+= 1
                 },
                 setIsLoading: { [weak self] isLoading in
-                    self?.isLoading = isLoading
+                    guard let self else { return }
+                    let wasLoading = self.isLoading
+                    self.isLoading = isLoading
+                    // 生成由「运行中」转为「空闲」即视为本轮完成 → 触发标题/建议辅助生成。
+                    if wasLoading && !isLoading {
+                        self.onGenerationCompleted()
+                    }
                 },
                 setPendingMemoryApproval: { [weak self] request in
                     self?.pendingMemoryApproval = request
@@ -284,6 +319,7 @@ final class ChatViewModel {
         guard let store = conversationStore else { return }
         messages = store.currentMessages
         messageRevision &+= 1
+        chatSuggestions = []
     }
 
     /// 把当前 messages 落盘（节流：只在流式结束/取消/切换时调，不在每个 chunk 调）。
@@ -384,9 +420,14 @@ final class ChatViewModel {
         let digest = chatInputDigest(for: prompt.isEmpty ? "[image]" : prompt)
         let userMsg = makeUserMessage(prompt: prompt, images: images)
         pendingAssistantRegeneration = nil
-        messages.append(userMsg)
+        // iMessage 式上屏:仅把这条用户消息的插入放进动画事务,驱动消息行的入场 transition。
+        // 批量加载/切换会话走 `messages = store.currentMessages`(不在事务内),不会逐条动画。
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+            messages.append(userMsg)
+        }
         messageRevision &+= 1
         inputText = ""
+        chatSuggestions = []
         pendingSelectedFilePreview = nil
         clearPendingImages()
         selectedFileContextError = nil
@@ -491,6 +532,129 @@ final class ChatViewModel {
             }
         }
         return .success(results)
+    }
+
+    // MARK: - Auxiliary generation (title + chat suggestions)
+
+    /// 一轮生成完成后触发:总是尝试生成对话建议;首轮(仅 1 条用户消息)再生成标题。
+    /// 工具审批暂停期间(有 pending approval)不触发;最后一条非助手消息也不触发。
+    private func onGenerationCompleted() {
+        guard pendingMemoryApproval == nil, pendingSearchApproval == nil,
+              pendingWebMountApproval == nil, pendingWorkspaceApproval == nil,
+              pendingMcpApproval == nil else { return }
+        guard let last = messages.last, last.role == MessageRole.assistant,
+              !last.toText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        generateChatSuggestions()
+        let userMessageCount = messages.filter { $0.role == MessageRole.user }.count
+        if userMessageCount == 1 { generateConversationTitle() }
+    }
+
+    /// 辅助模型:优先用指定的辅助模型,未设置时回退当前聊天模型(对齐 Android resolveTaskChatModel)。
+    private func resolveAuxModel(_ auxId: KotlinUuid) -> Model? {
+        sharedSettings.snapshot.findModelById(uuid: auxId) ?? sharedSettings.snapshot.getCurrentChatModel()
+    }
+
+    /// 最近 [maxMessages] 条消息拼成带角色前缀的文本,填入提示词的 {content}。
+    private func auxConversationText(maxMessages: Int) -> String {
+        messages.suffix(maxMessages).compactMap { message -> String? in
+            let text = message.toText().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let role: String
+            switch message.role {
+            case MessageRole.user: role = "User"
+            case MessageRole.assistant: role = "Assistant"
+            default: role = "System"
+            }
+            return "\(role): \(text)"
+        }.joined(separator: "\n\n")
+    }
+
+    private func auxLocaleName() -> String {
+        Locale.current.localizedString(forIdentifier: Locale.current.identifier) ?? Locale.current.identifier
+    }
+
+    /// 用辅助模型跑一次单轮文本生成(OpenAIKmpProviderAdapter 内部按服务商类型分发 OpenAI/Claude)。
+    private func runAuxModel(model: Model, prompt: String) async -> String? {
+        guard let provider = ChatProviderConfiguration.provider(
+            for: model,
+            providers: sharedSettings.snapshot.providers
+        ) else { return nil }
+        let params = TextGenerationParams(
+            model: model,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: ReasoningLevel.off,
+            customHeaders: [],
+            customBody: []
+        )
+        do {
+            let chunk = try await OpenAIKmpProviderAdapter().generateText(
+                providerSetting: provider,
+                messages: [UIMessage.companion.user(prompt: prompt)],
+                params: params
+            )
+            return chunk.choices.first?.message?.toText().trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
+    }
+
+    private func generateConversationTitle() {
+        let snapshot = sharedSettings.snapshot
+        guard let model = resolveAuxModel(snapshot.titleModelId),
+              let conversationId = currentConversationId else { return }
+        let content = auxConversationText(maxMessages: 4)
+        guard !content.isEmpty else { return }
+        let prompt = snapshot.titlePrompt
+            .replacingOccurrences(of: "{locale}", with: auxLocaleName())
+            .replacingOccurrences(of: "{content}", with: content)
+        Task { [weak self] in
+            guard let self else { return }
+            guard let raw = await self.runAuxModel(model: model, prompt: prompt) else { return }
+            let title = Self.sanitizeTitle(raw)
+            guard !title.isEmpty else { return }
+            await self.conversationStore?.renameConversation(id: conversationId, title: title)
+        }
+    }
+
+    private func generateChatSuggestions() {
+        let snapshot = sharedSettings.snapshot
+        guard let model = resolveAuxModel(snapshot.suggestionModelId) else { return }
+        let content = auxConversationText(maxMessages: 8)
+        guard !content.isEmpty else { return }
+        let prompt = snapshot.suggestionPrompt
+            .replacingOccurrences(of: "{locale}", with: auxLocaleName())
+            .replacingOccurrences(of: "{content}", with: content)
+        let conversationId = currentConversationId
+        Task { [weak self] in
+            guard let self else { return }
+            guard let raw = await self.runAuxModel(model: model, prompt: prompt) else { return }
+            let suggestions = raw
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .prefix(5)
+            await MainActor.run {
+                // 仅当仍是同一会话且未在生成中时才应用,避免覆盖到新一轮。
+                guard self.currentConversationId == conversationId, !self.isGenerationActive else { return }
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                    self.chatSuggestions = Array(suggestions)
+                }
+            }
+        }
+    }
+
+    /// 清洗标题:取首行、去引号/首尾标点、限长。
+    private static func sanitizeTitle(_ raw: String) -> String {
+        var title = raw
+            .split(separator: "\n").first.map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”『』「」《》 "))
+        if title.count > 24 { title = String(title.prefix(24)) }
+        return title
     }
 
     private func makeImageOnlyUserMessage(dataUrl: String) -> UIMessage {
@@ -1188,7 +1352,18 @@ final class ChatViewModel {
         let modelId = currentModelId
         let modelAbilities = currentModelAbilities
         let searchEnabled = sharedSettings.snapshot.enableWebSearch
-        let imageGenerationConfigured = IOSImageGenerationSettingsStore.shared.configurationIssue(settingsStore: settingsStore) == nil
+        // 图片生成现在挂载在「指定的生图模型」上(辅助任务 → 生图模型 / imageGenerationModelId),
+        // 不再依赖独立的图片生成配置页。模型能解析到且其 provider 有有效 apiKey/baseURL 才挂工具。
+        let imageGenerationConfigured: Bool = {
+            let snap = sharedSettings.snapshot
+            guard let model = snap.findModelById(uuid: snap.imageGenerationModelId),
+                  let provider = ChatProviderConfiguration.provider(for: model, providers: snap.providers) else {
+                return false
+            }
+            let key = ChatProviderConfiguration.apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
+            let base = ChatProviderConfiguration.baseURL(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
+            return !key.isEmpty && !base.isEmpty
+        }()
         var builtInTools: [BuiltInTools] = []
         if searchEnabled { builtInTools.append(BuiltInTools.Search.shared) }
         if imageGenerationConfigured { builtInTools.append(BuiltInTools.ImageGeneration.shared) }
@@ -1384,7 +1559,7 @@ final class ChatViewModel {
         return "\(prefix)\n\n原始错误：\(truncatedError(raw))"
     }
 
-    private static func truncatedError(_ value: String, maxLength: Int = 260) -> String {
+    private static func truncatedError(_ value: String, maxLength: Int = 700) -> String {
         guard value.count > maxLength else { return value }
         return String(value.prefix(maxLength)) + "..."
     }

@@ -436,6 +436,14 @@ object IosSettingsMutations {
         return settings.copy(compressModelId = parsed)
     }
 
+    /// Designated image-generation model. Unlike the other aux slots, a blank/unresolved
+    /// id means "no image-generation model" (image generation is OFF) rather than falling
+    /// back to the chat model — a chat model can't serve /images/generations.
+    fun setImageGenerationModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(imageGenerationModelId = parsed)
+    }
+
     /**
      * Construct an OpenAI-compatible [ProviderSetting.OpenAI] with a single
      * model. This is what iOS "add custom model" maps to: a user-added model
@@ -723,6 +731,57 @@ object IosSettingsMutations {
     /** Enable or disable the built-in Bing HTML fallback source. */
     fun setSearchBuiltinBingEnabled(settings: Settings, enabled: Boolean): Settings {
         return settings.copy(searchBuiltinBingEnabled = enabled)
+    }
+
+    /** Enable or disable the built-in Jina Search / Reader source. */
+    fun setSearchBuiltinJinaEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinJinaEnabled = enabled)
+    }
+
+    /** Enable or disable the built-in Wikipedia source. */
+    fun setSearchBuiltinWikipediaEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinWikipediaEnabled = enabled)
+    }
+
+    /** Enable or disable the built-in Hacker News source. */
+    fun setSearchBuiltinHackerNewsEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinHackerNewsEnabled = enabled)
+    }
+
+    /** Enable or disable the Google WebView visible-search fallback. */
+    fun setSearchGoogleWebViewFallbackEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchGoogleWebViewFallbackEnabled = enabled)
+    }
+
+    /** Set the per-search max result count (clamped to 1..50, mirrors Android). */
+    fun setSearchResultSize(settings: Settings, size: Int): Settings {
+        val clamped = size.coerceIn(1, 50)
+        return settings.copy(
+            searchCommonOptions = settings.searchCommonOptions.copy(resultSize = clamped)
+        )
+    }
+
+    /**
+     * Reorder a configured search service from [fromIndex] to [toIndex] (priority
+     * is the list order, first = highest). Keeps the currently-selected service
+     * pointing at the same item after the move. Mirrors Android's drag-to-reorder.
+     */
+    fun moveSearchService(settings: Settings, fromIndex: Int, toIndex: Int): Settings {
+        val services = settings.searchServices.toMutableList()
+        if (fromIndex !in services.indices) return settings
+        val target = toIndex.coerceIn(0, services.lastIndex)
+        if (fromIndex == target) return settings
+        val selectedId = services.getOrNull(settings.searchServiceSelected)?.id
+        val moved = services.removeAt(fromIndex)
+        services.add(target, moved)
+        val newSelected = selectedId
+            ?.let { sid -> services.indexOfFirst { it.id == sid } }
+            ?.takeIf { it >= 0 }
+            ?: settings.searchServiceSelected.coerceIn(0, services.lastIndex)
+        return settings.copy(
+            searchServices = services,
+            searchServiceSelected = newSelected,
+        )
     }
 
     /**

@@ -48,7 +48,6 @@ struct MessageBubbleView: View {
                     }
                     .frame(maxWidth: ChatLayout.userMaxWidth, alignment: .trailing)
                 }
-                .contextMenu { messageActions }
                 .sheet(isPresented: $editing) {
                     editSheet
                 }
@@ -238,7 +237,20 @@ struct MessageBubbleView: View {
         ForEach(Array(message.parts.enumerated()), id: \.offset) { _, part in
             if let textPart = part as? UIMessagePart.Text, !textPart.text.isEmpty {
                 if isUser {
+                    // 气泡现在是内容尺寸(已移除其内部的 300pt 框),contextMenu 的高亮平台贴合气泡。
+                    // 再用 .contentShape(.contextMenuPreview, 气泡圆角) 把平台裁成气泡形状,消除灰角。
                     ChatUserBubble(text: textPart.text)
+                        .contentShape(
+                            .contextMenuPreview,
+                            UnevenRoundedRectangle(
+                                topLeadingRadius: 18,
+                                bottomLeadingRadius: 18,
+                                bottomTrailingRadius: 6,
+                                topTrailingRadius: 18,
+                                style: .continuous
+                            )
+                        )
+                        .contextMenu { messageActions }
                 } else {
                     ChatAssistantText {
                         ChatAssistantMarkdownView(markdown: textPart.text, displaySetting: displaySetting)
@@ -310,11 +322,11 @@ struct MessageBubbleView: View {
         return String(firstLine.prefix(80))
     }
 
-    private static func reasoningDurationSeconds(_ reasoning: UIMessagePart.Reasoning) -> Int? {
+    private static func reasoningDurationSeconds(_ reasoning: UIMessagePart.Reasoning) -> Double? {
         guard let end = reasoning.finishedAt else { return nil }
         let start = instantToDate(reasoning.createdAt)
         let endDate = instantToDate(end)
-        return max(0, Int(endDate.timeIntervalSince(start).rounded()))
+        return max(0, endDate.timeIntervalSince(start))
     }
 
     static func instantToDate(_ instant: KotlinInstant) -> Date {

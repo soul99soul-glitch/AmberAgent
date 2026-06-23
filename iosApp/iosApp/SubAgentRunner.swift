@@ -298,7 +298,7 @@ final class SubAgentRunner {
             temperature: baseParams?.temperature,
             topP: baseParams?.topP,
             maxTokens: baseParams?.maxTokens ?? fallbackMaxTokens,
-            tools: ToolKt.iosToolDeclarations(names: [SUBAGENT_REPORT_TOOL_NAME_swift] + tools),
+            tools: Self.buildSubAgentToolDeclarations(names: [SUBAGENT_REPORT_TOOL_NAME_swift] + tools),
             reasoningLevel: baseParams?.reasoningLevel ?? .off,
             customHeaders: baseParams?.customHeaders ?? [],
             customBody: baseParams?.customBody ?? []
@@ -366,6 +366,27 @@ final class SubAgentRunner {
 
     /// The KMP `subagent_report` tool name as visible in Swift.
     private var SUBAGENT_REPORT_TOOL_NAME_swift: String { "subagent_report" }
+
+    /// Build tool declarations for a subagent the SAME way the main chat does:
+    /// `search_web` / `scrape_web` need their dedicated factories (the generic
+    /// `iosToolDeclarations` emits an incomplete schema the provider rejects with a
+    /// 500). Everything else (workspace / wm_ / file_read / report / tools_list) goes
+    /// through the generic declarations.
+    private static func buildSubAgentToolDeclarations(names: [String]) -> [Tool] {
+        var declarations: [Tool] = []
+        var genericNames: [String] = []
+        for name in names {
+            switch name {
+            case "search_web": declarations.append(ToolKt.createSearchWebToolDeclaration())
+            case "scrape_web": declarations.append(ToolKt.createScrapeWebToolDeclaration())
+            default: genericNames.append(name)
+            }
+        }
+        if !genericNames.isEmpty {
+            declarations.append(contentsOf: ToolKt.iosToolDeclarations(names: genericNames))
+        }
+        return declarations
+    }
 
     private static func uniqueTools(_ names: [String]) -> [String] {
         var seen = Set<String>()

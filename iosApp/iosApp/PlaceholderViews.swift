@@ -513,6 +513,35 @@ struct AmberFormRow: View {
     }
 }
 
+/// 会话列表右上角的账户头像:有自定义头像则显示图片,否则显示昵称首字母。
+/// 出现时加载,并监听 `.accountAvatarChanged` 在换头像后即时刷新。
+private struct HomeAccountAvatar: View {
+    let initial: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 34, height: 34)
+                    .clipShape(Circle())
+            } else {
+                Text(initial)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .frame(width: 34, height: 34)
+            }
+        }
+        .contentShape(Circle())
+        .onAppear { image = AccountAvatarStore.load() }
+        .onReceive(NotificationCenter.default.publisher(for: .accountAvatarChanged)) { _ in
+            image = AccountAvatarStore.load()
+        }
+    }
+}
+
 struct ConversationsView: View {
     let sharedSettings: IOSSharedSettingsStore
 
@@ -648,6 +677,11 @@ struct ConversationsView: View {
         }
     }
 
+    private var accountInitial: String {
+        let trimmed = sharedSettings.displaySetting.userNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String((trimmed.isEmpty ? "A" : trimmed).prefix(1)).uppercased()
+    }
+
     private var header: some View {
         HStack(alignment: .center) {
             Text("Amber")
@@ -666,11 +700,7 @@ struct ConversationsView: View {
                     Button {
                         router.navigate(to: .account)
                     } label: {
-                        Text("A")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(AmberTheme.foreground)
-                            .frame(width: 34, height: 34)
-                            .contentShape(Circle())
+                        HomeAccountAvatar(initial: accountInitial)
                     }
                     .buttonStyle(.plain)
                     .amberGlass(cornerRadius: 17)
@@ -813,7 +843,7 @@ private struct ConversationSummaryRow: View {
                     if summary.isPinned {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(AmberTheme.accentAmber)
+                            .foregroundStyle(AmberTheme.accent)
                     } else {
                         Image(systemName: "bubble.left.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -1143,7 +1173,7 @@ private struct RecentConversationSearchRow: View {
         Button(action: action) {
             SearchRowChrome(
                 systemImage: summary.isPinned ? "pin.fill" : "bubble.left.fill",
-                color: summary.isPinned ? AmberTheme.accentAmber : AmberTheme.accent,
+                color: AmberTheme.accent,
                 title: summary.title.isEmpty ? "新对话" : summary.title,
                 preview: "\(summary.messageCount) 条消息",
                 highlight: "",
@@ -1316,7 +1346,6 @@ struct SettingsHomeView: View {
         [
             .init(title: "服务商", subtitle: nil, value: nil, systemImage: "server.rack", color: AmberTheme.accent, route: .providers),
             .init(title: "模型与提示词", subtitle: nil, value: nil, systemImage: "cpu", color: AmberTheme.accentAmber, route: .modelDefaults),
-            .init(title: "图片生成", subtitle: nil, value: nil, systemImage: "photo.on.rectangle", color: AmberTheme.accentRed, route: .imageGeneration),
             .init(title: "搜索服务", subtitle: nil, value: nil, systemImage: "magnifyingglass", color: AmberTheme.accentGreen, route: .searchServices),
             .init(title: "语音服务", subtitle: nil, value: nil, systemImage: "speaker.wave.2", color: AmberTheme.accentCyan, route: .ttsSettings)
         ]

@@ -72,22 +72,6 @@ struct ChatView: View {
                     }
                     .transition(.opacity)
             }
-            // Bottom-edge gradient blur, re-added as a NON-INTERACTIVE background layer (not a
-            // safeAreaBar). It sits in front of the messages but behind the composer (which is a
-            // `.safeAreaInset` composited on top of the whole ZStack), so message content fades
-            // into the bottom edge while the composer controls stay crisp — never clipped and
-            // never focus-stolen, because this layer takes no hits and has no layout relationship
-            // with the composer. Pinned light so it doesn't adapt dark over the terracotta
-            // backdrop.
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                StreamingBottomBoundaryGlass()
-                    .frame(height: ChatLayout.bottomGlassHeight)
-            }
-            .ignoresSafeArea(edges: .bottom)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .environment(\.colorScheme, .light)
         }
         .safeAreaBar(edge: .top, spacing: 0) {
             topBar
@@ -100,10 +84,10 @@ struct ChatView: View {
         // moment it gained it — hiding those controls. safeAreaInset keeps the composer correctly
         // sized on its own crisp surfaces and does not overlap the scroll content.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            // Keep the composer's glass controls (the `.glassEffect(.regular.interactive())`
-            // buttons) in the light appearance so they don't adapt dark over the warm backdrop.
+            // 不再强制 light:原生 `.glassEffect` 本就按系统外观渲染(深色模式下渲染为深色玻璃),
+            // 若把内容强制成 light,前景图标/文字会按浅色调色板解析成深灰,贴在深色玻璃上发暗。
+            // 让 composer 跟随真实外观(与顶栏一致),图标与玻璃明暗才匹配。
             inputBar
-                .environment(\.colorScheme, .light)
         }
         .sheet(isPresented: $isModelSheetPresented) {
             ComposerModelSheet(sharedSettings: sharedSettings, currentModel: composerCurrentModelSelection) { model in
@@ -303,12 +287,6 @@ struct ChatView: View {
 
             Spacer()
 
-            Text("问候")
-                .font(.headline)
-                .foregroundStyle(AmberTheme.foreground)
-
-            Spacer()
-
             newChatToolbarButton
         }
         .padding(.horizontal, 18)
@@ -333,6 +311,18 @@ struct ChatView: View {
     }
 
     // MARK: - Message List
+
+    /// iMessage 式上屏:气泡从底部升起 + 渐显 + 从对应一侧的下角轻微放大弹出(用户=右下,
+    /// 助手=左下)。仅新追加的用户消息会在 `withAnimation` 中触发此 transition;批量加载/
+    /// 切换会话走数组整体赋值,不在动画事务内,故不会逐条动画。移除时仅淡出收缩。
+    private func messageEntranceTransition(isUser: Bool) -> AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: .bottom)
+                .combined(with: .opacity)
+                .combined(with: .scale(scale: 0.92, anchor: isUser ? .bottomTrailing : .bottomLeading)),
+            removal: .opacity.combined(with: .scale(scale: 0.96))
+        )
+    }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
@@ -385,6 +375,7 @@ struct ChatView: View {
                                 }
                             }
                             .id(message.id)
+                            .transition(messageEntranceTransition(isUser: message.role == MessageRole.user))
                         }
 
                         if viewModel.isRecognizingImages {
@@ -413,10 +404,10 @@ struct ChatView: View {
                     }
                 )
             }
-            // Drag the messages to dismiss the keyboard (iMessage-style). Tap-to-dismiss is
-            // attached to the content (LazyVStack) below instead of here, because a TapGesture
-            // on the ScrollView itself does not reliably fire — the UIScrollView swallows it.
-            .scrollDismissesKeyboard(.interactively)
+            // 一开始滚动就收起键盘(查看历史消息时自动收回)。之前用 .interactively 需要把键盘
+            // 往下「拖」才收,普通上滑看历史不触发,所以感觉只有点击能收。Tap-to-dismiss 仍保留
+            // 在下方内容(LazyVStack)上,因为 ScrollView 自身的 TapGesture 会被 UIScrollView 吞掉。
+            .scrollDismissesKeyboard(.immediately)
             .onScrollPhaseChange { _, phase in
                 switch phase {
                 case .interacting:
@@ -674,81 +665,99 @@ struct ChatView: View {
                     .transition(.scale(scale: 0.75, anchor: .bottomLeading).combined(with: .opacity))
             }
 
-            VStack(spacing: 8) {
-                    HStack(alignment: .center, spacing: 8) {
-                        Button {
-                            withAnimation(.bouncy(duration: 0.42, extraBounce: 0.14)) {
-                                isAttachExpanded.toggle()
-                            }
-                        } label: {
-                            Image(systemName: viewModel.isAttachingSelectedFile ? "paperclip.circle.fill" : "plus")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(AmberTheme.muted)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Circle())
-                                .rotationEffect(.degrees(isAttachExpanded ? 45 : 0))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(
-                            viewModel.isLoading ||
-                                viewModel.isAttachingSelectedFile ||
-                                hasPendingToolApproval
-                        )
-
-                        TextField(inputPlaceholder, text: $viewModel.inputText, axis: .vertical)
-                            .lineLimit(1...5)
-                            .textFieldStyle(.plain)
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.foreground)
-                            .frame(minHeight: 38)
-                            .focused($isInputFocused)
-                            .onSubmit {
-                                if sharedSettings.displaySetting.sendOnEnter {
-                                    guard sendEnabled else { return }
-                                    followPaused = false
-                                    viewModel.sendMessage()
+            if !viewModel.chatSuggestions.isEmpty, !viewModel.isGenerationActive {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(viewModel.chatSuggestions.prefix(4), id: \.self) { suggestion in
+                            Button {
+                                viewModel.inputText = suggestion
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    viewModel.chatSuggestions = []
                                 }
+                                isInputFocused = true
+                            } label: {
+                                Text(suggestion)
+                                    .font(.caption)
+                                    .foregroundStyle(AmberTheme.foreground2)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 26)
                             }
-                            .disabled(hasPendingToolApproval || configurationIssue != nil)
-                            .onChange(of: viewModel.inputText) { _, newText in
-                                let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
-                                if sharedSettings.displaySetting.pasteLongTextAsFile,
-                                   newText.count > threshold,
-                                   !pasteHintShown {
-                                    pasteHintShown = true
-                                }
-                            }
-
-                        if viewModel.isLoading {
-                            ComposerIconButton(
-                                systemImage: "stop.fill",
-                                accessibilityLabel: "停止生成",
-                                size: 32,
-                                symbolSize: 14,
-                                tint: AmberTheme.accentRed,
-                                prominent: true
-                            ) {
-                                viewModel.cancelGeneration()
-                            }
-                        } else {
-                            ComposerIconButton(
-                                systemImage: "arrow.up",
-                                accessibilityLabel: "发送消息",
-                                size: 32,
-                                symbolSize: 15,
-                                tint: sendEnabled ? AmberTheme.accent : AmberTheme.muted2,
-                                prominent: sendEnabled
-                            ) {
-                                followPaused = false
-                                viewModel.sendMessage()
-                            }
-                            .disabled(!sendEnabled)
+                            .buttonStyle(.plain)
+                            .amberGlass(cornerRadius: 13)
                         }
                     }
-                    .padding(.leading, 8)
-                    .padding(.trailing, 6)
-                    .padding(.vertical, 6)
-                    .composerStableSurface(cornerRadius: 25)
+                    .padding(.horizontal, 2)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            VStack(spacing: 8) {
+                    // Apple Music dock 风格:左侧输入胶囊 + 右侧独立圆形发送键,两块分离的原生
+                    // Liquid Glass。`.bottom` 对齐让圆形发送键随胶囊向上增高时仍贴住底边。
+                    HStack(alignment: .bottom, spacing: 8) {
+                        HStack(alignment: .center, spacing: 6) {
+                            Button {
+                                withAnimation(.bouncy(duration: 0.42, extraBounce: 0.14)) {
+                                    isAttachExpanded.toggle()
+                                }
+                            } label: {
+                                Image(systemName: viewModel.isAttachingSelectedFile ? "paperclip.circle.fill" : "plus")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(AmberTheme.muted)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Circle())
+                                    .rotationEffect(.degrees(isAttachExpanded ? 45 : 0))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(
+                                viewModel.isLoading ||
+                                    viewModel.isAttachingSelectedFile ||
+                                    hasPendingToolApproval
+                            )
+
+                            TextField(inputPlaceholder, text: $viewModel.inputText, axis: .vertical)
+                                .lineLimit(1...5)
+                                .textFieldStyle(.plain)
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground)
+                                .frame(minHeight: 40)
+                                .focused($isInputFocused)
+                                .onSubmit {
+                                    if sharedSettings.displaySetting.sendOnEnter {
+                                        guard sendEnabled else { return }
+                                        followPaused = false
+                                        viewModel.sendMessage()
+                                    }
+                                }
+                                .disabled(hasPendingToolApproval || configurationIssue != nil)
+                                .onChange(of: viewModel.inputText) { _, newText in
+                                    let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
+                                    if sharedSettings.displaySetting.pasteLongTextAsFile,
+                                       newText.count > threshold,
+                                       !pasteHintShown {
+                                        pasteHintShown = true
+                                    }
+                                }
+                        }
+                        .padding(.leading, 8)
+                        .padding(.trailing, 18)
+                        .padding(.vertical, 7)
+                        .composerDockGlass(cornerRadius: 27)
+
+                        ComposerDockSendButton(
+                            isLoading: viewModel.isLoading,
+                            sendEnabled: sendEnabled,
+                            diameter: 54,
+                            onSend: {
+                                followPaused = false
+                                viewModel.sendMessage()
+                            },
+                            onStop: {
+                                viewModel.cancelGeneration()
+                            }
+                        )
+                    }
 
                     if showsComposerMeta {
                         HStack {
@@ -764,7 +773,7 @@ struct ChatView: View {
                                     .frame(height: 30)
                             }
                             .buttonStyle(.plain)
-                            .composerStableSurface(cornerRadius: 15)
+                            .composerDockGlass(cornerRadius: 15)
                             .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
 
                             Spacer()
@@ -805,11 +814,6 @@ struct ChatView: View {
         .padding(.horizontal, ChatLayout.contentHorizontalInset)
         .padding(.top, 8)
         .padding(.bottom, 8)
-        // Step 2 baseline: the previous StreamingBottomBoundaryGlass was attached here as a
-        // `.background` of the whole inputBar, i.e. *behind* the `.thinMaterial` composer pills,
-        // which double-frosted and washed out the controls. Removed to restore a crisp baseline.
-        // The bottom Liquid Glass boundary is reintroduced in step 4 as a sibling layer that sits
-        // BELOW the composer (between scroll content and controls), never behind the controls.
         .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showsComposerMeta)
     }
 
@@ -930,39 +934,19 @@ struct ChatView: View {
 }
 
 private extension View {
-    func composerStableSurface(cornerRadius: CGFloat) -> some View {
-        background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
-            }
-            .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
-    }
-}
-
-private struct StreamingBottomBoundaryGlass: View {
-    var body: some View {
-        Group {
-            if #available(iOS 26.0, *) {
-                Rectangle()
-                    .fill(AmberTheme.background.opacity(0.32))
-                    .glassEffect(.regular.tint(AmberTheme.background.opacity(0.32)), in: .rect(cornerRadius: 0))
-            } else {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .background(AmberTheme.background.opacity(0.32))
-            }
-        }
-        .mask {
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .black.opacity(0.78), location: 0.28),
-                    .init(color: .black, location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+    /// 原生 Liquid Glass 输入胶囊:`.regular` 提供半透折射,`.interactive()` 提供触控时的
+    /// HDR 高光/透镜响应。低于 iOS 26 时回退到 `.thinMaterial`。
+    @ViewBuilder
+    func composerDockGlass(cornerRadius: CGFloat) -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+        } else {
+            background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
         }
     }
 }
@@ -985,20 +969,74 @@ private struct ComposerIconButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        // Match the model chip and context ring, which use composerStableSurface's `.thinMaterial`
-        // fill. Non-prominent icon buttons (e.g. the thinking button) previously used a more
-        // opaque AmberTheme.surface fill, which read inconsistently next to them. The stroke and
-        // shadow below already match composerStableSurface; only the fill differed. Prominent
-        // buttons (send / stop) keep their solid accent tint.
-        .background {
-            Circle().fill(prominent ? AnyShapeStyle(tint) : AnyShapeStyle(.thinMaterial))
-        }
-        .overlay {
-            Circle()
-                .stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
+        // 与输入条/发送键统一为原生 Liquid Glass:中性按钮用无色调玻璃,prominent 时染 tint。
+        .modifier(ComposerDockCircleGlass(tint: prominent ? tint : nil))
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// Apple Music dock 风格的独立圆形发送/停止键 —— 与输入胶囊分离的原生 Liquid Glass。
+/// 启用时给玻璃染上 accent 色调,触控时由 `.interactive()` 产生 HDR 透镜高光。
+private struct ComposerDockSendButton: View {
+    var isLoading: Bool
+    var sendEnabled: Bool
+    var diameter: CGFloat = 54
+    let onSend: () -> Void
+    let onStop: () -> Void
+
+    private var isActionable: Bool { isLoading || sendEnabled }
+
+    var body: some View {
+        Button {
+            if isLoading { onStop() } else { onSend() }
+        } label: {
+            Image(systemName: isLoading ? "stop.fill" : "arrow.up")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .frame(width: diameter, height: diameter)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .modifier(ComposerDockCircleGlass(tint: glassTint))
+        .disabled(!isActionable)
+        .animation(.easeOut(duration: 0.18), value: isLoading)
+        .animation(.easeOut(duration: 0.18), value: sendEnabled)
+        .accessibilityLabel(isLoading ? "停止生成" : "发送消息")
+    }
+
+    private var iconColor: Color {
+        if isLoading { return .white }
+        // 启用时白色箭头叠在 accent 玻璃上;禁用时用 muted(与左侧「+」同档),
+        // 比更淡的 muted2 在深色玻璃上更清晰,不再暗淡。
+        return sendEnabled ? .white : AmberTheme.muted
+    }
+
+    private var glassTint: Color? {
+        if isLoading { return AmberTheme.accentRed }
+        return sendEnabled ? AmberTheme.accent : nil
+    }
+}
+
+private struct ComposerDockCircleGlass: ViewModifier {
+    var tint: Color?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            // 单一 glassEffect 调用 —— 只让可空的 tint 参数在 accent ↔ nil 间变化,保持视图身份
+            // 不变。若按 tint 有无拆成两条分支,SwiftUI 会移除/插入两个不同身份的玻璃视图并做
+            // 交叉淡入,删字回到清玻璃时会闪过一帧发白。
+            content.glassEffect(.regular.tint(tint).interactive(), in: Circle())
+        } else {
+            content
+                .background {
+                    Circle().fill(tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.thinMaterial))
+                }
+                .overlay {
+                    Circle().stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+        }
     }
 }
 
@@ -1047,14 +1085,26 @@ private struct ContextRingButton: View {
 
     var body: some View {
         Button(action: action) {
-            Circle()
-                .stroke(AmberTheme.surface2, lineWidth: 4)
-                .frame(width: 16, height: 16)
+            ZStack {
+                // 轨道:强调色(用户可调的主题色,不一定是琥珀)的「很浅」版本,由 mix 混白得到。
+                // 不能用 accent.opacity(...):半透明强调色会和背后的玻璃混色,深色玻璃会把它压暗,
+                // 所以调透明度看着都一样。mix(with:.white) 才是真正把强调色调浅成不透明、背景无关的浅色。
+                Circle()
+                    .stroke(AmberTheme.accent.mix(with: .white, by: 0.82), lineWidth: 3)
+                // 进度:随上下文增长用强调色覆盖填充,呈现增长效果。填充上限按模型真实
+                // contextWindow 计算(见 snapshot.contextFillFraction)。
+                Circle()
+                    .trim(from: 0, to: snapshot.contextFillFraction)
+                    .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 18, height: 18)
             .frame(width: 34, height: 34)
             .contentShape(Circle())
+            .animation(.easeOut(duration: 0.3), value: snapshot.contextFillFraction)
         }
         .buttonStyle(.plain)
-        .composerStableSurface(cornerRadius: 17)
+        .modifier(ComposerDockCircleGlass(tint: nil))
         .accessibilityLabel("上下文统计")
         .accessibilityValue("\(snapshot.messageCount) 条消息，\(snapshot.totalTokens) tokens")
     }
@@ -1264,12 +1314,11 @@ private struct ComposerModelRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Text(model.name)
                     .font(.subheadline.weight(isSelected ? .semibold : .regular))
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let context = model.context {
                     Text(context)
@@ -1278,13 +1327,10 @@ private struct ComposerModelRow: View {
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(AmberTheme.surface2.opacity(0.72), in: Capsule())
+                        .layoutPriority(1)
                 }
 
-                Image(systemName: "checkmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(AmberTheme.accent)
-                    .frame(width: 18)
-                    .opacity(isSelected ? 1 : 0)
+                Spacer(minLength: 8)
             }
             .padding(.leading, 36)
             .padding(.trailing, 16)
@@ -1328,7 +1374,26 @@ private struct ComposerProviderGroup: Identifiable {
 
     private static func contextLabel(for model: Model) -> String? {
         guard let tokens = model.contextWindowTokens else { return nil }
-        return "\(Int(truncating: tokens)) ctx"
+        return formatContextWindow(Int(truncating: tokens))
+    }
+
+    /// 紧凑显示上下文窗口:≥100万写 1M(必要时带一位小数),≥1000 写 XK,否则原数。
+    static func formatContextWindow(_ tokens: Int) -> String {
+        if tokens >= 1_000_000 {
+            return trimmedDecimal(Double(tokens) / 1_000_000) + "M"
+        }
+        if tokens >= 1_000 {
+            return "\(Int((Double(tokens) / 1_000).rounded()))K"
+        }
+        return "\(tokens)"
+    }
+
+    private static func trimmedDecimal(_ value: Double) -> String {
+        let rounded = (value * 10).rounded() / 10
+        if rounded == rounded.rounded() {
+            return "\(Int(rounded))"
+        }
+        return String(format: "%.1f", rounded)
     }
 }
 
@@ -1464,9 +1529,10 @@ private struct ComposerContextPanel: View {
                         Circle()
                             .stroke(AmberTheme.surface2, lineWidth: 8)
                         Circle()
-                            // [Slice 5] 用量环按已用/上限比例填充（上限 8K 作视觉参考，
-                            // 非硬上限）。0 token 时环为空（诚实）。
-                            .trim(from: 0, to: min(CGFloat(snapshot.totalTokens) / 8_000.0, 1.0))
+                            // 用量环按已用/上限比例填充。上限按模型真实 contextWindow 计算,
+                            // 模型未声明时回退 8K 视觉参考(见 snapshot.contextFillFraction)。
+                            // 0 token 时环为空（诚实）。
+                            .trim(from: 0, to: snapshot.contextFillFraction)
                             .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 8, lineCap: .round))
                             .rotationEffect(.degrees(-90))
                     }
@@ -1580,10 +1646,6 @@ private struct ComposerPopoverSurface<Content: View>: View {
 enum ChatLayout {
     static let contentHorizontalInset: CGFloat = 22
     static let userMaxWidth: CGFloat = 300
-    // Height of the bottom-edge gradient blur layer. Covers the composer area plus a fade zone
-    // above it; StreamingBottomBoundaryGlass's gradient mask fades clear (top) → frosted (bottom)
-    // so message content dissolves into the bottom edge behind the composer.
-    static let bottomGlassHeight: CGFloat = 150
     static let followBottomGap: CGFloat = 96
     static let bottomStickThreshold: CGFloat = 40
 }
@@ -1657,7 +1719,8 @@ struct ChatUserBubble: View {
                     style: .continuous
                 )
             )
-            .frame(maxWidth: ChatLayout.userMaxWidth, alignment: .trailing)
+            // 不在这里 cap 宽度:气泡保持内容尺寸,长按 contextMenu 的高亮平台才会贴合气泡而非
+            // 撑成 300pt 灰条。宽度上限由各调用方的父容器负责(消息流是 MessageBubbleView 的 VStack)。
     }
 }
 
@@ -1691,7 +1754,7 @@ struct ChatReasoningCard: View {
     let bodyText: String
     var isThinking: Bool = false
     var startedAt: Date? = nil
-    var finishedSeconds: Int? = nil
+    var finishedSeconds: Double? = nil
     var levelLabel: String? = nil
     var autoCloseThinking: Bool = true
     @State private var isExpanded: Bool
@@ -1701,7 +1764,7 @@ struct ChatReasoningCard: View {
         bodyText: String,
         isThinking: Bool = false,
         startedAt: Date? = nil,
-        finishedSeconds: Int? = nil,
+        finishedSeconds: Double? = nil,
         levelLabel: String? = nil,
         autoCloseThinking: Bool = true
     ) {
@@ -1726,8 +1789,15 @@ struct ChatReasoningCard: View {
             if let elapsed { return "思考中 \(elapsed) 秒\(levelSuffix)" }
             return "思考中\(levelSuffix)"
         }
-        if let finishedSeconds { return "思考了 \(finishedSeconds) 秒\(levelSuffix)" }
+        if let finishedSeconds { return "思考了 \(Self.formatFinishedSeconds(finishedSeconds)) 秒\(levelSuffix)" }
         return "思考过程\(levelSuffix)"
+    }
+
+    /// 不足 1 秒按 0.1 精度显示(最小 0.1,避免「0 秒」/「0.0 秒」);≥1 秒显示整数。
+    private static func formatFinishedSeconds(_ seconds: Double) -> String {
+        let rounded = (seconds * 10).rounded() / 10
+        if rounded >= 1 { return "\(Int(rounded.rounded()))" }
+        return String(format: "%.1f", max(0.1, rounded))
     }
 
     @ViewBuilder
@@ -1918,7 +1988,9 @@ struct ChatToolStepModel: Identifiable {
     }
 
     init(tool: UIMessagePart.Tool) {
-        if tool.toolName == "subagent_dispatch" {
+        // `.contains` (不是 `==`):流式合并偶发把工具名拼成 "subagent_dispatchsubagent_dispatch",
+        // 用包含匹配才不会漏判、掉进裸名回退。
+        if tool.toolName.contains("subagent_dispatch") {
             let executed = !tool.output.isEmpty
             self.init(
                 systemImage: "person.2.fill",
@@ -1938,6 +2010,51 @@ struct ChatToolStepModel: Identifiable {
                 systemImage: "magnifyingglass",
                 title: Self.combinedLine(executed ? "已搜索" : "正在搜索", query),
                 detail: executed ? Self.searchResultSummary(from: tool.output) : query.map { "关键词：\($0)" },
+                state: executed ? .done : .active
+            )
+            return
+        }
+
+        if tool.toolName == "scrape_web" {
+            let url = Self.scrapeURL(from: tool.input)
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "globe",
+                title: Self.combinedLine(executed ? "已读取网页" : "正在读取网页", url),
+                detail: executed ? Self.searchResultSummary(from: tool.output) : url.map { "链接：\($0)" },
+                state: executed ? .done : .active
+            )
+            return
+        }
+
+        if tool.toolName == "memory_tool" {
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "brain.head.profile",
+                title: executed ? "已更新核心记忆" : "正在更新核心记忆",
+                detail: nil,
+                state: executed ? .done : .active
+            )
+            return
+        }
+
+        if tool.toolName == "mcp_call" {
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "puzzlepiece.extension",
+                title: Self.combinedLine(executed ? "已调用 MCP" : "正在调用 MCP", Self.mcpName(from: tool.input)),
+                detail: nil,
+                state: executed ? .done : .active
+            )
+            return
+        }
+
+        if tool.toolName == "model_council_run" {
+            let executed = !tool.output.isEmpty
+            self.init(
+                systemImage: "person.3.sequence",
+                title: executed ? "模型议会已完成" : "模型议会进行中",
+                detail: nil,
                 state: executed ? .done : .active
             )
             return
@@ -1984,13 +2101,63 @@ struct ChatToolStepModel: Identifiable {
             return
         }
 
-        let title = tool.toolName.isEmpty ? "工具调用" : tool.toolName
+        let executed = !tool.output.isEmpty
         self.init(
-            systemImage: Self.icon(for: title),
-            title: title,
+            systemImage: Self.icon(for: tool.toolName),
+            title: Self.friendlyToolTitle(tool.toolName, executed: executed),
             detail: tool.input.isEmpty ? nil : tool.input,
-            state: tool.output.isEmpty ? .active : .done
+            state: executed ? .done : .active
         )
+    }
+
+    /// 未单独映射的工具:给一个友好中文标签,不显示裸工具名。状态由胶囊上的对勾/转圈表示,不再加文字。
+    private static func friendlyToolTitle(_ name: String, executed: Bool) -> String {
+        let known: [String: String] = [
+            "file_read_selected": "读取选中文件",
+            "permissions_status": "查看权限状态",
+            "tools_list": "列出可用工具",
+            "subagent_report": "子智能体汇报",
+            "read_health": "读取健康数据"
+        ]
+        if let mapped = known[name] { return mapped }
+        if name.hasPrefix("mcp__") { return "MCP " + name.replacingOccurrences(of: "mcp__", with: "") }
+        return name.isEmpty ? "工具调用" : "调用 \(name)"
+    }
+
+    private static func scrapeURL(from input: String) -> String? {
+        guard let args = subAgentArgs(from: input) else {
+            let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : String(trimmed.prefix(48))
+        }
+        for key in ["url", "link", "target"] {
+            if let value = args[key] as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                return Self.shortURL(value)
+            }
+        }
+        if let urls = args["urls"] as? [Any], let first = urls.first as? String {
+            return Self.shortURL(first)
+        }
+        return nil
+    }
+
+    /// 取域名 + 路径首段,去掉协议与 query,胶囊里更易读。
+    private static func shortURL(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let comps = URLComponents(string: trimmed), let host = comps.host {
+            let firstPath = comps.path.split(separator: "/").first.map { "/\($0)" } ?? ""
+            return host + firstPath
+        }
+        return String(trimmed.prefix(48))
+    }
+
+    private static func mcpName(from input: String) -> String? {
+        guard let args = subAgentArgs(from: input) else { return nil }
+        for key in ["tool", "tool_name", "name", "server"] {
+            if let value = args[key] as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                return value
+            }
+        }
+        return nil
     }
 
     private static func subAgentArgs(from input: String) -> [String: Any]? {
@@ -2007,24 +2174,39 @@ struct ChatToolStepModel: Identifiable {
     }
 
     static func subAgentTask(from input: String) -> String? {
-        let args = subAgentArgs(from: input)
+        guard let args = subAgentArgs(from: input) else {
+            // 解析失败(含流式未完成的截断 JSON):是 JSON 形态就不回退原始串,避免把 `{"objective"...`
+            // 塞进胶囊标题;纯文本任务才原样用。
+            let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (trimmed.isEmpty || trimmed.hasPrefix("{") || trimmed.hasPrefix("[")) ? nil : trimmed
+        }
+        // 顶层字符串键
         for key in ["task", "prompt", "instruction", "objective", "input", "query"] {
-            if let value = args?[key] as? String,
+            if let value = args[key] as? String,
                !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return value
             }
         }
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        // 嵌套 task.objective(Android custom_subagent 的 task 结构)
+        if let task = args["task"] as? [String: Any] {
+            for key in ["objective", "prompt", "instruction"] {
+                if let value = task[key] as? String,
+                   !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return value
+                }
+            }
+        }
+        return nil
     }
 
     private static func subAgentTitle(from input: String) -> String {
+        // 胶囊只显示「标签 + 简短目标」,不再把整段 prompt 原样塞进标题。完整目标/输出留给详情 sheet。
         let role = subAgentRole(from: input)
-        if let task = subAgentTask(from: input) {
-            let oneLine = String(task.replacingOccurrences(of: "\n", with: " ").prefix(56))
-            return role.map { "@\($0) \(oneLine)" } ?? oneLine
+        let label = role.map { "子智能体 @\($0)" } ?? "派发子任务"
+        let objective = subAgentTask(from: input).map {
+            String($0.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces).prefix(16))
         }
-        return role.map { "SubAgent · \($0)" } ?? "SubAgent"
+        return combinedLine(label, objective)
     }
 
     private static func subAgentDetail(from input: String) -> String? {
@@ -2368,6 +2550,7 @@ private struct SampleUserTurn: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
             ChatUserBubble(text: text)
+                .frame(maxWidth: ChatLayout.userMaxWidth, alignment: .trailing)
             ChatMetaLine(text: time, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)

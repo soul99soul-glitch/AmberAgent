@@ -239,16 +239,21 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     }.mergeCustomBody(params.customBody)
 
     private fun buildMessages(messages: List<UIMessage>): JsonArray = buildJsonArray {
-        messages.filter { it.isValidToUpload() }.forEach { message ->
+        val uploadable = messages.filter { it.isValidToUpload() }
+        val lastUserIndex = uploadable.indexOfLast { it.role == MessageRole.USER }
+        uploadable.forEachIndexed { index, message ->
             if (message.role == MessageRole.ASSISTANT) {
-                addAssistantMessages(message)
+                // reasoning_content 只在「最后一条用户消息之后的当前轮」回传;历史里的思考不回传。
+                // 否则带思考 + tool_calls 的 assistant 消息被重发时,严格网关(mimo / DeepSeek 系)
+                // 会把请求体里不该出现的 reasoning_content 判为非法 → HTTP 500。对齐 Android 的 gating。
+                addAssistantMessages(message, includeReasoning = index > lastUserIndex)
             } else {
                 addNonAssistantMessage(message)
             }
         }
     }
 
-    private fun JsonArrayBuilder.addAssistantMessages(message: UIMessage) {
+    private fun JsonArrayBuilder.addAssistantMessages(message: UIMessage, includeReasoning: Boolean) {
         val groups = groupPartsByToolBoundary(message.parts)
         val contentBuffer = mutableListOf<UIMessagePart>()
         var reasoningPart: UIMessagePart.Reasoning? = null
@@ -262,14 +267,20 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
                 }
 
                 is PartGroup.Tools -> {
-                    buildAssistantMessageJson(contentBuffer, group.tools, reasoningPart)?.let { add(it) }
+                    // 防御:并行工具调用偶发 toolCallId 为空(流式分片未带 id 时),会让续写请求里
+                    // tool_calls 的 id 与后续 tool 结果的 tool_call_id 全空/撞车,服务端据此返回 500。
+                    // 为空 id 合成稳定唯一 id;同一个 id 同时用于 tool_call 与其结果,确保严格配对。
+                    val resolved = group.tools.mapIndexed { i, tool ->
+                        tool to tool.toolCallId.ifBlank { "call_${tool.streamIndex ?: i}_$i" }
+                    }
+                    buildAssistantMessageJson(contentBuffer, resolved, reasoningPart, includeReasoning)?.let { add(it) }
                     contentBuffer.clear()
                     reasoningPart = null
-                    group.tools.forEach { tool ->
+                    resolved.forEach { (tool, id) ->
                         add(buildJsonObject {
                             put("role", "tool")
                             put("name", tool.toolName)
-                            put("tool_call_id", tool.toolCallId)
+                            put("tool_call_id", id)
                             put(
                                 "content",
                                 tool.output.filterIsInstance<UIMessagePart.Text>()
@@ -282,17 +293,18 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         }
 
         if (contentBuffer.isNotEmpty() || reasoningPart != null) {
-            buildAssistantMessageJson(contentBuffer, emptyList(), reasoningPart)?.let { add(it) }
+            buildAssistantMessageJson(contentBuffer, emptyList(), reasoningPart, includeReasoning)?.let { add(it) }
         }
     }
 
     private fun buildAssistantMessageJson(
         contentParts: List<UIMessagePart>,
-        tools: List<UIMessagePart.Tool>,
+        tools: List<Pair<UIMessagePart.Tool, String>>,
         reasoningPart: UIMessagePart.Reasoning?,
+        includeReasoning: Boolean,
     ): JsonObject? {
         val hasText = contentParts.any { it is UIMessagePart.Text && it.text.isNotBlank() }
-        val hasReasoning = !reasoningPart?.reasoning.isNullOrBlank()
+        val hasReasoning = includeReasoning && !reasoningPart?.reasoning.isNullOrBlank()
         if (!hasText && !hasReasoning && tools.isEmpty()) return null
 
         return buildJsonObject {
@@ -313,13 +325,14 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
 
             if (tools.isNotEmpty()) {
                 putJsonArray("tool_calls") {
-                    tools.forEach { tool ->
+                    tools.forEach { (tool, id) ->
                         add(buildJsonObject {
-                            put("id", tool.toolCallId)
+                            put("id", id)
                             put("type", "function")
                             put("function", buildJsonObject {
                                 put("name", tool.toolName)
-                                put("arguments", tool.input)
+                                // 空/缺失参数补 "{}":arguments 必须是合法 JSON 字符串,空串会被网关判为非法。
+                                put("arguments", tool.input.ifBlank { "{}" })
                             })
                         })
                     }

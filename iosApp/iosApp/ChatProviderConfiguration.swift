@@ -98,14 +98,14 @@ enum ChatProviderConfiguration {
         return true
     }
 
-    private static func apiKey(of provider: ProviderSetting) -> String {
+    static func apiKey(of provider: ProviderSetting) -> String {
         if let openAI = provider as? ProviderSetting.OpenAI { return openAI.apiKey }
         if let claude = provider as? ProviderSetting.Claude { return claude.apiKey }
         if let google = provider as? ProviderSetting.Google { return google.apiKey }
         return ""
     }
 
-    private static func baseURL(of provider: ProviderSetting) -> String {
+    static func baseURL(of provider: ProviderSetting) -> String {
         if let openAI = provider as? ProviderSetting.OpenAI { return openAI.baseUrl }
         if let claude = provider as? ProviderSetting.Claude { return claude.baseUrl }
         if let google = provider as? ProviderSetting.Google { return google.baseUrl }

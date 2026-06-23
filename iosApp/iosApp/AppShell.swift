@@ -241,7 +241,6 @@ enum Route: Hashable {
     case providerDetail(id: String)
     case providerKeyEditor(name: String)
     case modelDefaults
-    case imageGeneration
     case searchServices
     case searchProvider
     case ttsSettings
@@ -384,8 +383,6 @@ private extension View {
                     sharedSettings: sharedSettings,
                     providerRegistry: providerRegistry
                 )
-            case .imageGeneration:
-                ImageGenerationView(settingsStore: settingsStore)
             case .searchServices:
                 SearchServicesView(sharedSettings: sharedSettings)
             case .searchProvider:

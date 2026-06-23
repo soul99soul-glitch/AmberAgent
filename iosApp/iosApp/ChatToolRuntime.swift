@@ -336,9 +336,7 @@ final class ChatToolRuntime {
     }
 
     private func pendingImageToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
-        guard IOSImageGenerationSettingsStore.shared.configurationIssue(settingsStore: settingsStore) == nil else {
-            return nil
-        }
+        guard resolvedImageGenerationConfig() != nil else { return nil }
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
                 .first(where: { $0.toolName == "generate_image" && $0.output.isEmpty }) {
@@ -346,6 +344,21 @@ final class ChatToolRuntime {
             }
         }
         return nil
+    }
+
+    /// Resolve the designated image-generation model (Settings.imageGenerationModelId) to
+    /// its modelId + provider apiKey/baseURL. Returns nil when no usable image model is set,
+    /// which gates the generate_image tool off (image generation disabled).
+    private func resolvedImageGenerationConfig() -> (modelId: String, apiKey: String, baseURL: String)? {
+        let snap = sharedSettings.snapshot
+        guard let model = snap.findModelById(uuid: snap.imageGenerationModelId),
+              let provider = ChatProviderConfiguration.provider(for: model, providers: snap.providers) else {
+            return nil
+        }
+        let apiKey = ChatProviderConfiguration.apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = ChatProviderConfiguration.baseURL(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !apiKey.isEmpty, !baseURL.isEmpty else { return nil }
+        return (model.modelId, apiKey, baseURL)
     }
 
     private func pendingAdvancedToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
@@ -553,11 +566,17 @@ final class ChatToolRuntime {
 
     private func dispatchImageToolCall(_ toolCall: UIMessagePart.Tool) async -> [UIMessagePart] {
         do {
-            let imageSettings = IOSImageGenerationSettingsStore.shared
-            let request = try IOSImageGenerationRepository.shared.toolRequest(from: toolCall.input, settings: imageSettings)
+            guard let config = resolvedImageGenerationConfig() else {
+                return [UIMessagePart.Text(
+                    text: ChatToolOutputFormatter.imageFailureJSON(reason: "请先在「默认模型 → 辅助任务」里设置生图模型。"),
+                    metadata: nil
+                )]
+            }
+            let request = try IOSImageGenerationRepository.shared.toolRequest(from: toolCall.input, modelId: config.modelId)
             let record = try await IOSImageGenerationRepository.shared.generate(
                 request: request,
-                settingsStore: settingsStore
+                apiKey: config.apiKey,
+                baseURL: config.baseURL
             )
             var parts: [UIMessagePart] = record.files.map { file in
                 UIMessagePart.Image(

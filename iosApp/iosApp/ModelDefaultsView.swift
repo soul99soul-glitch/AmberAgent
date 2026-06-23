@@ -214,8 +214,17 @@ struct ModelDefaultsView: View {
                     currentId: sharedSettings.snapshot.compressModelId,
                     set: { sharedSettings.setCompressModelId($0) }
                 )
+                ModelDefaultsDivider()
+                auxRow(
+                    icon: "photo.on.rectangle",
+                    title: "生图模型",
+                    subtitle: "对话中说“画一张…”时用它出图",
+                    currentId: sharedSettings.snapshot.imageGenerationModelId,
+                    clearTitle: "清除（不生成图片）",
+                    set: { sharedSettings.setImageGenerationModelId($0) }
+                )
             }
-            ModelDefaultsNote("辅助任务模型留空时会回退到当前聊天模型。「视觉识别模型」用于当前聊天模型看不了图片时，先把图片识别成文字。")
+            ModelDefaultsNote("辅助任务模型留空时会回退到当前聊天模型。「视觉识别模型」用于当前聊天模型看不了图片时，先把图片识别成文字。「生图模型」需指定一个支持图片生成的模型（如 GPT Image），留空则关闭对话内生图。")
         }
     }
 
@@ -225,6 +234,7 @@ struct ModelDefaultsView: View {
         title: String,
         subtitle: String,
         currentId: KotlinUuid,
+        clearTitle: String = "清除（回退当前聊天模型）",
         set: @escaping (String) -> Void
     ) -> some View {
         if chatModelOptions.isEmpty {
@@ -248,7 +258,7 @@ struct ModelDefaultsView: View {
                     Button(option.menuTitle) { set(option.id) }
                 }
                 Divider()
-                Button("清除（回退当前聊天模型）", role: .destructive) { set("") }
+                Button(clearTitle, role: .destructive) { set("") }
             }
         }
     }

@@ -573,6 +573,10 @@ final class IOSSharedSettingsStore {
         restoreSnapshot(IosSettingsMutations.shared.setCompressModelId(settings: snapshot, modelId: modelId))
     }
 
+    func setImageGenerationModelId(_ modelId: String) {
+        restoreSnapshot(IosSettingsMutations.shared.setImageGenerationModelId(settings: snapshot, modelId: modelId))
+    }
+
     /// Add a new provider (already-constructed ProviderSetting) and persist.
     /// Returns the added provider so callers can read its generated id.
     @discardableResult
@@ -744,6 +748,40 @@ final class IOSSharedSettingsStore {
 
     func setSearchBuiltinBingEnabled(_ enabled: Bool) {
         let merged = IosSettingsMutations.shared.setSearchBuiltinBingEnabled(settings: snapshot, enabled: enabled)
+        restoreSnapshot(merged)
+    }
+
+    func setSearchBuiltinJinaEnabled(_ enabled: Bool) {
+        let merged = IosSettingsMutations.shared.setSearchBuiltinJinaEnabled(settings: snapshot, enabled: enabled)
+        restoreSnapshot(merged)
+    }
+
+    func setSearchBuiltinWikipediaEnabled(_ enabled: Bool) {
+        let merged = IosSettingsMutations.shared.setSearchBuiltinWikipediaEnabled(settings: snapshot, enabled: enabled)
+        restoreSnapshot(merged)
+    }
+
+    func setSearchBuiltinHackerNewsEnabled(_ enabled: Bool) {
+        let merged = IosSettingsMutations.shared.setSearchBuiltinHackerNewsEnabled(settings: snapshot, enabled: enabled)
+        restoreSnapshot(merged)
+    }
+
+    func setSearchGoogleWebViewFallbackEnabled(_ enabled: Bool) {
+        let merged = IosSettingsMutations.shared.setSearchGoogleWebViewFallbackEnabled(settings: snapshot, enabled: enabled)
+        restoreSnapshot(merged)
+    }
+
+    func setSearchResultSize(_ size: Int) {
+        let merged = IosSettingsMutations.shared.setSearchResultSize(settings: snapshot, size: Int32(size))
+        restoreSnapshot(merged)
+    }
+
+    func moveSearchProvider(fromIndex: Int, toIndex: Int) {
+        let merged = IosSettingsMutations.shared.moveSearchService(
+            settings: snapshot,
+            fromIndex: Int32(fromIndex),
+            toIndex: Int32(toIndex)
+        )
         restoreSnapshot(merged)
     }
 
@@ -1129,6 +1167,9 @@ final class IOSSharedSettingsStore {
     var searchBuiltinWikipediaEnabled: Bool { snapshot.searchBuiltinWikipediaEnabled }
     var searchBuiltinHackerNewsEnabled: Bool { snapshot.searchBuiltinHackerNewsEnabled }
     var searchGoogleWebViewFallbackEnabled: Bool { snapshot.searchGoogleWebViewFallbackEnabled }
+
+    /// Per-search max result count (SearchCommonOptions.resultSize).
+    var searchResultSize: Int { Int(snapshot.searchCommonOptions.resultSize) }
 
     /// Real default display setting.
     var displaySetting: DisplaySetting {

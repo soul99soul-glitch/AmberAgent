@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 import Shared
 
 struct AccountView: View {
@@ -7,6 +9,10 @@ struct AccountView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var displayName = ""
+    @State private var avatarImage: UIImage?
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var isRenaming = false
+    @State private var renameDraft = ""
 
     private var avatarInitial: String {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -23,7 +29,6 @@ struct AccountView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         hero
-                        profileSection
                         statsSection
                     }
                     .padding(.bottom, 36)
@@ -33,11 +38,34 @@ struct AccountView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .onChange(of: avatarItem) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let ui = UIImage(data: data) {
+                    let resized = AccountAvatarStore.downscaled(ui)
+                    AccountAvatarStore.save(resized)
+                    await MainActor.run { avatarImage = resized }
+                }
+            }
+        }
+        .alert("修改昵称", isPresented: $isRenaming) {
+            TextField("输入你的称呼", text: $renameDraft)
+            Button("取消", role: .cancel) {}
+            Button("保存") {
+                let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                displayName = trimmed
+                sharedSettings.updateUserNickname(trimmed)
+            }
+        } message: {
+            Text("昵称会保存到本机，重启后保留。")
+        }
         .onAppear {
             // Seed the field from the persisted nickname (empty → "Amber" display).
             if displayName.isEmpty {
                 displayName = sharedSettings.displaySetting.userNickname
             }
+            avatarImage = AccountAvatarStore.load()
         }
     }
 
@@ -65,24 +93,25 @@ struct AccountView: View {
 
     private var hero: some View {
         VStack(spacing: 10) {
-            Text(avatarInitial)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(AmberTheme.foreground)
-                .frame(width: 72, height: 72)
-                .background(AmberTheme.surface2, in: Circle())
-                .overlay {
-                    Circle()
-                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-                }
+            PhotosPicker(selection: $avatarItem, matching: .images) {
+                avatarCircle
+            }
+            .buttonStyle(.plain)
 
             VStack(spacing: 4) {
-                Text(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Amber" : displayName)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(AmberTheme.foreground)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                Button {
+                    renameDraft = displayName
+                    isRenaming = true
+                } label: {
+                    Text(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Amber" : displayName)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
+                .buttonStyle(.plain)
 
-                Text("当前页面预览")
+                Text("点按头像换照片，点按昵称可修改")
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -93,27 +122,35 @@ struct AccountView: View {
         .padding(.bottom, 18)
     }
 
-    private var profileSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "个人资料")
-            AmberFormGroup {
-                AccountTextFieldRow(title: "昵称", placeholder: "输入你的称呼", text: $displayName)
-                    .onChange(of: displayName) { _, newValue in
-                        // Persist to displaySetting.userNickname (Android
-                        // ChatDrawer parity). Empty falls back to "Amber" in the
-                        // hero display.
-                        sharedSettings.updateUserNickname(newValue)
-                    }
+    private var avatarCircle: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if let avatarImage {
+                    Image(uiImage: avatarImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 72, height: 72)
+                        .clipShape(Circle())
+                } else {
+                    Text(avatarInitial)
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .frame(width: 72, height: 72)
+                        .background(AmberTheme.surface2, in: Circle())
+                }
+            }
+            .overlay {
+                Circle().stroke(AmberTheme.borderSoft, lineWidth: 0.5)
             }
 
-            Text("昵称会保存到本机设置，重启后保留。")
-                .font(.caption)
-                .lineSpacing(3)
-                .foregroundStyle(AmberTheme.muted2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+            Image(systemName: "camera.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(AmberTheme.accent, in: Circle())
+                .overlay { Circle().stroke(AmberTheme.background, lineWidth: 2) }
         }
+        .frame(width: 72, height: 72)
     }
 
     private var statsSection: some View {
@@ -125,28 +162,36 @@ struct AccountView: View {
     }
 }
 
-private struct AccountTextFieldRow: View {
-    let title: String
-    let placeholder: String
-    @Binding var text: String
+extension Notification.Name {
+    /// 自定义头像变更时广播,供会话列表等处即时刷新。
+    static let accountAvatarChanged = Notification.Name("app.amber.ios.accountAvatarChanged")
+}
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .frame(width: 62, alignment: .leading)
+/// 本机自定义头像存储(账户页用)。下采样后存为 Documents/account-avatar.jpg。
+enum AccountAvatarStore {
+    private static var fileURL: URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("account-avatar.jpg", isDirectory: false)
+    }
 
-            TextField(placeholder, text: $text)
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(.never)
-                .disableAutocorrection(true)
-        }
-        .frame(minHeight: 52)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+    static func load() -> UIImage? {
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return UIImage(data: data)
+    }
+
+    static func save(_ image: UIImage) {
+        guard let data = image.jpegData(compressionQuality: 0.85) else { return }
+        try? data.write(to: fileURL, options: [.atomic])
+        NotificationCenter.default.post(name: .accountAvatarChanged, object: nil)
+    }
+
+    static func downscaled(_ image: UIImage, maxDimension: CGFloat = 256) -> UIImage {
+        let longest = max(image.size.width, image.size.height)
+        guard longest > maxDimension, longest > 0 else { return image }
+        let scale = maxDimension / longest
+        let target = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: target)
+        return renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
     }
 }
 

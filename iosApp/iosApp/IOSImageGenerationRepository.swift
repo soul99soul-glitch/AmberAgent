@@ -96,21 +96,22 @@ final class IOSImageGenerationRepository {
 
     func generate(
         request: IOSImageGenerationRequest,
-        settingsStore: SettingsStore,
+        apiKey: String,
+        baseURL: String,
         transport: any IOSImageGenerationHTTPTransport = IOSURLSessionImageGenerationHTTPTransport()
     ) async throws -> IOSImageGenerationRecord {
         let trimmedPrompt = request.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else { throw IOSImageGenerationError.missingPrompt }
         let model = request.model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { throw IOSImageGenerationError.missingModel }
-        let apiKey = settingsStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !apiKey.isEmpty else { throw IOSImageGenerationError.missingAPIKey }
-        let endpoint = try imageEndpoint(from: settingsStore.baseUrl)
+        let resolvedApiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !resolvedApiKey.isEmpty else { throw IOSImageGenerationError.missingAPIKey }
+        let endpoint = try imageEndpoint(from: baseURL)
 
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = 120
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("Bearer \(resolvedApiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
         urlRequest.httpBody = try JSONSerialization.data(
@@ -157,15 +158,15 @@ final class IOSImageGenerationRepository {
         return record
     }
 
-    func toolRequest(from input: String, settings: IOSImageGenerationSettingsStore) throws -> IOSImageGenerationRequest {
+    func toolRequest(from input: String, modelId: String) throws -> IOSImageGenerationRequest {
         let object = jsonObject(input)
         let prompt = (object["prompt"] as? String) ?? input
         let aspect = IOSImageAspectRatio(toolValue: object["aspect_ratio"] as? String)
         let count = max(1, min((object["count"] as? Int) ?? intValue(object["count"]) ?? 1, 4))
-        let style = (object["style"] as? String) ?? settings.style
+        let style = (object["style"] as? String) ?? ""
         return IOSImageGenerationRequest(
             prompt: prompt,
-            model: settings.model,
+            model: modelId,
             aspectRatio: aspect,
             count: count,
             style: style,

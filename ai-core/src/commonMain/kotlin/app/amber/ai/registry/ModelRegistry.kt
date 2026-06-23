@@ -281,6 +281,14 @@ object ModelRegistry {
         contextWindow(1_000_000)
     }
 
+    private val DEEPSEEK_V4 = defineModel {
+        tokens("deepseek", "v", "4")
+        notTokens("deepseek", "v", "4", "flash")
+        notTokens("deepseek", "v", "4", "pro")
+        toolReasoningAbility()
+        contextWindow(1_000_000)
+    }
+
     private val DEEPSEEK_V4_FLASH = defineModel {
         tokens("deepseek", "v", "4", "flash")
         toolReasoningAbility()
@@ -431,6 +439,13 @@ object ModelRegistry {
         contextWindow(256_000)
     }
 
+    private val KIMI_K2_7 = defineModel {
+        tokens("kimi", "k", "2", "7")
+        visionInput()
+        toolReasoningAbility()
+        contextWindow(256_000)
+    }
+
     // Kimi Coding Plan default model (e.g. modelId "kimi-for-coding").
     // Token order matches "kimi" → ... → "coding"; matches both
     // "kimi-for-coding" and "kimi-coding-*" variants. KIMI_K2_* below
@@ -484,6 +499,12 @@ object ModelRegistry {
         contextWindow(200_000)
     }
 
+    private val GLM_5_2 = defineModel {
+        tokens("glm", "5", "2")
+        toolReasoningAbility()
+        contextWindow(1_000_000)
+    }
+
     private val MINIMAX_M2 = defineModel {
         tokens("minimax", "m", "2")
         toolReasoningAbility()
@@ -503,6 +524,7 @@ object ModelRegistry {
     private val MINIMAX_M3 = defineModel {
         tokens("minimax", "m", "3")
         toolReasoningAbility()
+        contextWindow(1_000_000)
     }
 
     private val XIAOMI_MIMO_V2 = defineModel {
@@ -638,6 +660,7 @@ object ModelRegistry {
         DEEPSEEK_CHAT,
         DEEPSEEK_R1_MODEL,
         DEEPSEEK_REASONER,
+        DEEPSEEK_V4,
         DEEPSEEK_V4_FLASH,
         DEEPSEEK_V4_PRO,
         DEEPSEEK_V3_1,
@@ -661,6 +684,7 @@ object ModelRegistry {
         KIMI_K2,
         KIMI_K2_5,
         KIMI_K2_6,
+        KIMI_K2_7,
         KIMI_FOR_CODING,
         STEP_3,
         INTERN_S1,
@@ -669,6 +693,7 @@ object ModelRegistry {
         GLM_4_7,
         GLM_5,
         GLM_5_1,
+        GLM_5_2,
         MINIMAX_M2,
         MINIMAX_M2_5,
         MINIMAX_M2_7,
