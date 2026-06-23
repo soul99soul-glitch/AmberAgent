@@ -3,18 +3,48 @@ import SwiftUI
 
 /// Live output model for a running subagent, observed by `ChatToolDetailSheet`.
 ///
-/// When a subagent is still running, this streams its generation token-by-token
-/// from the KMP `SubAgentManager` live flow. When no live flow is available
-/// (run finished and evicted, or never started), the sheet falls back to the
-/// stored `tool.output`. Wired to the KMP `observeLive` bridge in the live
-/// streaming pass; until then `start()`/`stop()` are inert and the sheet shows
-/// the stored output.
+/// The subagent engine (`IOSAgentToolEngine`) streams each turn and pushes the
+/// accumulating assistant text here via `ingest`. The sheet shows `text` live and
+/// flips off the running spinner on `finish`. When no live model is registered
+/// for a tool call (e.g. the run finished before the app session, or it was
+/// evicted), the sheet falls back to the stored `tool.output`.
 @MainActor
 @Observable
 final class SubAgentLiveModel {
     private(set) var text: String = ""
-    private(set) var isRunning: Bool = false
+    private(set) var isRunning: Bool = true
 
+    func ingest(_ newText: String) {
+        text = newText
+    }
+
+    func finish() {
+        isRunning = false
+    }
+
+    // The engine drives updates; these satisfy the sheet's `.task` / `.onDisappear`.
     func start() async {}
     func stop() {}
+}
+
+/// Process-wide registry linking a subagent dispatch tool call (by `toolCallId`)
+/// to its live model, so the chat detail sheet can find the live stream for the
+/// capsule the user tapped. The engine path (SubAgentRunner) registers a model
+/// when a dispatch starts; the sheet looks it up by the tool's id.
+@MainActor
+final class SubAgentLiveRegistry {
+    static let shared = SubAgentLiveRegistry()
+
+    private var models: [String: SubAgentLiveModel] = [:]
+
+    func register(toolCallId: String, _ model: SubAgentLiveModel) {
+        guard !toolCallId.isEmpty else { return }
+        // Crude cap — live models are transient and small; avoid unbounded growth.
+        if models.count > 64 { models.removeAll() }
+        models[toolCallId] = model
+    }
+
+    func model(forToolCallId id: String) -> SubAgentLiveModel? {
+        models[id]
+    }
 }

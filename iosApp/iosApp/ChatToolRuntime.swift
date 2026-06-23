@@ -620,7 +620,8 @@ final class ChatToolRuntime {
                 providerSetting: providerSetting,
                 modelId: params.model.modelId,
                 baseParams: params,
-                parentToolExecutors: subAgentParentToolExecutors(runId: runId)
+                parentToolExecutors: subAgentParentToolExecutors(runId: runId),
+                toolCallId: toolCall.toolCallId
             )
         case "model_council_run":
             let args = ChatToolCallParsing.jsonObject(toolCall.input)

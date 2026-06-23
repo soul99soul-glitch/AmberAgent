@@ -203,6 +203,7 @@ final class SubAgentRunner {
         modelId: String,
         baseParams: TextGenerationParams? = nil,
         parentToolExecutors: [String: any IOSToolExecutor],
+        toolCallId: String = "",
         provider: any IOSAgentTextProvider = OpenAIKmpProviderAdapter()
     ) async -> String {
         let role = IOSSubAgentRoleCatalog.resolve(roleId: roleId)
@@ -310,11 +311,20 @@ final class SubAgentRunner {
             configuration: .init(maxSteps: role.maxTurns + 1, honorApprovalPause: false)
         )
 
+        // Live stream: register a model keyed by the dispatch tool call so the
+        // chat detail sheet can show the subagent generating token-by-token, then
+        // feed the engine's accumulating assistant text into it.
+        let liveModel = await MainActor.run { SubAgentLiveModel() }
+        await MainActor.run { SubAgentLiveRegistry.shared.register(toolCallId: toolCallId, liveModel) }
         let result = await engine.run(
             providerSetting: providerSetting,
             messages: messages,
-            params: params
+            params: params,
+            onAssistantText: { text in
+                Task { @MainActor in liveModel.ingest(text) }
+            }
         )
+        await MainActor.run { liveModel.finish() }
 
         let displayText = result.messages
             .filter { $0.role == MessageRole.assistant }

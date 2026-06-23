@@ -287,7 +287,12 @@ struct MessageBubbleView: View {
             }
         }
         .sheet(item: $toolDetailTarget) { target in
-            ChatToolDetailSheet(tool: target.tool)
+            ChatToolDetailSheet(
+                tool: target.tool,
+                live: target.tool.toolName.contains("subagent_dispatch")
+                    ? SubAgentLiveRegistry.shared.model(forToolCallId: target.tool.toolCallId)
+                    : nil
+            )
         }
     }
 

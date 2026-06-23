@@ -69,6 +69,17 @@ public protocol IOSAgentTextProvider: Sendable {
         messages: [UIMessage],
         params: TextGenerationParams
     ) async throws -> MessageChunk
+
+    /// Streaming generation. Emits MessageChunk deltas via [onChunk]; calls
+    /// [onComplete] on success or [onError] on failure. Returns a cancellable Job.
+    func streamText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onChunk: @escaping (MessageChunk) -> Void,
+        onComplete: @escaping () -> Void,
+        onError: @escaping (KotlinThrowable) -> Void
+    ) -> Kotlinx_coroutines_coreJob?
 }
 
 /// Wraps the real KMP providers behind `IOSAgentTextProvider`. Routes to
@@ -102,6 +113,30 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider {
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "当前服务商类型暂不支持子代理"]
         )
+    }
+
+    public func streamText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onChunk: @escaping (MessageChunk) -> Void,
+        onComplete: @escaping () -> Void,
+        onError: @escaping (KotlinThrowable) -> Void
+    ) -> Kotlinx_coroutines_coreJob? {
+        if let openAI = providerSetting as? ProviderSetting.OpenAI {
+            return openAIProvider.streamTextCancellable(
+                providerSetting: openAI, messages: messages, params: params,
+                onChunk: onChunk, onComplete: onComplete, onError: onError
+            )
+        }
+        if let claude = providerSetting as? ProviderSetting.Claude {
+            return claudeProvider.streamTextCancellable(
+                providerSetting: claude, messages: messages, params: params,
+                onChunk: onChunk, onComplete: onComplete, onError: onError
+            )
+        }
+        onError(KotlinThrowable(message: "当前服务商类型暂不支持子代理"))
+        return nil
     }
 }
 
@@ -162,13 +197,77 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         self.configuration = configuration
     }
 
+    /// Streams one model turn, accumulating chunks via the shared (500-fixed)
+    /// MessageStreamAccumulator and surfacing the accumulating assistant text to
+    /// [onAssistantText] token-by-token. Returns a MessageChunk wrapping the final
+    /// assistant message so the rest of the loop stays unchanged.
+    private func streamStep(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onAssistantText: (@Sendable (String) -> Void)?
+    ) async throws -> MessageChunk {
+        let accumulator = MessageStreamAccumulator(initialMessages: messages, model: nil)
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<MessageChunk, Error>) in
+            var resumed = false
+            _ = provider.streamText(
+                providerSetting: providerSetting,
+                messages: messages,
+                params: params,
+                onChunk: { chunk in
+                    accumulator.append(chunk: chunk)
+                    if let last = accumulator.snapshot().last, last.role == MessageRole.assistant {
+                        let text = last.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+                        if !text.isEmpty { onAssistantText?(text) }
+                    }
+                },
+                onComplete: {
+                    guard !resumed else { return }
+                    resumed = true
+                    let last = accumulator.snapshot().last
+                    let finalMessage: UIMessage = (last?.role == MessageRole.assistant) ? last! : Self.emptyAssistant()
+                    cont.resume(returning: MessageChunk(
+                        id: "",
+                        model: "",
+                        choices: [UIMessageChoice(index: 0, delta: nil, message: finalMessage, finishReason: "stop")],
+                        usage: nil
+                    ))
+                },
+                onError: { error in
+                    guard !resumed else { return }
+                    resumed = true
+                    cont.resume(throwing: NSError(
+                        domain: "AmberAgent.SubAgentStream",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: error.message ?? "stream failed"]
+                    ))
+                }
+            )
+        }
+    }
+
+    private static func emptyAssistant() -> UIMessage {
+        UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [],
+            annotations: [],
+            createdAt: nowLocalDateTime(),
+            finishedAt: nowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
     /// Runs the loop to completion (or until approval is required / the step
     /// limit is hit). Pure function over `messages`: returns the new list,
     /// never mutates the caller's array.
     public func run(
         providerSetting: ProviderSetting,
         messages: [UIMessage],
-        params: TextGenerationParams
+        params: TextGenerationParams,
+        onAssistantText: (@Sendable (String) -> Void)? = nil
     ) async -> IOSAgentToolEngineResult {
         var working = messages
         var steps = 0
@@ -176,10 +275,11 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         while steps < configuration.maxSteps {
             let chunk: MessageChunk
             do {
-                chunk = try await provider.generateText(
+                chunk = try await streamStep(
                     providerSetting: providerSetting,
                     messages: working,
-                    params: params
+                    params: params,
+                    onAssistantText: onAssistantText
                 )
             } catch {
                 // A provider failure ends the loop. Surface the assistant
