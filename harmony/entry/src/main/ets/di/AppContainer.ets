@@ -9,7 +9,7 @@
 
 import type {
   RunManagerDeps, HttpClient, DeepReadRepository, AiClient,
-  SourcePrefetcher, SearchProviderRegistry,
+  SourcePrefetcher, SearchProviderRegistry, SectionWriterTools, ToolDefinition,
 } from '@amber/deepread-domain';
 import { createSourcePrefetcher, createScheduler } from '@amber/deepread-domain';
 import type { DeepReadScheduler } from '@amber/deepread-domain';
@@ -47,12 +47,24 @@ const buildContainer = (): Container => {
   // TODO(phase6): model 从 settings 读(对照 Android resolveModel)
   const model: string = 'deepseek-chat';
 
+  // 捕获当前 run 的 writer(由 run_manager.createRunContext 创建,通过 onWriterCreated 回调)
+  let currentWriter: SectionWriterTools | null = null;
+
   const runManager: RunManagerDeps = {
     prefetcher,
-    // collectRun:由 AiClient.generateText 装配(tool loop + budget + retry)
-    collectRun: async (messages, _statusLabel) => aiClient.generateText({
-      model, messages, stream: true,
-    }),
+    // collectRun:由 AiClient.generateText 装配 agent loop(runAgentLoop + executeToolsAndMerge +
+    //   budget_prompt + retry_classifier),注入当前 run 的 writer tools。
+    collectRun: async (messages, _statusLabel) => {
+      // writer 的 tools() 返回 ToolDefinition[];转 Map 供 agent loop
+      const toolList: ToolDefinition[] = currentWriter !== null
+        ? currentWriter.tools(null)
+        : [];
+      const toolMap: Map<string, ToolDefinition> = new Map();
+      for (const t of toolList) toolMap.set(t.name, t);
+      return aiClient.generateText({
+        model, messages, stream: true, tools: toolMap,
+      });
+    },
     aiClient,
     model,
     playbookMarkdown: PLAYBOOK_MD,
@@ -62,6 +74,7 @@ const buildContainer = (): Container => {
       clear: (topicId) => repository.clearDeepRead(topicId),
     },
     nowIso: () => new Date().toISOString().slice(0, 10),
+    onWriterCreated: (w) => { currentWriter = w; },
   };
 
   const notifier = createNotificationNotifier();
