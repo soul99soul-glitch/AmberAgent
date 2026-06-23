@@ -70,22 +70,27 @@ public protocol IOSAgentTextProvider: Sendable {
         params: TextGenerationParams
     ) async throws -> MessageChunk
 
-    /// Streaming generation. Emits MessageChunk deltas via [onChunk]; calls
-    /// [onComplete] on success or [onError] on failure. Returns a cancellable Job.
+}
+
+/// Optional streaming capability — only the real provider adapter conforms. The
+/// engine uses it for live subagent token streaming; non-streaming conformers
+/// (e.g. test doubles) fall back to a blocking `generateText` with no live
+/// tokens, and the engine loop behaves identically.
+public protocol IOSAgentStreamingProvider: Sendable {
     func streamText(
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onChunk: @escaping (MessageChunk) -> Void,
-        onComplete: @escaping () -> Void,
-        onError: @escaping (KotlinThrowable) -> Void
+        onChunk: @escaping @Sendable (MessageChunk) -> Void,
+        onComplete: @escaping @Sendable () -> Void,
+        onError: @escaping @Sendable (KotlinThrowable) -> Void
     ) -> Kotlinx_coroutines_coreJob?
 }
 
 /// Wraps the real KMP providers behind `IOSAgentTextProvider`. Routes to
 /// `OpenAIKmpProvider` or `ClaudeKmpProvider` based on the provider's sealed
 /// type, so sub-agents/councils can run on either protocol.
-public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider {
+public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingProvider {
     private let openAIProvider: OpenAIKmpProvider
     private let claudeProvider: ClaudeKmpProvider
 
@@ -119,9 +124,9 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onChunk: @escaping (MessageChunk) -> Void,
-        onComplete: @escaping () -> Void,
-        onError: @escaping (KotlinThrowable) -> Void
+        onChunk: @escaping @Sendable (MessageChunk) -> Void,
+        onComplete: @escaping @Sendable () -> Void,
+        onError: @escaping @Sendable (KotlinThrowable) -> Void
     ) -> Kotlinx_coroutines_coreJob? {
         if let openAI = providerSetting as? ProviderSetting.OpenAI {
             return openAIProvider.streamTextCancellable(
@@ -168,6 +173,16 @@ public struct IOSPendingToolApproval: Sendable {
 /// Thread-safety: one engine instance should drive one run at a time. The
 /// engine itself is a value type over its configuration; callers keep a
 /// reference to cancel an in-flight `Task`.
+/// Holds a streaming turn's accumulator + one-shot resume flag. `@unchecked
+/// Sendable` because the KMP streaming bridge drives the callbacks serially on a
+/// single coroutine, so there is no concurrent access despite Swift 6's
+/// (conservative) inability to prove it.
+private final class StreamStepState: @unchecked Sendable {
+    let accumulator: MessageStreamAccumulator
+    var resumed = false
+    init(accumulator: MessageStreamAccumulator) { self.accumulator = accumulator }
+}
+
 public final class IOSAgentToolEngine: @unchecked Sendable {
 
     public struct Configuration: Sendable {
@@ -207,24 +222,49 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         params: TextGenerationParams,
         onAssistantText: (@Sendable (String) -> Void)?
     ) async throws -> MessageChunk {
-        let accumulator = MessageStreamAccumulator(initialMessages: messages, model: nil)
+        // Non-streaming providers (e.g. test doubles) do a single blocking
+        // generate — no live tokens, identical loop behavior.
+        guard let streaming = provider as? IOSAgentStreamingProvider else {
+            return try await provider.generateText(providerSetting: providerSetting, messages: messages, params: params)
+        }
+        // Seed with a single NON-assistant placeholder so the streamed turn
+        // forms exactly one fresh assistant message (returned as `.last`),
+        // instead of merging into `messages`' trailing assistant turn — which on
+        // turn ≥2 would make `run`'s `working.append(...)` duplicate that prior
+        // turn. The real `messages` are still sent to the provider for context.
+        // (Also avoids the accumulator's non-empty `require` on empty input.)
+        let seed = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.user,
+            parts: [],
+            annotations: [],
+            createdAt: Self.nowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        // Box the accumulator + resume flag as @unchecked Sendable: the KMP
+        // streaming bridge invokes onChunk/onComplete/onError serially on a single
+        // coroutine (no concurrent access), but Swift 6 can't prove it. The box
+        // also makes the @Sendable callbacks legal.
+        let state = StreamStepState(accumulator: MessageStreamAccumulator(initialMessages: [seed], model: nil))
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<MessageChunk, Error>) in
-            var resumed = false
-            _ = provider.streamText(
+            _ = streaming.streamText(
                 providerSetting: providerSetting,
                 messages: messages,
                 params: params,
                 onChunk: { chunk in
-                    accumulator.append(chunk: chunk)
-                    if let last = accumulator.snapshot().last, last.role == MessageRole.assistant {
+                    state.accumulator.append(chunk: chunk)
+                    if let last = state.accumulator.snapshot().last, last.role == MessageRole.assistant {
                         let text = last.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
                         if !text.isEmpty { onAssistantText?(text) }
                     }
                 },
                 onComplete: {
-                    guard !resumed else { return }
-                    resumed = true
-                    let last = accumulator.snapshot().last
+                    guard !state.resumed else { return }
+                    state.resumed = true
+                    let last = state.accumulator.snapshot().last
                     let finalMessage: UIMessage = (last?.role == MessageRole.assistant) ? last! : Self.emptyAssistant()
                     cont.resume(returning: MessageChunk(
                         id: "",
@@ -234,8 +274,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     ))
                 },
                 onError: { error in
-                    guard !resumed else { return }
-                    resumed = true
+                    guard !state.resumed else { return }
+                    state.resumed = true
                     cont.resume(throwing: NSError(
                         domain: "AmberAgent.SubAgentStream",
                         code: 1,

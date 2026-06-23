@@ -15,6 +15,10 @@ final class SubAgentLiveModel {
     private(set) var isRunning: Bool = true
 
     func ingest(_ newText: String) {
+        // The engine streams the FULL accumulated text each time, and the
+        // per-chunk `Task { @MainActor }` hops aren't ordered — so a stale
+        // (shorter) update can land after a newer one. Only move forward.
+        guard newText.count >= text.count else { return }
         text = newText
     }
 
