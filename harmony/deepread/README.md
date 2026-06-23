@@ -51,3 +51,35 @@ crypto adapter 替换 node `crypto` 为 `@ohos.security.cryptoHash` 在 Platform
 - `platform/json_schema_validator.ts` — `JsonSchemaValidator`(轻量) ✅
 
 后续:RcpHttpClient / RdbDatabase / AssetStorage / 真实 SearchProvider 实现等 DevEco 工具链就绪。
+
+## Agent 层(Phase 2 — 已完成)
+
+- `agent/message.ts` — `UIMessage` + `UIMessagePart`(kind discriminated union:text/image/reasoning/tool)
+- `agent/append_chunk.ts` — `appendChunk`(流式 delta 合并 + Tool merge)
+- `agent/budget_prompt.ts` — `AgentLoopBudgetPrompt`(WARN/TIGHT/FINAL 步数预算)
+- `agent/retry_classifier.ts` — `RetryClassifier`(retryable/permanent 分类 + 指数退避)
+- `agent/tool_execution.ts` — `executeToolsAndMerge`(tool result 写回原 Tool part,闭合 agent loop)
+
+## Research 层(Phase 3 — 已完成)
+
+研究阶段管线:多 provider 搜索 → 正文提取 → 图片评分 → evidence 分桶 → 文章规划。全部纯 node 可测(mock HttpClient / mock AiClient 注入)。
+
+- `research/url_filter.ts` — `urlAllowedForBackgroundFetch` + `isPrivateUrl`(私网 SSRF gate,照搬 Android `ToolRegistry.isPrivateNetworkTarget`:loopback/LAN/CGNAT/IPv6 ULA/mDNS TLD)
+- `research/reader_extractor.ts` — `extractReadableTextArkTs`(ArkTS regex fallback,照搬 Android `extractReadableTextJvm`:剥 script/style/svg/canvas、block 换行语义、HTML 实体反转义、≥18 字符行过滤 + distinct 去重)+ `extractReadableText`(双路径:优先 native NAPI,失败/空/短 → ArkTS fallback)。Plan 8 升级 Rust NAPI。
+- `research/image_scorer.ts` — `scoreImageCandidate` / `scoreAndDedup`(MVP 评分模型,但 reject 路径忠实 Android `DeepReadImageScorer` 的 URL/quality risk flags + `hardRejectRisks` 集合:too_small/site_brand_asset/tracking/icon_format/tiny_file 等;hero gate 要求 score≥60 + 宽高比 0.75..2.0)
+- `research/search_provider.ts` — `createTavilyProvider`(真实 Tavily /search POST,Bearer 认证)+ `createFallbackProviders`(jina_fallback,无 key,Android 兜底行为)
+- `research/search_merger.ts` — `interleaveSearchResults`(多 query bucket round-robin 合并,跨/内 bucket URL 去重,cap `MAX_SEARCH_RESULTS`=14)
+- `research/source_prefetcher.ts` — `createSourcePrefetcher` factory(36s wall budget 并行预取 + LRU cache 10min/16 entries + seed URL 低阈值优先 + 并行 scrape + URL 去重 + cap `MAX_SOURCES`=12;空 prefetch 返回空数组由 caller 决定 hard-fail)。ArkTS 友好(闭包捕获 cache,非 class mutation)
+- `research/evidence_pack.ts` — `buildEvidencePack`(本地分桶 + `requiredSourceIds`)+ `cardsFor(stage, plan)`(P0-D:消费 `plan.stageSourceIds` 路由 evidence,`forced + planned.ifEmpty{stageBucket}`,distinct,cap `STAGE_EVIDENCE_MAX`=6)+ `sourceIdsFor`(stageKey/lowercase/UPPERCASE 三键匹配)
+- `research/article_plan.ts` — `generateArticlePlan`(1 次非流式 LLM 调用 + fallback)+ `normalizePlan`(**过滤 LLM 幻觉 sourceId**,mergeWithFallbackIds 补足 `STAGE_EVIDENCE_MIN`)+ `parsePlanJson`(容忍解析:整文本 → 代码块 → 字符串/转义感知大括号平衡)+ `fallbackPlan` / `buildPlanningPrompt`
+
+### 关键 Android 保真度决策
+
+- **私网 gate(P1-8)**:完整移植 Android `isPrivateNetworkTarget`(CGNAT 100.64/10、IPv6 ULA fc/fd、`.local`/`.internal`/`.lan` TLD),非 plan 的简化子集
+- **reader-extractor 双路径(P0-8)**:ArkTS fallback 就位,Plan 8 注入 NAPI;native 返回 null / <18 字符 / throw 时 fallback
+- **LRU cache(P0-9)**:TTL 10min、16 entries、evict-oldest
+- **cardsFor 消费 stageSourceIds(P0-D)**:忠实 Android `forced + planned.ifEmpty` 语义,跨 stage 查找
+- **幻觉 id 过滤**:`normalizePlan` 过滤掉 LLM 编造的不在 pack 已知 sourceIds 中的 id
+- **空 prefetch hard-fail(P1-9)**:`collect` 返回空数组,由 caller 决定是否 hard-fail(非发明 `evidence_quality:LOW`)
+
+后续:RcpHttpClient / OpenAiCompatibleAiClient 真实实现(Plan 5)、Rust NAPI reader-extractor(Plan 8)、其他 search provider(Zhipu/Brave/Exa)、OG image 提取。
