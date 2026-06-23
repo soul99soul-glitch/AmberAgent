@@ -1714,6 +1714,13 @@ final class IOSHotListDashboardStore {
                     fetchedAt: now
                 ))
             } catch {
+                // Refresh interrupted (the view's `.task` is cancelled on
+                // navigation, and sources are fetched sequentially) — abandon
+                // without overwriting the dashboard, so the not-yet-fetched
+                // sources don't all show a spurious "cancelled" failure.
+                if Task.isCancelled || (error as? URLError)?.code == .cancelled {
+                    return
+                }
                 let cached = previous[provider.providerId]?.items ?? []
                 snapshots.append(IOSHotListProviderSnapshot(
                     providerId: provider.providerId,

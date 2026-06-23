@@ -15,6 +15,11 @@ struct BoardSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        // `todayBoard` reads from the @ObservationIgnored `snapshot`, so without
+        // touching a tracked property this view never re-renders on a settings
+        // change — the segmented chips/toggle would look unresponsive. Observe
+        // `revision` (bumped by updateTodayBoard→restoreSnapshot) to refresh.
+        let _ = sharedSettings.revision
         ZStack {
             AmberTheme.background.ignoresSafeArea()
 
