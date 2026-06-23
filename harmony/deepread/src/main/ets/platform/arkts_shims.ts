@@ -78,6 +78,10 @@ export class URLSearchParams {
   has(name: string): boolean {
     return this.params.has(name);
   }
+
+  forEach(callback: (value: string, key: string) => void): void {
+    this.params.forEach((v: string, k: string) => callback(v, k));
+  }
 }
 
 // ===== AbortController / AbortSignal shim =====
