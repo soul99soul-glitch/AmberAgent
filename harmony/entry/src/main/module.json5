@@ -1,0 +1,48 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "phone",
+      "tablet"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          },
+          // 分享/deep-link 入口:接收 URL → deriveTopicId → DeepReadArticlePage
+          // TODO(toolchain): 实际 scheme/host 待配置(对照 §7.2)
+          {
+            "actions": ["ohos.want.action.viewData"],
+            "uris": [
+              { "scheme": "https" }
+            ]
+          }
+        ]
+      }
+    ],
+    // Deep Read 需要的权限
+    "requestPermissions": [
+      { "name": "ohos.permission.INTERNET", "reason": "$string:reason_internet" },
+      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
+      // 后台任务:0.2 不申请 ContinuousTask;通知用普通 ongoing
+      { "name": "ohos.permission.NOTIFICATION_CONTROLLER", "reason": "$string:reason_notification" }
+    ]
+  }
+}
