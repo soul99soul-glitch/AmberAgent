@@ -60,6 +60,52 @@ class MessageStreamAccumulatorToolTest {
     }
 
     @Test
+    fun parallelToolsThatReuseStreamIndexZeroStaySeparate() {
+        // Regression: some gateways (observed with MiMo) emit each parallel call
+        // in its own chunk while reusing stream index 0. They carry distinct ids
+        // and names and must NOT be folded into one tool — otherwise names
+        // ("subagent_dispatch" + "wm_stations") and arguments ("{...}" + "{}")
+        // get concatenated into a malformed "{...}{}", which the gateway rejects
+        // on the continuation turn ("unexpected content after document") → HTTP 500.
+        val acc = MessageStreamAccumulator(baseMessages(), model = null)
+
+        acc.append(
+            chunk(tool(id = "call_a", name = "subagent_dispatch", input = """{"role_id":"researcher"}""", streamIndex = 0))
+        )
+        acc.append(
+            chunk(tool(id = "call_b", name = "wm_stations", input = "{}", streamIndex = 0))
+        )
+
+        val tools = acc.snapshot().last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(2, tools.size)
+        val a = tools.first { it.toolCallId == "call_a" }
+        val b = tools.first { it.toolCallId == "call_b" }
+        assertEquals("subagent_dispatch", a.toolName)
+        assertEquals("""{"role_id":"researcher"}""", a.input)
+        assertEquals("wm_stations", b.toolName)
+        assertEquals("{}", b.input)
+    }
+
+    @Test
+    fun argumentFragmentsExtendTheOpenCallNotAFinishedOneSharingAnIndex() {
+        // Regression (MiMo): a completed call (subagent_dispatch, full args, index 0)
+        // is followed by a NEW call (search_web) that REUSES index 0. The new call's
+        // argument fragments (blank id) must extend search_web, never the finished
+        // subagent_dispatch — otherwise its args become "{...}{...}" and the gateway
+        // rejects the continuation ("unexpected content after document") with 400/500.
+        val acc = MessageStreamAccumulator(baseMessages(), model = null)
+
+        acc.append(chunk(tool(id = "call_a", name = "subagent_dispatch", input = """{"role_id":"researcher"}""", streamIndex = 0)))
+        acc.append(chunk(tool(id = "call_b", name = "search_web", input = "", streamIndex = 0)))
+        acc.append(chunk(tool(id = "", name = "", input = """{"query":"news"}""", streamIndex = 0)))
+
+        val tools = acc.snapshot().last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(2, tools.size)
+        assertEquals("""{"role_id":"researcher"}""", tools.first { it.toolName == "subagent_dispatch" }.input)
+        assertEquals("""{"query":"news"}""", tools.first { it.toolName == "search_web" }.input)
+    }
+
+    @Test
     fun streamToolIndexPrefersFieldAndKeepsMetadataFallback() {
         val fieldTool = tool(id = "field", name = "x", input = "{}", streamIndex = 2).copy(
             metadata = buildJsonObject { put(STREAM_TOOL_INDEX_METADATA_KEY, 9) }

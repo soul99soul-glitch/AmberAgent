@@ -167,14 +167,21 @@ class MessageStreamAccumulator(
 
         private fun appendTool(deltaPart: UIMessagePart.Tool) {
             val tool = if (deltaPart.toolCallId.isBlank()) {
+                // Argument-fragment delta (no id/name). Route it to the call currently
+                // being streamed: the MOST RECENT part that can still take args. Prefer a
+                // matching stream index, but skip parts whose args are already complete.
+                // Some gateways (MiMo) reuse stream index 0 across sequential calls, so
+                // matching the *first* index-0 tool would append a new call's fragments
+                // onto a finished one → "{...}{...}" → gateway rejects it (400/500).
                 val streamIndex = deltaPart.streamToolIndex()
-                val targetTool = streamIndex?.let { index ->
-                    parts.find { it is MutablePart.Tool && it.tool.streamToolIndex() == index } as? MutablePart.Tool
-                } ?: if (streamIndex == null) {
-                    parts.lastOrNull { it is MutablePart.Tool } as? MutablePart.Tool
-                } else {
-                    null
-                }
+                val targetTool = (streamIndex?.let { index ->
+                    parts.lastOrNull {
+                        it is MutablePart.Tool && it.tool.streamToolIndex() == index &&
+                            it.tool.canAcceptArgsDelta(deltaPart)
+                    }
+                } ?: parts.lastOrNull {
+                    it is MutablePart.Tool && it.tool.canAcceptArgsDelta(deltaPart)
+                }) as? MutablePart.Tool
                 targetTool?.tool?.merge(deltaPart)?.let { merged ->
                     val idx = parts.indexOf(targetTool)
                     if (idx >= 0) parts[idx] = MutablePart.Tool(merged)
@@ -182,12 +189,15 @@ class MessageStreamAccumulator(
                 }
                 deltaPart.copy()
             } else {
-                val existing = (parts.find {
+                // First delta of a tool (carries id/name). Match an existing part by id,
+                // or fall back to stream index — but only when it is the same call
+                // (canMergeDelta), never folding a distinct parallel call in by index.
+                val existing = ((parts.find {
                     it is MutablePart.Tool && it.tool.toolCallId == deltaPart.toolCallId
                 } as? MutablePart.Tool)
                     ?: deltaPart.streamToolIndex()?.let { index ->
-                        parts.find { it is MutablePart.Tool && it.tool.streamToolIndex() == index } as? MutablePart.Tool
-                    }
+                        parts.lastOrNull { it is MutablePart.Tool && it.tool.streamToolIndex() == index } as? MutablePart.Tool
+                    })?.takeIf { it.tool.canMergeDelta(deltaPart) }
                 existing?.let {
                     val merged = it.tool.merge(deltaPart)
                     val idx = parts.indexOf(existing)

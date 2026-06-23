@@ -106,18 +106,20 @@ data class UIMessage(
 
                     is UIMessagePart.Tool -> {
                         val streamIndex = deltaPart.streamToolIndex()
-                        val existingByStreamIndex = streamIndex?.let { index ->
-                            acc.find { it is UIMessagePart.Tool && it.streamToolIndex() == index }
-                                as? UIMessagePart.Tool
-                        }
                         if (deltaPart.toolCallId.isBlank()) {
-                            // No ID yet - OpenAI-compatible streams identify parallel tool deltas by index.
-                            val targetTool = existingByStreamIndex
-                                ?: if (streamIndex == null) {
-                                    acc.lastOrNull { it is UIMessagePart.Tool } as? UIMessagePart.Tool
-                                } else {
-                                    null
+                            // Argument-fragment delta (no id/name). Route it to the call
+                            // currently being streamed: the MOST RECENT tool that can still
+                            // take args (skip ones whose args are already complete). Gateways
+                            // such as MiMo reuse stream index 0 across sequential calls, so
+                            // matching the first index-0 tool would corrupt a finished one.
+                            val targetTool = (streamIndex?.let { index ->
+                                acc.lastOrNull {
+                                    it is UIMessagePart.Tool && it.streamToolIndex() == index &&
+                                        it.canAcceptArgsDelta(deltaPart)
                                 }
+                            } ?: acc.lastOrNull {
+                                it is UIMessagePart.Tool && it.canAcceptArgsDelta(deltaPart)
+                            }) as? UIMessagePart.Tool
                             if (targetTool != null) {
                                 acc.map { part ->
                                     if (part === targetTool) part.merge(deltaPart) else part
@@ -126,17 +128,22 @@ data class UIMessage(
                                 acc + deltaPart.copy()
                             }
                         } else {
-                            // Has ID - find and update by ID, or insert new
-                            val existsPart = (acc.find {
+                            // First delta of a tool (id/name). Match by id, or fall back to
+                            // stream index only when it is the same call (canMergeDelta),
+                            // never folding a distinct parallel call in by index alone.
+                            val existsPart = ((acc.find {
                                 it is UIMessagePart.Tool && it.toolCallId == deltaPart.toolCallId
-                            } as? UIMessagePart.Tool) ?: existingByStreamIndex
+                            } as? UIMessagePart.Tool)
+                                ?: streamIndex?.let { index ->
+                                    acc.lastOrNull {
+                                        it is UIMessagePart.Tool && it.streamToolIndex() == index
+                                    } as? UIMessagePart.Tool
+                                })?.takeIf { it.canMergeDelta(deltaPart) }
                             if (existsPart == null) {
                                 acc + deltaPart.copy()
                             } else {
                                 acc.map { part ->
-                                    if (part is UIMessagePart.Tool && part.toolCallId == deltaPart.toolCallId) {
-                                        part.merge(deltaPart)
-                                    } else part
+                                    if (part === existsPart) part.merge(deltaPart) else part
                                 }
                             }
                         }
@@ -493,6 +500,73 @@ sealed class UIMessagePart {
 
 fun UIMessagePart.Tool.streamToolIndex(): Int? =
     streamIndex ?: metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
+
+/**
+ * Whether a streaming [delta] may be merged into this tool part. Two deltas
+ * belong to the same tool call only if their non-blank ids agree and their
+ * non-blank names agree.
+ *
+ * Some OpenAI-compatible gateways (observed with MiMo) emit each parallel tool
+ * call in its own chunk while reusing stream index 0. Without this guard a
+ * second call (distinct id + name) gets merged into the first purely by index,
+ * concatenating names ("subagent_dispatch" + "wm_stations") and arguments
+ * ("{...}" + "{}") into one malformed tool. The doubled arguments then trip the
+ * gateway's prefill JSON parser on the continuation turn
+ * ("unexpected content after document"), surfacing as an HTTP 500.
+ */
+fun UIMessagePart.Tool.canMergeDelta(delta: UIMessagePart.Tool): Boolean {
+    if (toolCallId.isNotBlank() && delta.toolCallId.isNotBlank() &&
+        toolCallId != delta.toolCallId
+    ) {
+        return false
+    }
+    if (toolName.isNotBlank() && delta.toolName.isNotBlank() &&
+        toolName != delta.toolName
+    ) {
+        return false
+    }
+    return true
+}
+
+/**
+ * Whether [input] already holds a balanced, complete JSON value — i.e. no more
+ * argument fragments are expected. Used to stop a *new* tool call's fragments
+ * from being appended onto a finished call that merely shares a stream index.
+ * Returns true once the first balanced object/array closes, so a string that is
+ * already `{...}{...}` also reads as "complete" (no further extension allowed).
+ */
+fun UIMessagePart.Tool.argsAreComplete(): Boolean {
+    val s = input.trim()
+    if (s.length < 2 || (s.first() != '{' && s.first() != '[')) return false
+    var depth = 0
+    var inString = false
+    var escaped = false
+    for (c in s) {
+        if (escaped) {
+            escaped = false
+            continue
+        }
+        when {
+            inString && c == '\\' -> escaped = true
+            c == '"' -> inString = !inString
+            !inString && (c == '{' || c == '[') -> depth++
+            !inString && (c == '}' || c == ']') -> {
+                depth--
+                if (depth == 0) return true
+            }
+        }
+    }
+    return false
+}
+
+/**
+ * Whether an argument-fragment [delta] may extend this tool. It must be the same
+ * call ([canMergeDelta]) and this call's args must not already be complete — a
+ * non-empty fragment after a complete JSON document is exactly the corruption
+ * this guards against ("unexpected content after document").
+ */
+fun UIMessagePart.Tool.canAcceptArgsDelta(delta: UIMessagePart.Tool): Boolean =
+    canMergeDelta(delta) && !(delta.input.isNotBlank() && argsAreComplete())
 
 fun UIMessage.finishReasoning(): UIMessage {
     return copy(
