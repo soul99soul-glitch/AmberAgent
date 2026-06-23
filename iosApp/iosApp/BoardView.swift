@@ -49,7 +49,6 @@ struct BoardView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        hotListOverviewSection
                         hotTopicSection
                         hotListProviderSection
                     }

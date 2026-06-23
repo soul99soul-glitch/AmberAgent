@@ -10,6 +10,7 @@ struct BoardSettingsView: View {
     @State private var focusKeywordsText = ""
     @State private var editorSeed: BoardTemplateEditorSeed?
     @State private var banner: String?
+    @State private var showCreateSheet = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -22,6 +23,7 @@ struct BoardSettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
+                        createSourceSection
                         modelSection
                         refreshSection
                         hotListSourceSection
@@ -53,10 +55,46 @@ struct BoardSettingsView: View {
                 banner = "已保存并选择模板：\(template.name)"
             }
         }
+        .sheet(isPresented: $showCreateSheet) {
+            DeepReadCreateView(sharedSettings: sharedSettings)
+        }
     }
 
     private var board: TodayBoardSetting {
         sharedSettings.todayBoard
+    }
+
+    private var createSourceSection: some View {
+        BoardSettingsSection(title: "自定义来源") {
+            Button {
+                showCreateSheet = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(width: 30, height: 30)
+                        .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("手动创建深度阅读")
+                            .font(.body)
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text("手动文本 / 搜索 / 文件 / WebMount 页面")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.muted2)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var header: some View {
