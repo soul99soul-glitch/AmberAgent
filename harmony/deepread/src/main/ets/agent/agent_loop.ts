@@ -1,3 +1,4 @@
+import type { AbortSignalLike } from '../platform/runtime_api.ts';
 // runAgentLoop — 组装 GenerationHandler 核心行为(§4.8)
 // 多步 agent 循环:callModel → 检测 assistant 的 tool_calls → executeToolsAndMerge → 再调模型,
 // 直到无 tool / maxSteps / budget FINAL / pending approval / abort。
@@ -42,10 +43,10 @@ export interface AgentLoopDeps {
   approval: ApprovalMatrix;
   maxSteps: number;          // 默认调用方传 MAX_GENERATION_STEPS(32)
   onMessagesUpdate?: (messages: UIMessage[]) => void;
-  signal?: AbortSignal;
+  signal?: AbortSignalLike;
 }
 
-const isAborted = (signal?: AbortSignal): boolean => signal !== undefined && signal.aborted;
+const isAborted = (signal?: AbortSignalLike): boolean => signal !== undefined && signal.aborted;
 
 // resumable tool = 未执行且可恢复(approval approved/denied/answered)
 const hasResumableTools = (messages: UIMessage[]): boolean => {

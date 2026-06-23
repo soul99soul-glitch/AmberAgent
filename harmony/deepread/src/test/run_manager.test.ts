@@ -227,7 +227,7 @@ test('scheduler: isRunning false initially; abort no-op when nothing running', (
   const scheduler = createScheduler({
     runManager: deps,
     observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()),
-    isInterruptedPhase,
+    isInterruptedPhase, createAbortController: () => new AbortController(),
   });
   assert.equal(scheduler.isRunning('t1'), false);
   scheduler.abort('t1');
@@ -240,7 +240,7 @@ test('scheduler: detectInterrupted false when IDLE', async () => {
     model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
   };
   const scheduler = createScheduler({
-    runManager: deps, observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()), isInterruptedPhase,
+    runManager: deps, observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()), isInterruptedPhase, createAbortController: () => new AbortController(),
   });
   assert.equal(await scheduler.detectInterrupted('t1'), false);
 });
@@ -252,7 +252,7 @@ test('scheduler: detectInterrupted true when WRITING + not running', async () =>
   };
   const writingOutput = { ...makeEmptyDeepReadOutput(), generationPhase: 'WRITING' as const };
   const scheduler = createScheduler({
-    runManager: deps, observeOutput: () => makeMemoryObservable(writingOutput), isInterruptedPhase,
+    runManager: deps, observeOutput: () => makeMemoryObservable(writingOutput), isInterruptedPhase, createAbortController: () => new AbortController(),
   });
   assert.equal(await scheduler.detectInterrupted('t1'), true);
 });
@@ -263,7 +263,7 @@ test('scheduler: setBackgrounded toggle (no throw)', () => {
     model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
   };
   const scheduler = createScheduler({
-    runManager: deps, observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()), isInterruptedPhase,
+    runManager: deps, observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()), isInterruptedPhase, createAbortController: () => new AbortController(),
   });
   scheduler.setBackgrounded('t1', true);
   scheduler.setBackgrounded('t1', false);
@@ -280,7 +280,7 @@ test('scheduler: run() drives full pipeline via runManager', async () => {
     onWriterCreated: (w) => { writerRef.w = w; },
   };
   const scheduler = createScheduler({
-    runManager: deps, observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()), isInterruptedPhase,
+    runManager: deps, observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()), isInterruptedPhase, createAbortController: () => new AbortController(),
   });
   const result = await scheduler.run('t1', '量子计算', { force: true });
   assert.equal(result.ok, true);

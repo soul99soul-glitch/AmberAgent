@@ -13,13 +13,16 @@ export const isPrivateUrl = (url: string): boolean => {
   if (trimmed.length === 0) return false;
 
   let host: string;
-  try {
-    const u = new URL(trimmed);
-    host = u.hostname.toLowerCase();
-  } catch {
-    // URL 解析失败:host 未知 → 视为非私网(照搬 Android runCatching ?: false)
+  // 从 URL 提取 host(不依赖全局 URL 类,ArkTS 兼容)
+  // 支持:protocol://host[:port]/path、protocol://[ipv6][:port]/path
+  const bracketM = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/\[([^\]]+)\]/.exec(trimmed);
+  const plainM = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^\]/:?]+)/.exec(trimmed);
+  const m = bracketM !== null ? bracketM : plainM;
+  if (m === null) {
+    // 非 URL 格式(含裸 host:port 或无 scheme)→ 视为非私网(照搬 Android runCatching ?: false)
     return false;
   }
+  host = m[1].toLowerCase();
   if (host.length === 0) return false;
 
   // 去除 IPv6 方括号(对应 Android removePrefix("[").removeSuffix("]"))

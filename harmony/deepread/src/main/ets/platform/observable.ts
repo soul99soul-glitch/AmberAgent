@@ -1,3 +1,4 @@
+import type { AbortSignalLike } from './runtime_api.ts';
 // Observable<T> — MVP 用 1s 轮询实现(对应 Android Room Flow)
 // 升级路径:后续可换事件总线
 
@@ -8,7 +9,7 @@ export interface Observable<T> {
 
 export interface PollingOptions {
   intervalMs?: number;
-  signal?: AbortSignal;
+  signal?: AbortSignalLike;
 }
 
 export const pollingObservable = <T>(
@@ -59,7 +60,9 @@ export const pollingObservable = <T>(
     }
   };
 
-  signal?.addEventListener('abort', stop);
+  if (signal?.addEventListener !== undefined) {
+    signal.addEventListener('abort', stop);
+  }
 
   return {
     subscribe(cb: (value: T) => void): () => void {

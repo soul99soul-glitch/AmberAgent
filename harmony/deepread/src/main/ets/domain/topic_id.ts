@@ -1,11 +1,8 @@
-// Deep Read topic_id 派生 — HarmonyOS 独立 app 统一规则
-// 参见 design 3.5。Android 两条路径(hot-list / template-demo)都不适用,
-// 鸿蒙版用 URL 优先 + 规范化。
+// Deep Read topic_id 派生 — HarmonyOS 独立 app 统一规则(参见 design 3.5)
 //
-// 注意:本文件用 node 内置 crypto(测试用)。鸿蒙运行时需替换为
-// @ohos.security.cryptoHash,通过 adapter 注入(后续 Platform 层实现)。
-
-import { createHash } from 'crypto';
+// 双运行时兼容:Web 全局(URL/URLSearchParams/crypto)通过 runtime 接口注入,
+// 不直接 import 'crypto'。本文件 ArkTS 可编译。node 测试由 topic_id_node.ts
+// 提供默认 runtime(barrel re-export)。
 
 const HTTP_PREFIX = /^https?:\/\//i;
 
@@ -14,39 +11,48 @@ const TRACKING_PARAMS = new Set([
   'spm', 'from', 'ref', 'ref_src', 'fbclid', 'gclid',
 ]);
 
-export const normalizeUrl = (url: string): string => {
-  // 1. 小写 host(path 可能大小写敏感,保留)
-  // 2. 去 fragment
-  // 3. 去 tracking param
-  try {
-    const u = new URL(url);
-    u.hash = '';
-    u.hostname = u.hostname.toLowerCase();
-    const params = new URLSearchParams(u.search);
-    const filtered = new URLSearchParams();
-    for (const [k, v] of params.entries()) {
-      if (!TRACKING_PARAMS.has(k.toLowerCase())) filtered.append(k, v);
-    }
-    u.search = filtered.toString();
-    return u.toString();
-  } catch {
-    return url;
-  }
-};
+// runtime 接口:各运行时注入原生实现(node)或 shim(ArkTS)
+export interface TopicIdRuntime {
+  normalizeUrlInput: (url: string) => string;
+  sha256Hex32: (input: string) => string;
+}
 
 export const normalizeTitle = (title: string): string => {
   // 照搬 Android HotListRepository.kt:208-212: lowercase + \s+ → 单空格 + trim
   return title.toLowerCase().replace(/\s+/g, ' ').trim();
 };
 
-const sha256Hex32 = (input: string): string => {
-  return createHash('sha256').update(input, 'utf-8').digest('hex').substring(0, 32);
+// 工厂:可注入 runtime
+export const createTopicIdWithRuntime = (runtime: TopicIdRuntime) => {
+  return (input: { url: string | null | undefined; title: string }): string => {
+    if (input.url && HTTP_PREFIX.test(input.url)) {
+      return runtime.sha256Hex32(runtime.normalizeUrlInput(input.url));
+    }
+    return runtime.sha256Hex32(normalizeTitle(input.title));
+  };
 };
 
-export const deriveTopicId = (input: { url: string | null | undefined; title: string }): string => {
-  if (input.url && HTTP_PREFIX.test(input.url)) {
-    return sha256Hex32(normalizeUrl(input.url));
+// ArkTS 兼容的 URL normalize(不依赖全局 URL,纯字符串解析)
+// 用于 ArkTS 运行时的默认 normalizeUrlInput(与 node 行为等价)
+export const normalizeUrlArkTs = (url: string): string => {
+  // protocol://host[:port]/path?search#fragment
+  const m = /^([^:?#]+):\/\/([^/?#]+)([^?#]*)(\?[^#]*)?(#.*)?$/.exec(url);
+  if (m === null) return url;
+  const protocol = m[1];
+  const host = m[2].toLowerCase();
+  const path = m[3];
+  const searchRaw = m[4] ?? '';
+  // 去 tracking param + 去 fragment
+  let kept = '';
+  if (searchRaw.length > 1) {
+    const qs = searchRaw.slice(1).split('&');
+    const out: string[] = [];
+    for (const pair of qs) {
+      const eq = pair.indexOf('=');
+      const k = eq >= 0 ? pair.slice(0, eq) : pair;
+      if (!TRACKING_PARAMS.has(k.toLowerCase())) out.push(pair);
+    }
+    kept = out.length > 0 ? '?' + out.join('&') : '';
   }
-  // 非 http URL(ftp 等)或 url 为空 → 走 title 路径
-  return sha256Hex32(normalizeTitle(input.title));
+  return `${protocol}://${host}${path}${kept}`;
 };

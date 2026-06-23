@@ -203,7 +203,13 @@ const extractImgTags = (html: string, baseUrl: string): ImageCandidate[] => {
     if (url.startsWith('//')) {
       url = 'https:' + url;
     } else if (url.startsWith('/')) {
-      try { url = new URL(url, baseUrl).toString(); } catch { continue; }
+      // 相对路径解析:取 baseUrl 的 origin + url(ArkTS 兼容,不依赖 URL 类)
+      const originMatch = /^[^:]+:\/\/[^/]+/.exec(baseUrl);
+      if (originMatch !== null) {
+        url = originMatch[0] + url;
+      } else {
+        continue;
+      }
     } else if (!url.startsWith('http')) continue;
 
     const altMatch = attrs.match(/\balt\s*=\s*["']([^"']*)["']/i);

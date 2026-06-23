@@ -139,10 +139,12 @@ export const generateStages = async (
 ): Promise<RunResult> => {
   // createRunContext(空 prefetch → failure)
   const ctxResult = await createRunContext(deps, topicId, topicTitle, seedUrl, force);
-  if (!ctxResult.ok) {
-    return { ok: false, output: makeEmptyDeepReadOutput(), error: ctxResult.error };
+  if (ctxResult.ok === false) {
+    // ArkTS 对 discriminated union 的 narrow 较弱,显式提取 error
+    const failMsg: string = (ctxResult as { ok: false; error: string }).error;
+    return { ok: false, output: makeEmptyDeepReadOutput(), error: failMsg };
   }
-  const context = ctxResult.context;
+  const context = (ctxResult as { ok: true; context: RunContext }).context;
 
   // markCollecting → 写 COLLECTING phase(真实持久化)
   if (markCollecting && deps.repository) {

@@ -15,6 +15,7 @@ import type { DeepReadOutput } from '../domain/models.ts';
 import type { DeepReadGenerationStage } from '../domain/enums.ts';
 import type { RunResult, RunManagerDeps } from '../agent/run_manager.ts';
 import { run, runSection } from '../agent/run_manager.ts';
+import type { AbortControllerLike } from '../platform/runtime_api.ts';
 
 // ===== Scheduler interface(照搬设计 §6.3) =====
 
@@ -54,11 +55,13 @@ export interface SchedulerDeps {
   };
   // 检查 phase 是否为中断态(COLLECTING/PLANNING/WRITING)
   isInterruptedPhase: (output: DeepReadOutput) => boolean;
+  // AbortController 工厂:node 用原生 deps.createAbortController(),ArkTS 注入 shim 实现。
+  createAbortController: () => AbortControllerLike;
 }
 
 export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
-  // runningJobs:topicId → AbortController(REPLACE 语义)
-  const runningJobs = new Map<string, AbortController>();
+  // runningJobs:topicId → AbortControllerLike(REPLACE 语义)
+  const runningJobs = new Map<string, AbortControllerLike>();
   // backgrounded 标志(切后台暂停用)
   const backgroundedTopics = new Set<string>();
   // aborted 标志(模拟 cancel signal;真实用 AbortController.signal 传给 runManager)
@@ -105,7 +108,7 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
       await waitForAbort(topicId);
     }
     abortedTopics.delete(topicId);
-    const controller = new AbortController();
+    const controller = deps.createAbortController();
     runningJobs.set(topicId, controller);
 
     // 不申请 ContinuousTask(0.2);只 ongoing notification
@@ -139,7 +142,7 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
       abort(topicId);
       await waitForAbort(topicId);
     }
-    const controller = new AbortController();
+    const controller = deps.createAbortController();
     runningJobs.set(topicId, controller);
     try {
       return await withTopicLock(topicId, () => runSection(deps.runManager, topicId, title, stage, seedUrl));
