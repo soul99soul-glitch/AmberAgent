@@ -60,6 +60,20 @@ crypto adapter 替换 node `crypto` 为 `@ohos.security.cryptoHash` 在 Platform
 - `agent/retry_classifier.ts` — `RetryClassifier`(retryable/permanent 分类 + 指数退避)
 - `agent/tool_execution.ts` — `executeToolsAndMerge`(tool result 写回原 Tool part,闭合 agent loop)
 
+## Feature/Orchestration 层(Phase 4-5 — 已完成)
+
+照搬 Android `DeepReadSectionWriterTools.kt` + `DeepReadAgentRunManager.kt`。整个 Deep Read 生成逻辑闭环(从 prefetch 到完整 `DeepReadOutput`)纯 node 可测。
+
+- `agent/section_writer_tools.ts` — `createSectionWriterTools` factory(闭包状态,ArkTS 友好)。7 个 tool:overview/narrative/analysis/extended_reading(段落 writer,hasXxxContent gate → READY+STANDARD)+ visuals(P1-1 hero gate:hero_url 仅当候选池 confidence===hero 才接受)+ diagram(type 白名单/nodes≥2/edge 校验)+ finish(三门闩锁)。cleanText/safeTake(UTF-16 代理对安全截断)/merge 辅助。
+- `agent/supervisor_loop.ts` — `runStageSupervisorLoop`(2-pass 循环,cardsFor(stage,plan) evidence 路由,withTimeout race,supplementWritten gate,reminder,no-write→fallback)+ `buildPrompt`(10 段 prompt 组装)+ `buildWriterReminder`+ `collectRun`(`AiClient.generateText` 薄封装,可注入)。
+- `agent/try_fallback.ts` — `tryFallbackAfterStageFailure`(latestAssistantText → writeFallbackSection → READY BASIC)。
+- `agent/run_manager.ts` — `run`/`runSection`/`generateStages`(顺序 if:OVERVIEW→NARRATIVE→ANALYSIS→EXTENDED_READING,不是循环)/`createRunContext`(空 prefetch → hard fail P1-9)/`finishIfPossible`。依赖全注入(prefetcher/aiClient/repository/collectRun/onWriterCreated)。
+- `agent/scheduler.ts` — `DeepReadScheduler` interface + 前台主路径实现(topicMutex REPLACE 语义、runningJobs Map、abort、observeRunning derive、detectInterrupted、setBackgrounded)。后台 `@kit` API(ContinuousTask/notificationManager/UIAbility 生命周期)留接口,标注需运行时(Phase 6-7 接)。
+
+### Phase 5 验收
+
+用 mock prefetcher + mock collectRun(`onWriterCreated` 捕获 writer 触发写入)跑通完整 `run()` → 产出 `isComplete()=true` 的 `DeepReadOutput`(4 stages 全 READY,phase COMPLETE)。440 tests pass。
+
 ## Research 层(Phase 3 — 已完成)
 
 研究阶段管线:多 provider 搜索 → 正文提取 → 图片评分 → evidence 分桶 → 文章规划。全部纯 node 可测(mock HttpClient / mock AiClient 注入)。
