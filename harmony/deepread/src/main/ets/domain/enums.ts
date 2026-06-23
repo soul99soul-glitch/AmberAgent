@@ -90,3 +90,9 @@ export const MIN_SOURCE_CHARS = 280;
 export const MIN_SEED_SOURCE_CHARS = 15;
 // READER_NATIVE_MIN_CHARS: Android 用裸 >= 18 字面量 (DeepReadSourcePrefetcher.kt:657, 673)
 export const READER_NATIVE_MIN_CHARS = 18;
+
+// Evidence stage 分配 / cardsFor 上限 — 照搬 Android DeepReadResearchHarness.kt:15-17
+// STAGE_EVIDENCE_MIN/MAX 限制每个 stage 的 evidence cards 数量(plan + cardsFor cap)
+export const STAGE_EVIDENCE_MIN = 4;
+export const STAGE_EVIDENCE_MAX = 6;
+export const DEFAULT_STAGE_EVIDENCE_TARGET = 5;
