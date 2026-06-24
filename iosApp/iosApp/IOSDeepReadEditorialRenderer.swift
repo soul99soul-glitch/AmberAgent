@@ -44,6 +44,8 @@ enum IOSDeepReadEditorialRenderer {
         b += #"<meta name="viewport" content="width=device-width, initial-scale=1"/>"#
         b += "<style>\n"
         b += defaultFontCSS + "\n" + baseCSS + "\n" + runtimeCSS + "\n"
+        // After the base/runtime CSS so the :root + code overrides win the cascade.
+        b += bundledFontCSS + "\n"
         if input.dark { b += darkCSS + "\n" }
         b += emptyImageFallbackCSS + "\n</style></head><body><article>"
 
@@ -356,6 +358,17 @@ enum IOSDeepReadEditorialRenderer {
     .markdown-body table{width:100%;border-collapse:collapse;font-family:var(--deep-read-sans);font-size:12px;line-height:1.5;margin:0 0 13px;}
     .markdown-body th,.markdown-body td{border-top:1px solid #ddd;padding:7px 6px;text-align:left;vertical-align:top;}
     .markdown-body blockquote{margin:0 0 13px;padding-left:10px;border-left:2px solid #ef4444;font-size:15px;line-height:1.68;}
+    """
+
+    /// App-bundled fonts served via the `amberfont://` scheme handler
+    /// (IOSDeepReadFontSchemeHandler): Noto Serif SC for the body (matches Android),
+    /// JetBrains Mono for code. Prepended to the serif / code font stacks; the system
+    /// fonts remain as fallbacks.
+    private static let bundledFontCSS = """
+    @font-face{font-family:"AmberDeepReadSerif";src:url("amberfont://deepread/serif.otf") format("opentype");font-weight:400;font-style:normal;font-display:swap;}
+    @font-face{font-family:"AmberDeepReadMono";src:url("amberfont://deepread/mono.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap;}
+    :root{--deep-read-serif:"AmberDeepReadSerif","Noto Serif SC","Source Han Serif SC","Songti SC",serif;}
+    .markdown-body code,.markdown-body pre code{font-family:"AmberDeepReadMono",ui-monospace,SFMono-Regular,Menlo,monospace;}
     """
 
     private static let darkCSS = """

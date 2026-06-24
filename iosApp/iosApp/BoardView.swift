@@ -1315,6 +1315,9 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        // Serve the app-bundled reader fonts (Noto Serif SC / JetBrains Mono) to the
+        // page's @font-face via a custom scheme.
+        configuration.setURLSchemeHandler(IOSDeepReadFontSchemeHandler(), forURLScheme: IOSDeepReadFontSchemeHandler.scheme)
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.isOpaque = false
@@ -1329,7 +1332,9 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
-        webView.loadHTMLString(html, baseURL: nil)
+        // Load with the bundled-font scheme's base URL so @font-face requests are
+        // same-origin with the served fonts.
+        webView.loadHTMLString(html, baseURL: URL(string: IOSDeepReadFontSchemeHandler.baseURL))
     }
 
     func makeCoordinator() -> Coordinator {

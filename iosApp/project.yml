@@ -32,6 +32,12 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+      # Deep Read editorial reader fonts — reference the already-tracked Android
+      # font assets (no duplicate binary in the repo); bundled as app resources.
+      - path: ../app/src/main/res/font/noto_serif_sc.otf
+        buildPhase: resources
+      - path: ../app/src/main/res/font/jetbrains_mono.ttf
+        buildPhase: resources
     preBuildScripts:
       - name: Build Shared KMP Framework
         basedOnDependencyAnalysis: false
@@ -203,6 +209,10 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+      - path: ../app/src/main/res/font/noto_serif_sc.otf
+        buildPhase: resources
+      - path: ../app/src/main/res/font/jetbrains_mono.ttf
+        buildPhase: resources
     preBuildScripts:
       - name: Build Shared KMP Framework
         basedOnDependencyAnalysis: false
