@@ -28,7 +28,7 @@ struct BoardSettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        createSourceSection
+                        // 「自定义来源」(手动创建深度阅读)暂时隐藏 —— 现版太糙,后续重做。
                         modelSection
                         refreshSection
                         hotListSourceSection
@@ -44,7 +44,7 @@ struct BoardSettingsView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
-            focusKeywordsText = sharedSettings.todayBoard.hotListFocusKeywords.joined(separator: "\n")
+            focusKeywordsText = sharedSettings.todayBoard.hotListFocusKeywords.joined(separator: "、")
         }
         .sheet(item: $editorSeed) { seed in
             BoardTemplateWorkbenchSheet(
@@ -231,18 +231,23 @@ struct BoardSettingsView: View {
         }
     }
 
+    // 热榜来源按分类分组(AI 英文源 / 社交热搜 / 科技数码 / 财经 / 体育),每类一组开关 ——
+    // 即"分类添加":勾选哪类的哪些源。中文源来自 NewsNow 聚合器,标题本身就是中文。
+    @ViewBuilder
     private var hotListSourceSection: some View {
-        BoardSettingsSection(title: "热榜来源") {
-            ForEach(Array(IOSHotlistProviders.descriptors.enumerated()), id: \.element.id) { index, descriptor in
-                BoardSettingsToggleRow(
-                    title: descriptor.displayName,
-                    subtitle: descriptor.providerId,
-                    isOn: effectiveEnabledSources.contains(descriptor.providerId)
-                ) { enabled in
-                    toggleHotListSource(descriptor.providerId, enabled: enabled)
-                }
-                if index < IOSHotlistProviders.descriptors.count - 1 {
-                    BoardCapabilityDivider()
+        ForEach(IOSHotlistProviders.descriptorsByCategory(), id: \.category) { group in
+            BoardSettingsSection(title: "热榜来源 · \(group.category)") {
+                ForEach(Array(group.items.enumerated()), id: \.element.id) { index, descriptor in
+                    BoardSettingsToggleRow(
+                        title: descriptor.displayName,
+                        subtitle: descriptor.providerId,
+                        isOn: effectiveEnabledSources.contains(descriptor.providerId)
+                    ) { enabled in
+                        toggleHotListSource(descriptor.providerId, enabled: enabled)
+                    }
+                    if index < group.items.count - 1 {
+                        BoardCapabilityDivider()
+                    }
                 }
             }
         }
@@ -278,7 +283,7 @@ struct BoardSettingsView: View {
 
                     Button("恢复推荐") {
                         let defaults = defaultFocusKeywords
-                        focusKeywordsText = defaults.joined(separator: "\n")
+                        focusKeywordsText = defaults.joined(separator: "、")
                         sharedSettings.updateTodayBoard { _ in
                             TodayBoardSettingPatch(hotListFocusKeywords: defaults)
                         }

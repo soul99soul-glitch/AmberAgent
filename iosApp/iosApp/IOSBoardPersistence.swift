@@ -1314,6 +1314,77 @@ struct IOSGithubTrendingHotlistProvider: IOSHotlistProvider {
     }
 }
 
+/// NewsNow 聚合器预设源(Android NewsNowPresets 对齐)。NewsNow 代理了一批中文热榜,
+/// 标题本身就是中文、且比直连源(如 36kr.com/feed 常被 UA 拦)更稳。按分类组织,便于在
+/// 来源设置里"分类添加"。
+struct IOSNewsNowPreset: Identifiable, Equatable {
+    let newsNowId: String   // e.g. "zhihu"
+    let displayName: String // e.g. "知乎热榜"
+    let category: String    // e.g. "社交热搜"
+
+    var id: String { providerId }
+    var providerId: String { "newsnow:\(newsNowId)" }
+
+    static let all: [IOSNewsNowPreset] = [
+        .init(newsNowId: "zhihu", displayName: "知乎热榜", category: "社交热搜"),
+        .init(newsNowId: "weibo", displayName: "微博热搜", category: "社交热搜"),
+        .init(newsNowId: "douyin", displayName: "抖音热搜", category: "社交热搜"),
+        .init(newsNowId: "bilibili-hot-search", displayName: "B 站热搜", category: "科技数码"),
+        .init(newsNowId: "ithome", displayName: "IT 之家", category: "科技数码"),
+        .init(newsNowId: "sspai", displayName: "少数派", category: "科技数码"),
+        .init(newsNowId: "juejin", displayName: "掘金", category: "科技数码"),
+        .init(newsNowId: "36kr-quick", displayName: "36 氪快讯", category: "科技数码"),
+        .init(newsNowId: "coolapk", displayName: "酷安", category: "科技数码"),
+        .init(newsNowId: "v2ex-share", displayName: "V2EX 分享", category: "科技数码"),
+        .init(newsNowId: "github-trending-today", displayName: "GitHub 趋势", category: "科技数码"),
+        .init(newsNowId: "xueqiu-hotstock", displayName: "雪球热股", category: "财经"),
+        .init(newsNowId: "wallstreetcn-hot", displayName: "华尔街见闻", category: "财经"),
+        .init(newsNowId: "cls-telegraph", displayName: "财联社电报", category: "财经"),
+        .init(newsNowId: "hupu-zhugandaoretie", displayName: "虎扑步行街", category: "体育"),
+    ]
+}
+
+/// 单个 NewsNow 源 provider。命中 `https://newsnow.busiyi.world/api/s?id=<id>&latest`,
+/// 解析 `{items:[{title,url,extra:{info:热度}}]}`(Android FIELD_MAPPING_JSON 对齐)。
+struct IOSNewsNowHotlistProvider: IOSHotlistProvider {
+    let providerId: String
+    let displayName: String
+    let newsNowId: String
+
+    func fetch(limit: Int) async throws -> [IOSHotlistItem] {
+        let session = IOSRSSHotlistProvider.ephemeralSession
+        var request = URLRequest(url: URL(string: "https://newsnow.busiyi.world/api/s?id=\(newsNowId)")!)
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent"
+        )
+        request.setValue("zh-CN,zh;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, _) = try await session.data(for: request)
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = root["items"] as? [[String: Any]] else {
+            return []
+        }
+        let now = IOSBoardSignalRepository.currentEpochMs()
+        return items.prefix(max(limit, 0)).enumerated().compactMap { index, item in
+            guard let rawTitle = item["title"] as? String else { return nil }
+            let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            let url = (item["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let heat = (item["extra"] as? [String: Any])?["info"] as? String
+            return IOSHotlistItem(
+                providerId: providerId,
+                title: String(title.prefix(160)),
+                url: (url?.isEmpty == false) ? url : nil,
+                rank: index + 1,
+                score: nil,
+                fetchedAt: now,
+                heat: heat
+            )
+        }
+    }
+}
+
 /// All built-in iOS hotlist providers (Android BuiltInHotListProviders parity
 /// for the providers with stable public endpoints).
 enum IOSHotlistProviders {
@@ -1323,20 +1394,53 @@ enum IOSHotlistProviders {
         var displayName: String
     }
 
+    // NewsNow 源(中文热榜,标题本身中文)。直连 36kr.com/feed 常被 UA 拦返回空,故用
+    // NewsNow 的 36kr-quick 取代;旧的 IOSKr36HotlistProvider 不再注册进 all。
+    static let newsNow: [IOSHotlistProvider] = IOSNewsNowPreset.all.map {
+        IOSNewsNowHotlistProvider(providerId: $0.providerId, displayName: $0.displayName, newsNowId: $0.newsNowId)
+    }
+
     static let all: [IOSHotlistProvider] = [
         IOSHackerNewsHotlistProvider(),
         IOSArxivAIHotlistProvider(),
         IOSInfoqAIHotlistProvider(),
-        IOSKr36HotlistProvider(),
         IOSHuggingFacePapersHotlistProvider(),
         IOSGithubTrendingHotlistProvider()
-    ]
+    ] + newsNow
 
     static var descriptors: [Descriptor] {
         all.map { Descriptor(providerId: $0.providerId, displayName: $0.displayName) }
     }
 
-    static let iOSDefaultProviderIds: Set<String> = Set(all.map(\.providerId))
+    /// 分类 → provider id。内置英文源归「AI · 英文源」,NewsNow 源按各自分类。
+    static func category(for providerId: String) -> String {
+        if let preset = IOSNewsNowPreset.all.first(where: { $0.providerId == providerId }) {
+            return preset.category
+        }
+        return "AI · 英文源"
+    }
+
+    static let categoryOrder: [String] = ["AI · 英文源", "社交热搜", "科技数码", "财经", "体育"]
+
+    /// 描述符按分类分组(供来源设置"分类添加"展示),保持 categoryOrder 顺序。
+    static func descriptorsByCategory() -> [(category: String, items: [Descriptor])] {
+        let grouped = Dictionary(grouping: descriptors) { category(for: $0.providerId) }
+        return categoryOrder.compactMap { cat in
+            guard let items = grouped[cat], !items.isEmpty else { return nil }
+            return (cat, items)
+        }
+    }
+
+    // 新装/未自定义用户的默认开启集(英文 + 几个常用中文源)。不开全部,避免一次刷新拉一堆源。
+    // 注:NewsNow 的 36kr 上游目前常空,故默认用 IT 之家(稳定),36 氪仍保留为可选源。
+    static let iOSDefaultProviderIds: Set<String> = [
+        "hacker_news",
+        "github_trending_ai",
+        "newsnow:zhihu",
+        "newsnow:weibo",
+        "newsnow:ithome",
+        "newsnow:bilibili-hot-search",
+    ]
     static let androidDefaultProviderIds: Set<String> = ["bilibili", "hacker_news"]
     static let supportedProviderIds: Set<String> = Set(all.map(\.providerId))
 
