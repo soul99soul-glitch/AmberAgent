@@ -1,95 +1,49 @@
-// RdbRepository — Database + Repository 契约的真实实现
-// @kit.ArkData relationalStore
-// 对照设计 §3.4(RDB schema) + §3.6(Repository interface)
-//
-// DEEP_READ_SCHEMA_SQL 已在 deepread/domain/database.ts 定义(Plan 1.2)。
-// TODO(toolchain/ArkTS 验证): relationalStore.getRdbStore / executeSql 签名以 API 24 为准。
+// RdbRepository — DeepReadRepository 契约的实现
+// 对照设计 §3.4/§3.6。ArkTS 兼容:class implements DeepReadRepository。
+// MVP:内存 fallback(真实 relationalStore 待 context 注入 + API 验证后接入)。
 
-import { relationalStore } from '@kit.ArkData';
-import type { DeepReadOutput, DeepReadRepository, Storage } from '@amber/deepread-domain';
-import { DEEP_READ_SCHEMA_SQL } from '@amber/deepread-domain';
-import { pollingObservable } from '@amber/deepread-domain';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import type {
+  DeepReadRepository, DeepReadCacheEntry, Observable,
+} from '@amber/deepread-domain';
+import type { DeepReadGenerationStage, DeepReadGenerationPhase } from '@amber/deepread-domain';
+import type { DeepReadSectionState } from '@amber/deepread-domain';
 
-interface RdbContext {
-  store: relationalStore.RdbStore;
+const DOMAIN: number = 0x0001;
+const TAG: string = 'DeepRead.RdbRepository';
+
+class MemoryFallbackRepository implements DeepReadRepository {
+  private store: Map<string, DeepReadCacheEntry> = new Map();
+
+  async get(topicId: string): Promise<DeepReadCacheEntry | null> {
+    const e: DeepReadCacheEntry | undefined = this.store.get(topicId);
+    return e !== undefined ? e : null;
+  }
+  async getByUrl(_url: string): Promise<DeepReadCacheEntry | null> { return null; }
+  async getByTitle(_title: string): Promise<DeepReadCacheEntry | null> { return null; }
+  async materializeFresh(topicId: string, _title: string, _url: string | null): Promise<DeepReadCacheEntry | null> {
+    return this.store.get(topicId) ?? null;
+  }
+  async upsert(entry: DeepReadCacheEntry): Promise<void> {
+    this.store.set(entry.topicId, entry);
+  }
+  async updatePhase(_topicId: string, _phase: DeepReadGenerationPhase): Promise<void> {}
+  async updateSectionState(_topicId: string, _stage: DeepReadGenerationStage, _state: DeepReadSectionState): Promise<void> {}
+  async incrementAttempt(_topicId: string, _error: string): Promise<void> {}
+  async resetAttempt(_topicId: string): Promise<void> {}
+  observe(_topicId: string): Observable<DeepReadCacheEntry | null> {
+    return {
+      subscribe: (_cb: (v: DeepReadCacheEntry | null) => void): (() => void) => { return () => {}; },
+      getCurrent: (): DeepReadCacheEntry | null | undefined => undefined,
+    };
+  }
+  async listHistory(_limit: number): Promise<DeepReadCacheEntry[]> { return []; }
+  async delete(topicId: string): Promise<void> { this.store.delete(topicId); }
+  async purgeExpired(): Promise<number> { return 0; }
+  async purgeHistoryRetention(): Promise<number> { return 0; }
 }
 
-const STORE_NAME = 'deep_read_cache.db';
-
-export const createRdbRepository = (_storage: Storage): DeepReadRepository => {
-  let ctx: RdbContext | null = null;
-
-  const init = async (): Promise<RdbContext> => {
-    if (ctx !== null) return ctx;
-    // TODO(arkts): context 由 UIAbility 传入;这里需要 ability context。
-    // MVP: 用 globalThis.__abilityContext(由 EntryAbility 写入)
-    const context = (globalThis as Record<string, object>).__abilityContext as unknown as Context;
-    const config: relationalStore.StoreConfig = {
-      name: STORE_NAME,
-      securityLevel: relationalStore.SecurityLevel.S1,
-    };
-    const store = await relationalStore.getRdbStore(context, config);
-    // 建 schema:DEEP_READ_SCHEMA_SQL 是含多条 CREATE TABLE IF NOT EXISTS 的 SQL 文本,
-    // 按 ';' 分割逐条执行(每条非空)
-    const statements = DEEP_READ_SCHEMA_SQL.split(';').map(s => s.trim()).filter(s => s.length > 0);
-    for (const sql of statements) {
-      await store.executeSql(sql);
-    }
-    ctx = { store };
-    return ctx;
-  };
-
-  const getDeepRead = async (topicId: string): Promise<DeepReadOutput | null> => {
-    const { store } = await init();
-    const pred = new relationalStore.RdbPredicates('deep_read_cache');
-    pred.equalTo('topic_id', topicId);
-    const rs = await store.query(pred, ['output_json', 'updated_at']);
-    let result: DeepReadOutput | null = null;
-    if (rs.goToNextRow()) {
-      const json = rs.getString(rs.getColumnIndex('output_json'));
-      try {
-        result = JSON.parse(json) as DeepReadOutput;
-      } catch {
-        result = null;
-      }
-    }
-    rs.close();
-    return result;
-  };
-
-  const saveDeepRead = async (topicId: string, output: DeepReadOutput): Promise<void> => {
-    const { store } = await init();
-    const json = JSON.stringify(output);
-    const now = Date.now();
-    // TODO(arkts): upsert 语法(relationalStore insertWithConflictResolution ON CONFLICT REPLACE)
-    const pred = new relationalStore.RdbPredicates('deep_read_cache');
-    pred.equalTo('topic_id', topicId);
-    const existing = await store.query(pred, ['topic_id']);
-    const has = existing.goToNextRow();
-    existing.close();
-    if (has) {
-      const upd = new relationalStore.RdbPredicates('deep_read_cache');
-      upd.equalTo('topic_id', topicId);
-      await store.update({ output_json: json, updated_at: now } as Record<string,ValueType>, upd);
-    } else {
-      await store.insert('deep_read_cache', { topic_id: topicId, output_json: json, updated_at: now } as Record<string, ValueType>);
-    }
-  };
-
-  const clearDeepRead = async (topicId: string): Promise<void> => {
-    const { store } = await init();
-    const pred = new relationalStore.RdbPredicates('deep_read_cache');
-    pred.equalTo('topic_id', topicId);
-    await store.delete(pred);
-  };
-
-  const observeDeepRead = (topicId: string) => {
-    // MVP 轮询(对照 observable.ts pollingObservable,1s)
-    return pollingObservable(async () => {
-      const o = await getDeepRead(topicId);
-      return o ?? ({} as DeepReadOutput);
-    }, { intervalMs: 1000 });
-  };
-
-  return { getDeepRead, saveDeepRead, clearDeepRead, observeDeepRead };
+export const createRdbRepository = (): DeepReadRepository => {
+  hilog.info(DOMAIN, TAG, 'createRdbRepository — memory fallback (RDB TODO)');
+  return new MemoryFallbackRepository();
 };

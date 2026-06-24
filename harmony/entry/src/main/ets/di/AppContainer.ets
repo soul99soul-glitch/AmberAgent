@@ -9,10 +9,14 @@ import type {
   DeepReadOutput, DeepReadScheduler, HttpClient, Storage,
 } from '@amber/deepread-domain';
 import { run, makeEmptyDeepReadOutput, isInterruptedPhase } from '@amber/deepread-domain';
-// 真实平台实现 import(触发 ArkTS 编译验证)
+// 真实平台实现 import
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
 import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
-// TODO(notification): 接真实通知时恢复 import { notificationManager } from '@kit.NotificationKit';
+import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
+import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibleAiClient.ets';
+import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
+import { createNotificationNotifier } from '../platform_impl/NotificationNotifier.ets';
+import type { DeepReadRepository, SearchProviderRegistry, Notifier } from '@amber/deepread-domain';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0x0001;
@@ -75,8 +79,10 @@ const createRealNotifier = (): DeepReadNotifier => {
 interface Container {
   httpClient: HttpClient;
   storage: Storage;
+  repository: DeepReadRepository;
+  searchRegistry: SearchProviderRegistry;
   aiClient: AiClient;
-  notifier: DeepReadNotifier;
+  notifier: Notifier;
 }
 
 let cached: Container | null = null;
@@ -84,9 +90,11 @@ let cached: Container | null = null;
 const buildContainer = (): Container => {
   const httpClient: HttpClient = createRcpHttpClient();
   const storage: Storage = createPreferencesStorage();
-  const aiClient: AiClient = new MockAiClient();
-  const notifier: DeepReadNotifier = createRealNotifier();
-  return { httpClient, storage, aiClient, notifier };
+  const repository: DeepReadRepository = createRdbRepository();
+  const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(httpClient, storage);
+  const aiClient: AiClient = createOpenAiCompatibleAiClient(httpClient, storage);
+  const notifier: Notifier = createNotificationNotifier();
+  return { httpClient, storage, repository, searchRegistry, aiClient, notifier };
 };
 
 export const getAppContainer = (): Container => {
@@ -96,5 +104,6 @@ export const getAppContainer = (): Container => {
   return cached;
 };
 
-export const getNotifier = (): DeepReadNotifier => getAppContainer().notifier;
+export const getNotifier = (): Notifier => getAppContainer().notifier;
 export const getAiClient = (): AiClient => getAppContainer().aiClient;
+export const getRepository = (): DeepReadRepository => getAppContainer().repository;

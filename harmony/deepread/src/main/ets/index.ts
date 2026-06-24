@@ -20,8 +20,8 @@ export type { HttpClient, HttpRequest, HttpResponse } from './platform/http.ts';
 export type { Database } from './platform/database.ts';
 export type { Storage } from './platform/storage.ts';
 export type { SearchProvider, SearchProviderRegistry, SearchHit } from './platform/search.ts';
-export type { AiClient, Tool } from './platform/ai_client.ts';
-export type { DeepReadRepository } from './platform/repository.ts';
+export type { AiClient, Tool, GenerateTextParams } from './platform/ai_client.ts';
+export type { DeepReadRepository, DeepReadCacheEntry } from './platform/repository.ts';
 export type { Observable } from './platform/observable.ts';
 export { pollingObservable } from './platform/observable.ts';
 export { DEEP_READ_SCHEMA_SQL } from './platform/database.ts';
@@ -44,3 +44,4 @@ export type { SourcePrefetcher, DeepReadSource } from './research/source_prefetc
 export { buildEvidencePack, cardsFor } from './research/evidence_pack.ts';
 export type { DeepReadEvidencePack, DeepReadArticlePlan } from './research/evidence_pack.ts';
 export { generateArticlePlan, fallbackPlan } from './research/article_plan.ts';
+export { createTavilyProvider, createFallbackProviders } from './research/search_provider.ts';
