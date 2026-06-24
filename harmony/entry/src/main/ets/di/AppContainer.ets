@@ -1,92 +1,85 @@
-// AppContainer — 依赖注入容器
-// 组装 deepread 逻辑层(RunManagerDeps)与鸿蒙真实平台实现(@kit)。
-//
-// 对照设计 §8(Platform 契约) + Phase 6 真实平台实现。
-// 当前:平台实现文件已就位(platform_impl/*.ets),但部分 API 调用
-// 需在 DevEco + API 24 下编译验证。无法编译的部分在 platform_impl 内标 TODO。
-//
-// ArkTS 严格模式:无 any,单例用闭包(非 class 全局可变)。
+// AppContainer — 依赖注入容器(ArkTS 兼容版)
+// 组装 deepread 逻辑层与平台实现。
+// 当前:用内存 mock 替代真实 @kit 平台实现(它们需逐个修 ArkTS 编译,留 TODO)。
+// 真实 LLM 调用需配 API key 后由 OpenAiCompatibleAiClient 接入。
+// 通知调度(Phase 7)用 @kit.NotificationKit 接入。
 
 import type {
-  RunManagerDeps, HttpClient, DeepReadRepository, AiClient,
-  SourcePrefetcher, SearchProviderRegistry, SectionWriterTools, ToolDefinition,
+  RunManagerDeps, AiClient, UIMessage, Tool,
+  DeepReadOutput, DeepReadScheduler,
 } from '@amber/deepread-domain';
-import { createSourcePrefetcher, createScheduler } from '@amber/deepread-domain';
-import type { DeepReadScheduler } from '@amber/deepread-domain';
+import { run, makeEmptyDeepReadOutput, isInterruptedPhase } from '@amber/deepread-domain';
+// TODO(notification): 接真实通知时恢复 import { notificationManager } from '@kit.NotificationKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
-import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
-import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
-import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
-import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibleAiClient.ets';
-import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
-import { createNotificationNotifier } from '../platform_impl/NotificationNotifier.ets';
+const DOMAIN: number = 0x0001;
+const TAG: string = 'DeepRead.Container';
 
-// 单例容器(闭包持有,首次 get 时构造)
+// generateText 参数 interface(ArkTS 不允许对象字面量类型)
+interface GenTextParams {
+  model: string;
+  messages: UIMessage[];
+  tools?: Tool[];
+  maxSteps?: number;
+  autoApproveTools?: boolean;
+  autoApproveHighRiskTools?: boolean;
+  autoApprovedToolNames?: string[];
+  stream?: boolean;
+}
+
+// mock AiClient:无 API key 时返回空 → deepread 走 fallbackPlan + writeFallbackSection
+// TODO(phase6): 替换为 createOpenAiCompatibleAiClient(需修 ArkTS 编译后)
+class MockAiClient implements AiClient {
+  async generateText(_params: GenTextParams): Promise<UIMessage[]> {
+    return [];
+  }
+}
+
+// Phase 7:通知调度(对照设计 §6.7 / §8.8)
+// TODO(notification): notificationManager 的 ContentType/NotificationContent 类型
+// 在 API 26 SDK 有 @ohos.notification vs @ohos.notificationManager 模块冲突,
+// 需 DevEco 验证确切类型后接真实系统通知。当前用 hilog 输出(通知逻辑结构完整:
+// 3 类通知 running/completed/failed + cancel,调度接入 Index startDeepRead 全生命周期)。
+interface DeepReadNotifier {
+  notifyRunning(topicId: string, title: string): Promise<void>;
+  notifyCompleted(topicId: string, title: string, complete: boolean): Promise<void>;
+  notifyFailed(topicId: string, title: string, msg: string): Promise<void>;
+  cancelRunning(topicId: string): Promise<void>;
+}
+
+// 通知实现:当前用 hilog(标 TODO 接真实 notificationManager)
+// ArkTS 要求 interface 用 class implements,不允许对象字面量直接赋值。
+class HilogNotifier implements DeepReadNotifier {
+  async notifyRunning(topicId: string, title: string): Promise<void> {
+    hilog.info(DOMAIN, TAG, '[notifyRunning] topicId=%{public}s title=%{public}s', topicId, title);
+  }
+  async notifyCompleted(topicId: string, _title: string, complete: boolean): Promise<void> {
+    hilog.info(DOMAIN, TAG, '[notifyCompleted] topicId=%{public}s complete=%{public}s', topicId, complete ? 'true' : 'false');
+  }
+  async notifyFailed(topicId: string, _title: string, msg: string): Promise<void> {
+    hilog.warn(DOMAIN, TAG, '[notifyFailed] topicId=%{public}s msg=%{public}s', topicId, msg);
+  }
+  async cancelRunning(topicId: string): Promise<void> {
+    hilog.info(DOMAIN, TAG, '[cancelRunning] topicId=%{public}s', topicId);
+  }
+}
+
+const createRealNotifier = (): DeepReadNotifier => {
+  return new HilogNotifier();
+};
+
+// 容器单例
 interface Container {
-  httpClient: HttpClient;
-  repository: DeepReadRepository;
   aiClient: AiClient;
-  searchRegistry: SearchProviderRegistry;
-  prefetcher: SourcePrefetcher;
-  scheduler: DeepReadScheduler;
-  runManager: RunManagerDeps;
+  notifier: DeepReadNotifier;
 }
 
 let cached: Container | null = null;
 
-const PLAYBOOK_MD: string = '';  // TODO(phase6): 从 rawfile 加载 playbook.md
-
 const buildContainer = (): Container => {
-  const httpClient = createRcpHttpClient();
-  const storage = createPreferencesStorage();
-  const repository = createRdbRepository(storage);
-  const aiClient = createOpenAiCompatibleAiClient(httpClient, storage);
-  const searchRegistry = createTavilyAndFallbackRegistry(httpClient, storage);
-  const prefetcher = createSourcePrefetcher(httpClient, searchRegistry);
-
-  // TODO(phase6): model 从 settings 读(对照 Android resolveModel)
-  const model: string = 'deepseek-chat';
-
-  // 捕获当前 run 的 writer(由 run_manager.createRunContext 创建,通过 onWriterCreated 回调)
-  let currentWriter: SectionWriterTools | null = null;
-
-  const runManager: RunManagerDeps = {
-    prefetcher,
-    // collectRun:由 AiClient.generateText 装配 agent loop(runAgentLoop + executeToolsAndMerge +
-    //   budget_prompt + retry_classifier),注入当前 run 的 writer tools。
-    collectRun: async (messages, _statusLabel) => {
-      // writer 的 tools() 返回 ToolDefinition[];转 Map 供 agent loop
-      const toolList: ToolDefinition[] = currentWriter !== null
-        ? currentWriter.tools(null)
-        : [];
-      const toolMap: Map<string, ToolDefinition> = new Map();
-      for (const t of toolList) toolMap.set(t.name, t);
-      return aiClient.generateText({
-        model, messages, stream: true, tools: toolMap,
-      });
-    },
-    aiClient,
-    model,
-    playbookMarkdown: PLAYBOOK_MD,
-    repository: {
-      get: (topicId) => repository.getDeepRead(topicId),
-      save: (topicId, _title, output) => repository.saveDeepRead(topicId, output),
-      clear: (topicId) => repository.clearDeepRead(topicId),
-    },
-    nowIso: () => new Date().toISOString().slice(0, 10),
-    onWriterCreated: (w) => { currentWriter = w; },
-  };
-
-  const notifier = createNotificationNotifier();
-  const scheduler = createScheduler({
-    runManager,
-    observeOutput: (topicId) => repository.observeDeepRead(topicId),
-    notifier,
-    isInterruptedPhase: (o) => o.generationPhase === 'COLLECTING' ||
-      o.generationPhase === 'PLANNING' || o.generationPhase === 'WRITING',
-  });
-
-  return { httpClient, repository, aiClient, searchRegistry, prefetcher, scheduler, runManager };
+  const aiClient: AiClient = new MockAiClient();
+  const notifier: DeepReadNotifier = createRealNotifier();
+  return { aiClient, notifier };
 };
 
 export const getAppContainer = (): Container => {
@@ -96,5 +89,5 @@ export const getAppContainer = (): Container => {
   return cached;
 };
 
-export const getScheduler = (): DeepReadScheduler => getAppContainer().scheduler;
-export const getRepository = (): DeepReadRepository => getAppContainer().repository;
+export const getNotifier = (): DeepReadNotifier => getAppContainer().notifier;
+export const getAiClient = (): AiClient => getAppContainer().aiClient;

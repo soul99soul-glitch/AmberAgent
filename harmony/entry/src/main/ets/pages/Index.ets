@@ -10,6 +10,7 @@ import {
 import type { TopicIdRuntime, RunManagerDeps, DeepReadOutput, DeepReadSource, UIMessage, AiClient, Tool } from '@amber/deepread-domain';
 import { promptAction } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { getAppContainer, getNotifier } from '../di/AppContainer.ets';  // Phase 7 通知调度
 
 // generateText 参数 interface(ArkTS 不允许对象字面量类型)
 interface GenerateTextParams {
@@ -72,9 +73,12 @@ struct DeepReadHomePage {
     this.status = '正在生成深度阅读…';
     this.articleText = '';
 
-    try {
-      const topicId = deriveTopicIdArkTs({ url: null, title: this.title });
+    // Phase 7:通知调度 — 运行中通知
+    const notifier = getNotifier();
+    const topicId = deriveTopicIdArkTs({ url: null, title: this.title });
+    await notifier.notifyRunning(topicId, this.title);
 
+    try {
       // 构造 RunManagerDeps:mock prefetcher 返回 mockSources,
       // mock collectRun 模拟 LLM 调 writer tool 写入各段内容。
       // 关键:这会真实跑 deepread 的 generateStages → buildEvidencePack →
@@ -114,14 +118,22 @@ struct DeepReadHomePage {
         ];
         this.articleText = sections.join('\n\n');
         this.status = `生成完成 ✓ (topicId: ${topicId.substring(0, 8)}…)`;
+        // Phase 7:完成通知
+        await notifier.notifyCompleted(topicId, this.title, true);
       } else {
         this.status = `生成失败: ${result.error ?? '未知错误'}`;
+        // Phase 7:失败通知
+        await notifier.notifyFailed(topicId, this.title, result.error ?? '未知错误');
       }
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'run failed: %{public}s', String(e));
       this.status = `出错: ${String(e).substring(0, 80)}`;
       promptAction.showToast({ message: '生成失败,请重试' });
+      // Phase 7:失败通知
+      await notifier.notifyFailed(topicId, this.title, String(e).substring(0, 80));
     } finally {
+      // Phase 7:取消运行中通知
+      await notifier.cancelRunning(topicId);
       this.running = false;
     }
   }
