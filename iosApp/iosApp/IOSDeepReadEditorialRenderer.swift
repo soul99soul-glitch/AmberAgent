@@ -31,14 +31,18 @@ enum IOSDeepReadEditorialRenderer {
         var sourceLabel: String? = nil
         var sources: [SourceLink] = []
         var dark: Bool = false
+        /// Structured Android-parity output. When present (and non-empty), the reader
+        /// renders the rich editorial cards (timeline / core-points / diagram /
+        /// analysis / reading-links); otherwise it falls back to the flat Markdown body.
+        var structured: IOSDeepReadOutput? = nil
     }
 
     // MARK: - Entry point
 
     static func renderHTML(_ input: Input) -> String {
-        let body = markdownToHTML(stripLeadingH1(input.markdown))
         let hero = input.heroImageURL?.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasHero = !(hero ?? "").isEmpty
+        let structured = input.structured.flatMap { $0.hasStructuredBody ? $0 : nil }
 
         var b = "<!doctype html><html><head>"
         b += #"<meta name="viewport" content="width=device-width, initial-scale=1"/>"#
@@ -66,21 +70,32 @@ enum IOSDeepReadEditorialRenderer {
         if !hasHero {
             b += #"<p class="kicker">"# + esc(input.kicker) + "</p>"
         }
-        b += "<h1>" + esc(input.title) + "</h1></section>"
+        b += "<h1>" + esc(input.title) + "</h1>"
+        // Android puts the summary inside the headline section.
+        if let s = structured, !s.summary.isEmpty {
+            b += IOSDeepReadStructuredRenderer.summaryHTML(s.summary)
+        }
+        b += "</section>"
 
-        b += #"<section><div class="markdown-body">"# + body + "</div></section>"
-
-        if !input.sources.isEmpty {
-            b += #"<section><p class="section">来源</p>"#
-            for s in input.sources where !s.url.isEmpty {
-                b += #"<a class="reading-link" href=""# + esc(s.url) + #"">"#
-                b += "<p>" + esc(s.title) + "</p>"
-                if let src = s.source, !src.isEmpty {
-                    b += "<small>" + esc(src) + "</small>"
+        if let s = structured {
+            // Rich editorial sections from the typed output (timeline / core-points /
+            // diagram / analysis / extended-reading) — Android parity.
+            b += IOSDeepReadStructuredRenderer.sectionsHTML(s)
+        } else {
+            // Fallback: magazine-typeset flat Markdown body + the raw sources list.
+            b += #"<section><div class="markdown-body">"# + markdownToHTML(stripLeadingH1(input.markdown)) + "</div></section>"
+            if !input.sources.isEmpty {
+                b += #"<section><p class="section">来源</p>"#
+                for s in input.sources where !s.url.isEmpty {
+                    b += #"<a class="reading-link" href=""# + esc(s.url) + #"">"#
+                    b += "<p>" + esc(s.title) + "</p>"
+                    if let src = s.source, !src.isEmpty {
+                        b += "<small>" + esc(src) + "</small>"
+                    }
+                    b += "</a>"
                 }
-                b += "</a>"
+                b += "</section>"
             }
-            b += "</section>"
         }
 
         b += "</article></body></html>"
@@ -89,7 +104,8 @@ enum IOSDeepReadEditorialRenderer {
 
     // MARK: - Markdown -> HTML (same parser as MarkdownView)
 
-    private static func markdownToHTML(_ md: String) -> String {
+    /// Block Markdown → HTML — internal so IOSDeepReadStructuredRenderer reuses it.
+    static func markdownToHTML(_ md: String) -> String {
         let source = md.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !source.isEmpty else { return "" }
         guard let data = MarkdownBridge.parse(source),
@@ -102,6 +118,17 @@ enum IOSDeepReadEditorialRenderer {
                 .joined()
         }
         return root.children.map { blockHTML($0, source: source) }.joined()
+    }
+
+    /// Inline Markdown → HTML: strip a single surrounding `<p>…</p>` so the result can
+    /// sit inside an `<h2>`/`<h3>` (mirrors Android's markdownInlineHtml).
+    static func markdownToInlineHTML(_ md: String) -> String {
+        let html = markdownToHTML(md).trimmingCharacters(in: .whitespacesAndNewlines)
+        if html.hasPrefix("<p>"), html.hasSuffix("</p>") {
+            let inner = html.dropFirst(3).dropLast(4)
+            if !inner.contains("<p>") { return String(inner) }
+        }
+        return html
     }
 
     private static func blockHTML(_ node: PackedAstNode, source: String) -> String {
@@ -232,7 +259,7 @@ enum IOSDeepReadEditorialRenderer {
         return lines.joined(separator: "\n")
     }
 
-    private static func esc(_ s: String) -> String {
+    static func esc(_ s: String) -> String {
         var r = ""
         r.reserveCapacity(s.count)
         for c in s {
