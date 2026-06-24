@@ -635,6 +635,11 @@ struct BoardView: View {
                 } else {
                     source.metadata["scrape_status"] = "empty"
                 }
+                // 顺手从抓取页的 og:image 取一张当 hero,让热榜深读也能出斜切图文。
+                if source.metadata["hero_image_url"] == nil,
+                   let hero = scrapeFirstImage(from: output) {
+                    source.metadata["hero_image_url"] = hero
+                }
             } catch {
                 source.metadata["scrape_status"] = "failed"
                 source.metadata["scrape_error"] = String(error.localizedDescription.prefix(180))
@@ -650,6 +655,15 @@ struct BoardView: View {
             return nil
         }
         return object["content"] as? String
+    }
+
+    private func scrapeFirstImage(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let images = object["images"] as? [String] else {
+            return nil
+        }
+        return images.first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
     }
 
     private func jsonString(_ values: [String: Any]) -> String {

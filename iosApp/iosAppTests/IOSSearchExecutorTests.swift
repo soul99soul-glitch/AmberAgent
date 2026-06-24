@@ -211,6 +211,35 @@ final class IOSSearchExecutorTests: XCTestCase {
         ])
     }
 
+    func testScrapeExtractsOgImageHeroBothAttributeOrders() {
+        // The Deep Read editorial hero for hot-topic articles is sourced from the
+        // scraped page's og:image / twitter:image (parity with Android).
+        let html = """
+        <html><head>
+        <meta property="og:image" content="https://cdn.example.com/hero.jpg"/>
+        <meta name="twitter:image" content="https://cdn.example.com/tw.jpg"/>
+        <meta content="https://cdn.example.com/reversed.jpg" property="og:image:secure_url"/>
+        <meta property="og:title" content="not an image"/>
+        <title>x</title>
+        </head><body><p>body</p></body></html>
+        """
+        let urls = IOSSearchExecutor.extractHeroImageURLs(from: html)
+        XCTAssertEqual(urls.first, "https://cdn.example.com/hero.jpg", "og:image is the first hero candidate")
+        XCTAssertTrue(urls.contains("https://cdn.example.com/tw.jpg"))
+        XCTAssertTrue(urls.contains("https://cdn.example.com/reversed.jpg"), "content-before-property order must parse too")
+        XCTAssertFalse(urls.contains("not an image"))
+    }
+
+    func testScrapeOgImageIgnoresNonHTTPAndDedupes() {
+        let html = """
+        <meta property="og:image" content="https://cdn.example.com/a.jpg"/>
+        <meta property="og:image" content="https://cdn.example.com/a.jpg"/>
+        <meta property="og:image" content="/relative/no-host.jpg"/>
+        """
+        let urls = IOSSearchExecutor.extractHeroImageURLs(from: html)
+        XCTAssertEqual(urls, ["https://cdn.example.com/a.jpg"], "deduped + http(s)-only")
+    }
+
     func testMissingAPIKeyProviderFallsBackToExecutableSearch() {
         let store = makeIsolatedStore()
         store.addSearchProvider(name: "Tavily Without Key", serviceType: "tavily")

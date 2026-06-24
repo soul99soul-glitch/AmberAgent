@@ -729,13 +729,45 @@ struct IOSSearchExecutor {
         let content = extractReadableText(from: raw, maxChars: request.maxChars)
         guard !content.isEmpty else { throw IOSSearchExecutorError.emptyResponse("scrape_web") }
 
-        return jsonString([
+        var output: [String: Any] = [
             "status": "ok",
             "url": request.url.absoluteString,
             "title": title,
             "content": content,
             "chars": content.count
-        ])
+        ]
+        // og:image / twitter:image candidates — used to source the Deep Read editorial
+        // hero for hot-topic articles (parity with Android's fetchPageImages).
+        let heroImages = extractHeroImageURLs(from: raw)
+        if !heroImages.isEmpty { output["images"] = heroImages }
+        return jsonString(output)
+    }
+
+    /// Pull og:image / twitter:image URLs out of page HTML (both meta-attribute
+    /// orders), http(s) only, deduped, capped — the hero-image candidates.
+    static func extractHeroImageURLs(from raw: String) -> [String] {
+        let patterns = [
+            #"<meta[^>]+?(?:property|name)\s*=\s*["'](?:og:image(?::secure_url|:url)?|twitter:image(?::src)?)["'][^>]+?content\s*=\s*["']([^"'>]+)["']"#,
+            #"<meta[^>]+?content\s*=\s*["']([^"'>]+)["'][^>]+?(?:property|name)\s*=\s*["'](?:og:image(?::secure_url|:url)?|twitter:image(?::src)?)["']"#,
+        ]
+        var urls: [String] = []
+        var seen = Set<String>()
+        let ns = raw as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        for pattern in patterns {
+            guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { continue }
+            for match in re.matches(in: raw, options: [], range: range) where match.numberOfRanges > 1 {
+                let r = match.range(at: 1)
+                guard r.location != NSNotFound else { continue }
+                let url = ns.substring(with: r)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "&amp;", with: "&")
+                guard url.hasPrefix("http"), !seen.contains(url) else { continue }
+                seen.insert(url)
+                urls.append(url)
+            }
+        }
+        return Array(urls.prefix(5))
     }
 
     private static func format(
