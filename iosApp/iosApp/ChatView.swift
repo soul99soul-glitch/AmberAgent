@@ -33,6 +33,8 @@ struct ChatView: View {
     @State private var pendingInitialScrollToBottom = false
     @State private var followPaused = false
     @State private var userDragging = false
+    @State private var showScrollToBottom = false
+    @State private var scrollToBottomTrigger = 0
     @Environment(IOSConversationStore.self) private var conversationStore
 
     init(
@@ -87,7 +89,19 @@ struct ChatView: View {
             // 不再强制 light:原生 `.glassEffect` 本就按系统外观渲染(深色模式下渲染为深色玻璃),
             // 若把内容强制成 light,前景图标/文字会按浅色调色板解析成深灰,贴在深色玻璃上发暗。
             // 让 composer 跟随真实外观(与顶栏一致),图标与玻璃明暗才匹配。
-            inputBar
+            VStack(spacing: 0) {
+                // 看历史(已上滑离开底部)时,在输入框正上方居中浮出「回到底部」玻璃圆按钮。
+                if showScrollToBottom && !viewModel.messages.isEmpty {
+                    ChatScrollToBottomButton {
+                        followPaused = false
+                        scrollToBottomTrigger &+= 1
+                    }
+                    .padding(.bottom, 10)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+                inputBar
+            }
+            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showScrollToBottom)
         }
         .sheet(isPresented: $isModelSheetPresented) {
             ComposerModelSheet(sharedSettings: sharedSettings, currentModel: composerCurrentModelSelection) { model in
@@ -422,6 +436,12 @@ struct ChatView: View {
                 if userDragging {
                     followPaused = !atBottom
                 }
+                let shouldShow = !atBottom && !viewModel.messages.isEmpty
+                if shouldShow != showScrollToBottom {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                        showScrollToBottom = shouldShow
+                    }
+                }
             }
             .onChange(of: viewModel.messageRevision) { _, _ in
                 if pendingInitialScrollToBottom {
@@ -438,6 +458,10 @@ struct ChatView: View {
                     guard !followPaused else { return }
                     scrollToLatestMessage(proxy, animated: true, deferred: false)
                 }
+            }
+            // 「回到底部」悬浮按钮的触发(按钮在 composer 区,无法直接拿 proxy,用计数器桥接)。
+            .onChange(of: scrollToBottomTrigger) { _, _ in
+                scrollToLatestMessage(proxy, animated: true, deferred: false)
             }
         }
     }
@@ -489,9 +513,14 @@ struct ChatView: View {
             }
         }
         Task { @MainActor in
+            // A long LazyVStack realizes/measures its rows progressively, so one or two
+            // jumps can land short of the true bottom. Re-jump across a short settling
+            // window until the last row is realized and measured.
             jump()
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            jump()
+            for stepMs in [60, 80, 140, 200, 240] {
+                try? await Task.sleep(nanoseconds: UInt64(stepMs) * 1_000_000)
+                jump()
+            }
         }
     }
 
@@ -970,6 +999,25 @@ private struct ComposerIconButton: View {
         // 与输入条/发送键统一为原生 Liquid Glass:中性按钮用无色调玻璃,prominent 时染 tint。
         .modifier(ComposerDockCircleGlass(tint: prominent ? tint : nil))
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// 「回到底部」悬浮玻璃圆键 —— 上滑看历史时浮现在输入框正上方,点击跳回最新消息。
+/// 复用 composer 的原生 Liquid Glass 圆形样式,保持视觉统一。
+private struct ChatScrollToBottomButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(AmberTheme.foreground2)
+                .frame(width: 38, height: 38)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .modifier(ComposerDockCircleGlass(tint: nil))
+        .accessibilityLabel("回到最新消息")
     }
 }
 
