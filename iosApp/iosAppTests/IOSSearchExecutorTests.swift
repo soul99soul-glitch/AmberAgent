@@ -165,6 +165,52 @@ final class IOSSearchExecutorTests: XCTestCase {
         XCTAssertTrue(output.contains("https://example.com/tavily"))
     }
 
+    func testBraveRoutePrefersOriginalThumbnailOverProxiedSrc() async throws {
+        // Regression: Brave's proxied thumbnail `src` (imgs.search.brave.com) is
+        // hot-link protected and 403s without a brave.com Referer → blank hero. The
+        // editorial reader sources its hero from images.first, so `original` (the true
+        // source image) must come first, `src` only as fallback (parity with Android).
+        let store = makeIsolatedStore()
+        store.addSearchProvider(name: "Brave", apiKey: "brave-test", serviceType: "brave")
+        let transport = MockSearchTransport(responses: [
+            .json("""
+            {
+              "web": {
+                "results": [
+                  {
+                    "title": "Brave Result",
+                    "url": "https://example.com/brave",
+                    "description": "Brave snippet.",
+                    "thumbnail": {
+                      "src": "https://imgs.search.brave.com/sig/proxy.jpg",
+                      "original": "https://cdn.example.com/real.jpg"
+                    }
+                  }
+                ]
+              }
+            }
+            """)
+        ])
+
+        let execution = try await IOSSearchExecutor.searchResults(
+            toolInput: #"{"query":"embodied ai","max_results":1}"#,
+            settings: store.snapshot,
+            transport: transport
+        )
+
+        XCTAssertEqual(transport.requests.first?.url?.host, "api.search.brave.com")
+        let result = try XCTUnwrap(execution.results.first)
+        XCTAssertEqual(
+            result.images.first,
+            "https://cdn.example.com/real.jpg",
+            "hero must prefer the true source image, not the 403-prone proxied src"
+        )
+        XCTAssertEqual(result.images, [
+            "https://cdn.example.com/real.jpg",
+            "https://imgs.search.brave.com/sig/proxy.jpg",
+        ])
+    }
+
     func testMissingAPIKeyProviderFallsBackToExecutableSearch() {
         let store = makeIsolatedStore()
         store.addSearchProvider(name: "Tavily Without Key", serviceType: "tavily")

@@ -120,7 +120,7 @@ enum IOSDeepReadEditorialRenderer {
         case .listItem:
             return "<li>" + listItemHTML(node, source: source) + "</li>"
         case .codeBlock:
-            return "<pre><code>" + esc(sliceSource(source, start: node.startOffset, end: node.endOffset)) + "</code></pre>"
+            return "<pre><code>" + esc(codeBlockBody(node, source: source)) + "</code></pre>"
         case .horizontalRule:
             return "<hr/>"
         case .table:
@@ -130,7 +130,7 @@ enum IOSDeepReadEditorialRenderer {
                 return inlineHTML(node.children, source: source)
             }
             let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
-            return raw.isEmpty ? "" : "<p>" + esc(raw) + "</p>"
+            return raw.isEmpty ? "" : "<p>" + esc(resolveBackslashEscapes(raw)) + "</p>"
         }
     }
 
@@ -188,7 +188,7 @@ enum IOSDeepReadEditorialRenderer {
             case .hardBreak:
                 out += "<br/>"
             case .text:
-                out += esc(sliceSource(source, start: node.startOffset, end: node.endOffset))
+                out += esc(resolveBackslashEscapes(sliceSource(source, start: node.startOffset, end: node.endOffset)))
             case .emphasis:
                 out += "<em>" + inlineHTML(node.children, source: source) + "</em>"
             case .strong:
@@ -196,7 +196,7 @@ enum IOSDeepReadEditorialRenderer {
             case .strikethrough:
                 out += "<s>" + inlineHTML(node.children, source: source) + "</s>"
             case .inlineCode:
-                out += "<code>" + esc(sliceSource(source, start: node.startOffset, end: node.endOffset)) + "</code>"
+                out += "<code>" + esc(stripInlineCodeFence(sliceSource(source, start: node.startOffset, end: node.endOffset))) + "</code>"
             case .link:
                 let inner = inlineHTML(node.children, source: source)
                 if let href = node.linkHref(), href.hasPrefix("http") {
@@ -248,6 +248,49 @@ enum IOSDeepReadEditorialRenderer {
         return r
     }
 
+    /// Strip the backtick delimiters (and one optional surrounding space) from an
+    /// inline-code slice — the AST range includes them. Mirrors Android's `trim('`')`.
+    private static func stripInlineCodeFence(_ s: String) -> String {
+        var t = Substring(s)
+        while t.first == "`" { t = t.dropFirst() }
+        while t.last == "`" { t = t.dropLast() }
+        // CommonMark strips one space on each side iff the content isn't all spaces.
+        if t.count >= 2, t.first == " ", t.last == " ", t.contains(where: { $0 != " " }) {
+            t = t.dropFirst().dropLast()
+        }
+        return String(t)
+    }
+
+    /// The code body of a fenced/indented block. The AST range covers the ``` fences +
+    /// info string, but the block's child text node carries just the body — prefer it.
+    private static func codeBlockBody(_ node: PackedAstNode, source: String) -> String {
+        let body = node.children
+            .map { sliceSource(source, start: $0.startOffset, end: $0.endOffset) }
+            .joined()
+        return body.isEmpty ? sliceSource(source, start: node.startOffset, end: node.endOffset) : body
+    }
+
+    /// Resolve CommonMark backslash escapes (`\*` → `*`) in a text slice — the AST text
+    /// range can keep the backslash. Only a backslash before ASCII punctuation is an
+    /// escape. NOT applied to code slices (where backslashes are literal).
+    private static func resolveBackslashEscapes(_ s: String) -> String {
+        guard s.contains("\\") else { return s }
+        var out = ""
+        out.reserveCapacity(s.count)
+        let chars = Array(s)
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "\\", i + 1 < chars.count, chars[i + 1].isDeepReadASCIIPunctuation {
+                out.append(chars[i + 1])
+                i += 2
+            } else {
+                out.append(chars[i])
+                i += 1
+            }
+        }
+        return out
+    }
+
     /// Slice the source using UTF-8 byte offsets from the AST (same as MarkdownView).
     private static func sliceSource(_ source: String, start: Int, end: Int) -> String {
         guard start < end else { return "" }
@@ -282,7 +325,7 @@ enum IOSDeepReadEditorialRenderer {
     """
 
     private static let baseCSS = """
-    html,body{margin:0;padding:0;background:#fafaf8;color:#191919;font-family:var(--deep-read-serif);}
+    html,body{margin:0;padding:0;background:#fafaf8;color:#191919;font-family:var(--deep-read-serif);-webkit-user-select:text;}
     article{padding-bottom:34px;}
     .hero{margin:0 0 8px 0;position:relative;background:#f0f0ec;min-height:310px;overflow:hidden;}
     .hero img{display:block;width:100%;height:265px;object-fit:cover;}
@@ -398,6 +441,17 @@ enum IOSDeepReadEditorialRenderer {
     img:not([src]),img[src=""]{display:none!important;}
     figure:has(> img:not([src])),figure:has(> img[src=""]){display:none!important;}
     """
+}
+
+private extension Character {
+    /// ASCII punctuation per CommonMark — the only characters a backslash escapes.
+    var isDeepReadASCIIPunctuation: Bool {
+        guard let a = asciiValue else { return false }
+        switch a {
+        case 0x21...0x2F, 0x3A...0x40, 0x5B...0x60, 0x7B...0x7E: return true
+        default: return false
+        }
+    }
 }
 
 private extension NodeType {

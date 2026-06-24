@@ -1332,9 +1332,11 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
-        // Load with the bundled-font scheme's base URL so @font-face requests are
-        // same-origin with the served fonts.
-        webView.loadHTMLString(html, baseURL: URL(string: IOSDeepReadFontSchemeHandler.baseURL))
+        // Load from a handler-less origin so the main frame is NOT routed to the font
+        // scheme handler (a registered scheme as the document base URL gets the main
+        // request handed to the handler → fail → blank page). Fonts then load
+        // cross-origin via the handler's Access-Control-Allow-Origin: * response.
+        webView.loadHTMLString(html, baseURL: URL(string: IOSDeepReadFontSchemeHandler.documentBaseURL))
     }
 
     func makeCoordinator() -> Coordinator {
@@ -1345,19 +1347,31 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
         private let onHeight: @MainActor (CGFloat) -> Void
         var loadedHTML: String?
         private var sizeObservation: NSKeyValueObservation?
+        private var lastHeight: CGFloat = 0
 
         init(onHeight: @escaping @MainActor (CGFloat) -> Void) {
             self.onHeight = onHeight
         }
 
-        /// Content height settles after layout (and again if web fonts reflow), so
-        /// observe contentSize rather than reading it once on didFinish.
+        /// Content height settles after layout (and again if the hero image reflows in),
+        /// so observe contentSize rather than reading it once on didFinish.
         func observeContentSize(of scrollView: UIScrollView) {
             sizeObservation = scrollView.observe(\.contentSize, options: [.new]) { [weak self] scrollView, _ in
-                MainActor.assumeIsolated {
-                    let height = scrollView.contentSize.height
-                    guard height > 0 else { return }
-                    self?.onHeight(height)
+                // Round + dedupe so fractional contentSize values don't thrash SwiftUI
+                // layout (and the image reflow settles instead of oscillating).
+                let height = scrollView.contentSize.height.rounded(.up)
+                guard height > 0 else { return }
+                let deliver: @MainActor () -> Void = {
+                    guard let self, abs(height - self.lastHeight) > 0.5 else { return }
+                    self.lastHeight = height
+                    self.onHeight(height)
+                }
+                // KVO on contentSize normally fires on main; if it ever doesn't, hop
+                // instead of trapping (MainActor.assumeIsolated would crash off-main).
+                if Thread.isMainThread {
+                    MainActor.assumeIsolated(deliver)
+                } else {
+                    Task { @MainActor in deliver() }
                 }
             }
         }

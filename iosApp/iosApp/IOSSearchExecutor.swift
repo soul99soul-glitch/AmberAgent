@@ -483,16 +483,18 @@ struct IOSSearchExecutor {
         return Array(results.prefix(request.maxResults))
     }
 
-    /// Brave web results carry a `thumbnail` object: `src` is Brave's proxied/CDN
-    /// thumbnail (reliable for remote loading), `original` is the source image. Prefer
-    /// the proxied URL, then the original; only keep http(s) URLs.
+    /// Brave web results carry a `thumbnail` object: `original` is the true source
+    /// image URL; `src` is Brave's proxied thumbnail (imgs.search.brave.com/<sig>/…),
+    /// which is HOT-LINK PROTECTED — a fetch without a brave.com `Referer` gets a 403
+    /// and the image renders blank. So prefer `original`, fall back to `src` (parity
+    /// with Android's BraveSearchService). Only keep http(s) URLs.
     private static func braveImageURLs(_ item: [String: Any]) -> [String] {
         guard let thumbnail = item["thumbnail"] as? [String: Any] else { return [] }
         var urls: [String] = []
-        let src = string(thumbnail["src"])
         let original = string(thumbnail["original"])
-        if !src.isEmpty { urls.append(src) }
-        if !original.isEmpty, original != src { urls.append(original) }
+        let src = string(thumbnail["src"])
+        if !original.isEmpty { urls.append(original) }
+        if !src.isEmpty, src != original { urls.append(src) }
         return urls.filter { $0.hasPrefix("http") }
     }
 
