@@ -2788,7 +2788,6 @@ enum IOSDeepReadDraftGenerator {
     }
 
     static func generate(task: IOSDeepReadTask, now: Date = Date()) -> String {
-        let template = task.template
         let sources = task.sources
         let date = IOSDeepReadDateFormatters.detail.string(from: now)
         let grouped = Dictionary(grouping: sources, by: \.kind)
