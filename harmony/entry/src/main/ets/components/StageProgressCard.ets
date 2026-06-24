@@ -37,7 +37,7 @@ export struct StageProgressCard {
       }
       Text(this.statusText()).fontSize(12).fontColor(this.statusColor())
       if (this.status === 'FAILED') {
-        Button('重试').type(ButtonType.Text).fontSize(12).margin({ left: 8 }).onClick(() => this.onRetry())
+        Button('重试').type(ButtonType.Normal).fontSize(12).margin({ left: 8 }).onClick(() => this.onRetry())
       }
     }
     .width('90%')

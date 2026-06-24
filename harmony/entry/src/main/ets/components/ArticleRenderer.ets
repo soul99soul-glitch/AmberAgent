@@ -143,7 +143,7 @@ export struct ArticleRenderer {
     this.SectionTitle('图解')
     Text(d.title).fontSize(15).fontWeight(FontWeight.Medium)
     // TODO(phase6): 真正的 diagram 渲染(Canvas/SVG 绘制节点+边)。MVP 先列节点。
-    ForEach(d.nodes, (n) => {
+    ForEach(d.nodes, (n: DiagramNode) => {
       Row() {
         Text(n.id).fontSize(11).fontColor('#999').width(30)
         Text(n.label).fontSize(13).layoutWeight(1)
