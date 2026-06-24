@@ -215,24 +215,15 @@ struct BoardView: View {
                     }
 
                     AmberGlassGroup(spacing: 16) {
-                        HStack(spacing: 10) {
-                            Button {
-                                Task { await refreshHotList(force: true) }
-                            } label: {
-                                Label(hotListStore.isRefreshing ? "刷新中" : "刷新", systemImage: "arrow.clockwise")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.glassProminent)
-                            .disabled(hotListStore.isRefreshing)
-
-                            Button {
-                                showCustomSourceSheet = true
-                            } label: {
-                                Label("自定义来源", systemImage: "plus")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.glass)
+                        // 手动创建深度阅读(自定义来源)暂时下线 —— 现版太糙,后续重做。
+                        Button {
+                            Task { await refreshHotList(force: true) }
+                        } label: {
+                            Label(hotListStore.isRefreshing ? "刷新中" : "刷新", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.glassProminent)
+                        .disabled(hotListStore.isRefreshing)
                     }
 
                     if let message = deepReadMessage {
@@ -1000,7 +991,8 @@ struct IOSDeepReadTaskDetailView: View {
 
     @State private var store = IOSDeepReadStore.shared
     @State private var templateStore = IOSDeepReadTemplateStore.shared
-    @State private var banner: String?
+    @State private var toast: String?
+    @State private var statusPulse = false
     @State private var editorialHeight: CGFloat = 600
     @Environment(\.colorScheme) private var colorScheme
     @Environment(RouterPath.self) private var router
@@ -1009,6 +1001,17 @@ struct IOSDeepReadTaskDetailView: View {
 
     private var task: IOSDeepReadTask? {
         store.task(id: taskId)
+    }
+
+    // 三种 UI 状态:生成中(骨架)/ 完成(编辑器正文)/ 失败(琥珀横幅)。心智:阅读面是实的,
+    // 控制面才是玻璃。masthead + 状态机 + 骨架 + 失败横幅 + 来源折叠 + 底栏均为原生 SwiftUI;
+    // 正文沿用编辑器 HTML 渲染器(自带衬线/首字下沉),并切到 body-only 由 masthead 提供标题。
+    private enum DetailState { case generating, done, failed }
+
+    private func state(for task: IOSDeepReadTask) -> DetailState {
+        if task.status == .failed || task.status == .unsupported { return .failed }
+        if !task.resultMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .done }
+        return .generating
     }
 
     var body: some View {
@@ -1020,64 +1023,64 @@ struct IOSDeepReadTaskDetailView: View {
                     // 内容从浮动顶栏下方开始,向上滚动时从渐变模糊顶栏下穿过。
                     Color.clear.frame(height: 52)
 
-                    if let banner {
-                        Text(banner)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(AmberTheme.foreground2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 10)
-                    }
-
                     if let task {
-                        failureBanner(task)
-                        resultSection(task)
+                        masthead(task)
+                        content(task)
                         sourcesSection(task)
+                        Color.clear.frame(height: state(for: task) == .done ? 24 : 36)
                     } else {
                         Text("这条深度阅读历史无法读取。")
                             .font(.footnote)
                             .foregroundStyle(AmberTheme.muted)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 22)
                             .padding(.vertical, 24)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .padding(.bottom, 36)
             }
             .scrollIndicators(.hidden)
 
             header
+            toastView
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let task, state(for: task) == .done { bottomBar(task) }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { statusPulse = true }
+        }
     }
 
-    // 极简浮动顶栏:左返回 / 右分享(接系统分享菜单)。底部渐变模糊,正文从其下穿过。
-    // 失败时右侧改为重试。
+    // 浮动玻璃顶栏:返回左对齐,操作组右对齐(完成→分享,失败→重试)。底部渐变模糊。
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
             AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回深度阅读", size: 44, symbolSize: 20) {
                 dismiss()
             }
 
             Spacer()
 
-            if let task, !task.resultMarkdown.isEmpty {
-                ShareLink(item: "\(task.title)\n\n\(task.resultMarkdown)") {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(AmberTheme.foreground2)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .amberGlass(cornerRadius: 22)
-                .accessibilityLabel("分享")
-            } else if let task, task.status == .failed || task.status == .unsupported {
-                AmberGlassCircleButton(systemImage: "arrow.clockwise", accessibilityLabel: "重试深度阅读", size: 44, symbolSize: 17) {
-                    retry()
+            if let task {
+                switch state(for: task) {
+                case .failed:
+                    AmberGlassCircleButton(systemImage: "arrow.clockwise", accessibilityLabel: "重试深度阅读", size: 44, symbolSize: 17) {
+                        retry()
+                    }
+                case .done:
+                    ShareLink(item: "\(task.title)\n\n\(task.resultMarkdown)") {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AmberTheme.foreground2)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .amberGlass(cornerRadius: 22)
+                    .accessibilityLabel("分享")
+                case .generating:
+                    EmptyView()
                 }
             }
         }
@@ -1085,7 +1088,6 @@ struct IOSDeepReadTaskDetailView: View {
         .padding(.top, 10)
         .padding(.bottom, 12)
         .background {
-            // 顶部渐变模糊:顶端实、向下渐隐到透明,内容从下方滚过。
             Rectangle()
                 .fill(.ultraThinMaterial)
                 .mask(
@@ -1103,79 +1105,208 @@ struct IOSDeepReadTaskDetailView: View {
         }
     }
 
-    // 顶部「状态」卡片已移除(状态在导航栏标题下显示);复制 / 发回聊天 已移入顶栏。
-    // 失败时单独一条浅色横幅,正文则是全宽阅读面。
-
+    // 顶部浮动 toast(复制 / 发回聊天 反馈),~1.7s 自动消失。
     @ViewBuilder
-    private func failureBanner(_ task: IOSDeepReadTask) -> some View {
-        if let failure = task.failureMessage, !failure.isEmpty {
-            Text(failure)
-                .font(.footnote)
-                .foregroundStyle(AmberTheme.accentAmber)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(AmberTheme.accentAmber.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    private var toastView: some View {
+        if let toast {
+            Text(toast)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground)
                 .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .overlay { Capsule().stroke(AmberTheme.border.opacity(0.4), lineWidth: 0.5) }
+                .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
+                .padding(.top, 104)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .accessibilityAddTraits(.isStaticText)
         }
+    }
+
+    // 杂志报头:kicker(全大写,字距)+ 衬线大标题 + 状态行(带状态点)+ 分隔线。三态都显示。
+    @ViewBuilder
+    private func masthead(_ task: IOSDeepReadTask) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(kicker(task))
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.0)
+                .textCase(.uppercase)
+                .foregroundStyle(AmberTheme.muted)
+
+            Text(task.title)
+                .font(.system(size: 31, weight: .medium, design: .serif))
+                .foregroundStyle(AmberTheme.foreground)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+
+            statusLine(task)
+                .padding(.top, 14)
+
+            Rectangle()
+                .fill(AmberTheme.borderSoft)
+                .frame(height: 1)
+                .padding(.top, 20)
+        }
+        .padding(.horizontal, 22)
+        .padding(.bottom, 18)
     }
 
     @ViewBuilder
-    private func resultSection(_ task: IOSDeepReadTask) -> some View {
-        if task.resultMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            // 生成中:杂志骨架放在浅色容器里。
-            AmberFormGroup {
-                DeepReadGeneratingPlaceholder(isRunning: task.status == .running)
+    private func statusLine(_ task: IOSDeepReadTask) -> some View {
+        let st = state(for: task)
+        HStack(spacing: 7) {
+            Circle()
+                .fill(statusTint(task.status))
+                .frame(width: 7, height: 7)
+                .opacity(st == .generating ? (statusPulse ? 0.3 : 1.0) : 0.9)
+            Text(statusText(task))
+                .font(.system(size: 12.5))
+                .foregroundStyle(st == .failed ? AmberTheme.accentRed : AmberTheme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.updatesFrequently)
+    }
+
+    @ViewBuilder
+    private func content(_ task: IOSDeepReadTask) -> some View {
+        switch state(for: task) {
+        case .generating:
+            DeepReadMagazineSkeleton(dimmed: false)
+        case .failed:
+            failBanner()
+            DeepReadMagazineSkeleton(dimmed: true)
+        case .done:
+            if let html = customTemplateHTML(task) {
+                IOSDeepReadTemplateWebView(html: html)
+                    .frame(minHeight: 560)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+            } else {
+                // 完成:编辑器 HTML 阅读器(body-only,标题由上方 masthead 提供)。关掉 WebView
+                // 内部滚动、按内容高度自适应,整篇随详情页一起滚动。
+                IOSDeepReadEditorialWebView(html: editorialHTML(task), contentHeight: $editorialHeight)
+                    .frame(height: editorialHeight)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 12)
+                    .id(task.id)
             }
-        } else if let html = customTemplateHTML(task) {
-            IOSDeepReadTemplateWebView(html: html)
-                .frame(minHeight: 560)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-        } else {
-            // 完成:Android 式 HTML 杂志阅读器(IOSDeepReadEditorialRenderer → WKWebView)。
-            // 关掉 WebView 内部滚动、按内容高度自适应,让整篇随详情页一起滚动(HTML 自带
-            // 22px 侧边距,故这里不再加水平内边距)。来源仍由下方 SwiftUI sourcesSection 承载。
-            IOSDeepReadEditorialWebView(html: editorialHTML(task), contentHeight: $editorialHeight)
-                .frame(height: editorialHeight)
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 12)
-                .id(task.id)
         }
     }
 
+    // 失败 inline 琥珀横幅(非浮卡、非 modal)。
+    @ViewBuilder
+    private func failBanner() -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(AmberTheme.accentAmber)
+            Text("生成中断，部分内容可能不完整。点右上角重试。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.foreground2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(AmberTheme.accentAmber.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AmberTheme.accentAmber.opacity(0.28), lineWidth: 1) }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    // 来源折叠区:sec-label(div 非 h2)+ 分组卡片,每条可折叠展开元数据 + mono 链接。
+    @ViewBuilder
     private func sourcesSection(_ task: IOSDeepReadTask) -> some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "来源")
-            AmberFormGroup {
-                ForEach(Array(task.sources.enumerated()), id: \.element.id) { index, source in
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("\(source.kind.title) · \(source.title)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text(source.content)
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .lineLimit(5)
-                        if let url = source.url, !url.isEmpty {
-                            Text(url)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(AmberTheme.accent)
-                                .lineLimit(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    if index < task.sources.count - 1 {
-                        BoardCapabilityDivider()
+        if !task.sources.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("来源")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.0)
+                    .textCase(.uppercase)
+                    .foregroundStyle(AmberTheme.muted)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 4)
+
+                VStack(spacing: 10) {
+                    ForEach(task.sources) { source in
+                        DeepReadSourceRow(source: source)
                     }
                 }
+                .padding(.horizontal, 16)
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    // 底部玻璃操作条(完成态):复制 / 发回聊天。
+    @ViewBuilder
+    private func bottomBar(_ task: IOSDeepReadTask) -> some View {
+        HStack(spacing: 12) {
+            bottomCapsule("复制", systemImage: "doc.on.doc") {
+                UIPasteboard.general.string = "\(task.title)\n\n\(task.resultMarkdown)"
+                showToast("已复制到剪贴板")
+            }
+            bottomCapsule("发回聊天", systemImage: "bubble.left.and.text.bubble.right") {
+                UIPasteboard.general.string = "基于这篇深度阅读继续讨论：\n\n# \(task.title)\n\n\(task.resultMarkdown)"
+                showToast("已复制讨论素材，去聊天粘贴即可")
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background {
+            LinearGradient(
+                colors: [AmberTheme.background.opacity(0), AmberTheme.background.opacity(0.92), AmberTheme.background],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    private func bottomCapsule(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .amberGlass(cornerRadius: 22)
+        .accessibilityLabel(title)
+    }
+
+    private func showToast(_ message: String) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { toast = message }
+        Task {
+            try? await Task.sleep(for: .seconds(1.7))
+            await MainActor.run { withAnimation(.easeOut(duration: 0.25)) { toast = nil } }
+        }
+    }
+
+    private func kicker(_ task: IOSDeepReadTask) -> String {
+        let topicType = decodeStructured(task)?.topicType.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return topicType.isEmpty ? "DEEP READ" : topicType.uppercased()
+    }
+
+    private func statusText(_ task: IOSDeepReadTask) -> String {
+        switch state(for: task) {
+        case .generating: return "正在生成阅读稿…"
+        case .done:
+            let date = Date(timeIntervalSince1970: Double(task.updatedAt) / 1000)
+            return "已完成 · " + date.formatted(date: .omitted, time: .shortened)
+        case .failed: return "生成失败 · 可重试"
+        }
+    }
+
+    private func decodeStructured(_ task: IOSDeepReadTask) -> IOSDeepReadOutput? {
+        task.structuredJSON
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode(IOSDeepReadOutput.self, from: $0) }
     }
 
     private func retry() {
@@ -1190,7 +1321,7 @@ struct IOSDeepReadTaskDetailView: View {
                 switch await generateRetryOutput(task: running) {
                 case .failed(let reason):
                     store.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
-                    banner = "深度阅读重试失败：\(reason)"
+                    showToast("重试失败：\(reason)")
                 case .completed(let markdown, let json):
                     store.complete(id: task.id, markdown: markdown, structuredJSON: json)
                     _ = try? IOSWorkspaceStore.shared.saveArtifact(
@@ -1200,7 +1331,7 @@ struct IOSDeepReadTaskDetailView: View {
                         sourceKind: "deep_read_retry",
                         sourceId: running.id
                     )
-                    banner = "已重试并更新结果。"
+                    showToast("已重试并更新结果")
                 }
             }
         }
@@ -1230,7 +1361,8 @@ struct IOSDeepReadTaskDetailView: View {
                 heroCaption: structured?.heroCaption,
                 sourceLabel: hasHero ? "\(task.sources.count) 来源" : nil,
                 dark: colorScheme == .dark,
-                structured: structured
+                structured: structured,
+                showHeadline: false
             )
         )
     }
@@ -1647,53 +1779,84 @@ private struct TopicActionRow: View {
 /// 生成过渡态:不是一块呆板的灰条,而是「一篇正在排版的杂志稿」的骨架 ——
 /// 报头标题 + 副标题 + 细分隔线 + 正文段落块 + 小节标题,配柔和脉冲,
 /// 让等待阶段也保有阅读器的精致感。
-private struct DeepReadGeneratingPlaceholder: View {
-    let isRunning: Bool
+// 杂志结构骨架屏:铺在实色阅读面上(非玻璃卡片)。deck 行 + 进度行(spinner + 衬线标签
+// + 「排版中」meta)+ 导读 / 左竖线 pullquote / 要点 / 双栏。dimmed = 失败态(降透明、spinner 停)。
+private struct DeepReadMagazineSkeleton: View {
+    var dimmed: Bool = false
     @State private var pulse = false
 
     var body: some View {
-        if isRunning {
-            VStack(alignment: .leading, spacing: 0) {
-                // 报头:两行标题 + 副标题
-                bar(0.82, 24)
-                bar(0.54, 24).padding(.top, 9)
-                bar(0.36, 12).padding(.top, 15).opacity(0.7)
+        VStack(alignment: .leading, spacing: 0) {
+            // deck(导语)
+            bar(0.9, 14)
+            bar(0.6, 14).padding(.top, 9)
 
-                Rectangle()
-                    .fill(AmberTheme.surface2)
-                    .frame(height: 1)
-                    .opacity(0.85)
-                    .padding(.top, 16)
-
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(AmberTheme.accent)
-                    Text("正在生成阅读稿…")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(AmberTheme.muted)
-                }
+            Rectangle()
+                .fill(AmberTheme.surface2)
+                .frame(height: 1)
+                .opacity(0.85)
                 .padding(.top, 16)
 
-                paragraph([1.0, 1.0, 1.0, 0.62]).padding(.top, 18)
-                bar(0.3, 16).padding(.top, 22)            // 小节标题
-                paragraph([1.0, 1.0, 0.8, 0.46]).padding(.top, 14)
+            // 进度行
+            HStack(spacing: 8) {
+                if dimmed {
+                    Circle()
+                        .stroke(AmberTheme.border, lineWidth: 2)
+                        .frame(width: 15, height: 15)
+                        .opacity(0.5)
+                } else {
+                    ProgressView().controlSize(.small).tint(AmberTheme.accent)
+                }
+                Text(dimmed ? "生成已中断" : "正在生成阅读稿…")
+                    .font(.system(size: 14, design: .serif))
+                    .foregroundStyle(AmberTheme.muted)
+                Spacer(minLength: 8)
+                Text(dimmed ? "已中断" : "排版中")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.8)
+                    .textCase(.uppercase)
+                    .foregroundStyle(AmberTheme.muted2)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
-                    pulse = true
+            .padding(.top, 16)
+
+            // 导读
+            paragraph([1.0, 1.0, 1.0, 0.62]).padding(.top, 18)
+
+            // 左竖线 pullquote
+            HStack(alignment: .top, spacing: 12) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(AmberTheme.accent)
+                    .frame(width: 2)
+                    .opacity(0.55)
+                VStack(alignment: .leading, spacing: 10) {
+                    bar(0.92, 13)
+                    bar(0.6, 13)
                 }
             }
-        } else {
-            Text("还没有可显示结果。")
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 20)
+
+            // 要点 小节标题 + 段落
+            bar(0.3, 16).padding(.top, 22)
+            paragraph([1.0, 1.0, 0.8, 0.46]).padding(.top, 14)
+
+            // 双栏
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 10) { bar(1.0, 12); bar(1.0, 12); bar(0.66, 12) }
+                VStack(alignment: .leading, spacing: 10) { bar(1.0, 12); bar(0.85, 12); bar(0.5, 12) }
+            }
+            .padding(.top, 20)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(dimmed ? 0.38 : 1)
+        .allowsHitTesting(!dimmed)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(dimmed ? "生成已中断" : "正在生成")
+        .onAppear {
+            guard !dimmed else { return }
+            withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) { pulse = true }
         }
     }
 
@@ -1710,9 +1873,73 @@ private struct DeepReadGeneratingPlaceholder: View {
             RoundedRectangle(cornerRadius: height >= 20 ? 7 : 4, style: .continuous)
                 .fill(AmberTheme.surface2)
                 .frame(width: geo.size.width * widthFraction)
-                .opacity(pulse ? 0.38 : 0.85)
+                .opacity(dimmed ? 0.85 : (pulse ? 0.38 : 0.85))
         }
         .frame(height: height)
+    }
+}
+
+// 单条来源折叠卡:头部 min-height 48 + chevron 旋转,展开显示正文摘要 + mono 链接。
+private struct DeepReadSourceRow: View {
+    let source: IOSDeepReadSource
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Text("\(source.kind.title) · \(source.title)")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.muted2)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .frame(minHeight: 48)
+                .padding(.horizontal, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(source.title)
+            .accessibilityValue(expanded ? "已展开" : "已折叠")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(source.content)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let url = source.url, !url.isEmpty {
+                        if let link = URL(string: url) {
+                            Link(url, destination: link)
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundStyle(AmberTheme.accent)
+                                .lineLimit(2)
+                        } else {
+                            Text(url)
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundStyle(AmberTheme.accent)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+                .transition(.opacity)
+            }
+        }
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
     }
 }
 

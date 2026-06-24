@@ -35,6 +35,9 @@ enum IOSDeepReadEditorialRenderer {
         /// renders the rich editorial cards (timeline / core-points / diagram /
         /// analysis / reading-links); otherwise it falls back to the flat Markdown body.
         var structured: IOSDeepReadOutput? = nil
+        /// When false, the body renders WITHOUT the kicker + `<h1>` headline (the native
+        /// SwiftUI masthead owns those); the summary/lead is kept as the body's opener.
+        var showHeadline: Bool = true
     }
 
     // MARK: - Entry point
@@ -66,16 +69,21 @@ enum IOSDeepReadEditorialRenderer {
             b += "</div></figure>"
         }
 
-        b += #"<section class="headline">"#
-        if !hasHero {
-            b += #"<p class="kicker">"# + esc(input.kicker) + "</p>"
+        if input.showHeadline {
+            b += #"<section class="headline">"#
+            if !hasHero {
+                b += #"<p class="kicker">"# + esc(input.kicker) + "</p>"
+            }
+            b += "<h1>" + esc(input.title) + "</h1>"
+            // Android puts the summary inside the headline section.
+            if let s = structured, !s.summary.isEmpty {
+                b += IOSDeepReadStructuredRenderer.summaryHTML(s.summary)
+            }
+            b += "</section>"
+        } else if let s = structured, !s.summary.isEmpty {
+            // Body-only: native masthead owns kicker + h1; keep the summary as the lead.
+            b += #"<section class="headline">"# + IOSDeepReadStructuredRenderer.summaryHTML(s.summary) + "</section>"
         }
-        b += "<h1>" + esc(input.title) + "</h1>"
-        // Android puts the summary inside the headline section.
-        if let s = structured, !s.summary.isEmpty {
-            b += IOSDeepReadStructuredRenderer.summaryHTML(s.summary)
-        }
-        b += "</section>"
 
         if let s = structured {
             // Rich editorial sections from the typed output (timeline / core-points /
