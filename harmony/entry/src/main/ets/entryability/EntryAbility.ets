@@ -1,5 +1,7 @@
-// EntryAbility — minimal version (deepread integration deferred)
-// 启动到 DeepReadHomePage(Index),验证 HAP 可装可跑。
+// EntryAbility — Phase 7 切后台暂停/回前台续跑
+// onBackground → AppStorage 写 appBackgrounded=true(Index 检查后暂停新 stage)
+// onForeground → AppStorage 写 appBackgrounded false(恢复)
+// 对照设计 §6.5
 
 import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
@@ -11,6 +13,7 @@ const TAG: string = 'DeepRead.EntryAbility';
 export default class EntryAbility extends UIAbility {
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'onCreate');
+    AppStorage.setOrCreate<boolean>('appBackgrounded', false);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -22,10 +25,12 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
-    hilog.info(DOMAIN, TAG, 'onForeground');
+    hilog.info(DOMAIN, TAG, 'onForeground — 回前台续跑');
+    AppStorage.setOrCreate<boolean>('appBackgrounded', false);
   }
 
   onBackground(): void {
-    hilog.info(DOMAIN, TAG, 'onBackground');
+    hilog.info(DOMAIN, TAG, 'onBackground — 切后台暂停');
+    AppStorage.setOrCreate<boolean>('appBackgrounded', true);
   }
 }
