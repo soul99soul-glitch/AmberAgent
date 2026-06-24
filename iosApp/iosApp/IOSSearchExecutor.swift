@@ -15,6 +15,10 @@ struct IOSSearchResult: Equatable {
     let title: String
     let url: String
     let snippet: String
+    /// Candidate image URLs from the search provider (e.g. Brave thumbnails), used
+    /// to source the Deep Read editorial hero. Defaults empty for providers/parsers
+    /// that don't surface images.
+    var images: [String] = []
 }
 
 enum IOSSearchRoute: String, Equatable {
@@ -471,11 +475,25 @@ struct IOSSearchExecutor {
             IOSSearchResult(
                 title: string($0["title"]),
                 url: string($0["url"]),
-                snippet: string($0["description"])
+                snippet: string($0["description"]),
+                images: braveImageURLs($0)
             )
         }
         guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Brave") }
         return Array(results.prefix(request.maxResults))
+    }
+
+    /// Brave web results carry a `thumbnail` object: `src` is Brave's proxied/CDN
+    /// thumbnail (reliable for remote loading), `original` is the source image. Prefer
+    /// the proxied URL, then the original; only keep http(s) URLs.
+    private static func braveImageURLs(_ item: [String: Any]) -> [String] {
+        guard let thumbnail = item["thumbnail"] as? [String: Any] else { return [] }
+        var urls: [String] = []
+        let src = string(thumbnail["src"])
+        let original = string(thumbnail["original"])
+        if !src.isEmpty { urls.append(src) }
+        if !original.isEmpty, original != src { urls.append(original) }
+        return urls.filter { $0.hasPrefix("http") }
     }
 
     @MainActor

@@ -1176,14 +1176,19 @@ struct IOSDeepReadTaskDetailView: View {
         }
     }
 
-    /// Builds the Android-style editorial HTML for a completed deep read. Shell-first:
-    /// title headline + magazine-typeset Markdown body. Hero image (Phase 2) will be
-    /// supplied via `heroImageURL` once the Brave/search image chain is wired through.
+    /// Builds the Android-style editorial HTML for a completed deep read: title
+    /// headline + magazine-typeset Markdown body, with the diagonal hero figure when a
+    /// source carries an image (e.g. a Brave thumbnail, stashed in source metadata).
     private func editorialHTML(_ task: IOSDeepReadTask) -> String {
-        IOSDeepReadEditorialRenderer.renderHTML(
+        let hero = task.sources
+            .compactMap { $0.metadata["hero_image_url"] }
+            .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+        return IOSDeepReadEditorialRenderer.renderHTML(
             IOSDeepReadEditorialRenderer.Input(
                 title: task.title,
                 markdown: task.resultMarkdown,
+                heroImageURL: hero,
+                sourceLabel: hero == nil ? nil : "\(task.sources.count) 来源",
                 dark: colorScheme == .dark
             )
         )

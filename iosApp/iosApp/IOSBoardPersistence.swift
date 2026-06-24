@@ -2107,15 +2107,22 @@ enum IOSDeepReadSourceNormalizer {
                 result.url
             ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n"))
             guard !content.isEmpty else { return nil }
+            var metadata = [
+                "query": cleanQuery,
+                "rank": "\(index + 1)"
+            ]
+            // Carry the first usable provider image (e.g. a Brave thumbnail) so the
+            // editorial reader can source a hero. Stored in metadata to avoid a
+            // schema change to the persisted IOSDeepReadSource.
+            if let image = result.images.first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+                metadata["hero_image_url"] = image
+            }
             return IOSDeepReadSource(
                 kind: .searchResult,
                 title: result.title.ifEmpty("搜索结果 \(index + 1)"),
                 content: content,
                 url: result.url,
-                metadata: [
-                    "query": cleanQuery,
-                    "rank": "\(index + 1)"
-                ],
+                metadata: metadata,
                 createdAt: now
             )
         }
