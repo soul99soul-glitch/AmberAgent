@@ -960,9 +960,10 @@ struct ChatView: View {
     }
 }
 
-private extension View {
+extension View {
     /// 原生 Liquid Glass 输入胶囊:`.regular` 提供半透折射,`.interactive()` 提供触控时的
     /// HDR 高光/透镜响应。低于 iOS 26 时回退到 `.thinMaterial`。
+    /// 内部可见(非 private),以便模型议会等其他页面复用同一套原生输入胶囊样式。
     @ViewBuilder
     func composerDockGlass(cornerRadius: CGFloat) -> some View {
         if #available(iOS 26.0, *) {
@@ -1023,7 +1024,8 @@ private struct ChatScrollToBottomButton: View {
 
 /// Apple Music dock 风格的独立圆形发送/停止键 —— 与输入胶囊分离的原生 Liquid Glass。
 /// 启用时给玻璃染上 accent 色调,触控时由 `.interactive()` 产生 HDR 透镜高光。
-private struct ComposerDockSendButton: View {
+/// 内部可见(非 private),以便模型议会等其他页面复用同一颗原生发送键。
+struct ComposerDockSendButton: View {
     var isLoading: Bool
     var sendEnabled: Bool
     var diameter: CGFloat = 54

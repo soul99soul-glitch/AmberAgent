@@ -82,6 +82,35 @@ struct IOSCouncilRoomSeatConfig: Codable, Equatable, Identifiable {
     }
 }
 
+/// 预制席位角色,供「添加席位」面板选择(Android lens 预设 + 几个常用扩展)。
+/// modelId 留空 → 运行时由 resolveSeatModel 落到主持人的工作模型。
+struct IOSCouncilSeatPreset: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let rolePrompt: String
+    let reasoning: IOSCouncilReasoningPreset
+
+    static let all: [IOSCouncilSeatPreset] = [
+        .init(id: "engineering", name: "工程", rolePrompt: "从工程可行性、实现复杂度、系统边界和维护成本审视议题。", reasoning: .medium),
+        .init(id: "product", name: "产品", rolePrompt: "从用户价值、需求优先级、产品体验和上线取舍审视议题。", reasoning: .medium),
+        .init(id: "marketing", name: "营销", rolePrompt: "从市场定位、增长渠道、传播路径和获客成本审视议题。", reasoning: .medium),
+        .init(id: "pr", name: "公关", rolePrompt: "从品牌形象、舆论风险、对外口径和危机应对审视议题。", reasoning: .medium),
+        .init(id: "design", name: "设计", rolePrompt: "从用户体验、交互流程、可用性和情感化设计审视议题。", reasoning: .medium),
+        .init(id: "risk", name: "风险", rolePrompt: "从隐私、安全、成本、失败模式和误用风险审视议题。", reasoning: .high),
+        .init(id: "opponent", name: "反方", rolePrompt: "主动提出反例、盲区和反对意见，压测方案是否成立。", reasoning: .high),
+        .init(id: "data", name: "数据", rolePrompt: "从数据指标、度量口径、实验设计和因果推断审视议题。", reasoning: .medium),
+        .init(id: "legal", name: "法务", rolePrompt: "从合规、法律风险、知识产权和监管要求审视议题。", reasoning: .high),
+        .init(id: "finance", name: "财务", rolePrompt: "从成本结构、投入产出、现金流和商业模式审视议题。", reasoning: .medium),
+    ]
+
+    func asSeat() -> IOSCouncilRoomSeatConfig {
+        IOSCouncilRoomSeatConfig(
+            id: id, name: name, rolePrompt: rolePrompt,
+            modelId: "", reasoning: reasoning, prompt: "", isDefault: true
+        )
+    }
+}
+
 struct IOSCouncilHostConfig: Codable, Equatable {
     var modelId: String
     var reasoning: IOSCouncilReasoningPreset
@@ -209,6 +238,14 @@ final class IOSCouncilRoomSettingsStore {
         didSet { persist() }
     }
 
+    /// 主持人是否可按议题自由动态生成席位。开:自由组建;关:只能用下方已添加的席位。
+    /// 单独存一个 UserDefaults 键(不塞进 Codable settings,避免给老数据加字段导致解码失败重置)。
+    var dynamicSeatGeneration: Bool {
+        didSet { userDefaults.set(dynamicSeatGeneration, forKey: Self.dynamicSeatKey) }
+    }
+
+    private static let dynamicSeatKey = "app.amber.ios.councilDynamicSeatGeneration.v1"
+
     @ObservationIgnored private let userDefaults: UserDefaults
     @ObservationIgnored private let storageKey: String
     @ObservationIgnored private let encoder = JSONEncoder()
@@ -227,6 +264,8 @@ final class IOSCouncilRoomSettingsStore {
         } else {
             self.settings = IOSCouncilRoomSettings.defaults(currentModelId: currentModelId)
         }
+        // 默认开启动态生成(老用户/首次进入都按"自由组建"起步)。
+        self.dynamicSeatGeneration = (userDefaults.object(forKey: Self.dynamicSeatKey) as? Bool) ?? true
     }
 
     func bootstrapLegacySeatsIfNeeded(_ legacySeats: [[String: String]], currentModelId: String) {
@@ -369,6 +408,8 @@ struct IOSCouncilRoomRunRequest {
     let providerSetting: ProviderSetting
     let searchSettings: Settings?
     let researchConsent: IOSCouncilResearchConsent
+    /// 开:主持人按议题自由动态生成席位;关:只用 settings.seats 里已添加的席位。
+    var dynamicSeatGeneration: Bool = true
 }
 
 struct IOSCouncilRoomRunSummary: Equatable {
@@ -434,8 +475,8 @@ struct IOSCouncilSearchResearcher: IOSCouncilResearching {
     func research(
         objective: String,
         settings: Settings?,
-        maxSearches: Int = 2,
-        maxScrapes: Int = 2
+        maxSearches: Int = 4,
+        maxScrapes: Int = 4
     ) async -> IOSCouncilResearchBundle {
         let trimmed = objective.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -444,7 +485,9 @@ struct IOSCouncilSearchResearcher: IOSCouncilResearching {
 
         let queries = Array([
             trimmed,
-            "\(trimmed) 最新 信息"
+            "\(trimmed) 最新 信息",
+            "\(trimmed) 分析 观点",
+            "\(trimmed) 背景 影响"
         ].prefix(max(0, maxSearches)))
 
         var executions: [IOSSearchExecution] = []
@@ -650,6 +693,21 @@ final class IOSCouncilRoomRunner {
         let objective = request.objective.trimmingCharacters(in: .whitespacesAndNewlines)
         let settings = request.settings.normalized(currentModelId: request.currentModelId)
         let limits = settings.limits.normalized()
+
+        // 当前 provider 实际支持的 chat 模型。席位模型不在其中（或为空/历史默认值如
+        // "gpt-4o"）时回退到主持人正在用的当前模型，避免把不支持的 model 发给只认
+        // 自家模型的 provider 导致 HTTP 400「Not supported model」。
+        let supportedModelIds = Set(request.providerSetting.models
+            .filter { $0.type == ModelType.chat }
+            .map { $0.modelId.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })
+        func resolveSeatModel(_ modelId: String) -> String {
+            let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || supportedModelIds.isEmpty || !supportedModelIds.contains(trimmed) {
+                return request.currentModelId
+            }
+            return trimmed
+        }
         let task = taskStore.startTask(
             kind: .modelCouncil,
             title: "\(request.mode.title) · \(objective.prefix(34))",
@@ -697,23 +755,27 @@ final class IOSCouncilRoomRunner {
             id: "host",
             name: "主持人",
             rolePrompt: settings.host.prompt,
-            modelId: settings.host.modelId,
+            modelId: resolveSeatModel(settings.host.modelId),
             reasoning: settings.host.reasoning,
             prompt: settings.host.prompt,
             isHost: true
         )
+        // 静态默认席位仅作为「主持人动态规划失败」时的兜底；模型一律走 resolveSeatModel。
         var activeSeats = settings.defaultSeats(currentModelId: request.currentModelId).map { seat in
             IOSCouncilRoomSpeaker(
                 id: seat.id,
                 name: seat.name,
                 rolePrompt: seat.rolePrompt,
-                modelId: seat.modelId,
+                modelId: resolveSeatModel(seat.modelId),
                 reasoning: seat.reasoning,
                 prompt: seat.prompt,
                 isHost: false
             )
         }
-        if activeSeats.count < 2 {
+        // 兜底注入内置默认席位,只在以下两种情况:动态生成开(这只是占位,稍后会被主持人
+        // 动态规划替换);或用户一个席位都没配(否则会变成只有主持人的空议会)。动态关 + 用户
+        // 已添加 ≥1 个席位时,尊重用户配置,不再塞入无关的默认人设(honor「只用已添加的席位」)。
+        if activeSeats.count < 2, request.dynamicSeatGeneration || activeSeats.isEmpty {
             activeSeats = Array(IOSCouncilRoomSettings.defaults(currentModelId: request.currentModelId)
                 .defaultSeats(currentModelId: request.currentModelId)
                 .prefix(limits.maxSeats)
@@ -722,7 +784,7 @@ final class IOSCouncilRoomRunner {
                         id: $0.id,
                         name: $0.name,
                         rolePrompt: $0.rolePrompt,
-                        modelId: $0.modelId,
+                        modelId: resolveSeatModel($0.modelId),
                         reasoning: $0.reasoning,
                         prompt: $0.prompt,
                         isHost: false
@@ -741,8 +803,8 @@ final class IOSCouncilRoomRunner {
             research = await researcher.research(
                 objective: objective,
                 settings: request.searchSettings,
-                maxSearches: 2,
-                maxScrapes: 2
+                maxSearches: 4,
+                maxScrapes: 4
             )
         } else {
             research = IOSCouncilResearchBundle(
@@ -780,13 +842,29 @@ final class IOSCouncilRoomRunner {
             transcript.append("[\(host.name)] \(finalTopic)")
             taskStore.appendLog(id: task.id, chunk: "[\(host.name)] \(finalTopic)\n\n")
 
-            let plannedSeats = Self.plannedSeats(
-                from: finalTopic,
-                fallback: activeSeats,
-                maxSeats: limits.maxSeats,
-                currentModelId: request.currentModelId
-            )
-            activeSeats = plannedSeats
+            // 开关「动态席位生成」开 → 主持人按议题 + 调研单独输出一份严格 JSON 席位清单
+            //（Android planned_seats 思路），贴合本议题;关 → 直接用用户已添加的席位,不自由发挥。
+            if request.dynamicSeatGeneration {
+                onEvent(.state("组建议员席位中"))
+                let seatPlanRaw = (try? await stream(
+                    speaker: host,
+                    systemPrompt: seatPlanSystemPrompt(),
+                    userPrompt: seatPlanPrompt(objective: objective, finalTopic: finalTopic, research: research, limits: limits),
+                    request: request,
+                    temperature: 0.3,
+                    onUpdate: { _ in }
+                )) ?? ""
+                try checkCancelled()
+                let dynamicSeats = Self.plannedSeatsFromJSON(
+                    seatPlanRaw,
+                    maxSeats: limits.maxSeats,
+                    modelId: host.modelId
+                )
+                if dynamicSeats.count >= 2 { activeSeats = dynamicSeats }
+                onEvent(.append(dividerMessage("已组建 \(activeSeats.count) 位议员：\(activeSeats.map(\.name).joined(separator: "、"))")))
+            } else {
+                onEvent(.append(dividerMessage("本轮议员（已添加席位）：\(activeSeats.map(\.name).joined(separator: "、"))")))
+            }
             onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
             onEvent(.append(dividerMessage(request.mode == .debate ? "辩论开始" : "自由群聊开始")))
 
@@ -1061,35 +1139,42 @@ final class IOSCouncilRoomRunner {
         }
     }
 
-    static func plannedSeats(
-        from text: String,
-        fallback: [IOSCouncilRoomSpeaker],
+    /// Parses the host's strict-JSON seat plan `{"seats":[{"name","lens"}]}` into
+    /// dynamic council speakers, all running on the host's working model. Tolerates
+    /// ```json fences / surrounding prose (reuses the deep-read balanced-brace
+    /// extractor). Returns [] when fewer than 2 usable seats parse, so the caller
+    /// keeps the resolved default seats as a fallback.
+    static func plannedSeatsFromJSON(
+        _ text: String,
         maxSeats: Int,
-        currentModelId: String
+        modelId: String
     ) -> [IOSCouncilRoomSpeaker] {
-        let parsed = text
-            .components(separatedBy: .newlines)
-            .compactMap { raw -> IOSCouncilRoomSpeaker? in
-                let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard line.lowercased().hasPrefix("席位:") || line.lowercased().hasPrefix("seat:") else { return nil }
-                let body = line.drop { $0 != ":" }.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines)
-                let parts = body.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                guard let name = parts.first?.trimmedNilIfBlank else { return nil }
-                let role = parts.dropFirst().first?.trimmedNilIfBlank ?? "围绕议题提供独立视角。"
-                let matched = fallback.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
-                return IOSCouncilRoomSpeaker(
-                    id: matched?.id ?? "planned-\(Self.digest(name).prefix(8))",
-                    name: name,
-                    rolePrompt: matched?.rolePrompt ?? role,
-                    modelId: matched?.modelId ?? currentModelId,
-                    reasoning: matched?.reasoning ?? .medium,
-                    prompt: matched?.prompt ?? "",
-                    isHost: false
-                )
-            }
-        let capped = Array(parsed.prefix(maxSeats))
-        guard capped.count >= 2 else { return Array(fallback.prefix(maxSeats)) }
-        return capped
+        guard let json = IOSDeepReadDraftGenerator.extractJSONObject(text),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let seats = obj["seats"] as? [[String: Any]] else {
+            return []
+        }
+        var result: [IOSCouncilRoomSpeaker] = []
+        var seenNames = Set<String>()
+        for entry in seats {
+            guard let rawName = entry["name"] as? String else { continue }
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seenNames.insert(name.lowercased()).inserted else { continue }
+            let lensRaw = (entry["lens"] as? String) ?? (entry["role"] as? String) ?? (entry["prompt"] as? String) ?? ""
+            let lens = lensRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+            result.append(IOSCouncilRoomSpeaker(
+                id: "planned-\(Self.digest(name).prefix(8))",
+                name: name,
+                rolePrompt: lens.isEmpty ? "围绕议题提供独立、专业的视角。" : lens,
+                modelId: modelId,
+                reasoning: .medium,
+                prompt: "",
+                isHost: false
+            ))
+            if result.count >= maxSeats { break }
+        }
+        return result.count >= 2 ? result : []
     }
 
     private func stream(
@@ -1200,19 +1285,44 @@ final class IOSCouncilRoomRunner {
         defaultSeats: [IOSCouncilRoomSpeaker]
     ) -> String {
         """
-        User topic:
+        用户议题：
         \(objective)
 
-        Bounded web research:
+        联网调研要点：
         \(research.summaryText.trimmedOr("本轮没有联网调研材料。"))
 
-        Default available seats:
-        \(defaultSeats.map { "- \($0.name): \($0.rolePrompt)" }.joined(separator: "\n"))
+        请基于以上调研完善议题、补充关键背景和最新信息，形成一个清晰、有讨论价值的「最终议题」。
+        直接输出完善后的议题正文即可，不要列席位、不要输出 JSON。
+        """
+    }
 
-        请先完善议题并补充最新信息，形成“最终议题”。然后在结尾用严格格式列出你要拉起的 2 到 \(limits.maxSeats) 个席位：
-        席位: 名称 | 角色提示
+    private func seatPlanSystemPrompt() -> String {
+        """
+        你是 iOS 模型议会的主持人，负责根据具体议题和联网调研，动态组建本轮最有价值的议员席位。
+        只输出严格 JSON，不要代码围栏、不要任何解释文字。
+        """
+    }
 
-        只列本轮需要加入的席位，不要超过上限。
+    private func seatPlanPrompt(
+        objective: String,
+        finalTopic: String,
+        research: IOSCouncilResearchBundle,
+        limits: IOSCouncilRoomLimits
+    ) -> String {
+        """
+        最终议题：
+        \(finalTopic.trimmedOr(objective))
+
+        联网调研要点：
+        \(research.summaryText.trimmedOr("（无联网调研材料，请基于议题本身判断）"))
+
+        请针对这个【具体议题】动态设计 2 到 \(limits.maxSeats) 位最有价值的议员席位：
+        - 紧扣本议题的真实关键维度，不要套用「工程/产品/风险」之类的通用模板，除非它们确实最贴切。
+        - 每位议员视角独特、互补，合起来能覆盖议题的核心分歧与决策要点。
+        - 议员简称 2-6 个字；职责用一句话写清它从什么角度、审视什么。
+
+        只输出严格 JSON（不要代码围栏、不要解释）：
+        {"seats":[{"name":"议员简称","lens":"该议员的具体职责与审视角度"}]}
         """
     }
 

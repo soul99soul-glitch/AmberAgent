@@ -70,35 +70,40 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertFalse(seat.isDefault)
     }
 
-    func testPlannedSeatsParseDynamicSeatLinesAndFallbackWhenInvalid() {
-        let fallback = [
-            roomSpeaker(id: "engineering", name: "工程", modelId: "gpt-engineer"),
-            roomSpeaker(id: "risk", name: "风险", modelId: "gpt-risk"),
-            roomSpeaker(id: "product", name: "产品", modelId: "gpt-product")
-        ]
-
-        let planned = IOSCouncilRoomRunner.plannedSeats(
-            from: """
-            最终议题：完善 iOS 模型议会
-            席位: 工程 | 看实现复杂度
-            Seat: 风险 | 看安全和失败模式
+    func testPlannedSeatsFromJSONParsesDynamicSeatsAllOnHostModel() {
+        let planned = IOSCouncilRoomRunner.plannedSeatsFromJSON(
+            """
+            主持人输出：
+            ```json
+            {"seats":[{"name":"工程","lens":"看实现复杂度"},{"name":"风险","lens":"看安全和失败模式"}]}
+            ```
             """,
-            fallback: fallback,
-            maxSeats: 2,
-            currentModelId: "gpt-main"
+            maxSeats: 4,
+            modelId: "gpt-main"
         )
-
         XCTAssertEqual(planned.map(\.name), ["工程", "风险"])
-        XCTAssertEqual(planned.map(\.id), ["engineering", "risk"])
-        XCTAssertEqual(planned.map(\.modelId), ["gpt-engineer", "gpt-risk"])
+        XCTAssertEqual(planned.map(\.rolePrompt), ["看实现复杂度", "看安全和失败模式"])
+        // 所有动态席位都跑在主持人的工作模型上（修复 gpt-4o Not supported 的根因）。
+        XCTAssertEqual(planned.map(\.modelId), ["gpt-main", "gpt-main"])
+        XCTAssertFalse(planned.contains { $0.isHost })
+    }
 
-        let fallbacked = IOSCouncilRoomRunner.plannedSeats(
-            from: "席位: 只有一个 | 数量非法",
-            fallback: fallback,
-            maxSeats: 2,
-            currentModelId: "gpt-main"
+    func testPlannedSeatsFromJSONFallsBackToEmptyWhenInsufficientOrInvalid() {
+        // 少于 2 个有效席位 → 空（调用方保留已 resolve 的默认席位）
+        XCTAssertTrue(IOSCouncilRoomRunner.plannedSeatsFromJSON(
+            #"{"seats":[{"name":"只有一个","lens":"数量非法"}]}"#,
+            maxSeats: 4, modelId: "gpt-main"
+        ).isEmpty)
+        // 非 JSON 散文 → 空
+        XCTAssertTrue(IOSCouncilRoomRunner.plannedSeatsFromJSON(
+            "主持人写了一堆散文，没有任何 JSON。", maxSeats: 4, modelId: "gpt-main"
+        ).isEmpty)
+        // 超过上限按 maxSeats 截断
+        let capped = IOSCouncilRoomRunner.plannedSeatsFromJSON(
+            #"{"seats":[{"name":"A","lens":"a"},{"name":"B","lens":"b"},{"name":"C","lens":"c"}]}"#,
+            maxSeats: 2, modelId: "gpt-main"
         )
-        XCTAssertEqual(fallbacked.map(\.id), ["engineering", "risk"])
+        XCTAssertEqual(capped.map(\.name), ["A", "B"])
     }
 
     func testRoomRunnerFreeChatPersistsTaskApprovalAndOrderedMessages() async throws {

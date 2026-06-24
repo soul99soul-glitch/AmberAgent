@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import SwiftStreamingMarkdown
 @preconcurrency import Shared
 
 struct CouncilChatRuntimeView: View {
@@ -11,6 +12,8 @@ struct CouncilChatRuntimeView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: CouncilChatViewModel
     @FocusState private var isComposerFocused: Bool
+    /// 用户是否停在底部附近。流式/新消息只在底部附近时才自动跟随;一旦上滑看历史就不再强制拉回。
+    @State private var isNearBottom = true
 
     init(
         settingsStore: SettingsStore,
@@ -39,6 +42,9 @@ struct CouncilChatRuntimeView: View {
                 transcript
             }
         }
+        // 离开页面(返回/切走)时立即存一份当前 transcript,避免运行中退出导致刚流式出的内容
+        // 在下次进入前丢失(运行任务仍会在后台跑完并再存一次,以更完整的为准)。
+        .onDisappear { viewModel.persistTranscript() }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
         }
@@ -50,6 +56,10 @@ struct CouncilChatRuntimeView: View {
                     .presentationDragIndicator(.visible)
             case .members:
                 CouncilMembersSheet(
+                    selectedMode: Binding(
+                        get: { viewModel.selectedMode },
+                        set: { viewModel.selectedMode = $0 }
+                    ),
                     participants: viewModel.participants,
                     currentModelId: viewModel.currentModelId,
                     stateProvider: { viewModel.state(for: $0) },
@@ -59,6 +69,8 @@ struct CouncilChatRuntimeView: View {
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                // 固定 sheet 底色,避免拉伸到不同高度时系统在不同材质/灰阶间切换导致整体变色。
+                .presentationBackground(AmberTheme.background)
             case .settings:
                 CouncilRoomSettingsSheet(
                     roomSettingsStore: viewModel.roomSettingsStore,
@@ -69,16 +81,6 @@ struct CouncilChatRuntimeView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
-        }
-        .alert("允许本轮主持人联网调研？", isPresented: $viewModel.isResearchConsentPresented) {
-            Button("允许本轮") {
-                viewModel.startPendingDiscussion(researchAllowed: true)
-            }
-            Button("不联网启动", role: .cancel) {
-                viewModel.startPendingDiscussion(researchAllowed: false)
-            }
-        } message: {
-            Text("主持人最多执行 2 次搜索和 2 次网页读取，并只在本轮模型议会中使用。")
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -133,21 +135,12 @@ struct CouncilChatRuntimeView: View {
                     dismiss()
                 }
 
-                VStack(spacing: 2) {
-                    // 标题位置：显示当前模式（自由群聊/辩论），点击切换
-                    Menu {
-                        ForEach(CouncilDiscussionMode.allCases) { mode in
-                            Button {
-                                viewModel.selectedMode = mode
-                            } label: {
-                                if viewModel.selectedMode == mode {
-                                    Label(mode.title, systemImage: "checkmark")
-                                } else {
-                                    Text(mode.title)
-                                }
-                            }
-                        }
-                    } label: {
+                // 整个标题区(模式 + 成员·轮次)都可点击,唤起底部 sheet 切换模式 / 看席位。
+                // 不再用悬浮小菜单,点击热区也更大。
+                Button {
+                    viewModel.showMembers()
+                } label: {
+                    VStack(spacing: 2) {
                         HStack(spacing: 4) {
                             Text(viewModel.selectedMode.title)
                                 .font(.system(size: 16, weight: .semibold))
@@ -156,33 +149,21 @@ struct CouncilChatRuntimeView: View {
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(AmberTheme.muted)
                         }
-                    }
-                    .disabled(viewModel.isRunning)
-                    .accessibilityLabel("切换议会模式")
-
-                    // 小字位置：成员数 · 第几轮，点击唤起成员 sheet
-                    Button {
-                        viewModel.showMembers()
-                    } label: {
                         Text("\(viewModel.participants.count) 位成员 · 第 \(viewModel.discussionRound) 轮")
                             .font(.system(size: 11.5))
                             .foregroundStyle(AmberTheme.muted)
                             .lineLimit(1)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.isRunning)
-                    .accessibilityLabel("席位成员")
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.plain)
+                .accessibilityLabel("议会模式与席位")
 
-                if viewModel.isRunning {
-                    AmberGlassCircleButton(systemImage: "stop.fill", accessibilityLabel: "停止议会", size: 44, symbolSize: 15) {
-                        viewModel.cancelDiscussion()
-                    }
-                } else {
-                    AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "议会设置", size: 44, symbolSize: 18) {
-                        viewModel.showSettings()
-                    }
+                // 顶栏始终是设置入口;停止由输入框那颗发送/停止键负责(与 Chat 页一致),
+                // 不在顶栏再放一颗多余的停止键。
+                AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "议会设置", size: 44, symbolSize: 18) {
+                    viewModel.showSettings()
                 }
             }
         }
@@ -200,83 +181,65 @@ struct CouncilChatRuntimeView: View {
                             viewModel.showCurrentDetail()
                         }
                         .id(message.id)
+                        // 新气泡 / 小胶囊淡入 + 轻微上浮放大,避免突兀地"啪"地出现。
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .bottom)).combined(with: .scale(scale: 0.97, anchor: .bottom)),
+                            removal: .opacity
+                        ))
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .padding(.bottom, 20)
+                // 用消息数量驱动插入过渡;正文流式更新(count 不变)不触发,避免逐字抖动。
+                .animation(.spring(response: 0.4, dampingFraction: 0.82), value: viewModel.messages.count)
             }
             .scrollIndicators(.hidden)
+            // 跟踪是否在底部附近(距底 120pt 内)。上滑看历史时 isNearBottom=false → 不再强制跟随。
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 120
+            } action: { _, atBottom in
+                isNearBottom = atBottom
+            }
             .onChange(of: viewModel.messages.count) { _, _ in
+                guard isNearBottom else { return }
                 scrollToBottom(proxy)
             }
             .onChange(of: viewModel.lastMessageBody) { _, _ in
-                scrollToBottom(proxy)
+                // 流式跟随用非动画的即时定位,避免每个 token 触发一次 0.2s 滚动动画造成卡顿。
+                guard isNearBottom else { return }
+                scrollToBottom(proxy, animated: false)
             }
         }
     }
 
+    // 输入条与 Chat 页保持完全一致:复用 Chat 的原生 Liquid Glass 组件
+    // —— 左侧输入胶囊(`composerDockGlass`)+ 右侧分离的圆形发送键
+    // (`ComposerDockSendButton`)。胶囊内左侧 `@` 键沿用 Chat 的「+」位,
+    // 与 Chat 一致的原生输入胶囊 + 分离圆形发送键。去掉了原来无实际作用的 @ 键
+    // （runner 并不解析 @host 提及）和此前黏连成一团的玻璃操作 chips。
     private var composer: some View {
-        AmberGlassGroup(spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                controlStrip
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("输入议题开始", text: $viewModel.inputText, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.plain)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .frame(minHeight: 40)
+                .focused($isComposerFocused)
+                .disabled(viewModel.isRunning)
+                .padding(.leading, 18)
+                .padding(.trailing, 18)
+                .padding(.vertical, 7)
+                .composerDockGlass(cornerRadius: 27)
 
-                HStack(alignment: .bottom, spacing: 10) {
-                    Button {
-                        viewModel.insertHostMention()
-                        isComposerFocused = true
-                    } label: {
-                        Image(systemName: "at")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(AmberTheme.muted)
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.isRunning)
-
-                    TextField("输入议题开始", text: $viewModel.inputText, axis: .vertical)
-                        .lineLimit(1...5)
-                        .textFieldStyle(.plain)
-                        .font(.body)
-                        .foregroundStyle(AmberTheme.foreground)
-                        .frame(minHeight: 38)
-                        .focused($isComposerFocused)
-                        .disabled(viewModel.isRunning)
-
-                    if viewModel.isRunning {
-                        AmberGlassIconButton(
-                            systemImage: "stop.fill",
-                            accessibilityLabel: "停止议会",
-                            size: 32,
-                            symbolSize: 14,
-                            tint: AmberTheme.accentRed,
-                            prominent: true
-                        ) {
-                            viewModel.cancelDiscussion()
-                        }
-                    } else {
-                        AmberGlassIconButton(
-                            systemImage: "arrow.up",
-                            accessibilityLabel: "发送给议会",
-                            size: 32,
-                            symbolSize: 15,
-                            tint: viewModel.canSend ? AmberTheme.accent : AmberTheme.muted2,
-                            prominent: viewModel.canSend
-                        ) {
-                            viewModel.send()
-                        }
-                        .disabled(!viewModel.canSend)
-                    }
-                }
-                .padding(.leading, 8)
-                .padding(.trailing, 6)
-                .padding(.vertical, 6)
-                .overlay {
-                    Capsule()
-                        .stroke(AmberTheme.border.opacity(0.58), lineWidth: 0.5)
-                }
-                .amberGlass(cornerRadius: 25)
-            }
+            ComposerDockSendButton(
+                isLoading: viewModel.isRunning,
+                sendEnabled: viewModel.canSend,
+                diameter: 54,
+                onSend: { viewModel.send() },
+                onStop: { viewModel.cancelDiscussion() }
+            )
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -291,29 +254,13 @@ struct CouncilChatRuntimeView: View {
         }
     }
 
-    private var controlStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                CouncilComposerChip(title: "@主持", systemImage: "crown") {
-                    viewModel.insertHostMention()
-                    isComposerFocused = true
-                }
-                CouncilComposerChip(title: "邀请席位", systemImage: "person.badge.plus") {
-                    viewModel.insertInviteTemplate()
-                    isComposerFocused = true
-                }
-                CouncilComposerChip(title: "重新开始", systemImage: "arrow.counterclockwise") {
-                    viewModel.restartLastDiscussion()
-                }
-            }
-            .padding(.horizontal, 2)
-        }
-        .disabled(viewModel.isRunning)
-    }
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
         guard let lastId = viewModel.messages.last?.id else { return }
-        withAnimation(.easeOut(duration: 0.2)) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(lastId, anchor: .bottom)
+            }
+        } else {
             proxy.scrollTo(lastId, anchor: .bottom)
         }
     }
@@ -385,30 +332,32 @@ private struct CouncilMessageRow: View {
                 .padding(.vertical, 5)
                 .background(AmberTheme.surface, in: Capsule())
                 .frame(maxWidth: .infinity)
-        case .user, .host, .guest, .system:
-            row
+        case .user:
+            userRow
+        case .host, .guest, .system:
+            assistantRow
         }
     }
 
-    private var row: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if message.kind == .user {
-                Spacer(minLength: 42)
-            } else {
-                avatar
-            }
+    // 用户消息复用 Chat 页样式:右对齐的 accent 气泡(ChatUserBubble),无头像、无「你」标签。
+    private var userRow: some View {
+        HStack {
+            Spacer(minLength: 48)
+            ChatUserBubble(text: message.body)
+        }
+    }
 
-            VStack(alignment: message.kind == .user ? .trailing : .leading, spacing: 5) {
+    // Agent 消息:头像在左,气泡左缘对齐头像右缘;气泡右边距 = 左边距
+    // (头像 30 + 间距 10 = 40),整体左右对称,气泡不再占满整行。
+    private var assistantRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            avatar
+            VStack(alignment: .leading, spacing: 5) {
                 metaLine
                 bubble
             }
-
-            if message.kind == .user {
-                avatar
-            } else {
-                Spacer(minLength: 42)
-            }
         }
+        .padding(.trailing, 40)
     }
 
     private var metaLine: some View {
@@ -426,7 +375,10 @@ private struct CouncilMessageRow: View {
     }
 
     private var bubble: some View {
-        MarkdownView(markdown: message.displayBody)
+        // 复用 Chat 同款的微软流式 Markdown 渲染库(增量渲染,流式不再每个 token 全量重解析
+        // AST,卡顿大幅缓解);旧的 MarkdownView 会在每次 body 变化时重跑 MarkdownBridge.parse。
+        SwiftStreamingMarkdown.MarkdownView(text: message.displayBody)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(message.backgroundColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -444,25 +396,6 @@ private struct CouncilMessageRow: View {
             .foregroundStyle(message.tint)
             .frame(width: 30, height: 30)
             .background(message.tint.opacity(0.13), in: Circle())
-    }
-}
-
-private struct CouncilComposerChip: View {
-    let title: String
-    let systemImage: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.foreground2)
-                .lineLimit(1)
-                .padding(.horizontal, 10)
-                .frame(height: 30)
-                .amberGlass(cornerRadius: 15)
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -514,6 +447,7 @@ private struct CouncilDetailGroup: View {
 }
 
 private struct CouncilMembersSheet: View {
+    @Binding var selectedMode: CouncilDiscussionMode
     let participants: [CouncilParticipant]
     let currentModelId: String
     let stateProvider: (CouncilParticipant) -> CouncilParticipantState
@@ -524,35 +458,25 @@ private struct CouncilMembersSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("席位成员")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text(isRunning ? "本轮议会运行中" : "可重新开始上一轮议会")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
+        NavigationStack {
+            List {
+                Section {
+                    Picker("讨论模式", selection: $selectedMode) {
+                        ForEach(CouncilDiscussionMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
                     }
-                    Spacer()
-                    Button {
-                        restartAction()
-                        dismiss()
-                    } label: {
-                        Label("重新开始", systemImage: "arrow.counterclockwise")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .frame(height: 32)
-                            .background(AmberTheme.accent, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
+                    .pickerStyle(.segmented)
                     .disabled(isRunning)
+                    .listRowBackground(AmberTheme.surface)
+                } header: {
+                    Text("模式")
+                } footer: {
+                    Text(selectedMode.intent)
                 }
 
-                VStack(spacing: 0) {
-                    ForEach(Array(participants.enumerated()), id: \.element.id) { index, participant in
+                Section {
+                    ForEach(participants) { participant in
                         HStack(spacing: 12) {
                             Image(systemName: participant.systemImage)
                                 .font(.system(size: 15, weight: .semibold))
@@ -563,31 +487,51 @@ private struct CouncilMembersSheet: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(participant.displayName)
                                     .font(.body.weight(.semibold))
-                                    .foregroundStyle(AmberTheme.foreground)
                                 Text(participant.isHost ? "主持 · \(currentModelId)" : participant.roleDescription)
                                     .font(.caption)
-                                    .foregroundStyle(AmberTheme.muted)
+                                    .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
 
                             Text(failedSpeakerIds.contains(participant.id) ? "失败" : stateProvider(participant).label)
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(failedSpeakerIds.contains(participant.id) ? AmberTheme.accentRed : AmberTheme.muted)
+                                .foregroundStyle(failedSpeakerIds.contains(participant.id) ? Color.red : .secondary)
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-
-                        if index < participants.count - 1 {
-                            Divider().overlay(AmberTheme.borderSoft).padding(.leading, 58)
-                        }
+                        .padding(.vertical, 2)
+                        .listRowBackground(AmberTheme.surface)
                     }
+                } header: {
+                    Text("席位成员（\(participants.count)）")
+                } footer: {
+                    Text(isRunning
+                         ? "本轮议会运行中，模式与席位下一轮生效。"
+                         : "席位由主持人按议题联网调研后动态组建。")
                 }
-                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
             }
-            .padding(20)
+            // 隐藏系统 grouped 背景(那层会随 sheet 拉伸在冷灰之间切换,与暖色主题冲突),
+            // 统一用主题底色,颜色不再随高度变化。
+            .scrollContentBackground(.hidden)
+            .background(AmberTheme.background)
+            .navigationTitle("模型议会")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("完成") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        restartAction()
+                        dismiss()
+                    } label: {
+                        // 明确显示「重新开始」文字 + 图标(toolbar 里 Label 默认只显示图标)。
+                        Label("重新开始", systemImage: "arrow.counterclockwise")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .disabled(isRunning)
+                }
+            }
         }
-        .background(AmberTheme.background)
     }
 }
 
@@ -634,29 +578,89 @@ private struct CouncilRoomSettingsSheet: View {
                     .disabled(isReadOnly)
                 }
 
-                settingsGroup(title: "默认席位") {
-                    ForEach(roomSettingsStore.settings.seats) { seat in
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(seat.name)
-                                    .font(.body.weight(.medium))
-                                    .foregroundStyle(AmberTheme.foreground)
-                                Text("\(seat.modelId.trimmedOr(currentModelId)) · \(seat.reasoning.title)")
-                                    .font(.caption)
-                                    .foregroundStyle(AmberTheme.muted)
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            Toggle("", isOn: Binding(
-                                get: { seat.isDefault },
-                                set: { _ in roomSettingsStore.toggleDefaultSeat(id: seat.id) }
-                            ))
-                            .labelsHidden()
-                            .disabled(isReadOnly)
+                settingsGroup(title: "动态席位生成") {
+                    Toggle(isOn: Binding(
+                        get: { roomSettingsStore.dynamicSeatGeneration },
+                        set: { roomSettingsStore.dynamicSeatGeneration = $0 }
+                    )) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("主持人动态生成席位")
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text(roomSettingsStore.dynamicSeatGeneration
+                                 ? "开：主持人按议题联网调研后自由组建席位。"
+                                 : "关：只在下方你添加的席位中选择角色。")
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
                     }
+                    .tint(AmberTheme.accent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .disabled(isReadOnly)
+                }
+
+                settingsGroup(title: "席位（\(roomSettingsStore.settings.seats.count)）") {
+                    if roomSettingsStore.settings.seats.isEmpty {
+                        Text(roomSettingsStore.dynamicSeatGeneration
+                             ? "未添加固定席位。动态生成开启时由主持人按议题组建。"
+                             : "还没有添加席位。点下方「添加席位」从预制角色中选择。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                    } else {
+                        ForEach(roomSettingsStore.settings.seats) { seat in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(seat.name)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(AmberTheme.foreground)
+                                    Text(seat.rolePrompt)
+                                        .font(.caption)
+                                        .foregroundStyle(AmberTheme.muted)
+                                        .lineLimit(2)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Button {
+                                    roomSettingsStore.removeSeat(id: seat.id)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(AmberTheme.accentRed)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isReadOnly)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            Divider().overlay(AmberTheme.borderSoft)
+                        }
+                    }
+
+                    Menu {
+                        if availablePresets.isEmpty {
+                            Text("预制角色已全部添加")
+                        } else {
+                            ForEach(availablePresets) { preset in
+                                Button {
+                                    roomSettingsStore.addOrUpdateSeat(preset.asSeat(), currentModelId: currentModelId)
+                                } label: {
+                                    Text("\(preset.name) · \(preset.rolePrompt)")
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("添加席位", systemImage: "plus.circle.fill")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(AmberTheme.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                    }
+                    .disabled(isReadOnly)
                 }
 
                 settingsGroup(title: "功能限制") {
@@ -723,6 +727,15 @@ private struct CouncilRoomSettingsSheet: View {
     }
 
     @ViewBuilder
+    /// 预制角色里尚未添加的部分(按 id 和名称去重),供「添加席位」菜单展示。
+    private var availablePresets: [IOSCouncilSeatPreset] {
+        let addedIds = Set(roomSettingsStore.settings.seats.map(\.id))
+        let addedNames = Set(roomSettingsStore.settings.seats.map { $0.name.lowercased() })
+        return IOSCouncilSeatPreset.all.filter {
+            !addedIds.contains($0.id) && !addedNames.contains($0.name.lowercased())
+        }
+    }
+
     private func settingsGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
@@ -820,7 +833,6 @@ final class CouncilChatViewModel {
     var messages: [CouncilChatMessage]
     var isRunning = false
     var activeSheet: CouncilRuntimeSheet?
-    var isResearchConsentPresented = false
     /// 主持人向用户提问时的暂停状态（非 nil = 议会暂停中，等用户回答）。
     var pendingAskUser: IOSCouncilAskUserState?
     var participants: [CouncilParticipant] = []
@@ -832,6 +844,7 @@ final class CouncilChatViewModel {
     @ObservationIgnored private let sharedSettings: IOSSharedSettingsStore
     @ObservationIgnored private let providerRegistry: ProviderRegistryStore?
     @ObservationIgnored private let runner: IOSCouncilRoomRunner
+    @ObservationIgnored private let transcriptDefaults: UserDefaults
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
     @ObservationIgnored private var currentObjective = ""
     @ObservationIgnored private var currentTaskId: String?
@@ -849,15 +862,22 @@ final class CouncilChatViewModel {
         providerRegistry: ProviderRegistryStore?,
         permissionStore: IOSPermissionStore,
         roomSettingsStore: IOSCouncilRoomSettingsStore = .shared,
-        runner: IOSCouncilRoomRunner? = nil
+        runner: IOSCouncilRoomRunner? = nil,
+        transcriptDefaults: UserDefaults = .standard
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
         self.providerRegistry = providerRegistry
         self.roomSettingsStore = roomSettingsStore
         self.runner = runner ?? IOSCouncilRoomRunner(permissionStore: permissionStore)
-        self.messages = []
+        self.transcriptDefaults = transcriptDefaults
+        // 默认载回上一轮 transcript(退出后再进仍能看到历史);为空则空白开场。
+        self.messages = CouncilTranscriptStore.load(defaults: transcriptDefaults)
         refreshSettingsBackedParticipants()
+    }
+
+    func persistTranscript() {
+        CouncilTranscriptStore.save(messages, defaults: transcriptDefaults)
     }
 
     var canSend: Bool {
@@ -968,17 +988,13 @@ final class CouncilChatViewModel {
             return
         }
         pendingObjective = text
-        if sharedSettings.snapshot.enableWebSearch {
-            isResearchConsentPresented = true
-        } else {
-            startPendingDiscussion(researchAllowed: false)
-        }
+        // 默认同意联网调研:web search 开启即直接联网,不再弹出确认面板。
+        startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
     }
 
     func startPendingDiscussion(researchAllowed: Bool) {
         let text = pendingObjective.trimmingCharacters(in: .whitespacesAndNewlines)
         pendingObjective = ""
-        isResearchConsentPresented = false
         guard !text.isEmpty, !isRunning else { return }
         inputText = ""
         currentObjective = text
@@ -1020,6 +1036,7 @@ final class CouncilChatViewModel {
             subtitle: "已取消"
         )
         updateDetail(status: "已停止")
+        persistTranscript()
     }
 
     func showCurrentDetail() {
@@ -1067,9 +1084,10 @@ final class CouncilChatViewModel {
                     apiKey: settingsStore.currentApiKey
                 ),
             searchSettings: sharedSettings.snapshot,
-            researchConsent: sharedSettings.snapshot.enableWebSearch
-                ? (researchAllowed ? .allowed : .denied)
-                : .unavailable
+            // 默认同意联网调研:主持人始终用已配置的搜索服务(无配置时走内置 DuckDuckGo/Bing
+            // 兜底)做调研,不再受聊天页 web-search 总开关或确认面板影响。
+            researchConsent: .allowed,
+            dynamicSeatGeneration: roomSettingsStore.dynamicSeatGeneration
         )
         let summary = await runner.run(request: request, onEvent: { [weak self] event in
             self?.handle(event)
@@ -1091,6 +1109,7 @@ final class CouncilChatViewModel {
         isRunning = false
         roomStateOverride = summary.status == .completed ? "就绪" : summary.status.title
         updateDetail(status: roomStateOverride ?? "就绪")
+        persistTranscript()
     }
 
     private func appendToken(_ token: String) {
@@ -1282,6 +1301,8 @@ final class CouncilChatViewModel {
                 subtitle: "就绪"
             )
         ]
+        // 重新开始即清空历史(存盘也同步为空白开场),避免退出后又载回旧 transcript。
+        persistTranscript()
         refreshSettingsBackedParticipants()
     }
 }
@@ -1624,6 +1645,22 @@ enum CouncilMessageKind {
         case .divider: self = .divider
         }
     }
+
+    var rawKey: String {
+        switch self {
+        case .user: "user"; case .host: "host"; case .guest: "guest"; case .system: "system"; case .divider: "divider"
+        }
+    }
+
+    init(rawKey: String) {
+        switch rawKey {
+        case "host": self = .host
+        case "guest": self = .guest
+        case "system": self = .system
+        case "divider": self = .divider
+        default: self = .user
+        }
+    }
 }
 
 enum CouncilMessageStatus {
@@ -1637,6 +1674,103 @@ enum CouncilMessageStatus {
         case .completed: self = .completed
         case .failed: self = .failed
         }
+    }
+
+    var rawKey: String {
+        switch self {
+        case .speaking: "speaking"; case .completed: "completed"; case .failed: "failed"
+        }
+    }
+
+    init(rawKey: String) {
+        switch rawKey {
+        case "failed": self = .failed
+        // 重载会把仍标记为 speaking 的消息当作已完成(上一轮早已结束,不应再显示"思考中")。
+        default: self = .completed
+        }
+    }
+}
+
+/// Codable 快照,用于把上一轮议会的 transcript 存盘,退出后再进默认载回。颜色用 hex
+/// 保留(席位/主持的色彩在重载后仍准确);backgroundColor/foregroundColor/borderColor 由
+/// kind+status 派生,无需存。
+private struct CouncilPersistedMessage: Codable {
+    let id: String
+    let kind: String
+    let author: String
+    let body: String
+    let systemImage: String
+    let tintHex: String
+    let subtitle: String?
+    let status: String
+
+    init(_ message: CouncilChatMessage) {
+        self.id = message.id.uuidString
+        self.kind = message.kind.rawKey
+        self.author = message.author
+        self.body = message.body
+        self.systemImage = message.systemImage
+        self.tintHex = message.tint.councilHexString
+        self.subtitle = message.subtitle
+        self.status = message.status.rawKey
+    }
+
+    func restored() -> CouncilChatMessage {
+        CouncilChatMessage(
+            id: UUID(uuidString: id) ?? UUID(),
+            kind: CouncilMessageKind(rawKey: kind),
+            author: author,
+            body: body,
+            systemImage: systemImage,
+            tint: Color(councilHexString: tintHex),
+            subtitle: subtitle,
+            status: CouncilMessageStatus(rawKey: status)
+        )
+    }
+}
+
+/// UserDefaults 持久化上一轮议会 transcript(单房间,只保留最近一份)。
+enum CouncilTranscriptStore {
+    private static let key = "app.amber.ios.councilTranscript.v1"
+
+    static func save(_ messages: [CouncilChatMessage], defaults: UserDefaults) {
+        let dtos = messages.map(CouncilPersistedMessage.init)
+        if let data = try? JSONEncoder().encode(dtos) {
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    static func load(defaults: UserDefaults) -> [CouncilChatMessage] {
+        guard let data = defaults.data(forKey: key),
+              let dtos = try? JSONDecoder().decode([CouncilPersistedMessage].self, from: data) else {
+            return []
+        }
+        return dtos.map { $0.restored() }
+    }
+
+    static func clear(defaults: UserDefaults) {
+        defaults.removeObject(forKey: key)
+    }
+}
+
+private extension Color {
+    /// `#RRGGBB`。SwiftUI Color → UIColor 取分量;转换失败回退中性灰。
+    var councilHexString: String {
+        let ui = UIColor(self)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return "#999999" }
+        return String(format: "#%02X%02X%02X", Int((r * 255).rounded()), Int((g * 255).rounded()), Int((b * 255).rounded()))
+    }
+
+    init(councilHexString: String) {
+        let hex = councilHexString.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        var value: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&value)
+        self = Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
     }
 }
 
