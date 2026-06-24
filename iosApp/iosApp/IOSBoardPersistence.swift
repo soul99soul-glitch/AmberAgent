@@ -1914,35 +1914,46 @@ final class IOSHotListDashboardStore {
 
         let previous = Dictionary(uniqueKeysWithValues: dashboard.providers.map { ($0.providerId, $0) })
         let now = IOSBoardSignalRepository.currentEpochMs()
-        var snapshots: [IOSHotListProviderSnapshot] = []
-        for provider in IOSHotlistProviders.all where enabledIds.contains(provider.providerId) {
-            do {
-                let items = try await provider.fetch(limit: limit)
-                snapshots.append(IOSHotListProviderSnapshot(
-                    providerId: provider.providerId,
-                    providerName: provider.displayName,
-                    items: items,
-                    fetchedAt: now
-                ))
-            } catch {
-                // Refresh interrupted (the view's `.task` is cancelled on
-                // navigation, and sources are fetched sequentially) — abandon
-                // without overwriting the dashboard, so the not-yet-fetched
-                // sources don't all show a spurious "cancelled" failure.
-                if Task.isCancelled || (error as? URLError)?.code == .cancelled {
-                    return
+        let enabledProviders = IOSHotlistProviders.all.filter { enabledIds.contains($0.providerId) }
+
+        // 并发抓取所有启用的来源。此前是顺序抓取,且某个源被取消/超时就 `return` 整批中断,
+        // 导致后面的源(尤其新加的 NewsNow)永远抓不到、首页不显示。改成 TaskGroup 后单个源
+        // 失败/为空只影响自己,互不拖累。
+        var snapshots = await withTaskGroup(of: IOSHotListProviderSnapshot.self) { group in
+            for provider in enabledProviders {
+                group.addTask {
+                    do {
+                        let items = try await provider.fetch(limit: limit)
+                        return IOSHotListProviderSnapshot(
+                            providerId: provider.providerId,
+                            providerName: provider.displayName,
+                            items: items,
+                            fetchedAt: now
+                        )
+                    } catch {
+                        let cached = previous[provider.providerId]?.items ?? []
+                        return IOSHotListProviderSnapshot(
+                            providerId: provider.providerId,
+                            providerName: provider.displayName,
+                            items: cached,
+                            fetchedAt: previous[provider.providerId]?.fetchedAt ?? now,
+                            stale: !cached.isEmpty,
+                            // 有缓存就不显示为错误(标 stale 即可);彻底拿不到才报错。
+                            error: cached.isEmpty ? error.localizedDescription : nil
+                        )
+                    }
                 }
-                let cached = previous[provider.providerId]?.items ?? []
-                snapshots.append(IOSHotListProviderSnapshot(
-                    providerId: provider.providerId,
-                    providerName: provider.displayName,
-                    items: cached,
-                    fetchedAt: previous[provider.providerId]?.fetchedAt ?? now,
-                    stale: !cached.isEmpty,
-                    error: error.localizedDescription
-                ))
             }
+            var collected: [IOSHotListProviderSnapshot] = []
+            for await snapshot in group { collected.append(snapshot) }
+            return collected
         }
+        // TaskGroup 完成顺序不定,还原成启用列表的稳定顺序。
+        let orderIndex = Dictionary(uniqueKeysWithValues: enabledProviders.enumerated().map { ($1.providerId, $0) })
+        snapshots.sort { (orderIndex[$0.providerId] ?? 0) < (orderIndex[$1.providerId] ?? 0) }
+
+        // 整批已被取消(用户离开页面)→ 不用部分数据覆盖既有 dashboard。
+        if Task.isCancelled { return }
 
         // Auto-translate non-Chinese titles to fluent Chinese (opt-in toggle).
         // Cached translations from the prior dashboard are reused so a refresh
@@ -2050,6 +2061,11 @@ final class IOSHotListDashboardStore {
 
     private func shouldRefresh(setting: TodayBoardSetting) -> Bool {
         guard dashboard.hasContent, dashboard.lastUpdatedAt > 0 else { return true }
+        // 启用来源集合变了(新开/关了源,比如刚加的 NewsNow)→ 立刻刷新,否则缓存里没有
+        // 这些源,首页就一直不显示它们,直到刷新间隔过去。
+        let enabledIds = IOSHotlistProviders.effectiveEnabledProviderIds(setting: setting)
+        let fetchedIds = Set(dashboard.providers.map(\.providerId))
+        if enabledIds != fetchedIds { return true }
         let minutes = max(Int(setting.hotListRefreshIntervalMinutes), 30)
         let gapMs = Int64(minutes) * 60_000
         return IOSBoardSignalRepository.currentEpochMs() - dashboard.lastUpdatedAt >= gapMs
