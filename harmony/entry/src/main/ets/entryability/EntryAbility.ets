@@ -14,6 +14,7 @@ export default class EntryAbility extends UIAbility {
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'onCreate');
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
+    AppStorage.setOrCreate<Context>('abilityContext', this.context);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {

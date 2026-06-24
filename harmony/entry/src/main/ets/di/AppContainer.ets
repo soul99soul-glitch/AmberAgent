@@ -6,11 +6,12 @@
 
 import type {
   RunManagerDeps, AiClient, UIMessage, Tool,
-  DeepReadOutput, DeepReadScheduler, HttpClient,
+  DeepReadOutput, DeepReadScheduler, HttpClient, Storage,
 } from '@amber/deepread-domain';
 import { run, makeEmptyDeepReadOutput, isInterruptedPhase } from '@amber/deepread-domain';
 // 真实平台实现 import(触发 ArkTS 编译验证)
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
+import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
 // TODO(notification): 接真实通知时恢复 import { notificationManager } from '@kit.NotificationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
@@ -73,6 +74,7 @@ const createRealNotifier = (): DeepReadNotifier => {
 // 容器单例
 interface Container {
   httpClient: HttpClient;
+  storage: Storage;
   aiClient: AiClient;
   notifier: DeepReadNotifier;
 }
@@ -81,10 +83,10 @@ let cached: Container | null = null;
 
 const buildContainer = (): Container => {
   const httpClient: HttpClient = createRcpHttpClient();
+  const storage: Storage = createPreferencesStorage();
   const aiClient: AiClient = new MockAiClient();
   const notifier: DeepReadNotifier = createRealNotifier();
-  // TODO(phase6): 替换 mock AiClient 为真实 OpenAiCompatibleAiClient(需修 ArkTS 编译 + API key)
-  return { httpClient, aiClient, notifier };
+  return { httpClient, storage, aiClient, notifier };
 };
 
 export const getAppContainer = (): Container => {
