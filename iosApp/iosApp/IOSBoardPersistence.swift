@@ -2245,6 +2245,10 @@ struct IOSDeepReadTask: Codable, Equatable, Identifiable, Sendable {
     var updatedAt: Int64
     var completedAt: Int64?
     var retryCount: Int
+    /// Serialized `IOSDeepReadOutput` JSON when the LLM produced structured output;
+    /// the reader renders the rich editorial cards from it. nil → flat-markdown reader.
+    /// Optional so old persisted tasks decode unchanged.
+    var structuredJSON: String? = nil
 
     var sourceSummary: String {
         let counts = Dictionary(grouping: sources, by: \.kind)
@@ -2340,10 +2344,11 @@ final class IOSDeepReadStore {
         }
     }
 
-    func complete(id: String, markdown: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+    func complete(id: String, markdown: String, structuredJSON: String? = nil, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
         update(id: id) { task in
             task.status = .succeeded
             task.resultMarkdown = markdown
+            task.structuredJSON = structuredJSON
             task.failureMessage = nil
             task.updatedAt = now
             task.completedAt = now
@@ -2922,6 +2927,7 @@ enum IOSDeepReadDraftGenerator {
         let markdown: String
         let didFail: Bool
         let failureReason: String
+        var structuredJSON: String? = nil
     }
 
     /// Terminal outcome of a deep-read run, decoupled from the caller's
@@ -2932,7 +2938,7 @@ enum IOSDeepReadDraftGenerator {
     /// `didFail` and mark an all-failed run succeeded (closes the
     /// deepread.honest_fail caller-honoring gap on BOTH surfaces).
     enum DeepReadOutcome: Equatable {
-        case completed(markdown: String)
+        case completed(markdown: String, structuredJSON: String? = nil)
         case failed(reason: String)
     }
 
@@ -2944,7 +2950,10 @@ enum IOSDeepReadDraftGenerator {
         if result.didFail {
             return .failed(reason: result.failureReason)
         }
-        return .completed(markdown: result.markdown.isEmpty ? offlineFallback : result.markdown)
+        return .completed(
+            markdown: result.markdown.isEmpty ? offlineFallback : result.markdown,
+            structuredJSON: result.structuredJSON
+        )
     }
 
     /// Same stage pipeline as `generateViaLLM`, but reports honest failure:
@@ -2958,93 +2967,183 @@ enum IOSDeepReadDraftGenerator {
         provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
         now: Date = Date()
     ) async -> GenerationResult {
-        // Exclude failed-search sources (scrape_status=failed) from the factual
-        // block: their "content" is just an error message, so feeding it to the
-        // model as a source would be dishonest. The marker makes the failure a
-        // real source-failure state, not silent noise.
+        // Build a source block incl. any captured image URLs (so the model can obey
+        // the "images only from sources" rule). Exclude failed-search sources.
         let sourcesBlock = task.sources
             .filter { $0.metadata["scrape_status"] != "failed" }
-            .enumerated().map { index, source in
-                "[\(index + 1)] \(source.kind.title)｜\(source.title)\n\(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(1200))"
+            .enumerated().map { index, source -> String in
+                var lines = "[\(index + 1)] \(source.kind.title)｜\(source.title)"
+                if let url = source.url, !url.isEmpty { lines += "\n- url: \(url)" }
+                if let image = source.metadata["hero_image_url"], !image.isEmpty {
+                    lines += "\n- images: \(image)"
+                }
+                lines += "\n- excerpt: \(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(1200))"
+                return lines
             }.joined(separator: "\n\n")
 
-        var sections: [String] = []
+        // 4 JSON stages merged into one IOSDeepReadOutput (Android DeepReadPrompt parity):
+        // overview -> narrative -> analysis -> extended-reading. A stage that throws or
+        // returns unparseable/empty JSON is skipped; the accumulator keeps prior stages.
+        let stages: [(label: String, instruction: String, schema: String)] = [
+            ("概览",
+             "只完成 topic_type、summary、key_entities。summary 像杂志导语，约 120-250 字、完整句子优先、说明为什么值得读。本阶段不要输出 timeline / core_points / analysis / extended_reading。不要编造来源之外的事实。",
+             #"{"topic_type":"event|opinion|product|person","summary":"约120-250字中文杂志导语","key_entities":["关键实体"]}"#),
+            ("时间轴叙事",
+             "在已有概览基础上补齐 timeline 和 core_points。timeline 讲清「早期背景 → 直接导火索 → 当前事件 → 后续影响」。core_points 是你消化来源后的中文关键脉络（不是来源清单），每条解释为什么重要。",
+             #"{"timeline":[{"date":"日期或时间","event":"连贯叙事事件","is_highlight":true}],"core_points":[{"point":"关键脉络","supporting":"为什么重要"}]}"#),
+            ("深度分析",
+             "在已有概览和叙事基础上补齐 analysis。core_dispute 回答各方到底在争什么；perspectives 区分不同当事方/利益方；implications 写影响。",
+             #"{"analysis":{"core_dispute":"核心分歧，可为空","perspectives":[{"viewpoint":"观点","holder":"持有方"}],"implications":"影响分析，可为空"}}"#),
+            ("扩展阅读",
+             "做最后整理：补齐 extended_reading 与 hero_image_url，保留前面已完成内容。extended_reading 使用来源里的 title/url/source。hero_image_url 只能从来源 images 列表中选择，没有可靠图片时留空字符串。",
+             #"{"extended_reading":[{"title":"中文标题","url":"URL","source":"来源"}],"hero_image_url":"只能用来源 images 中的 URL，可为空","hero_caption":"图片说明，可为空"}"#),
+        ]
+
+        var merged = IOSDeepReadOutput()
         var threwCount = 0
-        var emptyCount = 0
-
-        // Stage 1: overview.
-        let overview = await synthesize(
-            stage: "overview",
-            instruction: "基于以下来源写一段简洁的总体摘要（3-5 句），点明主题、关键事实和结论方向。不要编造来源中没有的信息。",
-            sourcesBlock: sourcesBlock,
-            priorDraft: "",
-            providerSetting: providerSetting,
-            modelId: modelId,
-            provider: provider
-        )
-        if overview.threw { threwCount += 1 } else if overview.text.isEmpty { emptyCount += 1 }
-        sections.append("## 摘要\n\(overview.text)")
-
-        // Stage 2: narrative (seeded with the overview).
-        let narrative = await synthesize(
-            stage: "narrative",
-            instruction: "基于摘要和来源，写出脉络叙述（按时间或逻辑组织，引用来源编号 [n]）。保留事实边界，不要编造。",
-            sourcesBlock: sourcesBlock,
-            priorDraft: overview.text,
-            providerSetting: providerSetting,
-            modelId: modelId,
-            provider: provider
-        )
-        if narrative.threw { threwCount += 1 } else if narrative.text.isEmpty { emptyCount += 1 }
-        sections.append("## 脉络\n\(narrative.text)")
-
-        // Stage 3: analysis (seeded with overview + narrative).
-        let analysis = await synthesize(
-            stage: "analysis",
-            instruction: "对前面的摘要与脉络做分析：矛盾点、风险、缺失的来源、以及下一步建议。分条列出。",
-            sourcesBlock: sourcesBlock,
-            priorDraft: "\(overview.text)\n\n\(narrative.text)",
-            providerSetting: providerSetting,
-            modelId: modelId,
-            provider: provider
-        )
-        if analysis.threw { threwCount += 1 } else if analysis.text.isEmpty { emptyCount += 1 }
-        sections.append("## 分析\n\(analysis.text)")
-
-        // Stage 4: extended reading (seeded with overview + narrative + analysis).
-        // Parity with Android's EXTENDED_READING stage — a real 4th model call,
-        // not a static placeholder.
-        let extended = await synthesize(
-            stage: "extended_reading",
-            instruction: "基于前面的摘要、脉络与分析，整理「扩展阅读」：列出最值得进一步追踪的角度或线索，并对照来源说明可继续了解的方向（引用来源编号 [n]）。只用来源覆盖到的信息，不要编造链接或事实。",
-            sourcesBlock: sourcesBlock,
-            priorDraft: "\(overview.text)\n\n\(narrative.text)\n\n\(analysis.text)",
-            providerSetting: providerSetting,
-            modelId: modelId,
-            provider: provider
-        )
-        if extended.threw { threwCount += 1 } else if extended.text.isEmpty { emptyCount += 1 }
-        sections.append("## 扩展阅读\n\(extended.text)")
+        var unusableCount = 0
+        for stage in stages {
+            let priorJSON = merged.hasStructuredBody ? (encodeStructured(merged) ?? "") : ""
+            let prompt = buildStagePrompt(
+                topicTitle: task.title, stageLabel: stage.label, instruction: stage.instruction,
+                schema: stage.schema, priorJSON: priorJSON, sourcesBlock: sourcesBlock
+            )
+            let (text, threw) = await synthesizeJSON(
+                prompt: prompt, providerSetting: providerSetting, modelId: modelId, provider: provider
+            )
+            if threw {
+                threwCount += 1
+            } else if let parsed = parseStageJSON(text), parsed.hasStructuredBody {
+                merged = merged.merged(with: parsed)
+            } else {
+                unusableCount += 1
+            }
+        }
 
         let date = IOSDeepReadDateFormatters.detail.string(from: now)
-        let header = "# \(task.title)\n\n\(date)\n"
-        let body = header + sections.joined(separator: "\n\n")
-
-        // Honest failure: ALL 4 stages either threw or were empty. A single
-        // usable stage is enough to surface a (partial) completed draft.
-        let allStagesUnusable = (threwCount + emptyCount) == 4
-        let didFail = allStagesUnusable
+        // Honest failure only when nothing usable came back at all.
+        let didFail = !merged.hasStructuredBody
         let reason: String
-        if threwCount == 4 {
+        if didFail && threwCount == 4 {
             reason = "所有阶段调用失败（provider 抛错）"
-        } else if emptyCount == 4 {
-            reason = "所有阶段未产出可用内容（输出为空）"
-        } else if allStagesUnusable {
-            reason = "所有阶段失败或为空（threw=\(threwCount), empty=\(emptyCount)）"
+        } else if didFail {
+            reason = "所有阶段未产出可用结构化内容（threw=\(threwCount), unusable=\(unusableCount)）"
         } else {
             reason = ""
         }
-        return GenerationResult(markdown: body, didFail: didFail, failureReason: reason)
+
+        let structuredJSON = merged.hasStructuredBody ? encodeStructured(merged) : nil
+        let body = merged.hasStructuredBody
+            ? markdownFromStructured(merged, title: task.title, date: date)
+            : "# \(task.title)\n\n\(date)\n"
+        return GenerationResult(markdown: body, didFail: didFail, failureReason: reason, structuredJSON: structuredJSON)
+    }
+
+    // MARK: - Stage JSON helpers
+
+    private static func buildStagePrompt(topicTitle: String, stageLabel: String, instruction: String, schema: String, priorJSON: String, sourcesBlock: String) -> String {
+        var b = "你是 AmberAgent 的深度阅读编辑，分阶段生成高端 News 杂志风格的结构化深读稿。\n"
+        b += "话题：\(topicTitle)\n当前阶段：\(stageLabel)\n\n"
+        b += "## 阶段要求\n- \(instruction)\n"
+        b += "- 输出合法 JSON 对象，不要代码围栏、不要前后解释。\n"
+        b += "- 用户可见文本必须是简体中文；url 原样保留。\n"
+        b += "- 不要输出 null；没有内容时用空字符串或空数组。\n\n"
+        if !priorJSON.isEmpty {
+            b += "## 上一阶段 JSON（请保留并在其基础上补齐）\n\(priorJSON.prefixString(8000))\n\n"
+        }
+        b += "## 本阶段 JSON 字段\n\(schema)\n\n"
+        b += "## 来源\n\(sourcesBlock)\n"
+        return b
+    }
+
+    private static func synthesizeJSON(prompt: String, providerSetting: ProviderSetting, modelId: String, provider: IOSAgentTextProvider) async -> (text: String, threw: Bool) {
+        let system = "你是 AmberAgent 的深度阅读结构化写作助手。只基于提供的来源写作，不编造，只输出合法 JSON 对象。"
+        let messages = [
+            UIMessage.companion.system(prompt: system),
+            UIMessage.companion.user(prompt: prompt)
+        ]
+        let params = TextGenerationParams(
+            model: Model(modelId: modelId, displayName: modelId, id: KotlinUuid.companion.random(), type: ModelType.chat, customHeaders: [], customBodies: [], inputModalities: [], outputModalities: [], abilities: [], tools: Set<BuiltInTools>(), contextWindowTokens: nil, providerOverwrite: nil),
+            temperature: KotlinFloat(value: 0.3),
+            topP: nil,
+            maxTokens: KotlinInt(value: 2_500),
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+        do {
+            let chunk = try await provider.generateText(providerSetting: providerSetting, messages: messages, params: params)
+            let text = (chunk.choices.first?.message?.parts ?? [])
+                .compactMap { $0 as? UIMessagePart.Text }
+                .map { $0.text }
+                .joined(separator: "")
+            return (text.trimmingCharacters(in: .whitespacesAndNewlines), false)
+        } catch {
+            return ("", true)
+        }
+    }
+
+    static func parseStageJSON(_ text: String) -> IOSDeepReadOutput? {
+        guard let json = extractJSONObject(text) else { return nil }
+        return try? JSONDecoder().decode(IOSDeepReadOutput.self, from: Data(json.utf8))
+    }
+
+    /// First balanced top-level {...} object (ignores braces inside strings), so a
+    /// response wrapped in ```json fences or surrounding prose still parses.
+    static func extractJSONObject(_ text: String) -> String? {
+        let chars = Array(text)
+        guard let start = chars.firstIndex(of: "{") else { return nil }
+        var depth = 0, inString = false, escaped = false
+        var i = start
+        while i < chars.count {
+            let c = chars[i]
+            if inString {
+                if escaped { escaped = false }
+                else if c == "\\" { escaped = true }
+                else if c == "\"" { inString = false }
+            } else if c == "\"" {
+                inString = true
+            } else if c == "{" {
+                depth += 1
+            } else if c == "}" {
+                depth -= 1
+                if depth == 0 { return String(chars[start...i]) }
+            }
+            i += 1
+        }
+        return nil
+    }
+
+    static func encodeStructured(_ output: IOSDeepReadOutput) -> String? {
+        guard let data = try? JSONEncoder().encode(output) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func markdownFromStructured(_ o: IOSDeepReadOutput, title: String, date: String) -> String {
+        var b = "# \(title)\n\n\(date)\n"
+        if !o.summary.isEmpty { b += "\n## 摘要\n\(o.summary)\n" }
+        if !o.timeline.isEmpty {
+            b += "\n## 时间轴\n"
+            for e in o.timeline { b += "- **\(e.date)** \(e.event)\n" }
+        }
+        if !o.corePoints.isEmpty {
+            b += "\n## 关键脉络\n"
+            for p in o.corePoints { b += "- **\(p.point)**" + (p.supporting.map { "：\($0)" } ?? "") + "\n" }
+        }
+        if o.analysis.hasContent {
+            b += "\n## 深度分析\n"
+            if let d = o.analysis.coreDispute, !d.isEmpty { b += "> \(d)\n\n" }
+            for p in o.analysis.perspectives where !p.viewpoint.isEmpty {
+                b += "- **\(p.holder ?? "")**：\(p.viewpoint)\n"
+            }
+            if let imp = o.analysis.implications, !imp.isEmpty { b += "\n\(imp)\n" }
+        }
+        if !o.extendedReading.isEmpty {
+            b += "\n## 扩展阅读\n"
+            for l in o.extendedReading { b += "- [\(l.title)](\(l.url))\n" }
+        }
+        return b
     }
 
     /// Retry-generation decision as a testable static seam: given the already-
@@ -3073,49 +3172,6 @@ enum IOSDeepReadDraftGenerator {
         return outcome(for: result, offlineFallback: generate(task: task, now: now))
     }
 
-    /// One LLM synthesis call for a single stage. Returns the model text, or an
-    /// One LLM synthesis call for a single stage. Returns the model text plus
-    /// whether the call threw (`threw`). On throw, text is "" — the caller's
-    /// honest-fail accounting treats threw+empty as an unusable stage.
-    private static func synthesize(
-        stage: String,
-        instruction: String,
-        sourcesBlock: String,
-        priorDraft: String,
-        providerSetting: ProviderSetting,
-        modelId: String,
-        provider: IOSAgentTextProvider
-    ) async -> (text: String, threw: Bool) {
-        let system = "你是 AmberAgent 的深度阅读写作助手。只基于提供的来源写作，不编造。"
-        var user = "\(instruction)\n\n来源：\n\(sourcesBlock)"
-        if !priorDraft.isEmpty {
-            user += "\n\n上一阶段产出：\n\(priorDraft)"
-        }
-        let messages = [
-            UIMessage.companion.system(prompt: system),
-            UIMessage.companion.user(prompt: user)
-        ]
-        let params = TextGenerationParams(
-            model: Model(modelId: modelId, displayName: modelId, id: KotlinUuid.companion.random(), type: ModelType.chat, customHeaders: [], customBodies: [], inputModalities: [], outputModalities: [], abilities: [], tools: Set<BuiltInTools>(), contextWindowTokens: nil, providerOverwrite: nil),
-            temperature: KotlinFloat(value: 0.4),
-            topP: nil,
-            maxTokens: KotlinInt(value: 1_500),
-            tools: [],
-            reasoningLevel: .off,
-            customHeaders: [],
-            customBody: []
-        )
-        do {
-            let chunk = try await provider.generateText(providerSetting: providerSetting, messages: messages, params: params)
-            let text = (chunk.choices.first?.message?.parts ?? [])
-                .compactMap { $0 as? UIMessagePart.Text }
-                .map { $0.text }
-                .joined(separator: "")
-            return (text.trimmingCharacters(in: .whitespacesAndNewlines), false)
-        } catch {
-            return ("", true)
-        }
-    }
 }
 
 enum IOSDeepReadDateFormatters {

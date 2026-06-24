@@ -87,52 +87,63 @@ final class IOSDeepReadPipelineTests: XCTestCase {
         }
     }
 
-    func testPipelineRunsFourStagesAndAssemblesMarkdown() async {
+    func testPipelineRunsFourJSONStagesAndAssemblesStructured() async throws {
         let provider = StageProvider([
-            "OVERVIEW: two sources describe an iOS agent app.",
-            "NARRATIVE: the app has chat, then tools, then deep reading.",
-            "ANALYSIS: gap — no mention of release date; risk — early stage.",
-            "EXTENDED: follow the release timeline and competitor comparisons."
+            #"{"topic_type":"product","summary":"两个来源描述一个 iOS agent 应用。","key_entities":["AmberAgent"]}"#,
+            #"{"timeline":[{"date":"早期","event":"先有聊天，再有工具，再有深度阅读。"}],"core_points":[{"point":"能力分层"}]}"#,
+            #"{"analysis":{"core_dispute":"是否已到产品化拐点","perspectives":[{"viewpoint":"还早","holder":"观察者"}],"implications":"需要更多验证"}}"#,
+            #"{"extended_reading":[{"title":"发布时间线","url":"https://example.com","source":"Amber"}]}"#
         ])
-        let draft = await IOSDeepReadDraftGenerator.generateViaLLM(
+        let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
             task: makeTask(),
             providerSetting: makeProviderSetting(),
             modelId: "test-model",
             provider: provider
         )
 
-        // The pipeline must make exactly 4 synthesis calls
-        // (overview/narrative/analysis/extended-reading — Android parity).
+        // 4 synthesis calls (overview/narrative/analysis/extended-reading — Android parity).
         XCTAssertEqual(provider.callCount, 4)
-        // The assembled draft must contain all four section headers and text.
-        XCTAssertTrue(draft.contains("# Test Deep Read"))
-        XCTAssertTrue(draft.contains("## 摘要"))
-        XCTAssertTrue(draft.contains("OVERVIEW:"))
-        XCTAssertTrue(draft.contains("## 脉络"))
-        XCTAssertTrue(draft.contains("NARRATIVE:"))
-        XCTAssertTrue(draft.contains("## 分析"))
-        XCTAssertTrue(draft.contains("ANALYSIS:"))
-        XCTAssertTrue(draft.contains("## 扩展阅读"))
-        XCTAssertTrue(draft.contains("EXTENDED:"))
+        XCTAssertFalse(result.didFail)
+
+        // The merged structured output carries every stage's fields.
+        let json = try XCTUnwrap(result.structuredJSON)
+        let output = try JSONDecoder().decode(IOSDeepReadOutput.self, from: Data(json.utf8))
+        XCTAssertEqual(output.topicType, "product")
+        XCTAssertEqual(output.summary, "两个来源描述一个 iOS agent 应用。")
+        XCTAssertEqual(output.timeline.count, 1)
+        XCTAssertEqual(output.corePoints.first?.point, "能力分层")
+        XCTAssertEqual(output.analysis.coreDispute, "是否已到产品化拐点")
+        XCTAssertEqual(output.extendedReading.first?.url, "https://example.com")
+
+        // The serialized markdown (for share / fallback) carries the section headings.
+        XCTAssertTrue(result.markdown.contains("## 摘要"))
+        XCTAssertTrue(result.markdown.contains("## 时间轴"))
+        XCTAssertTrue(result.markdown.contains("## 关键脉络"))
+        XCTAssertTrue(result.markdown.contains("## 深度分析"))
+        XCTAssertTrue(result.markdown.contains("## 扩展阅读"))
     }
 
-    func testLaterStagesSeededWithEarlierStageOutput() async {
-        // The narrative prompt must include the overview text; analysis must
-        // include the narrative. Verify via the recorded user prompts.
-        let provider = StageProvider(["overview-text", "narrative-text", "analysis-text", "extended-text"])
-        _ = await IOSDeepReadDraftGenerator.generateViaLLM(
+    func testLaterStagesSeededWithEarlierStructuredJSON() async {
+        // Each stage's prompt must carry the merged prior-stage JSON.
+        let provider = StageProvider([
+            #"{"summary":"概览摘要内容"}"#,
+            #"{"core_points":[{"point":"叙事要点"}]}"#,
+            #"{"analysis":{"core_dispute":"分析分歧"}}"#,
+            #"{"extended_reading":[]}"#
+        ])
+        _ = await IOSDeepReadDraftGenerator.generateViaLLMResult(
             task: makeTask(),
             providerSetting: makeProviderSetting(),
             modelId: "test-model",
             provider: provider
         )
         XCTAssertEqual(provider.userPrompts.count, 4)
-        // Stage 2 (narrative) prompt should reference the overview output.
-        XCTAssertTrue(provider.userPrompts[1].contains("overview-text"))
-        // Stage 3 (analysis) prompt should reference the narrative output.
-        XCTAssertTrue(provider.userPrompts[2].contains("narrative-text"))
-        // Stage 4 (extended reading) prompt should reference the analysis output.
-        XCTAssertTrue(provider.userPrompts[3].contains("analysis-text"))
+        // Stage 2 prompt references the overview summary (merged JSON).
+        XCTAssertTrue(provider.userPrompts[1].contains("概览摘要内容"))
+        // Stage 3 references the narrative core point.
+        XCTAssertTrue(provider.userPrompts[2].contains("叙事要点"))
+        // Stage 4 references the analysis dispute.
+        XCTAssertTrue(provider.userPrompts[3].contains("分析分歧"))
     }
 
     func testOfflineFallbackDeterministicDraftStillWorks() {

@@ -123,7 +123,7 @@ final class IOSParityRedLightTests: XCTestCase {
         switch IOSDeepReadDraftGenerator.outcome(for: result, offlineFallback: "") {
         case .failed(let reason):
             store.fail(id: running.id, message: "所有生成阶段失败：\(reason)")
-        case .completed(let markdown):
+        case .completed(let markdown, _):
             store.complete(id: running.id, markdown: markdown)
         }
         let final = store.task(id: running.id)
@@ -168,7 +168,7 @@ final class IOSParityRedLightTests: XCTestCase {
         switch IOSDeepReadDraftGenerator.outcome(for: result, offlineFallback: "") {
         case .failed:
             store.fail(id: running.id, message: "生成内容为空：所有阶段未产出可用内容")
-        case .completed(let markdown):
+        case .completed(let markdown, _):
             store.complete(id: running.id, markdown: markdown)
         }
         let final = store.task(id: running.id)
@@ -208,12 +208,12 @@ final class IOSParityRedLightTests: XCTestCase {
             resolvedProvider: makeOpenAIProvider(),
             modelId: "any-model",
             task: makeDeepReadTask(),
-            provider: IOSDeepReadPipelineTests.StageProvider(["ov", "na", "an"])
+            provider: IOSDeepReadPipelineTests.StageProvider([#"{"summary":"ov 摘要"}"#])
         )
-        guard case .completed(let markdown) = outcome else {
+        guard case .completed(let markdown, _) = outcome else {
             return XCTFail("Successful retry must return .completed, got \(outcome)")
         }
-        XCTAssertTrue(markdown.contains("ov"), "Completed retry must carry the model output.")
+        XCTAssertTrue(markdown.contains("ov"), "Completed retry must carry the model output (summary).")
     }
 
     /// GREEN guard for the search-failure source state (de-faked this change).

@@ -559,6 +559,7 @@ struct BoardView: View {
             // Real LLM pipeline when a provider/key is configured; deterministic
             // offline draft otherwise (honest degradation, no fabricated output).
             let output: String
+            var structuredJSON: String? = nil
             // Resolve the board's Deep Read model + its provider from the shared
             // settings store (canonical: formal Provider UI writes it, chat reads
             // it) so a provider configured in Settings is honored — fixes the
@@ -589,14 +590,15 @@ struct BoardView: View {
                     self.deepReadMessage = "深度阅读生成失败：\(reason)"
                     self.deepReadMessageIsError = true
                     return
-                case .completed(let markdown):
+                case .completed(let markdown, let json):
                     output = markdown
+                    structuredJSON = json
                 }
             } else {
                 output = IOSDeepReadDraftGenerator.generate(task: running)
             }
 
-            self.deepReadStore.complete(id: task.id, markdown: output)
+            self.deepReadStore.complete(id: task.id, markdown: output, structuredJSON: structuredJSON)
             _ = try? IOSWorkspaceStore.shared.saveArtifact(
                 title: running.title,
                 content: output,
@@ -1175,8 +1177,8 @@ struct IOSDeepReadTaskDetailView: View {
                 case .failed(let reason):
                     store.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
                     banner = "深度阅读重试失败：\(reason)"
-                case .completed(let markdown):
-                    store.complete(id: task.id, markdown: markdown)
+                case .completed(let markdown, let json):
+                    store.complete(id: task.id, markdown: markdown, structuredJSON: json)
                     _ = try? IOSWorkspaceStore.shared.saveArtifact(
                         title: running.title,
                         content: markdown,
@@ -1194,16 +1196,27 @@ struct IOSDeepReadTaskDetailView: View {
     /// headline + magazine-typeset Markdown body, with the diagonal hero figure when a
     /// source carries an image (e.g. a Brave thumbnail, stashed in source metadata).
     private func editorialHTML(_ task: IOSDeepReadTask) -> String {
-        let hero = task.sources
+        // Structured output (when the LLM produced it) drives the rich cards; else the
+        // renderer falls back to the flat-markdown body.
+        let structured: IOSDeepReadOutput? = task.structuredJSON
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode(IOSDeepReadOutput.self, from: $0) }
+        let metaHero = task.sources
             .compactMap { $0.metadata["hero_image_url"] }
             .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+        let hero = metaHero ?? structured?.heroImageUrl?.trimmingCharacters(in: .whitespaces)
+        let hasHero = (hero?.isEmpty == false)
+        let kicker = (structured?.topicType.isEmpty == false) ? structured!.topicType.uppercased() : "DEEP READ"
         return IOSDeepReadEditorialRenderer.renderHTML(
             IOSDeepReadEditorialRenderer.Input(
                 title: task.title,
                 markdown: task.resultMarkdown,
-                heroImageURL: hero,
-                sourceLabel: hero == nil ? nil : "\(task.sources.count) 来源",
-                dark: colorScheme == .dark
+                kicker: kicker,
+                heroImageURL: hasHero ? hero : nil,
+                heroCaption: structured?.heroCaption,
+                sourceLabel: hasHero ? "\(task.sources.count) 来源" : nil,
+                dark: colorScheme == .dark,
+                structured: structured
             )
         )
     }

@@ -76,4 +76,47 @@ final class IOSDeepReadStructuredRendererTests: XCTestCase {
         XCTAssertTrue(output.corePoints.isEmpty)
         XCTAssertNil(output.diagram)
     }
+
+    func testStageMergeAccumulatesAcrossStages() {
+        let overview = IOSDeepReadDraftGenerator.parseStageJSON(
+            #"{"topic_type":"event","summary":"导语","key_entities":["甲"]}"#
+        )
+        let narrative = IOSDeepReadDraftGenerator.parseStageJSON(
+            #"{"timeline":[{"date":"2024","event":"事件"}],"core_points":[{"point":"要点"}]}"#
+        )
+        let merged = (overview ?? IOSDeepReadOutput()).merged(with: narrative ?? IOSDeepReadOutput())
+        XCTAssertEqual(merged.topicType, "event")          // OVERVIEW kept
+        XCTAssertEqual(merged.summary, "导语")              // OVERVIEW kept
+        XCTAssertEqual(merged.timeline.count, 1)           // NARRATIVE added
+        XCTAssertEqual(merged.corePoints.first?.point, "要点")
+    }
+
+    func testEmptyLaterStageDoesNotWipeEarlier() {
+        var base = IOSDeepReadOutput()
+        base.summary = "已有摘要"
+        let merged = base.merged(with: IOSDeepReadOutput())  // empty stage
+        XCTAssertEqual(merged.summary, "已有摘要")
+    }
+
+    func testMarkdownFromStructuredHasSectionHeadings() {
+        var output = IOSDeepReadOutput()
+        output.summary = "摘要文本"
+        output.timeline = [IOSDeepReadTimelineEvent(date: "2024", event: "事件")]
+        output.extendedReading = [IOSDeepReadLink(title: "延伸", url: "https://example.com")]
+        let md = IOSDeepReadDraftGenerator.markdownFromStructured(output, title: "标题", date: "2026-06-24")
+        XCTAssertTrue(md.contains("# 标题"))
+        XCTAssertTrue(md.contains("## 摘要"))
+        XCTAssertTrue(md.contains("## 时间轴"))
+        XCTAssertTrue(md.contains("## 扩展阅读"))
+        XCTAssertTrue(md.contains("https://example.com"))
+    }
+
+    func testExtractJSONObjectStripsCodeFencesAndProse() {
+        let wrapped = "这是模型的说明\n```json\n{\"summary\":\"x\",\"nested\":{\"a\":1}}\n```\n结束语"
+        XCTAssertEqual(
+            IOSDeepReadDraftGenerator.extractJSONObject(wrapped),
+            #"{"summary":"x","nested":{"a":1}}"#
+        )
+        XCTAssertNil(IOSDeepReadDraftGenerator.extractJSONObject("no json here"))
+    }
 }

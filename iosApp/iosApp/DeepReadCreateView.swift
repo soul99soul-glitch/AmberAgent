@@ -25,6 +25,7 @@ enum IOSDeepReadLauncher {
 
         Task { @MainActor in
             let output: String
+            var structuredJSON: String? = nil
             let resolved = sharedSettings.resolveBoardDeepReadModel(
                 boardModelId: sharedSettings.todayBoard.boardModelId
             )
@@ -42,14 +43,15 @@ enum IOSDeepReadLauncher {
                     store.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
                     onStatus("深度阅读生成失败：\(reason)", true)
                     return
-                case .completed(let markdown):
+                case .completed(let markdown, let json):
                     output = markdown
+                    structuredJSON = json
                 }
             } else {
                 output = IOSDeepReadDraftGenerator.generate(task: running)
             }
 
-            store.complete(id: task.id, markdown: output)
+            store.complete(id: task.id, markdown: output, structuredJSON: structuredJSON)
             _ = try? IOSWorkspaceStore.shared.saveArtifact(
                 title: running.title,
                 content: output,
