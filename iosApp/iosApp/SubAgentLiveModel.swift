@@ -40,12 +40,24 @@ final class SubAgentLiveRegistry {
     static let shared = SubAgentLiveRegistry()
 
     private var models: [String: SubAgentLiveModel] = [:]
+    // Insertion order, for bounded FIFO eviction.
+    private var order: [String] = []
+    private let capacity = 64
 
     func register(toolCallId: String, _ model: SubAgentLiveModel) {
         guard !toolCallId.isEmpty else { return }
-        // Crude cap — live models are transient and small; avoid unbounded growth.
-        if models.count > 64 { models.removeAll() }
+        if models[toolCallId] == nil {
+            order.append(toolCallId)
+        }
         models[toolCallId] = model
+        // Evict only the OLDEST entries past the cap. The previous blunt
+        // `removeAll()` wiped every live model — including the one currently
+        // streaming — so a capsule opened mid-run lost its live text. FIFO
+        // eviction keeps recent/active streams intact.
+        while order.count > capacity {
+            let oldest = order.removeFirst()
+            models.removeValue(forKey: oldest)
+        }
     }
 
     func model(forToolCallId id: String) -> SubAgentLiveModel? {
