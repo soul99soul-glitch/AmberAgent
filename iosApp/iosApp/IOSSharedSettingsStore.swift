@@ -1105,7 +1105,8 @@ final class IOSSharedSettingsStore {
             boardReadingFontPackId: patch.boardReadingFontPackId ?? board.boardReadingFontPackId,
             clearBoardReadingFontPackId: patch.clearBoardReadingFontPackId,
             deepReadFontScale: patch.deepReadFontScale ?? board.deepReadFontScale,
-            deepReadTemplateId: patch.deepReadTemplateId ?? board.deepReadTemplateId
+            deepReadTemplateId: patch.deepReadTemplateId ?? board.deepReadTemplateId,
+            hotListTranslateToChinese: patch.hotListTranslateToChinese ?? board.hotListTranslateToChinese
         )
         restoreSnapshot(merged)
     }
@@ -1265,6 +1266,7 @@ struct TodayBoardSettingPatch {
     var clearBoardReadingFontPackId: Bool
     var deepReadFontScale: Float?
     var deepReadTemplateId: String?
+    var hotListTranslateToChinese: Bool?
 
     init(
         boardModelId: String? = nil,
@@ -1278,7 +1280,8 @@ struct TodayBoardSettingPatch {
         boardReadingFontPackId: String? = nil,
         clearBoardReadingFontPackId: Bool = false,
         deepReadFontScale: Float? = nil,
-        deepReadTemplateId: String? = nil
+        deepReadTemplateId: String? = nil,
+        hotListTranslateToChinese: Bool? = nil
     ) {
         self.boardModelId = boardModelId
         self.clearBoardModelId = clearBoardModelId
@@ -1292,6 +1295,7 @@ struct TodayBoardSettingPatch {
         self.clearBoardReadingFontPackId = clearBoardReadingFontPackId
         self.deepReadFontScale = deepReadFontScale
         self.deepReadTemplateId = deepReadTemplateId
+        self.hotListTranslateToChinese = hotListTranslateToChinese
     }
 }
 

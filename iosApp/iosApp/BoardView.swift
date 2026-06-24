@@ -613,7 +613,21 @@ struct BoardView: View {
     }
 
     private func refreshHotList(force: Bool) async {
-        await hotListStore.refresh(setting: sharedSettings.todayBoard, force: force)
+        let board = sharedSettings.todayBoard
+        // Build a title translator only when the toggle is on AND a provider/model
+        // is configured; otherwise pass nil → raw titles (honest degradation).
+        var translate: IOSHotListTitleTranslate? = nil
+        if board.hotListTranslateToChinese,
+           let resolved = sharedSettings.resolveBoardDeepReadModel(boardModelId: board.boardModelId) {
+            translate = { titles in
+                await IOSHotListTitleTranslator.translate(
+                    titles: titles,
+                    providerSetting: resolved.provider,
+                    modelId: resolved.modelId
+                )
+            }
+        }
+        await hotListStore.refresh(setting: board, force: force, translate: translate)
     }
 
     private func enrichHotTopicSourcesWithScrape(_ sources: [IOSDeepReadSource]) async -> [IOSDeepReadSource] {

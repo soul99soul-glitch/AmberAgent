@@ -179,6 +179,12 @@ data class TodayBoardSetting(
     val hotListEnabledSources: Set<String> = HotListProviderIds.DEFAULT_ENABLED,
     val hotListFocusKeywords: List<String> = DEFAULT_HOT_LIST_FOCUS_KEYWORDS,
     val hotListFilterMode: TodayBoardHotListFilterMode = TodayBoardHotListFilterMode.FOCUS_FIRST,
+    /**
+     * When true, non-Chinese hot-list / ranking titles are auto-translated to fluent
+     * Simplified Chinese (technical terms preserved) on fetch. iOS-driven display feature;
+     * default off so the toggle is opt-in and English titles aren't silently rewritten.
+     */
+    val hotListTranslateToChinese: Boolean = false,
     val deepReadFirstUseConfirmed: Boolean = false,
     val boardReadingFontMode: TodayBoardReadingFontMode = TodayBoardReadingFontMode.SERIF,
     val boardReadingFontPackId: String? = null,

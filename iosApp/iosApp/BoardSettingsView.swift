@@ -216,6 +216,18 @@ struct BoardSettingsView: View {
                     TodayBoardSettingPatch(hotListWifiOnly: enabled)
                 }
             }
+
+            BoardCapabilityDivider()
+
+            BoardSettingsToggleRow(
+                title: "标题翻译为中文",
+                subtitle: "热榜及各类榜单中的非中文标题，抓取时即时翻译成通顺中文（专业术语保留原文）。",
+                isOn: board.hotListTranslateToChinese
+            ) { enabled in
+                sharedSettings.updateTodayBoard { _ in
+                    TodayBoardSettingPatch(hotListTranslateToChinese: enabled)
+                }
+            }
         }
     }
 

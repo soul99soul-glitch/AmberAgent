@@ -337,6 +337,54 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         XCTAssertEqual(store2.todayBoard.deepReadFontScale, 1.25, accuracy: 0.001)
     }
 
+    // ---- hot-list title translation ----
+
+    func testHotListTranslateToChineseFlagPersistsThroughKMPMutationAndRestart() {
+        let suiteName = "Slice5-Translate-\(UUID().uuidString)"
+        let store1 = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertFalse(store1.todayBoard.hotListTranslateToChinese, "default should be off (opt-in)")
+
+        store1.updateTodayBoard { _ in TodayBoardSettingPatch(hotListTranslateToChinese: true) }
+        XCTAssertTrue(store1.todayBoard.hotListTranslateToChinese)
+        // Editing an unrelated field must not reset the flag.
+        store1.updateTodayBoard { _ in TodayBoardSettingPatch(hotListWifiOnly: true) }
+        XCTAssertTrue(store1.todayBoard.hotListTranslateToChinese, "unrelated patch must preserve the flag")
+
+        let store2 = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertTrue(store2.todayBoard.hotListTranslateToChinese, "flag must survive restart")
+    }
+
+    func testNeedsTranslationSkipsTitlesWithCJK() {
+        XCTAssertTrue(IOSHotListTitleTranslator.needsTranslation("Apple unveils new chip"))
+        XCTAssertFalse(IOSHotListTitleTranslator.needsTranslation("苹果发布新芯片"))
+        // Mixed title already reads in Chinese → leave as-is.
+        XCTAssertFalse(IOSHotListTitleTranslator.needsTranslation("OpenAI 发布 GPT-5"))
+        // Too short / empty → nothing to translate.
+        XCTAssertFalse(IOSHotListTitleTranslator.needsTranslation("A"))
+        XCTAssertFalse(IOSHotListTitleTranslator.needsTranslation("   "))
+    }
+
+    func testTranslatorParseMapsIndicesBackToTitles() {
+        let pending = ["Apple unveils new chip", "Rust 2.0 released", "Kubernetes turns ten"]
+        let json = """
+        Here you go:
+        ```json
+        {"items":[{"i":1,"zh":"苹果发布新芯片"},{"i":3,"zh":"Kubernetes 迎来十周年"}]}
+        ```
+        """
+        let result = IOSHotListTitleTranslator.parse(json, pending: pending)
+        XCTAssertEqual(result["Apple unveils new chip"], "苹果发布新芯片")
+        XCTAssertEqual(result["Kubernetes turns ten"], "Kubernetes 迎来十周年")
+        XCTAssertNil(result["Rust 2.0 released"], "model omitted index 2 → caller keeps original")
+    }
+
+    func testTranslatorParseRejectsOutOfRangeAndEmpty() {
+        let pending = ["Only one"]
+        let json = #"{"items":[{"i":5,"zh":"越界"},{"i":1,"zh":"  "},{"i":1,"zh":"唯一"}]}"#
+        let result = IOSHotListTitleTranslator.parse(json, pending: pending)
+        XCTAssertEqual(result, ["Only one": "唯一"])
+    }
+
     // ---- helpers ----
 
     private func makeIsolatedStore(suiteName: String = "Slice4-Providers-\(UUID().uuidString)") -> IOSSharedSettingsStore {

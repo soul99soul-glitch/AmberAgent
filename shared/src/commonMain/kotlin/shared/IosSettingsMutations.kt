@@ -896,6 +896,7 @@ object IosSettingsMutations {
         clearBoardReadingFontPackId: Boolean,
         deepReadFontScale: Float,
         deepReadTemplateId: String,
+        hotListTranslateToChinese: Boolean,
     ): Settings {
         val runtime = settings.agentRuntime
         val board = runtime.todayBoard
@@ -935,6 +936,7 @@ object IosSettingsMutations {
                     boardReadingFontPackId = nextPackId,
                     deepReadFontScale = deepReadFontScale.coerceIn(DEEP_READ_FONT_SCALE_MIN, DEEP_READ_FONT_SCALE_MAX),
                     deepReadTemplateId = nextTemplateId,
+                    hotListTranslateToChinese = hotListTranslateToChinese,
                 )
             )
         )
