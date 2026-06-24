@@ -971,6 +971,8 @@ struct IOSDeepReadTaskDetailView: View {
     @State private var store = IOSDeepReadStore.shared
     @State private var templateStore = IOSDeepReadTemplateStore.shared
     @State private var banner: String?
+    @State private var editorialHeight: CGFloat = 600
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(RouterPath.self) private var router
     @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.dismiss) private var dismiss
@@ -1104,13 +1106,14 @@ struct IOSDeepReadTaskDetailView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
         } else {
-            // 完成:正文直接铺成全宽阅读面,不再套米色卡片(去掉「设置页」观感)。
-            MarkdownView(markdown: task.resultMarkdown, displaySetting: sharedSettings?.displaySetting, style: .magazine)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.top, 2)
-                .padding(.bottom, 20)
+            // 完成:Android 式 HTML 杂志阅读器(IOSDeepReadEditorialRenderer → WKWebView)。
+            // 关掉 WebView 内部滚动、按内容高度自适应,让整篇随详情页一起滚动(HTML 自带
+            // 22px 侧边距,故这里不再加水平内边距)。来源仍由下方 SwiftUI sourcesSection 承载。
+            IOSDeepReadEditorialWebView(html: editorialHTML(task), contentHeight: $editorialHeight)
+                .frame(height: editorialHeight)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 12)
+                .id(task.id)
         }
     }
 
@@ -1171,6 +1174,19 @@ struct IOSDeepReadTaskDetailView: View {
                 }
             }
         }
+    }
+
+    /// Builds the Android-style editorial HTML for a completed deep read. Shell-first:
+    /// title headline + magazine-typeset Markdown body. Hero image (Phase 2) will be
+    /// supplied via `heroImageURL` once the Brave/search image chain is wired through.
+    private func editorialHTML(_ task: IOSDeepReadTask) -> String {
+        IOSDeepReadEditorialRenderer.renderHTML(
+            IOSDeepReadEditorialRenderer.Input(
+                title: task.title,
+                markdown: task.resultMarkdown,
+                dark: colorScheme == .dark
+            )
+        )
     }
 
     private func customTemplateHTML(_ task: IOSDeepReadTask) -> String? {
@@ -1276,6 +1292,91 @@ struct IOSDeepReadTemplateWebView: View {
 
     var body: some View {
         Text("当前平台不支持 HTML 模板预览。")
+            .font(.caption)
+            .foregroundStyle(AmberTheme.muted)
+    }
+}
+#endif
+
+#if canImport(WebKit)
+/// A WKWebView host for the Deep Read editorial reader that grows to its content
+/// height instead of scrolling internally — so the whole magazine article scrolls
+/// as part of the detail page (no nested scroll). Reports the laid-out content
+/// height through `contentHeight`; tapped source links open in the system browser.
+struct IOSDeepReadEditorialWebView: UIViewRepresentable {
+    let html: String
+    @Binding var contentHeight: CGFloat
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+        webView.scrollView.isScrollEnabled = false   // the detail page scrolls the article
+        webView.scrollView.bounces = false
+        context.coordinator.observeContentSize(of: webView.scrollView)
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        guard context.coordinator.loadedHTML != html else { return }
+        context.coordinator.loadedHTML = html
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onHeight: { [binding = $contentHeight] in binding.wrappedValue = $0 })
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        private let onHeight: @MainActor (CGFloat) -> Void
+        var loadedHTML: String?
+        private var sizeObservation: NSKeyValueObservation?
+
+        init(onHeight: @escaping @MainActor (CGFloat) -> Void) {
+            self.onHeight = onHeight
+        }
+
+        /// Content height settles after layout (and again if web fonts reflow), so
+        /// observe contentSize rather than reading it once on didFinish.
+        func observeContentSize(of scrollView: UIScrollView) {
+            sizeObservation = scrollView.observe(\.contentSize, options: [.new]) { [weak self] scrollView, _ in
+                MainActor.assumeIsolated {
+                    let height = scrollView.contentSize.height
+                    guard height > 0 else { return }
+                    self?.onHeight(height)
+                }
+            }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+        ) {
+            // The initial loadHTMLString is `.other` → allow; a tapped source link
+            // opens in the system browser instead of navigating inside the reader.
+            if navigationAction.navigationType == .linkActivated {
+                if let url = navigationAction.request.url {
+                    UIApplication.shared.open(url)
+                }
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(navigationAction.navigationType == .other ? .allow : .cancel)
+        }
+    }
+}
+#else
+struct IOSDeepReadEditorialWebView: View {
+    let html: String
+    @Binding var contentHeight: CGFloat
+
+    var body: some View {
+        Text("当前平台不支持 HTML 阅读器。")
             .font(.caption)
             .foregroundStyle(AmberTheme.muted)
     }
