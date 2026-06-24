@@ -7,8 +7,10 @@
 import type {
   RunManagerDeps, AiClient, UIMessage, Tool,
   DeepReadOutput, DeepReadScheduler, HttpClient, Storage,
+  DeepReadRepository, SearchProviderRegistry, Notifier,
+  SourcePrefetcher,
 } from '@amber/deepread-domain';
-import { run, makeEmptyDeepReadOutput, isInterruptedPhase } from '@amber/deepread-domain';
+import { run, makeEmptyDeepReadOutput, isInterruptedPhase, createSourcePrefetcher } from '@amber/deepread-domain';
 // 真实平台实现 import
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
 import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
@@ -16,7 +18,6 @@ import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
 import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibleAiClient.ets';
 import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
 import { createNotificationNotifier } from '../platform_impl/NotificationNotifier.ets';
-import type { DeepReadRepository, SearchProviderRegistry, Notifier } from '@amber/deepread-domain';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0x0001;
@@ -81,6 +82,7 @@ interface Container {
   storage: Storage;
   repository: DeepReadRepository;
   searchRegistry: SearchProviderRegistry;
+  prefetcher: SourcePrefetcher;
   aiClient: AiClient;
   notifier: Notifier;
 }
@@ -92,9 +94,10 @@ const buildContainer = (): Container => {
   const storage: Storage = createPreferencesStorage();
   const repository: DeepReadRepository = createRdbRepository();
   const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(httpClient, storage);
+  const prefetcher: SourcePrefetcher = createSourcePrefetcher(httpClient, searchRegistry);
   const aiClient: AiClient = createOpenAiCompatibleAiClient(httpClient, storage);
   const notifier: Notifier = createNotificationNotifier();
-  return { httpClient, storage, repository, searchRegistry, aiClient, notifier };
+  return { httpClient, storage, repository, searchRegistry, prefetcher, aiClient, notifier };
 };
 
 export const getAppContainer = (): Container => {
@@ -105,5 +108,6 @@ export const getAppContainer = (): Container => {
 };
 
 export const getNotifier = (): Notifier => getAppContainer().notifier;
+export const getPrefetcher = (): SourcePrefetcher => getAppContainer().prefetcher;
 export const getAiClient = (): AiClient => getAppContainer().aiClient;
 export const getRepository = (): DeepReadRepository => getAppContainer().repository;

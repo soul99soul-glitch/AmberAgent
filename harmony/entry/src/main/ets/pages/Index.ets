@@ -10,7 +10,7 @@ import {
 import type { TopicIdRuntime, RunManagerDeps, DeepReadOutput, DeepReadSource, UIMessage, AiClient, Tool } from '@amber/deepread-domain';
 import { promptAction } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { getAppContainer, getNotifier } from '../di/AppContainer.ets';  // Phase 7 通知调度
+import { getAppContainer, getNotifier, getPrefetcher } from '../di/AppContainer.ets';
 
 // generateText 参数 interface(ArkTS 不允许对象字面量类型)
 interface GenerateTextParams {
@@ -50,13 +50,8 @@ const arktsTopicRuntime: TopicIdRuntime = {
 
 const deriveTopicIdArkTs = createTopicIdWithRuntime(arktsTopicRuntime);
 
-// 预置 mock sources(模拟 prefetch 结果,4 条来源,正文够长)
-const mockSources: DeepReadSource[] = [
-  { sourceId: 's1', url: 'https://src1.example.com/a', title: '来源一:量子计算突破报道', source: 'tavily', evidenceText: '这是关于量子计算重大突破的报道正文内容,包含关键事实和背景信息,长度满足最低字符要求。', credibility: 'high', freshness: 'unknown', publishedAt: null, imageCandidates: [] },
-  { sourceId: 's2', url: 'https://src2.example.com/b', title: '来源二:技术分析评论', source: 'tavily', evidenceText: '技术分析师认为此次突破将改变量子计算领域的竞争格局,影响深远。', credibility: 'medium', freshness: 'unknown', publishedAt: null, imageCandidates: [] },
-  { sourceId: 's3', url: 'https://src3.example.com/c', title: '来源三:官方声明', source: 'tavily', evidenceText: '官方声明确认了量子计算芯片的性能指标,展示了实验数据。', credibility: 'high', freshness: 'unknown', publishedAt: null, imageCandidates: [] },
-  { sourceId: 's4', url: 'https://src4.example.com/d', title: '来源四:行业反应', source: 'tavily', evidenceText: '行业反应积极,多家公司表示将加大量子计算研发投入。', credibility: 'medium', freshness: 'unknown', publishedAt: null, imageCandidates: [] },
-];
+// 真实抓取:用 AppContainer 的 prefetcher(createSourcePrefetcher → Tavily 搜索 → RCP scrape → reader 提取)
+// 对照 Android DeepReadSourcePrefetcher.collect 全流程
 
 @Entry
 @Component
@@ -85,21 +80,19 @@ struct DeepReadHomePage {
       // generateArticlePlan → supervisor loops → finishIfPossible 完整流程。
       // mock AiClient(无 key 时,generateText 返回空 → articlePlan 走 fallbackPlan)
       const mockAi: AiClient = new MockAiClient();
+      const prefetcher = getPrefetcher();
 
       const deps: RunManagerDeps = {
-        prefetcher: {
-          collect: async (): Promise<DeepReadSource[]> => mockSources,
-          cacheSize: (): number => 0,
-        },
+        prefetcher: prefetcher,
         collectRun: async (messages: UIMessage[]): Promise<UIMessage[]> => {
-          // mock:collectRun 不实际调 LLM(无 key),返回原 messages。
-          // supervisor loop 会走 fallback 路径(writeFallbackSection)用 source 正文生成 BASIC 段。
+          // 无 API key → collectRun 不调 LLM,返回原 messages。
+          // supervisor loop 走 fallback(writeFallbackSection)用抓取到的 source 正文生成 BASIC 段。
           return messages;
         },
         aiClient: mockAi,
         model: 'mock-model',
         playbookMarkdown: '',
-        nowIso: (): string => '2026-06-23',
+        nowIso: (): string => '2026-06-24',
       };
 
       const result = await run(deps, topicId, this.title, { force: true, seedUrl: null });
