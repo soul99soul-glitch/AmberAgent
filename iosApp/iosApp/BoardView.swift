@@ -1003,7 +1003,6 @@ struct IOSDeepReadTaskDetailView: View {
                         }
 
                         if let task {
-                            actionRow(task)
                             failureBanner(task)
                             resultSection(task)
                             sourcesSection(task)
@@ -1046,6 +1045,16 @@ struct IOSDeepReadTaskDetailView: View {
 
             Spacer()
 
+            // 完成的文章:复制 / 发回聊天 收进顶栏(从正文上方移走,让顶部直接是标题/hero)。
+            if let task, !task.resultMarkdown.isEmpty {
+                AmberGlassCircleButton(systemImage: "doc.on.doc", accessibilityLabel: "复制结果", size: 44, symbolSize: 16) {
+                    copyResult(task)
+                }
+                AmberGlassCircleButton(systemImage: "bubble.left.and.bubble.right", accessibilityLabel: "发回聊天", size: 44, symbolSize: 16) {
+                    Task { await saveToChat(task) }
+                }
+            }
+
             AmberGlassCircleButton(systemImage: "arrow.clockwise", accessibilityLabel: "重试深度阅读", size: 44, symbolSize: 17) {
                 retry()
             }
@@ -1056,25 +1065,8 @@ struct IOSDeepReadTaskDetailView: View {
         .padding(.bottom, 10)
     }
 
-    // 顶部「状态」卡片已移除(状态已在导航栏标题下显示)。完成后用一条贴右的玻璃胶囊
-    // 行承载「复制 / 发回聊天」,失败时单独一条浅色横幅,正文则是全宽阅读面。
-    @ViewBuilder
-    private func actionRow(_ task: IOSDeepReadTask) -> some View {
-        if !task.resultMarkdown.isEmpty {
-            HStack(spacing: 10) {
-                Spacer(minLength: 0)
-                DeepReadActionChip(icon: "doc.on.doc", title: "复制", enabled: true) {
-                    copyResult(task)
-                }
-                DeepReadActionChip(icon: "bubble.left.and.bubble.right", title: "发回聊天", enabled: true) {
-                    Task { await saveToChat(task) }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 2)
-            .padding(.bottom, 6)
-        }
-    }
+    // 顶部「状态」卡片已移除(状态在导航栏标题下显示);复制 / 发回聊天 已移入顶栏。
+    // 失败时单独一条浅色横幅,正文则是全宽阅读面。
 
     @ViewBuilder
     private func failureBanner(_ task: IOSDeepReadTask) -> some View {
@@ -1616,32 +1608,6 @@ private struct TopicActionRow: View {
 }
 
 // MARK: - 详情页:生成中骨架 + 玻璃操作胶囊
-
-private struct DeepReadActionChip: View {
-    let icon: String
-    let title: String
-    let enabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-            }
-            .foregroundStyle(enabled ? AmberTheme.accent : AmberTheme.muted2)
-            .padding(.horizontal, 16)
-            .frame(height: 38)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .amberGlass(cornerRadius: 12)
-        .opacity(enabled ? 1 : 0.55)
-        .disabled(!enabled)
-    }
-}
 
 /// 生成过渡态:不是一块呆板的灰条,而是「一篇正在排版的杂志稿」的骨架 ——
 /// 报头标题 + 副标题 + 细分隔线 + 正文段落块 + 小节标题,配柔和脉冲,
