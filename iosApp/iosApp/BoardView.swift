@@ -982,47 +982,50 @@ struct IOSDeepReadTaskDetailView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             AmberTheme.background.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                header
+            ScrollView {
+                VStack(spacing: 0) {
+                    // 内容从浮动顶栏下方开始,向上滚动时从渐变模糊顶栏下穿过。
+                    Color.clear.frame(height: 52)
 
-                ScrollView {
-                    VStack(spacing: 0) {
-                        if let banner {
-                            Text(banner)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(AmberTheme.foreground2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 9)
-                                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 10)
-                        }
-
-                        if let task {
-                            failureBanner(task)
-                            resultSection(task)
-                            sourcesSection(task)
-                        } else {
-                            Text("这条深度阅读历史无法读取。")
-                                .font(.footnote)
-                                .foregroundStyle(AmberTheme.muted)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 24)
-                        }
+                    if let banner {
+                        Text(banner)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(AmberTheme.foreground2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium))
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 10)
                     }
-                    .padding(.bottom, 36)
+
+                    if let task {
+                        failureBanner(task)
+                        resultSection(task)
+                        sourcesSection(task)
+                    } else {
+                        Text("这条深度阅读历史无法读取。")
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.muted)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 24)
+                    }
                 }
-                .scrollIndicators(.hidden)
+                .padding(.bottom, 36)
             }
+            .scrollIndicators(.hidden)
+
+            header
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
     }
 
+    // 极简浮动顶栏:左返回 / 右分享(接系统分享菜单)。底部渐变模糊,正文从其下穿过。
+    // 失败时右侧改为重试。
     private var header: some View {
         HStack {
             AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回深度阅读", size: 44, symbolSize: 20) {
@@ -1031,38 +1034,43 @@ struct IOSDeepReadTaskDetailView: View {
 
             Spacer()
 
-            VStack(spacing: 2) {
-                Text(task?.title ?? "深度阅读")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AmberTheme.foreground)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                Text(task?.status.title ?? "历史")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(AmberTheme.muted)
-            }
-            .frame(maxWidth: .infinity)
-
-            Spacer()
-
-            // 完成的文章:复制 / 发回聊天 收进顶栏(从正文上方移走,让顶部直接是标题/hero)。
             if let task, !task.resultMarkdown.isEmpty {
-                AmberGlassCircleButton(systemImage: "doc.on.doc", accessibilityLabel: "复制结果", size: 44, symbolSize: 16) {
-                    copyResult(task)
+                ShareLink(item: "\(task.title)\n\n\(task.resultMarkdown)") {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
                 }
-                AmberGlassCircleButton(systemImage: "bubble.left.and.bubble.right", accessibilityLabel: "发回聊天", size: 44, symbolSize: 16) {
-                    Task { await saveToChat(task) }
+                .buttonStyle(.plain)
+                .amberGlass(cornerRadius: 22)
+                .accessibilityLabel("分享")
+            } else if let task, task.status == .failed || task.status == .unsupported {
+                AmberGlassCircleButton(systemImage: "arrow.clockwise", accessibilityLabel: "重试深度阅读", size: 44, symbolSize: 17) {
+                    retry()
                 }
             }
-
-            AmberGlassCircleButton(systemImage: "arrow.clockwise", accessibilityLabel: "重试深度阅读", size: 44, symbolSize: 17) {
-                retry()
-            }
-            .opacity(task?.status == .failed || task?.status == .unsupported ? 1 : 0.35)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
+        .background {
+            // 顶部渐变模糊:顶端实、向下渐隐到透明,内容从下方滚过。
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.55),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .ignoresSafeArea(edges: .top)
+        }
     }
 
     // 顶部「状态」卡片已移除(状态在导航栏标题下显示);复制 / 发回聊天 已移入顶栏。
@@ -1218,20 +1226,6 @@ struct IOSDeepReadTaskDetailView: View {
             modelId: resolved.modelId,
             task: task
         )
-    }
-
-    private func copyResult(_ task: IOSDeepReadTask) {
-        #if canImport(UIKit)
-        UIPasteboard.general.string = task.resultMarkdown
-        banner = "已复制结果。"
-        #else
-        banner = "当前平台不支持剪贴板。"
-        #endif
-    }
-
-    private func saveToChat(_ task: IOSDeepReadTask) async {
-        let saved = await conversationStore.appendDeepReadResultToCurrentConversation(task)
-        banner = saved ? "已写入当前聊天上下文。" : "当前没有可写入的聊天上下文。"
     }
 
     private func statusTint(_ status: IOSDeepReadTaskStatus) -> Color {
