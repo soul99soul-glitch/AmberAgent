@@ -4,6 +4,7 @@
 
 import type { HttpClient, Storage, SearchProviderRegistry, SearchProvider, SearchHit } from '@amber/deepread-domain';
 import { createTavilyProvider } from '@amber/deepread-domain';
+import { createNewsNowProvider } from './NewsNowProvider.ets';
 
 // fallback provider class(ArkTS 不允许对象字面量实现 interface)
 class JinaFallbackProvider implements SearchProvider {
@@ -23,14 +24,16 @@ class TavilyAndFallbackRegistry implements SearchProviderRegistry {
   constructor(http: HttpClient, storage: Storage) {
     this.http = http;
     this.storage = storage;
-    // 异步加载 Tavily key 后缓存
-    this.loadEnabled();
+    // NewsNow 作为始终可用的 provider(无 key 需求)
+    this.cachedEnabled = [createNewsNowProvider(http)];
+    // 异步加载 Tavily key 后追加
+    this.loadTavily();
   }
 
-  private async loadEnabled(): Promise<void> {
+  private async loadTavily(): Promise<void> {
     const apiKey: string = await this.storage.get<string>('tavily_api_key', '');
     if (apiKey.length > 0) {
-      this.cachedEnabled = [createTavilyProvider(this.http, { apiKey: apiKey })];
+      this.cachedEnabled = [createNewsNowProvider(this.http), createTavilyProvider(this.http, { apiKey: apiKey })];
     }
   }
 
