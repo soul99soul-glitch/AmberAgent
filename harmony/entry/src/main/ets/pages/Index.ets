@@ -9,6 +9,7 @@ import { getAppContainer, getNotifier, getPrefetcher } from '../di/AppContainer.
 import { createNewsNowProvider } from '../platform_impl/NewsNowProvider.ets';
 import type { NewsNowProvider, HotItem, SourceSection } from '../platform_impl/NewsNowProvider.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { router } from '@kit.ArkUI';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Index';
@@ -122,16 +123,19 @@ struct DeepReadHomePage {
 
   build(): void {
     Column() {
-      // 顶栏:标题 + 刷新(纯文字,不要 Button 样式)
+      // 顶栏:标题(左)+ 刷新 + 设置(右)
       Row() {
         Text('深度阅读').fontSize(20).fontWeight(FontWeight.Bold)
         Blank()
         if (this.loadState === 'loading') {
-          LoadingProgress().width(16).height(16)
+          LoadingProgress().width(16).height(16).margin({ right: 16 })
         } else {
           Text('刷新').fontSize(13).fontColor('#1976D2')
+            .margin({ right: 16 })
             .onClick(() => { this.loadHotlist(); })
         }
+        Text('设置').fontSize(13).fontColor('#1976D2')
+          .onClick(() => { router.pushUrl({ url: 'pages/HistoryPage' }); })
       }
       .width('100%').height(52).padding({ left: 16, right: 16 })
 
