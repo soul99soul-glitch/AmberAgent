@@ -1043,9 +1043,6 @@ struct IOSDeepReadTaskDetailView: View {
             header
             toastView
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let task, state(for: task) == .done { bottomBar(task) }
-        }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
@@ -1105,7 +1102,7 @@ struct IOSDeepReadTaskDetailView: View {
         }
     }
 
-    // 顶部浮动 toast(复制 / 发回聊天 反馈),~1.7s 自动消失。
+    // 顶部浮动 toast(重试反馈),~1.7s 自动消失。
     @ViewBuilder
     private var toastView: some View {
         if let toast {
@@ -1240,44 +1237,6 @@ struct IOSDeepReadTaskDetailView: View {
             }
             .padding(.top, 8)
         }
-    }
-
-    // 底部玻璃操作条(完成态):复制 / 发回聊天。
-    @ViewBuilder
-    private func bottomBar(_ task: IOSDeepReadTask) -> some View {
-        HStack(spacing: 12) {
-            bottomCapsule("复制", systemImage: "doc.on.doc") {
-                UIPasteboard.general.string = "\(task.title)\n\n\(task.resultMarkdown)"
-                showToast("已复制到剪贴板")
-            }
-            bottomCapsule("发回聊天", systemImage: "bubble.left.and.text.bubble.right") {
-                UIPasteboard.general.string = "基于这篇深度阅读继续讨论：\n\n# \(task.title)\n\n\(task.resultMarkdown)"
-                showToast("已复制讨论素材，去聊天粘贴即可")
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
-        .background {
-            LinearGradient(
-                colors: [AmberTheme.background.opacity(0), AmberTheme.background.opacity(0.92), AmberTheme.background],
-                startPoint: .top, endPoint: .bottom
-            )
-            .ignoresSafeArea()
-        }
-    }
-
-    private func bottomCapsule(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AmberTheme.foreground)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .amberGlass(cornerRadius: 22)
-        .accessibilityLabel(title)
     }
 
     private func showToast(_ message: String) {
