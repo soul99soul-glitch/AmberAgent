@@ -40,9 +40,7 @@
     // Deep Read 需要的权限
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET", "reason": "$string:reason_internet" },
-      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
-      // 后台任务:0.2 不申请 ContinuousTask;通知用普通 ongoing
-      { "name": "ohos.permission.NOTIFICATION_CONTROLLER", "reason": "$string:reason_notification" }
+      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" }
     ]
   }
 }

@@ -4,13 +4,18 @@
 
 import { rcp } from '@kit.RemoteCommunicationKit';
 import { util } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { HttpClient, HttpRequest, HttpResponse } from '@amber/deepread-domain';
+
+const DOMAIN: number = 0x0001;
+const TAG: string = 'DeepRead.RCP';
 
 class RcpHttpClient implements HttpClient {
   private session: rcp.Session | null = null;
 
   private getSession(): rcp.Session {
     if (this.session === null) {
+      hilog.info(DOMAIN, TAG, 'createSession()');
       this.session = rcp.createSession();
     }
     return this.session;
@@ -18,22 +23,28 @@ class RcpHttpClient implements HttpClient {
 
   async fetch(req: HttpRequest): Promise<HttpResponse> {
     const s: rcp.Session = this.getSession();
-    // 构造 rcp.Request(url, method?, headers?, content?)
     const url: string = req.url;
     const method: rcp.HttpMethod = req.method as rcp.HttpMethod;
     const headers: Record<string, string> = req.headers;
+    hilog.info(DOMAIN, TAG, 'fetch start: %{public}s %{public}s', method, url);
     const rcpReq: rcp.Request = req.body !== undefined && req.body !== null
       ? new rcp.Request(url, method, headers, req.body)
       : new rcp.Request(url, method, headers);
-    const resp: rcp.Response = await s.fetch(rcpReq);
-
-    const bodyText: string = this.bodyToString(resp);
-    const result: HttpResponse = {
-      status: resp.statusCode,
-      headers: {},
-      body: bodyText,
-    };
-    return result;
+    try {
+      const resp: rcp.Response = await s.fetch(rcpReq);
+      hilog.info(DOMAIN, TAG, 'fetch done: %{public}s status=%{public}d', url, resp.statusCode);
+      const bodyText: string = this.bodyToString(resp);
+      const result: HttpResponse = {
+        status: resp.statusCode,
+        headers: {},
+        body: bodyText,
+      };
+      return result;
+    } catch (e) {
+      const errMsg: string = String(e);
+      hilog.error(DOMAIN, TAG, 'fetch FAILED: %{public}s err=%{public}s', url, errMsg);
+      throw new Error(`${url} fetch failed: ${errMsg}`);
+    }
   }
 
   async fetchStream(_req: HttpRequest): Promise<HttpResponse> {
