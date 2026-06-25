@@ -122,28 +122,32 @@ struct DeepReadHomePage {
 
   build(): void {
     Column() {
-      // 顶栏
+      // 顶栏:标题 + 刷新(纯文字,不要 Button 样式)
       Row() {
-        Text('深度阅读').fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1)
+        Text('深度阅读').fontSize(20).fontWeight(FontWeight.Bold)
+        Blank()
         if (this.loadState === 'loading') {
-          LoadingProgress().width(18).height(18)
+          LoadingProgress().width(16).height(16)
         } else {
-          Button('刷新').fontSize(11).height(30)
+          Text('刷新').fontSize(13).fontColor('#1976D2')
             .onClick(() => { this.loadHotlist(); })
         }
       }
-      .width('100%').height(48).padding({ left: 16, right: 16 })
+      .width('100%').height(52).padding({ left: 16, right: 16 })
 
       // 手动输入
       Row() {
         TextInput({ text: this.title, placeholder: '输入话题开始深读' })
-          .layoutWeight(1).height(38).fontSize(13)
+          .layoutWeight(1).height(40).fontSize(14)
+          .backgroundColor('#F5F5F5').borderRadius(20)
           .onChange((v: string) => { this.title = v; })
-        Button('深读').fontSize(11).height(38).margin({ left: 8 })
-          .enabled(this.title.trim().length > 0 && !this.running)
-          .onClick(() => { this.startDeepRead(this.title, null); })
+          .onSubmit(() => {
+            if (this.title.trim().length > 0 && !this.running) {
+              this.startDeepRead(this.title, null);
+            }
+          })
       }
-      .width('92%').margin({ bottom: 4 })
+      .width('92%').margin({ bottom: 8 })
 
       // 运行状态
       if (this.running || this.articleText.length > 0) {
