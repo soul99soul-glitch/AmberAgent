@@ -1800,6 +1800,7 @@ enum IOSHotListTitleTranslator {
         provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter()
     ) async -> [String: String] {
         let pending = Array(Set(titles.filter(needsTranslation))).prefix(60).map { $0 }
+        NSLog("[AmberTranslate] translate() in=\(titles.count) pending=\(pending.count) model=\(modelId)")
         guard !pending.isEmpty else { return [:] }
         let numbered = pending.enumerated()
             .map { "\($0.offset + 1). \($0.element)" }
@@ -1819,7 +1820,7 @@ enum IOSHotListTitleTranslator {
             model: Model(modelId: modelId, displayName: modelId, id: KotlinUuid.companion.random(), type: ModelType.chat, customHeaders: [], customBodies: [], inputModalities: [], outputModalities: [], abilities: [], tools: Set<BuiltInTools>(), contextWindowTokens: nil, providerOverwrite: nil),
             temperature: KotlinFloat(value: 0.2),
             topP: nil,
-            maxTokens: KotlinInt(value: 2_000),
+            maxTokens: KotlinInt(value: 4_000),
             tools: [],
             reasoningLevel: .off,
             customHeaders: [],
@@ -1833,9 +1834,12 @@ enum IOSHotListTitleTranslator {
                 .map { $0.text }
                 .joined(separator: "")
         } catch {
+            NSLog("[AmberTranslate] generateText threw: \(error)")
             return [:]
         }
-        return parse(text, pending: pending)
+        let result = parse(text, pending: pending)
+        NSLog("[AmberTranslate] llm chars=\(text.count) parsed=\(result.count) head=\(text.prefix(120))")
+        return result
     }
 
     /// Parses `{"items":[{"i":N,"zh":"..."}]}` into `[original: translation]`,
@@ -1904,7 +1908,24 @@ final class IOSHotListDashboardStore {
             return
         }
         if !force, !shouldRefresh(setting: setting) {
-            dashboard = filteredDashboard(dashboard, setting: setting)
+            // Fresh enough to skip a re-fetch, but still fill in any untranslated titles
+            // (the model may have become available after the last fetch, or a prior
+            // translation was skipped — opening the page should translate, not only a pull).
+            // applyTitleTranslations no-ops when nothing pends, so this spends an LLM call
+            // only the first time new non-Chinese titles appear.
+            let cached = dashboard.providers
+            let prev = Dictionary(uniqueKeysWithValues: cached.map { ($0.providerId, $0) })
+            let translated = await Self.applyTitleTranslations(to: cached, previous: prev, translate: translate)
+            let topics = IOSHotListAggregator.aggregate(providerSnapshots: translated, limit: limit)
+            dashboard = filteredDashboard(
+                IOSHotListDashboard(
+                    topics: topics, providers: translated,
+                    lastUpdatedAt: dashboard.lastUpdatedAt,
+                    enabledSourceCount: dashboard.enabledSourceCount
+                ),
+                setting: setting
+            )
+            persist()
             return
         }
 
@@ -1955,12 +1976,12 @@ final class IOSHotListDashboardStore {
         // 整批已被取消(用户离开页面)→ 不用部分数据覆盖既有 dashboard。
         if Task.isCancelled { return }
 
-        // Auto-translate non-Chinese titles to fluent Chinese (opt-in toggle).
-        // Cached translations from the prior dashboard are reused so a refresh
-        // only spends an LLM call on genuinely new titles.
-        if setting.hotListTranslateToChinese {
-            snapshots = await Self.applyTitleTranslations(to: snapshots, previous: previous, translate: translate)
-        }
+        // Always re-check for untranslated non-Chinese titles on every refresh and
+        // fill them in. Cached translations from the prior dashboard are reused so a
+        // refresh only spends an LLM call on genuinely new titles. This no longer
+        // reads the (snapshot-stale-prone) toggle: applyTitleTranslations no-ops when
+        // the translator is nil (no model) or nothing is pending, so it's safe always.
+        snapshots = await Self.applyTitleTranslations(to: snapshots, previous: previous, translate: translate)
 
         let topics = IOSHotListAggregator.aggregate(providerSnapshots: snapshots, limit: limit)
         let rawDashboard = IOSHotListDashboard(
@@ -2010,6 +2031,7 @@ final class IOSHotListDashboardStore {
         let pending = working.flatMap(\.items)
             .filter { ($0.displayTitle ?? "").isEmpty && IOSHotListTitleTranslator.needsTranslation($0.title) }
             .map(\.title)
+        NSLog("[AmberTranslate] apply pending=\(pending.count) translatorNil=\(translate == nil) cached=\(cache.count)")
         guard !pending.isEmpty, let translate else { return working }
         let translations = await translate(Array(Set(pending)))
         guard !translations.isEmpty else { return working }
@@ -3264,6 +3286,7 @@ enum IOSDeepReadDraftGenerator {
                 lines += "\n- excerpt: \(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(1200))"
                 return lines
             }.joined(separator: "\n\n")
+        NSLog("[AmberDeepRead] sources=\(task.sources.count) usable=\(task.sources.filter { $0.metadata["scrape_status"] != "failed" }.count) sourcesBlockChars=\(sourcesBlock.count)")
 
         // 4 JSON stages merged into one IOSDeepReadOutput (Android DeepReadPrompt parity):
         // overview -> narrative -> analysis -> extended-reading. A stage that throws or

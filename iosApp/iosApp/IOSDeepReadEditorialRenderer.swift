@@ -38,6 +38,21 @@ enum IOSDeepReadEditorialRenderer {
         /// When false, the body renders WITHOUT the kicker + `<h1>` headline (the native
         /// SwiftUI masthead owns those); the summary/lead is kept as the body's opener.
         var showHeadline: Bool = true
+        /// App accent color as a CSS hex ("#RRGGBB"). Drives every accent in the reader
+        /// (timeline markers, blockquote rule, diagram indices, links) via the injected
+        /// `--deep-read-accent` variable, so the editorial palette follows the user's swatch.
+        var accentHex: String = "#C8402F"
+        /// Reading font mode wire name: "serif" (bundled Noto Serif SC) or "system"
+        /// (the platform sans). Mirrors the board's 阅读字体 setting.
+        var fontMode: String = "serif"
+        /// Resolved canvas palette (the app theme's colors for the current appearance) as
+        /// CSS hex, injected as --deep-read-bg/fg/surface/muted/border so the reader follows
+        /// the chosen background theme. Defaults to the warm-paper palette.
+        var bgHex: String = "#fbf7f1"
+        var fgHex: String = "#2a2320"
+        var surfaceHex: String = "#f2eade"
+        var mutedHex: String = "#6e6254"
+        var borderHex: String = "#dbcebc"
     }
 
     // MARK: - Entry point
@@ -53,7 +68,22 @@ enum IOSDeepReadEditorialRenderer {
         b += defaultFontCSS + "\n" + baseCSS + "\n" + runtimeCSS + "\n"
         // After the base/runtime CSS so the :root + code overrides win the cascade.
         b += bundledFontCSS + "\n"
-        if input.dark { b += darkCSS + "\n" }
+        // User accent + canvas palette drive every var(--deep-read-*) in the CSS, injected
+        // last so they win. The palette is already resolved for the current appearance by
+        // the caller, so the reader follows the chosen background theme (paper or immersive,
+        // light or dark) with no baked light/dark stylesheet. "system" font mode swaps the
+        // serif body stack for the platform sans.
+        b += ":root{"
+            + "--deep-read-accent:" + input.accentHex + ";"
+            + "--deep-read-bg:" + input.bgHex + ";"
+            + "--deep-read-fg:" + input.fgHex + ";"
+            + "--deep-read-surface:" + input.surfaceHex + ";"
+            + "--deep-read-muted:" + input.mutedHex + ";"
+            + "--deep-read-border:" + input.borderHex + ";"
+            + "}\n"
+        if input.fontMode == "system" {
+            b += #":root{--deep-read-serif:"PingFang SC","Source Han Sans SC","Noto Sans SC",system-ui,sans-serif;}"# + "\n"
+        }
         b += emptyImageFallbackCSS + "\n</style></head><body><article>"
 
         if hasHero, let hero {
@@ -131,11 +161,15 @@ enum IOSDeepReadEditorialRenderer {
     /// Inline Markdown → HTML: strip a single surrounding `<p>…</p>` so the result can
     /// sit inside an `<h2>`/`<h3>` (mirrors Android's markdownInlineHtml).
     static func markdownToInlineHTML(_ md: String) -> String {
-        let html = markdownToHTML(md).trimmingCharacters(in: .whitespacesAndNewlines)
+        var html = markdownToHTML(md).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Collapse to inline so heading text keeps the heading's own font/size/weight:
+        // always drop the outer <p> wrapper (Android strips ^<p>(.*)</p>$ unconditionally)
+        // and fold any interior paragraph breaks into spaces, instead of leaking nested
+        // <p> (which would re-impose body 15px/1.68 inside an <h2>/<h3>).
         if html.hasPrefix("<p>"), html.hasSuffix("</p>") {
-            let inner = html.dropFirst(3).dropLast(4)
-            if !inner.contains("<p>") { return String(inner) }
+            html = String(html.dropFirst(3).dropLast(4))
         }
+        html = html.replacingOccurrences(of: "</p><p>", with: " ")
         return html
     }
 
@@ -360,59 +394,61 @@ enum IOSDeepReadEditorialRenderer {
     """
 
     private static let baseCSS = """
-    html,body{margin:0;padding:0;background:#fafaf8;color:#191919;font-family:var(--deep-read-serif);-webkit-user-select:text;}
+    html,body{margin:0;padding:0;background:var(--deep-read-bg);color:var(--deep-read-fg);font-family:var(--deep-read-serif);-webkit-user-select:text;}
     article{padding-bottom:34px;}
-    .hero{margin:0 0 8px 0;position:relative;background:#f0f0ec;min-height:310px;overflow:hidden;}
+    .hero{margin:0 0 8px 0;position:relative;background:var(--deep-read-surface);min-height:310px;overflow:hidden;}
     .hero img{display:block;width:100%;height:265px;object-fit:cover;}
-    .hero-cut{height:106px;background:#fafaf8;clip-path:polygon(0 24%,100% 0,100% 100%,0 100%);margin-top:-54px;position:relative;padding:46px 22px 0;box-sizing:border-box;}
+    .hero-cut{height:106px;background:var(--deep-read-bg);clip-path:polygon(0 24%,100% 0,100% 100%,0 100%);margin-top:-54px;position:relative;padding:46px 22px 0;box-sizing:border-box;}
     .hero-cut>div{display:flex;align-items:center;justify-content:space-between;gap:14px;}
-    .hero-type{font-family:var(--deep-read-sans);letter-spacing:.24em;color:#991b1b;font-size:10px;}
-    .hero-source{font-family:var(--deep-read-sans);letter-spacing:.18em;color:#6b7280;font-size:10px;white-space:nowrap;}
-    figcaption{font-size:9px;color:#6b7280;line-height:1.45;margin:10px 0 0;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .hero-type{font-family:var(--deep-read-sans);letter-spacing:.24em;color:var(--deep-read-accent);font-size:10px;}
+    .hero-source{font-family:var(--deep-read-sans);letter-spacing:.18em;color:var(--deep-read-muted);font-size:10px;white-space:nowrap;}
+    figcaption{font-size:9px;color:var(--deep-read-muted);line-height:1.45;margin:10px 0 0;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .headline,section{padding:0 22px;}
-    .kicker,.section,.date,.holder,small{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:#6b7280;font-size:10px;}
+    .kicker,.section,.date,.holder,small{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:var(--deep-read-muted);font-size:10px;}
     h1{font-weight:500;font-size:32px;line-height:1.13;margin:12px 0 16px;}
     h2{font-weight:500;font-size:18px;line-height:1.34;margin:0 0 6px;}
     p{font-size:15px;line-height:1.68;margin:0 0 13px;}
     .summary{font-size:15px;line-height:1.68;}
     section{margin-top:28px;}
-    .timeline{display:grid;grid-template-columns:32px 1fr;gap:10px;padding:11px 0;border-top:1px solid #ddd;}
-    .num{font-family:var(--deep-read-sans);color:#ef4444;letter-spacing:.12em;font-size:12px;padding-top:4px;}
-    .timeline-item{display:grid;grid-template-columns:32px minmax(0,1fr);gap:10px;padding:11px 0;border-top:1px solid #ddd;}
-    .timeline-marker{width:18px;height:18px;border-radius:50%;border:1px solid #ef4444;margin-top:3px;}
+    .timeline{display:grid;grid-template-columns:32px 1fr;gap:10px;padding:11px 0;border-top:1px solid var(--deep-read-border);}
+    .num{font-family:var(--deep-read-sans);color:var(--deep-read-accent);letter-spacing:.12em;font-size:12px;padding-top:4px;}
+    .timeline-item{display:grid;grid-template-columns:32px minmax(0,1fr);gap:10px;padding:11px 0;border-top:1px solid var(--deep-read-border);}
+    .timeline-marker{width:18px;height:18px;border-radius:50%;border:1px solid var(--deep-read-accent);margin-top:3px;}
     .timeline-body{min-width:0;}
-    .timeline-date{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:#ef4444;font-size:10px;margin-bottom:4px;}
-    .core-point{padding:12px 0;border-top:1px solid #ddd;}
-    .inline{margin:12px 0 4px;background:#f0f0ec;}
+    .timeline-date{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:var(--deep-read-accent);font-size:10px;margin-bottom:4px;}
+    .core-point{padding:12px 0;border-top:1px solid var(--deep-read-border);}
+    .inline{margin:12px 0 4px;background:var(--deep-read-surface);}
     .inline img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
     .inline figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-    .timeline-item figure,.core-point figure{margin:12px 0 4px;background:#f0f0ec;}
+    .timeline-item figure,.core-point figure{margin:12px 0 4px;background:var(--deep-read-surface);}
     .timeline-item img,.core-point img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
     .timeline-item figcaption,.core-point figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
     .diagram-block{padding:0 22px;margin-top:30px;}
     .diagram-block h2{margin:4px 0 14px;font-size:18px;}
-    .diagram-frame{background:#f4f1ec;border-top:1px solid #ddd;border-bottom:1px solid #ddd;padding:8px 12px 10px;}
+    .diagram-frame{background:var(--deep-read-surface);border-top:1px solid var(--deep-read-border);border-bottom:1px solid var(--deep-read-border);padding:8px 12px 10px;}
     .diagram-steps{list-style:none;margin:0;padding:0;}
     .diagram-step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid rgba(107,114,128,.18);}
     .diagram-step:first-child{border-top:0;}
-    .diagram-step-index{font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.12em;color:#ef4444;padding-top:2px;}
+    .diagram-step-index{font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.12em;color:var(--deep-read-accent);padding-top:2px;}
     .diagram-grid{display:grid;grid-template-columns:1fr;gap:8px;margin:0;}
-    .diagram-card{background:#fafaf8;border:1px solid #ddd8cf;padding:11px 12px;}
+    .diagram-card{background:var(--deep-read-bg);border:1px solid var(--deep-read-border);padding:11px 12px;}
     .diagram-step h3,.diagram-card h3{font-size:15px;line-height:1.42;margin:0 0 5px;font-weight:500;}
-    .diagram-step p,.diagram-card p{font-family:var(--deep-read-sans);font-size:12px;line-height:1.58;color:#6b7280;margin:0;}
-    .diagram-group{display:block;font-family:var(--deep-read-sans);letter-spacing:.14em;text-transform:uppercase;color:#991b1b;font-size:9px;margin-bottom:4px;}
+    .diagram-step p,.diagram-card p{font-family:var(--deep-read-sans);font-size:12px;line-height:1.58;color:var(--deep-read-muted);margin:0;}
+    .diagram-group{display:block;font-family:var(--deep-read-sans);letter-spacing:.14em;text-transform:uppercase;color:var(--deep-read-accent);font-size:9px;margin-bottom:4px;}
     .diagram-relations{list-style:none;margin:10px 0 0;padding:8px 0 0;border-top:1px solid rgba(107,114,128,.18);}
-    .diagram-relations li{font-family:var(--deep-read-sans);font-size:11px;line-height:1.55;color:#6b7280;margin:4px 0;}
-    .diagram-relations b{font-weight:500;color:#ef4444;margin:0 5px;}
-    .diagram-caption{font-family:var(--deep-read-sans);font-size:11px;line-height:1.5;color:#6b7280;margin:10px 0 0;}
-    blockquote{font-size:18px;line-height:1.48;margin:0 0 16px;padding-left:12px;border-left:3px solid #ef4444;}
-    .reading{display:grid;grid-template-columns:30px 1fr;gap:10px;border-top:1px solid #ddd;padding:10px 0;text-decoration:none;color:inherit;}
-    .reading span{font-family:var(--deep-read-sans);color:#ef4444;font-size:12px;letter-spacing:.12em;}
+    .diagram-relations li{font-family:var(--deep-read-sans);font-size:11px;line-height:1.55;color:var(--deep-read-muted);margin:4px 0;}
+    .diagram-relations b{font-weight:500;color:var(--deep-read-accent);margin:0 5px;}
+    .diagram-caption{font-family:var(--deep-read-sans);font-size:11px;line-height:1.5;color:var(--deep-read-muted);margin:10px 0 0;}
+    blockquote{font-size:18px;line-height:1.48;margin:0 0 16px;padding-left:12px;border-left:3px solid var(--deep-read-accent);}
+    .perspective{margin:0 0 26px;}
+    .perspective .holder{display:block;margin:0 0 13px;}
+    .reading{display:grid;grid-template-columns:30px 1fr;gap:10px;border-top:1px solid var(--deep-read-border);padding:10px 0;text-decoration:none;color:inherit;}
+    .reading span{font-family:var(--deep-read-sans);color:var(--deep-read-accent);font-size:12px;letter-spacing:.12em;}
     .reading p{font-size:13px;line-height:1.45;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
     .reading small{letter-spacing:.08em;font-size:9px;}
-    .reading-link{display:block;border-top:1px solid #ddd;padding:10px 0;text-decoration:none;color:inherit;}
+    .reading-link{display:block;border-top:1px solid var(--deep-read-border);padding:10px 0;text-decoration:none;color:inherit;}
     .reading-link p{font-size:13px;line-height:1.45;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-    .reading-link small{font-family:var(--deep-read-sans);letter-spacing:.08em;text-transform:uppercase;color:#6b7280;font-size:9px;}
+    .reading-link small{font-family:var(--deep-read-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--deep-read-muted);font-size:9px;}
     """
 
     private static let runtimeCSS = """
@@ -430,12 +466,14 @@ enum IOSDeepReadEditorialRenderer {
     .markdown-body li{margin:0 0 6px;padding-left:2px;}
     .markdown-body li>p{margin:0 0 6px;}
     .markdown-body code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;background:rgba(107,114,128,.12);padding:0 .22em;border-radius:4px;}
-    .markdown-body pre{overflow:auto;background:#f0f0ec;padding:10px 12px;border-radius:10px;margin:0 0 13px;}
+    .markdown-body pre{overflow:auto;background:var(--deep-read-surface);padding:10px 12px;border-radius:10px;margin:0 0 13px;}
     .markdown-body pre code{background:transparent;padding:0;border-radius:0;}
-    .markdown-body a{color:#991b1b;text-decoration:none;border-bottom:1px solid currentColor;}
+    .markdown-body a{color:var(--deep-read-accent);text-decoration:none;border-bottom:1px solid currentColor;}
     .markdown-body table{width:100%;border-collapse:collapse;font-family:var(--deep-read-sans);font-size:12px;line-height:1.5;margin:0 0 13px;}
-    .markdown-body th,.markdown-body td{border-top:1px solid #ddd;padding:7px 6px;text-align:left;vertical-align:top;}
-    .markdown-body blockquote{margin:0 0 13px;padding-left:10px;border-left:2px solid #ef4444;font-size:15px;line-height:1.68;}
+    .markdown-body th,.markdown-body td{border-top:1px solid var(--deep-read-border);padding:7px 6px;text-align:left;vertical-align:top;}
+    .markdown-body blockquote{margin:0 0 13px;padding-left:10px;border-left:2px solid var(--deep-read-accent);font-size:15px;line-height:1.68;}
+    blockquote.markdown-body p{font-size:18px;line-height:1.48;}
+    .diagram-note.markdown-body p{font-family:var(--deep-read-sans);font-size:12px;line-height:1.58;color:var(--deep-read-muted);margin:0;}
     """
 
     /// App-bundled fonts served via the `amberfont://` scheme handler
@@ -443,34 +481,14 @@ enum IOSDeepReadEditorialRenderer {
     /// JetBrains Mono for code. Prepended to the serif / code font stacks; the system
     /// fonts remain as fallbacks.
     private static let bundledFontCSS = """
-    @font-face{font-family:"AmberDeepReadSerif";src:url("amberfont://deepread/serif.otf") format("opentype");font-weight:400;font-style:normal;font-display:swap;}
+    @font-face{font-family:"AmberDeepReadSerif";src:url("amberfont://deepread/serif.otf") format("opentype");font-weight:400 700;font-style:normal;font-display:swap;}
     @font-face{font-family:"AmberDeepReadMono";src:url("amberfont://deepread/mono.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap;}
     :root{--deep-read-serif:"AmberDeepReadSerif","Noto Serif SC","Source Han Serif SC","Songti SC",serif;}
     .markdown-body code,.markdown-body pre code{font-family:"AmberDeepReadMono",ui-monospace,SFMono-Regular,Menlo,monospace;}
     """
 
-    private static let darkCSS = """
-    :root{color-scheme:dark;}
-    html,body{background:#0b0a09;color:#f1ece3;}
-    article{background:#0b0a09;}
-    .hero{background:#14110e;}
-    .hero-cut{background:#0b0a09;}
-    .hero-type,.diagram-group{color:#d18752;}
-    .hero-source,figcaption,.kicker,.section,.date,.holder,small,.diagram-step p,.diagram-card p,.diagram-relations li,.diagram-caption,.reading-link small{color:#a89d90;}
-    .timeline,.timeline-item,.core-point,.reading,.reading-link{border-top-color:#3a332b;}
-    .timeline-marker{border-color:#d18752;}
-    .num,.timeline-date,.diagram-step-index,.diagram-relations b,.reading span{color:#d18752;}
-    blockquote{border-left-color:#d18752;}
-    .inline,.timeline-item figure,.core-point figure,.diagram-frame{background:#181410;}
-    .diagram-frame{border-top-color:#3a332b;border-bottom-color:#3a332b;}
-    .diagram-step,.diagram-relations{border-top-color:rgba(168,157,144,.24);}
-    .diagram-card{background:#120f0c;border-color:#3a332b;}
-    .markdown-body code{background:rgba(168,157,144,.16);}
-    .markdown-body pre{background:#181410;}
-    .markdown-body a{color:#d18752;}
-    .markdown-body th,.markdown-body td{border-top-color:#3a332b;}
-    .markdown-body blockquote{border-left-color:#d18752;}
-    """
+    // (No separate dark stylesheet: the injected canvas palette — already resolved for the
+    //  current appearance by the caller — drives every var(--deep-read-*), light or dark.)
 
     private static let emptyImageFallbackCSS = """
     img:not([src]),img[src=""]{display:none!important;}

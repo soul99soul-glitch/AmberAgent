@@ -511,8 +511,7 @@ struct BoardView: View {
             try createAndGenerateTask(
                 title: topic.title,
                 sources: baseSources,
-                templateId: sharedSettings.todayBoard.deepReadTemplateId,
-                enrichHotTopic: true
+                templateId: sharedSettings.todayBoard.deepReadTemplateId
             )
         } catch {
             deepReadMessage = error.localizedDescription
@@ -523,8 +522,7 @@ struct BoardView: View {
     private func createAndGenerateTask(
         title: String,
         sources: [IOSDeepReadSource],
-        templateId: String,
-        enrichHotTopic: Bool = false
+        templateId: String
     ) throws {
         let task = try deepReadStore.createTask(
             title: title,
@@ -540,13 +538,15 @@ struct BoardView: View {
 
         Task { @MainActor in
             var running = running
-            if enrichHotTopic {
-                // 后台抓取网页正文增强来源(此前在导航前同步进行 → 点击后卡几秒)。
-                // 抓完写回任务来源(来源卡片会反映 scrape_status),再用于生成。
-                let enriched = await enrichHotTopicSourcesWithScrape(running.sources)
-                deepReadStore.replaceSources(id: task.id, sources: enriched)
-                running.sources = enriched
-            }
+            // 每篇深读都是「多源」深读:用话题去联网搜索 N 个源,与种子来源(热榜原始
+            // 源 / 手动文本 / 关键词检索)合并去重,再逐源抓取正文。只有一个来源算不上
+            // 深读。搜索失败则静默退回种子来源(诚实降级)。抓取写回任务来源(来源卡片
+            // 反映 scrape_status),再用于生成。
+            let searched = await searchSourcesForDeepRead(title: title)
+            let mergedSources = dedupeSources(running.sources + searched)
+            let enriched = await enrichHotTopicSourcesWithScrape(mergedSources)
+            deepReadStore.replaceSources(id: task.id, sources: enriched)
+            running.sources = enriched
             // Real LLM pipeline when a provider/key is configured; deterministic
             // offline draft otherwise (honest degradation, no fabricated output).
             let output: String
@@ -605,11 +605,11 @@ struct BoardView: View {
 
     private func refreshHotList(force: Bool) async {
         let board = sharedSettings.todayBoard
-        // Build a title translator only when the toggle is on AND a provider/model
-        // is configured; otherwise pass nil → raw titles (honest degradation).
+        // Always translate non-Chinese titles to Chinese. Every refresh re-checks
+        // for untranslated titles and fills them in; a configured provider/model is
+        // the only requirement. No model → pass nil → raw titles (honest degradation).
         var translate: IOSHotListTitleTranslate? = nil
-        if board.hotListTranslateToChinese,
-           let resolved = sharedSettings.resolveBoardDeepReadModel(boardModelId: board.boardModelId) {
+        if let resolved = sharedSettings.resolveBoardDeepReadModel(boardModelId: board.boardModelId) {
             translate = { titles in
                 await IOSHotListTitleTranslator.translate(
                     titles: titles,
@@ -618,6 +618,7 @@ struct BoardView: View {
                 )
             }
         }
+        NSLog("[AmberTranslate] refresh force=\(force) modelResolved=\(translate != nil) modelId=\(sharedSettings.resolveBoardDeepReadModel(boardModelId: board.boardModelId)?.modelId ?? "nil")")
         await hotListStore.refresh(setting: board, force: force, translate: translate)
     }
 
@@ -654,6 +655,79 @@ struct BoardView: View {
             enriched.append(source)
         }
         return enriched
+    }
+
+    /// Web-searches the deep-read topic and returns the hits as deep-read sources, so
+    /// every deep read has multiple sources to synthesize from (not just a single
+    /// seed). Failure degrades silently to no extra sources (honest degradation).
+    private func searchSourcesForDeepRead(title: String) async -> [IOSDeepReadSource] {
+        let queries = deepReadSearchQueries(from: title)
+        guard !queries.isEmpty else { return [] }
+        let settings = sharedSettings.snapshot
+        // Multi-angle fan-out (Android `buildDeepReadQueries` parity): search the topic from
+        // several dimensions — raw / background+timeline / official / dispute+impact / reactions /
+        // images, CN+EN — then dedup by URL, so the synthesis has enough material to build a
+        // timeline + analysis (not just one source). Sequential because the search executor is
+        // @MainActor; each angle's failure (e.g. a provider 422) is non-fatal.
+        var byURL: [String: IOSSearchResult] = [:]
+        var order: [String] = []
+        for query in queries {
+            do {
+                let execution = try await IOSSearchExecutor.searchResults(
+                    toolInput: searchToolInput(query: query, maxResults: 4),
+                    settings: settings
+                )
+                for result in execution.results {
+                    let key = result.url.lowercased().trimmingCharacters(in: .whitespaces)
+                    guard !key.isEmpty, byURL[key] == nil else { continue }
+                    byURL[key] = result
+                    order.append(key)
+                }
+            } catch {
+                NSLog("[AmberDeepRead] topic-search angle failed (\(query.prefix(20))…): \(error)")
+            }
+        }
+        let merged = Array(order.prefix(12).compactMap { byURL[$0] })
+        NSLog("[AmberDeepRead] topic-search angles=\(queries.count) distinct=\(byURL.count) used=\(merged.count)")
+        guard !merged.isEmpty else { return [] }
+        return (try? IOSDeepReadSourceNormalizer.searchSources(query: title, results: merged)) ?? []
+    }
+
+    /// Multi-angle search queries for one topic (Android `buildDeepReadQueries` parity): the same
+    /// topic searched from several dimensions in both Chinese and English, so a deep read has
+    /// enough material for a timeline + analysis + a hero image — not just a single source.
+    private func deepReadSearchQueries(from title: String) -> [String] {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 2 else { return [] }
+        let year = Calendar.current.component(.year, from: Date())
+        let lower = t.lowercased()
+        var queries = [
+            t,                                              // raw title
+            "\(t) 前因后果 时间线 背景 最新进展",               // background + timeline
+            "\(t) 官方 声明 通报",                           // official statements
+            "\(t) 核心矛盾 争议 影响 各方反应",                 // dispute + impact + stakeholders
+            "\(t) 专家解读 分析",                            // expert analysis
+            "\(t) background timeline latest news \(year)", // English: background / latest
+            "\(t) 图片 现场图 截图",                         // images (for the hero)
+        ]
+        if ["gemini","google","openai","claude","deepseek","gpt","llm","大模型","模型","发布会","ppt","截图"].contains(where: { lower.contains($0) || t.contains($0) }) {
+            queries.append("\(t) 发布 价格 跑分 性能 评价")
+            queries.append("\(t) 发布会 PPT 演示 文稿 图片")
+        }
+        return queries
+    }
+
+    /// Merges source lists, keeping the first occurrence per URL (or per title when
+    /// URL-less) so the seed source and search hits don't duplicate.
+    private func dedupeSources(_ sources: [IOSDeepReadSource]) -> [IOSDeepReadSource] {
+        var seen = Set<String>()
+        var result: [IOSDeepReadSource] = []
+        for source in sources {
+            let url = (source.url ?? "").lowercased().trimmingCharacters(in: .whitespaces)
+            let key = url.isEmpty ? "t:" + source.title.lowercased() : url
+            if seen.insert(key).inserted { result.append(source) }
+        }
+        return result
     }
 
     private func scrapeContent(from json: String) -> String? {
@@ -1021,7 +1095,8 @@ struct IOSDeepReadTaskDetailView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     // 内容从浮动顶栏下方开始,向上滚动时从渐变模糊顶栏下穿过。
-                    Color.clear.frame(height: 52)
+                    // 留足高度让 kicker(EVENT)落在返回按钮下方、不顶到它。
+                    Color.clear.frame(height: 70)
 
                     if let task {
                         masthead(task)
@@ -1137,13 +1212,17 @@ struct IOSDeepReadTaskDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 10)
 
-            statusLine(task)
-                .padding(.top, 14)
+            // 生成态不显示状态行 —— 骨架顶部的「正在生成阅读稿…排版中」已是唯一指示,
+            // 避免与之重复。完成/失败态仍显示(已完成·时间 / 生成失败·可重试)。
+            if state(for: task) != .generating {
+                statusLine(task)
+                    .padding(.top, 14)
+            }
 
             Rectangle()
                 .fill(AmberTheme.borderSoft)
                 .frame(height: 1)
-                .padding(.top, 20)
+                .padding(.top, state(for: task) == .generating ? 16 : 20)
         }
         .padding(.horizontal, 22)
         .padding(.bottom, 18)
@@ -1311,6 +1390,13 @@ struct IOSDeepReadTaskDetailView: View {
         let hero = metaHero ?? structured?.heroImageUrl?.trimmingCharacters(in: .whitespaces)
         let hasHero = (hero?.isEmpty == false)
         let kicker = (structured?.topicType.isEmpty == false) ? structured!.topicType.uppercased() : "DEEP READ"
+        // Resolve the app theme's canvas palette for the current appearance, so the reader
+        // follows the chosen background (paper or immersive) — same colors as the native
+        // masthead/sources around it. Immersive canvases share one palette across light/dark.
+        let palette = colorScheme == .dark
+            ? AmberThemeRuntime.shared.paper.darkPalette
+            : AmberThemeRuntime.shared.paper.lightPalette
+        func hex(_ value: UInt32) -> String { String(format: "#%06X", value) }
         return IOSDeepReadEditorialRenderer.renderHTML(
             IOSDeepReadEditorialRenderer.Input(
                 title: task.title,
@@ -1321,7 +1407,14 @@ struct IOSDeepReadTaskDetailView: View {
                 sourceLabel: hasHero ? "\(task.sources.count) 来源" : nil,
                 dark: colorScheme == .dark,
                 structured: structured,
-                showHeadline: false
+                showHeadline: false,
+                accentHex: hex(AmberThemeRuntime.shared.accentHex),
+                fontMode: sharedSettings?.todayBoard.boardReadingFontMode.wireName ?? "serif",
+                bgHex: hex(palette.background),
+                fgHex: hex(palette.foreground),
+                surfaceHex: hex(palette.surface),
+                mutedHex: hex(palette.muted),
+                borderHex: hex(palette.border)
             )
         )
     }
@@ -1746,17 +1839,7 @@ private struct DeepReadMagazineSkeleton: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // deck(导语)
-            bar(0.9, 14)
-            bar(0.6, 14).padding(.top, 9)
-
-            Rectangle()
-                .fill(AmberTheme.surface2)
-                .frame(height: 1)
-                .opacity(0.85)
-                .padding(.top, 16)
-
-            // 进度行
+            // 进度行(置顶 —— 生成态唯一状态指示,紧贴标题下方)
             HStack(spacing: 8) {
                 if dimmed {
                     Circle()
@@ -1776,7 +1859,16 @@ private struct DeepReadMagazineSkeleton: View {
                     .textCase(.uppercase)
                     .foregroundStyle(AmberTheme.muted2)
             }
-            .padding(.top, 16)
+
+            // deck(导语)
+            bar(0.9, 14).padding(.top, 18)
+            bar(0.6, 14).padding(.top, 9)
+
+            Rectangle()
+                .fill(AmberTheme.surface2)
+                .frame(height: 1)
+                .opacity(0.85)
+                .padding(.top, 16)
 
             // 导读
             paragraph([1.0, 1.0, 1.0, 0.62]).padding(.top, 18)
