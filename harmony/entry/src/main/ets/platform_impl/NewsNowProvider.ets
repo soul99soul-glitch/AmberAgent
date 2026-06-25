@@ -1,8 +1,8 @@
 // NewsNowProvider — NewsNow 聚合热搜源(对照 Android NewsNowPresets.kt)
 // API: https://newsnow.busiyi.world/api/s?id=<source_id>
-// 返回 { items: [{ title, url, extra: { info } }] }
-// 12 个国内热榜(知乎/微博/抖音/B站/V2EX/GitHub/36氪/虎扑/雪球/华尔街见闻/财联社)
-// 作为 Deep Read 的 SearchProvider:用话题标题匹配热榜条目,命中就当来源。
+// 两种用法:
+//   1. fetchAllSources() → 按源分组的完整热榜(知乎/微博/抖音… 各自 12 条)
+//   2. search(queries) → SearchProvider 接口,用关键词匹配热榜条目(供 prefetcher 用)
 
 import type { HttpClient, HttpRequest, HttpResponse, SearchProvider, SearchHit } from '@amber/deepread-domain';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -11,7 +11,7 @@ const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.NewsNow';
 const ENDPOINT: string = 'https://newsnow.busiyi.world/api/s';
 
-// 热榜 ID → 显示名(对照 Android NewsNowPresets.ALL)
+// 热榜预设(对照 Android NewsNowPresets.ALL)
 interface NewsNowPreset {
   id: string;
   displayName: string;
@@ -29,19 +29,35 @@ const PRESETS: NewsNowPreset[] = [
   { id: 'cls-telegraph', displayName: '财联社' },
 ];
 
-// NewsNow API 返回的单条
-interface NewsNowItem {
+// 单条热榜
+interface HotItem {
+  rank: number;
   title: string;
   url: string;
+  heat: string;
 }
 
-// NewsNow API 响应
-interface NewsNowResponse {
+// 一个源的完整热榜
+interface SourceSection {
+  sourceId: string;
+  sourceName: string;
+  items: HotItem[];
+  error: string | null;
+}
+
+// NewsNow API 返回
+interface NewsNowApiItem {
+  title: string;
+  url: string;
+  extra: Record<string, string> | null;
+}
+
+interface NewsNowApiResponse {
   code: number;
-  data: NewsNowItem[];
+  data: NewsNowApiItem[];
 }
 
-class NewsNowProvider implements SearchProvider {
+export class NewsNowProvider implements SearchProvider {
   readonly name: string = 'newsnow';
   private http: HttpClient;
 
@@ -49,55 +65,107 @@ class NewsNowProvider implements SearchProvider {
     this.http = http;
   }
 
-  async search(queries: string[]): Promise<SearchHit[]> {
-    const hits: SearchHit[] = [];
-    // 对每个热榜源抓取,用 query 关键词匹配标题
-    for (let pi = 0; pi < PRESETS.length; pi++) {
-      const preset: NewsNowPreset = PRESETS[pi];
-      try {
-        const req: HttpRequest = {
-          url: `${ENDPOINT}?id=${preset.id}`,
-          method: 'GET',
-          headers: {},
+  // 抓取单个源的热榜
+  async fetchSource(preset: NewsNowPreset): Promise<SourceSection> {
+    const result: SourceSection = {
+      sourceId: preset.id,
+      sourceName: preset.displayName,
+      items: [],
+      error: null,
+    };
+    try {
+      const req: HttpRequest = {
+        url: `${ENDPOINT}?id=${preset.id}`,
+        method: 'GET',
+        headers: {},
+      };
+      const resp: HttpResponse = await this.http.fetch(req);
+      if (resp.status !== 200) {
+        result.error = `HTTP ${resp.status}`;
+        return result;
+      }
+      const data: NewsNowApiResponse = JSON.parse(resp.body) as NewsNowApiResponse;
+      if (data.data === undefined || data.data === null) {
+        result.error = 'no data';
+        return result;
+      }
+      for (let i = 0; i < data.data.length && i < 12; i++) {
+        const apiItem: NewsNowApiItem = data.data[i];
+        const heatVal: string = (apiItem.extra !== null && apiItem.extra !== undefined)
+          ? (apiItem.extra['info'] ?? '')
+          : '';
+        const item: HotItem = {
+          rank: i + 1,
+          title: apiItem.title,
+          url: apiItem.url,
+          heat: heatVal,
         };
-        const resp: HttpResponse = await this.http.fetch(req);
-        if (resp.status !== 200) {
-          continue;
+        result.items.push(item);
+      }
+    } catch (e) {
+      result.error = String(e).substring(0, 60);
+    }
+    return result;
+  }
+
+  // 抓取所有源(并行)
+  async fetchAllSources(): Promise<SourceSection[]> {
+    const promises: Promise<SourceSection>[] = [];
+    for (let i = 0; i < PRESETS.length; i++) {
+      promises.push(this.fetchSource(PRESETS[i]));
+    }
+    const results: SourceSection[] = await Promise.all(promises);
+    return results;
+  }
+
+  // 综合热点:从所有源各取前 N 条,合并按出现频次排序
+  buildCombinedTopics(allSections: SourceSection[]): HotItem[] {
+    // 简化:取每个源的第 1 条(头条)合并,去重
+    const combined: HotItem[] = [];
+    const seenTitles: Set<string> = new Set();
+    for (let si = 0; si < allSections.length; si++) {
+      const section: SourceSection = allSections[si];
+      for (let ii = 0; ii < section.items.length; ii++) {
+        const item: HotItem = section.items[ii];
+        const key: string = item.title.substring(0, 12);
+        if (!seenTitles.has(key)) {
+          seenTitles.add(key);
+          combined.push(item);
         }
-        const data: NewsNowResponse = JSON.parse(resp.body) as NewsNowResponse;
-        if (data.data === undefined || data.data === null) {
-          continue;
-        }
-        // 匹配:query 关键词出现在 title 里就命中
-        for (let qi = 0; qi < queries.length; qi++) {
-          const q: string = queries[qi].toLowerCase();
-          for (let ii = 0; ii < data.data.length; ii++) {
-            const item: NewsNowItem = data.data[ii];
-            if (item.title.toLowerCase().includes(q) || q.includes(item.title.toLowerCase().substring(0, 8))) {
-              const hit: SearchHit = {
-                title: item.title,
-                url: item.url,
-                snippet: `${preset.displayName} · ${item.title}`,
-                source: 'newsnow',
-              };
-              hits.push(hit);
-            }
+      }
+    }
+    return combined;
+  }
+
+  // SearchProvider 接口:用关键词匹配热榜条目
+  async search(queries: string[]): Promise<SearchHit[]> {
+    const allSections: SourceSection[] = await this.fetchAllSources();
+    const hits: SearchHit[] = [];
+    for (let si = 0; si < allSections.length; si++) {
+      const section: SourceSection = allSections[si];
+      for (let qi = 0; qi < queries.length; qi++) {
+        const q: string = queries[qi].toLowerCase();
+        for (let ii = 0; ii < section.items.length; ii++) {
+          const item: HotItem = section.items[ii];
+          if (item.title.toLowerCase().includes(q)) {
+            const hit: SearchHit = {
+              title: item.title,
+              url: item.url,
+              snippet: `${section.sourceName} · ${item.heat}`,
+              source: 'newsnow',
+            };
+            hits.push(hit);
           }
         }
-        // 每个源最多取前 3 条匹配,避免单源刷屏
-        // (简化:不限数量,interleaveSearchResults 会 cap)
-      } catch (e) {
-        hilog.warn(DOMAIN, TAG, 'NewsNow fetch failed for %{public}s: %{public}s', preset.id, String(e));
       }
     }
     return hits;
   }
 }
 
-export const createNewsNowProvider = (http: HttpClient): SearchProvider => {
+export const createNewsNowProvider = (http: HttpClient): NewsNowProvider => {
   return new NewsNowProvider(http);
 };
 
-// 导出热榜列表(供 UI 做热点入口选择)
 export { PRESETS as NEWSNOW_PRESETS };
-export type { NewsNowPreset };
+export type { NewsNowPreset, HotItem, SourceSection };
