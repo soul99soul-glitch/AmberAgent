@@ -32,9 +32,51 @@ enum AmberTheme {
         border: 0x3A3741, borderSoft: 0x2A2830
     )
 
+    // ── Immersive single-hue canvases (Apple-Music-style full-bleed color). Each is a
+    // fixed color in BOTH light & dark (the theme IS the color), with text tuned for AA
+    // contrast on its own ground: deep grounds get pale ink, light grounds get dark ink.
+    //
+    // ⚠️ CURRENTLY HIDDEN from the picker (AppearanceSettingsView filters out `isImmersive`
+    // canvases) — full-bleed color read poorly app-wide. These palettes + their `Paper`
+    // cases are kept as PLACEHOLDERS so re-enabling or swapping in new colors later is a
+    // one-liner: edit the hex values below (or add a new palette + `Paper` case), then drop
+    // the `!$0.isImmersive` filter in `backgroundCards`. Everything else (base()/picker)
+    // auto-resolves. Wiring is proven-good; only the color choices were the problem.
+    // 绛红 — deep wine, pale rose ink.
+    static let garnetPalette = AmberPalette(
+        background: 0x5B1A1C, surface: 0x6F282A, surface2: 0x843234,
+        foreground: 0xF7E6E4, foreground2: 0xE4C7C5, muted: 0xC89C9B, muted2: 0xAC7E7C,
+        border: 0x7C3436, borderSoft: 0x682A2C
+    )
+    // 赭橙 — rust sienna, cream ink.
+    static let ochrePalette = AmberPalette(
+        background: 0xAE5230, surface: 0xBC6440, surface2: 0xC8714C,
+        foreground: 0xFBF1E8, foreground2: 0xF1DECC, muted: 0xE7C5A9, muted2: 0xD7A988,
+        border: 0xC26C47, borderSoft: 0xB45E3B
+    )
+    // 姜黄 — mustard gold, dark espresso ink.
+    static let turmericPalette = AmberPalette(
+        background: 0xC18D1A, surface: 0xCE9B2C, surface2: 0xD9A83E,
+        foreground: 0x3A2C06, foreground2: 0x5B4612, muted: 0x856A1E, muted2: 0xA08238,
+        border: 0xAD7C16, borderSoft: 0xBC8A1C
+    )
+    // 品红 — rose magenta, pale blush ink.
+    static let magentaPalette = AmberPalette(
+        background: 0xB23A66, surface: 0xC04874, surface2: 0xCC5682,
+        foreground: 0xFCE6EE, foreground2: 0xF3CCDB, muted: 0xE6ABC3, muted2: 0xD68BAA,
+        border: 0xC25180, borderSoft: 0xB4426E
+    )
+    // 藕荷 — pale dusty blush, dark ink.
+    static let lotusPalette = AmberPalette(
+        background: 0xE7D5D2, surface: 0xF2E5E3, surface2: 0xDBC8C5,
+        foreground: 0x2E2422, foreground2: 0x4F413E, muted: 0x7D6D69, muted2: 0xA4918D,
+        border: 0xD7C1BD, borderSoft: 0xE3D0CD
+    )
+
     private static func base(_ key: KeyPath<AmberPalette, UInt32>, alpha: Double = 1) -> Color {
-        let lightHex = (AmberThemeRuntime.shared.paper == .neutral ? neutralLight : paperLight)[keyPath: key]
-        let darkHex = darkPalette[keyPath: key]
+        let paper = AmberThemeRuntime.shared.paper
+        let lightHex = paper.lightPalette[keyPath: key]
+        let darkHex = paper.darkPalette[keyPath: key]
         return Color(uiColor: UIColor { trait in
             UIColor(hex: trait.userInterfaceStyle == .dark ? darkHex : lightHex, alpha: alpha)
         })
@@ -82,7 +124,53 @@ final class AmberThemeRuntime {
     // AmberTheme.* getters without forcing @MainActor onto all ~1500 call sites.
     nonisolated(unsafe) static let shared = AmberThemeRuntime()
 
-    enum Paper: String { case paper, neutral }
+    enum Paper: String, CaseIterable {
+        case paper, neutral, garnet, ochre, turmeric, magenta, lotus
+
+        /// Light-appearance palette. Neutral canvases (paper/neutral) adapt to system dark;
+        /// the immersive single-hue canvases keep their color in both appearances.
+        var lightPalette: AmberPalette {
+            switch self {
+            case .paper: AmberTheme.paperLight
+            case .neutral: AmberTheme.neutralLight
+            case .garnet: AmberTheme.garnetPalette
+            case .ochre: AmberTheme.ochrePalette
+            case .turmeric: AmberTheme.turmericPalette
+            case .magenta: AmberTheme.magentaPalette
+            case .lotus: AmberTheme.lotusPalette
+            }
+        }
+
+        var darkPalette: AmberPalette {
+            switch self {
+            case .paper, .neutral: AmberTheme.darkPalette
+            case .garnet: AmberTheme.garnetPalette
+            case .ochre: AmberTheme.ochrePalette
+            case .turmeric: AmberTheme.turmericPalette
+            case .magenta: AmberTheme.magentaPalette
+            case .lotus: AmberTheme.lotusPalette
+            }
+        }
+
+        var displayName: String {
+            switch self {
+            case .paper: "暖纸"
+            case .neutral: "中性白"
+            case .garnet: "绛红"
+            case .ochre: "赭橙"
+            case .turmeric: "姜黄"
+            case .magenta: "品红"
+            case .lotus: "藕荷"
+            }
+        }
+
+        var isImmersive: Bool {
+            switch self {
+            case .paper, .neutral: false
+            default: true
+            }
+        }
+    }
 
     var paper: Paper { didSet { UserDefaults.standard.set(paper.rawValue, forKey: Keys.paper) } }
     var accentHex: UInt32 { didSet { UserDefaults.standard.set(Int(accentHex), forKey: Keys.accent) } }
@@ -110,7 +198,7 @@ final class AmberThemeRuntime {
 /// Authoritative accent set + paired ink (redesign/aa-base.jsx ACCENT_INK). High-luminance hues
 /// (sage, amber gold) pair with dark ink; the rest with white — never a blanket white.
 enum AmberAccentOption: String, CaseIterable, Identifiable {
-    case terracotta, sage, mistBlue, wisteria, rose, amberGold
+    case terracotta, sage, mistBlue, wisteria, rose, amberGold, ink
 
     var id: String { rawValue }
 
@@ -122,6 +210,7 @@ enum AmberAccentOption: String, CaseIterable, Identifiable {
         case .wisteria:   0x9277C4
         case .rose:       0xC2607A
         case .amberGold:  0xC79A4A
+        case .ink:        0x222226
         }
     }
 
@@ -141,6 +230,7 @@ enum AmberAccentOption: String, CaseIterable, Identifiable {
         case .wisteria:   "紫藤"
         case .rose:       "玫红"
         case .amberGold:  "琥珀金"
+        case .ink:        "墨黑"
         }
     }
 }
