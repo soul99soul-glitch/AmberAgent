@@ -24,7 +24,7 @@ final class IOSDeepReadFontSchemeHandler: NSObject, WKURLSchemeHandler {
 
     /// Path key (the `<key>` in `amberfont://deepread/<key>.<ext>`) → bundled font.
     private static let resources: [String: (name: String, ext: String, mime: String)] = [
-        "serif": ("noto_serif_sc", "otf", "font/otf"),
+        "serif": ("noto_serif_sc_vf", "otf", "font/otf"),
         "mono": ("jetbrains_mono", "ttf", "font/ttf"),
     ]
 

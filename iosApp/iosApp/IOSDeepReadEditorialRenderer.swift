@@ -406,7 +406,7 @@ enum IOSDeepReadEditorialRenderer {
     .headline,section{padding:0 22px;}
     .kicker,.section,.date,.holder,small{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:var(--deep-read-muted);font-size:10px;}
     h1{font-weight:500;font-size:32px;line-height:1.13;margin:12px 0 16px;}
-    h2{font-weight:500;font-size:18px;line-height:1.34;margin:0 0 6px;}
+    h2{font-weight:650;font-size:18px;line-height:1.34;margin:0 0 6px;}
     p{font-size:15px;line-height:1.68;margin:0 0 13px;}
     .summary{font-size:15px;line-height:1.68;}
     section{margin-top:28px;}
@@ -481,7 +481,7 @@ enum IOSDeepReadEditorialRenderer {
     /// JetBrains Mono for code. Prepended to the serif / code font stacks; the system
     /// fonts remain as fallbacks.
     private static let bundledFontCSS = """
-    @font-face{font-family:"AmberDeepReadSerif";src:url("amberfont://deepread/serif.otf") format("opentype");font-weight:400 700;font-style:normal;font-display:swap;}
+    @font-face{font-family:"AmberDeepReadSerif";src:url("amberfont://deepread/serif.otf") format("opentype");font-weight:200 900;font-style:normal;font-display:swap;}
     @font-face{font-family:"AmberDeepReadMono";src:url("amberfont://deepread/mono.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap;}
     :root{--deep-read-serif:"AmberDeepReadSerif","Noto Serif SC","Source Han Serif SC","Songti SC",serif;}
     .markdown-body code,.markdown-body pre code{font-family:"AmberDeepReadMono",ui-monospace,SFMono-Regular,Menlo,monospace;}

@@ -827,7 +827,12 @@ struct IOSSearchExecutor {
 
     private static func requiredAPIKey(_ value: String, provider: String) throws -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw IOSSearchExecutorError.missingAPIKey(provider) }
+        // 旧版脱敏器曾把搜索服务的 apiKey 误写成掩码(见 IOSCredentialRedactor 修复)。
+        // 若读到残留掩码,视为未配置 —— 抛明确的"缺 key"错误,而不是把掩码当 token
+        // 发出去被服务端判 SUBSCRIPTION_TOKEN_INVALID(那会表现为搜索静默失败)。
+        guard !trimmed.isEmpty, trimmed != IOSCredentialRedactor.mask else {
+            throw IOSSearchExecutorError.missingAPIKey(provider)
+        }
         return trimmed
     }
 

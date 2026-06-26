@@ -543,7 +543,9 @@ struct BoardView: View {
             // 深读。搜索失败则静默退回种子来源(诚实降级)。抓取写回任务来源(来源卡片
             // 反映 scrape_status),再用于生成。
             let searched = await searchSourcesForDeepRead(title: title)
-            let mergedSources = dedupeSources(running.sources + searched)
+            // 总来源数控制在 10 以内(种子优先,搜索补足):来源过多既撑大生成 prompt,
+            // 也让「相关报道」列表过长。dedupe 保持顺序,取前 10。
+            let mergedSources = Array(dedupeSources(running.sources + searched).prefix(10))
             let enriched = await enrichHotTopicSourcesWithScrape(mergedSources)
             deepReadStore.replaceSources(id: task.id, sources: enriched)
             running.sources = enriched
@@ -1094,9 +1096,14 @@ struct IOSDeepReadTaskDetailView: View {
 
             ScrollView {
                 VStack(spacing: 0) {
-                    // 内容从浮动顶栏下方开始,向上滚动时从渐变模糊顶栏下穿过。
-                    // 留足高度让 kicker(EVENT)落在返回按钮下方、不顶到它。
-                    Color.clear.frame(height: 70)
+                    if let task, state(for: task) == .done, let cover = coverImageURL(task) {
+                        // 头图作为封面满溢到顶部(浮动顶栏在其上方半透叠加),标题在其下方。
+                        coverImage(url: cover)
+                    } else {
+                        // 无封面:内容从浮动顶栏下方开始,向上滚动时从渐变模糊顶栏下穿过。
+                        // 留足高度让 kicker(EVENT)落在返回按钮下方、不顶到它。
+                        Color.clear.frame(height: 70)
+                    }
 
                     if let task {
                         masthead(task)
@@ -1225,6 +1232,7 @@ struct IOSDeepReadTaskDetailView: View {
                 .padding(.top, state(for: task) == .generating ? 16 : 20)
         }
         .padding(.horizontal, 22)
+        .padding(.top, 18)
         .padding(.bottom, 18)
     }
 
@@ -1294,26 +1302,27 @@ struct IOSDeepReadTaskDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // 来源折叠区:sec-label(div 非 h2)+ 分组卡片,每条可折叠展开元数据 + mono 链接。
+    // 相关报道:杂志列表风(标题 + 媒体名),整条点击打开原文。与正文里原「扩展阅读」
+    // 合并为这一个模块(数据统一用真实来源、可溯源),消除此前的重复与样式割裂。
     @ViewBuilder
     private func sourcesSection(_ task: IOSDeepReadTask) -> some View {
-        if !task.sources.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("来源")
+        let linkable = task.sources.filter {
+            !($0.url ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        if !linkable.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("相关报道")
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(1.0)
                     .textCase(.uppercase)
                     .foregroundStyle(AmberTheme.muted)
-                    .padding(.horizontal, 22)
-                    .padding(.top, 4)
+                    .padding(.bottom, 2)
 
-                VStack(spacing: 10) {
-                    ForEach(task.sources) { source in
-                        DeepReadSourceRow(source: source)
-                    }
+                ForEach(linkable) { source in
+                    DeepReadRelatedRow(source: source)
                 }
-                .padding(.horizontal, 16)
             }
+            .padding(.horizontal, 22)
             .padding(.top, 8)
         }
     }
@@ -1378,17 +1387,62 @@ struct IOSDeepReadTaskDetailView: View {
     /// Builds the Android-style editorial HTML for a completed deep read: title
     /// headline + magazine-typeset Markdown body, with the diagonal hero figure when a
     /// source carries an image (e.g. a Brave thumbnail, stashed in source metadata).
+    /// Hero image URL for the native cover above the masthead. Mirrors the source the
+    /// editorial renderer used to use (task source `hero_image_url`, else the structured
+    /// output's `heroImageUrl`), so the cover shows the same image — now above the title.
+    private func coverImageURL(_ task: IOSDeepReadTask) -> String? {
+        let metaHero = task.sources
+            .compactMap { $0.metadata["hero_image_url"] }
+            .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+        let structuredHero = task.structuredJSON
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode(IOSDeepReadOutput.self, from: $0) }?
+            .heroImageUrl?.trimmingCharacters(in: .whitespaces)
+        let hero = metaHero ?? structuredHero
+        return (hero?.isEmpty == false) ? hero : nil
+    }
+
+    // 杂志封面图:宽度用 GeometryReader 锁定为容器宽(关键 —— 否则 scaledToFill 的图会按
+    // 固有大尺寸把整列内容撑宽、导致标题/正文左右溢出屏幕被裁),从顶部满溢、底边斜切,
+    // 标题在其下方 —— 头图在标题之上。
+    @ViewBuilder
+    private func coverImage(url: String) -> some View {
+        GeometryReader { geo in
+            AsyncImage(url: URL(string: url)) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    AmberTheme.surface
+                }
+            }
+            .frame(width: geo.size.width, height: 300)
+            .clipped()
+        }
+        .frame(height: 300)
+        .clipShape(CoverShape())
+        .accessibilityHidden(true)
+    }
+
+    /// 封面底边斜切(复刻旧 WebView hero-cut 的斜切过渡:左低右高)。
+    private struct CoverShape: Shape {
+        func path(in rect: CGRect) -> Path {
+            var p = Path()
+            p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - 26))
+            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            p.closeSubpath()
+            return p
+        }
+    }
+
     private func editorialHTML(_ task: IOSDeepReadTask) -> String {
         // Structured output (when the LLM produced it) drives the rich cards; else the
         // renderer falls back to the flat-markdown body.
         let structured: IOSDeepReadOutput? = task.structuredJSON
             .flatMap { $0.data(using: .utf8) }
             .flatMap { try? JSONDecoder().decode(IOSDeepReadOutput.self, from: $0) }
-        let metaHero = task.sources
-            .compactMap { $0.metadata["hero_image_url"] }
-            .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
-        let hero = metaHero ?? structured?.heroImageUrl?.trimmingCharacters(in: .whitespaces)
-        let hasHero = (hero?.isEmpty == false)
         let kicker = (structured?.topicType.isEmpty == false) ? structured!.topicType.uppercased() : "DEEP READ"
         // Resolve the app theme's canvas palette for the current appearance, so the reader
         // follows the chosen background (paper or immersive) — same colors as the native
@@ -1402,9 +1456,12 @@ struct IOSDeepReadTaskDetailView: View {
                 title: task.title,
                 markdown: task.resultMarkdown,
                 kicker: kicker,
-                heroImageURL: hasHero ? hero : nil,
-                heroCaption: structured?.heroCaption,
-                sourceLabel: hasHero ? "\(task.sources.count) 来源" : nil,
+                // Hero is now rendered NATIVELY above the masthead (cover-first, title below) —
+                // see `coverImageURL`/`coverImage` in the detail view. Suppress the WebView's
+                // top hero block so it isn't duplicated below the title.
+                heroImageURL: nil,
+                heroCaption: nil,
+                sourceLabel: nil,
                 dark: colorScheme == .dark,
                 structured: structured,
                 showHeadline: false,
@@ -1930,67 +1987,56 @@ private struct DeepReadMagazineSkeleton: View {
     }
 }
 
-// 单条来源折叠卡:头部 min-height 48 + chevron 旋转,展开显示正文摘要 + mono 链接。
-private struct DeepReadSourceRow: View {
+// 单条相关报道:杂志列表风(顶部分隔线 + 标题 + 媒体名),整条点击打开原文。
+private struct DeepReadRelatedRow: View {
     let source: IOSDeepReadSource
-    @State private var expanded = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.22)) { expanded.toggle() }
-            } label: {
-                HStack(spacing: 10) {
-                    Text("\(source.kind.title) · \(source.title)")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(AmberTheme.foreground)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AmberTheme.muted2)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                }
-                .frame(minHeight: 48)
-                .padding(.horizontal, 14)
-                .contentShape(Rectangle())
+        Button {
+            if let raw = source.url?.trimmingCharacters(in: .whitespaces),
+               let link = URL(string: raw) {
+                openURL(link)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(source.title)
-            .accessibilityValue(expanded ? "已展开" : "已折叠")
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                Rectangle()
+                    .fill(AmberTheme.borderSoft)
+                    .frame(height: 1)
 
-            if expanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(source.content)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let url = source.url, !url.isEmpty {
-                        if let link = URL(string: url) {
-                            Link(url, destination: link)
-                                .font(.system(size: 10.5, design: .monospaced))
-                                .foregroundStyle(AmberTheme.accent)
-                                .lineLimit(2)
-                        } else {
-                            Text(url)
-                                .font(.system(size: 10.5, design: .monospaced))
-                                .foregroundStyle(AmberTheme.accent)
-                                .lineLimit(2)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-                .transition(.opacity)
+                Text(source.title)
+                    .font(.system(size: 15))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineSpacing(1.5)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 11)
+
+                Text(mediaLabel)
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.8)
+                    .textCase(.uppercase)
+                    .foregroundStyle(AmberTheme.muted)
+                    .padding(.top, 5)
+                    .padding(.bottom, 11)
             }
+            .contentShape(Rectangle())
         }
-        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        .buttonStyle(.plain)
+        .accessibilityLabel(source.title)
+        .accessibilityHint("打开原文")
+    }
+
+    /// 媒体名:取 url 主域名主体(reuters.com → REUTERS);无可解析 url 时回退来源类型。
+    private var mediaLabel: String {
+        if let raw = source.url?.trimmingCharacters(in: .whitespaces),
+           let host = URL(string: raw)?.host {
+            let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            return bare.split(separator: ".").first.map(String.init) ?? bare
         }
-        .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+        return source.kind.title
     }
 }
 

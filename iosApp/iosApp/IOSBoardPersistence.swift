@@ -3275,18 +3275,23 @@ enum IOSDeepReadDraftGenerator {
     ) async -> GenerationResult {
         // Build a source block incl. any captured image URLs (so the model can obey
         // the "images only from sources" rule). Exclude failed-search sources.
-        let sourcesBlock = task.sources
-            .filter { $0.metadata["scrape_status"] != "failed" }
+        // 限制来源块规模:最多取前 10 条、每条摘要 ≤700 字、总量 ≤9000 字。来源多时若把
+        // 全部 1200 字摘要塞进每个 stage 的 prompt,叠加上一阶段累积 JSON 会撑爆模型上下文
+        // 窗口 → 叙事/分析阶段调用直接报错被静默跳过 → 深读反而变薄(来源越多越薄)。
+        let usableSources = task.sources.filter { $0.metadata["scrape_status"] != "failed" }
+        let sourcesBlock = usableSources
+            .prefix(10)
             .enumerated().map { index, source -> String in
                 var lines = "[\(index + 1)] \(source.kind.title)｜\(source.title)"
                 if let url = source.url, !url.isEmpty { lines += "\n- url: \(url)" }
                 if let image = source.metadata["hero_image_url"], !image.isEmpty {
                     lines += "\n- images: \(image)"
                 }
-                lines += "\n- excerpt: \(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(1200))"
+                lines += "\n- excerpt: \(IOSDeepReadSourceNormalizer.cleanMultiline(source.content).prefixString(700))"
                 return lines
             }.joined(separator: "\n\n")
-        NSLog("[AmberDeepRead] sources=\(task.sources.count) usable=\(task.sources.filter { $0.metadata["scrape_status"] != "failed" }.count) sourcesBlockChars=\(sourcesBlock.count)")
+            .prefixString(9000)
+        NSLog("[AmberDeepRead] sources=\(task.sources.count) usable=\(usableSources.count) used=\(min(usableSources.count, 10)) sourcesBlockChars=\(sourcesBlock.count)")
 
         // 4 JSON stages merged into one IOSDeepReadOutput (Android DeepReadPrompt parity):
         // overview -> narrative -> analysis -> extended-reading. A stage that throws or
@@ -3356,7 +3361,7 @@ enum IOSDeepReadDraftGenerator {
         b += "- 用户可见文本必须是简体中文；url 原样保留。\n"
         b += "- 不要输出 null；没有内容时用空字符串或空数组。\n\n"
         if !priorJSON.isEmpty {
-            b += "## 上一阶段 JSON（请保留并在其基础上补齐）\n\(priorJSON.prefixString(8000))\n\n"
+            b += "## 上一阶段 JSON（请保留并在其基础上补齐）\n\(priorJSON.prefixString(4000))\n\n"
         }
         b += "## 本阶段 JSON 字段\n\(schema)\n\n"
         b += "## 来源\n\(sourcesBlock)\n"
@@ -3373,7 +3378,7 @@ enum IOSDeepReadDraftGenerator {
             model: Model(modelId: modelId, displayName: modelId, id: KotlinUuid.companion.random(), type: ModelType.chat, customHeaders: [], customBodies: [], inputModalities: [], outputModalities: [], abilities: [], tools: Set<BuiltInTools>(), contextWindowTokens: nil, providerOverwrite: nil),
             temperature: KotlinFloat(value: 0.3),
             topP: nil,
-            maxTokens: KotlinInt(value: 2_500),
+            maxTokens: KotlinInt(value: 3_500),
             tools: [],
             reasoningLevel: .off,
             customHeaders: [],
