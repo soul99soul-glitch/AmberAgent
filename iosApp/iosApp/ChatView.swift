@@ -35,6 +35,15 @@ struct ChatView: View {
     @State private var userDragging = false
     @State private var showScrollToBottom = false
     @State private var scrollToBottomTrigger = 0
+    /// 当前是否已贴底(由 onScrollGeometryChange 维护),供跟随暂停/回到底部按钮使用。
+    @State private var isAtBottom = false
+    /// inset 感知的定位句柄:`scrollTo(edge:.bottom)` 停在内容底边的自然停靠位(尊重输入框
+    /// safeAreaInset、不钻背后)。仅用于显式的一次性校正,不与布局锚点持续争抢。
+    @State private var chatScrollPosition = ScrollPosition(edge: .bottom)
+    /// 每加载一次会话就自增,给 ScrollView 打上新身份 → 触发 `.defaultScrollAnchor(.bottom,
+    /// for: .initialOffset)` 重新以「从底部实现」的方式落位(否则切会话复用同一 ScrollView,
+    /// initialOffset 不会重新触发)。用 Int(非 KotlinUuid),规避其 Hashable 不可靠。
+    @State private var conversationLoadToken = 0
     @Environment(IOSConversationStore.self) private var conversationStore
 
     init(
@@ -154,6 +163,7 @@ struct ChatView: View {
             followPaused = false
             pendingInitialScrollToBottom = true
             viewModel.reloadFromStore()
+            conversationLoadToken &+= 1   // 新身份 → initialOffset 重新「从底部实现」落位
             repairCurrentChatModelIfNeeded()
             if let handoff = IOSWebMountContentHandoffStore.shared.consumeChatHandoff() {
                 viewModel.inputText = handoff.chatPrompt
@@ -166,6 +176,7 @@ struct ChatView: View {
             followPaused = false
             pendingInitialScrollToBottom = true
             viewModel.reloadFromStore()
+            conversationLoadToken &+= 1   // 切会话:换新身份让 initialOffset 重新落到底部
         }
         .onChange(of: sharedSettings.revision) { _, _ in
             repairCurrentChatModelIfNeeded()
@@ -395,11 +406,18 @@ struct ChatView: View {
                                 .id("vision-recognition-indicator")
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
                         }
+
+                        // 内容底部的静止留白兼定位锚:进入会话/回到底部都停在它的底边,
+                        // 即「内容底 + 一小段留白」,与手动上推回弹的自然停靠一致,不贴死输入框。
+                        Color.clear
+                            .frame(height: ChatLayout.bottomRestGap)
+                            .id(ChatLayout.bottomAnchorID)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
                 .padding(.horizontal, ChatLayout.contentHorizontalInset)
-                .padding(.vertical, 12)
-                .padding(.bottom, 18)
+                .padding(.top, 12)
                 .animation(.spring(response: 0.35, dampingFraction: 0.82), value: viewModel.isRecognizingImages)
                 // Tap anywhere in the message content to dismiss the keyboard. Attached to the
                 // content (not the ScrollView) so it reliably fires; simultaneousGesture so
@@ -420,6 +438,12 @@ struct ChatView: View {
             // 往下「拖」才收,普通上滑看历史不触发,所以感觉只有点击能收。Tap-to-dismiss 仍保留
             // 在下方内容(LazyVStack)上,因为 ScrollView 自身的 TapGesture 会被 UIScrollView 吞掉。
             .scrollDismissesKeyboard(.immediately)
+            // 进入会话「从底部实现」落位:布局阶段把内容底边锚到视口底(尊重 safeAreaInset),
+            // 先实现尾部行 → 一个布局 pass 就到真底,无需估算上方未实现行的高度 → 无竞争、无重试。
+            // 只用 .initialOffset(不含 .sizeChanges),避免流式时把上滑看历史的用户拽回底部。
+            // 空会话仍顶部对齐,不让配置卡/空态贴到输入框。
+            .defaultScrollAnchor(viewModel.messages.isEmpty ? .top : .bottom, for: .initialOffset)
+            .scrollPosition($chatScrollPosition)
             .onScrollPhaseChange { _, phase in
                 switch phase {
                 case .interacting:
@@ -433,6 +457,7 @@ struct ChatView: View {
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.visibleRect.maxY <= ChatLayout.bottomStickThreshold
             } action: { _, atBottom in
+                isAtBottom = atBottom
                 if userDragging {
                     followPaused = !atBottom
                 }
@@ -446,7 +471,9 @@ struct ChatView: View {
             .onChange(of: viewModel.messageRevision) { _, _ in
                 if pendingInitialScrollToBottom {
                     pendingInitialScrollToBottom = false
-                    scrollToLatestSettled(proxy)
+                    // 锚点已让尾部行实现并落到底部;延一帧再做一次 inset 感知的 edge 校正,
+                    // 确保最终停在「输入框上方的回弹位」而非 frame 底/背后。一次调用,无循环。
+                    Task { @MainActor in chatScrollPosition.scrollTo(edge: .bottom) }
                 } else if followGeneration, !followPaused {
                     scrollToLatestMessage(proxy, animated: true, deferred: false)
                 }
@@ -464,6 +491,9 @@ struct ChatView: View {
                 scrollToLatestMessage(proxy, animated: true, deferred: false)
             }
         }
+        // 每加载一次会话就换新身份,让 initialOffset 锚点重新「从底部实现」落位
+        // (切会话复用同一 ScrollView 时 initialOffset 不会自动重触发)。
+        .id(conversationLoadToken)
     }
 
     private var isStreamingFollowActive: Bool {
@@ -494,33 +524,6 @@ struct ChatView: View {
             Task { @MainActor in action() }
         } else {
             action()
-        }
-    }
-
-    /// Initial-load / conversation-switch scroll. A single deferred `scrollTo` to the last row
-    /// can land short on a long conversation, because LazyVStack may not have realized/measured
-    /// that row on the first runloop hop. So jump once immediately, then once more after layout
-    /// settles. Both jumps are non-animated. This runs only when `pendingInitialScrollToBottom`
-    /// was set (open/switch a session) — it is a one-shot, not a follow loop, and never reads
-    /// inputBar height.
-    private func scrollToLatestSettled(_ proxy: ScrollViewProxy) {
-        func jump() {
-            guard let lastId = viewModel.messages.last?.id else { return }
-            var transaction = Transaction()
-            transaction.animation = nil
-            withTransaction(transaction) {
-                proxy.scrollTo(lastId, anchor: .bottom)
-            }
-        }
-        Task { @MainActor in
-            // A long LazyVStack realizes/measures its rows progressively, so one or two
-            // jumps can land short of the true bottom. Re-jump across a short settling
-            // window until the last row is realized and measured.
-            jump()
-            for stepMs in [60, 80, 140, 200, 240] {
-                try? await Task.sleep(nanoseconds: UInt64(stepMs) * 1_000_000)
-                jump()
-            }
         }
     }
 
@@ -1696,6 +1699,11 @@ enum ChatLayout {
     static let userMaxWidth: CGFloat = 300
     static let followBottomGap: CGFloat = 96
     static let bottomStickThreshold: CGFloat = 40
+    /// 内容底部的静止留白:进入会话定位、回到底部时最后一条与输入框之间留出的小距离,
+    /// 和「手动上推→回弹」的自然停靠位一致(不贴死输入框)。
+    static let bottomRestGap: CGFloat = 26
+    /// 内容最底部的不可见锚点 id:定位到它(而非最后一条气泡)即停在「带留白的内容底」。
+    static let bottomAnchorID = "chat-bottom-rest-anchor"
 }
 
 struct ChatAssistantStack<Content: View>: View {

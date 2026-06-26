@@ -347,7 +347,10 @@ struct MessageBubbleView: View {
     }
 }
 
-private struct ChatAssistantMarkdownView: View {
+/// 唯一的 assistant Markdown 渲染入口:聊天页与模型议会共用同一组件,
+/// 跟随同一个「微软流式 Markdown」开关,默认走 App 自有同步渲染器(吃字体/排版偏好),
+/// 开关开时两处一起切到微软增量流式库。改成单一来源,避免两边各渲染各的、视觉不一致。
+struct ChatAssistantMarkdownView: View {
     let markdown: String
     var displaySetting: DisplaySetting?
 

@@ -12,8 +12,12 @@ struct CouncilChatRuntimeView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: CouncilChatViewModel
     @FocusState private var isComposerFocused: Bool
-    /// 用户是否停在底部附近。流式/新消息只在底部附近时才自动跟随;一旦上滑看历史就不再强制拉回。
-    @State private var isNearBottom = true
+    // 底部跟随状态(与 Chat 页同款):`userDragging` 只在用户「主动拖动」时为真,
+    // `followPaused` 也只在用户拖离底部时才置真——内容增长(流式/阶段衔接)导致的几何变化
+    // 不会误暂停跟随。跟随本身遵循全局「跟随生成」偏好,与聊天页一致。
+    @State private var userDragging = false
+    @State private var followPaused = false
+    @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
 
     init(
         settingsStore: SettingsStore,
@@ -65,7 +69,7 @@ struct CouncilChatRuntimeView: View {
                     stateProvider: { viewModel.state(for: $0) },
                     failedSpeakerIds: viewModel.failedSpeakerIds,
                     isRunning: viewModel.isRunning,
-                    restartAction: { viewModel.restartLastDiscussion() }
+                    restartAction: { viewModel.startFreshRoom() }
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
@@ -80,6 +84,16 @@ struct CouncilChatRuntimeView: View {
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+            case .history:
+                CouncilHistorySheet(
+                    tasks: IOSAdvancedTaskStore.shared.recent(kind: .modelCouncil, limit: 30)
+                        .filter { CouncilRoomArchiveStore.shared.exists(taskId: $0.id) },
+                    activeTaskId: viewModel.activeReplayTaskId,
+                    onSelect: { taskId in viewModel.openArchive(taskId: taskId) }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(AmberTheme.background)
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -130,13 +144,11 @@ struct CouncilChatRuntimeView: View {
 
     private var header: some View {
         AmberGlassGroup(spacing: 16) {
-            HStack(spacing: 10) {
-                AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
-                    dismiss()
-                }
-
+            // ZStack:标题绝对居中(以屏幕为基准),不受左 1 颗 / 右 2 颗按钮数量差影响。
+            // 之前用单 HStack + maxWidth:.infinity,标题只在「返回」和「历史」之间居中,
+            // 整体偏左。改成居中标题 + 左右按钮叠加,标题真正居中。
+            ZStack {
                 // 整个标题区(模式 + 成员·轮次)都可点击,唤起底部 sheet 切换模式 / 看席位。
-                // 不再用悬浮小菜单,点击热区也更大。
                 Button {
                     viewModel.showMembers()
                 } label: {
@@ -154,16 +166,28 @@ struct CouncilChatRuntimeView: View {
                             .foregroundStyle(AmberTheme.muted)
                             .lineLimit(1)
                     }
-                    .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("议会模式与席位")
 
-                // 顶栏始终是设置入口;停止由输入框那颗发送/停止键负责(与 Chat 页一致),
-                // 不在顶栏再放一颗多余的停止键。
-                AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "议会设置", size: 44, symbolSize: 18) {
-                    viewModel.showSettings()
+                HStack(spacing: 10) {
+                    AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
+                        dismiss()
+                    }
+
+                    Spacer(minLength: 0)
+
+                    // 历史议会入口:列出「最近讨论」,点任意一场重开成只读对话。
+                    AmberGlassCircleButton(systemImage: "clock.arrow.circlepath", accessibilityLabel: "历史议会", size: 44, symbolSize: 18) {
+                        viewModel.showHistory()
+                    }
+
+                    // 顶栏始终是设置入口;停止由输入框那颗发送/停止键负责(与 Chat 页一致),
+                    // 不在顶栏再放一颗多余的停止键。
+                    AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "议会设置", size: 44, symbolSize: 18) {
+                        viewModel.showSettings()
+                    }
                 }
             }
         }
@@ -175,40 +199,80 @@ struct CouncilChatRuntimeView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                // 用非 lazy 的 VStack:议会转录是有界的(轮数 1-5 × 席位数),一次性渲染可接受,
+                // 也避免 LazyVStack 回收行导致的重解析/高度跳变。
+                VStack(spacing: 12) {
                     ForEach(viewModel.messages) { message in
-                        CouncilMessageRow(message: message) {
-                            viewModel.showCurrentDetail()
+                        let isLastWhileRunning = viewModel.isRunning && message.id == viewModel.messages.last?.id
+
+                        VStack(spacing: 0) {
+                            CouncilMessageRow(
+                                message: message,
+                                onTapDetail: { viewModel.showCurrentDetail() },
+                                onRestart: { viewModel.restart(withObjective: $0) }
+                            )
+                            // Equatable:流式逐 token 改的是最后一条,只让那一行重渲染,
+                            // 其余已完成气泡不再随整个 messages 数组变化而重算 body。
+                            .equatable()
+
+                            // 跟随留白:仅在「最后一条 + 运行中」时垫一段恒定高度的透明块。
+                            // ① 跟随时让最后一条气泡停在离输入框一段距离处(不贴底边);
+                            // ② 高度恒定 → scrollTo 钉住的是这段空白的底边,而非「正在增长的气泡」,
+                            //    所以气泡顺势往上长、不再上下抖。
+                            if isLastWhileRunning {
+                                Color.clear
+                                    .frame(height: ChatLayout.followBottomGap)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
                         }
                         .id(message.id)
-                        // 新气泡 / 小胶囊淡入 + 轻微上浮放大,避免突兀地"啪"地出现。
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .move(edge: .bottom)).combined(with: .scale(scale: 0.97, anchor: .bottom)),
-                            removal: .opacity
-                        ))
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .padding(.bottom, 20)
-                // 用消息数量驱动插入过渡;正文流式更新(count 不变)不触发,避免逐字抖动。
-                .animation(.spring(response: 0.4, dampingFraction: 0.82), value: viewModel.messages.count)
+                .padding(.top, 12)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, minHeight: 0)
             }
             .scrollIndicators(.hidden)
-            // 跟踪是否在底部附近(距底 120pt 内)。上滑看历史时 isNearBottom=false → 不再强制跟随。
+            // 区分「用户主动拖动」与「程序/内容增长引起的滚动」:只有前者才允许改 followPaused。
+            .onScrollPhaseChange { _, phase in
+                switch phase {
+                case .interacting: userDragging = true
+                case .idle: userDragging = false
+                default: break
+                }
+            }
+            // 仅在用户主动拖动时,根据是否贴底来暂停/恢复跟随;内容增长导致的几何变化不算,
+            // 因此议题→席位等阶段衔接处不会被误判为「离开底部」而丢失跟随。
             .onScrollGeometryChange(for: Bool.self) { geo in
-                geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 120
+                geo.contentSize.height - geo.visibleRect.maxY <= ChatLayout.bottomStickThreshold
             } action: { _, atBottom in
-                isNearBottom = atBottom
+                if userDragging {
+                    followPaused = !atBottom
+                }
             }
             .onChange(of: viewModel.messages.count) { _, _ in
-                guard isNearBottom else { return }
-                scrollToBottom(proxy)
+                followBottom(proxy, animated: true)
             }
             .onChange(of: viewModel.lastMessageBody) { _, _ in
-                // 流式跟随用非动画的即时定位,避免每个 token 触发一次 0.2s 滚动动画造成卡顿。
-                guard isNearBottom else { return }
-                scrollToBottom(proxy, animated: false)
+                followBottom(proxy, animated: false)
+            }
+        }
+    }
+
+    /// 流式/新消息时把最后一条钉到底部(带恒定留白)。仅在「跟随生成」开启且用户未手动暂停时生效。
+    private func followBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard followGeneration, !followPaused, let lastId = viewModel.messages.last?.id else { return }
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(lastId, anchor: .bottom)
+            }
+        } else {
+            var transaction = Transaction()
+            transaction.animation = nil
+            withTransaction(transaction) {
+                proxy.scrollTo(lastId, anchor: .bottom)
             }
         }
     }
@@ -218,7 +282,51 @@ struct CouncilChatRuntimeView: View {
     // (`ComposerDockSendButton`)。胶囊内左侧 `@` 键沿用 Chat 的「+」位,
     // 与 Chat 一致的原生输入胶囊 + 分离圆形发送键。去掉了原来无实际作用的 @ 键
     // （runner 并不解析 @host 提及）和此前黏连成一团的玻璃操作 chips。
+    @ViewBuilder
     private var composer: some View {
+        if viewModel.isReplay {
+            replayBanner
+        } else {
+            liveComposer
+        }
+    }
+
+    // 只读重放历史议会时的底部条:提示「只读」+ 一键开新议会(退出重放、清空房间)。
+    private var replayBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AmberTheme.muted)
+            Text("历史议会 · 只读")
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.muted)
+            Spacer(minLength: 8)
+            Button {
+                viewModel.startFreshRoom()
+            } label: {
+                Text("开新议会")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .background(AmberTheme.accentTint, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background {
+            LinearGradient(
+                colors: [AmberTheme.background.opacity(0.78), AmberTheme.background],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    private var liveComposer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("输入议题开始", text: $viewModel.inputText, axis: .vertical)
                 .lineLimit(1...5)
@@ -254,16 +362,6 @@ struct CouncilChatRuntimeView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        guard let lastId = viewModel.messages.last?.id else { return }
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(lastId, anchor: .bottom)
-            }
-        } else {
-            proxy.scrollTo(lastId, anchor: .bottom)
-        }
-    }
 }
 
 private struct CouncilParticipantChip: View {
@@ -318,11 +416,32 @@ private struct CouncilParticipantChip: View {
     }
 }
 
-private struct CouncilMessageRow: View {
+private struct CouncilMessageRow: View, Equatable {
     let message: CouncilChatMessage
     let onTapDetail: () -> Void
+    /// 以指定议题重开议会(供用户气泡的「以此为题重开 / 编辑重开」)。
+    let onRestart: (String) -> Void
+
+    @State private var editing = false
+    @State private var editDraft = ""
+
+    // 只比较影响渲染的字段(闭包每次父刷新都新建但语义不变,忽略)。内部 @State
+    // (editing/editDraft)变化不受此 == 影响,SwiftUI 仍会照常更新本行。
+    nonisolated static func == (lhs: CouncilMessageRow, rhs: CouncilMessageRow) -> Bool {
+        lhs.message.id == rhs.message.id
+            && lhs.message.body == rhs.message.body
+            && lhs.message.status == rhs.message.status
+            && lhs.message.author == rhs.message.author
+            && lhs.message.subtitle == rhs.message.subtitle
+    }
 
     var body: some View {
+        content
+            .sheet(isPresented: $editing) { editSheet }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch message.kind {
         case .divider:
             Text(message.body)
@@ -344,20 +463,86 @@ private struct CouncilMessageRow: View {
         HStack {
             Spacer(minLength: 48)
             ChatUserBubble(text: message.body)
+                // 长按高亮平台裁成气泡形状(与 Chat 页一致),消除灰角。
+                .contentShape(
+                    .contextMenuPreview,
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 18,
+                        bottomLeadingRadius: 18,
+                        bottomTrailingRadius: 6,
+                        topTrailingRadius: 18,
+                        style: .continuous
+                    )
+                )
+                .contextMenu { messageActions }
         }
     }
 
-    // Agent 消息:头像在左,气泡左缘对齐头像右缘;气泡右边距 = 左边距
-    // (头像 30 + 间距 10 = 40),整体左右对称,气泡不再占满整行。
-    private var assistantRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            avatar
-            VStack(alignment: .leading, spacing: 5) {
-                metaLine
-                bubble
+    // 长按菜单。复制 / 分享对两类气泡通用;「以此为题重开 / 编辑重开」仅用户气泡(议题)有。
+    @ViewBuilder
+    private var messageActions: some View {
+        Button {
+            UIPasteboard.general.string = message.body
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+        ShareLink(item: message.body) {
+            Label("分享", systemImage: "square.and.arrow.up")
+        }
+        if message.kind == .user {
+            Divider()
+            Button {
+                onRestart(message.body)
+            } label: {
+                Label("以此为题重开", systemImage: "arrow.counterclockwise")
+            }
+            Button {
+                editDraft = message.body
+                editing = true
+            } label: {
+                Label("编辑重开", systemImage: "square.and.pencil")
             }
         }
-        .padding(.trailing, 40)
+    }
+
+    // 编辑议题后重开:预填原文,提交即清空当前画面并用改写后的议题重跑。
+    private var editSheet: some View {
+        NavigationStack {
+            VStack {
+                TextEditor(text: $editDraft)
+                    .font(.body)
+                    .padding(8)
+                    .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(16)
+            }
+            .navigationTitle("编辑议题")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { editing = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("重开") {
+                        editing = false
+                        onRestart(editDraft)
+                    }
+                    .disabled(editDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    // Agent 消息:头像 + 元信息在顶部一行,气泡落到下一行占满整行宽度
+    // ——气泡左缘对齐头像左缘,右边距 = 左边距(整体复用滚动内容的 16pt 水平内边距,左右对称)。
+    private var assistantRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
+                avatar
+                metaLine
+            }
+            bubble
+        }
     }
 
     private var metaLine: some View {
@@ -375,9 +560,10 @@ private struct CouncilMessageRow: View {
     }
 
     private var bubble: some View {
-        // 复用 Chat 同款的微软流式 Markdown 渲染库(增量渲染,流式不再每个 token 全量重解析
-        // AST,卡顿大幅缓解);旧的 MarkdownView 会在每次 body 变化时重跑 MarkdownBridge.parse。
-        SwiftStreamingMarkdown.MarkdownView(text: message.displayBody)
+        // 与聊天页共用唯一的渲染入口 `ChatAssistantMarkdownView`:跟随同一个「微软流式
+        // Markdown」开关,默认走 App 自有同步渲染器(与聊天视觉一致、吃字体/排版偏好,且
+        // 同步解析在 VStack 里不会出现微软库那种「先空高再异步撑开」的滚动乱跳)。
+        ChatAssistantMarkdownView(markdown: message.displayBody)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -387,7 +573,11 @@ private struct CouncilMessageRow: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(message.borderColor, lineWidth: message.kind == .host ? 0.8 : 0.4)
             }
+            // 长按高亮平台裁成气泡圆角形状,避免方角灰底。
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // 轻点看详情,长按出「复制」菜单(两者共存)。
             .onTapGesture(perform: onTapDetail)
+            .contextMenu { messageActions }
     }
 
     private var avatar: some View {
@@ -520,15 +710,12 @@ private struct CouncilMembersSheet: View {
                     Button("完成") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                    // 纯文字「重开」:清空当前议会、回到空白开场(即便正在运行也先停掉再清),
+                    // 不再用刷新图标,也不再是「重跑上一题」(那个会因 lastRunObjective 为空而点了没反应)。
+                    Button("重开", role: .destructive) {
                         restartAction()
                         dismiss()
-                    } label: {
-                        // 明确显示「重新开始」文字 + 图标(toolbar 里 Label 默认只显示图标)。
-                        Label("重新开始", systemImage: "arrow.counterclockwise")
-                            .labelStyle(.titleAndIcon)
                     }
-                    .disabled(isRunning)
                 }
             }
         }
@@ -800,12 +987,14 @@ enum CouncilRuntimeSheet: Identifiable {
     case detail(CouncilDiscussionDetail)
     case members
     case settings
+    case history
 
     var id: String {
         switch self {
         case .detail(let detail): "detail-\(detail.id)"
         case .members: "members"
         case .settings: "settings"
+        case .history: "history"
         }
     }
 }
@@ -837,6 +1026,8 @@ final class CouncilChatViewModel {
     var pendingAskUser: IOSCouncilAskUserState?
     var participants: [CouncilParticipant] = []
     var failedSpeakerIds: Set<String> = []
+    /// 只读重放:从「最近讨论」重开一场历史议会时为 true,隐藏输入条、不再归档/覆盖草稿。
+    var isReplay = false
 
     let roomSettingsStore: IOSCouncilRoomSettingsStore
 
@@ -845,6 +1036,7 @@ final class CouncilChatViewModel {
     @ObservationIgnored private let providerRegistry: ProviderRegistryStore?
     @ObservationIgnored private let runner: IOSCouncilRoomRunner
     @ObservationIgnored private let transcriptDefaults: UserDefaults
+    @ObservationIgnored private let archiveStore: CouncilRoomArchiveStore
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
     @ObservationIgnored private var currentObjective = ""
     @ObservationIgnored private var currentTaskId: String?
@@ -863,7 +1055,8 @@ final class CouncilChatViewModel {
         permissionStore: IOSPermissionStore,
         roomSettingsStore: IOSCouncilRoomSettingsStore = .shared,
         runner: IOSCouncilRoomRunner? = nil,
-        transcriptDefaults: UserDefaults = .standard
+        transcriptDefaults: UserDefaults = .standard,
+        archiveStore: CouncilRoomArchiveStore = .shared
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
@@ -871,12 +1064,15 @@ final class CouncilChatViewModel {
         self.roomSettingsStore = roomSettingsStore
         self.runner = runner ?? IOSCouncilRoomRunner(permissionStore: permissionStore)
         self.transcriptDefaults = transcriptDefaults
+        self.archiveStore = archiveStore
         // 默认载回上一轮 transcript(退出后再进仍能看到历史);为空则空白开场。
         self.messages = CouncilTranscriptStore.load(defaults: transcriptDefaults)
         refreshSettingsBackedParticipants()
     }
 
     func persistTranscript() {
+        // 重放历史议会时不要把只读快照写回单房间草稿,否则会覆盖实时房间的进度。
+        guard !isReplay else { return }
         CouncilTranscriptStore.save(messages, defaults: transcriptDefaults)
     }
 
@@ -925,10 +1121,19 @@ final class CouncilChatViewModel {
         messages.last?.body ?? ""
     }
 
-    /// 当前讨论轮次：统计 divider 消息数量（每次 appendDivider 标记一轮开场/结束）。
+    /// 当前若处于只读重放,返回被重放那场的 taskId(供历史列表高亮),否则 nil。
+    var activeReplayTaskId: String? {
+        isReplay ? currentTaskId : nil
+    }
+
+    /// 当前讨论轮次：只数真正的「第 N 轮」轮次分隔，不把开场 / 主持调研 / 席位组建 /
+    /// 轮末点评 / 主持总结等阶段胶囊也算进轮次（否则开场阶段就会误显示「第 6 轮」）。
     var discussionRound: Int {
-        let dividerCount = messages.filter { $0.kind == .divider }.count
-        return max(1, dividerCount)
+        let roundMarkers = messages.filter {
+            $0.kind == .divider
+                && $0.body.range(of: #"^第\s*\d+\s*轮$"#, options: .regularExpression) != nil
+        }
+        return max(1, roundMarkers.count)
     }
 
     var availableModelIds: [String] {
@@ -1037,6 +1242,7 @@ final class CouncilChatViewModel {
         )
         updateDetail(status: "已停止")
         persistTranscript()
+        archiveCurrentRoom()
     }
 
     func showCurrentDetail() {
@@ -1051,12 +1257,73 @@ final class CouncilChatViewModel {
         activeSheet = .settings
     }
 
+    func showHistory() {
+        activeSheet = .history
+    }
+
+    /// 从「最近讨论」重开一场历史议会,把归档快照还原成只读对话。
+    func openArchive(taskId: String) {
+        guard let room = archiveStore.load(taskId: taskId) else { return }
+        discussionTask?.cancel()
+        discussionTask = nil
+        runner.cancel()
+        isRunning = false
+        isReplay = true
+        currentTaskId = taskId
+        currentObjective = room.objective
+        lastRunObjective = room.objective
+        if let mode = CouncilDiscussionMode(rawValue: room.modeRaw) { selectedMode = mode }
+        participants = room.participants.map { $0.restored() }
+        failedSpeakerIds = Set(room.failedSpeakerIds)
+        activeSpeakerId = nil
+        invitedSpeakerIds = Set(participants.filter { !$0.isHost }.map(\.id))
+        messages = room.messages.map { $0.restored() }
+        roomStateOverride = "历史议会 · 只读"
+        activeSheet = nil
+    }
+
+    /// 退出只读重放,清空房间、恢复默认席位,准备开新议会。
+    func startFreshRoom() {
+        isReplay = false
+        resetRoom()
+        refreshSettingsBackedParticipants()
+        roomStateOverride = nil
+    }
+
+    /// 把当前房间快照按 taskId 归档(供「最近讨论」重开)。在名册/新消息/消息完结/结束等
+    /// 检查点调用;不在 per-token 的 updateMessage 上调用,避免每个 token 写一次文件。
+    private func archiveCurrentRoom() {
+        guard !isReplay, let taskId = currentTaskId, !messages.isEmpty else { return }
+        let room = CouncilPersistedRoom(
+            taskId: taskId,
+            objective: currentObjective,
+            modeRaw: selectedMode.rawValue,
+            statusRaw: roomStateOverride ?? "",
+            failedSpeakerIds: Array(failedSpeakerIds),
+            participants: participants.map(CouncilPersistedParticipant.init),
+            messages: messages.map(CouncilPersistedMessage.init),
+            updatedAtMs: Date().timeIntervalSince1970 * 1000
+        )
+        archiveStore.save(room)
+    }
+
     func restartLastDiscussion() {
         let objective = lastRunObjective.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !objective.isEmpty, !isRunning else { return }
         resetRoom()
         pendingObjective = objective
         startPendingDiscussion(researchAllowed: lastResearchAllowed)
+    }
+
+    /// 以指定议题重开一场议会:清空当前画面(含只读重放),再用该议题重新开跑。
+    /// 供长按用户消息的「以此为题重开」/「编辑重开」复用。
+    func restart(withObjective objective: String) {
+        let text = objective.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        isReplay = false
+        resetRoom()
+        pendingObjective = text
+        startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
     }
 
     private func runDiscussion(objective: String, researchAllowed: Bool) async {
@@ -1110,6 +1377,7 @@ final class CouncilChatViewModel {
         roomStateOverride = summary.status == .completed ? "就绪" : summary.status.title
         updateDetail(status: roomStateOverride ?? "就绪")
         persistTranscript()
+        archiveCurrentRoom()
     }
 
     private func appendToken(_ token: String) {
@@ -1169,6 +1437,7 @@ final class CouncilChatViewModel {
         switch event {
         case .taskStarted(let id):
             currentTaskId = id
+            archiveCurrentRoom()
         case .state(let state):
             roomStateOverride = state
             updateDetail(status: state)
@@ -1178,10 +1447,15 @@ final class CouncilChatViewModel {
             failedSpeakerIds = failedIds
             invitedSpeakerIds = Set(speakers.filter { !$0.isHost }.map(\.id))
             updateDetail(status: roomStateOverride ?? selectedMode.runningState)
+            archiveCurrentRoom()
         case .append(let event):
             appendMessage(event)
+            archiveCurrentRoom()
         case .updateMessage(let id, let body, let status):
-            updateMessage(id, body: body, status: CouncilMessageStatus(status))
+            let mapped = CouncilMessageStatus(status)
+            updateMessage(id, body: body, status: mapped)
+            // 仅在席位发言完结/失败时归档,流式中途(speaking)不写,避免逐 token 落盘。
+            if mapped != .speaking { archiveCurrentRoom() }
         case .askUser:
             // 实际的暂停/恢复由 onAskUser 回调驱动，这里不做额外处理。
             break
@@ -1285,22 +1559,18 @@ final class CouncilChatViewModel {
     private func resetRoom() {
         discussionTask?.cancel()
         runner.cancel()
+        // 取消运行中的议会后,被 cancel 的 async 任务不会再走到末尾的 isRunning=false,
+        // 这里显式复位,确保「重开」后输入框/发送键立刻回到就绪态。
+        isRunning = false
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         failedSpeakerIds.removeAll()
         currentTaskId = nil
         roomStateOverride = nil
         currentObjective = ""
-        messages = [
-            CouncilChatMessage(
-                kind: .system,
-                author: "议会",
-                body: "模型议会已重新开始。",
-                systemImage: "person.3.sequence",
-                tint: AmberTheme.accentIndigo,
-                subtitle: "就绪"
-            )
-        ]
+        // 重开 = 把画面清成真正空白(和首次进入议会一致:只剩「输入议题开始」占位),
+        // 不再自动发一条「已重新开始」系统消息(画蛇添足)。
+        messages = []
         // 重新开始即清空历史(存盘也同步为空白开场),避免退出后又载回旧 transcript。
         persistTranscript()
         refreshSettingsBackedParticipants()
@@ -1694,7 +1964,7 @@ enum CouncilMessageStatus {
 /// Codable 快照,用于把上一轮议会的 transcript 存盘,退出后再进默认载回。颜色用 hex
 /// 保留(席位/主持的色彩在重载后仍准确);backgroundColor/foregroundColor/borderColor 由
 /// kind+status 派生,无需存。
-private struct CouncilPersistedMessage: Codable {
+struct CouncilPersistedMessage: Codable, Equatable {
     let id: String
     let kind: String
     let author: String
@@ -1753,6 +2023,118 @@ enum CouncilTranscriptStore {
     }
 }
 
+// MARK: - 历史议会归档(按 taskId 一场一文件,支持「最近讨论」重开成只读对话)
+
+/// 单个席位/主持在重开时还原所需的展示信息。颜色用 hex 保留;派生色由 kind 重新计算。
+struct CouncilPersistedParticipant: Codable, Equatable {
+    let id: String
+    let handle: String
+    let displayName: String
+    let roleDescription: String
+    let shortLens: String
+    let systemImage: String
+    let tintHex: String
+    let isHost: Bool
+    let modelHint: String
+    let modelId: String?
+
+    init(_ participant: CouncilParticipant) {
+        self.id = participant.id
+        self.handle = participant.handle
+        self.displayName = participant.displayName
+        self.roleDescription = participant.roleDescription
+        self.shortLens = participant.shortLens
+        self.systemImage = participant.systemImage
+        self.tintHex = participant.tint.councilHexString
+        self.isHost = participant.isHost
+        self.modelHint = participant.modelHint
+        self.modelId = participant.modelId
+    }
+
+    func restored() -> CouncilParticipant {
+        CouncilParticipant(
+            id: id,
+            handle: handle,
+            displayName: displayName,
+            roleDescription: roleDescription,
+            shortLens: shortLens,
+            systemImage: systemImage,
+            tint: Color(councilHexString: tintHex),
+            isHost: isHost,
+            modelHint: modelHint,
+            modelId: modelId
+        )
+    }
+}
+
+/// 一场议会的完整快照:消息流 + 席位名册 + 失败席位 + 议题/模式/状态。
+/// 与单房间 `CouncilTranscriptStore`(只存当前 transcript)不同,这里按 taskId 归档每一场,
+/// 用于从「最近讨论」重开任意历史议会,渲染成只读对话(深读式重开)。
+struct CouncilPersistedRoom: Codable, Equatable {
+    let taskId: String
+    let objective: String
+    let modeRaw: String
+    let statusRaw: String
+    let failedSpeakerIds: [String]
+    let participants: [CouncilPersistedParticipant]
+    let messages: [CouncilPersistedMessage]
+    let updatedAtMs: Double
+}
+
+/// 文件持久化:每场议会一份 `Documents/council/<taskId>.json`。镜像 `IOSBoardPersistence`
+/// 的「一 id 一文件」范式,避免把大段 transcript 塞进 UserDefaults(80 条上限),也让每场
+/// 历史互不覆盖。
+@MainActor
+final class CouncilRoomArchiveStore {
+    static let shared = CouncilRoomArchiveStore()
+
+    private let directory: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    private let fileManager: FileManager
+
+    init(baseDirectory: URL? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let base = baseDirectory
+            ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        self.directory = base.appendingPathComponent("council", isDirectory: true)
+    }
+
+    func save(_ room: CouncilPersistedRoom) {
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try encoder.encode(room)
+            try data.write(to: fileURL(for: room.taskId), options: .atomic)
+        } catch {
+            // 归档失败不应打断议会;静默吞掉(下个检查点会再试)。
+        }
+    }
+
+    func load(taskId: String) -> CouncilPersistedRoom? {
+        let url = fileURL(for: taskId)
+        guard fileManager.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let room = try? decoder.decode(CouncilPersistedRoom.self, from: data) else {
+            return nil
+        }
+        return room
+    }
+
+    func exists(taskId: String) -> Bool {
+        fileManager.fileExists(atPath: fileURL(for: taskId).path)
+    }
+
+    func delete(taskId: String) {
+        try? fileManager.removeItem(at: fileURL(for: taskId))
+    }
+
+    private func fileURL(for taskId: String) -> URL {
+        let safe = taskId.replacingOccurrences(of: "/", with: "_")
+        return directory.appendingPathComponent("\(safe).json", isDirectory: false)
+    }
+}
+
 private extension Color {
     /// `#RRGGBB`。SwiftUI Color → UIColor 取分量;转换失败回退中性灰。
     var councilHexString: String {
@@ -1792,6 +2174,127 @@ private extension String {
     var trimmedNilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+// MARK: - 历史议会 sheet
+
+/// 列出可重开的历史议会(仅含已归档快照的任务),点任意一场以只读方式重开。
+private struct CouncilHistorySheet: View {
+    let tasks: [IOSAdvancedTaskRecord]
+    let activeTaskId: String?
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AmberTheme.background.ignoresSafeArea()
+                if tasks.isEmpty {
+                    emptyState
+                } else {
+                    ScrollView {
+                        AmberFormGroup {
+                            ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
+                                Button {
+                                    onSelect(task.id)
+                                    dismiss()
+                                } label: {
+                                    row(task)
+                                }
+                                .buttonStyle(.plain)
+                                if index < tasks.count - 1 {
+                                    Divider()
+                                        .overlay(AmberTheme.borderSoft)
+                                        .padding(.leading, 14)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 24)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+            }
+            .navigationTitle("历史议会")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(AmberTheme.muted2)
+            Text("暂无可重开的历史议会")
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.muted)
+            Text("完成一场议会后，这里会列出可重开的讨论。")
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted2)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 32)
+    }
+
+    private func row(_ task: IOSAdvancedTaskRecord) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon(for: task.status))
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(iconColor(for: task.status))
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(task.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text("\(task.status.title) · \(task.objective)")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if task.id == activeTaskId {
+                Image(systemName: "eye.fill")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.accent)
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
+        }
+        .frame(minHeight: 56)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+
+    private func icon(for status: IOSAdvancedTaskStatus) -> String {
+        switch status {
+        case .completed: "checkmark.seal.fill"
+        case .failed, .timedOut, .interrupted: "exclamationmark.triangle.fill"
+        case .cancelled: "xmark.circle.fill"
+        default: "bubble.left.and.bubble.right.fill"
+        }
+    }
+
+    private func iconColor(for status: IOSAdvancedTaskStatus) -> Color {
+        switch status {
+        case .completed: AmberTheme.accentGreen
+        case .failed, .timedOut, .interrupted: AmberTheme.accentRed
+        case .cancelled: AmberTheme.muted2
+        default: AmberTheme.accent
+        }
     }
 }
 
