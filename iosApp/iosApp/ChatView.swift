@@ -25,7 +25,7 @@ struct ChatView: View {
     @State private var isCameraPresented = false
     @State private var isPhotoPickerPresented = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
-    @FocusState private var isInputFocused: Bool
+    @State private var isInputFocused = false
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
@@ -35,8 +35,13 @@ struct ChatView: View {
     @State private var userDragging = false
     @State private var showScrollToBottom = false
     @State private var scrollToBottomTrigger = 0
+    @State private var composerInputHeight: CGFloat = 40
+    @State private var composerInputController = ComposerInputController()
     /// 当前是否已贴底(由 onScrollGeometryChange 维护),供跟随暂停/回到底部按钮使用。
     @State private var isAtBottom = false
+    /// 当前内容是否已经高过可视区。内容尚未超过一屏时强制 scrollTo(bottom) 会让整段回复
+    /// 在顶部自然布局和底部锚定之间来回跳,这是短回复流式初期抖动的主要来源。
+    @State private var isContentScrollable = false
     /// inset 感知的定位句柄:`scrollTo(edge:.bottom)` 停在内容底边的自然停靠位(尊重输入框
     /// safeAreaInset、不钻背后)。仅用于显式的一次性校正,不与布局锚点持续争抢。
     @State private var chatScrollPosition = ScrollPosition(edge: .bottom)
@@ -114,13 +119,14 @@ struct ChatView: View {
         }
         .sheet(isPresented: $isModelSheetPresented) {
             ComposerModelSheet(sharedSettings: sharedSettings, currentModel: composerCurrentModelSelection) { model in
-                sharedSettings.setCurrentChatModelId(model.id)
+                sharedSettings.setCurrentAssistantChatModelId(model.id)
                 sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                viewModel.reasoningLevel = sharedSettings.currentAssistantReasoningLevel()
                 viewModel.messageRevision &+= 1
                 isModelSheetPresented = false
             }
             .presentationDetents([.fraction(0.72), .large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
         }
         .fileImporter(
             isPresented: $isImportingSelectedFile,
@@ -161,6 +167,7 @@ struct ChatView: View {
             // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
             viewModel.conversationStore = conversationStore
             followPaused = false
+            isContentScrollable = false
             pendingInitialScrollToBottom = true
             viewModel.reloadFromStore()
             conversationLoadToken &+= 1   // 新身份 → initialOffset 重新「从底部实现」落位
@@ -174,6 +181,7 @@ struct ChatView: View {
         // 用 Int 修订号而非 KotlinUuid——后者是否被 Swift 当作 Equatable 不可靠。
         .onChange(of: conversationStore.currentRevision) { _, _ in
             followPaused = false
+            isContentScrollable = false
             pendingInitialScrollToBottom = true
             viewModel.reloadFromStore()
             conversationLoadToken &+= 1   // 切会话:换新身份让 initialOffset 重新落到底部
@@ -305,15 +313,139 @@ struct ChatView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            backToolbarButton
+        ZStack {
+            HStack {
+                backToolbarButton
 
-            Spacer()
+                Spacer()
 
-            newChatToolbarButton
+                newChatToolbarButton
+            }
+
+            ChatActivityIslandView(state: topIslandState)
+                .padding(.horizontal, 74)
+                .frame(maxWidth: .infinity)
+                .allowsHitTesting(false)
         }
         .padding(.horizontal, 18)
         .frame(height: 54)
+    }
+
+    private var topIslandState: ChatActivityIslandState {
+        if let step = activeToolStepForIsland {
+            return ChatActivityIslandState.activity(
+                kind: step.systemImage == "photo.on.rectangle" ? .image : .tool,
+                title: compactIslandText(step.title, limit: 18),
+                detail: step.detail.map { compactIslandText($0, limit: 22) },
+                systemImage: step.systemImage,
+                tint: islandTint(for: step)
+            )
+        }
+
+        if viewModel.isRecognizingImages {
+            return ChatActivityIslandState.activity(
+                kind: .image,
+                title: "识别图片",
+                detail: "整理图片上下文",
+                systemImage: "viewfinder",
+                tint: .cyan
+            )
+        }
+
+        if isAwaitingFirstAssistantChunk {
+            return ChatActivityIslandState.activity(
+                kind: .waiting,
+                title: "连接模型",
+                detail: "等待首个响应",
+                systemImage: "sparkles",
+                tint: .amber
+            )
+        }
+
+        if viewModel.isGenerationActive {
+            if lastAssistantHasOpenReasoning {
+                return ChatActivityIslandState.activity(
+                    kind: .thinking,
+                    title: "思考中",
+                    detail: composerReasoningLabel,
+                    systemImage: "brain.head.profile",
+                    tint: .amber
+                )
+            }
+            return ChatActivityIslandState.activity(
+                kind: .generating,
+                title: "生成回复",
+                detail: nil,
+                systemImage: "text.bubble",
+                tint: .accent
+            )
+        }
+
+        return .conversationTitle(conversationTitleForIsland)
+    }
+
+    private var activeToolStepForIsland: ChatToolStepModel? {
+        for message in viewModel.messages.suffix(3).reversed() {
+            let tools = message.parts.compactMap { $0 as? UIMessagePart.Tool }
+            if let active = tools.reversed().first(where: { $0.output.isEmpty }) {
+                return ChatToolStepModel(tool: active)
+            }
+        }
+        return nil
+    }
+
+    private var lastAssistantHasOpenReasoning: Bool {
+        guard let last = viewModel.messages.last, last.role == MessageRole.assistant else { return false }
+        return last.parts.contains { part in
+            guard let reasoning = part as? UIMessagePart.Reasoning else { return false }
+            return reasoning.finishedAt == nil
+        }
+    }
+
+    private var conversationTitleForIsland: String {
+        _ = conversationStore.currentRevision
+        let storedTitle = conversationStore.currentConversation?.title
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !storedTitle.isEmpty {
+            return compactIslandText(storedTitle, limit: 14)
+        }
+        if let firstUserText = viewModel.messages.first(where: { $0.role == MessageRole.user })?
+            .toText()
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !firstUserText.isEmpty {
+            return compactIslandText(firstUserText, limit: 14)
+        }
+        return "Amber"
+    }
+
+    private func compactIslandText(_ raw: String, limit: Int) -> String {
+        let compacted = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard compacted.count > limit else { return compacted }
+        return String(compacted.prefix(limit))
+    }
+
+    private func islandTint(for step: ChatToolStepModel) -> ChatActivityIslandTint {
+        switch step.state {
+        case .failed:
+            return .red
+        case .done:
+            return .green
+        case .active:
+            switch step.systemImage {
+            case "magnifyingglass", "globe", "globe.badge.chevron.backward":
+                return .cyan
+            case "photo.on.rectangle":
+                return .green
+            case "person.2.fill", "person.3.sequence":
+                return .indigo
+            case "brain.head.profile":
+                return .amber
+            default:
+                return .accent
+            }
+        }
     }
 
     private var backToolbarButton: some View {
@@ -327,6 +459,7 @@ struct ChatView: View {
             viewModel.cancelGeneration()
             Task { @MainActor in
                 followPaused = false
+                isContentScrollable = false
                 await conversationStore.newConversation()
                 viewModel.reloadFromStore()
             }
@@ -373,32 +506,49 @@ struct ChatView: View {
                             )
                         }
                         ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
-                            let isLastStreamingMessage = index == viewModel.messages.count - 1 && isStreamingFollowActive
-
                             VStack(spacing: 0) {
                                 MessageBubbleView(
                                     message: message,
                                     messageIndex: index,
                                     variantInfo: viewModel.variantInfo(atMessageIndex: index),
                                     displaySetting: sharedSettings.displaySetting,
+                                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
                                     onRegenerate: { viewModel.regenerate(atMessageIndex: index) },
                                     onEdit: { newText in viewModel.editMessage(atMessageIndex: index, newText: newText) },
                                     onDelete: { viewModel.deleteMessage(atMessageIndex: index) },
                                     onSelectVariant: { variantIndex in viewModel.selectVariant(messageIndex: index, variantIndex: variantIndex) },
+                                    onGenerativeWidgetAction: { prompt in
+                                        guard !viewModel.isGenerationActive else { return }
+                                        viewModel.inputText = prompt
+                                        followPaused = false
+                                        viewModel.sendMessage()
+                                    },
+                                    onModifyGeneratedImage: { imageURL, prompt, aspectRatio in
+                                        guard !viewModel.isGenerationActive else { return }
+                                        followPaused = false
+                                        viewModel.modifyGeneratedImage(
+                                            sourceImageURL: imageURL,
+                                            prompt: prompt,
+                                            aspectRatio: aspectRatio
+                                        )
+                                    },
                                     isGenerating: viewModel.isGenerationActive,
                                     isLastMessage: index == viewModel.messages.count - 1,
                                     reasoningLevelLabel: composerReasoningLabel
                                 )
 
-                                if isLastStreamingMessage {
-                                    Color.clear
-                                        .frame(height: ChatLayout.followBottomGap)
-                                        .allowsHitTesting(false)
-                                        .accessibilityHidden(true)
-                                }
                             }
                             .id(message.id)
-                            .transition(messageEntranceTransition(isUser: message.role == MessageRole.user))
+                            .transition(message.role == MessageRole.user
+                                ? messageEntranceTransition(isUser: true)
+                                : .opacity
+                            )
+                        }
+
+                        if isAwaitingFirstAssistantChunk {
+                            ChatAssistantPendingResponseView()
+                                .id("assistant-pending-response")
+                                .transition(.opacity)
                         }
 
                         if viewModel.isRecognizingImages {
@@ -454,14 +604,19 @@ struct ChatView: View {
                     break
                 }
             }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentSize.height - geometry.visibleRect.maxY <= ChatLayout.bottomStickThreshold
-            } action: { _, atBottom in
-                isAtBottom = atBottom
+            .onScrollGeometryChange(for: ChatScrollGeometryState.self) { geometry in
+                ChatScrollGeometryState(
+                    atBottom: geometry.contentSize.height - geometry.visibleRect.maxY <= ChatLayout.bottomStickThreshold,
+                    isScrollable: geometry.contentSize.height > geometry.visibleRect.height + ChatLayout.bottomStickThreshold
+                )
+            } action: { _, state in
+                isAtBottom = state.atBottom
+                isContentScrollable = state.isScrollable
                 if userDragging {
-                    followPaused = !atBottom
+                    followPaused = !state.atBottom
                 }
-                let shouldShow = !atBottom && !viewModel.messages.isEmpty
+                let autoFollowingGeneration = isStreamingFollowActive && followGeneration && !followPaused
+                let shouldShow = !state.atBottom && !viewModel.messages.isEmpty && !autoFollowingGeneration
                 if shouldShow != showScrollToBottom {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
                         showScrollToBottom = shouldShow
@@ -475,8 +630,21 @@ struct ChatView: View {
                     // 确保最终停在「输入框上方的回弹位」而非 frame 底/背后。一次调用,无循环。
                     Task { @MainActor in chatScrollPosition.scrollTo(edge: .bottom) }
                 } else if followGeneration, !followPaused {
-                    scrollToLatestMessage(proxy, animated: true, deferred: false)
+                    let shouldSnapAutoFollow = isStreamingFollowActive || viewModel.messages.last?.role == MessageRole.user
+                    if shouldSnapAutoFollow && !isContentScrollable {
+                        return
+                    }
+                    scrollToLatestMessage(
+                        proxy,
+                        animated: !shouldSnapAutoFollow,
+                        deferred: false,
+                        targetBottomAnchor: shouldSnapAutoFollow
+                    )
                 }
+            }
+            .onChange(of: isContentScrollable) { _, scrollable in
+                guard scrollable, followGeneration, !followPaused, isStreamingFollowActive else { return }
+                scrollToLatestMessage(proxy, animated: false, deferred: false, targetBottomAnchor: true)
             }
             .onChange(of: isInputFocused) { _, focused in
                 guard focused, !followPaused, !viewModel.messages.isEmpty else { return }
@@ -500,22 +668,34 @@ struct ChatView: View {
         viewModel.isGenerationActive || viewModel.isLoading
     }
 
+    private var isAwaitingFirstAssistantChunk: Bool {
+        isStreamingFollowActive && viewModel.messages.last?.role == MessageRole.user
+    }
+
     private func scrollToLatestMessage(
         _ proxy: ScrollViewProxy,
         animated: Bool,
-        deferred: Bool
+        deferred: Bool,
+        targetBottomAnchor: Bool = false
     ) {
         guard !viewModel.messages.isEmpty, let lastId = viewModel.messages.last?.id else { return }
+        let scroll = {
+            if targetBottomAnchor {
+                proxy.scrollTo(ChatLayout.bottomAnchorID, anchor: .bottom)
+            } else {
+                proxy.scrollTo(lastId, anchor: .bottom)
+            }
+        }
         let action = {
             if animated {
                 withAnimation {
-                    proxy.scrollTo(lastId, anchor: .bottom)
+                    scroll()
                 }
             } else {
                 var transaction = Transaction()
                 transaction.animation = nil
                 withTransaction(transaction) {
-                    proxy.scrollTo(lastId, anchor: .bottom)
+                    scroll()
                 }
             }
         }
@@ -746,29 +926,34 @@ struct ChatView: View {
                                     hasPendingToolApproval
                             )
 
-                            TextField(inputPlaceholder, text: $viewModel.inputText, axis: .vertical)
-                                .lineLimit(1...5)
-                                .textFieldStyle(.plain)
-                                .font(.body)
-                                .foregroundStyle(AmberTheme.foreground)
-                                .frame(minHeight: 40)
-                                .focused($isInputFocused)
-                                .onSubmit {
-                                    if sharedSettings.displaySetting.sendOnEnter {
-                                        guard sendEnabled else { return }
-                                        followPaused = false
-                                        viewModel.sendMessage()
-                                    }
+                            ZStack(alignment: .leading) {
+                                ComposerInputTextView(
+                                    text: $viewModel.inputText,
+                                    height: $composerInputHeight,
+                                    isFocused: inputFocusBinding,
+                                    isEnabled: !hasPendingToolApproval,
+                                    sendOnEnter: sharedSettings.displaySetting.sendOnEnter,
+                                    controller: composerInputController,
+                                    onSubmit: sendComposerMessage
+                                )
+                                .frame(height: composerInputHeight)
+
+                                if viewModel.inputText.isEmpty {
+                                    Text(inputPlaceholder)
+                                        .font(.body)
+                                        .foregroundStyle(AmberTheme.muted2)
+                                        .allowsHitTesting(false)
                                 }
-                                .disabled(hasPendingToolApproval || configurationIssue != nil)
-                                .onChange(of: viewModel.inputText) { _, newText in
-                                    let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
-                                    if sharedSettings.displaySetting.pasteLongTextAsFile,
-                                       newText.count > threshold,
-                                       !pasteHintShown {
-                                        pasteHintShown = true
-                                    }
+                            }
+                            .frame(minHeight: 40)
+                            .onChange(of: viewModel.inputText) { _, newText in
+                                let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
+                                if sharedSettings.displaySetting.pasteLongTextAsFile,
+                                   newText.count > threshold,
+                                   !pasteHintShown {
+                                    pasteHintShown = true
                                 }
+                            }
                         }
                         .padding(.leading, 8)
                         .padding(.trailing, 18)
@@ -779,10 +964,7 @@ struct ChatView: View {
                             isLoading: viewModel.isLoading,
                             sendEnabled: sendEnabled,
                             diameter: 54,
-                            onSend: {
-                                followPaused = false
-                                viewModel.sendMessage()
-                            },
+                            onSend: sendComposerMessage,
                             onStop: {
                                 viewModel.cancelGeneration()
                             }
@@ -792,8 +974,7 @@ struct ChatView: View {
                     if showsComposerMeta {
                         HStack {
                             Button {
-                                activeComposerPanel = nil
-                                isModelSheetPresented = true
+                                openComposerModelSheet()
                             } label: {
                                 Text(composerModelLabel)
                                     .font(.caption.weight(.semibold))
@@ -804,6 +985,7 @@ struct ChatView: View {
                             }
                             .buttonStyle(.plain)
                             .composerDockGlass(cornerRadius: 15)
+                            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                             .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
 
                             Spacer()
@@ -821,7 +1003,8 @@ struct ChatView: View {
                                 .popover(isPresented: popoverBinding(for: .thinking), arrowEdge: .bottom) {
                                     ComposerThinkingPanel(
                                         selectedOption: selectedReasoningBinding,
-                                        isAvailable: viewModel.currentModelSupportsReasoning
+                                        options: availableReasoningOptions,
+                                        isAvailable: reasoningIsAvailable
                                     ) { _ in activeComposerPanel = nil }
                                     .presentationCompactAdaptation(.popover)
                                 }
@@ -848,12 +1031,39 @@ struct ChatView: View {
     }
 
     private var sendEnabled: Bool {
+        sendEnabled(for: viewModel.inputText)
+    }
+
+    private func sendEnabled(for text: String) -> Bool {
         _ = sharedSettings.revision
-        return !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !viewModel.isGenerationActive &&
             !viewModel.isAttachingSelectedFile &&
             !hasPendingToolApproval &&
             configurationIssue == nil
+    }
+
+    private func sendComposerMessage() {
+        let committedText = composerInputController.committedText() ?? viewModel.inputText
+        if committedText != viewModel.inputText {
+            viewModel.inputText = committedText
+        }
+        guard sendEnabled(for: committedText) else { return }
+        followPaused = false
+        viewModel.sendMessage()
+    }
+
+    private func openComposerModelSheet() {
+        activeComposerPanel = nil
+        if let currentText = composerInputController.currentText(),
+           currentText != viewModel.inputText {
+            viewModel.inputText = currentText
+        }
+        isModelSheetPresented = true
+        Task { @MainActor in
+            await Task.yield()
+            dismissKeyboard()
+        }
     }
 
     private var configurationIssue: ChatConfigurationIssue? {
@@ -873,6 +1083,8 @@ struct ChatView: View {
             "先配置服务商"
         case .unsupportedProvider:
             "先切换服务商"
+        case .codexNotSignedIn:
+            "先登录 Codex"
         case nil:
             "发消息给 Amber..."
         }
@@ -889,7 +1101,8 @@ struct ChatView: View {
     private var showsComposerMeta: Bool {
         isInputFocused ||
             activeComposerPanel != nil ||
-            isModelSheetPresented
+            isModelSheetPresented ||
+            configurationIssue != nil
     }
 
     private var composerModelLabel: String {
@@ -906,7 +1119,20 @@ struct ChatView: View {
     }
 
     private var selectedReasoningOption: ComposerReasoningOption {
-        ComposerReasoningOption(reasoningLevel: viewModel.reasoningLevel)
+        _ = sharedSettings.revision
+        return ComposerReasoningOption(reasoningLevel: sharedSettings.currentAssistantReasoningLevel())
+    }
+
+    private var availableReasoningOptions: [ComposerReasoningOption] {
+        _ = sharedSettings.revision
+        let options = sharedSettings.currentAssistantReasoningLevels().map(ComposerReasoningOption.init)
+        var seen = Set<ComposerReasoningOption>()
+        let unique = options.filter { seen.insert($0).inserted }
+        return unique.isEmpty ? [.off] : unique
+    }
+
+    private var reasoningIsAvailable: Bool {
+        availableReasoningOptions.contains { $0 != .off }
     }
 
     // Reasoning effort shown on the thinking pill (e.g. "Auto"); nil when reasoning is off.
@@ -919,12 +1145,22 @@ struct ChatView: View {
     private var selectedReasoningBinding: Binding<ComposerReasoningOption> {
         Binding(
             get: { selectedReasoningOption },
-            set: { viewModel.reasoningLevel = $0.reasoningLevel }
+            set: { option in
+                sharedSettings.updateCurrentAssistantReasoningLevel(option.reasoningLevel)
+                viewModel.reasoningLevel = sharedSettings.currentAssistantReasoningLevel()
+            }
+        )
+    }
+
+    private var inputFocusBinding: Binding<Bool> {
+        Binding(
+            get: { isInputFocused },
+            set: { isInputFocused = $0 }
         )
     }
 
     private var reasoningAccessibilityValue: String {
-        viewModel.currentModelSupportsReasoning ? selectedReasoningOption.title : "当前模型未标记 Reasoning"
+        reasoningIsAvailable ? selectedReasoningOption.title : "当前模型未标记 Reasoning"
     }
 
     private func toggleComposerPanel(_ panel: ComposerPanel) {
@@ -935,7 +1171,7 @@ struct ChatView: View {
         switch configurationIssue {
         case .missingModel:
             openModelDefaults()
-        case .missingAPIKey, .invalidBaseURL, .missingProvider, .unsupportedProvider, nil:
+        case .missingAPIKey, .invalidBaseURL, .missingProvider, .unsupportedProvider, .codexNotSignedIn, nil:
             router.navigate(to: .providers)
         }
     }
@@ -1065,6 +1301,137 @@ struct ComposerDockSendButton: View {
     private var glassTint: Color? {
         if isLoading { return AmberTheme.accentRed }
         return sendEnabled ? AmberTheme.accent : nil
+    }
+}
+
+private final class ComposerInputController {
+    weak var textView: UITextView?
+
+    func currentText() -> String? {
+        textView?.text
+    }
+
+    func committedText() -> String? {
+        guard let textView else { return nil }
+        textView.unmarkText()
+        return textView.text
+    }
+}
+
+private struct ComposerInputTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var height: CGFloat
+    var isFocused: Binding<Bool>
+    var isEnabled: Bool
+    var sendOnEnter: Bool
+    var controller: ComposerInputController
+    var onSubmit: () -> Void
+
+    private let minHeight: CGFloat = 40
+    private let maxLines: CGFloat = 5
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        controller.textView = textView
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textColor = .label
+        textView.tintColor = UIColor(AmberTheme.accent)
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        textView.textContainer.lineFragmentPadding = 0
+        textView.isScrollEnabled = false
+        textView.keyboardDismissMode = .interactive
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        context.coordinator.parent = self
+        controller.textView = textView
+        if textView.text != text {
+            textView.text = text
+        }
+        textView.isEditable = isEnabled
+        textView.isSelectable = isEnabled
+        textView.returnKeyType = sendOnEnter ? .send : .default
+        if !isEnabled, textView.isFirstResponder {
+            textView.resignFirstResponder()
+        } else if isFocused.wrappedValue, !textView.isFirstResponder {
+            textView.becomeFirstResponder()
+        }
+        context.coordinator.updateHeight(for: textView)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    static func dismantleUIView(_ uiView: UITextView, coordinator: Coordinator) {
+        if coordinator.controller.textView === uiView {
+            coordinator.controller.textView = nil
+        }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: ComposerInputTextView
+        let controller: ComposerInputController
+
+        init(parent: ComposerInputTextView) {
+            self.parent = parent
+            self.controller = parent.controller
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused.wrappedValue = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused.wrappedValue = false
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            if parent.text != textView.text {
+                parent.text = textView.text
+            }
+            updateHeight(for: textView)
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText replacement: String
+        ) -> Bool {
+            guard replacement == "\n", parent.sendOnEnter else { return true }
+            if textView.markedTextRange != nil {
+                return true
+            }
+            parent.onSubmit()
+            return false
+        }
+
+        func updateHeight(for textView: UITextView) {
+            let width = textView.bounds.width
+            guard width > 0 else { return }
+            let fittingSize = textView.sizeThatFits(
+                CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+            )
+            let font = textView.font ?? .preferredFont(forTextStyle: .body)
+            let maxHeight = ceil(font.lineHeight * parent.maxLines)
+                + textView.textContainerInset.top
+                + textView.textContainerInset.bottom
+            let nextHeight = min(max(parent.minHeight, ceil(fittingSize.height)), maxHeight)
+            let shouldScroll = fittingSize.height > maxHeight + 0.5
+            DispatchQueue.main.async {
+                if abs(self.parent.height - nextHeight) > 0.5 {
+                    self.parent.height = nextHeight
+                }
+                if textView.isScrollEnabled != shouldScroll {
+                    textView.isScrollEnabled = shouldScroll
+                }
+            }
+        }
     }
 }
 
@@ -1518,6 +1885,7 @@ private enum ComposerReasoningOption: String, CaseIterable, Identifiable {
 
 private struct ComposerThinkingPanel: View {
     @Binding var selectedOption: ComposerReasoningOption
+    let options: [ComposerReasoningOption]
     let isAvailable: Bool
     let onPick: (ComposerReasoningOption) -> Void
 
@@ -1525,7 +1893,7 @@ private struct ComposerThinkingPanel: View {
         ComposerPopoverSurface(width: 180) {
             if isAvailable {
                 VStack(spacing: 0) {
-                    ForEach(Array(ComposerReasoningOption.allCases.enumerated()), id: \.element.id) { index, option in
+                    ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                         ComposerPopoverDivider(index: index)
 
                         Button {
@@ -1706,6 +2074,11 @@ enum ChatLayout {
     static let bottomAnchorID = "chat-bottom-rest-anchor"
 }
 
+private struct ChatScrollGeometryState: Equatable {
+    let atBottom: Bool
+    let isScrollable: Bool
+}
+
 struct ChatAssistantStack<Content: View>: View {
     let content: Content
 
@@ -1806,6 +2179,58 @@ struct ChatAssistantText<Content: View>: View {
     }
 }
 
+private struct ChatAssistantPendingResponseView: View {
+    @State private var startedAt = Date()
+
+    var body: some View {
+        ChatAssistantStack {
+            ChatAgentName()
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accentAmber)
+
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let elapsed = Int(max(0, context.date.timeIntervalSince(startedAt)))
+                    Text(elapsed >= 2 ? "正在等待模型响应 \(elapsed) 秒" : "正在连接模型")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.foreground2)
+                }
+
+                TypingDots()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                AmberTheme.surface,
+                in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct TypingDots: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { timeline in
+            HStack(spacing: 3) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(AmberTheme.muted.opacity(dotOpacity(index: index, date: timeline.date)))
+                        .frame(width: 4, height: 4)
+                }
+            }
+        }
+        .frame(width: 20, height: 8)
+    }
+
+    private func dotOpacity(index: Int, date: Date) -> Double {
+        let phase = (date.timeIntervalSinceReferenceDate * 1.8 + Double(index) * 0.28)
+            .truncatingRemainder(dividingBy: 1)
+        return 0.25 + 0.55 * (0.5 + 0.5 * sin(phase * .pi * 2))
+    }
+}
+
 struct ChatReasoningCard: View {
     let bodyText: String
     var isThinking: Bool = false
@@ -1830,14 +2255,31 @@ struct ChatReasoningCard: View {
         self.finishedSeconds = finishedSeconds
         self.levelLabel = levelLabel
         self.autoCloseThinking = autoCloseThinking
-        // Expanded while streaming so the reasoning is visible as it generates; otherwise follow
-        // the autoCloseThinking setting.
-        self._isExpanded = State(initialValue: isThinking ? true : !autoCloseThinking)
+        // Streaming reasoning should be visible: it reassures the user that the agent is working.
+        // The body gets a fixed live height below, so visibility does not fight chat scrolling.
+        let hasInitialBodyText = !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        self._isExpanded = State(initialValue: hasInitialBodyText && (isThinking ? true : !autoCloseThinking))
     }
 
     private var levelSuffix: String {
         guard let levelLabel, !levelLabel.isEmpty else { return "" }
         return " · \(levelLabel)"
+    }
+
+    private var hasBodyText: Bool {
+        !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showsBody: Bool {
+        isExpanded && hasBodyText
+    }
+
+    private var capsuleFill: Color {
+        AmberTheme.accent.opacity(isThinking ? 0.10 : 0.08)
+    }
+
+    private var capsuleStroke: Color {
+        AmberTheme.accent.opacity(isThinking ? 0.20 : 0.16)
     }
 
     private func titleText(elapsed: Int?) -> String {
@@ -1877,6 +2319,7 @@ struct ChatReasoningCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                guard hasBodyText else { return }
                 userToggled = true
                 withAnimation(.easeInOut(duration: 0.22)) { isExpanded.toggle() }
             } label: {
@@ -1889,12 +2332,14 @@ struct ChatReasoningCard: View {
 
                     // Collapsed: hug content (chevron sits right after the title). Expanded: push
                     // the chevron to the right edge, matching the full-width reading area below.
-                    if isExpanded { Spacer(minLength: 6) }
+                    if showsBody { Spacer(minLength: 6) }
 
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(AmberTheme.muted)
-                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    if hasBodyText {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(AmberTheme.muted)
+                            .rotationEffect(.degrees(showsBody ? 180 : 0))
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -1902,7 +2347,7 @@ struct ChatReasoningCard: View {
             }
             .buttonStyle(.plain)
 
-            if isExpanded {
+            if showsBody {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
@@ -1917,11 +2362,15 @@ struct ChatReasoningCard: View {
                         .padding(.top, 2)
                         .padding(.bottom, 10)
                     }
-                    .frame(maxHeight: 220)
+                    .frame(height: isThinking ? 132 : nil)
+                    .frame(maxHeight: isThinking ? nil : 220)
                     .onChange(of: bodyText) { _, _ in
-                        // Follow the streaming reasoning tail while it generates.
+                        // Follow the streaming reasoning tail without adding a second animation
+                        // loop inside the chat scroll view.
                         if isThinking {
-                            withAnimation(.linear(duration: 0.15)) {
+                            var transaction = Transaction()
+                            transaction.animation = nil
+                            withTransaction(transaction) {
                                 proxy.scrollTo("reasoning-bottom", anchor: .bottom)
                             }
                         }
@@ -1933,15 +2382,31 @@ struct ChatReasoningCard: View {
             }
         }
         .background(
-            AmberTheme.surface,
-            in: RoundedRectangle(cornerRadius: isExpanded ? AmberTheme.radiusLarge : 17, style: .continuous)
+            capsuleFill,
+            in: RoundedRectangle(cornerRadius: showsBody ? AmberTheme.radiusLarge : 17, style: .continuous)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: showsBody ? AmberTheme.radiusLarge : 17, style: .continuous)
+                .stroke(capsuleStroke, lineWidth: 0.7)
+        }
         // Clip to the capsule so the collapsing content can never render outside / through it.
-        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? AmberTheme.radiusLarge : 17, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: showsBody ? AmberTheme.radiusLarge : 17, style: .continuous))
+        .onChange(of: bodyText) { _, newValue in
+            guard isThinking, !userToggled else { return }
+            if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                isExpanded = true
+            }
+        }
         .onChange(of: isThinking) { _, nowThinking in
-            // Auto-collapse when generation finishes, unless the user opened it themselves.
-            if !nowThinking, autoCloseThinking, !userToggled {
-                withAnimation(.easeInOut(duration: 0.22)) { isExpanded = false }
+            guard !userToggled else { return }
+            if nowThinking {
+                isExpanded = hasBodyText
+            } else if autoCloseThinking {
+                var transaction = Transaction()
+                transaction.animation = nil
+                withTransaction(transaction) {
+                    isExpanded = false
+                }
             }
         }
     }
@@ -1986,11 +2451,11 @@ enum ChatToolStepState {
     var rowFill: Color {
         switch self {
         case .done:
-            AmberTheme.surface
+            AmberTheme.accent.opacity(0.08)
         case .active:
-            AmberTheme.background
+            AmberTheme.accent.opacity(0.10)
         case .failed:
-            AmberTheme.background
+            AmberTheme.accentRed.opacity(0.10)
         }
     }
 
@@ -2008,11 +2473,11 @@ enum ChatToolStepState {
     var stroke: Color {
         switch self {
         case .done:
-            AmberTheme.borderSoft
+            AmberTheme.accent.opacity(0.16)
         case .active:
-            AmberTheme.accent.opacity(0.72)
+            AmberTheme.accent.opacity(0.20)
         case .failed:
-            AmberTheme.accentRed.opacity(0.72)
+            AmberTheme.accentRed.opacity(0.22)
         }
     }
 }
@@ -2120,10 +2585,19 @@ struct ChatToolStepModel: Identifiable {
             let prompt = Self.imagePrompt(from: tool.input)
             let imageCount = tool.output.compactMap { $0 as? UIMessagePart.Image }.count
             let executed = !tool.output.isEmpty
+            if executed && imageCount == 0 {
+                self.init(
+                    systemImage: "photo.on.rectangle",
+                    title: Self.combinedLine("图片生成失败", prompt),
+                    detail: ChatToolOutputFormatter.imageFailureReason(from: tool.output) ?? "没有返回图片",
+                    state: .failed
+                )
+                return
+            }
             self.init(
                 systemImage: "photo.on.rectangle",
                 title: Self.combinedLine(executed ? "图片已生成" : "正在生成图片", prompt),
-                detail: executed ? "\(max(imageCount, 1)) 张图片" : prompt.map { "提示词：\($0)" },
+                detail: executed ? "\(imageCount) 张图片" : prompt.map { "提示词：\($0)" },
                 state: executed ? .done : .active
             )
             return
@@ -2526,7 +3000,11 @@ struct ChatToolTimeline: View {
         .padding(.vertical, 6)
         // Hug content (chip-style); a long title still truncates because the message column
         // bounds the available width. No maxWidth:.infinity → pills don't stretch full-width.
-        .background(AmberTheme.surface, in: Capsule(style: .continuous))
+        .background(step.state.rowFill, in: Capsule(style: .continuous))
+        .overlay {
+            Capsule(style: .continuous)
+                .stroke(step.state.stroke, lineWidth: 0.7)
+        }
         .contentShape(Capsule(style: .continuous))
     }
 
@@ -2567,13 +3045,6 @@ private struct ChatEmptyState: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 96)
         .padding(.bottom, 180)
-    }
-}
-
-private extension String {
-    var nilIfBlank: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

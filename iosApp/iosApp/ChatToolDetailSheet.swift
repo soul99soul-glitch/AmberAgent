@@ -89,7 +89,7 @@ struct ChatToolDetailSheet: View {
             } else {
                 if !storedOutputText.isEmpty { codeBlock(storedOutputText) }
                 ForEach(Array(outputImages.enumerated()), id: \.offset) { _, img in
-                    AsyncImage(url: URL(string: img.url)) { image in
+                    AsyncImage(url: Self.imageURL(from: img.url)) { image in
                         image.resizable().scaledToFit()
                     } placeholder: {
                         ProgressView()
@@ -160,13 +160,7 @@ struct ChatToolDetailSheet: View {
     }
 
     private func codeBlock(_ text: String) -> some View {
-        Text(text)
-            .font(.system(.footnote, design: .monospaced))
-            .foregroundStyle(AmberTheme.foreground2)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        LazyToolTextBlock(text: text)
     }
 
     private func statusLine(_ text: String) -> some View {
@@ -198,10 +192,78 @@ struct ChatToolDetailSheet: View {
         return nil
     }
 
+    static func imageURL(from raw: String) -> URL? {
+        IOSImageGenerationRepository.resolvedImageURL(from: raw)
+    }
+
     static func markdownAttributed(_ text: String) -> AttributedString {
         (try? AttributedString(
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )) ?? AttributedString(text)
+    }
+}
+
+private struct LazyToolTextBlock: View {
+    let text: String
+    @State private var isExpanded = false
+
+    private let previewLimit = 1_600
+
+    private var isLong: Bool {
+        text.utf8.count > previewLimit
+    }
+
+    private var displayText: String {
+        guard isLong, !isExpanded else { return text }
+        return String(text.prefix(previewLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(displayText)
+                .font(.system(.footnote, design: .monospaced))
+                .foregroundStyle(AmberTheme.foreground2)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isLong {
+                Divider().overlay(AmberTheme.borderSoft)
+
+                Button {
+                    var transaction = Transaction()
+                    transaction.animation = nil
+                    withTransaction(transaction) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(isExpanded ? "收起完整内容" : "展开完整内容")
+                        Spacer(minLength: 0)
+                        Text(byteCountText)
+                            .foregroundStyle(AmberTheme.muted2)
+                    }
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.accent)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var byteCountText: String {
+        let bytes = text.utf8.count
+        if bytes >= 1_048_576 {
+            return String(format: "%.1f MB", Double(bytes) / 1_048_576)
+        }
+        if bytes >= 1_024 {
+            return String(format: "%.1f KB", Double(bytes) / 1_024)
+        }
+        return "\(bytes) B"
     }
 }
