@@ -12,11 +12,20 @@ struct AmberAgentActivityWidgetBundle: WidgetBundle {
 struct AmberAgentActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AgentActivityAttributes.self) { context in
-            LockScreenAgentActivityView(presentation: context.state.presentation)
-                .activityBackgroundTint(.black.opacity(0.78))
+            LockScreenAgentActivityView(
+                presentation: context.state.presentation,
+                startedAt: context.attributes.startedAt
+            )
+                .activityBackgroundTint(.amberActivityBackground)
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    AgentActivityPhaseBadge(presentation: context.state.presentation, size: 34)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    ElapsedActivityTime(startedAt: context.attributes.startedAt)
+                }
                 DynamicIslandExpandedRegion(.center) {
                     ExpandedStatusLine(presentation: context.state.presentation)
                 }
@@ -24,80 +33,26 @@ struct AmberAgentActivityWidget: Widget {
                     ExpandedStepTrack(presentation: context.state.presentation)
                 }
             } compactLeading: {
-                Text(compactLeadingText(for: context.state.presentation))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                Image(systemName: context.state.presentation.phaseSymbolName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(phaseColor(for: context.state.presentation))
             } compactTrailing: {
-                Text(compactTrailingText(for: context.state.presentation))
+                Text(context.state.presentation.compactTrailingText)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.white.opacity(0.82))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             } minimal: {
-                Text(minimalText(for: context.state.presentation))
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(minimalColor(for: context.state.presentation))
+                Image(systemName: context.state.presentation.phaseSymbolName)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(phaseColor(for: context.state.presentation))
             }
             .keylineTint(.amberAccent)
         }
     }
 
-    private func compactLeadingText(for presentation: AgentActivityPresentation) -> String {
-        switch presentation.phase {
-        case .waitingForUser:
-            "确认"
-        case .completed:
-            "完成"
-        case .failed:
-            "失败"
-        case .cancelled:
-            "停止"
-        case .running:
-            "Amber"
-        }
-    }
-
-    private func compactTrailingText(for presentation: AgentActivityPresentation) -> String {
-        switch presentation.phase {
-        case .running:
-            "执行中"
-        case .waitingForUser:
-            "等待"
-        case .completed:
-            "已完成"
-        case .failed:
-            "问题"
-        case .cancelled:
-            "已停"
-        }
-    }
-
-    private func minimalText(for presentation: AgentActivityPresentation) -> String {
-        switch presentation.phase {
-        case .running:
-            "●"
-        case .waitingForUser:
-            "!"
-        case .completed:
-            "✓"
-        case .failed, .cancelled:
-            "!"
-        }
-    }
-
-    private func minimalColor(for presentation: AgentActivityPresentation) -> Color {
-        switch presentation.phase {
-        case .running:
-            .amberAccent
-        case .waitingForUser:
-            .orange
-        case .completed:
-            .green
-        case .failed, .cancelled:
-            .red
-        }
+    private func phaseColor(for presentation: AgentActivityPresentation) -> Color {
+        presentation.phase.widgetColor
     }
 }
 
@@ -105,14 +60,21 @@ private struct ExpandedStatusLine: View {
     let presentation: AgentActivityPresentation
 
     var body: some View {
-        Text(presentation.statusText)
-            .font(.system(size: 15, weight: .semibold, design: .default))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-            .minimumScaleFactor(0.78)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
-            .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(presentation.statusText)
+                .font(.system(size: 15, weight: .semibold, design: .default))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+
+            Text(presentation.currentStepTitle)
+                .font(.system(size: 11, weight: .medium, design: .default))
+                .foregroundStyle(.white.opacity(0.62))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
     }
 }
 
@@ -121,11 +83,18 @@ private struct ExpandedStepTrack: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(presentation.toolTitle)
-                .font(.system(size: 12, weight: .semibold, design: .default))
-                .foregroundStyle(.white.opacity(0.72))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            HStack(spacing: 8) {
+                Text(presentation.toolTitle)
+                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                ProgressView(value: presentation.progress)
+                    .progressViewStyle(.linear)
+                    .tint(presentation.phase.widgetColor)
+                    .frame(maxWidth: 92)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(presentation.steps) { step in
@@ -134,7 +103,6 @@ private struct ExpandedStepTrack: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
         .padding(.top, 2)
         .padding(.bottom, 10)
         .padding(.bottom, 2)
@@ -189,18 +157,38 @@ private struct StepRow: View {
 
 private struct LockScreenAgentActivityView: View {
     let presentation: AgentActivityPresentation
+    let startedAt: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(presentation.statusText)
-                .font(.headline)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                AgentActivityPhaseBadge(presentation: presentation, size: 34)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(presentation.statusText)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                    Text(presentation.currentStepTitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                ElapsedActivityTime(startedAt: startedAt)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(presentation.toolTitle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(presentation.toolTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ProgressView(value: presentation.progress)
+                        .progressViewStyle(.linear)
+                        .tint(presentation.phase.widgetColor)
+                }
                 ForEach(presentation.steps) { step in
                     HStack(spacing: 6) {
                         Text(step.state.marker)
@@ -216,6 +204,53 @@ private struct LockScreenAgentActivityView: View {
     }
 }
 
+private struct AgentActivityPhaseBadge: View {
+    let presentation: AgentActivityPresentation
+    var size: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(presentation.phase.widgetColor.opacity(0.18))
+            Circle()
+                .stroke(presentation.phase.widgetColor.opacity(0.38), lineWidth: 1)
+            Image(systemName: presentation.phaseSymbolName)
+                .font(.system(size: size * 0.38, weight: .semibold))
+                .foregroundStyle(presentation.phase.widgetColor)
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+private struct ElapsedActivityTime: View {
+    let startedAt: Date
+
+    var body: some View {
+        Text(startedAt, style: .timer)
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.white.opacity(0.78))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+    }
+}
+
 private extension Color {
     static let amberAccent = Color(red: 1.0, green: 0.66, blue: 0.28)
+    static let amberActivityBackground = Color(red: 0.10, green: 0.09, blue: 0.08)
+}
+
+private extension AgentActivityPhase {
+    var widgetColor: Color {
+        switch self {
+        case .running:
+            .amberAccent
+        case .waitingForUser:
+            .orange
+        case .completed:
+            .green
+        case .failed, .cancelled:
+            .red
+        }
+    }
 }
