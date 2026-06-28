@@ -60,6 +60,7 @@ struct ChatGenerationBindings {
     let setPendingWebMountApproval: (WebMountToolApprovalRequest?) -> Void
     let setPendingWorkspaceApproval: (WorkspaceToolApprovalRequest?) -> Void
     let setPendingMcpApproval: (McpToolApprovalRequest?) -> Void
+    let setContextCompactState: (ChatContextCompactState) -> Void
     let persistMessages: (KotlinUuid?) -> Void
     let recordRun: (String, Int64, String, String) async -> Void
     let startLiveActivity: (String, AgentActivityPresentation) -> Void
@@ -126,6 +127,7 @@ final class ChatGenerationCoordinator {
             cancel()
         }
         bindings.setIsLoading(true)
+        bindings.setContextCompactState(.idle)
 
         let runId = UUID().uuidString
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
@@ -183,7 +185,7 @@ final class ChatGenerationCoordinator {
             // Codex needs `OpenAI-Beta`/originator/account-id headers on the
             // /responses request (else the backend 404s) — inject them for codex.
             let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(params, provider: providerSetting)
-            self.startStreaming(
+            await self.prepareAndStartStreaming(
                 providerSetting: effectiveProvider,
                 params: effectiveParams,
                 runId: runId,
@@ -264,6 +266,7 @@ final class ChatGenerationCoordinator {
         currentToolResumeCount = 0
         clearPendingApprovals()
         bindings.setIsLoading(false)
+        bindings.setContextCompactState(.idle)
 
         guard let runId, let startedAt, let digest else { return }
         Task { @MainActor [dependencies, bindings] in
@@ -316,6 +319,132 @@ final class ChatGenerationCoordinator {
         await finishPendingMcpToolApproval(allow: false)
     }
 
+    private func prepareAndStartStreaming(
+        providerSetting: ProviderSetting,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        uploadMessages: [UIMessage]
+    ) async {
+        guard currentRunId == runId else { return }
+        let effectiveProvider: ProviderSetting
+        do {
+            effectiveProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
+        } catch {
+            await presentStreamError(
+                rawMessage: (error as NSError).localizedDescription,
+                modelId: params.model.modelId,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return
+        }
+        let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(params, provider: effectiveProvider)
+
+        let runtimeBaseline = bindings.messagesByInjectingRuntimeContext(uploadMessages)
+        let runtimeOverheadTokens = max(
+            IOSContextCompactionCoordinator.estimatedTokensForRequest(runtimeBaseline) -
+                IOSContextCompactionCoordinator.estimatedTokensForRequest(uploadMessages),
+            0
+        )
+
+        let preparedUploadMessages: [UIMessage]
+        do {
+            preparedUploadMessages = try await IOSContextCompactionCoordinator.shared.prepareMessagesForRequest(
+                uploadMessages: uploadMessages,
+                conversationId: conversationId,
+                settings: dependencies.sharedSettings.snapshot,
+                params: effectiveParams,
+                fallbackProvider: effectiveProvider,
+                promptOverheadTokens: runtimeOverheadTokens,
+                onEvent: { [weak self] event in
+                    guard let self, self.currentRunId == runId else { return }
+                    self.applyCompactEvent(event)
+                }
+            )
+        } catch {
+            if currentRunId == runId {
+                applyCompactEvent(.failed(message: (error as NSError).localizedDescription))
+            }
+            await presentStreamError(
+                rawMessage: "上下文压缩失败：\((error as NSError).localizedDescription)",
+                modelId: effectiveParams.model.modelId,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return
+        }
+        guard currentRunId == runId else { return }
+        let runtimePreparedMessages = bindings.messagesByInjectingRuntimeContext(preparedUploadMessages)
+        let finalUploadMessages: [UIMessage]
+        do {
+            finalUploadMessages = try IOSContextCompactionCoordinator.shared.finalizedMessagesForRequest(
+                runtimePreparedMessages,
+                settings: dependencies.sharedSettings.snapshot,
+                params: effectiveParams
+            )
+        } catch {
+            if currentRunId == runId {
+                applyCompactEvent(.failed(message: (error as NSError).localizedDescription))
+            }
+            await presentStreamError(
+                rawMessage: "上下文压缩失败：\((error as NSError).localizedDescription)",
+                modelId: effectiveParams.model.modelId,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return
+        }
+        startStreaming(
+            providerSetting: effectiveProvider,
+            params: effectiveParams,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            uploadMessages: finalUploadMessages
+        )
+    }
+
+    private func applyCompactEvent(_ event: IOSContextCompactionEvent) {
+        switch event {
+        case .planning:
+            bindings.setContextCompactState(ChatContextCompactState(
+                status: .planning,
+                summary: "",
+                updatedAt: Date()
+            ))
+        case .compacting:
+            bindings.setContextCompactState(ChatContextCompactState(
+                status: .compacting,
+                summary: "",
+                updatedAt: Date()
+            ))
+        case .completed(let summary):
+            bindings.setContextCompactState(ChatContextCompactState(
+                status: .completed,
+                summary: summary,
+                updatedAt: Date()
+            ))
+        case .failed(let message):
+            bindings.setContextCompactState(ChatContextCompactState(
+                status: .failed,
+                summary: message,
+                updatedAt: Date()
+            ))
+        case .idle:
+            bindings.setContextCompactState(.idle)
+        }
+    }
+
     private func startStreaming(
         providerSetting: ProviderSetting,
         params: TextGenerationParams,
@@ -330,11 +459,10 @@ final class ChatGenerationCoordinator {
             model: params.model
         )
         var detectedToolCallIds = Set<String>()
-        let preparedUploadMessages = bindings.messagesByInjectingRuntimeContext(uploadMessages)
 
         streamJob = dispatchStream(
             providerSetting: providerSetting,
-            messages: preparedUploadMessages,
+            messages: uploadMessages,
             params: params,
             onChunk: { chunk in
                 Task { @MainActor [weak self] in
@@ -541,7 +669,7 @@ final class ChatGenerationCoordinator {
                 presentation: .generatingResponse(modelName: params.model.modelId),
                 force: true
             )
-            startStreaming(
+            await prepareAndStartStreaming(
                 providerSetting: providerSetting,
                 params: params,
                 runId: runId,
@@ -678,15 +806,18 @@ final class ChatGenerationCoordinator {
             pending.runId,
             .generatingResponse(modelName: pending.params.model.modelId)
         )
-        startStreaming(
-            providerSetting: pending.providerSetting,
-            params: pending.params,
-            runId: pending.runId,
-            startedAt: pending.startedAt,
-            inputDigest: pending.inputDigest,
-            conversationId: pending.conversationId,
-            uploadMessages: resumedMessages
-        )
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.prepareAndStartStreaming(
+                providerSetting: pending.providerSetting,
+                params: pending.params,
+                runId: pending.runId,
+                startedAt: pending.startedAt,
+                inputDigest: pending.inputDigest,
+                conversationId: pending.conversationId,
+                uploadMessages: resumedMessages
+            )
+        }
     }
 
     private func dispatchStream(

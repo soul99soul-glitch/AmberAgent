@@ -27,6 +27,30 @@ struct ChatContextSnapshot {
     let currentContextTokens: Int
 }
 
+enum ChatContextCompactStatus: Equatable {
+    case idle
+    case planning
+    case compacting
+    case completed
+    case failed
+}
+
+struct ChatContextCompactState: Equatable {
+    var status: ChatContextCompactStatus
+    var summary: String
+    var updatedAt: Date
+
+    static let idle = ChatContextCompactState(status: .idle, summary: "", updatedAt: Date.distantPast)
+
+    var isActive: Bool {
+        status == .planning || status == .compacting
+    }
+
+    var isVisible: Bool {
+        isActive || status == .completed || status == .failed
+    }
+}
+
 extension ChatContextSnapshot {
     /// 未声明上下文窗口的模型的默认兜底(token)。当下主流模型基本都 ≥100万,
     /// 几乎不存在比 20万更小的,故用 20万作保守默认 —— 比旧的 8K 合理得多。
@@ -72,6 +96,7 @@ final class ChatViewModel {
     var pendingWorkspaceApproval: WorkspaceToolApprovalRequest?
     var pendingMcpApproval: McpToolApprovalRequest?
     var configurationError: String?
+    var contextCompactState: ChatContextCompactState = .idle
 
     /// 持久化存储（由 AppShell 注入）。nil 时退化为纯内存模式（向后兼容旧调用方）。
     weak var conversationStore: IOSConversationStore?
@@ -284,6 +309,11 @@ final class ChatViewModel {
                 setPendingMcpApproval: { [weak self] request in
                     self?.pendingMcpApproval = request
                 },
+                setContextCompactState: { [weak self] state in
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        self?.contextCompactState = state
+                    }
+                },
                 persistMessages: { [weak self] conversationId in
                     self?.persistMessages(conversationId: conversationId)
                 },
@@ -318,6 +348,7 @@ final class ChatViewModel {
     func reloadFromStore() {
         guard let store = conversationStore else { return }
         messages = store.currentMessages
+        contextCompactState = .idle
         messageRevision &+= 1
         chatSuggestions = []
     }

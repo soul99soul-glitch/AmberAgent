@@ -557,6 +557,12 @@ struct ChatView: View {
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
                         }
 
+                        if viewModel.contextCompactState.isVisible {
+                            ContextCompactTimelineMarker(state: viewModel.contextCompactState)
+                                .id("context-compact-\(String(describing: viewModel.contextCompactState.status))-\(viewModel.contextCompactState.updatedAt.timeIntervalSince1970)")
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+
                         // 内容底部的静止留白兼定位锚:进入会话/回到底部都停在它的底边,
                         // 即「内容底 + 一小段留白」,与手动上推回弹的自然停靠一致,不贴死输入框。
                         Color.clear
@@ -569,6 +575,7 @@ struct ChatView: View {
                 .padding(.horizontal, ChatLayout.contentHorizontalInset)
                 .padding(.top, 12)
                 .animation(.spring(response: 0.35, dampingFraction: 0.82), value: viewModel.isRecognizingImages)
+                .animation(.easeOut(duration: 0.22), value: viewModel.contextCompactState)
                 // Tap anywhere in the message content to dismiss the keyboard. Attached to the
                 // content (not the ScrollView) so it reliably fires; simultaneousGesture so
                 // message bubbles/buttons still receive their taps; contentShape makes the gaps
@@ -1009,7 +1016,10 @@ struct ChatView: View {
                                     .presentationCompactAdaptation(.popover)
                                 }
 
-                                ContextRingButton(snapshot: viewModel.contextSnapshot) {
+                                ContextRingButton(
+                                    snapshot: viewModel.contextSnapshot,
+                                    compactState: viewModel.contextCompactState
+                                ) {
                                     toggleComposerPanel(.context)
                                 }
                                 .popover(isPresented: popoverBinding(for: .context), arrowEdge: .bottom) {
@@ -1499,32 +1509,51 @@ private struct ChatToolbarIconButton: View {
 
 private struct ContextRingButton: View {
     let snapshot: ChatContextSnapshot
+    let compactState: ChatContextCompactState
     let action: () -> Void
+    @State private var rotates = false
 
     var body: some View {
         Button(action: action) {
             ZStack {
-                // 轨道:强调色(用户可调的主题色,不一定是琥珀)的「很浅」版本,由 mix 混白得到。
-                // 不能用 accent.opacity(...):半透明强调色会和背后的玻璃混色,深色玻璃会把它压暗,
-                // 所以调透明度看着都一样。mix(with:.white) 才是真正把强调色调浅成不透明、背景无关的浅色。
-                Circle()
-                    .stroke(AmberTheme.accent.mix(with: .white, by: 0.82), lineWidth: 3)
-                // 进度:随上下文增长用强调色覆盖填充,呈现增长效果。填充上限按模型真实
-                // contextWindow 计算(见 snapshot.contextFillFraction)。
-                Circle()
-                    .trim(from: 0, to: snapshot.contextFillFraction)
-                    .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+                if compactState.isActive {
+                    Circle()
+                        .stroke(Color.blue.opacity(0.16), lineWidth: 3)
+                    Circle()
+                        .trim(from: 0.05, to: 0.78)
+                        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(rotates ? 360 : 0))
+                    Image(systemName: "shippingbox")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Color.blue)
+                } else {
+                    // 轨道:强调色(用户可调的主题色,不一定是琥珀)的「很浅」版本,由 mix 混白得到。
+                    // 不能用 accent.opacity(...):半透明强调色会和背后的玻璃混色,深色玻璃会把它压暗,
+                    // 所以调透明度看着都一样。mix(with:.white) 才是真正把强调色调浅成不透明、背景无关的浅色。
+                    Circle()
+                        .stroke(AmberTheme.accent.mix(with: .white, by: 0.82), lineWidth: 3)
+                    // 进度:随上下文增长用强调色覆盖填充,呈现增长效果。填充上限按模型真实
+                    // contextWindow 计算(见 snapshot.contextFillFraction)。
+                    Circle()
+                        .trim(from: 0, to: snapshot.contextFillFraction)
+                        .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
             }
             .frame(width: 18, height: 18)
             .frame(width: 34, height: 34)
             .contentShape(Circle())
             .animation(.easeOut(duration: 0.3), value: snapshot.contextFillFraction)
+            .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: rotates)
         }
         .buttonStyle(.plain)
         .modifier(ComposerDockCircleGlass(tint: nil))
+        .onAppear { rotates = compactState.isActive }
+        .onChange(of: compactState.isActive) { _, active in
+            rotates = active
+        }
         .accessibilityLabel("上下文统计")
-        .accessibilityValue("\(snapshot.messageCount) 条消息，\(snapshot.totalTokens) tokens")
+        .accessibilityValue(compactState.isActive ? "正在压缩上下文" : "\(snapshot.messageCount) 条消息，\(snapshot.totalTokens) tokens")
     }
 }
 
@@ -2207,6 +2236,90 @@ private struct ChatAssistantPendingResponseView: View {
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ContextCompactTimelineMarker: View {
+    let state: ChatContextCompactState
+
+    private var title: String {
+        switch state.status {
+        case .planning:
+            return "准备压缩上下文"
+        case .compacting:
+            return "正在压缩上下文"
+        case .completed:
+            return "上下文已压缩"
+        case .failed:
+            return "上下文压缩失败"
+        case .idle:
+            return ""
+        }
+    }
+
+    private var icon: String {
+        switch state.status {
+        case .completed:
+            return "checkmark.circle"
+        case .failed:
+            return "exclamationmark.triangle"
+        default:
+            return "shippingbox"
+        }
+    }
+
+    private var tint: Color {
+        switch state.status {
+        case .completed:
+            return AmberTheme.accent
+        case .failed:
+            return .red
+        default:
+            return .blue
+        }
+    }
+
+    private var preview: String {
+        let text = state.summary
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count > 220 else { return text }
+        return String(text.prefix(220)) + "..."
+    }
+
+    var body: some View {
+        VStack(spacing: 7) {
+            HStack(spacing: 10) {
+                Rectangle()
+                    .fill(AmberTheme.border.opacity(0.55))
+                    .frame(height: 0.5)
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(tint)
+                    Text(title)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(tint)
+                    if state.isActive {
+                        TypingDots()
+                    }
+                }
+                Rectangle()
+                    .fill(AmberTheme.border.opacity(0.55))
+                    .frame(height: 0.5)
+            }
+
+            if !preview.isEmpty {
+                Text(preview)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, 24)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
     }
 }
 
