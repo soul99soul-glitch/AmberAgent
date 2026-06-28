@@ -83,6 +83,40 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
     var title: String { "执行 MCP 工具" }
 }
 
+enum IshToolApprovalMode: String, Equatable {
+    case handoff
+    case embeddedExecute
+}
+
+struct IshHandoffToolApprovalRequest: Identifiable, Equatable {
+    let id: String
+    let mode: IshToolApprovalMode
+    let commandPreview: String
+    let filename: String
+    let reason: String
+
+    var title: String {
+        switch mode {
+        case .handoff: "交接到 iSH"
+        case .embeddedExecute: "执行内置 iSH"
+        }
+    }
+
+    var primaryChip: (systemImage: String, title: String) {
+        switch mode {
+        case .handoff: ("doc.on.clipboard", "复制到剪贴板")
+        case .embeddedExecute: ("terminal", "本地执行")
+        }
+    }
+
+    var secondaryChip: (systemImage: String, title: String) {
+        switch mode {
+        case .handoff: ("hand.tap", "需手动粘贴")
+        case .embeddedExecute: ("arrowshape.turn.up.left", "回传输出")
+        }
+    }
+}
+
 enum ChatToolCallParsing {
     static func jsonObject(_ string: String) -> [String: Any]? {
         guard let data = string.data(using: .utf8) else { return nil }
@@ -232,6 +266,35 @@ enum ChatToolApprovalRequestBuilder {
         )
     }
 
+    @MainActor
+    static func ishHandoff(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> IshHandoffToolApprovalRequest? {
+        if IOSEmbeddedIshToolCatalog.supportedToolNames.contains(toolCall.toolName) {
+            guard let preview = IOSEmbeddedIshExecuteExecutor.approvalPreview(input: toolCall.input) else {
+                return nil
+            }
+            return IshHandoffToolApprovalRequest(
+                id: ChatToolCallParsing.requestId(for: toolCall),
+                mode: preview.mode,
+                commandPreview: preview.commandPreview,
+                filename: preview.filename,
+                reason: reason
+            )
+        }
+        guard let preview = IOSIshHandoffExecutor.approvalPreview(input: toolCall.input) else {
+            return nil
+        }
+        return IshHandoffToolApprovalRequest(
+            id: ChatToolCallParsing.requestId(for: toolCall),
+            mode: .handoff,
+            commandPreview: preview.commandPreview,
+            filename: preview.filename,
+            reason: reason
+        )
+    }
+
     static func mcp(
         for toolCall: UIMessagePart.Tool,
         reason: String
@@ -288,7 +351,7 @@ enum ChatToolOutputFormatter {
                 "platform": snapshot.platform,
                 "capabilities": capabilities
             ]))
-        case .workspaceResult(let result), .webMountResult(let result):
+        case .workspaceResult(let result), .webMountResult(let result), .ishExecuteResult(let result), .ishHandoffResult(let result):
             return .filled(result)
         case .needsUserAction(let reason):
             return .denied(reason)
@@ -305,6 +368,10 @@ enum ChatToolOutputFormatter {
     ) -> String {
         switch output {
         case .workspaceResult(let result):
+            return result
+        case .ishExecuteResult(let result):
+            return result
+        case .ishHandoffResult(let result):
             return result
         case .needsUserAction(let reason):
             return IOSWorkspaceStore.json([
@@ -347,6 +414,57 @@ enum ChatToolOutputFormatter {
         }
     }
 
+    static func ishHandoffResultText(
+        for toolCall: UIMessagePart.Tool,
+        output: IOSLocalToolExecutionOutput
+    ) -> String {
+        let canReturnExecutionOutput = IOSEmbeddedIshToolCatalog.supportedToolNames.contains(toolCall.toolName)
+        switch output {
+        case .ishExecuteResult(let result):
+            return result
+        case .ishHandoffResult(let result):
+            return result
+        case .needsUserAction(let reason):
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "needs_user_action": true,
+                "reason": reason,
+                "stdout_available": canReturnExecutionOutput,
+                "stderr_available": canReturnExecutionOutput,
+                "exit_code_available": false
+            ])
+        case .denied(let reason):
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "denied": true,
+                "reason": reason,
+                "stdout_available": canReturnExecutionOutput,
+                "stderr_available": canReturnExecutionOutput,
+                "exit_code_available": false
+            ])
+        case .failed(let message):
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "error": message,
+                "stdout_available": canReturnExecutionOutput,
+                "stderr_available": canReturnExecutionOutput,
+                "exit_code_available": false
+            ])
+        default:
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "error": "Unexpected output for iSH handoff tool.",
+                "stdout_available": canReturnExecutionOutput,
+                "stderr_available": canReturnExecutionOutput,
+                "exit_code_available": false
+            ])
+        }
+    }
+
     static func webMountResultText(
         for toolCall: UIMessagePart.Tool,
         output: IOSLocalToolExecutionOutput
@@ -354,6 +472,12 @@ enum ChatToolOutputFormatter {
         switch output {
         case .webMountResult(let result):
             return result
+        case .ishExecuteResult, .ishHandoffResult:
+            return IOSWebMountController.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "error": "Unexpected iSH output for WebMount tool."
+            ])
         case .needsUserAction(let reason):
             return IOSWebMountController.json([
                 "ok": false,

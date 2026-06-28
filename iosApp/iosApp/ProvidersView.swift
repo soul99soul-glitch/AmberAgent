@@ -68,18 +68,16 @@ struct ProvidersView: View {
 
             Spacer()
 
-            Button {
+            AmberGlassIconButton(
+                systemImage: "plus",
+                accessibilityLabel: "添加服务商",
+                size: 44,
+                symbolSize: 20,
+                tint: AmberTheme.accent,
+                prominent: true
+            ) {
                 router.navigate(to: .providerAdd)
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(AmberTheme.accent)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
             }
-            .buttonStyle(.plain)
-            .amberGlass(cornerRadius: 22)
-            .accessibilityLabel("添加服务商")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -93,15 +91,15 @@ struct ProvidersView: View {
                 .foregroundStyle(AmberTheme.muted.opacity(0.72))
 
             Text("搜索服务商")
-                .font(.subheadline)
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(AmberTheme.muted)
 
             Spacer()
         }
-        .frame(height: 40)
+        .frame(height: 42)
         .padding(.horizontal, 13)
         .background(
-            AmberTheme.surface2.opacity(0.82),
+            AmberTheme.surface.opacity(0.76),
             in: RoundedRectangle(cornerRadius: AmberTheme.radiusPill, style: .continuous)
         )
         .overlay {
@@ -164,15 +162,11 @@ private struct RegistryProviderRow: View {
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 12) {
-                Text(model.initial)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .frame(width: 32, height: 32)
-                    .background(AmberTheme.surface2, in: Circle())
+                ProviderAvatar(initial: model.initial, isSelected: isSelected, hasStoredKey: hasStoredKey)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.name)
-                        .font(.body)
+                        .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
                         .lineLimit(1)
 
@@ -186,9 +180,15 @@ private struct RegistryProviderRow: View {
 
                 trailing
             }
-            .frame(minHeight: 56)
+            .frame(minHeight: 62)
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(AmberTheme.accent.opacity(0.06))
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -198,17 +198,68 @@ private struct RegistryProviderRow: View {
 
     @ViewBuilder private var trailing: some View {
         if isSelected {
-            HStack(spacing: 4) {
-                Image(systemName: "checkmark.circle.fill")
-                Text("当前")
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(AmberTheme.accentGreen)
+            ProviderStatusBadge(title: "当前", systemImage: "checkmark.circle.fill", tint: AmberTheme.accentGreen)
         } else {
-            Text(hasStoredKey ? "已配置" : "未填写")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(hasStoredKey ? AmberTheme.accentGreen : AmberTheme.muted2)
+            ProviderStatusBadge(
+                title: hasStoredKey ? "已配置" : "未填写",
+                systemImage: hasStoredKey ? "checkmark" : "exclamationmark",
+                tint: hasStoredKey ? AmberTheme.accentGreen : AmberTheme.muted2
+            )
         }
+    }
+}
+
+private struct ProviderAvatar: View {
+    let initial: String
+    let isSelected: Bool
+    let hasStoredKey: Bool
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Text(initial)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isSelected ? AmberTheme.accent : AmberTheme.foreground2)
+                .frame(width: 38, height: 38)
+                .background(
+                    isSelected ? AmberTheme.accentTint : AmberTheme.surface2.opacity(0.86),
+                    in: Circle()
+                )
+                .overlay {
+                    Circle()
+                        .stroke(isSelected ? AmberTheme.accent.opacity(0.14) : AmberTheme.borderSoft, lineWidth: 0.5)
+                }
+
+            if hasStoredKey || isSelected {
+                Circle()
+                    .fill(isSelected ? AmberTheme.accentGreen : AmberTheme.muted2)
+                    .frame(width: 9, height: 9)
+                    .overlay {
+                        Circle()
+                            .stroke(AmberTheme.surface, lineWidth: 1.5)
+                    }
+            }
+        }
+        .frame(width: 40, height: 40)
+    }
+}
+
+private struct ProviderStatusBadge: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .bold))
+            Text(title)
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(tint)
+        .lineLimit(1)
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(tint.opacity(0.10), in: Capsule())
     }
 }
 

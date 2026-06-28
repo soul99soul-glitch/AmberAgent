@@ -445,6 +445,30 @@ extension AgentActivityPresentation {
         }
     }
 
+    var activitySymbolName: String {
+        if phase != .running {
+            return phaseSymbolName
+        }
+        switch toolTitle {
+        case "网页搜索":
+            return "magnifyingglass"
+        case "网页读取", "WebMount":
+            return "globe"
+        case "图片生成":
+            return "photo.on.rectangle"
+        case "记忆更新":
+            return "brain.head.profile"
+        case "MCP 调用":
+            return "puzzlepiece.extension"
+        case "Workspace", "文档读取":
+            return "folder"
+        case "生成回复":
+            return "text.bubble"
+        default:
+            return "sparkles"
+        }
+    }
+
     var progress: Double {
         guard !steps.isEmpty else {
             return phase == .completed ? 1 : 0

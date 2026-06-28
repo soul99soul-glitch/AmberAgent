@@ -1365,6 +1365,22 @@ struct IOSCapabilityRegistry {
         ),
 
         capability(
+            id: "ios.embedded.ish_runtime",
+            title: "内置 iSH Runtime",
+            summary: "Run short Linux shell commands inside AmberAgent's experimental embedded iSH runtime and return stdout/stderr/exit code. Linked only in the ExperimentalGPL target.",
+            domain: .networkAndConnectivity,
+            status: IOSEmbeddedIshToolCatalog.capabilityStatus,
+            risk: .high,
+            requestKind: IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty ? .unsupported : .foregroundSession,
+            requestEntryPoint: "Chat ios_ish_execute approval",
+            modelToolNames: Array(IOSEmbeddedIshToolCatalog.supportedToolNames).sorted(),
+            unavailableReason: IOSEmbeddedIshToolCatalog.unavailableReason,
+            defaultEnabled: true,
+            canOpenSettings: false,
+            gate: freshHighRiskGate
+        ),
+
+        capability(
             id: "ios.external.sms_compose",
             title: "短信草稿",
             summary: "Present a system message composer. iOS keeps final send confirmation with the user.",
@@ -1402,6 +1418,19 @@ struct IOSCapabilityRegistry {
             requestKind: .foregroundSystemUI,
             requestEntryPoint: "UIActivityViewController / UIApplication.open",
             uiActionNames: ["share_text", "share_file", "app_open_url"],
+            defaultEnabled: true,
+            gate: freshHighRiskGate
+        ),
+        capability(
+            id: "ios.external.ish_handoff",
+            title: "iSH 交接",
+            summary: "Prepare a paste-ready command or script for manual execution in iSH. AmberAgent cannot control iSH, run it silently, or read stdout/stderr from its sandbox.",
+            domain: .externalApps,
+            status: .degraded,
+            risk: .high,
+            requestKind: .foregroundSession,
+            requestEntryPoint: "Chat ish_handoff approval",
+            modelToolNames: Array(IOSIshToolCatalog.supportedToolNames).sorted(),
             defaultEnabled: true,
             gate: freshHighRiskGate
         ),
@@ -1503,7 +1532,7 @@ struct IOSCapabilityRegistry {
 
     static let executableToolNames: Set<String> = Set(
         capabilities
-            .filter { $0.status == .supported }
+            .filter { $0.status != .unsupported }
             .flatMap(\.modelToolNames)
     )
 

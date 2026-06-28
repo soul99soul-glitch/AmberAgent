@@ -89,15 +89,15 @@ enum IOSTerminalRuntimeCapabilities {
         IOSTerminalRuntimeCapability(
             runtime: .ishExperimental,
             tier: .experimental,
-            supportsPTY: true,
-            supportsPackageInstall: true,
-            supportsLongRunningJobs: true,
-            supportsInteractiveLogin: true,
-            supportsFileSync: true,
+            supportsPTY: false,
+            supportsPackageInstall: false,
+            supportsLongRunningJobs: false,
+            supportsInteractiveLogin: false,
+            supportsFileSync: false,
             appStoreSafeByDefault: false,
             supportsExternalCLIByDefault: false,
             licenseClass: .gplReviewRequired,
-            summary: "Experimental embedded Linux runtime gated out of stable builds."
+            summary: "Experimental embedded iSH oneshot runner for short bounded commands; no PTY, stdin, live session, or immediate cancellation yet."
         )
     ]
 
@@ -591,11 +591,10 @@ final class IOSTerminalRuntime {
                 message: "Remote Mosh requires GPL/license review before it can be linked into a distributable build."
             )
         case .ishExperimental:
-            return failedSnapshot(
-                runtime: runtime,
+            return startEmbeddedIshJob(
                 command: command,
                 now: now,
-                message: "iSH Experimental requires the ExperimentalGPL target and source/license compliance bundle."
+                timeoutSeconds: timeoutSeconds
             )
         }
     }
@@ -615,6 +614,11 @@ final class IOSTerminalRuntime {
         }
         guard let job = jobs[id] else { return nil }
         guard !job.status.isTerminal else { return job.snapshot }
+        if job.runtime == .ishExperimental {
+            job.error = "Embedded iSH commands cannot be interrupted by wait timeout; this job is still running until the command exits or its own timeout fires."
+            job.updatedAt = Date()
+            return job.snapshot
+        }
         job.task?.cancel()
         job.status = .timedOut
         job.error = IOSSSHError.commandTimedOut.localizedDescription
@@ -625,6 +629,11 @@ final class IOSTerminalRuntime {
     func stopJob(id: String) -> IOSTerminalJobSnapshot? {
         guard let job = jobs[id] else { return nil }
         guard !job.status.isTerminal else { return job.snapshot }
+        if job.runtime == .ishExperimental {
+            job.error = "Embedded iSH commands cannot be interrupted after launch; this job will finish when the command exits or its timeout fires."
+            job.updatedAt = Date()
+            return job.snapshot
+        }
         job.task?.cancel()
         job.status = .cancelled
         job.error = IOSSSHError.commandCancelled.localizedDescription
@@ -716,6 +725,67 @@ final class IOSTerminalRuntime {
         return job.snapshot
     }
 
+    private func startEmbeddedIshJob(
+        command: String,
+        now: Date,
+        timeoutSeconds: TimeInterval
+    ) -> IOSTerminalJobSnapshot {
+        switch IOSRemoteCommandPolicy.validate(command) {
+        case .success:
+            break
+        case .failure(let message):
+            return failedSnapshot(
+                runtime: .ishExperimental,
+                command: command,
+                now: now,
+                message: message
+            )
+        }
+
+        let job = IOSTerminalJobState(
+            id: UUID().uuidString,
+            runtime: .ishExperimental,
+            startedAt: now,
+            status: .running
+        )
+        jobs[job.id] = job
+
+        let jobId = job.id
+        job.task = Task {
+            let result = await IOSEmbeddedIshRuntime.shared.run(
+                command: command,
+                timeoutSeconds: timeoutSeconds
+            )
+            guard !Task.isCancelled else {
+                updateJob(
+                    id: jobId,
+                    status: .cancelled,
+                    exitCode: nil,
+                    output: nil,
+                    error: IOSSSHError.commandCancelled.localizedDescription
+                )
+                return
+            }
+            let output = Self.embeddedIshOutput(stdout: result.stdout, stderr: result.stderr)
+            let status: IOSTerminalJobStatus
+            if result.timedOut {
+                status = .timedOut
+            } else if result.exitCode == 0, result.error == nil {
+                status = .completed
+            } else {
+                status = .failed
+            }
+            updateJob(
+                id: jobId,
+                status: status,
+                exitCode: result.exitCode,
+                output: output,
+                error: result.error ?? (status == .failed ? "Embedded iSH command exited with \(result.exitCode ?? -1)." : nil)
+            )
+        }
+        return job.snapshot
+    }
+
     private func appendOutput(_ chunk: String, to id: String) {
         guard let job = jobs[id], !chunk.isEmpty else { return }
         guard !job.status.isTerminal else { return }
@@ -746,6 +816,17 @@ final class IOSTerminalRuntime {
         guard utf8.count > Self.outputTailLimit else { return value }
         let suffix = utf8.suffix(Self.outputTailLimit)
         return String(decoding: suffix, as: UTF8.self)
+    }
+
+    private static func embeddedIshOutput(stdout: String, stderr: String) -> String {
+        var parts: [String] = []
+        if !stdout.isEmpty {
+            parts.append(stdout)
+        }
+        if !stderr.isEmpty {
+            parts.append("[stderr]\n\(stderr)")
+        }
+        return parts.joined(separator: stdout.hasSuffix("\n") ? "" : "\n")
     }
 
     private func runLocalTool(command: String, now: Date) -> IOSTerminalJobSnapshot {

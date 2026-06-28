@@ -19,11 +19,12 @@ enum AmberTheme {
         foreground: 0x2A2320, foreground2: 0x4A4039, muted: 0x6E6254, muted2: 0xA89A88,
         border: 0xDBCEBC, borderSoft: 0xECE3D6
     )
-    // Neutral white: true white canvas with only subtle grouping tones.
+    // Neutral white: true white canvas, with off-white grouped surfaces so
+    // cards, sheets, and code blocks remain visually separated.
     static let neutralLight = AmberPalette(
-        background: 0xFFFFFF, surface: 0xFFFFFF, surface2: 0xF7F7F8,
+        background: 0xFFFFFF, surface: 0xFAFAFB, surface2: 0xF1F2F4,
         foreground: 0x1C1C1E, foreground2: 0x3A3A3C, muted: 0x6C6C70, muted2: 0xAEAEB2,
-        border: 0xE1E1E5, borderSoft: 0xEEEEF0
+        border: 0xD8DADF, borderSoft: 0xE6E8EC
     )
     // Warm dark (HIG: not pure black / not pure white; hairlines via near-bg surfaces).
     static let darkPalette = AmberPalette(
@@ -317,6 +318,72 @@ extension UIColor {
     }
 }
 
+enum AmberHapticEvent {
+    case lightImpact
+    case mediumImpact
+    case selection
+    case success
+    case warning
+    case error
+}
+
+enum AmberHaptics {
+    @MainActor
+    static func trigger(_ event: AmberHapticEvent) {
+        switch event {
+        case .lightImpact:
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .mediumImpact:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        case .selection:
+            UISelectionFeedbackGenerator().selectionChanged()
+        case .success:
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        case .warning:
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        case .error:
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+}
+
+struct AmberPressFeedbackStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.96
+    var haptic: AmberHapticEvent? = .lightImpact
+
+    func makeBody(configuration: Configuration) -> some View {
+        AmberPressFeedbackBody(
+            configuration: configuration,
+            pressedScale: pressedScale,
+            haptic: haptic
+        )
+    }
+}
+
+private struct AmberPressFeedbackBody: View {
+    let configuration: ButtonStyleConfiguration
+    let pressedScale: CGFloat
+    let haptic: AmberHapticEvent?
+
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var wasPressed = false
+
+    var body: some View {
+        configuration.label
+            .scaleEffect(isEnabled && configuration.isPressed ? pressedScale : 1)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72),
+                value: configuration.isPressed
+            )
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                defer { wasPressed = isPressed }
+                guard isEnabled, isPressed, !wasPressed, let haptic else { return }
+                AmberHaptics.trigger(haptic)
+            }
+    }
+}
+
 private struct AmberGlassModifier: ViewModifier {
     let cornerRadius: CGFloat
     let interactive: Bool
@@ -419,26 +486,30 @@ struct AmberGlassIconButton: View {
     let action: () -> Void
 
     var body: some View {
+        Button(action: action) {
+            styledLabel
+        }
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.92, haptic: .lightImpact))
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    @ViewBuilder
+    private var styledLabel: some View {
         if prominent {
-            buttonLabel
+            iconLabel
                 .amberProminentGlass(cornerRadius: size / 2, tint: tint)
-                .accessibilityLabel(accessibilityLabel)
         } else {
-            buttonLabel
+            iconLabel
                 .amberGlass(cornerRadius: size / 2)
-                .accessibilityLabel(accessibilityLabel)
         }
     }
 
-    private var buttonLabel: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: symbolSize, weight: .semibold))
-                .foregroundStyle(prominent ? Color.white : tint)
-                .frame(width: size, height: size)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
+    private var iconLabel: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: symbolSize, weight: .semibold))
+            .foregroundStyle(prominent ? Color.white : tint)
+            .frame(width: size, height: size)
+            .contentShape(Circle())
     }
 }
 
@@ -488,9 +559,9 @@ struct AmberGlassCircleButton: View {
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(width: size, height: size)
                 .contentShape(Circle())
+                .amberGlass(cornerRadius: size / 2)
         }
-        .buttonStyle(.plain)
-        .amberGlass(cornerRadius: size / 2)
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.92, haptic: .lightImpact))
         .accessibilityLabel(accessibilityLabel)
     }
 }
@@ -598,7 +669,7 @@ struct AmberFormRow: View {
             .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: action == nil ? 1 : 0.985, haptic: .selection))
         .disabled(action == nil)
     }
 }
@@ -607,6 +678,7 @@ struct AmberFormRow: View {
 /// 出现时加载,并监听 `.accountAvatarChanged` 在换头像后即时刷新。
 private struct HomeAccountAvatar: View {
     let initial: String
+    var size: CGFloat = 40
     @State private var image: UIImage?
 
     var body: some View {
@@ -615,13 +687,13 @@ private struct HomeAccountAvatar: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 34, height: 34)
+                    .frame(width: size, height: size)
                     .clipShape(Circle())
             } else {
                 Text(initial)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.system(size: size * 0.38, weight: .bold, design: .rounded))
                     .foregroundStyle(AmberTheme.foreground)
-                    .frame(width: 34, height: 34)
+                    .frame(width: size, height: size)
             }
         }
         .contentShape(Circle())
@@ -742,7 +814,7 @@ struct ConversationsView: View {
             } label: {
                 Image(systemName: "pencil")
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AmberTheme.accentInk)
                     .frame(width: 56, height: 56)
             }
             .buttonStyle(.plain)
@@ -797,25 +869,24 @@ struct ConversationsView: View {
     private var header: some View {
         HStack(alignment: .center) {
             Text("Amber")
-                .font(.system(size: 34, weight: .bold, design: .default))
+                .font(.system(size: 32, weight: .bold, design: .default))
                 .foregroundStyle(AmberTheme.foreground)
-                .tracking(-0.7)
 
             Spacer()
 
-            AmberGlassGroup(spacing: 8) {
-                HStack(spacing: 8) {
-                    AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "设置", size: 34, symbolSize: 16) {
+            AmberGlassGroup(spacing: 10) {
+                HStack(spacing: 10) {
+                    AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "设置", size: 40, symbolSize: 17) {
                         router.navigate(to: .settings)
                     }
 
                     Button {
                         router.navigate(to: .account)
                     } label: {
-                        HomeAccountAvatar(initial: accountInitial)
+                        HomeAccountAvatar(initial: accountInitial, size: 40)
                     }
                     .buttonStyle(.plain)
-                    .amberGlass(cornerRadius: 17)
+                    .amberGlass(cornerRadius: 20)
                     .accessibilityLabel("我的账户")
                 }
             }
@@ -830,7 +901,7 @@ struct ConversationsView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(AmberTheme.muted2)
-            TextField("搜索会话与消息", text: $searchQuery)
+            TextField("搜索会话", text: $searchQuery)
                 .font(.body)
                 .foregroundStyle(AmberTheme.foreground)
                 .submitLabel(.search)
@@ -851,7 +922,7 @@ struct ConversationsView: View {
                 .accessibilityLabel("清除搜索")
             }
         }
-        .frame(height: 38)
+        .frame(height: 40)
         .padding(.horizontal, 14)
         .amberGlass(cornerRadius: 13)
         .padding(.horizontal, 16)
@@ -859,12 +930,12 @@ struct ConversationsView: View {
     }
 
     private var shortcutStrip: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ForEach(shortcuts) { shortcut in
                 shortcutButton(shortcut)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 16)
         // Sit a little lower under the search field and tighten the gap to the 会话 header
         // (which itself adds 20pt top), so the row isn't pushed high with a big void below.
         .padding(.top, 10)
@@ -877,18 +948,22 @@ struct ConversationsView: View {
         } label: {
             VStack(alignment: .center, spacing: 8) {
                 Image(systemName: shortcut.systemImage)
-                    .font(.system(size: 26, weight: .medium))
+                    .font(.system(size: 25, weight: .medium))
                     .foregroundStyle(shortcut.color)
-                    .frame(width: 52, height: 52)
-                    .background(shortcut.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .frame(width: 50, height: 50)
+                    .background(AmberTheme.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .stroke(AmberTheme.borderSoft.opacity(0.82), lineWidth: 0.5)
+                    }
 
                 Text(shortcut.title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(AmberTheme.foreground2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
-            .frame(maxWidth: .infinity, minHeight: 78)
+            .frame(maxWidth: .infinity, minHeight: 76)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -985,10 +1060,23 @@ private struct ConversationSummaryRow: View {
 
                 Spacer(minLength: 8)
             }
-            .frame(minHeight: 58)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 2)
+            .background {
+                if isCurrent {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(AmberTheme.accent.opacity(0.075))
+                }
+            }
+            .overlay {
+                if isCurrent {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(AmberTheme.accent.opacity(0.12), lineWidth: 0.5)
+                }
+            }
             .padding(.horizontal, 16)
             .padding(.vertical, 2)
-            .background(isCurrent ? AmberTheme.accentTint : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

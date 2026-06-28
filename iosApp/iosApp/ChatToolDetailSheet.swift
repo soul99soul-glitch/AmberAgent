@@ -144,6 +144,8 @@ struct ChatToolDetailSheet: View {
 
     private var friendlyName: String {
         if isSubAgent { return "子智能体" }
+        if tool.toolName == "ish_handoff" { return "iSH 交接" }
+        if tool.toolName == "ios_ish_execute" { return "内置 iSH 执行" }
         if tool.toolName.isEmpty { return "工具调用" }
         return tool.toolName
     }

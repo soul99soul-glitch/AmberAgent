@@ -192,6 +192,36 @@ final class IOSConversationStore {
         await refreshSummaries()
     }
 
+    func saveBackgroundCompletion(
+        baseMessages: [UIMessage],
+        completedMessages: [UIMessage],
+        to id: KotlinUuid
+    ) async {
+        let conversation: Conversation?
+        if currentConversation?.id == id {
+            conversation = currentConversation
+        } else {
+            do {
+                conversation = try await storage.loadConversation(id: id)
+            } catch {
+                lastIOError = IOSConversationIOError(operation: "保存后台回复", detail: "目标 \(id): \(error)")
+                conversation = nil
+            }
+        }
+        guard let conversation else { return }
+
+        let current = conversation.currentMessages
+        let nextMessages: [UIMessage]
+        if Self.sameMessageIdentity(current, baseMessages) {
+            nextMessages = completedMessages
+        } else {
+            let generatedSuffix = Array(completedMessages.dropFirst(baseMessages.count))
+            let notice = UIMessage.companion.assistant(prompt: "后台生成已完成；当前会话期间已有新内容，以下是后台完成的结果。")
+            nextMessages = current + [notice] + generatedSuffix
+        }
+        await save(messages: nextMessages, to: id)
+    }
+
     /// 重建一个仅 title 不同的 Conversation（Swift 侧无 partial copy，用全字段构造器）。
     /// 所有其他字段保持原值；updateAt 刷新到当前时刻以反映「最近修改」。
     private func retitledCopy(of conversation: Conversation, title: String) -> Conversation {
@@ -419,6 +449,13 @@ final class IOSConversationStore {
             return nodeMessages
         }
         return conversation.currentMessages
+    }
+
+    private static func sameMessageIdentity(_ lhs: [UIMessage], _ rhs: [UIMessage]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        return zip(lhs, rhs).allSatisfy { left, right in
+            String(describing: left.id) == String(describing: right.id)
+        }
     }
 
     private static func searchPreview(from text: String, around query: String, maxLength: Int = 96) -> String {

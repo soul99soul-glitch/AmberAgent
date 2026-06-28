@@ -59,6 +59,7 @@ struct ChatGenerationBindings {
     let setPendingSearchApproval: (SearchToolApprovalRequest?) -> Void
     let setPendingWebMountApproval: (WebMountToolApprovalRequest?) -> Void
     let setPendingWorkspaceApproval: (WorkspaceToolApprovalRequest?) -> Void
+    let setPendingIshHandoffApproval: (IshHandoffToolApprovalRequest?) -> Void
     let setPendingMcpApproval: (McpToolApprovalRequest?) -> Void
     let setContextCompactState: (ChatContextCompactState) -> Void
     let persistMessages: (KotlinUuid?) -> Void
@@ -102,7 +103,10 @@ final class ChatGenerationCoordinator {
     private var pendingSearchToolApproval: ChatPendingToolApproval?
     private var pendingWebMountToolApproval: ChatPendingToolApproval?
     private var pendingWorkspaceToolApproval: ChatPendingToolApproval?
+    private var pendingIshHandoffToolApproval: ChatPendingToolApproval?
     private var pendingMcpToolApproval: ChatPendingToolApproval?
+    private var backgroundHandoff: IOSChatBackgroundHandoff?
+    private weak var pendingBackgroundConversationStore: IOSConversationStore?
 
     var isRunning: Bool {
         currentRunId != nil
@@ -136,6 +140,8 @@ final class ChatGenerationCoordinator {
         currentInputDigest = inputDigest
         currentConversationIdForRun = conversationId
         currentToolResumeCount = 0
+        backgroundHandoff = nil
+        pendingBackgroundConversationStore = nil
         bindings.startLiveActivity(
             runId,
             .generatingResponse(modelName: params.model.modelId)
@@ -210,6 +216,8 @@ final class ChatGenerationCoordinator {
         currentInputDigest = inputDigest
         currentConversationIdForRun = conversationId
         currentToolResumeCount = 0
+        backgroundHandoff = nil
+        pendingBackgroundConversationStore = nil
         bindings.setIsLoading(true)
         bindings.startLiveActivity(runId, .runningTool(toolName: "generate_image"))
 
@@ -264,6 +272,8 @@ final class ChatGenerationCoordinator {
         currentInputDigest = nil
         currentConversationIdForRun = nil
         currentToolResumeCount = 0
+        backgroundHandoff = nil
+        pendingBackgroundConversationStore = nil
         clearPendingApprovals()
         bindings.setIsLoading(false)
         bindings.setContextCompactState(.idle)
@@ -277,6 +287,45 @@ final class ChatGenerationCoordinator {
             await bindings.recordRun(runId, startedAt, "interrupted", digest)
             bindings.persistMessages(conversationId)
         }
+    }
+
+    @discardableResult
+    func handoffCurrentGenerationToBackground(conversationStore: IOSConversationStore?) -> Bool {
+        guard let handoff = backgroundHandoff,
+              let conversationStore else {
+            if isRunning {
+                pendingBackgroundConversationStore = conversationStore
+            }
+            return false
+        }
+        let didStart = IOSChatBackgroundGenerationCoordinator.shared.start(
+            handoff: handoff,
+            conversationStore: conversationStore,
+            toolRuntime: toolRuntime,
+            liveActivityController: dependencies.liveActivityController,
+            saveMiniAppIfPresent: { [bindings] messages, conversationId in
+                bindings.saveMiniAppIfPresent(messages, conversationId)
+            }
+        )
+        guard didStart else { return false }
+
+        streamJob?.cancel(cause: nil)
+        streamJob = nil
+        cancelPendingStreamSnapshotPublish()
+        bindings.setMessages(handoff.displayMessages)
+        bindings.bumpMessageRevision()
+        bindings.persistMessages(handoff.conversationId)
+        currentRunId = nil
+        currentStartedAt = nil
+        currentInputDigest = nil
+        currentConversationIdForRun = nil
+        currentToolResumeCount = 0
+        backgroundHandoff = nil
+        pendingBackgroundConversationStore = nil
+        clearPendingApprovals()
+        bindings.setContextCompactState(.idle)
+        bindings.setIsLoading(false)
+        return true
     }
 
     func approvePendingMemoryTool() {
@@ -309,6 +358,14 @@ final class ChatGenerationCoordinator {
 
     func denyPendingWorkspaceTool() async {
         await finishPendingWorkspaceToolApproval(allow: false)
+    }
+
+    func approvePendingIshHandoffTool() async {
+        await finishPendingIshHandoffToolApproval(allow: true)
+    }
+
+    func denyPendingIshHandoffTool() async {
+        await finishPendingIshHandoffToolApproval(allow: false)
     }
 
     func approvePendingMcpTool() async {
@@ -454,8 +511,29 @@ final class ChatGenerationCoordinator {
         conversationId: KotlinUuid?,
         uploadMessages: [UIMessage]
     ) {
+        let displayMessages = bindings.getMessages()
+        if let conversationId {
+            backgroundHandoff = IOSChatBackgroundHandoff(
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                providerSetting: providerSetting,
+                params: params,
+                uploadMessages: uploadMessages,
+                displayMessages: displayMessages
+            )
+        } else {
+            backgroundHandoff = nil
+        }
+        if let pendingStore = pendingBackgroundConversationStore {
+            pendingBackgroundConversationStore = nil
+            if handoffCurrentGenerationToBackground(conversationStore: pendingStore) {
+                return
+            }
+        }
         let accumulator = MessageStreamAccumulator(
-            initialMessages: bindings.getMessages(),
+            initialMessages: displayMessages,
             model: params.model
         )
         var detectedToolCallIds = Set<String>()
@@ -701,6 +779,9 @@ final class ChatGenerationCoordinator {
         case .workspace(let request):
             pendingWorkspaceToolApproval = pending
             bindings.setPendingWorkspaceApproval(request)
+        case .ish(let request):
+            pendingIshHandoffToolApproval = pending
+            bindings.setPendingIshHandoffApproval(request)
         case .mcp(let request):
             pendingMcpToolApproval = pending
             bindings.setPendingMcpApproval(request)
@@ -766,6 +847,21 @@ final class ChatGenerationCoordinator {
         guard currentRunId == pending.runId else { return }
         bindings.setIsLoading(true)
         let resumedMessages = await toolRuntime.finishWorkspaceApproval(
+            pending: pending,
+            allow: allow
+        )
+        guard currentRunId == pending.runId else { return }
+        bindings.setMessages(resumedMessages)
+        bindings.bumpMessageRevision()
+        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+    }
+
+    private func finishPendingIshHandoffToolApproval(allow: Bool) async {
+        guard let pending = pendingIshHandoffToolApproval else { return }
+        clearPendingIshHandoffApproval()
+        guard currentRunId == pending.runId else { return }
+        bindings.setIsLoading(true)
+        let resumedMessages = await toolRuntime.finishIshHandoffApproval(
             pending: pending,
             allow: allow
         )
@@ -859,6 +955,8 @@ final class ChatGenerationCoordinator {
         currentInputDigest = nil
         currentConversationIdForRun = nil
         streamJob = nil
+        backgroundHandoff = nil
+        pendingBackgroundConversationStore = nil
         bindings.setIsLoading(false)
         clearPendingApprovals()
     }
@@ -868,6 +966,7 @@ final class ChatGenerationCoordinator {
         clearPendingSearchApproval()
         clearPendingWebMountApproval()
         clearPendingWorkspaceApproval()
+        clearPendingIshHandoffApproval()
         clearPendingMcpApproval()
     }
 
@@ -891,6 +990,11 @@ final class ChatGenerationCoordinator {
         bindings.setPendingWorkspaceApproval(nil)
     }
 
+    private func clearPendingIshHandoffApproval() {
+        pendingIshHandoffToolApproval = nil
+        bindings.setPendingIshHandoffApproval(nil)
+    }
+
     private func clearPendingMcpApproval() {
         pendingMcpToolApproval = nil
         bindings.setPendingMcpApproval(nil)
@@ -911,6 +1015,12 @@ final class ChatGenerationCoordinator {
         }
         for toolCall in toolCalls where IOSWorkspaceToolCatalog.supportedToolNames.contains(toolCall.toolName) {
             print("[ChatViewModel] Detected Workspace tool call runId=\(runId) toolCallId=\(toolCall.toolCallId) tool=\(toolCall.toolName)")
+        }
+        for toolCall in toolCalls where IOSIshToolCatalog.supportedToolNames.contains(toolCall.toolName) {
+            print("[ChatViewModel] Detected iSH handoff tool call runId=\(runId) toolCallId=\(toolCall.toolCallId)")
+        }
+        for toolCall in toolCalls where IOSEmbeddedIshToolCatalog.supportedToolNames.contains(toolCall.toolName) {
+            print("[ChatViewModel] Detected embedded iSH tool call runId=\(runId) toolCallId=\(toolCall.toolCallId)")
         }
         for toolCall in toolCalls where toolCall.toolName == "memory_tool" {
             print("[ChatViewModel] Detected memory_tool call runId=\(runId) toolCallId=\(toolCall.toolCallId)")

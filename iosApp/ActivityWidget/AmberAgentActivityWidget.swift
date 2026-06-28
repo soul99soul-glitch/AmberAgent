@@ -21,7 +21,7 @@ struct AmberAgentActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    AgentActivityPhaseBadge(presentation: context.state.presentation, size: 34)
+                    AgentActivityGlyph(presentation: context.state.presentation, size: 34, showsProgressRing: true)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     ElapsedActivityTime(startedAt: context.attributes.startedAt)
@@ -33,26 +33,18 @@ struct AmberAgentActivityWidget: Widget {
                     ExpandedStepTrack(presentation: context.state.presentation)
                 }
             } compactLeading: {
-                Image(systemName: context.state.presentation.phaseSymbolName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(phaseColor(for: context.state.presentation))
+                AgentActivityGlyph(presentation: context.state.presentation, size: 20, showsProgressRing: true)
             } compactTrailing: {
                 Text(context.state.presentation.compactTrailingText)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.82))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             } minimal: {
-                Image(systemName: context.state.presentation.phaseSymbolName)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(phaseColor(for: context.state.presentation))
+                AgentActivityGlyph(presentation: context.state.presentation, size: 17, showsProgressRing: true)
             }
             .keylineTint(.amberAccent)
         }
-    }
-
-    private func phaseColor(for presentation: AgentActivityPresentation) -> Color {
-        presentation.phase.widgetColor
     }
 }
 
@@ -60,16 +52,15 @@ private struct ExpandedStatusLine: View {
     let presentation: AgentActivityPresentation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(presentation.statusText)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("Amber")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(presentation.phase.widgetColor)
+                .lineLimit(1)
+
+            Text(presentation.statusText.replacingOccurrences(of: "Amber ", with: ""))
                 .font(.system(size: 15, weight: .semibold, design: .default))
                 .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-
-            Text(presentation.currentStepTitle)
-                .font(.system(size: 11, weight: .medium, design: .default))
-                .foregroundStyle(.white.opacity(0.62))
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
         }
@@ -82,50 +73,65 @@ private struct ExpandedStepTrack: View {
     let presentation: AgentActivityPresentation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(presentation.toolTitle)
-                    .font(.system(size: 12, weight: .semibold, design: .default))
-                    .foregroundStyle(.white.opacity(0.72))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.62))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
 
-                ProgressView(value: presentation.progress)
-                    .progressViewStyle(.linear)
-                    .tint(presentation.phase.widgetColor)
-                    .frame(maxWidth: 92)
+                Capsule()
+                    .fill(.white.opacity(0.12))
+                    .frame(height: 4)
+                    .overlay(alignment: .leading) {
+                        GeometryReader { proxy in
+                            Capsule()
+                                .fill(presentation.phase.widgetColor)
+                                .frame(width: max(10, proxy.size.width * presentation.progress))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                Text("\(Int((presentation.progress * 100).rounded()))%")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.58))
             }
 
-            VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
                 ForEach(presentation.steps) { step in
-                    StepRow(step: step)
+                    StepPill(step: step)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 2)
-        .padding(.bottom, 10)
-        .padding(.bottom, 2)
+        .padding(.bottom, 8)
     }
 }
 
-private struct StepRow: View {
+private struct StepPill: View {
     let step: AgentActivityStep
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(step.state.marker)
-                .font(.system(size: 11, weight: .semibold, design: .default))
-                .foregroundStyle(markerColor)
-                .frame(width: 12, alignment: .center)
+            Circle()
+                .fill(markerColor)
+                .frame(width: 6, height: 6)
 
             Text(step.title)
-                .font(.system(size: 12, weight: step.state == .current ? .semibold : .regular, design: .default))
+                .font(.system(size: 10.5, weight: step.state == .current ? .semibold : .medium, design: .default))
                 .foregroundStyle(textColor)
                 .lineLimit(1)
-                .minimumScaleFactor(0.78)
+                .minimumScaleFactor(0.72)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            step.state == .current ? .white.opacity(0.12) : .white.opacity(0.05),
+            in: Capsule()
+        )
     }
 
     private var markerColor: Color {
@@ -162,7 +168,7 @@ private struct LockScreenAgentActivityView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                AgentActivityPhaseBadge(presentation: presentation, size: 34)
+                AgentActivityGlyph(presentation: presentation, size: 34, showsProgressRing: true)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(presentation.statusText)
@@ -204,18 +210,42 @@ private struct LockScreenAgentActivityView: View {
     }
 }
 
-private struct AgentActivityPhaseBadge: View {
+private struct AgentActivityGlyph: View {
     let presentation: AgentActivityPresentation
     var size: CGFloat
+    var showsProgressRing: Bool
 
     var body: some View {
+        let baseLineWidth = max(0.8, size * 0.045)
+        let ringLineWidth = max(1.1, size * 0.06)
+        let ringInset = ringLineWidth / 2 + 0.8
+        let progress = min(1, max(0.08, presentation.progress))
+
         ZStack {
             Circle()
-                .fill(presentation.phase.widgetColor.opacity(0.18))
-            Circle()
-                .stroke(presentation.phase.widgetColor.opacity(0.38), lineWidth: 1)
-            Image(systemName: presentation.phaseSymbolName)
-                .font(.system(size: size * 0.38, weight: .semibold))
+                .inset(by: ringInset)
+                .fill(presentation.phase.widgetColor.opacity(0.16))
+
+            if showsProgressRing {
+                Circle()
+                    .inset(by: ringInset)
+                    .stroke(.white.opacity(0.16), lineWidth: baseLineWidth)
+                Circle()
+                    .inset(by: ringInset)
+                    .trim(from: 0, to: progress)
+                    .stroke(
+                        presentation.phase.widgetColor,
+                        style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+            } else {
+                Circle()
+                    .inset(by: ringInset)
+                    .stroke(presentation.phase.widgetColor.opacity(0.38), lineWidth: baseLineWidth)
+            }
+
+            Image(systemName: presentation.activitySymbolName)
+                .font(.system(size: size * 0.34, weight: .semibold))
                 .foregroundStyle(presentation.phase.widgetColor)
         }
         .frame(width: size, height: size)

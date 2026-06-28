@@ -94,6 +94,7 @@ final class ChatViewModel {
     var pendingSearchApproval: SearchToolApprovalRequest?
     var pendingWebMountApproval: WebMountToolApprovalRequest?
     var pendingWorkspaceApproval: WorkspaceToolApprovalRequest?
+    var pendingIshHandoffApproval: IshHandoffToolApprovalRequest?
     var pendingMcpApproval: McpToolApprovalRequest?
     var configurationError: String?
     var contextCompactState: ChatContextCompactState = .idle
@@ -306,6 +307,9 @@ final class ChatViewModel {
                 setPendingWorkspaceApproval: { [weak self] request in
                     self?.pendingWorkspaceApproval = request
                 },
+                setPendingIshHandoffApproval: { [weak self] request in
+                    self?.pendingIshHandoffApproval = request
+                },
                 setPendingMcpApproval: { [weak self] request in
                     self?.pendingMcpApproval = request
                 },
@@ -418,6 +422,7 @@ final class ChatViewModel {
               pendingSearchApproval == nil,
               pendingWebMountApproval == nil,
               pendingWorkspaceApproval == nil,
+              pendingIshHandoffApproval == nil,
               pendingMcpApproval == nil else { return }
 
         if autoGenerateResponses, let configurationIssue {
@@ -610,6 +615,7 @@ final class ChatViewModel {
     private func onGenerationCompleted() {
         guard pendingMemoryApproval == nil, pendingSearchApproval == nil,
               pendingWebMountApproval == nil, pendingWorkspaceApproval == nil,
+              pendingIshHandoffApproval == nil,
               pendingMcpApproval == nil else { return }
         guard let last = messages.last, last.role == MessageRole.assistant,
               !last.toText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -840,6 +846,13 @@ final class ChatViewModel {
                 presentation: .selectedFileReadFailed,
                 dismissalDelay: 6
             )
+        case .ishExecuteResult, .ishHandoffResult:
+            selectedFileContextError = "iSH tool output cannot be attached to a chat message."
+            await liveActivityController.end(
+                runId: activityRunId,
+                presentation: .selectedFileReadFailed,
+                dismissalDelay: 6
+            )
         }
     }
 
@@ -965,6 +978,18 @@ final class ChatViewModel {
         }
     }
 
+    func approvePendingIshHandoffTool() {
+        Task { @MainActor in
+            await generationCoordinator.approvePendingIshHandoffTool()
+        }
+    }
+
+    func denyPendingIshHandoffTool() {
+        Task { @MainActor in
+            await generationCoordinator.denyPendingIshHandoffTool()
+        }
+    }
+
     func approvePendingMcpTool() {
         Task { @MainActor in
             await generationCoordinator.approvePendingMcpTool()
@@ -979,6 +1004,11 @@ final class ChatViewModel {
 
     func cancelGeneration() {
         generationCoordinator.cancel()
+    }
+
+    @discardableResult
+    func handoffGenerationToBackgroundIfNeeded() -> Bool {
+        generationCoordinator.handoffCurrentGenerationToBackground(conversationStore: conversationStore)
     }
 
     // MARK: - Message branching actions (Android ChatService parity)
@@ -1505,6 +1535,11 @@ final class ChatViewModel {
                 names: workspaceToolNamesForCurrentTurn()
             ))
         }
+        if localToolExecutor != nil {
+            toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+                names: ishToolNamesForCurrentTurn()
+            ))
+        }
         if localToolExecutor != nil, isWebMountRuntimeEnabled {
             toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
                 names: Array(IOSWebMountToolCatalog.supportedToolNames).sorted()
@@ -1546,12 +1581,24 @@ final class ChatViewModel {
         return Array(names).sorted()
     }
 
+    private func ishToolNamesForCurrentTurn() -> [String] {
+        let embeddedNames = enabledModelToolNames(IOSEmbeddedIshToolCatalog.supportedToolNames)
+        let handoffNames = enabledModelToolNames(IOSIshToolCatalog.supportedToolNames)
+        guard !embeddedNames.isEmpty else { return handoffNames }
+        return latestUserMessageRequestsExternalIshHandoff() ? handoffNames : embeddedNames
+    }
+
+    private func latestUserMessageRequestsExternalIshHandoff() -> Bool {
+        guard let text = latestUserMessageTextLowercased() else { return false }
+        return [
+            "外部 ish", "ish app", "ish 应用", "打开 ish", "交给 ish",
+            "交接", "复制到剪贴板", "剪贴板", "粘贴", "手动执行",
+            "handoff", "external ish", "clipboard", "paste manually"
+        ].contains { text.contains($0) }
+    }
+
     private func latestUserMessageRequestsWorkspaceWrite() -> Bool {
-        guard let text = messages.reversed()
-            .first(where: { $0.role == MessageRole.user })?
-            .toText()
-            .lowercased()
-        else { return false }
+        guard let text = latestUserMessageTextLowercased() else { return false }
 
         let hasWriteAction = [
             "保存", "存到", "存入", "写入", "新建", "创建", "生成文件", "导出",
@@ -1564,6 +1611,13 @@ final class ChatViewModel {
             "workspace", "工作区", "/workspace", "文件", "文档",
             ".md", ".txt", ".json", ".html", ".csv"
         ].contains { text.contains($0) }
+    }
+
+    private func latestUserMessageTextLowercased() -> String? {
+        messages.reversed()
+            .first(where: { $0.role == MessageRole.user })?
+            .toText()
+            .lowercased()
     }
 
     #if DEBUG
@@ -1662,6 +1716,18 @@ final class ChatViewModel {
         guard let localToolExecutor else { return true }
         let snapshot = localToolExecutor.permissionsStatus()
         return snapshot.capabilities.first { $0.id == capabilityId }?.policy != IOSAgentPermissionPolicy.disabled.title
+    }
+
+    private func enabledModelToolNames(_ names: Set<String>) -> [String] {
+        guard let localToolExecutor else { return Array(names).sorted() }
+        let snapshot = localToolExecutor.permissionsStatus()
+        return names.filter { toolName in
+            guard let capability = snapshot.capabilities.first(where: { $0.modelToolNames.contains(toolName) }) else {
+                return false
+            }
+            return capability.policy != IOSAgentPermissionPolicy.disabled.title
+        }
+        .sorted()
     }
 
 }

@@ -18,6 +18,8 @@ final class IOSCapabilityRegistryTests: XCTestCase {
             "ios.mcp.tool_call",
             "ios.workspace.file_read",
             "ios.workspace.file_write",
+            "ios.embedded.ish_runtime",
+            "ios.external.ish_handoff",
             "ios.remote.command",
             "ios.location.always",
             "ios.location.temporary_precise",
@@ -90,8 +92,10 @@ final class IOSCapabilityRegistryTests: XCTestCase {
             "workspace_file_write",
             "workspace_file_edit",
             "workspace_file_move",
-            "workspace_artifact_delete"
+            "workspace_artifact_delete",
+            "ish_handoff"
         ]).union(IOSWebMountToolCatalog.supportedToolNames)
+            .union(IOSEmbeddedIshToolCatalog.supportedToolNames)
         XCTAssertEqual(IOSCapabilityRegistry.executableToolNames, expected)
     }
 
@@ -105,9 +109,30 @@ final class IOSCapabilityRegistryTests: XCTestCase {
         let remote = try XCTUnwrap(
             IOSCapabilityRegistry.capabilities.first { $0.id == "ios.remote.command" }
         )
+        let ish = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.external.ish_handoff" }
+        )
+        let embeddedIsh = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.embedded.ish_runtime" }
+        )
 
         XCTAssertEqual(subAgent.modelToolNames, ["subagent_dispatch"])
         XCTAssertEqual(council.modelToolNames, ["model_council_run"])
+        XCTAssertEqual(ish.modelToolNames, ["ish_handoff"])
+        XCTAssertEqual(ish.status, .degraded)
+        XCTAssertTrue(ish.summary.contains("cannot control iSH"))
+        XCTAssertTrue(ish.summary.contains("stdout/stderr"))
+        if IOSTerminalBuildPolicy.experimentalRuntimesLinked {
+            XCTAssertEqual(embeddedIsh.status, .supported)
+            XCTAssertEqual(embeddedIsh.modelToolNames, ["ios_ish_execute"])
+            XCTAssertTrue(IOSCapabilityRegistry.executableToolNames.contains("ios_ish_execute"))
+            XCTAssertNil(embeddedIsh.unavailableReason)
+        } else {
+            XCTAssertEqual(embeddedIsh.status, .unsupported)
+            XCTAssertTrue(embeddedIsh.modelToolNames.isEmpty)
+            XCTAssertFalse(IOSCapabilityRegistry.executableToolNames.contains("ios_ish_execute"))
+            XCTAssertTrue(embeddedIsh.unavailableReason?.contains("ExperimentalGPL") == true)
+        }
         XCTAssertTrue(remote.uiActionNames.contains("remote_command_run"))
         XCTAssertTrue(remote.modelToolNames.isEmpty)
         XCTAssertFalse(IOSCapabilityRegistry.executableToolNames.contains("terminal_execute"))

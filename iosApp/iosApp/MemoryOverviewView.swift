@@ -66,7 +66,14 @@ struct MemoryOverviewView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "新增记忆", size: 44, symbolSize: 20) {
+            AmberGlassIconButton(
+                systemImage: "plus",
+                accessibilityLabel: "新增记忆",
+                size: 44,
+                symbolSize: 20,
+                tint: AmberTheme.accent,
+                prominent: true
+            ) {
                 router.navigate(to: .memoryEdit(recordId: nil, text: "", scope: "核心", pinned: false))
             }
         }
@@ -77,12 +84,12 @@ struct MemoryOverviewView: View {
 
     private var intro: some View {
         Text("管理 Amber 会在聊天中参考的本地记忆。记录可以搜索、按范围过滤、查看来源，并在模型尝试写入时留下审批痕迹。")
-            .font(.subheadline)
-            .foregroundStyle(AmberTheme.muted)
-            .lineSpacing(2)
+            .font(.callout)
+            .foregroundStyle(AmberTheme.foreground2)
+            .lineSpacing(3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.bottom, 3)
+            .padding(.bottom, 6)
     }
 
     private var runtimeSection: some View {
@@ -122,7 +129,7 @@ struct MemoryOverviewView: View {
     private var searchSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "搜索与过滤")
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(AmberTheme.muted)
@@ -148,28 +155,21 @@ struct MemoryOverviewView: View {
                         .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
                 }
 
-                ScrollView(.horizontal) {
-                    AmberGlassGroup(spacing: 12) {
-                        HStack(spacing: 8) {
-                            ForEach(IOSMemoryScopeFilter.allCases) { filter in
-                                Button {
-                                    scopeFilter = filter
-                                } label: {
-                                    AmberGlassTextChip(
-                                        title: filter.title,
-                                        isSelected: scopeFilter == filter,
-                                        height: 30,
-                                        horizontalPadding: 12
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityAddTraits(scopeFilter == filter ? .isSelected : [])
-                            }
+                HStack(spacing: 8) {
+                    ForEach(IOSMemoryScopeFilter.allCases) { filter in
+                        Button {
+                            scopeFilter = filter
+                        } label: {
+                            MemoryScopeFilterChip(
+                                title: filter.title,
+                                isSelected: scopeFilter == filter
+                            )
                         }
-                        .padding(.horizontal, 16)
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(scopeFilter == filter ? .isSelected : [])
                     }
                 }
-                .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 16)
         }
@@ -181,14 +181,18 @@ struct MemoryOverviewView: View {
             AmberFormGroup {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
-                        Image(systemName: recallRecords.isEmpty ? "brain.head.profile" : "brain.head.profile.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(recallRecords.isEmpty ? AmberTheme.muted2 : AmberTheme.accentCyan)
-                            .frame(width: 28, height: 28)
+                        ZStack {
+                            Circle()
+                                .fill(recallRecords.isEmpty ? AmberTheme.surface2 : AmberTheme.accentCyan.opacity(0.14))
+                            Image(systemName: recallRecords.isEmpty ? "brain.head.profile" : "brain.head.profile.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(recallRecords.isEmpty ? AmberTheme.muted2 : AmberTheme.accentCyan)
+                        }
+                        .frame(width: 32, height: 32)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(recallRecords.count) 条会进入当前聊天候选")
-                                .font(.body.weight(.semibold))
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(AmberTheme.foreground)
                             Text(IOSMemoryLibrary.recallExplanation(records: records, runtime: sharedSettings.agentRuntime))
                                 .font(.caption)
@@ -208,6 +212,7 @@ struct MemoryOverviewView: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
             }
@@ -219,14 +224,7 @@ struct MemoryOverviewView: View {
             AmberSectionLabel(text: "记忆库")
             if filteredRecords.isEmpty {
                 AmberFormGroup {
-                    ContentUnavailableView(
-                        records.isEmpty ? "暂无记忆" : "没有匹配结果",
-                        systemImage: records.isEmpty ? "tray" : "magnifyingglass",
-                        description: Text(records.isEmpty ? "点右上角新增，或在聊天中批准模型写入。" : "换个关键词或范围再试。")
-                    )
-                    .foregroundStyle(AmberTheme.muted)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 28)
+                    MemoryEmptyState(isSearching: !records.isEmpty)
                 }
             } else {
                 AmberFormGroup {
@@ -437,6 +435,74 @@ private struct MemoryTag: View {
     }
 }
 
+private struct MemoryScopeFilterChip: View {
+    let title: String
+    let isSelected: Bool
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(isSelected ? AmberTheme.accentInk : AmberTheme.foreground2)
+            .lineLimit(1)
+            .frame(height: 32)
+            .padding(.horizontal, 13)
+            .background(
+                isSelected ? AmberTheme.accent : AmberTheme.surface,
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(
+                        isSelected ? AmberTheme.accent.opacity(0.16) : AmberTheme.borderSoft,
+                        lineWidth: 0.5
+                    )
+            }
+    }
+}
+
+private struct MemoryEmptyState: View {
+    let isSearching: Bool
+
+    private var title: String {
+        isSearching ? "没有匹配结果" : "暂无记忆"
+    }
+
+    private var message: String {
+        isSearching ? "换个关键词或范围再试。" : "点右上角新增，或在聊天中批准模型写入。"
+    }
+
+    private var systemImage: String {
+        isSearching ? "magnifyingglass" : "tray"
+    }
+
+    var body: some View {
+        VStack(spacing: 13) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(AmberTheme.surface2.opacity(0.82))
+                Image(systemName: systemImage)
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
+            .frame(width: 58, height: 58)
+
+            VStack(spacing: 5) {
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 34)
+    }
+}
+
 private struct MemoryPresetRow: View {
     let title: String
     let subtitle: String
@@ -446,11 +512,12 @@ private struct MemoryPresetRow: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.body)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground)
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -458,7 +525,7 @@ private struct MemoryPresetRow: View {
                 .labelsHidden()
                 .tint(AmberTheme.accent)
         }
-        .frame(minHeight: 58)
+        .frame(minHeight: 60)
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
         .accessibilityLabel(title)
@@ -470,7 +537,7 @@ private struct MemoryDivider: View {
 
     var body: some View {
         Rectangle()
-            .fill(AmberTheme.borderSoft)
+            .fill(AmberTheme.borderSoft.opacity(0.82))
             .frame(height: 0.5)
             .padding(.leading, leading)
     }

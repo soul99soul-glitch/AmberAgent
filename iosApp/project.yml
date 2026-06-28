@@ -25,6 +25,9 @@ packages:
   SwiftStreamingMarkdown:
     url: https://github.com/microsoft/SwiftStreamingMarkdown
     branch: main
+  ish-arm64-pkg:
+    url: https://github.com/Lolendor/ish-arm64-pkg
+    exactVersion: 0.3.3
 
 targets:
   iosApp:
@@ -195,7 +198,7 @@ targets:
       - path: iosApp/AgentActivityModels.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.experimental-gpl.activity
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.activity
         INFOPLIST_FILE: ActivityWidget/Info.plist
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
@@ -213,6 +216,9 @@ targets:
         buildPhase: resources
       - path: ../app/src/main/res/font/jetbrains_mono.ttf
         buildPhase: resources
+      - path: IshRuntimeResources/fs
+        buildPhase: resources
+        type: folder
     preBuildScripts:
       - name: Build Shared KMP Framework
         basedOnDependencyAnalysis: false
@@ -266,7 +272,7 @@ targets:
           fi
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.experimental-gpl
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios
         INFOPLIST_FILE: iosApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: iosApp/AmberAgent.entitlements
         MARKETING_VERSION: "1.0.0"
@@ -305,6 +311,8 @@ targets:
         product: NIOSSH
       - package: SwiftStreamingMarkdown
         product: SwiftStreamingMarkdown
+      - package: ish-arm64-pkg
+        product: IshEmbed
       - target: AmberAgentActivityWidgetExperimentalGPL
     scheme:
       gatherCoverageData: false

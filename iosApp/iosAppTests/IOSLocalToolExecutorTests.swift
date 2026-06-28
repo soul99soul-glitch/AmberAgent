@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 import WebKit
 @testable import iosApp
 
@@ -898,6 +899,87 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         }
         XCTAssertEqual(try jsonObject(deleteText)["deleted"] as? Bool, true)
         XCTAssertThrowsError(try workspaceStore.artifactContent(id: artifact.id))
+    }
+
+    func testIshHandoffRequiresApprovalAndPreparesClipboard() async throws {
+        let executor = makeExecutor()
+        let input = #"{"command":"echo amber-ish","filename":"demo.sh","purpose":"smoke"}"#
+
+        let blocked = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "ish_handoff",
+                operation: input,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+        guard case .needsUserAction(let reason) = blocked else {
+            return XCTFail("Expected iSH handoff approval requirement, got \(blocked)")
+        }
+        XCTAssertTrue(reason.contains("foreground approval"))
+
+        let prepared = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "ish_handoff",
+                operation: input,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: true
+            ),
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        guard case .ishHandoffResult(let text) = prepared else {
+            return XCTFail("Expected iSH handoff result, got \(prepared)")
+        }
+
+        let object = try jsonObject(text)
+        XCTAssertEqual(object["ok"] as? Bool, true)
+        XCTAssertEqual(object["status"] as? String, "handoff_prepared")
+        XCTAssertEqual(object["mode"] as? String, "clipboard_handoff")
+        XCTAssertEqual(object["script_file_name"] as? String, "demo.sh")
+        XCTAssertEqual(object["copied_to_clipboard"] as? Bool, true)
+        XCTAssertEqual(object["requires_user_paste"] as? Bool, true)
+        XCTAssertEqual(object["open_ish_supported"] as? Bool, false)
+        XCTAssertEqual(object["stdout_available"] as? Bool, false)
+        XCTAssertEqual(object["stderr_available"] as? Bool, false)
+        XCTAssertEqual(object["exit_code_available"] as? Bool, false)
+
+        let paste = try XCTUnwrap(UIPasteboard.general.string)
+        XCTAssertTrue(paste.contains("demo.sh"))
+        XCTAssertTrue(paste.contains("echo amber-ish"))
+
+        let scriptPath = try XCTUnwrap(object["amber_script_path"] as? String)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scriptPath))
+        let savedScript = try String(contentsOfFile: scriptPath, encoding: .utf8)
+        XCTAssertTrue(savedScript.contains("#!/bin/sh"))
+        XCTAssertTrue(savedScript.contains("echo amber-ish"))
+    }
+
+    func testEmbeddedIshExecuteAvailabilityMatchesBuildTarget() async throws {
+        let executor = makeExecutor()
+
+        let blocked = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: "ios_ish_execute",
+                operation: #"{"command":"echo amber-ish","purpose":"smoke"}"#,
+                scopeDigest: "",
+                payloadDigest: "",
+                isUserInitiated: false
+            )
+        )
+
+        if IOSEmbeddedIshToolCatalog.supportedToolNames.contains("ios_ish_execute") {
+            guard case .needsUserAction(let reason) = blocked else {
+                return XCTFail("Expected embedded iSH approval requirement, got \(blocked)")
+            }
+            XCTAssertTrue(reason.contains("stdout/stderr/exit code"))
+        } else {
+            guard case .denied(let reason) = blocked else {
+                return XCTFail("Expected unavailable embedded iSH denial, got \(blocked)")
+            }
+            XCTAssertTrue(reason.contains("Unknown iOS tool"))
+        }
     }
 
     private func makeExecutor(

@@ -138,7 +138,7 @@ struct SettingsView: View {
             } header: {
                 Text("Terminal Runtime")
             } footer: {
-                Text("稳定版会优先使用 SSH 作为远程命令运行环境，本机 iOS 工具用于轻量文件和脚本操作。更多高级运行时会在满足审核要求后开放。")
+                Text("稳定版会优先使用 SSH 作为远程命令运行环境，本机 iOS 工具用于轻量文件和脚本操作。更多高级 Runtime 会在满足审核要求后开放。")
             }
 
             Section {

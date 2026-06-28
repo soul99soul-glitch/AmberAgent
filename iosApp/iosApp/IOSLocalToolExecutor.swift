@@ -17,6 +17,8 @@ struct IOSLocalToolExecutionRequest: Equatable {
 enum IOSLocalToolExecutionOutput: Equatable {
     case selectedFilePreview(SelectedDocumentReadResult)
     case permissionsStatus(IOSPermissionsStatusSnapshot)
+    case ishExecuteResult(String)
+    case ishHandoffResult(String)
     case webMountResult(String)
     case workspaceResult(String)
     case needsUserAction(String)
@@ -120,6 +122,32 @@ final class IOSLocalToolExecutor {
     ) async -> IOSLocalToolExecutionOutput {
         if request.toolName == "permissions_status" {
             return .permissionsStatus(permissionsStatus(now: now))
+        }
+        if IOSEmbeddedIshToolCatalog.supportedToolNames.contains(request.toolName) {
+            guard let capability = IOSCapabilityRegistry.capability(forToolName: request.toolName) else {
+                return .denied("Unknown embedded iSH tool: \(request.toolName)")
+            }
+            switch resolveEmbeddedIshExecute(request: request, capability: capability) {
+            case .allow:
+                return .ishExecuteResult(await IOSEmbeddedIshExecuteExecutor.execute(input: request.operation))
+            case .needsUserAction(let reason):
+                return .needsUserAction(reason)
+            case .deny(let reason):
+                return .denied(reason)
+            }
+        }
+        if IOSIshToolCatalog.supportedToolNames.contains(request.toolName) {
+            guard let capability = IOSCapabilityRegistry.capability(forToolName: request.toolName) else {
+                return .denied("Unknown iSH handoff tool: \(request.toolName)")
+            }
+            switch resolveIshHandoff(request: request, capability: capability) {
+            case .allow:
+                return .ishHandoffResult(IOSIshHandoffExecutor.execute(input: request.operation, now: now))
+            case .needsUserAction(let reason):
+                return .needsUserAction(reason)
+            case .deny(let reason):
+                return .denied(reason)
+            }
         }
         if IOSWorkspaceToolCatalog.supportedToolNames.contains(request.toolName) {
             guard let capability = IOSCapabilityRegistry.capability(forToolName: request.toolName) else {
@@ -228,6 +256,34 @@ final class IOSLocalToolExecutor {
         return .allow(capabilityId: capability.id)
     }
 
+    private func resolveEmbeddedIshExecute(
+        request: IOSLocalToolExecutionRequest,
+        capability: IOSPlatformCapability
+    ) -> IOSPlatformGateDecision {
+        let policy = permissionStore.policy(for: capability)
+        if policy == .disabled {
+            return .deny(reason: "Disabled by AmberAgent embedded iSH policy")
+        }
+        guard request.isUserInitiated else {
+            return .needsUserAction(reason: "Embedded iSH executes local Linux commands and returns stdout/stderr/exit code. It requires explicit foreground approval.")
+        }
+        return .allow(capabilityId: capability.id)
+    }
+
+    private func resolveIshHandoff(
+        request: IOSLocalToolExecutionRequest,
+        capability: IOSPlatformCapability
+    ) -> IOSPlatformGateDecision {
+        let policy = permissionStore.policy(for: capability)
+        if policy == .disabled {
+            return .deny(reason: "Disabled by AmberAgent iSH handoff policy")
+        }
+        guard request.isUserInitiated else {
+            return .needsUserAction(reason: "iSH handoff prepares a paste-ready command for another app. It requires explicit foreground approval.")
+        }
+        return .allow(capabilityId: capability.id)
+    }
+
     private func resolveWorkspace(
         request: IOSLocalToolExecutionRequest,
         capability: IOSPlatformCapability
@@ -298,7 +354,7 @@ final class IOSLocalToolExecutor {
                     requiredBackgroundModes: capability.requiredBackgroundModes,
                     requiredExtensionTargets: capability.requiredExtensionTargets,
                     reason: capability.unavailableReason,
-                    executable: capability.status == .supported &&
+                    executable: capability.status != .unsupported &&
                         policy != .disabled &&
                         (!capability.modelToolNames.isEmpty || !capability.uiActionNames.isEmpty),
                     lastApprovalAction: latestApproval?.action.title,

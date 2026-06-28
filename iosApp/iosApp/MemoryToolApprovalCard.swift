@@ -532,3 +532,92 @@ struct McpToolApprovalCard: View {
         }
     }
 }
+
+struct IshHandoffToolApprovalCard: View {
+    let request: IshHandoffToolApprovalRequest
+    let onApprove: () -> Void
+    let onDeny: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accentAmber)
+                    .frame(width: 30, height: 30)
+                    .background(AmberTheme.accentAmber.opacity(0.13), in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(request.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+
+                    Text(request.reason)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(request.filename)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .lineLimit(1)
+                Text(request.commandPreview)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                AmberTheme.surface.opacity(0.72),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+
+            HStack(spacing: 6) {
+                WebMountApprovalChip(systemImage: request.primaryChip.systemImage, title: request.primaryChip.title)
+                WebMountApprovalChip(systemImage: request.secondaryChip.systemImage, title: request.secondaryChip.title)
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+
+                Button(action: onDeny) {
+                    Label("拒绝", systemImage: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("拒绝 iSH 工具")
+
+                Button(action: onApprove) {
+                    Label("批准", systemImage: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 13)
+                        .frame(height: 32)
+                        .background(AmberTheme.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("批准 iSH 工具")
+            }
+        }
+        .padding(12)
+        .amberGlass(cornerRadius: 18)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AmberTheme.accentAmber.opacity(0.38), lineWidth: 0.7)
+        }
+    }
+}

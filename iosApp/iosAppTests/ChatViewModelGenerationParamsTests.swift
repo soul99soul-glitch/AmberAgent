@@ -103,6 +103,12 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let names = Set(viewModel.currentToolDeclarationNames())
         XCTAssertTrue(names.contains("subagent_dispatch"))
         XCTAssertTrue(names.contains("model_council_run"))
+        if IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty {
+            XCTAssertTrue(names.contains("ish_handoff"))
+        } else {
+            XCTAssertFalse(names.contains("ish_handoff"))
+            XCTAssertEqual(names.intersection(IOSEmbeddedIshToolCatalog.supportedToolNames), IOSEmbeddedIshToolCatalog.supportedToolNames)
+        }
         XCTAssertTrue(names.contains("workspace_file_list"))
         XCTAssertTrue(names.contains("workspace_file_search"))
         XCTAssertFalse(names.contains("workspace_file_write"))
@@ -125,6 +131,42 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertTrue(names.contains("wm_select"))
         XCTAssertTrue(names.contains("wm_find"))
         XCTAssertTrue(names.contains("wm_wait"))
+    }
+
+    func testEmbeddedIshExecutionIsPreferredForPlainIshRequest() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: localToolExecutor(),
+            autoGenerateResponses: false
+        )
+        viewModel.inputText = "用内置 iSH 执行 uname -a，并返回 stdout stderr exit code"
+        viewModel.sendMessage()
+
+        let names = Set(viewModel.currentToolDeclarationNames())
+        if IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty {
+            XCTAssertTrue(names.contains("ish_handoff"))
+        } else {
+            XCTAssertTrue(names.contains("ios_ish_execute"))
+            XCTAssertFalse(names.contains("ish_handoff"))
+        }
+    }
+
+    func testExternalIshHandoffCanBeRequestedExplicitly() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: localToolExecutor(),
+            autoGenerateResponses: false
+        )
+        viewModel.inputText = "交接到外部 iSH App，复制脚本到剪贴板，我手动粘贴执行"
+        viewModel.sendMessage()
+
+        let names = Set(viewModel.currentToolDeclarationNames())
+        XCTAssertTrue(names.contains("ish_handoff"))
+        if !IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty {
+            XCTAssertFalse(names.contains("ios_ish_execute"))
+        }
     }
 
     func testWorkspaceWriteToolsRequireExplicitFileWriteRequest() {
@@ -168,8 +210,16 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let council = try XCTUnwrap(
             IOSCapabilityRegistry.capabilities.first { $0.id == "ios.agent.model_council_run" }
         )
+        let ish = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.external.ish_handoff" }
+        )
+        let embeddedIsh = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.embedded.ish_runtime" }
+        )
         permissionStore.setPolicy(.disabled, for: subAgent)
         permissionStore.setPolicy(.disabled, for: council)
+        permissionStore.setPolicy(.disabled, for: ish)
+        permissionStore.setPolicy(.disabled, for: embeddedIsh)
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
@@ -180,6 +230,8 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
 
         XCTAssertFalse(names.contains("subagent_dispatch"))
         XCTAssertFalse(names.contains("model_council_run"))
+        XCTAssertFalse(names.contains("ish_handoff"))
+        XCTAssertFalse(names.contains("ios_ish_execute"))
     }
 
     func testLocalToolDeclarationsMatchCatalogAndCapabilityRegistry() {
@@ -192,11 +244,17 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let paramsNames = Set(viewModel.currentToolDeclarationNames())
         let executableNames = IOSCapabilityRegistry.executableToolNames
         let workspaceNames = IOSWorkspaceToolCatalog.supportedToolNames
+        let ishNames = IOSIshToolCatalog.supportedToolNames
+        let embeddedIshNames = IOSEmbeddedIshToolCatalog.supportedToolNames
         let webMountNames = IOSWebMountToolCatalog.supportedToolNames
 
         XCTAssertEqual(paramsNames.intersection(workspaceNames), IOSWorkspaceToolCatalog.readToolNames)
+        XCTAssertEqual(paramsNames.intersection(ishNames), embeddedIshNames.isEmpty ? ishNames : [])
+        XCTAssertEqual(paramsNames.intersection(embeddedIshNames), embeddedIshNames)
         XCTAssertEqual(paramsNames.intersection(webMountNames), webMountNames)
         XCTAssertEqual(executableNames.intersection(workspaceNames), workspaceNames)
+        XCTAssertEqual(executableNames.intersection(ishNames), ishNames)
+        XCTAssertEqual(executableNames.intersection(embeddedIshNames), embeddedIshNames)
         XCTAssertEqual(executableNames.intersection(webMountNames), webMountNames)
 
         viewModel.inputText = "创建 Workspace 文件 /workspace/check.md"

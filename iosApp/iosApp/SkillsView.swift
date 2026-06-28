@@ -42,10 +42,16 @@ struct SkillsView: View {
 
             Spacer()
 
-            AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加技能", size: 44, symbolSize: 20) {
+            AmberGlassIconButton(
+                systemImage: "plus",
+                accessibilityLabel: "添加技能",
+                size: 44,
+                symbolSize: 20,
+                tint: AmberTheme.accent,
+                prominent: true
+            ) {
                 router.navigate(to: .skillAdd)
             }
-            .foregroundStyle(AmberTheme.accent)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -57,18 +63,7 @@ struct SkillsView: View {
             AmberSectionLabel(text: "本机技能")
             AmberFormGroup {
                 if scannedSkills.isEmpty {
-                    HStack(spacing: 10) {
-                        Image(systemName: "doc.questionmark")
-                            .font(.system(size: 16))
-                            .foregroundStyle(AmberTheme.muted2)
-                        Text("还没有导入本机技能。添加技能后可在这里启用、编辑或删除。")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
+                    SkillEmptyState()
                 } else {
                     ForEach(Array(scannedSkills.enumerated()), id: \.offset) { index, skill in
                         let enabled = sharedSettings.isSkillEnabled(skill.name)
@@ -108,33 +103,9 @@ struct SkillsView: View {
                     }
                 }
             }
-
-            HStack(spacing: 12) {
-                Button {
-                    if let docsDir = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true).path {
-                        scannedSkills = IosSkillFactory.shared.listSkills(documentsDir: docsDir)
-                    }
-                } label: {
-                    Label("重新扫描", systemImage: "arrow.clockwise")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(AmberTheme.accent)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-
-            Text("重新扫描会刷新本机技能列表。")
-                .font(.footnote)
-                .foregroundStyle(AmberTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 6)
         }
         .onAppear {
-            if let docsDir = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true).path {
-                scannedSkills = IosSkillFactory.shared.listSkills(documentsDir: docsDir)
-            }
+            rescanSkills()
         }
     }
 
@@ -146,8 +117,7 @@ struct SkillsView: View {
                     systemImage: "point.3.connected.trianglepath.dotted",
                     iconColor: AmberTheme.accentCyan,
                     title: "MCP 服务器",
-                    subtitle: "管理可供聊天使用的外部工具服务器",
-                    trailing: "管理"
+                    subtitle: "管理可供聊天使用的外部工具服务器"
                 ) {
                     router.navigate(to: .mcpServers)
                 }
@@ -162,7 +132,7 @@ struct SkillsView: View {
                 SkillUtilityRow(
                     systemImage: "arrow.triangle.2.circlepath",
                     iconColor: AmberTheme.accent,
-                    title: "重新扫描",
+                    title: "扫描本机技能",
                     subtitle: "刷新本机技能列表"
                 ) {
                     rescanSkills()
@@ -321,6 +291,35 @@ private struct SkillBadge: View {
     }
 }
 
+private struct SkillEmptyState: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(AmberTheme.surface2.opacity(0.82))
+                Image(systemName: "doc.questionmark")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
+            .frame(width: 52, height: 52)
+
+            VStack(spacing: 4) {
+                Text("暂无本机技能")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Text("点右上角添加技能，或在下方重新扫描本机目录。")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 24)
+    }
+}
+
 private struct SkillUtilityRow: View {
     let systemImage: String
     let iconColor: Color
@@ -340,7 +339,7 @@ private struct SkillUtilityRow: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.body)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
                     Text(subtitle)
                         .font(.caption)
@@ -359,7 +358,7 @@ private struct SkillUtilityRow: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AmberTheme.muted2)
             }
-            .frame(minHeight: 58)
+            .frame(minHeight: 60)
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
             .contentShape(Rectangle())

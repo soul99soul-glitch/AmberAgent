@@ -294,6 +294,39 @@ fun createSelectedFileReadToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createIshHandoffToolDeclaration(): Tool = Tool(
+    name = "ish_handoff",
+    description = """
+        Prepare a command or shell script for manual execution in the external iSH app on iOS.
+        This is a foreground handoff only: AmberAgent writes a script copy, copies a paste-ready
+        iSH command to the clipboard, and returns handoff metadata. It does not run iSH in the
+        background and cannot read stdout, stderr, exit code, or files from the iSH sandbox.
+        Use this only when the user explicitly wants to run something in iSH and can paste it
+        into iSH themselves.
+    """.trimIndent().replace("\n", " "),
+    parameters = { ishHandoffParameters() },
+    needsApproval = true,
+    mandatoryApproval = true,
+    allowsAutoApproval = false,
+    execute = { emptyList() }
+)
+
+fun createIosIshExecuteToolDeclaration(): Tool = Tool(
+    name = "ios_ish_execute",
+    description = """
+        Execute a POSIX shell command or script inside AmberAgent iOS's embedded experimental iSH runtime.
+        This is not the external iSH app: Amber owns the runtime process and returns stdout, stderr,
+        exit_code, timeout, and status in the tool result. Available only in the iOS ExperimentalGPL
+        build after explicit foreground approval. Use for short, bounded proof commands; do not start
+        long-running interactive programs unless the user explicitly asks.
+    """.trimIndent().replace("\n", " "),
+    parameters = { iosIshExecuteParameters() },
+    needsApproval = true,
+    mandatoryApproval = true,
+    allowsAutoApproval = false,
+    execute = { emptyList() }
+)
+
 fun createPermissionsStatusToolDeclaration(): Tool = Tool(
     name = "permissions_status",
     description = "Return AmberAgent iOS capability and permission status for tools available on this device.",
@@ -359,6 +392,8 @@ fun iosToolDeclaration(name: String): Tool? = when (name) {
     "subagent_dispatch" -> createSubAgentDispatchToolDeclaration()
     "model_council_run" -> createModelCouncilRunToolDeclaration()
     "file_read_selected" -> createSelectedFileReadToolDeclaration()
+    "ish_handoff" -> createIshHandoffToolDeclaration()
+    "ios_ish_execute" -> createIosIshExecuteToolDeclaration()
     "permissions_status" -> createPermissionsStatusToolDeclaration()
     "tools_list" -> createToolsListToolDeclaration()
     "subagent_report" -> createSubAgentReportToolDeclaration()
@@ -746,6 +781,50 @@ private fun imageGenParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("prompt")
+)
+
+private fun ishHandoffParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("command", buildJsonObject {
+            put("type", "string")
+            put("description", "Single shell command to run in iSH. Use either command or script.")
+        })
+        put("script", buildJsonObject {
+            put("type", "string")
+            put("description", "Full POSIX /bin/sh script content to paste into iSH. Use either script or command.")
+        })
+        put("filename", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional safe .sh filename to use in iSH and AmberAgent handoff storage.")
+        })
+        put("purpose", buildJsonObject {
+            put("type", "string")
+            put("description", "Short user-facing reason for this iSH handoff.")
+        })
+    }
+)
+
+private fun iosIshExecuteParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("command", buildJsonObject {
+            put("type", "string")
+            put("description", "Single POSIX shell command to execute with /bin/sh -lc. Use either command or script, not both.")
+        })
+        put("script", buildJsonObject {
+            put("type", "string")
+            put("description", "Full POSIX /bin/sh script content to execute. Use either script or command, not both.")
+        })
+        put("timeout_seconds", buildJsonObject {
+            put("type", "integer")
+            put("minimum", 1)
+            put("maximum", 180)
+            put("description", "Execution timeout in seconds. Default 60, maximum 180.")
+        })
+        put("purpose", buildJsonObject {
+            put("type", "string")
+            put("description", "Short user-facing reason for this embedded iSH execution.")
+        })
+    }
 )
 
 private fun webMountTool(

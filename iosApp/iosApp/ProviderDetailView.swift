@@ -338,10 +338,10 @@ struct ProviderDetailView: View {
 
             if let message = connectionStatus.message {
                 ProviderConnectionResultRow(status: connectionStatus, message: message)
-                    .padding(.horizontal, 16)
             }
         }
         .padding(.top, 16)
+        .padding(.horizontal, 16)
     }
 
     private var modelsPanel: some View {
@@ -877,29 +877,39 @@ private struct ProviderSegmentedControl: View {
     @Binding var selection: ProviderDetailTab
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach(ProviderDetailTab.allCases) { tab in
                 Button {
                     selection = tab
                 } label: {
                     Text(tab.title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(selection == tab ? AmberTheme.foreground : AmberTheme.muted)
+                        .foregroundStyle(selection == tab ? AmberTheme.foreground : AmberTheme.foreground2)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 42)
+                        .frame(height: 38)
                         .background(
-                            selection == tab ? AmberTheme.surface : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            selection == tab ? AmberTheme.background.opacity(0.92) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
                         )
+                        .overlay {
+                            if selection == tab {
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .stroke(AmberTheme.borderSoft.opacity(0.9), lineWidth: 0.5)
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(3)
+        .padding(4)
         .background(
-            AmberTheme.surface2.opacity(0.88),
+            AmberTheme.surface.opacity(0.72),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
     }
 }
 
@@ -1013,6 +1023,7 @@ private struct ProviderModelEditorSheet: View {
                             ProviderActionRow(systemImage: "plus.circle", title: "添加 Header", tint: AmberTheme.accent)
                         }
                         .buttonStyle(.plain)
+                        .padding(.horizontal, 16)
                         .padding(.top, 16)
                     }
                     .padding(.bottom, 30)
@@ -1045,20 +1056,22 @@ private struct ProviderActionRow: View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             Text(title)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
             Spacer()
         }
-        .foregroundStyle(tint)
         .frame(maxWidth: .infinity)
-        .frame(height: 46)
-        .padding(.horizontal, 14)
-        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(height: 50)
+        .padding(.horizontal, 12)
+        .background(tint.opacity(0.075), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(tint.opacity(0.13), lineWidth: 0.5)
         }
-        .padding(.horizontal, 16)
     }
 }
 
@@ -1148,6 +1161,10 @@ private struct ProviderConnectionResultRow: View {
         }
         .padding(12)
         .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
     }
 
     private var icon: String {
@@ -1266,12 +1283,19 @@ private struct ProviderModelRow: View {
             Image(systemName: systemImage)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(isCurrent ? AmberTheme.accentGreen : AmberTheme.accent)
-                .frame(width: 32, height: 32)
-                .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .frame(width: 36, height: 36)
+                .background(
+                    isCurrent ? AmberTheme.accentGreen.opacity(0.12) : AmberTheme.accentTint,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke((isCurrent ? AmberTheme.accentGreen : AmberTheme.accent).opacity(0.13), lineWidth: 0.5)
+                }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(name)
-                    .font(.body)
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
                 Text(summary)
@@ -1281,10 +1305,7 @@ private struct ProviderModelRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(badge)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted)
-                .lineLimit(1)
+            ProviderModelBadge(text: badge, isCurrent: isCurrent)
 
             Menu {
                 Button("编辑", action: onEdit)
@@ -1293,19 +1314,45 @@ private struct ProviderModelRow: View {
                 }
                 Button("删除", role: .destructive, action: onDelete)
             } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 18, weight: .semibold))
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(AmberTheme.muted)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 32, height: 32)
+                    .background(AmberTheme.surface2.opacity(0.8), in: Circle())
             }
             .buttonStyle(.plain)
         }
-        .frame(minHeight: 58)
+        .frame(minHeight: 64)
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
+        .background {
+            if isCurrent {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(AmberTheme.accentGreen.opacity(0.045))
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             onEdit()
         }
+    }
+}
+
+private struct ProviderModelBadge: View {
+    let text: String
+    let isCurrent: Bool
+
+    var body: some View {
+        Text(text)
+            .font(isCurrent ? .caption2.weight(.semibold) : .system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(isCurrent ? AmberTheme.accentGreen : AmberTheme.muted)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(
+                (isCurrent ? AmberTheme.accentGreen : AmberTheme.muted).opacity(0.10),
+                in: Capsule()
+            )
     }
 }

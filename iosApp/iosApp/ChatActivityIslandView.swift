@@ -197,6 +197,9 @@ private struct ChatActivityIslandGlyph: View {
             Image(systemName: systemImage)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(tint)
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.variableColor.iterative.reversing, isActive: isActive && !reduceMotion)
+                .animation(.spring(response: 0.35, dampingFraction: 0.72), value: systemImage)
         }
         .frame(width: 24, height: 24)
     }

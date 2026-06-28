@@ -19,11 +19,9 @@ struct TTSSettingsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         intro
-                        presetProvidersSection
-                        engineSection
-                        systemSettingsSection
+                        currentEngineSection
                         previewSection
-                        deleteSection
+                        cloudSection
                     }
                     .padding(.bottom, 36)
                 }
@@ -57,7 +55,7 @@ struct TTSSettingsView: View {
     }
 
     private var intro: some View {
-        Text("当前可使用系统语音进行试听。云端语音服务当前不可用。")
+        Text("iOS 当前使用系统语音合成。云端 TTS 配置会保留，但暂不参与试听或聊天朗读。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
@@ -67,112 +65,60 @@ struct TTSSettingsView: View {
             .padding(.top, 2)
     }
 
-    /// Read-only list of the REAL KMP default TTS providers (DEFAULT_TTS_PROVIDERS),
-    /// sourced from `IOSSharedSettingsStore` (which calls the KMP
-    /// `IosSettingsDefaults.defaultSeededSettings()`). This proves the "real seeded
-    /// Settings read" data path is wired end-to-end (UI -> IOSSharedSettingsStore
-    /// -> IosSettingsDefaults -> applyBackfillAndSeedShared ->
-    /// applyCrossDomainConsistencyShared -> seeded Settings). It does NOT make these
-    /// engines editable/playable — the cloud engine editing below stays draft-only.
-    private var presetProvidersSection: some View {
+    private var currentEngineSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "语音服务")
+            AmberSectionLabel(text: "当前引擎")
 
             AmberFormGroup {
-                ForEach(Array(sharedSettings.ttsProviders.enumerated()), id: \.offset) { index, provider in
-                    TTSPresetProviderRow(
-                        name: provider.name,
-                        isSelected: provider.id == sharedSettings.selectedTTSProviderId
-                    )
-
-                    if index < sharedSettings.ttsProviders.count - 1 {
-                        TTSSettingsDivider()
-                    }
-                }
+                TTSCurrentEngineRow(
+                    title: "系统 TTS",
+                    subtitle: "使用 iOS AVSpeechSynthesizer，本机可直接试听",
+                    status: "可用"
+                )
             }
-
-            TTSSettingsNote("当前默认使用 \(sharedSettings.ttsProviders.first { $0.id == sharedSettings.selectedTTSProviderId }?.name ?? "系统 TTS")。")
-        }
-    }
-
-    private var engineSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "语音引擎")
-            AmberFormGroup {
-                TTSPresetProviderRow(name: "系统 TTS", isSelected: true)
-            }
-
-            TTSSettingsNote("当前仅系统 TTS 可试听；云端 TTS 当前不可用。")
-        }
-    }
-
-    private var systemSettingsSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "系统 TTS 设置")
-            AmberFormGroup {
-                TTSMenuRow(title: "试听语速", value: systemSpeechRate.title) {
-                    ForEach(TTSSpeed.allCases) { speed in
-                        Button(speed.title) { systemSpeechRate = speed }
-                    }
-                }
-            }
-
-            TTSSettingsNote("语速只影响本机试听。")
         }
     }
 
     private var previewSection: some View {
-        AmberFormGroup {
-            Button {
-                if ttsPlayer.isSpeaking {
-                    ttsPlayer.stop()
-                } else {
-                    ttsPlayer.speak(
-                        text: "你好，这是 AmberAgent 的语音试听。系统 TTS 可用。",
-                        language: "zh-CN",
-                        rate: systemSpeechRate.avSpeechRate
-                    )
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: ttsPlayer.isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 30, height: 30)
-                        .background(ttsPlayer.isSpeaking ? AmberTheme.accentRed : AmberTheme.accent, in: Circle())
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(ttsPlayer.isSpeaking ? "正在播放（点击停止）" : "系统 TTS 试听")
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text(ttsPlayer.isSpeaking ? "AVSpeechSynthesizer 正在合成语音" : "使用 iOS 系统语音朗读测试文本")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "试听")
+            AmberFormGroup {
+                TTSMenuRow(title: "语速", value: systemSpeechRate.title) {
+                    ForEach(TTSSpeed.allCases) { speed in
+                        Button(speed.title) { systemSpeechRate = speed }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(minHeight: 58)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
-                .contentShape(Rectangle())
+
+                TTSSettingsDivider()
+
+                Button {
+                    if ttsPlayer.isSpeaking {
+                        ttsPlayer.stop()
+                    } else {
+                        ttsPlayer.speak(
+                            text: "你好，这是 AmberAgent 的语音试听。系统 TTS 可用。",
+                            language: "zh-CN",
+                            rate: systemSpeechRate.avSpeechRate
+                        )
+                    }
+                } label: {
+                    TTSPreviewRow(isSpeaking: ttsPlayer.isSpeaking)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(ttsPlayer.isSpeaking ? "停止试听" : "系统 TTS 试听")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(ttsPlayer.isSpeaking ? "停止试听" : "系统 TTS 试听")
         }
-        .padding(.top, 20)
     }
 
-    private var deleteSection: some View {
+    private var cloudSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已有自定义 TTS 配置")
+            AmberSectionLabel(text: "云端 TTS")
             AmberFormGroup {
+                TTSUnavailableCloudRow()
+
                 let engines = sharedSettings.savedTtsEngines
-                if engines.isEmpty {
-                    Text("暂无自定义云端引擎。云端 TTS 当前不可用。")
-                        .font(.caption).foregroundStyle(AmberTheme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14).padding(.vertical, 12)
-                } else {
+                if !engines.isEmpty {
+                    TTSSettingsDivider()
                     ForEach(Array(engines.enumerated()), id: \.offset) { index, engine in
                         HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 3) {
@@ -189,9 +135,8 @@ struct TTSSettingsView: View {
                 }
             }
 
-            TTSSettingsNote("这里仅管理历史自定义记录。")
+            TTSSettingsNote("这里仅保留历史自定义记录；接入播放链路后再启用选择和试听。")
         }
-        .padding(.top, 20)
     }
 
 }
@@ -250,7 +195,7 @@ private struct TTSMenuRow<MenuContent: View>: View {
         } label: {
             HStack(spacing: 10) {
                 Text(title)
-                    .font(.body)
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -278,39 +223,116 @@ private struct TTSSettingsDivider: View {
     }
 }
 
-private struct TTSPresetProviderRow: View {
-    let name: String
-    let isSelected: Bool
+private struct TTSCurrentEngineRow: View {
+    let title: String
+    let subtitle: String
+    let status: String
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "speaker.wave.2")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(AmberTheme.accent)
-                .frame(width: 30, height: 30)
-                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        HStack(spacing: 12) {
+            TTSIcon(systemName: "speaker.wave.2.fill", tint: AmberTheme.accent)
 
-            Text(name)
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if isSelected {
-                Text("默认")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(AmberTheme.accentGreen)
-            } else {
-                Text("预置")
-                    .font(.caption2)
-                    .foregroundStyle(AmberTheme.muted2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(status)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AmberTheme.accentGreen)
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(AmberTheme.accentGreen.opacity(0.10), in: Capsule())
         }
-        .frame(minHeight: 48)
+        .frame(minHeight: 64)
         .padding(.horizontal, 14)
-        .padding(.vertical, 3)
+        .padding(.vertical, 5)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(name)\(isSelected ? "，当前默认" : "")")
+    }
+}
+
+private struct TTSPreviewRow: View {
+    let isSpeaking: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TTSIcon(
+                systemName: isSpeaking ? "stop.fill" : "play.fill",
+                tint: isSpeaking ? AmberTheme.accentRed : AmberTheme.accent
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(isSpeaking ? "停止试听" : "播放试听")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(isSpeaking ? "系统语音正在朗读测试文本" : "用当前语速朗读一段中文测试文本")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted2)
+        }
+        .frame(minHeight: 62)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct TTSUnavailableCloudRow: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            TTSIcon(systemName: "cloud.slash.fill", tint: AmberTheme.muted2)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("云端 TTS 暂未接入")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Text("不会参与当前试听或聊天朗读；历史配置仅用于保留记录。")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("待接入")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(AmberTheme.surface2.opacity(0.85), in: Capsule())
+        }
+        .frame(minHeight: 64)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TTSIcon: View {
+    let systemName: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(tint)
+            .frame(width: 34, height: 34)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(tint.opacity(0.13), lineWidth: 0.5)
+            }
     }
 }
 

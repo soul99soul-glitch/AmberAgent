@@ -18,6 +18,7 @@ struct RuntimeEnvironmentView: View {
     @State private var remoteCommandTaskId: String?
     @State private var taskStore = IOSAdvancedTaskStore.shared
     @State private var permissionStore = IOSPermissionStore()
+    @State private var showsCapabilityMatrix = false
 
     enum SSHStatus {
         case idle
@@ -42,11 +43,13 @@ struct RuntimeEnvironmentView: View {
                 VStack(spacing: 0) {
                     header
                     intro
+                    runtimeStatusSection
                     runtimeSection
+                    ishHandoffSection
                     sshProfileSection
                     hostFingerprintSection
                     remoteCommandSection
-                    runtimeMatrixSection
+                    diagnosticsSection
                 }
                 .padding(.bottom, 36)
             }
@@ -84,7 +87,7 @@ struct RuntimeEnvironmentView: View {
     }
 
     private var intro: some View {
-        Text("终端任务会通过远程 SSH 在你的机器上执行单条命令。当前支持密码认证和命令执行，交互式 shell、私钥和文件同步当前不可用。")
+        Text("Amber 的执行环境分成两层：默认 Runtime 负责前台测试和远程命令；Agent 工具能力负责在聊天中审批后调用 iSH 交接或内置 iSH 短命令。")
             .font(.footnote)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(3)
@@ -93,22 +96,34 @@ struct RuntimeEnvironmentView: View {
             .padding(.bottom, 16)
     }
 
+    private var runtimeStatusSection: some View {
+        RuntimeStatusCard(
+            defaultRuntime: settingsStore.terminalDefaultRuntime,
+            sshProfileName: settingsStore.defaultSSHProfile?.displayName,
+            embeddedIshAvailable: embeddedIshAvailable,
+            externalIshAvailable: externalIshAvailable,
+            experimentalEnabled: settingsStore.terminalExperimentalRuntimesEnabled
+        )
+        .padding(.horizontal, 16)
+        .padding(.bottom, 4)
+    }
+
     private var runtimeSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "终端运行时")
+            AmberSectionLabel(text: "默认 Runtime")
             AmberFormGroup {
-                ForEach(Array(IOSTerminalRuntimeKind.allCases.enumerated()), id: \.element.id) { index, runtime in
+                ForEach(Array(runtimeChoices.enumerated()), id: \.element.id) { index, runtime in
                     RuntimeChoiceRow(
                         runtime: runtime,
                         isSelected: settingsStore.terminalDefaultRuntime == runtime,
-                        isEnabled: IOSTerminalBuildPolicy.selectableRuntimes.contains(runtime),
+                        isEnabled: runtimeIsEnabled(runtime),
                         isRecommended: runtime == .remoteSSH
                     ) {
-                        guard IOSTerminalBuildPolicy.selectableRuntimes.contains(runtime) else { return }
+                        guard runtimeIsEnabled(runtime) else { return }
                         settingsStore.terminalDefaultRuntime = runtime
                     }
 
-                    if index < IOSTerminalRuntimeKind.allCases.count - 1 {
+                    if index < runtimeChoices.count - 1 {
                         Divider()
                             .overlay(AmberTheme.borderSoft)
                             .padding(.leading, 14)
@@ -116,42 +131,28 @@ struct RuntimeEnvironmentView: View {
                 }
             }
 
-            AmberFormGroup {
-                RuntimeToggleRow(
-                    title: "启用可选运行时",
-                    subtitle: IOSTerminalBuildPolicy.experimentalRuntimesLinked ? "允许选择 Remote Mosh / iSH 等可选运行时" : "此稳定版本未链接可选运行时代码",
-                    isOn: settingsStore.terminalExperimentalRuntimesEnabled,
-                    isEnabled: IOSTerminalBuildPolicy.experimentalRuntimesLinked
-                ) {
-                    guard IOSTerminalBuildPolicy.experimentalRuntimesLinked else { return }
-                    settingsStore.terminalExperimentalRuntimesEnabled.toggle()
+            if IOSTerminalBuildPolicy.experimentalRuntimesLinked {
+                AmberFormGroup {
+                    RuntimeToggleRow(
+                        title: "显示实验 Runtime",
+                        subtitle: "允许把 Remote Mosh / iSH Experimental 设为默认 Runtime",
+                        isOn: settingsStore.terminalExperimentalRuntimesEnabled,
+                        isEnabled: true
+                    ) {
+                        settingsStore.terminalExperimentalRuntimesEnabled.toggle()
+                        if !settingsStore.terminalExperimentalRuntimesEnabled,
+                           IOSTerminalRuntimeCapabilities.capability(for: settingsStore.terminalDefaultRuntime).tier == .experimental {
+                            settingsStore.terminalDefaultRuntime = .remoteSSH
+                        }
+                    }
                 }
-            }
-            .padding(.top, 10)
-
-            HStack {
-                Button {
-                    testTerminalRuntime()
-                } label: {
-                    Label("运行 Smoke Test", systemImage: "play.fill")
-                }
-                .buttonStyle(RuntimeFilledButtonStyle())
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-
-            if let terminalSmokeResult {
-                SmokeResultCard(result: terminalSmokeResult)
-                    .padding(.top, 10)
+                .padding(.top, 10)
             }
 
-            Text("Remote SSH 下执行 echo amber-terminal-smoke；本地工具下执行 pwd。结果展示运行状态、退出码与输出尾部。")
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted2)
-                .lineSpacing(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 7)
+            Text(IOSTerminalBuildPolicy.experimentalRuntimesLinked
+                ? "默认 Runtime 只影响前台测试和远程命令入口；聊天里的 iSH 工具是否暴露，由下方 Agent 工具能力和权限闸门决定。"
+                : "当前稳定 target 只提供 Remote SSH 和本地轻量工具作为默认 Runtime；聊天里的 iSH 交接能力在下方单独说明。")
+                .runtimeFootnote()
         }
     }
 
@@ -219,6 +220,42 @@ struct RuntimeEnvironmentView: View {
         }
     }
 
+    private var ishHandoffSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "Agent iSH 工具")
+            AmberFormGroup {
+                RuntimeInfoRow(
+                    title: "内置 iSH 执行",
+                    subtitle: embeddedIshAvailable
+                        ? "聊天中审批后调用 ios_ish_execute，在 Amber 沙盒内执行短命令并回传 stdout、stderr、exit code。"
+                        : "当前 target 未链接 embedded iSH，不会向模型暴露 ios_ish_execute。",
+                    value: embeddedIshAvailable ? "可回传" : "未链接",
+                    systemImage: embeddedIshAvailable ? "shippingbox" : "lock",
+                    accent: embeddedIshAvailable ? AmberTheme.accentGreen : AmberTheme.muted
+                )
+                RuntimeDivider()
+                RuntimeInfoRow(
+                    title: "外部 iSH 交接",
+                    subtitle: "聊天中审批后调用 ish_handoff，复制可粘贴脚本并写入 Documents/ish-handoff；需要你切到 iSH 手动执行。",
+                    value: externalIshAvailable ? "手动交接" : "不可用",
+                    systemImage: "terminal",
+                    accent: AmberTheme.accentAmber
+                )
+                RuntimeDivider()
+                RuntimeInfoRow(
+                    title: "安全边界",
+                    subtitle: "两条 iSH 链路都需要前台审批；外部 iSH 不回传结果，内置 iSH 没有 PTY、stdin、长会话和即时取消。",
+                    value: "每次审批",
+                    systemImage: "hand.raised",
+                    accent: AmberTheme.accentAmber
+                )
+            }
+
+            Text("这两项是聊天工具能力，不等同于默认 Runtime。Remote SSH 仍是稳定远程任务主线；iSH 更适合短命令、手动交接或本地 Linux 能力验证。")
+                .runtimeFootnote()
+        }
+    }
+
     private var hostFingerprintSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "Host 指纹信任")
@@ -250,19 +287,46 @@ struct RuntimeEnvironmentView: View {
         }
     }
 
-    private var runtimeMatrixSection: some View {
+    private var diagnosticsSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行时能力对照")
-            ForEach(IOSTerminalRuntimeCapabilities.all) { capability in
-                RuntimeMatrixCard(capability: capability)
-                    .padding(.bottom, 8)
+            AmberSectionLabel(text: "验证与诊断")
+            HStack(spacing: 10) {
+                Button {
+                    testTerminalRuntime()
+                } label: {
+                    Label("运行 Smoke Test", systemImage: "play.fill")
+                }
+                .buttonStyle(RuntimeFilledButtonStyle())
+
+                Button {
+                    withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+                        showsCapabilityMatrix.toggle()
+                    }
+                } label: {
+                    Label(showsCapabilityMatrix ? "收起矩阵" : "能力矩阵", systemImage: "square.grid.2x2")
+                }
+                .buttonStyle(RuntimeGlassButtonStyle())
             }
-            Text("当前推荐使用 Remote SSH。它支持密码认证和单条命令执行；交互式终端、安装器与文件同步当前不可用。")
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted2)
-                .lineSpacing(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+
+            if let terminalSmokeResult {
+                SmokeResultCard(result: terminalSmokeResult)
+                    .padding(.top, 10)
+            }
+
+            Text("Smoke Test 会验证当前默认 Runtime：Remote SSH 执行 echo amber-terminal-smoke，本地工具执行 pwd。")
+                .runtimeFootnote()
+
+            if showsCapabilityMatrix {
+                VStack(spacing: 8) {
+                    ForEach(IOSTerminalRuntimeCapabilities.all) { capability in
+                        RuntimeMatrixCard(capability: capability)
+                    }
+                }
+                .padding(.top, 10)
+                .transition(.opacity)
+            }
         }
     }
 
@@ -325,6 +389,27 @@ struct RuntimeEnvironmentView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 7)
         }
+    }
+
+    private var embeddedIshAvailable: Bool {
+        !IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty
+    }
+
+    private var externalIshAvailable: Bool {
+        !IOSIshToolCatalog.supportedToolNames.isEmpty
+    }
+
+    private var runtimeChoices: [IOSTerminalRuntimeKind] {
+        guard IOSTerminalBuildPolicy.experimentalRuntimesLinked else {
+            return [.remoteSSH, .localIOSTools]
+        }
+        return IOSTerminalRuntimeKind.allCases
+    }
+
+    private func runtimeIsEnabled(_ runtime: IOSTerminalRuntimeKind) -> Bool {
+        guard IOSTerminalBuildPolicy.selectableRuntimes.contains(runtime) else { return false }
+        let tier = IOSTerminalRuntimeCapabilities.capability(for: runtime).tier
+        return tier == .stable || settingsStore.terminalExperimentalRuntimesEnabled
     }
 
     private var isRemoteCommandRunning: Bool {
@@ -647,6 +732,91 @@ struct RuntimeEnvironmentView: View {
     }
 }
 
+private struct RuntimeStatusCard: View {
+    let defaultRuntime: IOSTerminalRuntimeKind
+    let sshProfileName: String?
+    let embeddedIshAvailable: Bool
+    let externalIshAvailable: Bool
+    let experimentalEnabled: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(width: 34, height: 34)
+                    .background(AmberTheme.accentTint, in: Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("当前执行策略")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(strategySummary)
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: 8) {
+                RuntimeStatusMetric(
+                    title: "默认",
+                    value: defaultRuntime.displayName,
+                    color: AmberTheme.accent
+                )
+                RuntimeStatusMetric(
+                    title: "内置 iSH",
+                    value: embeddedIshAvailable ? "可回传" : "未链接",
+                    color: embeddedIshAvailable ? AmberTheme.accentGreen : AmberTheme.muted
+                )
+                RuntimeStatusMetric(
+                    title: "外部 iSH",
+                    value: externalIshAvailable ? "交接" : "不可用",
+                    color: externalIshAvailable ? AmberTheme.accentAmber : AmberTheme.muted
+                )
+            }
+        }
+        .padding(14)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
+    }
+
+    private var strategySummary: String {
+        let profile = sshProfileName ?? "未选择 SSH Profile"
+        let experimental = experimentalEnabled ? "实验 Runtime 已显示" : "实验 Runtime 已隐藏"
+        return "\(profile) · \(experimental)。聊天中的 iSH 工具会单独走前台审批。"
+    }
+}
+
+private struct RuntimeStatusMetric: View {
+    let title: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted2)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
 private struct RuntimeChoiceRow: View {
     let runtime: IOSTerminalRuntimeKind
     let isSelected: Bool
@@ -657,6 +827,12 @@ private struct RuntimeChoiceRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
+                Image(systemName: runtimeIcon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isEnabled ? runtimeColor : AmberTheme.muted2)
+                    .frame(width: 30, height: 30)
+                    .background((isEnabled ? runtimeColor : AmberTheme.muted2).opacity(0.10), in: Circle())
+
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
                         Text(runtime.displayName)
@@ -665,7 +841,10 @@ private struct RuntimeChoiceRow: View {
                         if isRecommended {
                             RuntimePill(text: "推荐", color: AmberTheme.accent)
                         }
-                        RuntimePill(text: runtimeTier.rawValue, color: runtimeTier == .stable ? AmberTheme.accentGreen : AmberTheme.muted)
+                        RuntimePill(text: runtimeTier == .stable ? "稳定" : "实验", color: runtimeTier == .stable ? AmberTheme.accentGreen : AmberTheme.accentAmber)
+                        if !isEnabled {
+                            RuntimePill(text: "未启用", color: AmberTheme.muted)
+                        }
                     }
 
                     Text(runtimeSummary)
@@ -682,11 +861,12 @@ private struct RuntimeChoiceRow: View {
             }
             .frame(minHeight: 56)
             .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: isEnabled ? 0.985 : 1, haptic: isEnabled ? .selection : nil))
         .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.62)
     }
 
     private var runtimeTier: IOSTerminalRuntimeTier {
@@ -695,10 +875,28 @@ private struct RuntimeChoiceRow: View {
 
     private var runtimeSummary: String {
         switch runtime {
-        case .remoteSSH: "在远程机器上通过 SSH 执行单条命令"
-        case .localIOSTools: "轻量本地能力验证，不是 Termux 替代品"
-        case .remoteMosh: "可选运行时，默认不可作为稳定执行环境"
-        case .ishExperimental: "可选运行时，不进入 Stable 主推路径"
+        case .remoteSSH: "稳定远程命令主线；需要 SSH Profile、密码和 Host 信任"
+        case .localIOSTools: "本地轻量验证与沙盒工具；不提供 Linux shell"
+        case .remoteMosh: "预留的移动会话方向；当前不建议作为默认环境"
+        case .ishExperimental: "内置 iSH 短命令 runner；无 PTY、stdin 和长会话"
+        }
+    }
+
+    private var runtimeIcon: String {
+        switch runtime {
+        case .remoteSSH: "desktopcomputer"
+        case .localIOSTools: "iphone"
+        case .remoteMosh: "antenna.radiowaves.left.and.right"
+        case .ishExperimental: "shippingbox"
+        }
+    }
+
+    private var runtimeColor: Color {
+        switch runtime {
+        case .remoteSSH: AmberTheme.accent
+        case .localIOSTools: AmberTheme.accentGreen
+        case .remoteMosh: AmberTheme.accentCyan
+        case .ishExperimental: AmberTheme.accentAmber
         }
     }
 }
@@ -769,6 +967,44 @@ private struct RuntimeValueRow: View {
                 .foregroundStyle(AmberTheme.muted2)
         }
         .frame(minHeight: 52)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+    }
+}
+
+private struct RuntimeInfoRow: View {
+    let title: String
+    let subtitle: String
+    let value: String
+    let systemImage: String
+    var accent: Color = AmberTheme.accentAmber
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(accent)
+                .frame(width: 28, height: 28)
+                .background(accent.opacity(0.10), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(accent)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
+        }
+        .frame(minHeight: 58)
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
     }
@@ -1166,5 +1402,15 @@ private extension Text {
             .font(.caption)
             .foregroundStyle(AmberTheme.muted)
             .lineSpacing(2)
+    }
+
+    func runtimeFootnote() -> some View {
+        self
+            .font(.caption)
+            .foregroundStyle(AmberTheme.muted2)
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 7)
     }
 }

@@ -26,24 +26,36 @@ struct AppShell: View {
         let workspaceStore = IOSWorkspaceStore.shared
         let systemPermissionCoordinator = IOSSystemPermissionCoordinator()
         let sharedSettingsStore = IOSSharedSettingsStore()
+        let conversationStore = IOSConversationStore()
+        let localToolExecutor = IOSLocalToolExecutor(
+            permissionStore: permissionStore,
+            documentStore: documentAccessStore,
+            workspaceStore: workspaceStore,
+            systemPermissionCoordinator: systemPermissionCoordinator
+        )
+        let backgroundMcpManager = IOSMcpManager(sharedSettings: sharedSettingsStore, configStore: .shared)
+        let backgroundToolRuntime = ChatToolRuntime(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettingsStore,
+            localToolExecutor: localToolExecutor,
+            searchTransport: IOSURLSessionSearchHTTPTransport(),
+            mcpManager: backgroundMcpManager
+        )
         self.settingsStore = settingsStore
         self._permissionStore = State(initialValue: permissionStore)
         self._documentAccessStore = State(initialValue: documentAccessStore)
         self._workspaceStore = State(initialValue: workspaceStore)
         self._systemPermissionCoordinator = State(initialValue: systemPermissionCoordinator)
-        self._localToolExecutor = State(
-            initialValue: IOSLocalToolExecutor(
-                permissionStore: permissionStore,
-                documentStore: documentAccessStore,
-                workspaceStore: workspaceStore,
-                systemPermissionCoordinator: systemPermissionCoordinator
-            )
-        )
+        self._localToolExecutor = State(initialValue: localToolExecutor)
         self._providerRegistry = State(initialValue: ProviderRegistryStore(settingsStore: settingsStore))
         self._sharedSettings = State(initialValue: sharedSettingsStore)
         self._mcpConfigStore = State(initialValue: IOSMcpConfigStore())
-        self._conversationStore = State(initialValue: IOSConversationStore())
+        self._conversationStore = State(initialValue: conversationStore)
         IOSDeepReadBackgroundCoordinator.shared.configure(sharedSettings: sharedSettingsStore)
+        IOSChatBackgroundGenerationCoordinator.shared.configure(
+            conversationStore: conversationStore,
+            toolRuntime: backgroundToolRuntime
+        )
         IOSDeepReadRecoveryOnce.run()
         // [Slice 6] Load persisted memories (Documents/memories/memories.json)
         // into the IosMemoryFactory store before any view reads it. Missing or

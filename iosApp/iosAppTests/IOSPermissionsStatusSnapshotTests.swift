@@ -119,11 +119,27 @@ final class IOSPermissionsStatusSnapshotTests: XCTestCase {
         let subAgent = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.agent.subagent_dispatch" })
         let council = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.agent.model_council_run" })
         let remote = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.remote.command" })
+        let ish = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.external.ish_handoff" })
+        let embeddedIsh = try XCTUnwrap(snapshot.capabilities.first { $0.id == "ios.embedded.ish_runtime" })
 
         XCTAssertTrue(subAgent.executable)
         XCTAssertTrue(subAgent.modelToolNames.contains("subagent_dispatch"))
         XCTAssertTrue(council.executable)
         XCTAssertTrue(council.modelToolNames.contains("model_council_run"))
+        XCTAssertTrue(ish.executable)
+        XCTAssertEqual(ish.status, IOSCapabilityStatus.degraded.title)
+        XCTAssertTrue(ish.modelToolNames.contains("ish_handoff"))
+        if IOSTerminalBuildPolicy.experimentalRuntimesLinked {
+            XCTAssertTrue(embeddedIsh.executable)
+            XCTAssertEqual(embeddedIsh.status, IOSCapabilityStatus.supported.title)
+            XCTAssertTrue(embeddedIsh.modelToolNames.contains("ios_ish_execute"))
+            XCTAssertNil(embeddedIsh.reason)
+        } else {
+            XCTAssertFalse(embeddedIsh.executable)
+            XCTAssertEqual(embeddedIsh.status, IOSCapabilityStatus.unsupported.title)
+            XCTAssertTrue(embeddedIsh.modelToolNames.isEmpty)
+            XCTAssertTrue(embeddedIsh.reason?.contains("ExperimentalGPL") == true)
+        }
         XCTAssertTrue(remote.executable)
         XCTAssertTrue(remote.modelToolNames.isEmpty)
         XCTAssertTrue(remote.uiActionNames.contains("remote_command_run"))

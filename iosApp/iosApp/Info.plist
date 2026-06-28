@@ -24,6 +24,7 @@
     <true/>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).chat.*</string>
         <string>$(PRODUCT_BUNDLE_IDENTIFIER).deepread.*</string>
     </array>
     <key>NSAppleMusicUsageDescription</key>

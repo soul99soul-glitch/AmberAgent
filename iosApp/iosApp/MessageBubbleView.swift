@@ -657,12 +657,22 @@ private struct ChatGeneratedImageRequestDisplay {
 private struct ChatGeneratedImageDotPlaceholder: View {
     let aspectRatio: CGFloat
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private let period: TimeInterval = 2.2
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            Canvas { context, size in
-                drawDots(context: context, size: size, phase: phase(at: timeline.date))
+        Group {
+            if reduceMotion {
+                Canvas { context, size in
+                    drawDots(context: context, size: size, phase: 0.28)
+                }
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    Canvas { context, size in
+                        drawDots(context: context, size: size, phase: phase(at: timeline.date))
+                    }
+                }
             }
         }
         .aspectRatio(max(aspectRatio, 0.1), contentMode: .fit)
@@ -695,21 +705,74 @@ private struct ChatGeneratedImageDotPlaceholder: View {
                 let diagonal = CGFloat(column + row) / diagonalRange
                 let wavePhase = (phase + diagonal).truncatingRemainder(dividingBy: 1)
                 let distance = abs(wavePhase - 0.5) * 2
-                let alpha = min(max(0.12 + 0.52 * (1 - distance), 0.08), 0.64)
+                let energy = max(0, 1 - distance)
+                let alpha = min(max(0.10 + 0.40 * energy, 0.08), 0.54)
+                let radius = dotRadius + 0.7 * energy
+                let color = energy > 0.64
+                    ? AmberTheme.accent.opacity(0.18 + 0.18 * energy)
+                    : AmberTheme.muted.opacity(alpha)
                 let x = xOffset + CGFloat(column) * spacing
                 let y = yOffset + CGFloat(row) * spacing
                 let rect = CGRect(
-                    x: x - dotRadius,
-                    y: y - dotRadius,
-                    width: dotRadius * 2,
-                    height: dotRadius * 2
+                    x: x - radius,
+                    y: y - radius,
+                    width: radius * 2,
+                    height: radius * 2
                 )
                 context.fill(
                     Path(ellipseIn: rect),
-                    with: .color(AmberTheme.muted.opacity(alpha))
+                    with: .color(color)
                 )
             }
         }
+    }
+}
+
+private struct ChatGeneratedImageAppearModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(appeared ? 1 : 0)
+            .scaleEffect(appeared ? 1 : 0.985)
+            .onAppear {
+                guard !appeared else { return }
+                withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+                    appeared = true
+                }
+            }
+    }
+}
+
+private struct ChatGeneratedImageActionLabel: View {
+    let title: String
+    let systemImage: String
+    let foreground: Color
+    let fill: Color
+    var isWorking = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if isWorking {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(foreground)
+            } else {
+                Image(systemName: systemImage)
+                    .contentTransition(.symbolEffect(.replace.downUp))
+            }
+
+            Text(title)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(foreground)
+        .frame(maxWidth: .infinity)
+        .frame(height: 28)
+        .background(fill, in: Capsule())
+        .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.82), value: title)
+        .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.82), value: systemImage)
     }
 }
 
@@ -746,6 +809,7 @@ private struct ChatGeneratedImageTile: View {
                         Image(uiImage: decodedDataImage)
                             .resizable()
                             .scaledToFit()
+                            .modifier(ChatGeneratedImageAppearModifier())
                     } else {
                         ProgressView()
                             .tint(AmberTheme.accent)
@@ -758,6 +822,7 @@ private struct ChatGeneratedImageTile: View {
                             image
                                 .resizable()
                                 .scaledToFit()
+                                .modifier(ChatGeneratedImageAppearModifier())
                         case .failure:
                             Image(systemName: "exclamationmark.triangle")
                                 .font(.system(size: 24, weight: .semibold))
@@ -802,19 +867,21 @@ private struct ChatGeneratedImageTile: View {
                                 .background(AmberTheme.accentTint, in: Capsule())
                         }
                         .accessibilityLabel("分享图片")
+                        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.94, haptic: .lightImpact))
                     }
 
                     Button {
                         saveImageToPhotos()
                     } label: {
-                        Label(saveState.title, systemImage: saveState.systemImage)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(saveState == .saved ? AmberTheme.accentGreen : AmberTheme.accent)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 28)
-                            .background((saveState == .saved ? AmberTheme.accentGreen.opacity(0.10) : AmberTheme.accentTint), in: Capsule())
+                        ChatGeneratedImageActionLabel(
+                            title: saveState.title,
+                            systemImage: saveState.systemImage,
+                            foreground: saveState == .saved ? AmberTheme.accentGreen : AmberTheme.accent,
+                            fill: saveState == .saved ? AmberTheme.accentGreen.opacity(0.10) : AmberTheme.accentTint,
+                            isWorking: saveState == .saving
+                        )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .lightImpact))
                     .disabled(saveState != .idle)
                     .accessibilityLabel("保存图片到相册")
 
@@ -824,14 +891,14 @@ private struct ChatGeneratedImageTile: View {
                             aspectRatio: display.aspectRatioTitle
                         )
                     } label: {
-                        Label("修改", systemImage: "wand.and.stars")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AmberTheme.accent)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 28)
-                            .background(AmberTheme.accentTint, in: Capsule())
+                        ChatGeneratedImageActionLabel(
+                            title: "修改",
+                            systemImage: "wand.and.stars",
+                            foreground: AmberTheme.accent,
+                            fill: AmberTheme.accentTint
+                        )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
                     .accessibilityLabel("修改图片")
                 }
             }
@@ -861,37 +928,71 @@ private struct ChatGeneratedImageTile: View {
                 try await Self.writeImageToPhotoLibrary(urlString)
                 await MainActor.run {
                     saveState = .saved
+                    AmberHaptics.trigger(.success)
                 }
             } catch {
                 await MainActor.run {
                     saveState = .idle
                     saveAlert = ChatGeneratedImageSaveAlert(message: error.localizedDescription)
+                    AmberHaptics.trigger(.error)
                 }
             }
         }
     }
 
-    private static func writeImageToPhotoLibrary(_ urlString: String) async throws {
-        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-        let resolvedStatus: PHAuthorizationStatus
-        if status == .notDetermined {
-            resolvedStatus = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
-        } else {
-            resolvedStatus = status
-        }
-
+    private nonisolated static func writeImageToPhotoLibrary(_ urlString: String) async throws {
+        let resolvedStatus = await photoAuthorizationStatus()
         guard resolvedStatus == .authorized || resolvedStatus == .limited else {
             throw ChatGeneratedImagePhotoSaveError.notAuthorized
         }
 
-        let data = try IOSImageGenerationRepository.imageData(from: urlString)
-        guard let image = UIImage(data: data) else {
+        let source = try photoSaveSourceURL(from: urlString)
+        defer {
+            if source.removeAfterSave {
+                try? FileManager.default.removeItem(at: source.url)
+            }
+        }
+
+        try await saveImageFileToPhotoLibrary(source.url)
+    }
+
+    @MainActor
+    private static func photoAuthorizationStatus() async -> PHAuthorizationStatus {
+        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        guard status == .notDetermined else { return status }
+        return await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+    }
+
+    private nonisolated static func photoSaveSourceURL(from urlString: String) throws -> PhotoSaveSource {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let resolvedURL = IOSImageGenerationRepository.resolvedImageURL(from: trimmed),
+           resolvedURL.isFileURL {
+            guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
+                throw ChatGeneratedImagePhotoSaveError.missingImageFile
+            }
+            return PhotoSaveSource(url: resolvedURL, removeAfterSave: false)
+        }
+
+        let data = try IOSImageGenerationRepository.imageData(from: trimmed)
+        guard !data.isEmpty else {
             throw ChatGeneratedImagePhotoSaveError.invalidImage
         }
 
+        let temporaryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("amber-generated-\(UUID().uuidString)")
+            .appendingPathExtension(imageFileExtension(for: data))
+        try data.write(to: temporaryURL, options: [.atomic])
+        return PhotoSaveSource(url: temporaryURL, removeAfterSave: true)
+    }
+
+    private nonisolated static func saveImageFileToPhotoLibrary(_ fileURL: URL) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
+                let request = PHAssetCreationRequest.forAsset()
+                let options = PHAssetResourceCreationOptions()
+                options.shouldMoveFile = false
+                request.addResource(with: .photo, fileURL: fileURL, options: options)
             } completionHandler: { success, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -903,6 +1004,29 @@ private struct ChatGeneratedImageTile: View {
             }
         }
     }
+
+    private nonisolated static func imageFileExtension(for data: Data) -> String {
+        if data.starts(with: [0xFF, 0xD8, 0xFF]) {
+            return "jpg"
+        }
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) {
+            return "png"
+        }
+        if data.starts(with: [0x47, 0x49, 0x46]) {
+            return "gif"
+        }
+        if data.count >= 12,
+           data[0] == 0x52, data[1] == 0x49, data[2] == 0x46, data[3] == 0x46,
+           data[8] == 0x57, data[9] == 0x45, data[10] == 0x42, data[11] == 0x50 {
+            return "webp"
+        }
+        return "png"
+    }
+}
+
+private struct PhotoSaveSource {
+    let url: URL
+    let removeAfterSave: Bool
 }
 
 private enum ChatGeneratedImagePhotoSaveState: Equatable {
@@ -934,6 +1058,7 @@ private struct ChatGeneratedImageSaveAlert: Identifiable {
 
 private enum ChatGeneratedImagePhotoSaveError: LocalizedError {
     case notAuthorized
+    case missingImageFile
     case invalidImage
     case unknown
 
@@ -941,6 +1066,8 @@ private enum ChatGeneratedImagePhotoSaveError: LocalizedError {
         switch self {
         case .notAuthorized:
             "没有相册写入权限。请在系统设置里允许 AmberAgent 添加照片。"
+        case .missingImageFile:
+            "当前图片文件已经不存在。重装 App 会删除 App 沙盒内的历史图片，需要重新生成后再保存。"
         case .invalidImage:
             "当前图片文件无法解码，可能已经被系统或重装流程删除。"
         case .unknown:

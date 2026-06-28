@@ -1031,6 +1031,7 @@ private final class ChatGenerationBindingState {
             },
             setPendingWebMountApproval: { _ in },
             setPendingWorkspaceApproval: { _ in },
+            setPendingIshHandoffApproval: { _ in },
             setPendingMcpApproval: { _ in },
             setContextCompactState: { _ in },
             persistMessages: { [weak self] _ in

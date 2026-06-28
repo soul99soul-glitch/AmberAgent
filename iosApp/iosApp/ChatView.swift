@@ -50,6 +50,7 @@ struct ChatView: View {
     /// initialOffset 不会重新触发)。用 Int(非 KotlinUuid),规避其 Hashable 不可靠。
     @State private var conversationLoadToken = 0
     @Environment(IOSConversationStore.self) private var conversationStore
+    @Environment(\.scenePhase) private var scenePhase
 
     init(
         settingsStore: SettingsStore,
@@ -185,6 +186,11 @@ struct ChatView: View {
             pendingInitialScrollToBottom = true
             viewModel.reloadFromStore()
             conversationLoadToken &+= 1   // 切会话:换新身份让 initialOffset 重新落到底部
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                _ = viewModel.handoffGenerationToBackgroundIfNeeded()
+            }
         }
         .onChange(of: sharedSettings.revision) { _, _ in
             repairCurrentChatModelIfNeeded()
@@ -780,6 +786,19 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if let request = viewModel.pendingIshHandoffApproval {
+                IshHandoffToolApprovalCard(
+                    request: request,
+                    onApprove: {
+                        viewModel.approvePendingIshHandoffTool()
+                    },
+                    onDeny: {
+                        viewModel.denyPendingIshHandoffTool()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if let request = viewModel.pendingMcpApproval {
                 McpToolApprovalCard(
                     request: request,
@@ -925,8 +944,9 @@ struct ChatView: View {
                                     .frame(width: 32, height: 32)
                                     .contentShape(Circle())
                                     .rotationEffect(.degrees(isAttachExpanded ? 45 : 0))
+                                    .contentTransition(.symbolEffect(.replace.downUp))
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.88, haptic: .lightImpact))
                             .disabled(
                                 viewModel.isLoading ||
                                     viewModel.isAttachingSelectedFile ||
@@ -989,9 +1009,9 @@ struct ChatView: View {
                                     .lineLimit(1)
                                     .padding(.horizontal, 12)
                                     .frame(height: 30)
+                                    .composerDockGlass(cornerRadius: 15)
                             }
-                            .buttonStyle(.plain)
-                            .composerDockGlass(cornerRadius: 15)
+                            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
                             .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                             .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
 
@@ -1105,6 +1125,7 @@ struct ChatView: View {
             viewModel.pendingSearchApproval != nil ||
             viewModel.pendingWebMountApproval != nil ||
             viewModel.pendingWorkspaceApproval != nil ||
+            viewModel.pendingIshHandoffApproval != nil ||
             viewModel.pendingMcpApproval != nil
     }
 
@@ -1244,10 +1265,10 @@ private struct ComposerIconButton: View {
                 .foregroundStyle(prominent ? Color.white : tint)
                 .frame(width: size, height: size)
                 .contentShape(Circle())
+                // 与输入条/发送键统一为原生 Liquid Glass:中性按钮用无色调玻璃,prominent 时染 tint。
+                .modifier(ComposerDockCircleGlass(tint: prominent ? tint : nil))
         }
-        .buttonStyle(.plain)
-        // 与输入条/发送键统一为原生 Liquid Glass:中性按钮用无色调玻璃,prominent 时染 tint。
-        .modifier(ComposerDockCircleGlass(tint: prominent ? tint : nil))
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .selection))
         .accessibilityLabel(accessibilityLabel)
     }
 }
@@ -1264,9 +1285,9 @@ private struct ChatScrollToBottomButton: View {
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(width: 38, height: 38)
                 .contentShape(Circle())
+                .modifier(ComposerDockCircleGlass(tint: nil))
         }
-        .buttonStyle(.plain)
-        .modifier(ComposerDockCircleGlass(tint: nil))
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .selection))
         .accessibilityLabel("回到最新消息")
     }
 }
@@ -1292,9 +1313,10 @@ struct ComposerDockSendButton: View {
                 .foregroundStyle(iconColor)
                 .frame(width: diameter, height: diameter)
                 .contentShape(Circle())
+                .modifier(ComposerDockCircleGlass(tint: glassTint))
+                .contentTransition(.symbolEffect(.replace.downUp))
         }
-        .buttonStyle(.plain)
-        .modifier(ComposerDockCircleGlass(tint: glassTint))
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.88, haptic: isLoading ? .mediumImpact : .lightImpact))
         .disabled(!isActionable)
         .animation(.easeOut(duration: 0.18), value: isLoading)
         .animation(.easeOut(duration: 0.18), value: sendEnabled)
@@ -1482,11 +1504,11 @@ private struct ChatToolbarIconButton: View {
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(width: size, height: size)
                 .contentShape(Circle())
+                .background {
+                    circleGlass
+                }
         }
-        .buttonStyle(.plain)
-        .background {
-            circleGlass
-        }
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .lightImpact))
         .accessibilityLabel(accessibilityLabel)
     }
 
@@ -1545,9 +1567,9 @@ private struct ContextRingButton: View {
             .contentShape(Circle())
             .animation(.easeOut(duration: 0.3), value: snapshot.contextFillFraction)
             .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: rotates)
+            .modifier(ComposerDockCircleGlass(tint: nil))
         }
-        .buttonStyle(.plain)
-        .modifier(ComposerDockCircleGlass(tint: nil))
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .selection))
         .onAppear { rotates = compactState.isActive }
         .onChange(of: compactState.isActive) { _, active in
             rotates = active
@@ -2353,6 +2375,7 @@ struct ChatReasoningCard: View {
     var autoCloseThinking: Bool = true
     @State private var isExpanded: Bool
     @State private var userToggled = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         bodyText: String,
@@ -2440,6 +2463,7 @@ struct ChatReasoningCard: View {
                     Image(systemName: "clock")
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(AmberTheme.accentAmber)
+                        .symbolEffect(.variableColor.iterative.reversing, isActive: isThinking && !reduceMotion)
 
                     titleLabel
 
@@ -2458,7 +2482,7 @@ struct ChatReasoningCard: View {
                 .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AmberPressFeedbackStyle(pressedScale: hasBodyText ? 0.98 : 1, haptic: hasBodyText ? .selection : nil))
 
             if showsBody {
                 ScrollViewReader { proxy in
@@ -2525,7 +2549,7 @@ struct ChatReasoningCard: View {
     }
 }
 
-enum ChatToolStepState {
+enum ChatToolStepState: Equatable {
     case done
     case active
     case failed
@@ -2596,7 +2620,7 @@ enum ChatToolStepState {
 }
 
 struct ChatToolStepModel: Identifiable {
-    let id = UUID()
+    let id: String
     let systemImage: String
     let title: String
     let detail: String?
@@ -2606,6 +2630,7 @@ struct ChatToolStepModel: Identifiable {
     let tool: UIMessagePart.Tool?
 
     init(
+        id: String = UUID().uuidString,
         systemImage: String,
         title: String,
         detail: String? = nil,
@@ -2613,6 +2638,7 @@ struct ChatToolStepModel: Identifiable {
         isSubAgent: Bool = false,
         tool: UIMessagePart.Tool? = nil
     ) {
+        self.id = id
         self.systemImage = systemImage
         self.title = title
         self.detail = detail
@@ -2622,11 +2648,13 @@ struct ChatToolStepModel: Identifiable {
     }
 
     init(tool: UIMessagePart.Tool) {
+        let stableID = Self.stableID(for: tool)
         // `.contains` (不是 `==`):流式合并偶发把工具名拼成 "subagent_dispatchsubagent_dispatch",
         // 用包含匹配才不会漏判、掉进裸名回退。
         if tool.toolName.contains("subagent_dispatch") {
             let executed = !tool.output.isEmpty
             self.init(
+                id: stableID,
                 systemImage: "person.2.fill",
                 title: Self.subAgentTitle(from: tool.input),
                 detail: Self.subAgentDetail(from: tool.input),
@@ -2641,6 +2669,7 @@ struct ChatToolStepModel: Identifiable {
             let query = Self.searchQuery(from: tool.input)
             let executed = !tool.output.isEmpty
             self.init(
+                id: stableID,
                 systemImage: "magnifyingglass",
                 title: Self.combinedLine(executed ? "已搜索" : "正在搜索", query),
                 detail: executed ? Self.searchResultSummary(from: tool.output) : query.map { "关键词：\($0)" },
@@ -2653,6 +2682,7 @@ struct ChatToolStepModel: Identifiable {
             let url = Self.scrapeURL(from: tool.input)
             let executed = !tool.output.isEmpty
             self.init(
+                id: stableID,
                 systemImage: "globe",
                 title: Self.combinedLine(executed ? "已读取网页" : "正在读取网页", url),
                 detail: executed ? Self.searchResultSummary(from: tool.output) : url.map { "链接：\($0)" },
@@ -2664,6 +2694,7 @@ struct ChatToolStepModel: Identifiable {
         if tool.toolName == "memory_tool" {
             let executed = !tool.output.isEmpty
             self.init(
+                id: stableID,
                 systemImage: "brain.head.profile",
                 title: executed ? "已更新核心记忆" : "正在更新核心记忆",
                 detail: nil,
@@ -2675,6 +2706,7 @@ struct ChatToolStepModel: Identifiable {
         if tool.toolName == "mcp_call" {
             let executed = !tool.output.isEmpty
             self.init(
+                id: stableID,
                 systemImage: "puzzlepiece.extension",
                 title: Self.combinedLine(executed ? "已调用 MCP" : "正在调用 MCP", Self.mcpName(from: tool.input)),
                 detail: nil,
@@ -2686,6 +2718,7 @@ struct ChatToolStepModel: Identifiable {
         if tool.toolName == "model_council_run" {
             let executed = !tool.output.isEmpty
             self.init(
+                id: stableID,
                 systemImage: "person.3.sequence",
                 title: executed ? "模型议会已完成" : "模型议会进行中",
                 detail: nil,
@@ -2700,6 +2733,7 @@ struct ChatToolStepModel: Identifiable {
             let executed = !tool.output.isEmpty
             if executed && imageCount == 0 {
                 self.init(
+                    id: stableID,
                     systemImage: "photo.on.rectangle",
                     title: Self.combinedLine("图片生成失败", prompt),
                     detail: ChatToolOutputFormatter.imageFailureReason(from: tool.output) ?? "没有返回图片",
@@ -2708,6 +2742,7 @@ struct ChatToolStepModel: Identifiable {
                 return
             }
             self.init(
+                id: stableID,
                 systemImage: "photo.on.rectangle",
                 title: Self.combinedLine(executed ? "图片已生成" : "正在生成图片", prompt),
                 detail: executed ? "\(imageCount) 张图片" : prompt.map { "提示词：\($0)" },
@@ -2716,9 +2751,36 @@ struct ChatToolStepModel: Identifiable {
             return
         }
 
+        if tool.toolName == "ish_handoff" {
+            let executed = !tool.output.isEmpty
+            let failed = executed && Self.ishToolResultIndicatesFailure(tool.output)
+            self.init(
+                id: stableID,
+                systemImage: "terminal",
+                title: failed ? "iSH 交接失败" : (executed ? "iSH 交接已准备" : "准备 iSH 交接"),
+                detail: executed ? Self.ishHandoffResultSummary(from: tool.output) : Self.ishHandoffInputSummary(from: tool.input),
+                state: failed ? .failed : (executed ? .done : .active)
+            )
+            return
+        }
+
+        if tool.toolName == "ios_ish_execute" {
+            let executed = !tool.output.isEmpty
+            let failed = executed && Self.ishToolResultIndicatesFailure(tool.output)
+            self.init(
+                id: stableID,
+                systemImage: "terminal",
+                title: failed ? "内置 iSH 执行失败" : (executed ? "内置 iSH 已执行" : "准备执行内置 iSH"),
+                detail: executed ? Self.ishExecuteResultSummary(from: tool.output) : Self.ishHandoffInputSummary(from: tool.input),
+                state: failed ? .failed : (executed ? .done : .active)
+            )
+            return
+        }
+
         if tool.toolName.hasPrefix("wm_") {
             let executed = !tool.output.isEmpty
             self.init(
+                id: stableID,
                 systemImage: "globe.badge.chevron.backward",
                 title: Self.combinedLine(
                     executed ? Self.webMountCompletedTitle(for: tool) : Self.webMountPendingTitle(for: tool.toolName),
@@ -2733,6 +2795,7 @@ struct ChatToolStepModel: Identifiable {
         if IOSWorkspaceToolCatalog.supportedToolNames.contains(tool.toolName) {
             let executed = !tool.output.isEmpty
             self.init(
+                id: stableID,
                 systemImage: "folder",
                 title: Self.combinedLine(
                     executed ? Self.workspaceCompletedTitle(for: tool.toolName) : Self.workspacePendingTitle(for: tool.toolName),
@@ -2746,11 +2809,19 @@ struct ChatToolStepModel: Identifiable {
 
         let executed = !tool.output.isEmpty
         self.init(
+            id: stableID,
             systemImage: Self.icon(for: tool.toolName),
             title: Self.friendlyToolTitle(tool.toolName, executed: executed),
             detail: tool.input.isEmpty ? nil : tool.input,
             state: executed ? .done : .active
         )
+    }
+
+    private static func stableID(for tool: UIMessagePart.Tool) -> String {
+        let callID = tool.toolCallId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !callID.isEmpty { return callID }
+        let fallbackInput = tool.input.replacingOccurrences(of: "\n", with: " ")
+        return "\(tool.toolName):\(String(fallbackInput.prefix(80)))"
     }
 
     /// 未单独映射的工具:给一个友好中文标签,不显示裸工具名。状态由胶囊上的对勾/转圈表示,不再加文字。
@@ -2760,6 +2831,7 @@ struct ChatToolStepModel: Identifiable {
             "permissions_status": "查看权限状态",
             "tools_list": "列出可用工具",
             "subagent_report": "子智能体汇报",
+            "ish_handoff": "iSH 交接",
             "read_health": "读取健康数据"
         ]
         if let mapped = known[name] { return mapped }
@@ -2953,6 +3025,76 @@ struct ChatToolStepModel: Identifiable {
         return String(IOSWebMountRedactor.redactedText(trimmedInput).prefix(160))
     }
 
+    private static func ishHandoffInputSummary(from input: String) -> String? {
+        guard let args = subAgentArgs(from: input) else {
+            let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+        }
+        if let filename = args["filename"] as? String, !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return filename
+        }
+        if let purpose = args["purpose"] as? String, !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return purpose
+        }
+        if let command = args["command"] as? String, !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(command.prefix(80))
+        }
+        if let script = args["script"] as? String, !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(script.prefix(80))
+        }
+        return nil
+    }
+
+    private static func ishHandoffResultSummary(from output: [UIMessagePart]) -> String? {
+        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
+        guard let data = text.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        if let ok = object["ok"] as? Bool, !ok {
+            return (object["error"] as? String) ?? (object["reason"] as? String) ?? "交接失败"
+        }
+        let copied = (object["copied_to_clipboard"] as? Bool) == true ? "已复制" : "未复制"
+        let file = object["script_file_name"] as? String ?? "script.sh"
+        return "\(copied) · \(file) · 无输出回传"
+    }
+
+    private static func ishExecuteResultSummary(from output: [UIMessagePart]) -> String? {
+        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
+        guard let data = text.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        if let ok = object["ok"] as? Bool, !ok {
+            return (object["error"] as? String)?.nilIfBlank
+                ?? (object["stderr"] as? String)?.nilIfBlank
+                ?? "执行失败"
+        }
+        let exitCode = object["exit_code"] as? Int ?? 0
+        let stdout = (object["stdout"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let stdout, !stdout.isEmpty {
+            return "exit \(exitCode) · \(String(stdout.prefix(80)))"
+        }
+        return "exit \(exitCode) · 无输出"
+    }
+
+    private static func ishToolResultIndicatesFailure(_ output: [UIMessagePart]) -> Bool {
+        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
+        guard let data = text.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return false
+        }
+        if let ok = object["ok"] as? Bool { return !ok }
+        if let denied = object["denied"] as? Bool, denied { return true }
+        if let status = object["status"] as? String {
+            return ["failed", "error", "denied", "timed_out"].contains(status.lowercased())
+        }
+        if let exitCode = object["exit_code"] as? Int {
+            return exitCode != 0
+        }
+        return false
+    }
+
     private static func workspacePendingTitle(for toolName: String) -> String {
         switch toolName {
         case "workspace_file_read": "准备读取 Workspace 文件"
@@ -3067,6 +3209,7 @@ struct ChatToolTimeline: View {
     let steps: [ChatToolStepModel]
     /// Tapping a step (used for subagent steps, which open a detail sheet). nil = not tappable.
     var onTapStep: ((ChatToolStepModel) -> Void)? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -3074,7 +3217,7 @@ struct ChatToolTimeline: View {
                 let tappable = onTapStep != nil
                 if tappable {
                     Button { onTapStep?(step) } label: { row(step, chevron: true) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.98, haptic: .selection))
                 } else {
                     row(step, chevron: false)
                 }
@@ -3094,6 +3237,8 @@ struct ChatToolTimeline: View {
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(step.state.color)
                 .frame(width: 16)
+                .contentTransition(.symbolEffect(.replace.downUp))
+                .symbolEffect(.variableColor.iterative.reversing, isActive: step.state == .active && !reduceMotion)
 
             Text(step.title)
                 .font(.footnote.weight(.medium))
@@ -3119,6 +3264,7 @@ struct ChatToolTimeline: View {
                 .stroke(step.state.stroke, lineWidth: 0.7)
         }
         .contentShape(Capsule(style: .continuous))
+        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.84), value: step.state)
     }
 
     @ViewBuilder
@@ -3128,6 +3274,7 @@ struct ChatToolTimeline: View {
             Image(systemName: "checkmark")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(AmberTheme.accentGreen)
+                .contentTransition(.symbolEffect(.replace.downUp))
         case .active:
             ProgressView()
                 .controlSize(.mini)
@@ -3136,6 +3283,7 @@ struct ChatToolTimeline: View {
             Image(systemName: "exclamationmark")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(AmberTheme.accentRed)
+                .contentTransition(.symbolEffect(.replace.downUp))
         }
     }
 }
