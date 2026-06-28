@@ -467,7 +467,8 @@ final class ChatGenerationCoordinator {
             startedAt: startedAt,
             inputDigest: inputDigest,
             conversationId: conversationId,
-            uploadMessages: finalUploadMessages
+            uploadMessages: finalUploadMessages,
+            backgroundProviderSetting: providerSetting
         )
     }
 
@@ -509,7 +510,8 @@ final class ChatGenerationCoordinator {
         startedAt: Int64,
         inputDigest: String,
         conversationId: KotlinUuid?,
-        uploadMessages: [UIMessage]
+        uploadMessages: [UIMessage],
+        backgroundProviderSetting: ProviderSetting? = nil
     ) {
         let displayMessages = bindings.getMessages()
         if let conversationId {
@@ -518,7 +520,7 @@ final class ChatGenerationCoordinator {
                 startedAt: startedAt,
                 inputDigest: inputDigest,
                 conversationId: conversationId,
-                providerSetting: providerSetting,
+                providerSetting: backgroundProviderSetting ?? providerSetting,
                 params: params,
                 uploadMessages: uploadMessages,
                 displayMessages: displayMessages

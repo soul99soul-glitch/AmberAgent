@@ -7,8 +7,10 @@ import app.amber.core.agent.utils.JsonInstant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalUuidApi::class)
 @Serializable
 data class IosChatBackgroundPayload(
     val runId: String,
@@ -22,6 +24,7 @@ data class IosChatBackgroundPayload(
 )
 
 /** Swift-facing bridge for persisted iOS chat background generation payloads. */
+@OptIn(ExperimentalUuidApi::class)
 object IosChatBackgroundPayloadJsonBridge {
     fun encode(
         runId: String,

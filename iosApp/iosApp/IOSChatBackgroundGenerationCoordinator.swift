@@ -224,9 +224,24 @@ final class IOSChatBackgroundGenerationCoordinator {
             }
         }
 
+        let requestProvider: ProviderSetting
+        let requestParams: TextGenerationParams
+        do {
+            requestProvider = try await IOSCodexProviderResolver.resolved(job.providerSetting)
+            requestParams = IOSCodexProviderResolver.augmentParamsForCodex(job.params, provider: requestProvider)
+        } catch {
+            await fail(
+                job: job,
+                backgroundTask: backgroundTask,
+                runState: runState,
+                rawMessage: (error as NSError).localizedDescription
+            )
+            return
+        }
+
         await job.liveActivityController.update(
             runId: job.runId,
-            presentation: .generatingResponse(modelName: job.params.model.modelId),
+            presentation: .generatingResponse(modelName: requestParams.model.modelId),
             force: true
         )
 
@@ -236,16 +251,16 @@ final class IOSChatBackgroundGenerationCoordinator {
         let engine = IOSAgentToolEngine(
             provider: IOSChatBackgroundProvider(),
             executors: job.toolRuntime.backgroundToolExecutors(
-                providerSetting: job.providerSetting,
-                params: job.params,
+                providerSetting: requestProvider,
+                params: requestParams,
                 runId: job.runId
             ),
             configuration: .init(maxSteps: 6, honorApprovalPause: false)
         )
         let result = await engine.run(
-            providerSetting: job.providerSetting,
+            providerSetting: requestProvider,
             messages: job.uploadMessages,
-            params: job.params
+            params: requestParams
         )
         guard !runState.isExpired else { return }
 
