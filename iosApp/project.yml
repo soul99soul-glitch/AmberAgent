@@ -41,6 +41,9 @@ targets:
         buildPhase: resources
       - path: ../app/src/main/res/font/jetbrains_mono.ttf
         buildPhase: resources
+      - path: IshRuntimeResources/fs
+        buildPhase: resources
+        type: folder
     preBuildScripts:
       - name: Build Shared KMP Framework
         basedOnDependencyAnalysis: false
@@ -118,7 +121,7 @@ targets:
           - "-lamber_ffi"
         SWIFT_ACTIVE_COMPILATION_CONDITIONS:
           - "$(inherited)"
-          - "STABLE_TERMINAL_RUNTIMES"
+          - "ENABLE_EXPERIMENTAL_TERMINAL_RUNTIMES"
         HEADER_SEARCH_PATHS[sdk=iphonesimulator*]:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim/Headers"
         HEADER_SEARCH_PATHS[sdk=iphoneos*]:
@@ -134,6 +137,8 @@ targets:
         product: NIOSSH
       - package: SwiftStreamingMarkdown
         product: SwiftStreamingMarkdown
+      - package: ish-arm64-pkg
+        product: IshEmbed
       - target: AmberAgentActivityWidget
     scheme:
       gatherCoverageData: false
