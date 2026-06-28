@@ -94,6 +94,9 @@ final class ChatGenerationCoordinator {
     private var currentConversationIdForRun: KotlinUuid?
     private var currentToolResumeCount = 0
     private let maxToolResumeCount = 4
+    private var pendingStreamSnapshot: [UIMessage]?
+    private var streamSnapshotFlushTask: Task<Void, Never>?
+    private let streamSnapshotFlushDelayNanos: UInt64 = 33_000_000
     private var pendingMemoryToolApproval: ChatPendingToolApproval?
     private var pendingSearchToolApproval: ChatPendingToolApproval?
     private var pendingWebMountToolApproval: ChatPendingToolApproval?
@@ -148,15 +151,100 @@ final class ChatGenerationCoordinator {
                 await self.dependencies.mcpManager.syncAll()
             }
             guard self.currentRunId == runId else { return }
+            // Codex OAuth providers carry no apiKey: resolve a valid OAuth access
+            // token (refreshing if needed) and swap in a request-ready provider
+            // (bearer + Responses API + codex backend). Non-codex providers pass
+            // through unchanged. A resolution failure (not signed in / refresh
+            // failed) surfaces as a normal generation error.
+            let effectiveProvider: ProviderSetting
+            do {
+                effectiveProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
+            } catch {
+                await self.presentStreamError(
+                    rawMessage: (error as NSError).localizedDescription,
+                    modelId: params.model.modelId,
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId
+                )
+                return
+            }
+            guard self.currentRunId == runId else { return }
+            if let openAI = providerSetting as? ProviderSetting.OpenAI,
+               openAI.authMode != OpenAIAuthMode.codexOauth,
+               IOSCodexProviderResolver.isCodexProvider(providerSetting) {
+                _ = self.dependencies.sharedSettings.setOpenAIAuthMode(
+                    providerId: openAI.id.description(),
+                    authMode: OpenAIAuthMode.codexOauth
+                )
+                self.dependencies.sharedSettings.syncLegacySettingsStoreForCurrentChat(self.dependencies.settingsStore)
+            }
+            // Codex needs `OpenAI-Beta`/originator/account-id headers on the
+            // /responses request (else the backend 404s) — inject them for codex.
+            let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(params, provider: providerSetting)
             self.startStreaming(
-                providerSetting: providerSetting,
-                params: params,
+                providerSetting: effectiveProvider,
+                params: effectiveParams,
                 runId: runId,
                 startedAt: startedAt,
                 inputDigest: inputDigest,
                 conversationId: conversationId,
                 uploadMessages: uploadMessages
             )
+        }
+    }
+
+    func runImageTool(input: String, conversationId: KotlinUuid?) {
+        if isRunning {
+            cancel()
+        }
+
+        let runId = UUID().uuidString
+        let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
+        let inputDigest = chatInputDigest(for: input)
+        currentRunId = runId
+        currentStartedAt = startedAt
+        currentInputDigest = inputDigest
+        currentConversationIdForRun = conversationId
+        currentToolResumeCount = 0
+        bindings.setIsLoading(true)
+        bindings.startLiveActivity(runId, .runningTool(toolName: "generate_image"))
+
+        let toolCall = toolRuntime.userInitiatedImageToolCall(input: input)
+        var snapshot = bindings.getMessages()
+        snapshot.append(UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [toolCall],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        ))
+        bindings.setMessages(snapshot)
+        bindings.bumpMessageRevision()
+        bindings.persistMessages(conversationId)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.bindings.recordRun(runId, startedAt, "running", inputDigest)
+            let resumed = await self.toolRuntime.messagesByExecutingImageToolCall(
+                toolCall,
+                in: snapshot
+            )
+            guard self.currentRunId == runId else { return }
+            self.bindings.setMessages(resumed)
+            self.bindings.bumpMessageRevision()
+            await self.bindings.recordRun(runId, startedAt, "completed", inputDigest)
+            await self.dependencies.liveActivityController.end(
+                runId: runId,
+                presentation: .completed(toolTitle: "图片生成")
+            )
+            self.bindings.persistMessages(conversationId)
+            self.finishStreaming()
         }
     }
 
@@ -168,6 +256,7 @@ final class ChatGenerationCoordinator {
 
         streamJob?.cancel(cause: nil)
         streamJob = nil
+        cancelPendingStreamSnapshotPublish()
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -262,13 +351,14 @@ final class ChatGenerationCoordinator {
                     if !toolCalls.isEmpty {
                         self.handleDetectedToolCalls(toolCalls, runId: runId)
                     }
-                    self.bindings.setMessages(snapshot)
-                    self.bindings.bumpMessageRevision()
+                    self.scheduleStreamSnapshotPublish(snapshot, runId: runId)
                 }
             },
             onComplete: {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    guard self.currentRunId == runId else { return }
+                    self.cancelPendingStreamSnapshotPublish()
                     let snapshot = accumulator.snapshot()
                     await self.handleCompletedStream(
                         snapshot: snapshot,
@@ -283,37 +373,89 @@ final class ChatGenerationCoordinator {
             },
             onError: { error in
                 Task { @MainActor [weak self] in
-                    guard let self, self.currentRunId == runId else { return }
-                    let rawMessage = error.message ?? String(describing: error)
-                    let userFacingMessage = self.bindings.userFacingGenerationError(
-                        rawMessage,
-                        params.model.modelId
-                    )
-                    let errMsg = UIMessage(
-                        id: KotlinUuid.companion.random(),
-                        role: MessageRole.assistant,
-                        parts: [UIMessagePart.Text(text: userFacingMessage, metadata: nil)],
-                        annotations: [],
-                        createdAt: chatNowLocalDateTime(),
-                        finishedAt: chatNowLocalDateTime(),
-                        modelId: nil,
-                        usage: nil,
-                        translation: nil
-                    )
-                    var updated = self.bindings.getMessages()
-                    updated.append(errMsg)
-                    self.bindings.setMessages(updated)
+                    guard let self else { return }
+                    guard self.currentRunId == runId else { return }
+                    self.cancelPendingStreamSnapshotPublish()
+                    let snapshot = accumulator.snapshot()
+                    self.bindings.setMessages(snapshot)
                     self.bindings.bumpMessageRevision()
-                    await self.bindings.recordRun(runId, startedAt, "failed", inputDigest)
-                    await self.dependencies.liveActivityController.end(
+                    await self.presentStreamError(
+                        rawMessage: error.message ?? String(describing: error),
+                        modelId: params.model.modelId,
                         runId: runId,
-                        presentation: .failed()
+                        startedAt: startedAt,
+                        inputDigest: inputDigest,
+                        conversationId: conversationId
                     )
-                    self.bindings.persistMessages(conversationId)
-                    self.finishStreaming()
                 }
             }
         )
+    }
+
+    private func scheduleStreamSnapshotPublish(_ snapshot: [UIMessage], runId: String) {
+        pendingStreamSnapshot = snapshot
+        guard streamSnapshotFlushTask == nil else { return }
+        streamSnapshotFlushTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: self?.streamSnapshotFlushDelayNanos ?? 16_000_000)
+            } catch {
+                return
+            }
+            self?.flushPendingStreamSnapshot(runId: runId)
+        }
+    }
+
+    private func flushPendingStreamSnapshot(runId: String) {
+        streamSnapshotFlushTask = nil
+        guard currentRunId == runId else {
+            pendingStreamSnapshot = nil
+            return
+        }
+        guard let snapshot = pendingStreamSnapshot else { return }
+        pendingStreamSnapshot = nil
+        bindings.setMessages(snapshot)
+        bindings.bumpMessageRevision()
+    }
+
+    private func cancelPendingStreamSnapshotPublish() {
+        streamSnapshotFlushTask?.cancel()
+        streamSnapshotFlushTask = nil
+        pendingStreamSnapshot = nil
+    }
+
+    /// Surfaces a generation failure as an assistant error bubble and finalizes
+    /// the run (records "failed", ends the live activity, persists). Shared by the
+    /// stream's onError and the codex token-resolution failure path.
+    @MainActor
+    private func presentStreamError(
+        rawMessage: String,
+        modelId: String,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?
+    ) async {
+        guard currentRunId == runId else { return }
+        let userFacingMessage = bindings.userFacingGenerationError(rawMessage, modelId)
+        let errMsg = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(text: userFacingMessage, metadata: nil)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        var updated = bindings.getMessages()
+        updated.append(errMsg)
+        bindings.setMessages(updated)
+        bindings.bumpMessageRevision()
+        await bindings.recordRun(runId, startedAt, "failed", inputDigest)
+        await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
+        bindings.persistMessages(conversationId)
+        finishStreaming()
     }
 
     private func handleCompletedStream(
@@ -382,6 +524,11 @@ final class ChatGenerationCoordinator {
             conversationId: conversationId,
             baseMessages: baseMessages
         )
+        await dependencies.liveActivityController.update(
+            runId: runId,
+            presentation: .runningTool(toolName: pendingToolCall.toolCall.toolName),
+            force: true
+        )
         let result = await toolRuntime.execute(pendingToolCall, context: pending)
         guard currentRunId == runId else { return }
 
@@ -389,6 +536,11 @@ final class ChatGenerationCoordinator {
         case .completed(let resumedMessages):
             bindings.setMessages(resumedMessages)
             bindings.bumpMessageRevision()
+            await dependencies.liveActivityController.update(
+                runId: runId,
+                presentation: .generatingResponse(modelName: params.model.modelId),
+                force: true
+            )
             startStreaming(
                 providerSetting: providerSetting,
                 params: params,
@@ -570,6 +722,7 @@ final class ChatGenerationCoordinator {
     }
 
     private func finishStreaming() {
+        cancelPendingStreamSnapshotPublish()
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil

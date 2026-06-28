@@ -428,4 +428,37 @@ enum ChatToolOutputFormatter {
         }
         return text
     }
+
+    nonisolated static func imageFailureReason(from output: [UIMessagePart]) -> String? {
+        let texts = output.compactMap { ($0 as? UIMessagePart.Text)?.text }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !texts.isEmpty else { return nil }
+
+        for text in texts {
+            guard let data = text.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            if object["ok"] as? Bool == false {
+                return stringValue(in: object, keys: ["reason", "error", "detail", "message"])
+            }
+            if (object["tool"] as? String) == "generate_image",
+               let reason = stringValue(in: object, keys: ["reason", "error", "detail", "message"]) {
+                return reason
+            }
+        }
+
+        return texts.first
+    }
+
+    nonisolated private static func stringValue(in object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = object[key] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+        return nil
+    }
 }

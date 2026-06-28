@@ -559,19 +559,3 @@ private enum BridgeError: LocalizedError {
         return nil
     }
 }
-
-private extension String {
-    var nilIfBlank: String? {
-        isEmpty ? nil : self
-    }
-
-    func truncated(to limit: Int) -> String {
-        String(prefix(limit))
-    }
-}
-
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
-    }
-}

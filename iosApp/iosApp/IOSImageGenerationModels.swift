@@ -24,12 +24,29 @@ enum IOSImageAspectRatio: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    var renderedAspectRatio: Double {
+        switch self {
+        case .square:
+            1.0
+        case .landscape:
+            1536.0 / 1024.0
+        case .portrait:
+            1024.0 / 1536.0
+        }
+    }
+
     init(toolValue: String?) {
-        switch toolValue?.trimmingCharacters(in: .whitespacesAndNewlines) {
+        let normalized = toolValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+        switch normalized {
         case "16:9", "landscape":
             self = .landscape
         case "9:16", "portrait":
             self = .portrait
+        case "1:1", "square":
+            self = .square
         default:
             self = .square
         }
@@ -43,6 +60,7 @@ struct IOSImageGenerationRequest: Equatable {
     var count: Int
     var style: String
     var source: String
+    var sourceImageURL: String? = nil
 
     var effectivePrompt: String {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -77,7 +95,7 @@ enum IOSImageGenerationError: LocalizedError, Equatable {
     case invalidBaseURL
     case invalidResponse
     case httpStatus(Int, String)
-    case noImages
+    case noImages(String?)
     case invalidImageData
 
     var errorDescription: String? {
@@ -94,8 +112,12 @@ enum IOSImageGenerationError: LocalizedError, Equatable {
             "图片生成服务返回了无法解析的响应。"
         case .httpStatus(let status, let body):
             "图片生成失败：HTTP \(status)。\(body)"
-        case .noImages:
-            "图片生成服务没有返回图片。"
+        case .noImages(let reason):
+            if let reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                "图片生成服务没有返回图片：\(reason)"
+            } else {
+                "图片生成服务没有返回图片。"
+            }
         case .invalidImageData:
             "图片数据不是可保存的 base64 或公开 URL。"
         }

@@ -746,16 +746,6 @@ private enum MiniAppRunnerHostError: LocalizedError {
     }
 }
 
-private extension String {
-    var nilIfBlank: String? {
-        isEmpty ? nil : self
-    }
-
-    func truncated(to limit: Int) -> String {
-        String(prefix(limit))
-    }
-}
-
 #Preview {
     NavigationStack {
         MiniAppRunnerView(appId: IOSMiniAppFixtures.sampleId)

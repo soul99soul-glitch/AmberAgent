@@ -545,10 +545,6 @@ private struct RegexPattern {
 }
 
 private extension String {
-    var nilIfBlank: String? {
-        isEmpty ? nil : self
-    }
-
     var takeIfJSONObject: String? {
         trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") ? self : nil
     }

@@ -42,6 +42,7 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
 
         XCTAssertEqual(request.url?.absoluteString, "https://api.example.com/v1/images/generations")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer image-key")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
         XCTAssertEqual(body["model"] as? String, "gpt-image-test")
         XCTAssertEqual(body["n"] as? Int, 2)
         XCTAssertEqual(body["size"] as? String, "1536x1024")
@@ -88,6 +89,100 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
         XCTAssertEqual(request.count, 4)
         XCTAssertEqual(request.style, "cinematic")
         XCTAssertEqual(request.source, "chat")
+    }
+
+    func testToolRequestParsesSourceImageURL() throws {
+        let request = try IOSImageGenerationRepository(historyStore: isolatedHistory()).toolRequest(
+            from: #"{"prompt":"Make it snowy","source_image_url":"data:image/png;base64,QUJD"}"#,
+            modelId: "gpt-image-test"
+        )
+
+        XCTAssertEqual(request.prompt, "Make it snowy")
+        XCTAssertEqual(request.sourceImageURL, "data:image/png;base64,QUJD")
+    }
+
+    func testCodexResponsesRequestBodyMatchesAndroidShape() throws {
+        let body = IOSImageGenerationRepository.codexResponsesRequestBody(for: IOSImageGenerationRequest(
+            prompt: "A cat",
+            model: IOSCodexOAuthConstants.imageModelId,
+            aspectRatio: .portrait,
+            count: 4,
+            style: "ink",
+            source: "test"
+        ))
+
+        XCTAssertEqual(body["model"] as? String, "gpt-5.4")
+        XCTAssertEqual(body["instructions"] as? String, "")
+        XCTAssertEqual(body["store"] as? Bool, false)
+        XCTAssertEqual(body["stream"] as? Bool, true)
+        XCTAssertEqual(body["tool_choice"] as? String, "required")
+
+        let tools = try XCTUnwrap(body["tools"] as? [[String: Any]])
+        let tool = try XCTUnwrap(tools.first)
+        XCTAssertEqual(tool["type"] as? String, "image_generation")
+        XCTAssertEqual(tool["size"] as? String, "1024x1536")
+        XCTAssertEqual(tool["quality"] as? String, "high")
+        XCTAssertEqual(tool["moderation"] as? String, "low")
+        XCTAssertNil(tool["model"])
+
+        let input = try XCTUnwrap(body["input"] as? [[String: Any]])
+        let firstInput = try XCTUnwrap(input.first)
+        XCTAssertEqual(firstInput["role"] as? String, "user")
+        let content = try XCTUnwrap(firstInput["content"] as? [[String: Any]])
+        XCTAssertEqual(content.first?["type"] as? String, "input_text")
+        XCTAssertEqual(content.first?["text"] as? String, "A cat\nStyle: ink")
+    }
+
+    func testCodexResponsesRequestBodyIncludesSourceImageForEdits() throws {
+        let body = IOSImageGenerationRepository.codexResponsesRequestBody(for: IOSImageGenerationRequest(
+            prompt: "Make the sky orange",
+            model: IOSCodexOAuthConstants.imageModelId,
+            aspectRatio: .square,
+            count: 1,
+            style: "",
+            source: "test",
+            sourceImageURL: "data:image/png;base64,QUJD"
+        ))
+
+        let input = try XCTUnwrap(body["input"] as? [[String: Any]])
+        let firstInput = try XCTUnwrap(input.first)
+        let content = try XCTUnwrap(firstInput["content"] as? [[String: Any]])
+
+        XCTAssertEqual(content.count, 2)
+        XCTAssertEqual(content[0]["type"] as? String, "input_text")
+        XCTAssertEqual(content[0]["text"] as? String, "Make the sky orange")
+        XCTAssertEqual(content[1]["type"] as? String, "input_image")
+        XCTAssertEqual(content[1]["image_url"] as? String, "data:image/png;base64,QUJD")
+    }
+
+    func testCodexImageExtractionParsesSSEOutputItemDone() {
+        let sse = """
+        event: response.output_item.done
+        data: {"type":"response.output_item.done","item":{"type":"image_generation_call","id":"ig_1","status":"completed","result":"data:image/png;base64,QUJD"}}
+
+        data: [DONE]
+
+        """
+
+        let extraction = IOSImageGenerationRepository.codexImageExtraction(from: Data(sse.utf8))
+
+        XCTAssertEqual(extraction.images, ["data:image/png;base64,QUJD"])
+        XCTAssertNil(extraction.failureReason)
+    }
+
+    func testCodexImageExtractionKeepsFailureReasonWhenNoImageResult() {
+        let sse = """
+        event: response.completed
+        data: {"type":"response.completed","response":{"status":"failed","error":{"message":"Image generation refused by backend"}}}
+
+        data: [DONE]
+
+        """
+
+        let extraction = IOSImageGenerationRepository.codexImageExtraction(from: Data(sse.utf8))
+
+        XCTAssertTrue(extraction.images.isEmpty)
+        XCTAssertEqual(extraction.failureReason, "Image generation refused by backend")
     }
 
     func testToolResultJSONIncludesFileURLs() throws {

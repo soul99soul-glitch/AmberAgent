@@ -178,9 +178,3 @@ enum IOSSSHSecretStore {
         SecItemDelete(query as CFDictionary)
     }
 }
-
-private extension String {
-    var nilIfBlank: String? {
-        isEmpty ? nil : self
-    }
-}

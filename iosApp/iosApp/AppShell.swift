@@ -25,6 +25,7 @@ struct AppShell: View {
         let documentAccessStore = DocumentAccessStore()
         let workspaceStore = IOSWorkspaceStore.shared
         let systemPermissionCoordinator = IOSSystemPermissionCoordinator()
+        let sharedSettingsStore = IOSSharedSettingsStore()
         self.settingsStore = settingsStore
         self._permissionStore = State(initialValue: permissionStore)
         self._documentAccessStore = State(initialValue: documentAccessStore)
@@ -39,9 +40,11 @@ struct AppShell: View {
             )
         )
         self._providerRegistry = State(initialValue: ProviderRegistryStore(settingsStore: settingsStore))
-        self._sharedSettings = State(initialValue: IOSSharedSettingsStore())
+        self._sharedSettings = State(initialValue: sharedSettingsStore)
         self._mcpConfigStore = State(initialValue: IOSMcpConfigStore())
         self._conversationStore = State(initialValue: IOSConversationStore())
+        IOSDeepReadBackgroundCoordinator.shared.configure(sharedSettings: sharedSettingsStore)
+        IOSDeepReadRecoveryOnce.run()
         // [Slice 6] Load persisted memories (Documents/memories/memories.json)
         // into the IosMemoryFactory store before any view reads it. Missing or
         // corrupt file is a no-op (store keeps its seed/empty state).

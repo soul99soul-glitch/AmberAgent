@@ -22,6 +22,10 @@
     <true/>
     <key>NSSupportsLiveActivities</key>
     <true/>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).deepread.*</string>
+    </array>
     <key>NSAppleMusicUsageDescription</key>
     <string>AmberAgent can request access to Apple Music and the media library when you choose to enable media capabilities.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>

@@ -24,6 +24,7 @@ struct ProviderDetailView: View {
     @State private var draftChatPath = "/chat/completions"
     @State private var draftUseResponseAPI = false
     @State private var draftPromptCaching = false
+    @State private var showCodexLogin = false
 
     var body: some View {
         ZStack {
@@ -61,6 +62,28 @@ struct ProviderDetailView: View {
             ProviderModelEditorSheet(
                 draft: draft,
                 onSave: saveModelDraft
+            )
+        }
+        .sheet(isPresented: $showCodexLogin) {
+            CodexLoginView(
+                providerId: providerId,
+                onAuthModeChange: { mode in
+                    _ = sharedSettings.setOpenAIAuthMode(providerId: providerId, authMode: mode)
+                    if isCurrentProvider {
+                        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                    }
+                },
+                persistModels: { models in
+                    _ = sharedSettings.updateProviderChatModels(providerId: providerId, models: models)
+                    _ = sharedSettings.upsertProviderImageModel(
+                        providerId: providerId,
+                        modelId: IOSCodexOAuthConstants.imageModelId,
+                        displayName: "Codex 生图 (ChatGPT)"
+                    )
+                    if isCurrentProvider {
+                        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                    }
+                }
             )
         }
     }
@@ -181,6 +204,8 @@ struct ProviderDetailView: View {
 
                 legacyKeyImportSection
 
+                codexSection
+
                 if provider is ProviderSetting.Claude {
                     AmberSectionLabel(text: "选项")
                     AmberFormGroup {
@@ -219,6 +244,44 @@ struct ProviderDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(!(provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude))
+    }
+
+    /// Codex (ChatGPT account) sign-in entry, shown for the official OpenAI brand
+    /// or a provider already switched to Codex OAuth.
+    @ViewBuilder
+    private var codexSection: some View {
+        if let openAI = provider as? ProviderSetting.OpenAI,
+           openAI.brand == OpenAIBrand.openai || openAI.authMode == OpenAIAuthMode.codexOauth {
+            AmberSectionLabel(text: "ChatGPT 登录 (Codex)")
+            AmberFormGroup {
+                Button {
+                    showCodexLogin = true
+                } label: {
+                    ProviderRowContent(
+                        title: codexSignedIn ? "已登录 Codex" : "用 ChatGPT 登录",
+                        subtitle: codexSubtitle,
+                        value: codexSignedIn ? "管理" : "登录",
+                        valueStyle: .accent,
+                        showsChevron: true
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var codexSignedIn: Bool {
+        _ = sharedSettings.revision
+        return IOSCodexAuthStore.load(providerId: providerId) != nil
+    }
+
+    private var codexSubtitle: String {
+        if let tokens = IOSCodexAuthStore.load(providerId: providerId) {
+            let email = tokens.email ?? ""
+            let plan = tokens.planType.map { " · \($0)" } ?? ""
+            return email.isEmpty ? "已登录\(plan)" : "\(email)\(plan)"
+        }
+        return "用 ChatGPT Plus/Pro/Team 账号,无需 API Key"
     }
 
     @ViewBuilder
@@ -523,6 +586,7 @@ struct ProviderDetailView: View {
             modelId: model.modelId,
             displayName: displayName,
             contextWindowTokens: intValue(model.contextWindowTokens),
+            modelType: model.type,
             headers: model.customHeaders.map { ($0.name, $0.value) }
         ) else { return }
         guard let savedModel = updatedProvider.models.first(where: { $0.type == .chat && $0.modelId == model.modelId }) else { return }
@@ -546,6 +610,7 @@ struct ProviderDetailView: View {
             modelId: modelId,
             displayName: displayName,
             contextWindowTokens: draft.contextWindowTokens,
+            modelType: draft.type,
             headers: draft.headers.map { ($0.name, $0.value) }
         ) else { return false }
         if shouldSelect,
@@ -770,6 +835,7 @@ private struct ProviderModelDraft: Identifiable {
     var modelId: String
     var displayName: String
     var contextWindowText: String
+    var type: ModelType
     var headers: [ProviderHeaderDraft]
 
     init() {
@@ -777,6 +843,7 @@ private struct ProviderModelDraft: Identifiable {
         self.modelId = ""
         self.displayName = ""
         self.contextWindowText = ""
+        self.type = .chat
         self.headers = []
     }
 
@@ -789,6 +856,7 @@ private struct ProviderModelDraft: Identifiable {
         } else {
             self.contextWindowText = ""
         }
+        self.type = model.type
         self.headers = model.customHeaders.map { ProviderHeaderDraft(name: $0.name, value: $0.value) }
     }
 
@@ -845,6 +913,27 @@ private struct ProviderModelEditorSheet: View {
         self.onSave = onSave
     }
 
+    // Custom segmented control (Kotlin `ModelType` isn't Hashable in Swift, so a
+    // SwiftUI Picker can't bind to it; compare with `==` instead).
+    @ViewBuilder
+    private func modelTypeButton(_ title: String, _ type: ModelType) -> some View {
+        let selected = draft.type == type
+        Button {
+            draft.type = type
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? AmberTheme.foreground : AmberTheme.muted)
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .background(
+                    selected ? AmberTheme.surface : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -865,6 +954,25 @@ private struct ProviderModelEditorSheet: View {
                                 text: $draft.displayName,
                                 placeholder: "留空时使用 Model ID"
                             )
+                            ProviderDetailDivider()
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("类型")
+                                    .font(.subheadline)
+                                    .foregroundStyle(AmberTheme.muted)
+                                HStack(spacing: 0) {
+                                    modelTypeButton("聊天", .chat)
+                                    modelTypeButton("生图", .image)
+                                    modelTypeButton("嵌入", .embedding)
+                                }
+                                .padding(3)
+                                .background(
+                                    AmberTheme.surface2.opacity(0.88),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                )
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
                             ProviderDetailDivider()
                             ProviderEditableTextFieldRow(
                                 title: "上下文",

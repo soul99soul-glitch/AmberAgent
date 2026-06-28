@@ -1095,41 +1095,7 @@ private fun ProviderSetting.isHiddenCodexOAuthModel(model: Model): Boolean {
  *  - 默认: off/auto/low/med/high/max (6 段)
  */
 internal fun reasoningLevelsForModel(model: Model): List<Pair<app.amber.ai.core.ReasoningLevel, String>> {
-    val id = model.modelId.lowercase()
-    return when {
-        id.contains("deepseek") -> listOf(
-            app.amber.ai.core.ReasoningLevel.OFF to "off",
-            app.amber.ai.core.ReasoningLevel.HIGH to "high",
-            app.amber.ai.core.ReasoningLevel.MAX to "max",
-        )
-        // Claude (Anthropic) extended thinking + adaptive auto：
-        // Anthropic 在 claude-sonnet-4.5 / opus-4.1 起暴露 thinking_budget=auto，模型自己
-        // 决定多少 token 用来思考（无人工指定 budget）。设计稿 model-picker.jsx 标 auto
-        // 作为首段，方便用户日常聊天直接选 "让 Claude 自己决定" 而不用挑 low/med/high。
-        // 段集：auto / low / med / high / xhigh / max (6 段)
-        id.contains("claude") -> listOf(
-            app.amber.ai.core.ReasoningLevel.AUTO to "auto",
-            app.amber.ai.core.ReasoningLevel.LOW to "low",
-            app.amber.ai.core.ReasoningLevel.MEDIUM to "med",
-            app.amber.ai.core.ReasoningLevel.HIGH to "high",
-            app.amber.ai.core.ReasoningLevel.XHIGH to "xhigh",
-            app.amber.ai.core.ReasoningLevel.MAX to "max",
-        )
-        id.contains("gpt") || id.contains("codex") || id.contains("o1") || id.contains("o3") || id.contains("o4") -> listOf(
-            app.amber.ai.core.ReasoningLevel.LOW to "low",
-            app.amber.ai.core.ReasoningLevel.MEDIUM to "med",
-            app.amber.ai.core.ReasoningLevel.HIGH to "high",
-            app.amber.ai.core.ReasoningLevel.XHIGH to "xhigh",
-        )
-        id.contains("kimi") || id.contains("glm") || id.contains("zhipu") -> listOf(
-            app.amber.ai.core.ReasoningLevel.OFF to "off",
-            app.amber.ai.core.ReasoningLevel.AUTO to "auto",
-        )
-        else -> listOf(
-            app.amber.ai.core.ReasoningLevel.OFF to "off",
-            app.amber.ai.core.ReasoningLevel.AUTO to "auto",
-        )
-    }
+    return app.amber.ai.provider.reasoningLevelsForModel(model)
 }
 
 @Composable

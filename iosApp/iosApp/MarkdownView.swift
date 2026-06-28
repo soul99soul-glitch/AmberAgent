@@ -160,12 +160,18 @@ struct MarkdownView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             if let lang, !lang.isEmpty {
-                Text(lang)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                HStack {
+                    Text(lang)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if ["svg", "html"].contains(lang.lowercased()) {
+                        WidgetCodePreviewButton(code: code)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
             }
             if shouldCollapse {
                 Text(String(code.prefix(300)))

@@ -562,6 +562,7 @@ private enum ProviderAddAlert: Identifiable {
 
 enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     case openAI
+    case codexOAuth
     case google
     case anthropic
     case custom
@@ -571,6 +572,7 @@ enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .openAI: "OpenAI Compatible"
+        case .codexOAuth: "Codex OAuth"
         case .google: "Gemini"
         case .anthropic: "Anthropic"
         case .custom: "自定义"
@@ -580,6 +582,7 @@ enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     var detailTitle: String {
         switch self {
         case .openAI: "OpenAI 兼容"
+        case .codexOAuth: "Codex OAuth"
         case .google: "Gemini"
         case .anthropic: "Anthropic 兼容"
         case .custom: "自定义"
@@ -589,6 +592,7 @@ enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     var defaultPath: String {
         switch self {
         case .openAI: "/chat/completions"
+        case .codexOAuth: "/responses"
         case .google: "/models/{model}:generateContent"
         case .anthropic: "/messages"
         case .custom: "/chat/completions"
@@ -609,6 +613,9 @@ enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     static func option(for provider: ProviderSetting?) -> ProviderProtocolOption? {
         guard let provider else { return nil }
         if let openAI = provider as? ProviderSetting.OpenAI {
+            if IOSCodexProviderResolver.isCodexProvider(openAI) {
+                return .codexOAuth
+            }
             return openAI.useResponseApi ? nil : .openAI
         }
         if provider is ProviderSetting.Claude {
@@ -625,6 +632,7 @@ enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     var defaultBaseURL: String {
         switch self {
         case .openAI: "https://api.openai.com/v1"
+        case .codexOAuth: IOSCodexOAuthConstants.codexBackendBaseUrl
         case .anthropic: "https://api.anthropic.com/v1"
         case .google: "https://generativelanguage.googleapis.com/v1beta"
         case .custom: "https://api.example.com/v1"
@@ -638,6 +646,7 @@ enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     var defaultName: String {
         switch self {
         case .openAI: "OpenAI Compatible"
+        case .codexOAuth: "Codex OAuth"
         case .anthropic: "Claude"
         case .google: "Gemini"
         case .custom: "Custom"

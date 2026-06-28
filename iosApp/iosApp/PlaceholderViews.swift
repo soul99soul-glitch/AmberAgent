@@ -19,11 +19,11 @@ enum AmberTheme {
         foreground: 0x2A2320, foreground2: 0x4A4039, muted: 0x6E6254, muted2: 0xA89A88,
         border: 0xDBCEBC, borderSoft: 0xECE3D6
     )
-    // Neutral white (systemGroupedBackground family).
+    // Neutral white: true white canvas with only subtle grouping tones.
     static let neutralLight = AmberPalette(
-        background: 0xF2F2F7, surface: 0xFFFFFF, surface2: 0xEFEFF4,
+        background: 0xFFFFFF, surface: 0xFFFFFF, surface2: 0xF7F7F8,
         foreground: 0x1C1C1E, foreground2: 0x3A3A3C, muted: 0x6C6C70, muted2: 0xAEAEB2,
-        border: 0xD8D8DD, borderSoft: 0xE5E5EA
+        border: 0xE1E1E5, borderSoft: 0xEEEEF0
     )
     // Warm dark (HIG: not pure black / not pure white; hairlines via near-bg surfaces).
     static let darkPalette = AmberPalette(

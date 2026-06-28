@@ -96,6 +96,7 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderManager
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.providerRoutingKey
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexOAuthClient
 import app.amber.ai.ui.UIMessagePart

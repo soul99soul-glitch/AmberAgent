@@ -38,15 +38,7 @@ enum IOSCredentialRedactor {
             var out: [String: Any] = [:]
             for (key, val) in dict {
                 let lowerKey = key.lowercased()
-                // 搜索服务(Brave/Tavily/…)凭据的 Keychain 还原是 P2 才落地的工作。
-                // 在还原侧实现之前,这里若把它们的 apiKey 也脱敏,就会因为没有任何地方
-                // 把掩码换回真实 key,导致 apiKey 被永久写成掩码 → 每次请求都被服务端判
-                // SUBSCRIPTION_TOKEN_INVALID(深读只剩 1 来源)。因此 searchServices 子树
-                // 内的 apiKey 暂不脱敏(明文留在 UserDefaults,符合 P2 前的既有预期);
-                // password/token 等其它敏感字段照旧脱敏。
-                if inSearchServices, lowerKey == "apikey" {
-                    out[key] = val
-                } else if isSensitiveKey(key) {
+                if isSensitiveKey(key) {
                     out[key] = mask
                 } else if lowerKey == "headers" || lowerKey == "customheaders" || lowerKey == "custombodies" {
                     // Header/body collections hold name/value (or key/value) pairs

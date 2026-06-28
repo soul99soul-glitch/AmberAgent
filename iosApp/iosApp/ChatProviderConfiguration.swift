@@ -7,6 +7,7 @@ enum ChatConfigurationIssue: Equatable {
     case missingModel
     case missingProvider
     case unsupportedProvider
+    case codexNotSignedIn
 
     var title: String {
         switch self {
@@ -20,6 +21,8 @@ enum ChatConfigurationIssue: Equatable {
             "还没有配置服务商"
         case .unsupportedProvider:
             "当前服务商暂不支持聊天"
+        case .codexNotSignedIn:
+            "还没有登录 Codex"
         }
     }
 
@@ -35,6 +38,8 @@ enum ChatConfigurationIssue: Equatable {
             "请先在设置里添加一个服务商（并填写 API Key 与模型），再发送消息。"
         case .unsupportedProvider:
             "当前服务商类型的 iOS 聊天执行器尚未移植，请先切换到 OpenAI 兼容或 Anthropic 服务商。"
+        case .codexNotSignedIn:
+            "请先在服务商设置里用 ChatGPT 账号登录 Codex，再发送消息。"
         }
     }
 }
@@ -58,6 +63,13 @@ enum ChatProviderConfiguration {
     static func issue(for model: Model, provider: ProviderSetting?) -> ChatConfigurationIssue? {
         guard let provider else { return .missingProvider }
         guard supportsChatStreaming(provider) else { return .unsupportedProvider }
+        // Codex OAuth providers carry no apiKey — the bearer is an OAuth token
+        // resolved at request time. Gate on sign-in state instead of apiKey.
+        if IOSCodexProviderResolver.isCodexProvider(provider) {
+            if !IOSCodexProviderResolver.isSignedIn(provider) { return .codexNotSignedIn }
+            if model.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .missingModel }
+            return nil
+        }
         return issue(
             baseUrl: baseURL(of: provider),
             apiKey: apiKey(of: provider),
@@ -80,6 +92,10 @@ enum ChatProviderConfiguration {
 
     static func supportsChatStreaming(_ provider: ProviderSetting) -> Bool {
         if let openAI = provider as? ProviderSetting.OpenAI {
+            // Codex OAuth speaks the Responses API via an OAuth bearer; it's
+            // supported through the codex request path (token injected at
+            // request time) even though it implies useResponseApi.
+            if IOSCodexProviderResolver.isCodexProvider(openAI) { return true }
             return !openAI.useResponseApi
         }
         return provider is ProviderSetting.Claude

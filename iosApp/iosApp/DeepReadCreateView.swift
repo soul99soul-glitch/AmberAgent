@@ -1,3 +1,4 @@
+@preconcurrency import BackgroundTasks
 import SwiftUI
 import UniformTypeIdentifiers
 @preconcurrency import Shared
@@ -9,58 +10,523 @@ import UniformTypeIdentifiers
 /// never a faked success.
 @MainActor
 enum IOSDeepReadLauncher {
+    typealias StatusHandler = @MainActor (String, Bool) -> Void
+
     static func createAndGenerate(
         title: String,
         sources: [IOSDeepReadSource],
         templateId: String,
         sharedSettings: IOSSharedSettingsStore,
         navigate: @escaping (String) -> Void,
-        onStatus: @escaping (String, Bool) -> Void
+        onStatus: @escaping StatusHandler
     ) throws {
         let store = IOSDeepReadStore.shared
         let task = try store.createTask(title: title, sources: sources, templateId: templateId)
         store.markRunning(id: task.id)
-        guard let running = store.task(id: task.id) else { return }
         navigate(task.id)
 
-        Task { @MainActor in
-            let output: String
-            var structuredJSON: String? = nil
-            let resolved = sharedSettings.resolveBoardDeepReadModel(
-                boardModelId: sharedSettings.todayBoard.boardModelId
-            )
-            if let (modelId, providerSetting) = resolved {
-                let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
-                    task: running,
-                    providerSetting: providerSetting,
-                    modelId: modelId
-                )
-                switch IOSDeepReadDraftGenerator.outcome(
-                    for: result,
-                    offlineFallback: IOSDeepReadDraftGenerator.generate(task: running)
-                ) {
-                case .failed(let reason):
-                    store.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
-                    onStatus("深度阅读生成失败：\(reason)", true)
-                    return
-                case .completed(let markdown, let json):
-                    output = markdown
-                    structuredJSON = json
-                }
-            } else {
-                output = IOSDeepReadDraftGenerator.generate(task: running)
-            }
+        IOSDeepReadBackgroundCoordinator.shared.start(
+            taskId: task.id,
+            title: title,
+            generationId: UUID().uuidString,
+            sharedSettings: sharedSettings,
+            onStatus: onStatus
+        )
+    }
 
-            store.complete(id: task.id, markdown: output, structuredJSON: structuredJSON)
-            _ = try? IOSWorkspaceStore.shared.saveArtifact(
-                title: running.title,
-                content: output,
-                type: .deepRead,
-                sourceKind: "deep_read",
-                sourceId: running.id
-            )
-            onStatus("已生成并保存深度阅读。", false)
+    static func retry(
+        taskId: String,
+        sharedSettings: IOSSharedSettingsStore,
+        onStatus: @escaping StatusHandler
+    ) {
+        let store = IOSDeepReadStore.shared
+        store.prepareRetry(id: taskId)
+        store.markRunning(id: taskId)
+        let title = store.task(id: taskId)?.title ?? "深度阅读"
+        IOSDeepReadBackgroundCoordinator.shared.start(
+            taskId: taskId,
+            title: title,
+            generationId: UUID().uuidString,
+            sharedSettings: sharedSettings,
+            onStatus: onStatus
+        )
+    }
+
+    @discardableResult
+    static func runExistingTask(
+        taskId: String,
+        requestId: String? = nil,
+        sharedSettings: IOSSharedSettingsStore,
+        backgroundTask: BGContinuedProcessingTask? = nil,
+        onStatus: StatusHandler? = nil
+    ) async -> Bool {
+        let store = IOSDeepReadStore.shared
+        let runState = IOSDeepReadRunState()
+        defer {
+            IOSDeepReadBackgroundCoordinator.shared.finish(taskId: taskId, requestId: requestId)
         }
+        guard var running = store.task(id: taskId) else {
+            backgroundTask?.setTaskCompleted(success: false)
+            return false
+        }
+        guard running.status == .queued || running.status == .running else {
+            backgroundTask?.setTaskCompleted(success: false)
+            return false
+        }
+
+        let progress = backgroundTask?.progress
+        progress?.totalUnitCount = 7
+        progress?.completedUnitCount = 0
+
+        backgroundTask?.expirationHandler = {
+            if runState.expire() {
+                backgroundTask?.setTaskCompleted(success: false)
+                Task { @MainActor in
+                    store.fail(id: taskId, message: "深度阅读后台生成被系统中断，可稍后重试。")
+                    onStatus?("深度阅读后台生成被系统中断，可稍后重试。", true)
+                }
+            }
+        }
+
+        func updateProgress(_ completed: Int64, _ subtitle: String) {
+            if store.task(id: taskId)?.status == .running {
+                store.markRunning(id: taskId)
+            }
+            progress?.completedUnitCount = min(completed, progress?.totalUnitCount ?? completed)
+            backgroundTask?.updateTitle("深度阅读", subtitle: subtitle)
+        }
+
+        store.markRunning(id: taskId)
+        updateProgress(0, "准备生成 \(running.title)")
+
+        updateProgress(1, "正在搜索补充来源")
+        let searched = await searchSourcesForDeepRead(title: running.title, settings: sharedSettings.snapshot)
+        guard !runState.isExpired else { return false }
+
+        let mergedSources = Array(dedupeSources(running.sources + searched).prefix(10))
+        let scrapeBase: Int64 = 2
+        let generationBase = scrapeBase + Int64(max(mergedSources.count, 1))
+        progress?.totalUnitCount = generationBase + 5
+        updateProgress(2, "正在抓取网页正文")
+        let enriched = await enrichSourcesWithScrape(
+            mergedSources,
+            settings: sharedSettings.snapshot,
+            onSourceProgress: { index, total in
+                updateProgress(scrapeBase + Int64(index), "正在抓取网页正文 \(index)/\(total)")
+            }
+        )
+        guard !runState.isExpired else { return false }
+
+        store.replaceSources(id: taskId, sources: enriched)
+        running.sources = enriched
+        guard enriched.contains(where: isUsableSourceForGeneration) else {
+            return failRun(
+                taskId: taskId,
+                message: "深度阅读生成失败：没有可用来源，请检查搜索/网页抓取配置后重试。",
+                store: store,
+                backgroundTask: backgroundTask,
+                runState: runState,
+                onStatus: onStatus
+            )
+        }
+
+        let output: String
+        var structuredJSON: String? = nil
+        if let (modelId, providerSetting) = sharedSettings.resolveBoardDeepReadModel(
+            boardModelId: sharedSettings.todayBoard.boardModelId
+        ) {
+            updateProgress(generationBase, "正在生成概览")
+            let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
+                task: running,
+                providerSetting: providerSetting,
+                modelId: modelId,
+                onStageProgress: { label, index, _ in
+                    updateProgress(generationBase + Int64(index), "正在生成\(label)")
+                }
+            )
+            guard !runState.isExpired else { return false }
+            switch IOSDeepReadDraftGenerator.outcome(
+                for: result,
+                offlineFallback: IOSDeepReadDraftGenerator.generate(task: running)
+            ) {
+            case .failed(let reason):
+                return failRun(
+                    taskId: taskId,
+                    message: "深度阅读生成失败：\(reason)",
+                    store: store,
+                    backgroundTask: backgroundTask,
+                    runState: runState,
+                    onStatus: onStatus
+                )
+            case .completed(let markdown, let json):
+                output = markdown
+                structuredJSON = json
+            }
+        } else {
+            updateProgress(generationBase + 4, "正在生成离线草稿")
+            output = IOSDeepReadDraftGenerator.generate(task: running)
+        }
+
+        guard runState.reserveTerminal() else { return false }
+        updateProgress(progress?.totalUnitCount ?? generationBase + 5, "正在保存结果")
+        store.complete(id: taskId, markdown: output, structuredJSON: structuredJSON)
+        _ = try? IOSWorkspaceStore.shared.saveArtifact(
+            title: running.title,
+            content: output,
+            type: .deepRead,
+            sourceKind: "deep_read",
+            sourceId: running.id
+        )
+        onStatus?("已生成并保存深度阅读。", false)
+        backgroundTask?.setTaskCompleted(success: true)
+        return true
+    }
+
+    private static func failRun(
+        taskId: String,
+        message: String,
+        store: IOSDeepReadStore,
+        backgroundTask: BGContinuedProcessingTask?,
+        runState: IOSDeepReadRunState,
+        onStatus: StatusHandler?
+    ) -> Bool {
+        guard runState.reserveTerminal() else { return false }
+        store.fail(id: taskId, message: message)
+        onStatus?(message, true)
+        backgroundTask?.setTaskCompleted(success: false)
+        return false
+    }
+
+    private static func isUsableSourceForGeneration(_ source: IOSDeepReadSource) -> Bool {
+        source.metadata["scrape_status"] != "failed"
+            && !IOSDeepReadSourceNormalizer.cleanMultiline(source.content).isEmpty
+    }
+
+    private static func enrichSourcesWithScrape(
+        _ sources: [IOSDeepReadSource],
+        settings: Settings?,
+        onSourceProgress: ((_ index: Int, _ total: Int) -> Void)? = nil
+    ) async -> [IOSDeepReadSource] {
+        var enriched: [IOSDeepReadSource] = []
+        for (index, var source) in sources.enumerated() {
+            defer { onSourceProgress?(index + 1, sources.count) }
+            if source.metadata["scrape_status"] == "failed" {
+                enriched.append(source)
+                continue
+            }
+            guard let url = source.url, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                source.metadata["scrape_status"] = "no_url"
+                enriched.append(source)
+                continue
+            }
+            do {
+                let input = jsonString(["url": url, "max_chars": 12_000])
+                let output = try await IOSSearchExecutor.execute(
+                    toolName: "scrape_web",
+                    toolInput: input,
+                    settings: settings
+                )
+                if let content = scrapeContent(from: output), !content.isEmpty {
+                    source.content = IOSDeepReadSourceNormalizer.cleanMultiline(source.content + "\n\n网页正文：\n" + content)
+                    source.metadata["scrape_status"] = "ok"
+                } else {
+                    source.metadata["scrape_status"] = "empty"
+                }
+                if source.metadata["hero_image_url"] == nil,
+                   let hero = scrapeFirstImage(from: output) {
+                    source.metadata["hero_image_url"] = hero
+                }
+            } catch {
+                let hasExistingContent = !IOSDeepReadSourceNormalizer.cleanMultiline(source.content).isEmpty
+                source.metadata["scrape_status"] = hasExistingContent ? "scrape_failed_keep_content" : "failed"
+                source.metadata["scrape_error"] = String(error.localizedDescription.prefix(180))
+            }
+            enriched.append(source)
+        }
+        return enriched
+    }
+
+    private static func searchSourcesForDeepRead(title: String, settings: Settings?) async -> [IOSDeepReadSource] {
+        let queries = deepReadSearchQueries(from: title)
+        guard !queries.isEmpty else { return [] }
+        var byURL: [String: IOSSearchResult] = [:]
+        var order: [String] = []
+        for query in queries {
+            do {
+                let execution = try await IOSSearchExecutor.searchResults(
+                    toolInput: searchToolInput(query: query, maxResults: 4),
+                    settings: settings
+                )
+                for result in execution.results {
+                    let key = result.url.lowercased().trimmingCharacters(in: .whitespaces)
+                    guard !key.isEmpty, byURL[key] == nil else { continue }
+                    byURL[key] = result
+                    order.append(key)
+                }
+            } catch {
+                NSLog("[AmberDeepRead] topic-search angle failed (\(query.prefix(20))…): \(error)")
+            }
+        }
+        let merged = Array(order.prefix(12).compactMap { byURL[$0] })
+        NSLog("[AmberDeepRead] topic-search angles=\(queries.count) distinct=\(byURL.count) used=\(merged.count)")
+        guard !merged.isEmpty else { return [] }
+        return (try? IOSDeepReadSourceNormalizer.searchSources(query: title, results: merged)) ?? []
+    }
+
+    private static func deepReadSearchQueries(from title: String) -> [String] {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 2 else { return [] }
+        let year = Calendar.current.component(.year, from: Date())
+        let lower = t.lowercased()
+        var queries = [
+            t,
+            "\(t) 前因后果 时间线 背景 最新进展",
+            "\(t) 官方 声明 通报",
+            "\(t) 核心矛盾 争议 影响 各方反应",
+            "\(t) 专家解读 分析",
+            "\(t) background timeline latest news \(year)",
+            "\(t) 图片 现场图 截图",
+        ]
+        if ["gemini", "google", "openai", "claude", "deepseek", "gpt", "llm", "大模型", "模型", "发布会", "ppt", "截图"].contains(where: { lower.contains($0) || t.contains($0) }) {
+            queries.append("\(t) 发布 价格 跑分 性能 评价")
+            queries.append("\(t) 发布会 PPT 演示 文稿 图片")
+        }
+        return queries
+    }
+
+    private static func dedupeSources(_ sources: [IOSDeepReadSource]) -> [IOSDeepReadSource] {
+        var seen = Set<String>()
+        var result: [IOSDeepReadSource] = []
+        for source in sources {
+            let url = (source.url ?? "").lowercased().trimmingCharacters(in: .whitespaces)
+            let key = url.isEmpty ? "t:" + source.title.lowercased() : url
+            if seen.insert(key).inserted { result.append(source) }
+        }
+        return result
+    }
+
+    private static func scrapeContent(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object["content"] as? String
+    }
+
+    private static func scrapeFirstImage(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let images = object["images"] as? [String] else {
+            return nil
+        }
+        return images.first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+    }
+
+    private static func jsonString(_ values: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(values),
+              let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
+    }
+
+    private static func searchToolInput(query: String, maxResults: Int) -> String {
+        let object: [String: Any] = ["query": query, "max_results": maxResults]
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return query
+        }
+        return string
+    }
+}
+
+@MainActor
+final class IOSDeepReadBackgroundCoordinator {
+    static let shared = IOSDeepReadBackgroundCoordinator()
+
+    private var bundleIdentifier: String { Bundle.main.bundleIdentifier ?? "app.amber.ios" }
+    private var permittedIdentifier: String { "\(bundleIdentifier).deepread.*" }
+    private var requestPrefix: String { "\(bundleIdentifier).deepread." }
+    private var taskMapKey: String { "\(bundleIdentifier).deepread.backgroundTaskMap" }
+    private var registered = false
+    private var sharedSettings: IOSSharedSettingsStore?
+
+    private init() {}
+
+    func configure(sharedSettings: IOSSharedSettingsStore) {
+        self.sharedSettings = sharedSettings
+        guard !registered else { return }
+        registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: permittedIdentifier, using: nil) { task in
+            guard let task = task as? BGContinuedProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            Task { @MainActor in
+                await IOSDeepReadBackgroundCoordinator.shared.handle(task)
+            }
+        }
+        if !registered {
+            NSLog("[AmberDeepRead] BGContinuedProcessingTask registration failed for \(permittedIdentifier)")
+        }
+    }
+
+    func start(
+        taskId: String,
+        title: String,
+        generationId: String,
+        sharedSettings: IOSSharedSettingsStore,
+        onStatus: @escaping IOSDeepReadLauncher.StatusHandler
+    ) {
+        configure(sharedSettings: sharedSettings)
+        let requestId = requestIdentifier(for: taskId, generationId: generationId)
+        remember(taskId: taskId, requestId: requestId)
+
+        guard registered else {
+            finish(taskId: taskId)
+            onStatus("后台任务注册失败，已以前台任务继续生成。", false)
+            Task { @MainActor in
+                await IOSDeepReadLauncher.runExistingTask(
+                    taskId: taskId,
+                    requestId: nil,
+                    sharedSettings: sharedSettings,
+                    onStatus: onStatus
+                )
+            }
+            return
+        }
+
+        let request = BGContinuedProcessingTaskRequest(
+            identifier: requestId,
+            title: "深度阅读",
+            subtitle: title
+        )
+        request.strategy = .fail
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            onStatus("已开始后台生成深度阅读。离开 App 后系统会继续处理，并显示进度。", false)
+        } catch {
+            finish(taskId: taskId)
+            NSLog("[AmberDeepRead] BGContinuedProcessingTask submit failed: \(error)")
+            onStatus("后台任务提交失败，已以前台任务继续生成。", false)
+            Task { @MainActor in
+                await IOSDeepReadLauncher.runExistingTask(
+                    taskId: taskId,
+                    requestId: nil,
+                    sharedSettings: sharedSettings,
+                    onStatus: onStatus
+                )
+            }
+        }
+    }
+
+    func finish(taskId: String, requestId: String? = nil) {
+        var map = taskMap()
+        if let requestId {
+            map.removeValue(forKey: requestId)
+        } else {
+            map = map.filter { $0.value != taskId }
+        }
+        UserDefaults.standard.set(map, forKey: taskMapKey)
+    }
+
+    var mappedTaskIds: Set<String> {
+        Set(taskMap().values)
+    }
+
+    private func handle(_ backgroundTask: BGContinuedProcessingTask) async {
+        let settings = sharedSettings ?? IOSSharedSettingsStore()
+        sharedSettings = settings
+        guard let taskId = taskId(for: backgroundTask.identifier) else {
+            failMappedTasksForUnresolvableWildcard(backgroundTask.identifier)
+            backgroundTask.setTaskCompleted(success: false)
+            return
+        }
+        await IOSDeepReadLauncher.runExistingTask(
+            taskId: taskId,
+            requestId: backgroundTask.identifier,
+            sharedSettings: settings,
+            backgroundTask: backgroundTask
+        )
+    }
+
+    private func requestIdentifier(for taskId: String, generationId: String) -> String {
+        let rawId = taskId + "-" + generationId
+        let safeId = rawId.map { character -> Character in
+            character.isLetter || character.isNumber ? character : "-"
+        }
+        return requestPrefix + String(safeId)
+    }
+
+    private func remember(taskId: String, requestId: String) {
+        var map = taskMap()
+        map[requestId] = taskId
+        UserDefaults.standard.set(map, forKey: taskMapKey)
+    }
+
+    private func taskId(for requestId: String) -> String? {
+        let map = taskMap()
+        if let exact = map[requestId] { return exact }
+        if requestId == permittedIdentifier, map.count == 1 {
+            return map.values.first
+        }
+        return nil
+    }
+
+    private func failMappedTasksForUnresolvableWildcard(_ requestId: String) {
+        guard requestId == permittedIdentifier else { return }
+        let ids = Set(taskMap().values)
+        guard !ids.isEmpty else { return }
+        for taskId in ids {
+            IOSDeepReadStore.shared.fail(id: taskId, message: "深度阅读后台任务标识无法对应到具体请求，请重试。")
+            finish(taskId: taskId)
+        }
+    }
+
+    private func taskMap() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: taskMapKey) as? [String: String] ?? [:]
+    }
+}
+
+@MainActor
+enum IOSDeepReadRecoveryOnce {
+    private static var didRun = false
+
+    static func run() {
+        guard !didRun else { return }
+        didRun = true
+        IOSDeepReadStore.shared.recoverInterruptedRuns(
+            excluding: IOSDeepReadBackgroundCoordinator.shared.mappedTaskIds
+        )
+    }
+}
+
+private final class IOSDeepReadRunState {
+    private let lock = NSLock()
+    private var expired = false
+    private var terminalReserved = false
+
+    var isExpired: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return expired
+    }
+
+    func expire() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !terminalReserved else { return false }
+        expired = true
+        return true
+    }
+
+    func reserveTerminal() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !expired, !terminalReserved else { return false }
+        terminalReserved = true
+        return true
     }
 }
 

@@ -483,13 +483,3 @@ final class IOSMiniAppRepository {
     private let sharedValueBytesLimit = 32 * 1024
     private let sharedNamespaceBytesLimit = 2 * 1024 * 1024
 }
-
-private extension String {
-    var nilIfBlank: String? {
-        isEmpty ? nil : self
-    }
-
-    func truncated(to limit: Int) -> String {
-        String(prefix(limit))
-    }
-}

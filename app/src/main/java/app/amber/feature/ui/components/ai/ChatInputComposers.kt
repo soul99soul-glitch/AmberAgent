@@ -61,6 +61,7 @@ import app.amber.feature.subagent.SubAgentMode
 import app.amber.core.model.reasoningLevelForModel
 import app.amber.core.model.withReasoningLevelForModel
 import app.amber.core.settings.defaultReasoningLevelForModel
+import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.getQuickMessagesOfAssistant
@@ -304,7 +305,10 @@ internal fun TextInputRow(
                                     )
                                     SlashCommandThinkingFooter(
                                         currentLevel = currentLevel,
-                                        levels = app.amber.feature.ui.components.ai.reasoningLevelsForModel(currentModel),
+                                        levels = app.amber.ai.provider.reasoningLevelsForModel(
+                                            currentModel,
+                                            currentModel.findProvider(settings.providers),
+                                        ),
                                         onChange = { level ->
                                             update(assistant.withReasoningLevelForModel(currentModel.id, level))
                                         },

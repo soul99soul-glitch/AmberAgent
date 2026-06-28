@@ -73,6 +73,11 @@ enum IOSCredentialSideTable {
         "provider.\(providerId).apiKey"
     }
 
+    /// Search service API key credential ref.
+    static func searchServiceApiKey(serviceId: String) -> String {
+        "search.\(serviceId).apiKey"
+    }
+
     /// MCP server header credential ref.
     static func mcpHeader(serverName: String, headerName: String) -> String {
         "mcp.\(serverName).header.\(headerName)"

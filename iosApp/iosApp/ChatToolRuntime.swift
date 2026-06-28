@@ -72,6 +72,12 @@ enum ChatToolRuntimeResult {
     case waitingForApproval(ChatToolApprovalPrompt)
 }
 
+private enum ChatCodexImageConfig {
+    case signedIn(providerId: String)
+    case notSignedIn
+    case notSelected
+}
+
 @MainActor
 final class ChatToolRuntime {
     private let settingsStore: SettingsStore
@@ -137,6 +143,30 @@ final class ChatToolRuntime {
         case .advanced:
             return await executeAdvancedToolCall(context)
         }
+    }
+
+    func userInitiatedImageToolCall(input: String) -> UIMessagePart.Tool {
+        UIMessagePart.Tool(
+            toolCallId: "image-\(UUID().uuidString)-\(chatInputDigest(for: input))",
+            toolName: "generate_image",
+            input: input,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+    }
+
+    func messagesByExecutingImageToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        in messages: [UIMessage]
+    ) async -> [UIMessage] {
+        let resultParts = await dispatchImageToolCall(toolCall)
+        return messagesByFinishingToolCall(
+            toolCall,
+            outputParts: resultParts,
+            in: messages
+        )
     }
 
     func finishMemoryApproval(
@@ -336,7 +366,6 @@ final class ChatToolRuntime {
     }
 
     private func pendingImageToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
-        guard resolvedImageGenerationConfig() != nil else { return nil }
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
                 .first(where: { $0.toolName == "generate_image" && $0.output.isEmpty }) {
@@ -359,6 +388,21 @@ final class ChatToolRuntime {
         let baseURL = ChatProviderConfiguration.baseURL(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !apiKey.isEmpty, !baseURL.isEmpty else { return nil }
         return (model.modelId, apiKey, baseURL)
+    }
+
+    /// Resolve a codex (ChatGPT OAuth) image target. The actual request uses
+    /// Android's fixed Codex image routing model, so only the provider id is
+    /// needed here for OAuth token lookup.
+    private func codexImageConfig() -> ChatCodexImageConfig {
+        let snap = sharedSettings.snapshot
+        guard let model = snap.findModelById(uuid: snap.imageGenerationModelId),
+              let provider = ChatProviderConfiguration.provider(for: model, providers: snap.providers) as? ProviderSetting.OpenAI,
+              provider.authMode == OpenAIAuthMode.codexOauth else {
+            return .notSelected
+        }
+        let providerId = provider.id.description()
+        guard IOSCodexAuthStore.load(providerId: providerId) != nil else { return .notSignedIn }
+        return .signedIn(providerId: providerId)
     }
 
     private func pendingAdvancedToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
@@ -489,6 +533,9 @@ final class ChatToolRuntime {
             )
         }
         do {
+            if toolCall.toolName == "search_web" {
+                return try await executeSearchWebWithFallback(toolCall)
+            }
             return try await IOSSearchExecutor.execute(
                 toolName: toolCall.toolName,
                 toolInput: toolCall.input,
@@ -501,6 +548,92 @@ final class ChatToolRuntime {
                 reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             )
         }
+    }
+
+    private func executeSearchWebWithFallback(_ toolCall: UIMessagePart.Tool) async throws -> String {
+        let settings = sharedSettings.snapshot
+        let maxResults = Int(settings.searchCommonOptions.resultSize)
+        let request = try IOSSearchExecutor.searchRequest(
+            from: toolCall.input,
+            defaultMaxResults: maxResults
+        )
+        let initialSelection = IOSSearchExecutor.searchProviderSelection(settings: settings)
+        do {
+            let execution = try await IOSSearchExecutor.searchResults(
+                toolInput: toolCall.input,
+                maxResults: maxResults,
+                settings: settings,
+                transport: searchTransport
+            )
+            return IOSSearchExecutor.format(
+                query: execution.request.query,
+                results: execution.results,
+                selection: execution.selection
+            )
+        } catch {
+            guard let fallbackSelection = chatSearchFallbackSelection(
+                after: initialSelection,
+                settings: settings,
+                initialError: error
+            ) else {
+                throw error
+            }
+            let results: [IOSSearchResult]
+            switch fallbackSelection.route {
+            case .duckDuckGoLite:
+                results = try await IOSSearchExecutor.searchDuckDuckGoLite(
+                    query: request.query,
+                    maxResults: request.maxResults,
+                    transport: searchTransport
+                )
+            case .bingHTML:
+                results = try await IOSSearchExecutor.searchBingHTML(
+                    query: request.query,
+                    maxResults: request.maxResults,
+                    transport: searchTransport
+                )
+            default:
+                throw error
+            }
+            return IOSSearchExecutor.format(
+                query: request.query,
+                results: results,
+                selection: fallbackSelection
+            )
+        }
+    }
+
+    private func chatSearchFallbackSelection(
+        after selection: IOSSearchProviderSelection,
+        settings: Settings,
+        initialError: Error
+    ) -> IOSSearchProviderSelection? {
+        let reason = "原搜索服务 \(selection.providerName) 失败：\(searchErrorSummary(initialError))"
+        if selection.route != .duckDuckGoLite, settings.searchBuiltinDuckDuckGoEnabled {
+            return IOSSearchProviderSelection(
+                route: .duckDuckGoLite,
+                providerName: "DuckDuckGo Lite",
+                providerType: "duckduckgo_builtin",
+                serviceId: nil,
+                fallbackReason: reason
+            )
+        }
+        if selection.route != .bingHTML, settings.searchBuiltinBingEnabled {
+            return IOSSearchProviderSelection(
+                route: .bingHTML,
+                providerName: "Bing HTML",
+                providerType: "bing_builtin",
+                serviceId: nil,
+                fallbackReason: reason
+            )
+        }
+        return nil
+    }
+
+    private func searchErrorSummary(_ error: Error) -> String {
+        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        guard message.count > 120 else { return message }
+        return String(message.prefix(120)) + "..."
     }
 
     private func workspaceToolExecutionOutput(
@@ -566,6 +699,32 @@ final class ChatToolRuntime {
 
     private func dispatchImageToolCall(_ toolCall: UIMessagePart.Tool) async -> [UIMessagePart] {
         do {
+            switch codexImageConfig() {
+            case .signedIn(let codex):
+                let request = try IOSImageGenerationRepository.shared.toolRequest(
+                    from: toolCall.input,
+                    modelId: IOSCodexOAuthConstants.imageModelId
+                )
+                let record = try await IOSImageGenerationRepository.shared.generateViaCodex(
+                    request: request,
+                    providerId: codex
+                )
+                var parts: [UIMessagePart] = record.files.map { file in
+                    UIMessagePart.Image(
+                        url: IOSImageGenerationRepository.chatImageURLString(filePath: file.path),
+                        metadata: nil
+                    )
+                }
+                parts.append(UIMessagePart.Text(text: IOSImageGenerationRepository.shared.toolResultJSON(record: record), metadata: nil))
+                return parts
+            case .notSignedIn:
+                return [UIMessagePart.Text(
+                    text: ChatToolOutputFormatter.imageFailureJSON(reason: "请先在服务商设置里登录 Codex 后再生成或修改图片。"),
+                    metadata: nil
+                )]
+            case .notSelected:
+                break
+            }
             guard let config = resolvedImageGenerationConfig() else {
                 return [UIMessagePart.Text(
                     text: ChatToolOutputFormatter.imageFailureJSON(reason: "请先在「默认模型 → 辅助任务」里设置生图模型。"),
@@ -573,6 +732,12 @@ final class ChatToolRuntime {
                 )]
             }
             let request = try IOSImageGenerationRepository.shared.toolRequest(from: toolCall.input, modelId: config.modelId)
+            if request.sourceImageURL != nil {
+                return [UIMessagePart.Text(
+                    text: ChatToolOutputFormatter.imageFailureJSON(reason: "当前图片修改只支持 Codex 生图。"),
+                    metadata: nil
+                )]
+            }
             let record = try await IOSImageGenerationRepository.shared.generate(
                 request: request,
                 apiKey: config.apiKey,
@@ -580,7 +745,7 @@ final class ChatToolRuntime {
             )
             var parts: [UIMessagePart] = record.files.map { file in
                 UIMessagePart.Image(
-                    url: URL(fileURLWithPath: file.path).absoluteString,
+                    url: IOSImageGenerationRepository.chatImageURLString(filePath: file.path),
                     metadata: nil
                 )
             }

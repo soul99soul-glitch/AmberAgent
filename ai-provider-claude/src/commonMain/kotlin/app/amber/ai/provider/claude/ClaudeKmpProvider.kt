@@ -84,22 +84,25 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
     private val sseClient by lazy { HttpClient { install(SSE) } }
     private val httpClient by lazy { HttpClient { } }
 
+    // Provider.listModels is not @Throws-annotated, so a thrown error would abort
+    // the process (SIGABRT) on iOS instead of bridging to Swift. Swallow failures
+    // and return an empty list so callers degrade gracefully.
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> {
-        val response = httpClient.get("${providerSetting.baseUrl}/models") {
-            header("x-api-key", providerSetting.apiKey)
-            header("anthropic-version", ANTHROPIC_VERSION)
-        }
-        if (!response.status.isSuccess()) {
-            error("Claude listModels failed: ${response.status.value} ${response.bodyAsText()}")
-        }
-        val bodyJson = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        val data = bodyJson["data"]?.jsonArray ?: return emptyList()
-        return data.mapNotNull { modelJson ->
-            val modelObj = modelJson.jsonObject
-            val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val displayName = modelObj["display_name"]?.jsonPrimitive?.contentOrNull ?: id
-            Model(modelId = id, displayName = displayName)
-        }
+        return runCatching {
+            val response = httpClient.get("${providerSetting.baseUrl}/models") {
+                header("x-api-key", providerSetting.apiKey)
+                header("anthropic-version", ANTHROPIC_VERSION)
+            }
+            if (!response.status.isSuccess()) return@runCatching emptyList()
+            val bodyJson = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val data = bodyJson["data"]?.jsonArray ?: return@runCatching emptyList()
+            data.mapNotNull { modelJson ->
+                val modelObj = modelJson.jsonObject
+                val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val displayName = modelObj["display_name"]?.jsonPrimitive?.contentOrNull ?: id
+                Model(modelId = id, displayName = displayName)
+            }
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun generateImage(

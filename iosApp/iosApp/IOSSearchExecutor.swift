@@ -319,7 +319,7 @@ struct IOSSearchExecutor {
         request.httpMethod = "GET"
         request.setValue("Mozilla/5.0 AmberAgent-iOS Search", forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 20
+        request.timeoutInterval = 8
 
         let (response, data) = try await transport.send(request)
         guard (200...299).contains(response.statusCode) else {
@@ -349,7 +349,7 @@ struct IOSSearchExecutor {
         request.httpMethod = "GET"
         request.setValue("Mozilla/5.0 AmberAgent-iOS Search", forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 20
+        request.timeoutInterval = 8
 
         let (response, data) = try await transport.send(request)
         guard (200...299).contains(response.statusCode) else {
@@ -465,7 +465,7 @@ struct IOSSearchExecutor {
         guard let url = components?.url else { throw IOSSearchExecutorError.invalidURL }
         var httpRequest = URLRequest(url: url)
         httpRequest.httpMethod = "GET"
-        httpRequest.timeoutInterval = 20
+        httpRequest.timeoutInterval = 8
         httpRequest.setValue("application/json", forHTTPHeaderField: "Accept")
         httpRequest.setValue(apiKey, forHTTPHeaderField: "X-Subscription-Token")
 
@@ -545,7 +545,7 @@ struct IOSSearchExecutor {
         guard let url = components?.url else { throw IOSSearchExecutorError.invalidURL }
         var httpRequest = URLRequest(url: url)
         httpRequest.httpMethod = "GET"
-        httpRequest.timeoutInterval = 20
+        httpRequest.timeoutInterval = 8
         httpRequest.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let object = try await jsonResponse(httpRequest, provider: "SerpAPI", transport: transport)
@@ -712,7 +712,7 @@ struct IOSSearchExecutor {
         urlRequest.httpMethod = "GET"
         urlRequest.setValue("Mozilla/5.0 AmberAgent-iOS Scrape", forHTTPHeaderField: "User-Agent")
         urlRequest.setValue("text/html,text/plain,application/xhtml+xml,application/json;q=0.8,*/*;q=0.3", forHTTPHeaderField: "Accept")
-        urlRequest.timeoutInterval = 20
+        urlRequest.timeoutInterval = 10
 
         let (response, data) = try await transport.send(urlRequest)
         guard (200...299).contains(response.statusCode) else {
@@ -770,7 +770,7 @@ struct IOSSearchExecutor {
         return Array(urls.prefix(5))
     }
 
-    private static func format(
+    static func format(
         query: String,
         results: [IOSSearchResult],
         selection: IOSSearchProviderSelection
@@ -847,7 +847,7 @@ struct IOSSearchExecutor {
     private static func jsonPOST(url: URL, body: [String: Any], headers: [String: String] = [:]) throws -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 20
+        request.timeoutInterval = 8
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (name, value) in headers {

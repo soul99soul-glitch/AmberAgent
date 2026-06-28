@@ -505,8 +505,7 @@ struct BoardView: View {
 
         do {
             // 先用基础来源建任务并「立刻」跳转到生成中页面,消除点击后数秒的等待;
-            // 网页抓取增强(enrichHotTopicSourcesWithScrape,逐源联网、耗时)挪到后台
-            // 任务里、生成之前进行(见 createAndGenerateTask 的 enrichHotTopic)。
+            // 网页抓取增强和多源搜索由共享 DeepRead launcher 在生成任务里处理。
             let baseSources = try IOSDeepReadSourceNormalizer.hotTopicSources(topic: topic)
             try createAndGenerateTask(
                 title: topic.title,
@@ -524,85 +523,20 @@ struct BoardView: View {
         sources: [IOSDeepReadSource],
         templateId: String
     ) throws {
-        let task = try deepReadStore.createTask(
+        try IOSDeepReadLauncher.createAndGenerate(
             title: title,
             sources: sources,
-            templateId: templateId
-        )
-        deepReadStore.markRunning(id: task.id)
-        guard let running = deepReadStore.task(id: task.id) else { return }
-        // Open the task page immediately so the user watches generation happen in
-        // real time, instead of silent background work that only pops the page
-        // open when it finishes.
-        router.navigate(to: .deepReadTask(id: task.id))
-
-        Task { @MainActor in
-            var running = running
-            // 每篇深读都是「多源」深读:用话题去联网搜索 N 个源,与种子来源(热榜原始
-            // 源 / 手动文本 / 关键词检索)合并去重,再逐源抓取正文。只有一个来源算不上
-            // 深读。搜索失败则静默退回种子来源(诚实降级)。抓取写回任务来源(来源卡片
-            // 反映 scrape_status),再用于生成。
-            let searched = await searchSourcesForDeepRead(title: title)
-            // 总来源数控制在 10 以内(种子优先,搜索补足):来源过多既撑大生成 prompt,
-            // 也让「相关报道」列表过长。dedupe 保持顺序,取前 10。
-            let mergedSources = Array(dedupeSources(running.sources + searched).prefix(10))
-            let enriched = await enrichHotTopicSourcesWithScrape(mergedSources)
-            deepReadStore.replaceSources(id: task.id, sources: enriched)
-            running.sources = enriched
-            // Real LLM pipeline when a provider/key is configured; deterministic
-            // offline draft otherwise (honest degradation, no fabricated output).
-            let output: String
-            var structuredJSON: String? = nil
-            // Resolve the board's Deep Read model + its provider from the shared
-            // settings store (canonical: formal Provider UI writes it, chat reads
-            // it) so a provider configured in Settings is honored — fixes the
-            // dual-source bug (legacy ProviderRegistryStore was key-LESS + ignored
-            // the selected model). nil → deterministic offline draft (honest
-            // degradation, never a silent /chat/completions).
-            let resolved = sharedSettings.resolveBoardDeepReadModel(
-                boardModelId: sharedSettings.todayBoard.boardModelId
-            )
-            if let (modelId, providerSetting) = resolved {
-                // Honest-fail state machine: when every stage threw or was empty,
-                // mark the task .failed (never mark empty output .succeeded).
-                let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
-                    task: running,
-                    providerSetting: providerSetting,
-                    modelId: modelId
-                )
-                // The didFail → .failed decision is shared with the retry path
-                // via IOSDeepReadDraftGenerator.outcome (single source of truth).
-                switch IOSDeepReadDraftGenerator.outcome(
-                    for: result,
-                    offlineFallback: IOSDeepReadDraftGenerator.generate(task: running)
-                ) {
-                case .failed(let reason):
-                    // Honest failure: surface it, persist nothing as a "completed"
-                    // draft (the user sees a clear failure, not fake success).
-                    self.deepReadStore.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
-                    self.deepReadMessage = "深度阅读生成失败：\(reason)"
-                    self.deepReadMessageIsError = true
-                    return
-                case .completed(let markdown, let json):
-                    output = markdown
-                    structuredJSON = json
+            templateId: templateId,
+            sharedSettings: sharedSettings,
+            navigate: { router.navigate(to: .deepReadTask(id: $0)) },
+            onStatus: { message, isError in
+                deepReadMessage = message
+                deepReadMessageIsError = isError
+                if !isError, message.contains("已生成") {
+                    deepReadTitle = ""
                 }
-            } else {
-                output = IOSDeepReadDraftGenerator.generate(task: running)
             }
-
-            self.deepReadStore.complete(id: task.id, markdown: output, structuredJSON: structuredJSON)
-            _ = try? IOSWorkspaceStore.shared.saveArtifact(
-                title: running.title,
-                content: output,
-                type: .deepRead,
-                sourceKind: "deep_read",
-                sourceId: running.id
-            )
-            self.deepReadMessage = "已生成并保存深度阅读。"
-            self.deepReadMessageIsError = false
-            self.deepReadTitle = ""
-        }
+        )
     }
 
     private func refreshHotList(force: Bool) async {
@@ -622,140 +556,6 @@ struct BoardView: View {
         }
         NSLog("[AmberTranslate] refresh force=\(force) modelResolved=\(translate != nil) modelId=\(sharedSettings.resolveBoardDeepReadModel(boardModelId: board.boardModelId)?.modelId ?? "nil")")
         await hotListStore.refresh(setting: board, force: force, translate: translate)
-    }
-
-    private func enrichHotTopicSourcesWithScrape(_ sources: [IOSDeepReadSource]) async -> [IOSDeepReadSource] {
-        var enriched: [IOSDeepReadSource] = []
-        for var source in sources {
-            guard let url = source.url, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                source.metadata["scrape_status"] = "no_url"
-                enriched.append(source)
-                continue
-            }
-            do {
-                let input = jsonString(["url": url, "max_chars": 12_000])
-                let output = try await IOSSearchExecutor.execute(
-                    toolName: "scrape_web",
-                    toolInput: input,
-                    settings: sharedSettings.snapshot
-                )
-                if let content = scrapeContent(from: output), !content.isEmpty {
-                    source.content = IOSDeepReadSourceNormalizer.cleanMultiline(source.content + "\n\n网页正文：\n" + content)
-                    source.metadata["scrape_status"] = "ok"
-                } else {
-                    source.metadata["scrape_status"] = "empty"
-                }
-                // 顺手从抓取页的 og:image 取一张当 hero,让热榜深读也能出斜切图文。
-                if source.metadata["hero_image_url"] == nil,
-                   let hero = scrapeFirstImage(from: output) {
-                    source.metadata["hero_image_url"] = hero
-                }
-            } catch {
-                source.metadata["scrape_status"] = "failed"
-                source.metadata["scrape_error"] = String(error.localizedDescription.prefix(180))
-            }
-            enriched.append(source)
-        }
-        return enriched
-    }
-
-    /// Web-searches the deep-read topic and returns the hits as deep-read sources, so
-    /// every deep read has multiple sources to synthesize from (not just a single
-    /// seed). Failure degrades silently to no extra sources (honest degradation).
-    private func searchSourcesForDeepRead(title: String) async -> [IOSDeepReadSource] {
-        let queries = deepReadSearchQueries(from: title)
-        guard !queries.isEmpty else { return [] }
-        let settings = sharedSettings.snapshot
-        // Multi-angle fan-out (Android `buildDeepReadQueries` parity): search the topic from
-        // several dimensions — raw / background+timeline / official / dispute+impact / reactions /
-        // images, CN+EN — then dedup by URL, so the synthesis has enough material to build a
-        // timeline + analysis (not just one source). Sequential because the search executor is
-        // @MainActor; each angle's failure (e.g. a provider 422) is non-fatal.
-        var byURL: [String: IOSSearchResult] = [:]
-        var order: [String] = []
-        for query in queries {
-            do {
-                let execution = try await IOSSearchExecutor.searchResults(
-                    toolInput: searchToolInput(query: query, maxResults: 4),
-                    settings: settings
-                )
-                for result in execution.results {
-                    let key = result.url.lowercased().trimmingCharacters(in: .whitespaces)
-                    guard !key.isEmpty, byURL[key] == nil else { continue }
-                    byURL[key] = result
-                    order.append(key)
-                }
-            } catch {
-                NSLog("[AmberDeepRead] topic-search angle failed (\(query.prefix(20))…): \(error)")
-            }
-        }
-        let merged = Array(order.prefix(12).compactMap { byURL[$0] })
-        NSLog("[AmberDeepRead] topic-search angles=\(queries.count) distinct=\(byURL.count) used=\(merged.count)")
-        guard !merged.isEmpty else { return [] }
-        return (try? IOSDeepReadSourceNormalizer.searchSources(query: title, results: merged)) ?? []
-    }
-
-    /// Multi-angle search queries for one topic (Android `buildDeepReadQueries` parity): the same
-    /// topic searched from several dimensions in both Chinese and English, so a deep read has
-    /// enough material for a timeline + analysis + a hero image — not just a single source.
-    private func deepReadSearchQueries(from title: String) -> [String] {
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard t.count >= 2 else { return [] }
-        let year = Calendar.current.component(.year, from: Date())
-        let lower = t.lowercased()
-        var queries = [
-            t,                                              // raw title
-            "\(t) 前因后果 时间线 背景 最新进展",               // background + timeline
-            "\(t) 官方 声明 通报",                           // official statements
-            "\(t) 核心矛盾 争议 影响 各方反应",                 // dispute + impact + stakeholders
-            "\(t) 专家解读 分析",                            // expert analysis
-            "\(t) background timeline latest news \(year)", // English: background / latest
-            "\(t) 图片 现场图 截图",                         // images (for the hero)
-        ]
-        if ["gemini","google","openai","claude","deepseek","gpt","llm","大模型","模型","发布会","ppt","截图"].contains(where: { lower.contains($0) || t.contains($0) }) {
-            queries.append("\(t) 发布 价格 跑分 性能 评价")
-            queries.append("\(t) 发布会 PPT 演示 文稿 图片")
-        }
-        return queries
-    }
-
-    /// Merges source lists, keeping the first occurrence per URL (or per title when
-    /// URL-less) so the seed source and search hits don't duplicate.
-    private func dedupeSources(_ sources: [IOSDeepReadSource]) -> [IOSDeepReadSource] {
-        var seen = Set<String>()
-        var result: [IOSDeepReadSource] = []
-        for source in sources {
-            let url = (source.url ?? "").lowercased().trimmingCharacters(in: .whitespaces)
-            let key = url.isEmpty ? "t:" + source.title.lowercased() : url
-            if seen.insert(key).inserted { result.append(source) }
-        }
-        return result
-    }
-
-    private func scrapeContent(from json: String) -> String? {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        return object["content"] as? String
-    }
-
-    private func scrapeFirstImage(from json: String) -> String? {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let images = object["images"] as? [String] else {
-            return nil
-        }
-        return images.first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
-    }
-
-    private func jsonString(_ values: [String: Any]) -> String {
-        guard JSONSerialization.isValidJSONObject(values),
-              let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
-              let string = String(data: data, encoding: .utf8) else {
-            return "{}"
-        }
-        return string
     }
 
     private func createFromWebMount() async {
@@ -1358,29 +1158,12 @@ struct IOSDeepReadTaskDetailView: View {
 
     private func retry() {
         guard let task, task.status == .failed || task.status == .unsupported else { return }
-        Task { @MainActor in
-            store.prepareRetry(id: task.id)
-            store.markRunning(id: task.id)
-            if let running = store.task(id: task.id) {
-                // Honor the honest-fail outcome: an all-stages-failed retry is
-                // marked .failed (not completed with empty sections), parity with
-                // the create path.
-                switch await generateRetryOutput(task: running) {
-                case .failed(let reason):
-                    store.fail(id: task.id, message: "深度阅读生成失败：\(reason)")
-                    showToast("重试失败：\(reason)")
-                case .completed(let markdown, let json):
-                    store.complete(id: task.id, markdown: markdown, structuredJSON: json)
-                    _ = try? IOSWorkspaceStore.shared.saveArtifact(
-                        title: running.title,
-                        content: markdown,
-                        type: .deepRead,
-                        sourceKind: "deep_read_retry",
-                        sourceId: running.id
-                    )
-                    showToast("已重试并更新结果")
-                }
-            }
+        guard let sharedSettings else {
+            showToast("当前设置不可用，无法重试")
+            return
+        }
+        IOSDeepReadLauncher.retry(taskId: task.id, sharedSettings: sharedSettings) { message, isError in
+            showToast(message)
         }
     }
 
@@ -1487,26 +1270,6 @@ struct IOSDeepReadTaskDetailView: View {
             template: template,
             fontScale: board?.deepReadFontScale ?? 1.0,
             fontModeWireName: board?.boardReadingFontMode.wireName ?? "serif"
-        )
-    }
-
-    private func generateRetryOutput(task: IOSDeepReadTask) async -> IOSDeepReadDraftGenerator.DeepReadOutcome {
-        let offline = IOSDeepReadDraftGenerator.generate(task: task)
-        // Resolve the board model + provider from the shared settings store
-        // (canonical source the formal Provider UI writes and chat reads), unwrap
-        // to a non-optional on the MainActor (mirrors the create path's
-        // concurrency shape) so the fresh provider crosses the async boundary
-        // without a data race. nil → offline draft (honest degradation). Fixes the
-        // retry-surface half of the dual-source bug.
-        guard let resolved = sharedSettings?.resolveBoardDeepReadModel(
-            boardModelId: sharedSettings?.todayBoard.boardModelId
-        ) else {
-            return .completed(markdown: offline)
-        }
-        return await IOSDeepReadDraftGenerator.retryOutcome(
-            resolvedProvider: resolved.provider,
-            modelId: resolved.modelId,
-            task: task
         )
     }
 

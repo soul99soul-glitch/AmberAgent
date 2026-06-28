@@ -21,9 +21,7 @@ enum IOSDeepReadStructuredRenderer {
         b += corePointsSection(output.corePoints)
         if let diagram = output.diagram { b += diagramSection(diagram) }
         b += analysisSection(output.analysis)
-        // 扩展阅读与原生「相关报道」(BoardView.sourcesSection)数据重复、样式割裂,
-        // 已统一为原生杂志列表(真实来源、可点击)。不再在 WebView 里单独渲染。
-        // extendedReadingSection(_:) 保留以备需要时恢复。
+        b += extendedReadingSection(output.extendedReading)
         return b
     }
 

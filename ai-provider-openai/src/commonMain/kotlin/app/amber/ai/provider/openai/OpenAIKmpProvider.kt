@@ -2,15 +2,22 @@ package app.amber.ai.provider.openai
 
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.MessageRole
+import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.core.TokenUsage
+import app.amber.ai.provider.BuiltInTools
 import app.amber.ai.provider.CustomBody
 import app.amber.ai.provider.ImageGenerationParams
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.Provider
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.PartGroup
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
+import app.amber.ai.registry.ModelRegistry
+import app.amber.ai.util.parseErrorDetail
 import app.amber.ai.ui.ImageGenerationResult
 import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.STREAM_TOOL_INDEX_METADATA_KEY
@@ -19,7 +26,6 @@ import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.sse.SSE
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -52,6 +58,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlin.uuid.Uuid
 
 /**
  * KMP OpenAI-compatible chat provider. Implements [Provider] for
@@ -68,26 +75,30 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     private val json = Json { ignoreUnknownKeys = true }
 
     // Engine is resolved per-platform at runtime (Darwin on iOS, JVM default on JVM).
-    private val sseClient by lazy { HttpClient { install(SSE) } }
+    private val sseClient by lazy { HttpClient { } }
     private val httpClient by lazy { HttpClient { } }
 
+    // The Provider.listModels contract is NOT annotated @Throws, so a thrown error
+    // here would NOT bridge to Swift and would abort the process (SIGABRT) on iOS
+    // (Kotlin/Native), instead of surfacing as a catchable error. Swallow failures
+    // and return an empty list so callers degrade gracefully. This matters for codex
+    // providers, whose apiKey is empty (the bearer is the OAuth token, injected only
+    // for chat requests), so a `/models` call here always 401s.
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> {
-        val url = "${providerSetting.baseUrl}/models"
-        val response = httpClient.get(url) {
-            header("Authorization", "Bearer ${providerSetting.apiKey}")
-        }
-        if (!response.status.isSuccess()) {
-            val errorBody = response.bodyAsText()
-            throw Exception("OpenAI listModels failed: ${response.status.value} $errorBody")
-        }
-        val bodyStr = response.bodyAsText()
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-        val data = bodyJson["data"]?.arr() ?: return emptyList()
-        return data.mapNotNull { modelJson ->
-            val modelObj = modelJson.obj() ?: return@mapNotNull null
-            val id = modelObj.str("id") ?: return@mapNotNull null
-            Model(modelId = id, displayName = id)
-        }
+        return runCatching {
+            val url = "${providerSetting.baseUrl}/models"
+            val response = httpClient.get(url) {
+                header("Authorization", "Bearer ${providerSetting.apiKey}")
+            }
+            if (!response.status.isSuccess()) return@runCatching emptyList()
+            val bodyJson = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val data = bodyJson["data"]?.arr() ?: return@runCatching emptyList()
+            data.mapNotNull { modelJson ->
+                val modelObj = modelJson.obj() ?: return@mapNotNull null
+                val id = modelObj.str("id") ?: return@mapNotNull null
+                Model(modelId = id, displayName = id)
+            }
+        }.getOrDefault(emptyList())
     }
 
     // @Throws is REQUIRED for the Swift-facing suspend boundary: without it, a
@@ -101,7 +112,10 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): MessageChunk {
-        val requestBody = buildChatCompletionRequest(messages, params, stream = false)
+        if (providerSetting.useResponseApi) {
+            return responsesGenerateText(providerSetting, messages, params)
+        }
+        val requestBody = buildChatCompletionRequest(providerSetting, messages, params, stream = false)
         val url = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}"
         val response = httpClient.post(url) {
             contentType(ContentType.Application.Json)
@@ -140,7 +154,10 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<MessageChunk> {
-        val requestBody = buildChatCompletionRequest(messages, params, stream = true)
+        if (providerSetting.useResponseApi) {
+            return responsesStreamText(providerSetting, messages, params)
+        }
+        val requestBody = buildChatCompletionRequest(providerSetting, messages, params, stream = true)
         val url = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}"
         return sseClient.sseFlow(url) {
             method = HttpMethod.Post
@@ -207,20 +224,90 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     // ---- request building ----
 
     private fun buildChatCompletionRequest(
+        providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
         stream: Boolean = false,
     ): JsonObject = buildJsonObject {
+        val host = hostOf(providerSetting.baseUrl)
+        val isMiMo = isMiMoProvider(providerSetting, host, params.model.modelId)
         put("model", params.model.modelId)
         put("messages", buildMessages(messages))
 
         if (params.temperature != null) put("temperature", params.temperature)
         if (params.topP != null) put("top_p", params.topP)
-        if (params.maxTokens != null) put("max_tokens", params.maxTokens)
+        if (params.maxTokens != null) put(if (isMiMo) "max_completion_tokens" else "max_tokens", params.maxTokens)
 
         put("stream", stream)
         if (stream) {
             put("stream_options", buildJsonObject { put("include_usage", true) })
+        }
+
+        if (params.model.abilities.contains(ModelAbility.REASONING)) {
+            val level = params.reasoningLevel
+            when {
+                isMiMo -> {
+                    put("thinking", buildJsonObject {
+                        put("type", if (level.isEnabled) "enabled" else "disabled")
+                    })
+                }
+
+                host == "openrouter.ai" -> {
+                    put("reasoning", buildJsonObject {
+                        when (level) {
+                            ReasoningLevel.OFF -> put("effort", "none")
+                            ReasoningLevel.AUTO -> put("enabled", true)
+                            else -> put("effort", level.effort)
+                        }
+                    })
+                }
+
+                host == "dashscope.aliyuncs.com" -> {
+                    put("enable_thinking", level.isEnabled)
+                    if (level != ReasoningLevel.AUTO) put("thinking_budget", level.budgetTokens)
+                }
+
+                host == "ark.cn-beijing.volces.com" -> {
+                    put("thinking", buildJsonObject {
+                        put("type", if (level.isEnabled) "enabled" else "disabled")
+                    })
+                }
+
+                host == "api.mistral.ai" -> {
+                    // Mistral does not accept an OpenAI-style reasoning field.
+                }
+
+                host == "chat.intern-ai.org.cn" -> {
+                    put("thinking_mode", level.isEnabled)
+                }
+
+                host == "api.siliconflow.cn" -> {
+                    if (params.model.modelId in siliconFlowThinkingModels) {
+                        put("enable_thinking", level.isEnabled)
+                    }
+                }
+
+                host == "open.bigmodel.cn" || host == "api.moonshot.cn" -> {
+                    put("thinking", buildJsonObject {
+                        put("type", if (level.isEnabled) "enabled" else "disabled")
+                    })
+                }
+
+                host == "api.deepseek.com" -> {
+                    put("thinking", buildJsonObject {
+                        put("type", if (level.isEnabled) "enabled" else "disabled")
+                    })
+                    if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                        put("reasoning_effort", level.effort)
+                    }
+                }
+
+                else -> {
+                    if (level != ReasoningLevel.AUTO) {
+                        put("reasoning_effort", openAIChatCompletionsReasoningEffort(level))
+                    }
+                }
+            }
         }
 
         if (params.tools.isNotEmpty()) {
@@ -513,4 +600,709 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     private fun JsonElement?.obj(): JsonObject? = this as? JsonObject
 
     private fun JsonElement?.arr(): JsonArray? = this as? JsonArray
+
+    // ========================================================================
+    // OpenAI Responses API (`/responses`) support.
+    //
+    // Faithful, engine-agnostic port of the Android-only `ResponseAPI`
+    // (`:ai` module). Routed when `providerSetting.useResponseApi == true`;
+    // the `/chat/completions` path above is untouched. Platform deps removed:
+    //  - host parsing uses a pure-Kotlin extractor (no java.net.URL)
+    //  - all android.util.Log calls dropped
+    //  - image_generation is omitted (no commonMain base64 encoder / image
+    //    output type) — function_call / function_call_output tool calling is
+    //    fully supported because the agent needs tools.
+    // ========================================================================
+
+    @Throws(Throwable::class)
+    private suspend fun responsesGenerateText(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): MessageChunk {
+        val requestBody = buildResponsesRequestBody(providerSetting, messages, params, stream = false)
+        val url = "${providerSetting.baseUrl}/responses"
+        val response = httpClient.post(url) {
+            contentType(ContentType.Application.Json)
+            header("Authorization", "Bearer ${providerSetting.apiKey}")
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach { header(it.name, it.value) }
+            setBody(json.encodeToString(requestBody))
+        }
+        if (!response.status.isSuccess()) {
+            throw Exception("OpenAI Responses request failed: ${response.status.value} ${response.bodyAsText()}")
+        }
+        val bodyJson = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        return parseResponseOutput(bodyJson)
+    }
+
+    private fun responsesStreamText(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): Flow<MessageChunk> {
+        val streamAssistantId = Uuid.random()
+        val requestBody = buildResponsesRequestBody(providerSetting, messages, params, stream = true)
+        val url = "${providerSetting.baseUrl}/responses"
+        return sseClient.sseFlow(url) {
+            method = HttpMethod.Post
+            contentType(ContentType.Application.Json)
+            header("Authorization", "Bearer ${providerSetting.apiKey}")
+            params.customHeaders.filter { it.name.isNotBlank() }.forEach { header(it.name, it.value) }
+            setBody(json.encodeToString(requestBody))
+        }.mapNotNull { event ->
+            when (event) {
+                is SseEvent.Event -> {
+                    val payloads = normalizeOpenAIStreamDataLines(event.data)
+                    payloads.mapNotNull { payload ->
+                        val obj = runCatching { json.parseToJsonElement(payload) as? JsonObject }
+                            .getOrNull() ?: return@mapNotNull null
+                        obj["error"]?.let { throw it.parseErrorDetail() }
+                        parseResponseDelta(obj)?.normalizeResponseStreamAssistant(streamAssistantId)
+                    }.lastOrNull()
+                }
+
+                is SseEvent.Failure -> throw event.throwable ?: Exception("Stream failed")
+                is SseEvent.Open, is SseEvent.Closed -> null
+            }
+        }
+    }
+
+    private fun MessageChunk.normalizeResponseStreamAssistant(streamAssistantId: Uuid): MessageChunk = copy(
+        choices = choices.map { choice ->
+            val delta = choice.delta
+            val message = choice.message
+            when {
+                delta != null && delta.role == MessageRole.ASSISTANT ->
+                    choice.copy(delta = delta.copy(id = streamAssistantId))
+
+                delta == null && message != null && message.role == MessageRole.ASSISTANT ->
+                    choice.copy(
+                        delta = UIMessage(
+                            id = streamAssistantId,
+                            role = MessageRole.ASSISTANT,
+                            parts = emptyList(),
+                        ),
+                        message = null,
+                    )
+
+                else -> choice
+            }
+        },
+    )
+
+    // ---- Responses request building (port of buildRequestBody) ----
+
+    private fun buildResponsesRequestBody(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        stream: Boolean,
+    ): JsonObject {
+        val capabilities = resolveResponseProviderCapabilities(hostOf(providerSetting.baseUrl))
+        return buildJsonObject {
+            put("model", params.model.modelId)
+            put("stream", stream)
+            put("store", false)
+
+            if (responsesIsModelAllowTemperature(params.model)) {
+                if (params.temperature != null) put("temperature", params.temperature)
+                if (params.topP != null) put("top_p", params.topP)
+            }
+            if (params.maxTokens != null) put("max_output_tokens", params.maxTokens)
+
+            // system instructions
+            val systemMessage = messages.firstOrNull { it.role == MessageRole.SYSTEM }
+            if (systemMessage != null) {
+                put(
+                    "instructions",
+                    systemMessage.parts.filterIsInstance<UIMessagePart.Text>()
+                        .joinToString("\n\n") { it.text },
+                )
+            }
+
+            // messages
+            put("input", buildResponsesMessages(messages))
+
+            // reasoning
+            if (params.model.abilities.contains(ModelAbility.REASONING) &&
+                params.reasoningLevel != ReasoningLevel.OFF
+            ) {
+                put("reasoning", buildJsonObject {
+                    if (capabilities.supportsReasoningSummary) {
+                        put("summary", "auto")
+                    }
+                    openAIResponsesReasoningEffort(params.reasoningLevel)?.let { effort ->
+                        put("effort", effort)
+                    }
+                })
+                if (capabilities.supportEncryptedContent) {
+                    put("include", buildJsonArray { add("reasoning.encrypted_content") })
+                }
+            }
+
+            val toolDefinitions = buildJsonArray {
+                if (params.model.abilities.contains(ModelAbility.TOOL)) {
+                    params.tools.forEach { tool ->
+                        add(buildJsonObject {
+                            put("type", "function")
+                            put("name", tool.name)
+                            put("description", tool.description)
+                            tool.parameters()?.let { schema ->
+                                put(
+                                    "parameters",
+                                    json.encodeToJsonElement(InputSchema.serializer(), schema),
+                                )
+                            }
+                        })
+                    }
+                }
+                params.model.tools.forEach { builtInTool ->
+                    when (builtInTool) {
+                        BuiltInTools.Search -> add(buildJsonObject { put("type", "web_search") })
+                        BuiltInTools.UrlContext -> {} // not supported
+                        BuiltInTools.ImageGeneration -> {} // omitted: no commonMain image output path
+                    }
+                }
+            }
+            if (toolDefinitions.isNotEmpty()) {
+                put("tools", toolDefinitions)
+            }
+        }.mergeCustomBody(params.customBody)
+    }
+
+    private fun buildResponsesMessages(messages: List<UIMessage>): JsonArray = buildJsonArray {
+        messages
+            .filter { it.isValidToUpload() && it.role != MessageRole.SYSTEM }
+            .forEach { message ->
+                if (message.role == MessageRole.ASSISTANT) {
+                    addResponsesAssistantItems(message)
+                } else {
+                    addResponsesUserItems(message)
+                }
+            }
+    }
+
+    private fun JsonArrayBuilder.addResponsesAssistantItems(message: UIMessage) {
+        val groups = groupPartsByToolBoundary(message.parts)
+        val contentBuffer = mutableListOf<UIMessagePart>()
+
+        for (group in groups) {
+            when (group) {
+                is PartGroup.Content -> {
+                    group.parts.forEach { part ->
+                        when (part) {
+                            is UIMessagePart.Reasoning -> {
+                                if (contentBuffer.isNotEmpty()) {
+                                    addResponsesContentItem(MessageRole.ASSISTANT, contentBuffer)
+                                    contentBuffer.clear()
+                                }
+                                add(buildJsonObject {
+                                    put("type", "reasoning")
+                                    part.metadata?.get("reasoning_id")?.responseContentOrNull()?.let {
+                                        put("id", it)
+                                    }
+                                    put("summary", buildJsonArray {
+                                        add(buildJsonObject {
+                                            put("type", "summary_text")
+                                            put("text", part.reasoning)
+                                        })
+                                    })
+                                    part.metadata?.get("encrypted_content")?.responseContentOrNull()
+                                        ?.let { put("encrypted_content", it) }
+                                })
+                            }
+
+                            is UIMessagePart.Text -> contentBuffer.add(part)
+
+                            // Image / image_generation_call replay is omitted on the
+                            // Responses port (no commonMain image output path). Treat any
+                            // image part as a no-op so visible text is preserved.
+                            else -> {}
+                        }
+                    }
+                }
+
+                is PartGroup.Tools -> {
+                    if (contentBuffer.isNotEmpty()) {
+                        addResponsesContentItem(MessageRole.ASSISTANT, contentBuffer)
+                        contentBuffer.clear()
+                    }
+                    group.tools.forEach { tool ->
+                        add(buildJsonObject {
+                            put("type", "function_call")
+                            put("call_id", tool.toolCallId)
+                            put("name", tool.toolName)
+                            put("arguments", tool.input)
+                        })
+                        add(buildJsonObject {
+                            put("type", "function_call_output")
+                            put("call_id", tool.toolCallId)
+                            put(
+                                "output",
+                                tool.output.filterIsInstance<UIMessagePart.Text>()
+                                    .joinToString("\n") { it.text },
+                            )
+                        })
+                    }
+                }
+            }
+        }
+
+        if (contentBuffer.isNotEmpty()) {
+            addResponsesContentItem(MessageRole.ASSISTANT, contentBuffer)
+        }
+    }
+
+    private fun JsonArrayBuilder.addResponsesUserItems(message: UIMessage) {
+        val contentParts = message.parts.filter {
+            it is UIMessagePart.Text || it is UIMessagePart.Image
+        }
+        if (contentParts.isNotEmpty()) {
+            addResponsesContentItem(message.role, contentParts)
+        }
+    }
+
+    private fun JsonArrayBuilder.addResponsesContentItem(role: MessageRole, parts: List<UIMessagePart>) {
+        if (parts.isEmpty()) return
+        val texts = parts.filterIsInstance<UIMessagePart.Text>()
+        val images = parts.filterIsInstance<UIMessagePart.Image>()
+
+        add(buildJsonObject {
+            put("role", role.name.lowercase())
+            if (images.isEmpty() && texts.size == 1) {
+                put("content", texts.first().text)
+            } else {
+                putJsonArray("content") {
+                    parts.forEach { part ->
+                        when (part) {
+                            is UIMessagePart.Text -> add(buildJsonObject {
+                                put("type", if (role == MessageRole.USER) "input_text" else "output_text")
+                                put("text", part.text)
+                            })
+
+                            is UIMessagePart.Image -> {
+                                // Android re-encodes to base64 via a platform helper; commonMain has
+                                // none. The iOS composer already passes a `data:`/http(s) URL, which
+                                // the Responses `input_image` accepts directly, so forward `url` as-is.
+                                if (role == MessageRole.USER && part.url.isNotBlank()) {
+                                    add(buildJsonObject {
+                                        put("type", "input_image")
+                                        put("image_url", part.url)
+                                    })
+                                }
+                            }
+
+                            else -> {}
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    // ---- Responses stream/output parsing (port of parseResponseDelta etc.) ----
+
+    private fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
+        val chunkType = jsonObject.str("type") ?: return null
+
+        when (chunkType) {
+            "response.output_text.delta" -> {
+                return MessageChunk(
+                    id = jsonObject.str("item_id") ?: "",
+                    model = "",
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            delta = UIMessage.assistant(jsonObject.str("delta") ?: ""),
+                            message = null,
+                            finishReason = null,
+                        ),
+                    ),
+                )
+            }
+
+            "response.output_text.done" -> {
+                return MessageChunk(
+                    id = jsonObject.str("item_id") ?: "",
+                    model = "",
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            delta = null,
+                            message = UIMessage.assistant(jsonObject.str("text") ?: ""),
+                            finishReason = null,
+                        ),
+                    ),
+                )
+            }
+
+            "response.reasoning_summary_text.delta", "response.reasoning_text.delta" -> {
+                return MessageChunk(
+                    id = jsonObject.str("item_id") ?: "",
+                    model = "",
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            delta = UIMessage(
+                                role = MessageRole.ASSISTANT,
+                                parts = listOf(
+                                    UIMessagePart.Reasoning(
+                                        reasoning = jsonObject.str("delta") ?: "",
+                                        finishedAt = null,
+                                    ),
+                                ),
+                            ),
+                            message = null,
+                            finishReason = null,
+                        ),
+                    ),
+                )
+            }
+
+            "response.output_item.added" -> {
+                val item = jsonObject["item"]?.obj() ?: return null
+                val type = item.str("type") ?: return null
+                val id = item.str("id") ?: return null
+                when (type) {
+                    "function_call" -> return MessageChunk(
+                        id = id,
+                        model = "",
+                        choices = listOf(
+                            UIMessageChoice(
+                                index = 0,
+                                message = null,
+                                delta = UIMessage(
+                                    role = MessageRole.ASSISTANT,
+                                    parts = listOf(
+                                        UIMessagePart.Tool(
+                                            toolCallId = id,
+                                            toolName = item.str("name") ?: "",
+                                            input = item.str("arguments") ?: "",
+                                            output = emptyList(),
+                                        ),
+                                    ),
+                                ),
+                                finishReason = null,
+                            ),
+                        ),
+                    )
+
+                    "reasoning" -> {
+                        val encryptedContent = item.str("encrypted_content")
+                        return MessageChunk(
+                            id = id,
+                            model = "",
+                            choices = listOf(
+                                UIMessageChoice(
+                                    index = 0,
+                                    message = null,
+                                    delta = UIMessage(
+                                        role = MessageRole.ASSISTANT,
+                                        parts = listOf(
+                                            UIMessagePart.Reasoning(
+                                                reasoning = "",
+                                                finishedAt = null,
+                                            ).also {
+                                                it.metadata = buildJsonObject {
+                                                    put("encrypted_content", encryptedContent)
+                                                    put("reasoning_id", id)
+                                                }
+                                            },
+                                        ),
+                                    ),
+                                    finishReason = null,
+                                ),
+                            ),
+                        )
+                    }
+                    // image_generation_call: omitted (no commonMain image output path).
+                }
+            }
+
+            "response.output_item.done" -> {
+                val item = jsonObject["item"]?.obj() ?: return null
+                val type = item.str("type") ?: return null
+                val id = item.str("id") ?: return null
+                when (type) {
+                    "reasoning" -> {
+                        val encryptedContent = item.str("encrypted_content")
+                        return MessageChunk(
+                            id = id,
+                            model = "",
+                            choices = listOf(
+                                UIMessageChoice(
+                                    index = 0,
+                                    message = null,
+                                    delta = UIMessage(
+                                        role = MessageRole.ASSISTANT,
+                                        parts = listOf(
+                                            UIMessagePart.Reasoning(reasoning = "").also {
+                                                it.metadata = buildJsonObject {
+                                                    put("encrypted_content", encryptedContent)
+                                                    put("reasoning_id", id)
+                                                }
+                                            },
+                                        ),
+                                    ),
+                                    finishReason = null,
+                                ),
+                            ),
+                        )
+                    }
+
+                    "message" -> return parseResponsesDoneMessageItem(item, id)
+                    // image_generation_call: omitted (no commonMain image output path).
+                }
+            }
+
+            "response.function_call_arguments.done" -> {
+                val toolCallId = jsonObject.str("item_id") ?: return null
+                val arguments = jsonObject.str("arguments") ?: return null
+                return MessageChunk(
+                    id = toolCallId,
+                    model = "",
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            delta = UIMessage(
+                                role = MessageRole.ASSISTANT,
+                                parts = listOf(
+                                    UIMessagePart.Tool(
+                                        toolCallId = toolCallId,
+                                        toolName = "",
+                                        input = arguments,
+                                        output = emptyList(),
+                                    ),
+                                ),
+                            ),
+                            message = null,
+                            finishReason = null,
+                        ),
+                    ),
+                )
+            }
+
+            "response.completed" -> {
+                val response = jsonObject["response"]?.obj()
+                if (response != null) {
+                    return parseResponseOutput(response)
+                }
+                return MessageChunk(
+                    id = jsonObject.str("item_id") ?: "",
+                    model = "",
+                    choices = emptyList(),
+                    usage = null,
+                )
+            }
+        }
+
+        return null
+    }
+
+    private fun parseResponsesDoneMessageItem(item: JsonObject, id: String): MessageChunk? {
+        val text = item.extractResponsesMessageOutputText()
+        if (text.isEmpty()) return null
+        return MessageChunk(
+            id = id,
+            model = "",
+            choices = listOf(
+                UIMessageChoice(
+                    index = 0,
+                    delta = null,
+                    message = UIMessage.assistant(text),
+                    finishReason = null,
+                ),
+            ),
+        )
+    }
+
+    private fun parseResponseOutput(jsonObject: JsonObject): MessageChunk {
+        val outputs = jsonObject["output"]?.arr() ?: emptyList()
+        val parts = mutableListOf<UIMessagePart>()
+
+        outputs.forEach { outputItem ->
+            val output = outputItem.obj() ?: return@forEach
+            when (output.str("type")) {
+                "reasoning" -> {
+                    (output["summary"]?.arr() ?: emptyList()).mapNotNull { it.obj() }.forEach { part ->
+                        if (part.str("type") == "summary_text") {
+                            part.str("text")?.let { text ->
+                                parts.add(UIMessagePart.Reasoning(reasoning = text))
+                            }
+                        }
+                    }
+                }
+
+                "function_call" -> {
+                    val callId = output.str("call_id") ?: return@forEach
+                    val name = output.str("name") ?: return@forEach
+                    parts.add(
+                        UIMessagePart.Tool(
+                            toolCallId = callId,
+                            toolName = name,
+                            input = output.str("arguments") ?: "",
+                            output = emptyList(),
+                        ),
+                    )
+                }
+
+                "message" -> {
+                    output.extractResponsesMessageOutputText()
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { text -> parts.add(UIMessagePart.Text(text = text)) }
+                    (output["content"]?.arr() ?: emptyList())
+                        .mapNotNull { it.obj() }
+                        .mapNotNull { it.str("refusal") }
+                        .filter { it.isNotBlank() }
+                        .forEach { refusal -> parts.add(UIMessagePart.Text(text = refusal)) }
+                }
+
+                "output_text" -> {
+                    output.str("text")?.takeIf { it.isNotEmpty() }
+                        ?.let { text -> parts.add(UIMessagePart.Text(text = text)) }
+                }
+
+                "refusal" -> {
+                    output.str("refusal")?.takeIf { it.isNotBlank() }
+                        ?.let { refusal -> parts.add(UIMessagePart.Text(text = refusal)) }
+                }
+
+                // image_generation_call: omitted (no commonMain image output path).
+                else -> return@forEach
+            }
+        }
+
+        return MessageChunk(
+            id = jsonObject.str("id") ?: "",
+            model = jsonObject.str("model") ?: "",
+            choices = listOf(
+                UIMessageChoice(
+                    index = 0,
+                    message = UIMessage(role = MessageRole.ASSISTANT, parts = parts),
+                    finishReason = jsonObject.responsesFinishReason(),
+                    delta = null,
+                ),
+            ),
+            usage = parseResponsesTokenUsage(jsonObject["usage"]?.obj()),
+        )
+    }
+
+    private fun JsonObject.extractResponsesMessageOutputText(): String =
+        (this["content"]?.arr() ?: emptyList())
+            .mapNotNull { part ->
+                val partObject = part.obj() ?: return@mapNotNull null
+                when (partObject.str("type")) {
+                    "output_text", "text" -> partObject.str("text")
+                    else -> null
+                }
+            }
+            .joinToString("")
+
+    private fun JsonObject.responsesFinishReason(): String? {
+        val status = this.str("status")
+        val incompleteReason = this["incomplete_details"]?.obj()?.str("reason")
+        return incompleteReason ?: status?.takeIf { it != "completed" }
+    }
+
+    private fun parseResponsesTokenUsage(obj: JsonObject?): TokenUsage? {
+        if (obj == null) return null
+        return TokenUsage(
+            promptTokens = obj.int("input_tokens") ?: 0,
+            completionTokens = obj.int("output_tokens") ?: 0,
+            totalTokens = obj.int("total_tokens") ?: 0,
+            cachedTokens = obj["input_tokens_details"]?.obj()?.int("cached_tokens") ?: 0,
+        )
+    }
+
+    /** Pure-Kotlin replacement for the Android `java.net.URL(...).host`. */
+    private fun hostOf(baseUrl: String): String {
+        val afterScheme = baseUrl.substringAfter("://", baseUrl)
+        val authority = afterScheme.substringBefore('/')
+        return authority.substringBefore('?').substringBefore('#')
+            .substringAfter('@')      // strip userinfo
+            .substringBefore(':')     // strip port
+            .lowercase()
+    }
+
+    private fun responsesIsModelAllowTemperature(model: Model): Boolean {
+        val modelId = model.modelId.lowercase()
+        return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) &&
+            !ModelRegistry.GPT_5.match(model.modelId) &&
+            !modelId.startsWith("gpt-5") &&
+            !modelId.contains("codex")
+    }
+
+    private fun isMiMoProvider(
+        providerSetting: ProviderSetting.OpenAI,
+        host: String,
+        modelId: String,
+    ): Boolean {
+        val lowerModelId = modelId.lowercase()
+        return providerSetting.brand == OpenAIBrand.MIMO ||
+            providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
+            host.endsWith("xiaomimimo.com") ||
+            lowerModelId.contains("mimo")
+    }
+
+    private fun openAIChatCompletionsReasoningEffort(level: ReasoningLevel): String = when (level) {
+        ReasoningLevel.OFF, ReasoningLevel.LOW -> "low"
+        ReasoningLevel.MEDIUM -> "medium"
+        ReasoningLevel.AUTO,
+        ReasoningLevel.HIGH,
+        ReasoningLevel.XHIGH,
+        ReasoningLevel.MAX -> "high"
+    }
+
+    private fun openAIResponsesReasoningEffort(level: ReasoningLevel): String? = when (level) {
+        ReasoningLevel.AUTO -> null
+        ReasoningLevel.OFF, ReasoningLevel.LOW -> "low"
+        ReasoningLevel.MEDIUM -> "medium"
+        ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "high"
+    }
+
+    private data class ResponseProviderCapabilities(
+        val supportsReasoningSummary: Boolean = true,
+        val supportEncryptedContent: Boolean = true,
+    )
+
+    private fun resolveResponseProviderCapabilities(host: String): ResponseProviderCapabilities =
+        when (host) {
+            "ark.cn-beijing.volces.com" -> ResponseProviderCapabilities(
+                supportsReasoningSummary = false,
+                supportEncryptedContent = false,
+            )
+
+            else -> ResponseProviderCapabilities()
+        }
+
+    private val siliconFlowThinkingModels = setOf(
+        "Pro/moonshotai/Kimi-K2.5",
+        "Pro/zai-org/GLM-5",
+        "Pro/zai-org/GLM-5.1",
+        "Pro/zai-org/GLM-4.7",
+        "deepseek-ai/DeepSeek-V3.2",
+        "Pro/deepseek-ai/DeepSeek-V3.2",
+        "Qwen/Qwen3.5-397B-A17B",
+        "Qwen/Qwen3.5-122B-A10B",
+        "Qwen/Qwen3.5-35B-A3B",
+        "Qwen/Qwen3.5-27B",
+        "Qwen/Qwen3.5-9B",
+        "Qwen/Qwen3.5-4B",
+        "zai-org/GLM-4.6",
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen3-14B",
+        "Qwen/Qwen3-32B",
+        "Qwen/Qwen3-30B-A3B",
+        "tencent/Hunyuan-A13B-Instruct",
+        "zai-org/GLM-4.5V",
+        "deepseek-ai/DeepSeek-V3.1-Terminus",
+        "Pro/deepseek-ai/DeepSeek-V3.1-Terminus",
+        "deepseek-ai/DeepSeek-V4-Flash",
+        "Pro/deepseek-ai/DeepSeek-V4-Flash",
+        "deepseek-ai/DeepSeek-V4-Pro",
+        "Pro/deepseek-ai/DeepSeek-V4-Pro",
+    )
+
+    private fun JsonElement?.responseContentOrNull(): String? =
+        (this as? JsonPrimitive)?.contentOrNull
 }

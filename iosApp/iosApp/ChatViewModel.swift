@@ -147,7 +147,7 @@ final class ChatViewModel {
     }
 
     var currentModelSupportsReasoning: Bool {
-        currentModelAbilities.contains(.reasoning)
+        sharedSettings.currentAssistantReasoningLevels().contains { $0 != .off }
     }
 
     var isGenerationActive: Bool {
@@ -412,6 +412,22 @@ final class ChatViewModel {
         sendUserMessage(text: text, images: pendingImages)
     }
 
+    func modifyGeneratedImage(sourceImageURL: String, prompt: String, aspectRatio: String) {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSource = sourceImageURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty,
+              !trimmedSource.isEmpty,
+              !generationCoordinator.isRunning else { return }
+
+        configurationError = nil
+        let input = Self.imageEditToolInput(
+            prompt: trimmedPrompt,
+            sourceImageURL: trimmedSource,
+            aspectRatio: aspectRatio
+        )
+        generationCoordinator.runImageTool(input: input, conversationId: currentConversationId)
+    }
+
     /// Appends the user message (keeping image parts for in-bubble display) and persists it.
     /// Returns the input digest + conversation id so the caller can start generation.
     @discardableResult
@@ -444,6 +460,28 @@ final class ChatViewModel {
         let (digest, conversationId) = appendUserMessage(text: text, images: images)
         guard autoGenerateResponses else { return }
         generateResponse(inputDigest: digest, conversationId: conversationId)
+    }
+
+    private static func imageEditToolInput(
+        prompt: String,
+        sourceImageURL: String,
+        aspectRatio: String
+    ) -> String {
+        let payload: [String: Any] = [
+            "prompt": prompt,
+            "aspect_ratio": aspectRatio,
+            "count": 1,
+            "mode": "edit",
+            "source_image_url": sourceImageURL,
+        ]
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        ),
+        let text = String(data: data, encoding: .utf8) else {
+            return prompt
+        }
+        return text
     }
 
     /// OCR fallback: the user message (with its image) is shown in the chat immediately;
@@ -1360,13 +1398,17 @@ final class ChatViewModel {
                   let provider = ChatProviderConfiguration.provider(for: model, providers: snap.providers) else {
                 return false
             }
+            // Codex image generation uses the OAuth bearer (no apiKey); gate on
+            // sign-in instead. Other providers require a real apiKey + baseURL.
+            if IOSCodexProviderResolver.isCodexProvider(provider) {
+                return IOSCodexProviderResolver.isSignedIn(provider)
+            }
             let key = ChatProviderConfiguration.apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
             let base = ChatProviderConfiguration.baseURL(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
             return !key.isEmpty && !base.isEmpty
         }()
         var builtInTools: [BuiltInTools] = []
         if searchEnabled { builtInTools.append(BuiltInTools.Search.shared) }
-        if imageGenerationConfigured { builtInTools.append(BuiltInTools.ImageGeneration.shared) }
 
         // Real Android parity: read generation params from the current Assistant
         // + Model instead of hardcoding temperature=0.7/topP=nil/maxTokens=nil.

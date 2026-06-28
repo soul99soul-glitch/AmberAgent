@@ -94,6 +94,20 @@ extension AgentActivityPresentation {
         )
     }
 
+    static func runningTool(toolName: String) -> AgentActivityPresentation {
+        let descriptor = publicToolDescriptor(for: toolName)
+        return AgentActivityPresentation(
+            statusText: descriptor.statusText,
+            toolTitle: descriptor.toolTitle,
+            phase: .running,
+            steps: [
+                AgentActivityStep(id: "prepare", title: "准备上下文", state: .done),
+                AgentActivityStep(id: "tool", title: descriptor.stepTitle, state: .current),
+                AgentActivityStep(id: "finish", title: "整理结果", state: .pending)
+            ]
+        )
+    }
+
     static func waitingForUser(toolTitle: String = "终端命令") -> AgentActivityPresentation {
         AgentActivityPresentation(
             statusText: "Amber 需要你确认",
@@ -246,17 +260,31 @@ extension AgentActivityPresentation {
     private static let allowedPublicSummaries: Set<String> = [
         "Amber 正在处理",
         "Amber 正在阅读 Apple 文档",
-        "Amber 正在生成回复",
-        "Amber 需要你确认",
-        "Amber 已完成处理",
-        "Amber 遇到问题",
-        "Amber 已停止处理",
-        "Amber 正在读取文件",
-        "网页搜索",
-        "工具执行",
-        "生成回复",
-        "终端命令",
-        "文档读取",
+            "Amber 正在生成回复",
+            "Amber 需要你确认",
+            "Amber 已完成处理",
+            "Amber 遇到问题",
+            "Amber 已停止处理",
+            "Amber 正在读取文件",
+            "Amber 正在搜索资料",
+            "Amber 正在阅读网页",
+            "Amber 正在生成图片",
+            "Amber 正在更新记忆",
+            "Amber 正在调用 MCP",
+            "Amber 正在访问网页",
+            "Amber 正在操作文件",
+            "Amber 正在调用工具",
+            "网页搜索",
+            "网页读取",
+            "图片生成",
+            "记忆更新",
+            "MCP 调用",
+            "WebMount",
+            "Workspace",
+            "工具执行",
+            "生成回复",
+            "终端命令",
+            "文档读取",
         "搜索 ActivityKit",
         "阅读 Apple 文档",
         "生成适配方案",
@@ -275,15 +303,22 @@ extension AgentActivityPresentation {
         "整理预览",
         "读取失败",
         "选择文件",
-        "搜索资料",
-        "阅读文档",
-        "生成方案",
-        "阅读失败",
-        "处理敏感配置",
-        "阅读网页",
-        "处理私密信息",
-        "执行终端命令"
-    ]
+            "搜索资料",
+            "阅读文档",
+            "生成方案",
+            "阅读失败",
+            "阅读网页",
+            "生成图片",
+            "更新记忆",
+            "调用 MCP",
+            "访问网页",
+            "操作文件",
+            "调用工具",
+            "处理敏感配置",
+            "阅读网页",
+            "处理私密信息",
+            "执行终端命令"
+        ]
 
     private static func genericPrivateSummary(for text: String) -> String? {
         let lowercased = text.lowercased()
@@ -324,6 +359,35 @@ extension AgentActivityPresentation {
         return nil
     }
 
+    private static func publicToolDescriptor(
+        for rawToolName: String
+    ) -> (statusText: String, toolTitle: String, stepTitle: String) {
+        if rawToolName == "search_web" {
+            return ("Amber 正在搜索资料", "网页搜索", "搜索资料")
+        }
+        if rawToolName == "scrape_web" {
+            return ("Amber 正在阅读网页", "网页读取", "阅读网页")
+        }
+        if rawToolName == "generate_image" {
+            return ("Amber 正在生成图片", "图片生成", "生成图片")
+        }
+        if rawToolName == "memory_tool" {
+            return ("Amber 正在更新记忆", "记忆更新", "更新记忆")
+        }
+        if rawToolName == "mcp_call" {
+            return ("Amber 正在调用 MCP", "MCP 调用", "调用 MCP")
+        }
+        if rawToolName.hasPrefix("wm_") {
+            return ("Amber 正在访问网页", "WebMount", "访问网页")
+        }
+        if rawToolName.hasPrefix("workspace_") ||
+            rawToolName.contains("file") ||
+            rawToolName.contains("workspace") {
+            return ("Amber 正在操作文件", "Workspace", "操作文件")
+        }
+        return ("Amber 正在调用工具", "工具执行", "调用工具")
+    }
+
     private static func looksLikeEmail(_ text: String) -> Bool {
         text.contains("@") && text.contains(".")
     }
@@ -340,5 +404,65 @@ extension AgentActivityPresentation {
                     return (0...255).contains(value)
                 }
             }
+    }
+}
+
+extension AgentActivityPresentation {
+    var currentStepTitle: String {
+        steps.first { $0.state == .current }?.title ??
+            steps.first { $0.state == .failed }?.title ??
+            steps.last?.title ??
+            toolTitle
+    }
+
+    var compactTrailingText: String {
+        switch phase {
+        case .running:
+            currentStepTitle
+        case .waitingForUser:
+            "等待确认"
+        case .completed:
+            "已完成"
+        case .failed:
+            "遇到问题"
+        case .cancelled:
+            "已停止"
+        }
+    }
+
+    var phaseSymbolName: String {
+        switch phase {
+        case .running:
+            "sparkles"
+        case .waitingForUser:
+            "exclamationmark.circle.fill"
+        case .completed:
+            "checkmark.circle.fill"
+        case .failed:
+            "xmark.circle.fill"
+        case .cancelled:
+            "stop.circle.fill"
+        }
+    }
+
+    var progress: Double {
+        guard !steps.isEmpty else {
+            return phase == .completed ? 1 : 0
+        }
+        if phase == .completed { return 1 }
+        if phase == .failed || phase == .cancelled { return 0.92 }
+        let units = steps.reduce(0.0) { partial, step in
+            switch step.state {
+            case .done:
+                partial + 1
+            case .current:
+                partial + 0.58
+            case .pending:
+                partial
+            case .failed:
+                partial + 0.82
+            }
+        }
+        return min(max(units / Double(steps.count), 0), 1)
     }
 }

@@ -529,6 +529,39 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    func test_searchProviderApiKey_rehydratedFromKeychainOnReloadAndRepersist() {
+        let secret = "search-rehydrate-SECRET-\(UUID().uuidString)"
+        let namespace = "redlight-search-rehydrate-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: namespace)!
+        let store = IOSSharedSettingsStore(userDefaults: defaults)
+        store.addSearchProvider(name: "Tavily Rehydrate", apiKey: secret, serviceType: "tavily")
+
+        guard let added = store.snapshot.searchServices.last as? SearchServiceOptions.TavilyOptions else {
+            return XCTFail("Expected added Tavily search service.")
+        }
+        let serviceId = added.id.description()
+        let persistedJson = defaults.string(forKey: "app.amber.ios.sharedSettingsJson") ?? ""
+        XCTAssertFalse(persistedJson.contains(secret))
+        XCTAssertTrue(persistedJson.contains(IOSCredentialRedactor.mask))
+
+        let reloaded = IOSSharedSettingsStore(userDefaults: defaults)
+        let reloadedService = reloaded.snapshot.searchServices.first {
+            $0.id.description() == serviceId
+        } as? SearchServiceOptions.TavilyOptions
+        XCTAssertEqual(reloadedService?.apiKey, secret)
+
+        reloaded.setEnableWebSearch(!reloaded.snapshot.enableWebSearch)
+        let repersistedJson = defaults.string(forKey: "app.amber.ios.sharedSettingsJson") ?? ""
+        XCTAssertFalse(repersistedJson.contains(secret))
+        XCTAssertTrue(repersistedJson.contains(IOSCredentialRedactor.mask))
+
+        let reloadedAgain = IOSSharedSettingsStore(userDefaults: defaults)
+        let serviceAfterRepersist = reloadedAgain.snapshot.searchServices.first {
+            $0.id.description() == serviceId
+        } as? SearchServiceOptions.TavilyOptions
+        XCTAssertEqual(serviceAfterRepersist?.apiKey, secret)
+    }
+
     /// RED for P0 (discovery round 1). GREEN target: P2.
     /// Cell: *.secure_store (TTS credential class).
     ///
@@ -621,6 +654,7 @@ final class IOSParityRedLightTests: XCTestCase {
             modelId: "m-\(UUID().uuidString)",
             displayName: "m",
             contextWindowTokens: nil,
+            modelType: ModelType.chat,
             headers: [("Authorization", "Bearer \(secret)")]
         )
 

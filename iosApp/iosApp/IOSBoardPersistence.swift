@@ -1435,6 +1435,10 @@ enum IOSHotlistProviders {
     // 注:NewsNow 的 36kr 上游目前常空,故默认用 IT 之家(稳定),36 氪仍保留为可选源。
     static let iOSDefaultProviderIds: Set<String> = [
         "hacker_news",
+        "arxiv_ai",
+        "infoq_ai",
+        "36kr",
+        "huggingface_papers",
         "github_trending_ai",
         "newsnow:zhihu",
         "newsnow:weibo",
@@ -2680,10 +2684,33 @@ final class IOSDeepReadStore {
     func prepareRetry(id: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
         update(id: id) { task in
             task.status = .queued
+            task.resultMarkdown = ""
+            task.structuredJSON = nil
             task.failureMessage = nil
+            task.completedAt = nil
             task.retryCount += 1
             task.updatedAt = now
         }
+    }
+
+    func recoverInterruptedRuns(
+        excluding activeTaskIds: Set<String> = [],
+        staleAfterMs: Int64 = 30 * 60 * 1000,
+        now: Int64 = IOSBoardSignalRepository.currentEpochMs()
+    ) {
+        var changed = false
+        for index in tasks.indices {
+            guard tasks[index].status == .running || tasks[index].status == .queued else { continue }
+            if activeTaskIds.contains(tasks[index].id),
+               now - tasks[index].updatedAt < staleAfterMs {
+                continue
+            }
+            tasks[index].status = .failed
+            tasks[index].failureMessage = "上次深度阅读生成被中断，可重试。"
+            tasks[index].updatedAt = now
+            changed = true
+        }
+        if changed { persist() }
     }
 
     private func update(id: String, mutate: (inout IOSDeepReadTask) -> Void) {
@@ -3106,7 +3133,7 @@ enum IOSDeepReadDraftGenerator {
     }
 
     static func generate(task: IOSDeepReadTask, now: Date = Date()) -> String {
-        let sources = task.sources
+        let sources = task.sources.filter { $0.metadata["scrape_status"] != "failed" }
         let date = IOSDeepReadDateFormatters.detail.string(from: now)
         let grouped = Dictionary(grouping: sources, by: \.kind)
 
@@ -3271,14 +3298,25 @@ enum IOSDeepReadDraftGenerator {
         providerSetting: ProviderSetting,
         modelId: String,
         provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
-        now: Date = Date()
+        now: Date = Date(),
+        onStageProgress: (@MainActor (_ label: String, _ index: Int, _ total: Int) -> Void)? = nil
     ) async -> GenerationResult {
         // Build a source block incl. any captured image URLs (so the model can obey
         // the "images only from sources" rule). Exclude failed-search sources.
         // 限制来源块规模:最多取前 10 条、每条摘要 ≤700 字、总量 ≤9000 字。来源多时若把
         // 全部 1200 字摘要塞进每个 stage 的 prompt,叠加上一阶段累积 JSON 会撑爆模型上下文
         // 窗口 → 叙事/分析阶段调用直接报错被静默跳过 → 深读反而变薄(来源越多越薄)。
-        let usableSources = task.sources.filter { $0.metadata["scrape_status"] != "failed" }
+        let usableSources = task.sources.filter {
+            $0.metadata["scrape_status"] != "failed"
+                && !IOSDeepReadSourceNormalizer.cleanMultiline($0.content).isEmpty
+        }
+        guard !usableSources.isEmpty else {
+            return GenerationResult(
+                markdown: "",
+                didFail: true,
+                failureReason: "没有可用来源"
+            )
+        }
         let sourcesBlock = usableSources
             .prefix(10)
             .enumerated().map { index, source -> String in
@@ -3314,7 +3352,7 @@ enum IOSDeepReadDraftGenerator {
         var merged = IOSDeepReadOutput()
         var threwCount = 0
         var unusableCount = 0
-        for stage in stages {
+        for (stageIndex, stage) in stages.enumerated() {
             let priorJSON = merged.hasStructuredBody ? (encodeStructured(merged) ?? "") : ""
             let prompt = buildStagePrompt(
                 topicTitle: task.title, stageLabel: stage.label, instruction: stage.instruction,
@@ -3330,6 +3368,7 @@ enum IOSDeepReadDraftGenerator {
             } else {
                 unusableCount += 1
             }
+            await onStageProgress?(stage.label, stageIndex + 1, stages.count)
         }
 
         let date = IOSDeepReadDateFormatters.detail.string(from: now)

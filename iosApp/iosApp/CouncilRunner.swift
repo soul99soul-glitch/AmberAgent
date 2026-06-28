@@ -409,7 +409,7 @@ struct IOSCouncilRoomRunRequest {
     let searchSettings: Settings?
     let researchConsent: IOSCouncilResearchConsent
     /// 开:主持人按议题自由动态生成席位;关:只用 settings.seats 里已添加的席位。
-    var dynamicSeatGeneration: Bool = true
+    var dynamicSeatGeneration: Bool = false
 }
 
 struct IOSCouncilRoomRunSummary: Equatable {

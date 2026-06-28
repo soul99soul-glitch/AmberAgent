@@ -1,6 +1,7 @@
 import SwiftUI
 import Shared
 import SwiftStreamingMarkdown
+import Photos
 
 struct MessageBubbleView: View {
 
@@ -8,12 +9,15 @@ struct MessageBubbleView: View {
     var messageIndex: Int = 0
     var variantInfo: IOSConversationStore.VariantInfo? = nil
     var displaySetting: DisplaySetting? = nil
+    var generativeUiSetting: GenerativeUiSetting? = nil
     // Branching actions (Android ChatService parity). Defaults are no-ops so
     // existing call sites / previews that don't supply them still compile.
     var onRegenerate: () -> Void = {}
     var onEdit: (String) -> Void = { _ in }
     var onDelete: () -> Void = {}
     var onSelectVariant: (Int) -> Void = { _ in }
+    var onGenerativeWidgetAction: (String) -> Void = { _ in }
+    var onModifyGeneratedImage: (String, String, String) -> Void = { _, _, _ in }
     var isGenerating: Bool = false
     /// True only for the last message — gates the live "thinking" timer so a stopped/older
     /// reasoning (whose finishedAt was never set on cancel) doesn't keep counting.
@@ -61,6 +65,7 @@ struct MessageBubbleView: View {
                         }
                     }
                     variantSwitcher
+                    fallbackThinkingCard
                     messageParts
                     annotationsBlock
                 }
@@ -254,10 +259,16 @@ struct MessageBubbleView: View {
                         .contextMenu { messageActions }
                 } else {
                     ChatAssistantText {
-                        ChatAssistantMarkdownView(markdown: textPart.text, displaySetting: displaySetting)
+                        ChatAssistantMarkdownView(
+                            markdown: textPart.text,
+                            displaySetting: displaySetting,
+                            generativeUiSetting: generativeUiSetting,
+                            isStreaming: isGenerating && isLastMessage,
+                            onGenerativeWidgetAction: onGenerativeWidgetAction
+                        )
                     }
                 }
-            } else if let reasoning = part as? UIMessagePart.Reasoning, !reasoning.reasoning.isEmpty {
+            } else if let reasoning = part as? UIMessagePart.Reasoning {
                 ChatReasoningCard(
                     bodyText: reasoning.reasoning,
                     isThinking: reasoning.finishedAt == nil && isGenerating && isLastMessage,
@@ -271,7 +282,10 @@ struct MessageBubbleView: View {
                     ChatUserImageTile(urlString: image.url)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 } else {
-                    ChatGeneratedImageGrid(images: [image])
+                    ChatGeneratedImageGrid(
+                        images: [image],
+                        onModify: onModifyGeneratedImage
+                    )
                 }
             } else if let tool = part as? UIMessagePart.Tool {
                 ChatToolTimeline(
@@ -281,11 +295,26 @@ struct MessageBubbleView: View {
                 if tool.toolName == "generate_image" {
                     let images = tool.output.compactMap { $0 as? UIMessagePart.Image }
                     if !images.isEmpty {
-                        ChatGeneratedImageGrid(images: images)
+                        ChatGeneratedImageGrid(
+                            images: images,
+                            toolInput: tool.input,
+                            onModify: onModifyGeneratedImage
+                        )
+                            .transition(.opacity)
+                    } else if tool.output.isEmpty {
+                        ChatGeneratedImageLoadingPlaceholder(toolInput: tool.input)
+                            .transition(.opacity)
+                    } else {
+                        ChatGeneratedImageFailureCard(
+                            reason: ChatToolOutputFormatter.imageFailureReason(from: tool.output)
+                                ?? "图片生成工具没有返回图片。"
+                        )
+                        .transition(.opacity)
                     }
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.28), value: message.parts.map(Self.partAnimationKey).joined(separator: "|"))
         .sheet(item: $toolDetailTarget) { target in
             ChatToolDetailSheet(
                 tool: target.tool,
@@ -294,6 +323,31 @@ struct MessageBubbleView: View {
                     : nil
             )
         }
+    }
+
+    @ViewBuilder
+    private var fallbackThinkingCard: some View {
+        if !isUser, isGenerating, isLastMessage, !hasReasoningPart {
+            ChatReasoningCard(
+                bodyText: "",
+                isThinking: true,
+                levelLabel: reasoningLevelLabel,
+                autoCloseThinking: displaySetting?.autoCloseThinking ?? true
+            )
+            .transition(.opacity)
+        }
+    }
+
+    private var hasReasoningPart: Bool {
+        message.parts.contains { $0 is UIMessagePart.Reasoning }
+    }
+
+    private static func partAnimationKey(_ part: UIMessagePart) -> String {
+        if let tool = part as? UIMessagePart.Tool {
+            let imageCount = tool.output.compactMap { $0 as? UIMessagePart.Image }.count
+            return "tool:\(tool.toolCallId):\(tool.output.isEmpty):\(imageCount)"
+        }
+        return String(describing: type(of: part))
     }
 
     private var assistantArtifactText: String? {
@@ -353,15 +407,79 @@ struct MessageBubbleView: View {
 struct ChatAssistantMarkdownView: View {
     let markdown: String
     var displaySetting: DisplaySetting?
+    var generativeUiSetting: GenerativeUiSetting?
+    var isStreaming = false
+    var onGenerativeWidgetAction: (String) -> Void = { _ in }
 
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
+    @State private var hasUsedStreamingMarkdownRenderer = false
 
     var body: some View {
-        if microsoftStreamingMarkdown {
-            SwiftStreamingMarkdown.MarkdownView(text: markdown)
+        let widgetSettings = IOSGenerativeWidgetSettings(generativeUiSetting)
+        Group {
+            if widgetSettings.enabled {
+                let segments = IOSGenerativeWidgetParser.parse(markdown, streaming: isStreaming)
+                let hasWidgetSegment = segments.contains { segment in
+                    switch segment {
+                    case .widget, .loading:
+                        return true
+                    case .text:
+                        return false
+                    }
+                }
+                if hasWidgetSegment {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(segments) { segment in
+                            switch segment {
+                            case .text(_, let content):
+                                markdownText(content)
+                            case .widget(let widget):
+                                IOSGenerativeWidgetCard(
+                                    widget: widget,
+                                    generativeUiSetting: generativeUiSetting,
+                                    onAction: onGenerativeWidgetAction
+                                )
+                            case .loading:
+                                IOSGenerativeWidgetLoadingView()
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    markdownText(markdown)
+                }
+            } else {
+                markdownText(markdown)
+            }
+        }
+        .onAppear {
+            if isStreaming {
+                hasUsedStreamingMarkdownRenderer = true
+            }
+        }
+        .onChange(of: isStreaming) { _, newValue in
+            if newValue {
+                hasUsedStreamingMarkdownRenderer = true
+            }
+        }
+    }
+
+    private var shouldUseStreamingMarkdownRenderer: Bool {
+        microsoftStreamingMarkdown || isStreaming || hasUsedStreamingMarkdownRenderer
+    }
+
+    private var streamingMarkdownConfig: SwiftStreamingMarkdown.MarkdownRenderConfig {
+        SwiftStreamingMarkdown.MarkdownRenderConfig.default
+            .withShouldAnimateText(value: isStreaming || hasUsedStreamingMarkdownRenderer)
+    }
+
+    @ViewBuilder
+    private func markdownText(_ content: String) -> some View {
+        if shouldUseStreamingMarkdownRenderer {
+            SwiftStreamingMarkdown.MarkdownView(text: content, config: streamingMarkdownConfig)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            MarkdownView(markdown: markdown, displaySetting: displaySetting)
+            MarkdownView(markdown: content, displaySetting: displaySetting)
         }
     }
 }
@@ -396,31 +514,219 @@ private enum WorkspaceSaveAlert: Identifiable {
 
 private struct ChatGeneratedImageGrid: View {
     let images: [UIMessagePart.Image]
+    var toolInput: String?
+    var onModify: (String, String, String) -> Void = { _, _, _ in }
 
-    private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 140), spacing: 8)]
+    private var display: ChatGeneratedImageRequestDisplay {
+        ChatGeneratedImageRequestDisplay(toolInput: toolInput)
     }
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(Array(images.enumerated()), id: \.offset) { _, image in
-                ChatGeneratedImageTile(urlString: image.url)
+        Group {
+            if images.count <= 1 {
+                if let image = images.first {
+                    singleCard {
+                        ChatGeneratedImageTile(
+                            urlString: image.url,
+                            display: display,
+                            onModify: onModify
+                        )
+                    }
+                }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(images.enumerated()), id: \.offset) { _, image in
+                            ChatGeneratedImageTile(
+                                urlString: image.url,
+                                display: display,
+                                onModify: onModify
+                            )
+                                .frame(width: display.multiCardWidth)
+                        }
+                    }
+                    .padding(.trailing, 16)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func singleCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if let maxWidth = display.singleCardMaxWidth {
+            content().frame(maxWidth: maxWidth, alignment: .leading)
+        } else {
+            content().frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct ChatGeneratedImageLoadingPlaceholder: View {
+    let toolInput: String
+
+    private var display: ChatGeneratedImageRequestDisplay {
+        ChatGeneratedImageRequestDisplay(toolInput: toolInput)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            placeholder
+        }
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var placeholder: some View {
+        let card = ChatGeneratedImageDotPlaceholder(aspectRatio: display.aspectRatio)
+        if display.requestedCount > 1 {
+            card.frame(maxWidth: display.multiCardWidth, alignment: .leading)
+        } else if let maxWidth = display.singleCardMaxWidth {
+            card.frame(maxWidth: maxWidth, alignment: .leading)
+        } else {
+            card.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct ChatGeneratedImageFailureCard: View {
+    let reason: String
+
+    var body: some View {
+        HStack {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accentRed)
+                    .frame(width: 18, height: 18)
+
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(AmberTheme.accentRed.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(AmberTheme.accentRed.opacity(0.20), lineWidth: 0.5)
+            }
+        }
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ChatGeneratedImageRequestDisplay {
+    var aspectRatio: CGFloat
+    var aspectRatioTitle: String
+    var requestedCount: Int
+
+    var singleCardMaxWidth: CGFloat? {
+        aspectRatio < 1 ? 236 : nil
+    }
+
+    let multiCardWidth: CGFloat = 280
+
+    init(toolInput: String?) {
+        let object = Self.jsonObject(from: toolInput)
+        let parsedAspect = IOSImageAspectRatio(toolValue: object?["aspect_ratio"] as? String)
+        self.aspectRatio = CGFloat(parsedAspect.renderedAspectRatio)
+        self.aspectRatioTitle = parsedAspect.title
+        self.requestedCount = min(max(Self.intValue(object?["count"]) ?? 1, 1), 4)
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        if let string = value as? String { return Int(string) }
+        return nil
+    }
+
+    private static func jsonObject(from input: String?) -> [String: Any]? {
+        guard let input else { return nil }
+        guard let data = input.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+}
+
+private struct ChatGeneratedImageDotPlaceholder: View {
+    let aspectRatio: CGFloat
+
+    private let period: TimeInterval = 2.2
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            Canvas { context, size in
+                drawDots(context: context, size: size, phase: phase(at: timeline.date))
+            }
+        }
+        .aspectRatio(max(aspectRatio, 0.1), contentMode: .fit)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func phase(at date: Date) -> CGFloat {
+        CGFloat(date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period)
+    }
+
+    private func drawDots(context: GraphicsContext, size: CGSize, phase: CGFloat) {
+        let padding: CGFloat = 20
+        let spacing: CGFloat = 14
+        let dotRadius: CGFloat = 1.6
+        let drawingWidth = max(size.width - padding * 2, spacing)
+        let drawingHeight = max(size.height - padding * 2, spacing)
+        let columns = max(Int(drawingWidth / spacing), 1)
+        let rows = max(Int(drawingHeight / spacing), 1)
+        let xOffset = padding + (drawingWidth - CGFloat(columns - 1) * spacing) / 2
+        let yOffset = padding + (drawingHeight - CGFloat(rows - 1) * spacing) / 2
+        let diagonalRange = max(CGFloat(columns + rows), 1)
+
+        for column in 0..<columns {
+            for row in 0..<rows {
+                let diagonal = CGFloat(column + row) / diagonalRange
+                let wavePhase = (phase + diagonal).truncatingRemainder(dividingBy: 1)
+                let distance = abs(wavePhase - 0.5) * 2
+                let alpha = min(max(0.12 + 0.52 * (1 - distance), 0.08), 0.64)
+                let x = xOffset + CGFloat(column) * spacing
+                let y = yOffset + CGFloat(row) * spacing
+                let rect = CGRect(
+                    x: x - dotRadius,
+                    y: y - dotRadius,
+                    width: dotRadius * 2,
+                    height: dotRadius * 2
+                )
+                context.fill(
+                    Path(ellipseIn: rect),
+                    with: .color(AmberTheme.muted.opacity(alpha))
+                )
+            }
+        }
     }
 }
 
 private struct ChatGeneratedImageTile: View {
     let urlString: String
-    @Environment(IOSWorkspaceStore.self) private var workspaceStore
-    @State private var saved = false
+    var display = ChatGeneratedImageRequestDisplay(toolInput: nil)
+    var onModify: (String, String, String) -> Void = { _, _, _ in }
+    @State private var saveState: ChatGeneratedImagePhotoSaveState = .idle
+    @State private var saveAlert: ChatGeneratedImageSaveAlert?
     @State private var decodedDataImage: UIImage?
+    @State private var previewTarget: ChatGeneratedImagePreviewTarget?
+    @State private var editTarget: ChatGeneratedImageEditTarget?
 
     private var isDataURL: Bool { urlString.hasPrefix("data:") }
 
     private var url: URL? {
-        URL(string: urlString) ?? URL(fileURLWithPath: urlString)
+        IOSImageGenerationRepository.resolvedImageURL(from: urlString)
     }
 
     /// Decodes a `data:<mime>;base64,...` URL (used by chat image attachments) into a UIImage.
@@ -439,7 +745,7 @@ private struct ChatGeneratedImageTile: View {
                     if let decodedDataImage {
                         Image(uiImage: decodedDataImage)
                             .resizable()
-                            .scaledToFill()
+                            .scaledToFit()
                     } else {
                         ProgressView()
                             .tint(AmberTheme.accent)
@@ -451,7 +757,7 @@ private struct ChatGeneratedImageTile: View {
                         case .success(let image):
                             image
                                 .resizable()
-                                .scaledToFill()
+                                .scaledToFit()
                         case .failure:
                             Image(systemName: "exclamationmark.triangle")
                                 .font(.system(size: 24, weight: .semibold))
@@ -467,55 +773,358 @@ private struct ChatGeneratedImageTile: View {
                     }
                 }
             }
-            .frame(height: 176)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .aspectRatio(display.aspectRatio, contentMode: .fit)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                previewTarget = ChatGeneratedImagePreviewTarget(urlString: urlString)
+            }
             .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous))
             .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous)
+                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+            }
             .task(id: urlString) {
                 if isDataURL, decodedDataImage == nil {
                     decodedDataImage = Self.decodeDataURL(urlString)
                 }
             }
 
-            if let url {
+            if url != nil || isDataURL {
                 HStack(spacing: 6) {
-                    ShareLink(item: url) {
-                        Label("分享", systemImage: "square.and.arrow.up")
+                    if let url {
+                        ShareLink(item: url) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AmberTheme.accent)
+                                .frame(width: 36, height: 28)
+                                .background(AmberTheme.accentTint, in: Capsule())
+                        }
+                        .accessibilityLabel("分享图片")
+                    }
+
+                    Button {
+                        saveImageToPhotos()
+                    } label: {
+                        Label(saveState.title, systemImage: saveState.systemImage)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(saveState == .saved ? AmberTheme.accentGreen : AmberTheme.accent)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 28)
+                            .background((saveState == .saved ? AmberTheme.accentGreen.opacity(0.10) : AmberTheme.accentTint), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(saveState != .idle)
+                    .accessibilityLabel("保存图片到相册")
+
+                    Button {
+                        editTarget = ChatGeneratedImageEditTarget(
+                            urlString: urlString,
+                            aspectRatio: display.aspectRatioTitle
+                        )
+                    } label: {
+                        Label("修改", systemImage: "wand.and.stars")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(AmberTheme.accent)
                             .frame(maxWidth: .infinity)
                             .frame(height: 28)
                             .background(AmberTheme.accentTint, in: Capsule())
                     }
-
-                    Button {
-                        saveImageArtifact()
-                    } label: {
-                        Image(systemName: saved ? "checkmark" : "tray.and.arrow.down")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(saved ? AmberTheme.accentGreen : AmberTheme.accent)
-                            .frame(width: 36, height: 28)
-                            .background((saved ? AmberTheme.accentGreen.opacity(0.10) : AmberTheme.accentTint), in: Capsule())
-                    }
                     .buttonStyle(.plain)
-                    .disabled(saved)
-                    .accessibilityLabel("保存图片到 Workspace")
+                    .accessibilityLabel("修改图片")
+                }
+            }
+        }
+        .fullScreenCover(item: $previewTarget) { target in
+            ChatGeneratedImagePreview(urlString: target.urlString)
+        }
+        .sheet(item: $editTarget) { target in
+            ChatGeneratedImageEditSheet { prompt in
+                onModify(target.urlString, prompt, target.aspectRatio)
+            }
+        }
+        .alert(item: $saveAlert) { alert in
+            Alert(
+                title: Text("保存失败"),
+                message: Text(alert.message),
+                dismissButton: .default(Text("好"))
+            )
+        }
+    }
+
+    private func saveImageToPhotos() {
+        guard saveState == .idle else { return }
+        saveState = .saving
+        Task {
+            do {
+                try await Self.writeImageToPhotoLibrary(urlString)
+                await MainActor.run {
+                    saveState = .saved
+                }
+            } catch {
+                await MainActor.run {
+                    saveState = .idle
+                    saveAlert = ChatGeneratedImageSaveAlert(message: error.localizedDescription)
                 }
             }
         }
     }
 
-    private func saveImageArtifact() {
-        do {
-            _ = try workspaceStore.saveArtifact(
-                title: "Generated Image",
-                content: "![Generated Image](\(urlString))",
-                type: .image,
-                sourceKind: "image_generation",
-                sourceId: urlString
-            )
-            saved = true
-        } catch {
-            saved = false
+    private static func writeImageToPhotoLibrary(_ urlString: String) async throws {
+        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        let resolvedStatus: PHAuthorizationStatus
+        if status == .notDetermined {
+            resolvedStatus = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        } else {
+            resolvedStatus = status
+        }
+
+        guard resolvedStatus == .authorized || resolvedStatus == .limited else {
+            throw ChatGeneratedImagePhotoSaveError.notAuthorized
+        }
+
+        let data = try IOSImageGenerationRepository.imageData(from: urlString)
+        guard let image = UIImage(data: data) else {
+            throw ChatGeneratedImagePhotoSaveError.invalidImage
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            } completionHandler: { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: ChatGeneratedImagePhotoSaveError.unknown)
+                }
+            }
+        }
+    }
+}
+
+private enum ChatGeneratedImagePhotoSaveState: Equatable {
+    case idle
+    case saving
+    case saved
+
+    var title: String {
+        switch self {
+        case .idle: "保存"
+        case .saving: "保存中"
+        case .saved: "已保存"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .idle: "square.and.arrow.down"
+        case .saving: "arrow.triangle.2.circlepath"
+        case .saved: "checkmark"
+        }
+    }
+}
+
+private struct ChatGeneratedImageSaveAlert: Identifiable {
+    let id = UUID()
+    let message: String
+}
+
+private enum ChatGeneratedImagePhotoSaveError: LocalizedError {
+    case notAuthorized
+    case invalidImage
+    case unknown
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthorized:
+            "没有相册写入权限。请在系统设置里允许 AmberAgent 添加照片。"
+        case .invalidImage:
+            "当前图片文件无法解码，可能已经被系统或重装流程删除。"
+        case .unknown:
+            "系统相册没有返回明确原因。"
+        }
+    }
+}
+
+private struct ChatGeneratedImagePreviewTarget: Identifiable {
+    let id = UUID()
+    let urlString: String
+}
+
+private struct ChatGeneratedImageEditTarget: Identifiable {
+    let id = UUID()
+    let urlString: String
+    let aspectRatio: String
+}
+
+private struct ChatGeneratedImagePreview: View {
+    let urlString: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var decodedDataImage: UIImage?
+    @State private var dragOffset: CGFloat = 0
+
+    private var isDataURL: Bool { urlString.hasPrefix("data:") }
+    private var url: URL? { IOSImageGenerationRepository.resolvedImageURL(from: urlString) }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+                .ignoresSafeArea()
+
+            imageContent
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .offset(y: dragOffset)
+                .opacity(max(0.45, 1 - abs(dragOffset) / 360))
+                .gesture(
+                    DragGesture(minimumDistance: 20)
+                        .onChanged { value in
+                            dragOffset = value.translation.height
+                        }
+                        .onEnded { value in
+                            let shouldDismiss = abs(value.translation.height) > 140
+                                || abs(value.predictedEndTranslation.height) > 220
+                            if shouldDismiss {
+                                dismiss()
+                            } else {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                    dragOffset = 0
+                                }
+                            }
+                        }
+                )
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(.white.opacity(0.18), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 20)
+            .padding(.trailing, 16)
+            .accessibilityLabel("关闭大图")
+        }
+        .task(id: urlString) {
+            guard isDataURL, decodedDataImage == nil else { return }
+            decodedDataImage = Self.decodeDataURL(urlString)
+        }
+    }
+
+    @ViewBuilder
+    private var imageContent: some View {
+        if isDataURL {
+            if let decodedDataImage {
+                Image(uiImage: decodedDataImage)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                ProgressView()
+                    .tint(.white)
+            }
+        } else if let url {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                case .failure:
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(.white)
+                case .empty:
+                    ProgressView()
+                        .tint(.white)
+                @unknown default:
+                    EmptyView()
+                }
+            }
+        } else {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private static func decodeDataURL(_ string: String) -> UIImage? {
+        guard let comma = string.firstIndex(of: ",") else { return nil }
+        let base64 = String(string[string.index(after: comma)...])
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return UIImage(data: data)
+    }
+}
+
+private struct ChatGeneratedImageEditSheet: View {
+    let onSubmit: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var prompt = ""
+    @FocusState private var focused: Bool
+
+    private var trimmedPrompt: String {
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("修改要求")
+                    .font(.headline)
+                    .foregroundStyle(AmberTheme.foreground)
+
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $prompt)
+                        .focused($focused)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .frame(minHeight: 160)
+                        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                        }
+
+                    if prompt.isEmpty {
+                        Text("例如：保留构图，把背景改成雪山，把服装改成蓝色。")
+                            .font(.body)
+                            .foregroundStyle(AmberTheme.muted)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 16)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(18)
+            .navigationTitle("修改图片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("生成") {
+                        let value = trimmedPrompt
+                        guard !value.isEmpty else { return }
+                        onSubmit(value)
+                        dismiss()
+                    }
+                    .disabled(trimmedPrompt.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .task {
+            focused = true
         }
     }
 }
@@ -528,7 +1137,7 @@ private struct ChatUserImageTile: View {
     @State private var decoded: UIImage?
 
     private var isDataURL: Bool { urlString.hasPrefix("data:") }
-    private var url: URL? { URL(string: urlString) ?? URL(fileURLWithPath: urlString) }
+    private var url: URL? { IOSImageGenerationRepository.resolvedImageURL(from: urlString) }
 
     private static let maxW: CGFloat = 220
     private static let maxH: CGFloat = 300
@@ -676,6 +1285,8 @@ struct ChatConfigurationNoticeCard: View {
             "server.rack"
         case .unsupportedProvider:
             "exclamationmark.triangle"
+        case .codexNotSignedIn:
+            "person.crop.circle"
         }
     }
 
@@ -691,6 +1302,8 @@ struct ChatConfigurationNoticeCard: View {
             "server.rack"
         case .unsupportedProvider:
             "exclamationmark.triangle.fill"
+        case .codexNotSignedIn:
+            "person.crop.circle.fill"
         }
     }
 
@@ -706,6 +1319,8 @@ struct ChatConfigurationNoticeCard: View {
             "配置服务商"
         case .unsupportedProvider:
             "切换服务商"
+        case .codexNotSignedIn:
+            "登录 Codex"
         }
     }
 }

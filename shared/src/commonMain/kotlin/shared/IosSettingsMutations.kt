@@ -1,18 +1,29 @@
 package shared
 
 import app.amber.ai.core.MessageRole
+import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.coerceToReasoningOptions
+import app.amber.ai.provider.fixedBaseUrl
+import app.amber.ai.provider.reasoningOptions
+import app.amber.core.model.reasoningLevelForModel
+import app.amber.core.model.withChatModelReasoningMemory
+import app.amber.core.model.withReasoningLevelForModel
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
 import app.amber.core.settings.Settings
+import app.amber.core.settings.defaultReasoningLevelForModel
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentAssistant
+import app.amber.core.settings.getCurrentChatModel
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
 import app.amber.feature.board.TodayBoardHotListFilterMode
@@ -196,6 +207,34 @@ object IosSettingsMutations {
     }
 
     /**
+     * Sets the OpenAI auth mode for provider [providerId]. Switching to
+     * CODEX_OAUTH pins the codex backend baseUrl and enables the Responses API
+     * (iOS resolves the OAuth bearer at request time); other modes keep the
+     * existing baseUrl/useResponseApi. No-op for non-OpenAI providers.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun setOpenAIAuthMode(
+        settings: Settings,
+        providerId: String,
+        authMode: OpenAIAuthMode,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed || provider !is ProviderSetting.OpenAI) {
+                    provider
+                } else {
+                    provider.copy(
+                        authMode = authMode,
+                        baseUrl = authMode.fixedBaseUrl() ?: provider.baseUrl,
+                        useResponseApi = if (authMode == OpenAIAuthMode.CODEX_OAUTH) true else provider.useResponseApi,
+                    )
+                }
+            }
+        )
+    }
+
+    /**
      * Construct an Anthropic Claude [ProviderSetting.Claude] with a single model.
      * iOS counterpart of [buildOpenAIProvider] for the Anthropic protocol.
      */
@@ -299,6 +338,38 @@ object IosSettingsMutations {
         return settings.copy(providers = providers)
     }
 
+    /**
+     * Upserts a single IMAGE-typed model on an OpenAI provider (used for the
+     * synthetic codex image model `codex-oauth-image`). Replaces any existing
+     * model with the same modelId; preserves all other models. No-op for non-
+     * OpenAI providers.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun upsertProviderImageModel(
+        settings: Settings,
+        providerId: String,
+        modelId: String,
+        displayName: String,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed || provider !is ProviderSetting.OpenAI) {
+                    provider
+                } else {
+                    val others = provider.models.filter { it.modelId != modelId }
+                    val imageModel = Model(
+                        modelId = modelId,
+                        displayName = displayName,
+                        id = kotlin.uuid.Uuid.random(),
+                        type = ModelType.IMAGE,
+                    )
+                    provider.copy(models = others + imageModel)
+                }
+            }
+        )
+    }
+
     fun upsertProviderChatModel(
         settings: Settings,
         providerId: String,
@@ -306,6 +377,7 @@ object IosSettingsMutations {
         modelId: String,
         displayName: String,
         contextWindowTokens: Int?,
+        modelType: ModelType,
         headerPairs: List<Pair<String, String>>,
     ): Settings {
         val parsedProvider = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
@@ -322,13 +394,13 @@ object IosSettingsMutations {
                 } else {
                     val existing = provider.models.firstOrNull { model ->
                         (parsedModel != null && model.id == parsedModel) ||
-                            (parsedModel == null && model.modelId == modelId && model.type == ModelType.CHAT)
+                            (parsedModel == null && model.modelId == modelId && model.type == modelType)
                     }
                     val updated = if (existing != null) {
                         existing.copy(
                             modelId = modelId,
                             displayName = displayName.ifBlank { modelId },
-                            type = ModelType.CHAT,
+                            type = modelType,
                             contextWindowTokens = contextWindowTokens,
                             customHeaders = headers,
                         )
@@ -337,7 +409,7 @@ object IosSettingsMutations {
                             modelId = modelId,
                             displayName = displayName.ifBlank { modelId },
                             id = kotlin.uuid.Uuid.random(),
-                            type = ModelType.CHAT,
+                            type = modelType,
                             customHeaders = headers,
                             contextWindowTokens = contextWindowTokens,
                         )
@@ -378,6 +450,67 @@ object IosSettingsMutations {
     fun setChatModelId(settings: Settings, modelId: String): Settings {
         val parsed = runCatching { kotlin.uuid.Uuid.parse(modelId) }.getOrNull() ?: return settings
         return settings.copy(chatModelId = parsed)
+    }
+
+    /**
+     * Android parity for chat-surface model switching: update the current
+     * assistant, preserve the level used by the model being left, and restore the
+     * remembered/default reasoning level for the selected model.
+     */
+    fun setCurrentAssistantChatModelId(settings: Settings, modelId: String): Settings {
+        val selectedModelId = runCatching { kotlin.uuid.Uuid.parse(modelId) }.getOrNull() ?: return settings
+        val selectedModel = settings.findModelById(selectedModelId)
+        val currentAssistant = settings.getCurrentAssistant()
+        val currentModelId = currentAssistant.chatModelId ?: settings.chatModelId
+        val currentModel = settings.findModelById(currentModelId)
+        val updatedAssistant = if (selectedModel != null) {
+            currentAssistant.withChatModelReasoningMemory(
+                currentModelId = currentModelId,
+                currentDefaultReasoningLevel = currentModel
+                    ?.let { settings.defaultReasoningLevelForModel(it) }
+                    ?: settings.defaultReasoningLevelForModel(selectedModel),
+                selectedModelId = selectedModelId,
+                selectedDefaultReasoningLevel = settings.defaultReasoningLevelForModel(selectedModel),
+            )
+        } else {
+            currentAssistant.copy(chatModelId = selectedModelId)
+        }
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.id == currentAssistant.id) updatedAssistant else assistant
+            }
+        )
+    }
+
+    fun currentAssistantReasoningLevels(settings: Settings): List<ReasoningLevel> {
+        val model = settings.getCurrentChatModel()
+        val provider = model?.findProvider(settings.providers)
+        return model.reasoningOptions(provider).map { it.level }
+    }
+
+    fun currentAssistantReasoningLevel(settings: Settings): ReasoningLevel {
+        val model = settings.getCurrentChatModel() ?: return settings.getCurrentAssistant().reasoningLevel
+        val provider = model.findProvider(settings.providers)
+        val defaultLevel = settings.defaultReasoningLevelForModel(model)
+        val level = settings.getCurrentAssistant().reasoningLevelForModel(model.id, defaultLevel)
+        return level.coerceToReasoningOptions(model.reasoningOptions(provider))
+    }
+
+    fun updateCurrentAssistantReasoningLevel(
+        settings: Settings,
+        reasoningLevel: ReasoningLevel,
+    ): Settings {
+        val model = settings.getCurrentChatModel()
+        val provider = model?.findProvider(settings.providers)
+        val options = model.reasoningOptions(provider)
+        val coerced = reasoningLevel.coerceToReasoningOptions(options)
+        val currentAssistant = settings.getCurrentAssistant()
+        val updatedAssistant = currentAssistant.withReasoningLevelForModel(model?.id, coerced)
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.id == currentAssistant.id) updatedAssistant else assistant
+            }
+        )
     }
 
     /**
@@ -716,6 +849,37 @@ object IosSettingsMutations {
             settings.searchEnabledServiceIds.filterNot { it == parsed }
         }
         return settings.copy(searchEnabledServiceIds = enabledIds)
+    }
+
+    /** Update a search service apiKey by [id] without changing subtype-specific options. */
+    fun updateSearchServiceApiKey(settings: Settings, id: String, apiKey: String): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return settings
+        return settings.copy(
+            searchServices = settings.searchServices.map { service ->
+                if (service.id != parsed) {
+                    service
+                } else {
+                    when (service) {
+                        is SearchServiceOptions.ZhipuOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.TavilyOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.ExaOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.LinkUpOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.BraveOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.SerperOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.SerpApiOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.MetasoOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.OllamaOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.PerplexityOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.FirecrawlOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.JinaOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.BochaOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.AmberAgentSearchOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.GrokOptions -> service.copy(apiKey = apiKey)
+                        else -> service
+                    }
+                }
+            }
+        )
     }
 
     /** Toggle the master web-search gate consumed by iOS ChatViewModel. */

@@ -429,37 +429,41 @@ final class IOSLocalToolExecutorTests: XCTestCase {
         let firstList = try jsonObject(await controller.execute(toolName: "wm_tab_list", input: "{}", isUserInitiated: true))
         XCTAssertEqual(firstList["count"] as? Int, 1)
 
-        let firstNew = try jsonObject(await controller.execute(toolName: "wm_tab_new", input: "{}", isUserInitiated: true))
-        let firstSessionId = try XCTUnwrap(firstNew["session_id"] as? String)
-        let secondNew = try jsonObject(await controller.execute(toolName: "wm_tab_new", input: "{}", isUserInitiated: true))
-        let secondSessionId = try XCTUnwrap(secondNew["session_id"] as? String)
+        _ = try jsonObject(await controller.execute(toolName: "wm_tab_new", input: "{}", isUserInitiated: true))
+        _ = try jsonObject(await controller.execute(toolName: "wm_tab_new", input: "{}", isUserInitiated: true))
         _ = await controller.execute(toolName: "wm_tab_new", input: "{}", isUserInitiated: true)
 
         let list = try jsonObject(await controller.execute(toolName: "wm_tab_list", input: "{}", isUserInitiated: true))
         XCTAssertLessThanOrEqual(list["count"] as? Int ?? 0, 3)
+        let listedSessions = try XCTUnwrap(list["sessions"] as? [[String: Any]])
+        let listedCurrentId = try XCTUnwrap(list["current_session_id"] as? String)
+        let closeTargetId = try XCTUnwrap(
+            listedSessions.compactMap { $0["session_id"] as? String }.first { $0 != listedCurrentId }
+        )
 
         let closed = try jsonObject(await controller.execute(
             toolName: "wm_tab_close",
-            input: IOSWebMountController.json(["session_id": firstSessionId]),
+            input: IOSWebMountController.json(["session_id": closeTargetId]),
             isUserInitiated: true
         ))
-        XCTAssertEqual(closed["closed_session_id"] as? String, firstSessionId)
+        XCTAssertEqual(closed["closed_session_id"] as? String, closeTargetId)
+        let liveSessionId = try XCTUnwrap(closed["current_session_id"] as? String)
 
         let staleState = try jsonObject(await controller.execute(
             toolName: "wm_state",
-            input: IOSWebMountController.json(["session_id": firstSessionId]),
+            input: IOSWebMountController.json(["session_id": closeTargetId]),
             isUserInitiated: true
         ))
         XCTAssertEqual(staleState["ok"] as? Bool, false)
-        XCTAssertTrue((staleState["error"] as? String)?.contains(firstSessionId) == true)
+        XCTAssertTrue((staleState["error"] as? String)?.contains(closeTargetId) == true)
 
         let liveState = try jsonObject(await controller.execute(
             toolName: "wm_state",
-            input: IOSWebMountController.json(["session_id": secondSessionId]),
+            input: IOSWebMountController.json(["session_id": liveSessionId]),
             isUserInitiated: true
         ))
         XCTAssertEqual(liveState["ok"] as? Bool, true)
-        XCTAssertEqual(liveState["session_id"] as? String, secondSessionId)
+        XCTAssertEqual(liveState["session_id"] as? String, liveSessionId)
     }
 
     func testWebMountObserveSnapshotAndScreenshotAreRedacted() async throws {

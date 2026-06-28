@@ -154,6 +154,31 @@ struct ModelDefaultsView: View {
         return options
     }
 
+    /// IMAGE-typed models across enabled providers (for the 生图模型 picker), so a
+    /// codex image model or any IMAGE model is selectable — not just chat models.
+    private var imageModelOptions: [ModelDefaultOption] {
+        _ = sharedSettings.revision
+        var seen = Set<String>()
+        var options: [ModelDefaultOption] = []
+        for provider in sharedSettings.snapshot.providers where provider.enabled {
+            for model in provider.models where model.type == ModelType.image {
+                let uuid = model.id.description()
+                guard seen.insert(uuid).inserted else { continue }
+                let modelID = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !modelID.isEmpty else { continue }
+                options.append(
+                    ModelDefaultOption(
+                        id: uuid,
+                        providerName: provider.name,
+                        modelId: modelID,
+                        displayName: model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                )
+            }
+        }
+        return options
+    }
+
     private var enabledChatProviderCount: Int {
         _ = sharedSettings.revision
         return sharedSettings.snapshot.providers.filter {
@@ -188,6 +213,7 @@ struct ModelDefaultsView: View {
                     title: "视觉识别模型",
                     subtitle: "当前模型不支持图片时使用",
                     currentId: sharedSettings.snapshot.ocrModelId,
+                    options: chatModelOptions,
                     set: { sharedSettings.setOcrModelId($0) }
                 )
                 ModelDefaultsDivider()
@@ -196,6 +222,7 @@ struct ModelDefaultsView: View {
                     title: "标题总结模型",
                     subtitle: "总结对话标题",
                     currentId: sharedSettings.snapshot.titleModelId,
+                    options: chatModelOptions,
                     set: { sharedSettings.setTitleModelId($0) }
                 )
                 ModelDefaultsDivider()
@@ -204,6 +231,7 @@ struct ModelDefaultsView: View {
                     title: "聊天建议模型",
                     subtitle: "生成对话建议",
                     currentId: sharedSettings.snapshot.suggestionModelId,
+                    options: chatModelOptions,
                     set: { sharedSettings.setSuggestionModelId($0) }
                 )
                 ModelDefaultsDivider()
@@ -212,6 +240,7 @@ struct ModelDefaultsView: View {
                     title: "压缩模型",
                     subtitle: "压缩对话历史",
                     currentId: sharedSettings.snapshot.compressModelId,
+                    options: chatModelOptions,
                     set: { sharedSettings.setCompressModelId($0) }
                 )
                 ModelDefaultsDivider()
@@ -220,6 +249,7 @@ struct ModelDefaultsView: View {
                     title: "生图模型",
                     subtitle: "对话中说“画一张…”时用它出图",
                     currentId: sharedSettings.snapshot.imageGenerationModelId,
+                    options: imageModelOptions,
                     clearTitle: "清除（不生成图片）",
                     set: { sharedSettings.setImageGenerationModelId($0) }
                 )
@@ -234,10 +264,11 @@ struct ModelDefaultsView: View {
         title: String,
         subtitle: String,
         currentId: KotlinUuid,
+        options: [ModelDefaultOption],
         clearTitle: String = "清除（回退当前聊天模型）",
         set: @escaping (String) -> Void
     ) -> some View {
-        if chatModelOptions.isEmpty {
+        if options.isEmpty {
             ModelDefaultStaticRow(
                 systemImage: icon,
                 iconColor: AmberTheme.accent,
@@ -254,7 +285,7 @@ struct ModelDefaultsView: View {
                 subtitle: subtitle,
                 value: auxModelName(currentId)
             ) {
-                ForEach(chatModelOptions) { option in
+                ForEach(options) { option in
                     Button(option.menuTitle) { set(option.id) }
                 }
                 Divider()

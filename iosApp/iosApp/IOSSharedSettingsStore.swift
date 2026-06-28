@@ -149,6 +149,7 @@ final class IOSSharedSettingsStore {
         // provider's apiKey is non-empty AND non-mask, store it to the side-table
         // now (so the next persist redacts it), then keep it in memory.
         Self.rehydrateProviderApiKeys(into: &self.snapshot)
+        Self.rehydrateSearchServiceApiKeys(into: &self.snapshot)
         // iOS identity: introduce as "Amber" and don't claim to run on Android.
         // Applied on every load (idempotent) so persisted snapshots are rebranded too.
         self.snapshot = IosSettingsMutations.shared.rebrandAmberIdentity(settings: self.snapshot)
@@ -183,6 +184,50 @@ final class IOSSharedSettingsStore {
         return ""
     }
 
+    private static func rehydrateSearchServiceApiKeys(into snapshot: inout Settings) {
+        for service in snapshot.searchServices {
+            let serviceId = service.id.description()
+            let current = searchApiKey(of: service)
+            if current == IOSCredentialRedactor.mask {
+                // Search-service credentials follow the same scheme-B invariant
+                // as chat providers: UserDefaults may contain only the mask,
+                // while the real key is restored from the side-table before the
+                // snapshot is used or persisted again.
+                if let real = IOSCredentialSideTable.load(key: IOSCredentialSideTable.searchServiceApiKey(serviceId: serviceId)) {
+                    snapshot = IosSettingsMutations.shared.updateSearchServiceApiKey(
+                        settings: snapshot,
+                        id: serviceId,
+                        apiKey: real
+                    )
+                }
+            } else if !current.isEmpty {
+                IOSCredentialSideTable.store(
+                    key: IOSCredentialSideTable.searchServiceApiKey(serviceId: serviceId),
+                    value: current
+                )
+            }
+        }
+    }
+
+    private static func searchApiKey(of service: SearchServiceOptions) -> String {
+        if let service = service as? SearchServiceOptions.ZhipuOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.TavilyOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.ExaOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.LinkUpOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.BraveOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.SerperOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.SerpApiOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.MetasoOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.OllamaOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.PerplexityOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.FirecrawlOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.JinaOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.BochaOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.AmberAgentSearchOptions { return service.apiKey }
+        if let service = service as? SearchServiceOptions.GrokOptions { return service.apiKey }
+        return ""
+    }
+
     func restoreSnapshot(_ settings: Settings) {
         snapshot = settings
         // Scheme B: store real credentials in the Keychain side-table BEFORE
@@ -192,15 +237,24 @@ final class IOSSharedSettingsStore {
         for provider in settings.providers {
             let providerId = provider.id.description() as String
             let apiKey = Self.apiKey(of: provider)
-            if !apiKey.isEmpty {
+            // Guard against the redaction mask (parity with the search loop below):
+            // if the in-memory key is the placeholder — e.g. rehydration didn't find
+            // a side-table entry — never write it back, or it would overwrite the
+            // real key in the Keychain and break the provider permanently.
+            if !apiKey.isEmpty, apiKey != IOSCredentialRedactor.mask {
                 IOSCredentialSideTable.store(key: IOSCredentialSideTable.providerApiKey(providerId: providerId), value: apiKey)
             }
         }
-        for provider in settings.providers {
-            let providerId = provider.id.description() as String
-            let apiKey = Self.apiKey(of: provider)
-            if !apiKey.isEmpty {
-                IOSCredentialSideTable.store(key: IOSCredentialSideTable.providerApiKey(providerId: providerId), value: apiKey)
+        for service in settings.searchServices {
+            let serviceId = service.id.description()
+            let apiKey = Self.searchApiKey(of: service)
+            if !apiKey.isEmpty, apiKey != IOSCredentialRedactor.mask {
+                // Persist the real search key before JSON redaction. Reloading a
+                // masked Settings blob must round-trip back to this value.
+                IOSCredentialSideTable.store(
+                    key: IOSCredentialSideTable.searchServiceApiKey(serviceId: serviceId),
+                    value: apiKey
+                )
             }
         }
         // Redact credentials BEFORE persisting (in-memory snapshot keeps real
@@ -484,6 +538,19 @@ final class IOSSharedSettingsStore {
         return merged.providers.first { ($0.id.description() as String) == providerId }
     }
 
+    /// Sets the OpenAI auth mode (API key ↔ Codex OAuth) for a provider. Codex
+    /// pins the codex backend baseUrl + Responses API. Persists to snapshot.
+    @discardableResult
+    func setOpenAIAuthMode(providerId: String, authMode: OpenAIAuthMode) -> ProviderSetting? {
+        let merged = IosSettingsMutations.shared.setOpenAIAuthMode(
+            settings: snapshot,
+            providerId: providerId,
+            authMode: authMode
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
     /// Replace the chat-typed models on provider [providerId]. Each entry is
     /// (modelId, displayName). Non-chat models are preserved. Persists to snapshot.
     @discardableResult
@@ -494,6 +561,20 @@ final class IOSSharedSettingsStore {
         }
         let merged = IosSettingsMutations.shared.updateProviderChatModels(
             settings: before, providerId: providerId, modelIds: pairs
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
+    /// Upserts the synthetic codex IMAGE model on a provider (replaces the entry
+    /// with the same modelId, preserves the rest). Persists to snapshot.
+    @discardableResult
+    func upsertProviderImageModel(providerId: String, modelId: String, displayName: String) -> ProviderSetting? {
+        let merged = IosSettingsMutations.shared.upsertProviderImageModel(
+            settings: snapshot,
+            providerId: providerId,
+            modelId: modelId,
+            displayName: displayName
         )
         restoreSnapshot(merged)
         return merged.providers.first { ($0.id.description() as String) == providerId }
@@ -520,6 +601,7 @@ final class IOSSharedSettingsStore {
         modelId: String,
         displayName: String,
         contextWindowTokens: Int?,
+        modelType: ModelType,
         headers: [(name: String, value: String)]
     ) -> ProviderSetting? {
         let pairs = headers.map {
@@ -532,6 +614,7 @@ final class IOSSharedSettingsStore {
             modelId: modelId,
             displayName: displayName,
             contextWindowTokens: contextWindowTokens.map { KotlinInt(value: Int32($0)) },
+            modelType: modelType,
             headerPairs: pairs
         )
         restoreSnapshot(merged)
@@ -552,6 +635,29 @@ final class IOSSharedSettingsStore {
     /// Set the global current chat model by model UUID string. Persists to snapshot.
     func setCurrentChatModelId(_ modelId: String) {
         let merged = IosSettingsMutations.shared.setChatModelId(settings: snapshot, modelId: modelId)
+        restoreSnapshot(merged)
+    }
+
+    /// Set the current assistant's chat model and carry per-model reasoning
+    /// memory across the switch, matching Android's chat-surface behavior.
+    func setCurrentAssistantChatModelId(_ modelId: String) {
+        let merged = IosSettingsMutations.shared.setCurrentAssistantChatModelId(settings: snapshot, modelId: modelId)
+        restoreSnapshot(merged)
+    }
+
+    func currentAssistantReasoningLevels() -> [ReasoningLevel] {
+        IosSettingsMutations.shared.currentAssistantReasoningLevels(settings: snapshot)
+    }
+
+    func currentAssistantReasoningLevel() -> ReasoningLevel {
+        IosSettingsMutations.shared.currentAssistantReasoningLevel(settings: snapshot)
+    }
+
+    func updateCurrentAssistantReasoningLevel(_ level: ReasoningLevel) {
+        let merged = IosSettingsMutations.shared.updateCurrentAssistantReasoningLevel(
+            settings: snapshot,
+            reasoningLevel: level
+        )
         restoreSnapshot(merged)
     }
 
@@ -731,6 +837,7 @@ final class IOSSharedSettingsStore {
         let removed = providers.remove(at: index)
         savedSearchProviders = providers
         if let serviceId = removed["serviceId"] {
+            IOSCredentialSideTable.delete(key: IOSCredentialSideTable.searchServiceApiKey(serviceId: serviceId))
             let merged = IosSettingsMutations.shared.removeSearchService(settings: snapshot, id: serviceId)
             restoreSnapshot(merged)
         }
