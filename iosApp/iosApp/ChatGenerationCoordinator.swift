@@ -112,6 +112,15 @@ final class ChatGenerationCoordinator {
         currentRunId != nil
     }
 
+    private var hasPendingToolApproval: Bool {
+        pendingMemoryToolApproval != nil ||
+            pendingSearchToolApproval != nil ||
+            pendingWebMountToolApproval != nil ||
+            pendingWorkspaceToolApproval != nil ||
+            pendingIshHandoffToolApproval != nil ||
+            pendingMcpToolApproval != nil
+    }
+
     init(
         dependencies: ChatGenerationDependencies,
         bindings: ChatGenerationBindings
@@ -291,6 +300,7 @@ final class ChatGenerationCoordinator {
 
     @discardableResult
     func handoffCurrentGenerationToBackground(conversationStore: IOSConversationStore?) -> Bool {
+        guard !hasPendingToolApproval else { return false }
         guard let handoff = backgroundHandoff,
               let conversationStore else {
             if isRunning {
@@ -311,10 +321,11 @@ final class ChatGenerationCoordinator {
 
         streamJob?.cancel(cause: nil)
         streamJob = nil
+        if let pendingStreamSnapshot {
+            bindings.setMessages(pendingStreamSnapshot)
+            bindings.bumpMessageRevision()
+        }
         cancelPendingStreamSnapshotPublish()
-        bindings.setMessages(handoff.displayMessages)
-        bindings.bumpMessageRevision()
-        bindings.persistMessages(handoff.conversationId)
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil

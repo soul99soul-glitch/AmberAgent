@@ -1,0 +1,4 @@
+interface:
+  display_name: "AmberAgent iOS Taste"
+  short_description: "AmberAgent iOS 界面审美与层级闸门"
+  default_prompt: "Use $amberagent-ios-taste to audit and refine AmberAgent iOS UI changes before implementation."

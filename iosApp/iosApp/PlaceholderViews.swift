@@ -1557,7 +1557,7 @@ struct SettingsHomeView: View {
     private var agentEntries: [SettingsHomeEntry] {
         [
             .init(title: "核心记忆", subtitle: nil, value: nil, systemImage: "cylinder.split.1x2", color: AmberTheme.accent, route: .memory),
-            .init(title: "执行与任务", subtitle: nil, value: nil, systemImage: "waveform.path.ecg", color: AmberTheme.accentGreen, route: .execution),
+            .init(title: "运行环境", subtitle: nil, value: nil, systemImage: "terminal", color: AmberTheme.accentGreen, route: .execution),
             .init(title: "技能", subtitle: nil, value: nil, systemImage: "wrench.and.screwdriver", color: AmberTheme.accentAmber, route: .skills),
             .init(title: "权限与批准", subtitle: nil, value: nil, systemImage: "shield", color: AmberTheme.accentCyan, route: .toolPermissions)
         ]

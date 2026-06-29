@@ -37,7 +37,7 @@ struct ExecutionSettingsView: View {
 
             Spacer()
 
-            Text("执行与任务")
+            Text("运行环境")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
@@ -53,11 +53,12 @@ struct ExecutionSettingsView: View {
 
     private var runSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "任务环境")
+            AmberSectionLabel(text: "环境配置")
             AmberFormGroup {
                 ExecutionNavigationRow(
                     systemImage: "terminal",
-                    title: "远程执行"
+                    title: "Runtime 与任务",
+                    subtitle: "默认 Runtime、Remote SSH、iSH 工具与任务记录"
                 ) {
                     router.navigate(to: .sandbox)
                 }
