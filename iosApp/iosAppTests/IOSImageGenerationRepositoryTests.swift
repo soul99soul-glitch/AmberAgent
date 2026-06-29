@@ -185,7 +185,40 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
         XCTAssertEqual(extraction.failureReason, "Image generation refused by backend")
     }
 
-    func testToolResultJSONIncludesFileURLs() throws {
+    func testCodexImageResultPollsInProgressResponse() async throws {
+        let initial = """
+        event: response.completed
+        data: {"type":"response.completed","response":{"id":"resp_123","status":"in_progress"}}
+
+        data: [DONE]
+
+        """
+        let transport = MockImageTransport(responses: [
+            .json(#"{"id":"resp_123","status":"completed","output":[{"type":"image_generation_call","id":"ig_1","status":"completed","result":"data:image/png;base64,QUJD"}]}"#)
+        ])
+        let repository = IOSImageGenerationRepository(historyStore: isolatedHistory())
+
+        let image = try await repository.resolveCodexImageResult(
+            from: Data(initial.utf8),
+            token: "codex-token",
+            accountId: "account-1",
+            transport: transport,
+            maxPollAttempts: 1,
+            pollDelayNanoseconds: 0
+        )
+
+        XCTAssertEqual(image, "data:image/png;base64,QUJD")
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.absoluteString, "https://chatgpt.com/backend-api/codex/responses/resp_123")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer codex-token")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "OpenAI-Beta"), "responses=experimental")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "originator"), "amberagent_android")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-Id"), "account-1")
+    }
+
+    func testToolResultJSONIncludesChatImageURLs() throws {
         let record = IOSImageGenerationRecord(
             id: "record-1",
             prompt: "Prompt",
@@ -203,7 +236,10 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
 
         XCTAssertEqual(payload["status"] as? String, "ok")
         XCTAssertEqual(payload["source"] as? String, "generate_image")
-        XCTAssertTrue(text.contains("file:///tmp/image.png"))
+        let files = try XCTUnwrap(payload["files"] as? [[String: Any]])
+        let file = try XCTUnwrap(files.first)
+        XCTAssertEqual(file["url"] as? String, "amber-image-generation://image-generation/image.png")
+        XCTAssertEqual(file["mime_type"] as? String, "image/png")
     }
 
     private func isolatedHistory() -> IOSImageGenerationHistoryStore {

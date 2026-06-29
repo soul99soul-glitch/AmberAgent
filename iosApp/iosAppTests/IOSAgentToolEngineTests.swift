@@ -362,4 +362,89 @@ final class IOSAgentToolEngineTests: XCTestCase {
         let output = toolPart?.output.compactMap { $0 as? UIMessagePart.Text }.first?.text
         XCTAssertEqual(output, "{\"error\":\"[engine] no executor registered for tool `ghost`\"}")
     }
+
+    // MARK: - Background handoff parity: pre-existing empty-output tools
+
+    /// When a run hands off to background, the input messages may already carry
+    /// an assistant turn with an empty-output tool call (the model decided to
+    /// generate_image, but the foreground executor was interrupted before it ran).
+    /// The engine must execute that pre-existing tool ONCE before streaming, so
+    /// the background run does NOT cause the model to re-issue (and re-run) the
+    /// same call — e.g. wasting a Codex image-generation. This is the
+    /// "generate_image must not re-run in background" fix.
+    func testPreExistingEmptyOutputToolIsExecutedBeforeStreaming() async {
+        // Input already contains the assistant tool-call turn (output empty).
+        // Provider script: only a final text turn — the model should NOT be
+        // asked to re-emit the tool (it already exists in history).
+        let provider = ScriptedProvider([assistantText("image is ready")])
+        let executor = RecordingExecutor(.filledParts([
+            UIMessagePart.Image(url: "data:image/png;base64,AAA", metadata: nil)
+        ]))
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: ["generate_image": executor],
+            configuration: .init(maxSteps: 4)
+        )
+
+        let input: [UIMessage] = [
+            userMessage("draw a cat"),
+            toolCallMessage(toolCallId: "img-1", toolName: "generate_image", input: "{\"prompt\":\"cat\"}")
+        ]
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: input,
+            params: makeParams(tools: ["generate_image"])
+        )
+
+        // The pre-existing tool must have been executed exactly once.
+        XCTAssertEqual(executor.calls.count, 1, "pre-existing empty-output tool must execute once before streaming")
+        XCTAssertEqual(executor.calls.first?.name, "generate_image")
+        XCTAssertEqual(executor.calls.first?.arguments, "{\"prompt\":\"cat\"}")
+
+        // Its output must be filled in place in the returned message list.
+        let toolMessage = result.messages[1]
+        let toolPart = toolMessage.parts.compactMap { $0 as? UIMessagePart.Tool }.first
+        XCTAssertFalse(toolPart?.output.isEmpty ?? true, "pre-existing tool output must be filled")
+
+        // The model must not be asked to re-emit the tool: the provider should
+        // only have been called for the single scripted final text turn.
+        XCTAssertEqual(provider.callCount, 1, "engine must not re-prompt the model to regenerate an already-present tool call")
+    }
+
+    /// Guard against double execution: a pre-existing empty-output tool that the
+    /// model ALSO re-issues in its next turn (provider quirk) must not be
+    /// executed twice — the in-place fill from pre-execution makes the model's
+    /// re-issued copy collapse into the already-filled one rather than running
+    /// the executor a second time.
+    func testPreExecutedToolNotReRunIfModelReIssuesIt() async {
+        // Provider re-emits the SAME tool call id in its first turn (a buggy /
+        // streaming-merged provider echo), then a final text turn.
+        let provider = ScriptedProvider([
+            toolCallMessage(toolCallId: "img-1", toolName: "generate_image", input: "{\"prompt\":\"cat\"}"),
+            assistantText("done")
+        ])
+        let executor = RecordingExecutor(.filledParts([
+            UIMessagePart.Image(url: "data:image/png;base64,AAA", metadata: nil)
+        ]))
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: ["generate_image": executor],
+            configuration: .init(maxSteps: 4)
+        )
+
+        let input: [UIMessage] = [
+            userMessage("draw a cat"),
+            toolCallMessage(toolCallId: "img-1", toolName: "generate_image", input: "{\"prompt\":\"cat\"}")
+        ]
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: input,
+            params: makeParams(tools: ["generate_image"])
+        )
+
+        // Even though the model re-issued img-1, the executor must run only once.
+        XCTAssertEqual(executor.calls.count, 1, "a tool whose output is already filled must not be re-executed")
+    }
 }

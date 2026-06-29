@@ -312,6 +312,21 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         var working = messages
         var steps = 0
 
+        // Background handoff parity: the input may carry assistant turns whose
+        // tool calls were never executed — e.g. the model already decided to
+        // generate_image, but the foreground executor was interrupted (lock
+        // screen) before it ran. Execute those pre-existing empty-output tools
+        // ONCE here, before any streaming, and fill their results in place.
+        //
+        // Without this, the loop below would first re-prompt the model, which —
+        // seeing an unanswered tool call — typically re-issues it, causing the
+        // executor to run the SAME call a second time. For costly side effects
+        // (image generation burning a Codex credit, a network search) this is a
+        // real waste and a correctness hazard. Pre-execution does not consume
+        // the `steps` budget: it is finishing work the prior (foreground) run
+        // already started, not a fresh reasoning round.
+        working = await executePreExistingPendingTools(in: working)
+
         while steps < configuration.maxSteps {
             let chunk: MessageChunk
             do {
@@ -351,7 +366,19 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             }
 
             // Gather all pending tool calls in the just-produced turn.
-            let pendingTools = pendingToolCalls(in: assistantMessage)
+            var pendingTools = pendingToolCalls(in: assistantMessage)
+            // Drop any call whose result is ALREADY filled earlier in the
+            // transcript (same toolCallKey). A background pre-execution (see
+            // `executePreExistingPendingTools`) or a provider that echoes a
+            // completed call id would otherwise re-run the executor, double-
+            // charging side effects like image generation. The empty-output
+            // echo is collapsed into the already-completed one instead.
+            if !pendingTools.isEmpty {
+                let alreadyCompleted = completedToolKeys(in: working)
+                if !alreadyCompleted.isEmpty {
+                    pendingTools = pendingTools.filter { !alreadyCompleted.contains(Self.toolCallKey($0)) }
+                }
+            }
             if pendingTools.isEmpty {
                 // No more tool calls — the model is done.
                 return IOSAgentToolEngineResult(
@@ -402,6 +429,49 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     private func pendingToolCalls(in message: UIMessage?) -> [UIMessagePart.Tool] {
         guard let message, message.role == MessageRole.assistant else { return [] }
         return message.parts.compactMap { $0 as? UIMessagePart.Tool }.filter { $0.output.isEmpty }
+    }
+
+    /// toolCallKeys of every tool call in the transcript whose output is already
+    /// filled. Used to suppress re-execution of a call the model echoes after it
+    /// was completed earlier (background pre-execution or a buggy provider echo).
+    private func completedToolKeys(in messages: [UIMessage]) -> Set<String> {
+        var keys = Set<String>()
+        for message in messages where message.role == MessageRole.assistant {
+            for case let tool as UIMessagePart.Tool in message.parts where !tool.output.isEmpty {
+                keys.insert(Self.toolCallKey(tool))
+            }
+        }
+        return keys
+    }
+
+    /// Executes any empty-output tool calls that are ALREADY present in the
+    /// input messages (across all assistant turns, not just the last), filling
+    /// their results in place. See the call site in `run` for rationale.
+    ///
+    /// Routes through the same `executeBatch` + `applyToolOutputs` path as the
+    /// main loop, so approval/denial/failure outcomes are handled identically.
+    /// Returns the messages unchanged when there is nothing pre-existing to run.
+    private func executePreExistingPendingTools(in messages: [UIMessage]) async -> [UIMessage] {
+        let preExisting = messages.flatMap { message -> [UIMessagePart.Tool] in
+            guard message.role == MessageRole.assistant else { return [] }
+            return message.parts.compactMap { $0 as? UIMessagePart.Tool }.filter { $0.output.isEmpty }
+        }
+        // Only pre-execute tools this engine actually knows how to run. Scoped
+        // engines (e.g. a subagent whose executor map is restricted to a read-only
+        // allow-list) must NOT pre-fill a parent transcript's tools they were never
+        // meant to handle — that would inject `[engine] no executor registered`
+        // failure text into the history. Such tools are left untouched; they will
+        // either be re-issued by the model (and then hit the executor map) or
+        // simply ignored.
+        let executable = preExisting.filter { executors[$0.toolName] != nil }
+        guard !executable.isEmpty else { return messages }
+        let batchResult = await executeBatch(executable, isUserInitiated: false)
+        // honorApprovalPause is irrelevant here: pre-existing tools handed off
+        // from the foreground are not user-initiated prompts, and a background
+        // run cannot surface an approval card. A .needsApproval outcome is
+        // simply left unfilled (the model will re-issue it after streaming,
+        // where the normal loop honors approvalPause per configuration).
+        return applyToolOutputs(batchResult.outputs, to: messages)
     }
 
     private struct BatchExecutionResult {

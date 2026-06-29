@@ -63,7 +63,7 @@ struct ChatGenerationBindings {
     let setPendingMcpApproval: (McpToolApprovalRequest?) -> Void
     let setContextCompactState: (ChatContextCompactState) -> Void
     let persistMessages: (KotlinUuid?) -> Void
-    let recordRun: (String, Int64, String, String) async -> Void
+    let recordRun: (String, Int64, String, String, String?) async -> Void
     let startLiveActivity: (String, AgentActivityPresentation) -> Void
     let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> UIMessage?
     let messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
@@ -163,7 +163,7 @@ final class ChatGenerationCoordinator {
             // which marks it interrupted. The terminal recordRun (completion / cancel
             // / error) REPLACEs this row with the final status + finishedAt
             // (insertRun is OnConflictStrategy.REPLACE).
-            await self.bindings.recordRun(runId, startedAt, "running", inputDigest)
+            await self.bindings.recordRun(runId, startedAt, "running", inputDigest, conversationId?.toHexDashString())
             if self.dependencies.sharedSettings.isCapabilityGateEnabled(.mcp) {
                 await self.dependencies.mcpManager.syncAll()
             }
@@ -249,7 +249,7 @@ final class ChatGenerationCoordinator {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.bindings.recordRun(runId, startedAt, "running", inputDigest)
+            await self.bindings.recordRun(runId, startedAt, "running", inputDigest, conversationId?.toHexDashString())
             let resumed = await self.toolRuntime.messagesByExecutingImageToolCall(
                 toolCall,
                 in: snapshot
@@ -257,7 +257,7 @@ final class ChatGenerationCoordinator {
             guard self.currentRunId == runId else { return }
             self.bindings.setMessages(resumed)
             self.bindings.bumpMessageRevision()
-            await self.bindings.recordRun(runId, startedAt, "completed", inputDigest)
+            await self.bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationId?.toHexDashString())
             await self.dependencies.liveActivityController.end(
                 runId: runId,
                 presentation: .completed(toolTitle: "图片生成")
@@ -293,8 +293,46 @@ final class ChatGenerationCoordinator {
                 runId: runId,
                 presentation: .cancelled()
             )
-            await bindings.recordRun(runId, startedAt, "interrupted", digest)
+            await bindings.recordRun(runId, startedAt, "interrupted", digest, conversationId?.toHexDashString())
             bindings.persistMessages(conversationId)
+        }
+    }
+
+    /// (Re)snapshots the background handoff payload. Called at every point a run
+    /// can be interrupted by a background transition:
+    ///  - `startStreaming` (model streaming), so a lock screen mid-stream hands
+    ///    off the current round's input/output snapshot.
+    ///  - `executeToolCall` (tool HTTP in flight), so a lock screen DURING tool
+    ///    execution hands off a snapshot that still carries the model's just-made
+    ///    tool call. The background engine then pre-executes that pending tool
+    ///    (see IOSAgentToolEngine.executePreExistingPendingTools) instead of
+    ///    re-prompting the model to re-issue it — e.g. avoiding a wasted
+    ///    duplicate image generation.
+    private func refreshBackgroundHandoff(
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        providerSetting: ProviderSetting,
+        backgroundProviderSetting: ProviderSetting?,
+        params: TextGenerationParams,
+        uploadMessages: [UIMessage],
+        displayMessages: [UIMessage]
+    ) {
+        if let conversationId {
+            backgroundHandoff = IOSChatBackgroundHandoff(
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                providerId: (backgroundProviderSetting ?? providerSetting).id.toHexDashString(),
+                providerSetting: backgroundProviderSetting ?? providerSetting,
+                params: params,
+                uploadMessages: uploadMessages,
+                displayMessages: displayMessages
+            )
+        } else {
+            backgroundHandoff = nil
         }
     }
 
@@ -525,20 +563,17 @@ final class ChatGenerationCoordinator {
         backgroundProviderSetting: ProviderSetting? = nil
     ) {
         let displayMessages = bindings.getMessages()
-        if let conversationId {
-            backgroundHandoff = IOSChatBackgroundHandoff(
-                runId: runId,
-                startedAt: startedAt,
-                inputDigest: inputDigest,
-                conversationId: conversationId,
-                providerSetting: backgroundProviderSetting ?? providerSetting,
-                params: params,
-                uploadMessages: uploadMessages,
-                displayMessages: displayMessages
-            )
-        } else {
-            backgroundHandoff = nil
-        }
+        refreshBackgroundHandoff(
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            providerSetting: providerSetting,
+            backgroundProviderSetting: backgroundProviderSetting,
+            params: params,
+            uploadMessages: uploadMessages,
+            displayMessages: displayMessages
+        )
         if let pendingStore = pendingBackgroundConversationStore {
             pendingBackgroundConversationStore = nil
             if handoffCurrentGenerationToBackground(conversationStore: pendingStore) {
@@ -671,7 +706,7 @@ final class ChatGenerationCoordinator {
         updated.append(errMsg)
         bindings.setMessages(updated)
         bindings.bumpMessageRevision()
-        await bindings.recordRun(runId, startedAt, "failed", inputDigest)
+        await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationId?.toHexDashString())
         await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
         bindings.persistMessages(conversationId)
         finishStreaming()
@@ -714,7 +749,7 @@ final class ChatGenerationCoordinator {
             bindings.bumpMessageRevision()
         }
 
-        await bindings.recordRun(runId, startedAt, "completed", inputDigest)
+        await bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationId?.toHexDashString())
         await dependencies.liveActivityController.end(
             runId: runId,
             presentation: .completed()
@@ -747,6 +782,21 @@ final class ChatGenerationCoordinator {
             runId: runId,
             presentation: .runningTool(toolName: pendingToolCall.toolCall.toolName),
             force: true
+        )
+        // Refresh the handoff snapshot right before the (potentially long) tool
+        // HTTP call, so a background transition during tool execution hands off
+        // a snapshot carrying this pending tool call. The background engine then
+        // pre-executes it instead of re-prompting the model to re-issue it.
+        refreshBackgroundHandoff(
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            providerSetting: providerSetting,
+            backgroundProviderSetting: nil,
+            params: params,
+            uploadMessages: baseMessages,
+            displayMessages: bindings.getMessages()
         )
         let result = await toolRuntime.execute(pendingToolCall, context: pending)
         guard currentRunId == runId else { return }

@@ -20,6 +20,7 @@ import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.util.parseErrorDetail
 import app.amber.ai.ui.ImageGenerationResult
 import app.amber.ai.ui.MessageChunk
+import app.amber.ai.ui.RESPONSES_ITEM_ID_METADATA_KEY
 import app.amber.ai.ui.STREAM_TOOL_INDEX_METADATA_KEY
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
@@ -902,7 +903,7 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
 
     // ---- Responses stream/output parsing (port of parseResponseDelta etc.) ----
 
-    private fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
+    internal fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
         val chunkType = jsonObject.str("type") ?: return null
 
         when (chunkType) {
@@ -963,29 +964,38 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
                 val item = jsonObject["item"]?.obj() ?: return null
                 val type = item.str("type") ?: return null
                 val id = item.str("id") ?: return null
+                val callId = item.str("call_id") ?: id
                 when (type) {
-                    "function_call" -> return MessageChunk(
-                        id = id,
-                        model = "",
-                        choices = listOf(
-                            UIMessageChoice(
-                                index = 0,
-                                message = null,
-                                delta = UIMessage(
-                                    role = MessageRole.ASSISTANT,
-                                    parts = listOf(
-                                        UIMessagePart.Tool(
-                                            toolCallId = id,
-                                            toolName = item.str("name") ?: "",
-                                            input = item.str("arguments") ?: "",
-                                            output = emptyList(),
-                                        ),
+                "function_call" -> return MessageChunk(
+                    id = callId,
+                    model = "",
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            message = null,
+                            delta = UIMessage(
+                                role = MessageRole.ASSISTANT,
+                                parts = listOf(
+                                    UIMessagePart.Tool(
+                                        toolCallId = callId,
+                                        toolName = item.str("name") ?: "",
+                                        input = item.str("arguments") ?: "",
+                                        output = emptyList(),
+                                        // Stamp the Responses item id (item.id, NOT call_id) so the
+                                        // accumulator can merge the later function_call_arguments.done
+                                        // delta — which carries item_id but may omit call_id/name — back
+                                        // into this call. Without it the done delta becomes a separate
+                                        // Tool, splitting id/name from arguments.
+                                        metadata = buildJsonObject {
+                                            put(RESPONSES_ITEM_ID_METADATA_KEY, id)
+                                        },
                                     ),
                                 ),
-                                finishReason = null,
                             ),
+                            finishReason = null,
                         ),
-                    )
+                    ),
+                )
 
                     "reasoning" -> {
                         val encryptedContent = item.str("encrypted_content")
@@ -1056,7 +1066,8 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             }
 
             "response.function_call_arguments.done" -> {
-                val toolCallId = jsonObject.str("item_id") ?: return null
+                val itemId = jsonObject.str("item_id") ?: return null
+                val toolCallId = jsonObject.str("call_id") ?: itemId
                 val arguments = jsonObject.str("arguments") ?: return null
                 return MessageChunk(
                     id = toolCallId,
@@ -1069,9 +1080,16 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
                                 parts = listOf(
                                     UIMessagePart.Tool(
                                         toolCallId = toolCallId,
-                                        toolName = "",
+                                        toolName = jsonObject.str("name") ?: "",
                                         input = arguments,
                                         output = emptyList(),
+                                        // Mirror the item id stamped at output_item.added. The done
+                                        // event may omit call_id/name and carries only item_id, so this
+                                        // is the key that lets the accumulator fold the arguments back
+                                        // into the call created by the added event.
+                                        metadata = buildJsonObject {
+                                            put(RESPONSES_ITEM_ID_METADATA_KEY, itemId)
+                                        },
                                     ),
                                 ),
                             ),

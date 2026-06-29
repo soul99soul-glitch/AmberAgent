@@ -177,19 +177,58 @@ final class ChatToolRuntime {
             return .filledParts(await self.dispatchImageToolCall(self.toolCall(name: "generate_image", input: arguments)))
         }
 
-        for name in ["subagent_dispatch", "model_council_run", "mcp_call"] {
-            executors[name] = IOSClosureToolExecutor { toolName, _, _ in
-                let label: String
-                switch toolName {
-                case "subagent_dispatch":
-                    label = "Subagent"
-                case "model_council_run":
-                    label = "模型委员会"
-                default:
-                    label = "MCP 工具"
-                }
-                return .denied("后台生成期间需要回到 App 确认或执行 \(label)。")
+        // Advanced tools in background. The foreground approval UI cannot surface
+        // during a BGContinuedProcessingTask, so:
+        //  - subagent_dispatch: gated by the capability switch (isAdvancedToolEnabled),
+        //    same as foreground; runs silently via the engine loop and returns its
+        //    JSON report. The live token panel is not driven — the user sees the
+        //    final result on return to the app.
+        //  - mcp_call: high-risk (external/remote), mirrors the foreground gate —
+        //    only runs when the high-risk auto-approve switch is on, otherwise
+        //    denied so the user returns to the app to confirm.
+        //  - model_council_run: DENIED in background. A council run is a long,
+        //    multi-seat/multi-round streaming sequence (many sequential HTTP calls,
+        //    potentially tens of minutes) that occupies a single executor step. The
+        //    BGTask expirationHandler cannot interrupt an in-flight streamText, so a
+        //    background council would overrun the BGTask window and be force-killed,
+        //    leaving an incomplete run. It also drives the council-room @Observable
+        //    UI, which has no subscriber in background. Revert to foreground.
+        executors["subagent_dispatch"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+            guard let self else { return .failed("Chat runtime is unavailable.") }
+            guard self.isAdvancedToolEnabled(toolName) else {
+                return .failed("\(toolName) 未开启。请先在设置中启用对应能力。")
             }
+            let result = await self.dispatchAdvancedToolCall(
+                self.toolCall(name: toolName, input: arguments),
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId
+            )
+            return .filled(result)
+        }
+
+        executors["model_council_run"] = IOSClosureToolExecutor { _, _, _ in
+            .denied("模型委员会运行时间较长且依赖前台房间界面，请回到 App 内执行。")
+        }
+
+        executors["mcp_call"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+            guard let self else { return .failed("Chat runtime is unavailable.") }
+            // High-risk gate mirrors the foreground path (executeAdvancedToolCall):
+            // MCP may touch external services, so only auto-run when the high-risk
+            // auto-approve switch is on. Otherwise deny so the user returns to confirm.
+            guard IOSLocalToolExecutor.isHighRiskAutoApproveEnabled else {
+                return .denied("后台生成期间需要回到 App 确认 MCP 工具。")
+            }
+            guard self.isAdvancedToolEnabled(toolName) else {
+                return .failed("\(toolName) 未开启。请先在设置中启用对应能力。")
+            }
+            let result = await self.dispatchAdvancedToolCall(
+                self.toolCall(name: toolName, input: arguments),
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId
+            )
+            return .filled(result)
         }
 
         return executors

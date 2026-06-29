@@ -17,7 +17,7 @@ data class IosChatBackgroundPayload(
     val startedAt: Long,
     val inputDigest: String,
     val conversationId: Uuid,
-    val providerSetting: ProviderSetting,
+    val providerId: String,
     val params: TextGenerationParams,
     val uploadMessages: List<UIMessage>,
     val displayMessages: List<UIMessage>,
@@ -41,12 +41,16 @@ object IosChatBackgroundPayloadJsonBridge {
             startedAt = startedAt,
             inputDigest = inputDigest,
             conversationId = conversationId,
-            providerSetting = providerSetting,
-            params = params,
+            providerId = providerSetting.id.toString(),
+            params = params.withoutProviderOverwrite(),
             uploadMessages = uploadMessages,
             displayMessages = displayMessages,
         )
     )
 
     fun decode(json: String): IosChatBackgroundPayload = JsonInstant.decodeFromString(json)
+
+    private fun TextGenerationParams.withoutProviderOverwrite(): TextGenerationParams {
+        return if (model.providerOverwrite == null) this else copy(model = model.copy(providerOverwrite = null))
+    }
 }

@@ -41,9 +41,6 @@ targets:
         buildPhase: resources
       - path: ../app/src/main/res/font/jetbrains_mono.ttf
         buildPhase: resources
-      - path: IshRuntimeResources/fs
-        buildPhase: resources
-        type: folder
     preBuildScripts:
       - name: Build Shared KMP Framework
         basedOnDependencyAnalysis: false
@@ -119,9 +116,6 @@ targets:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
         OTHER_LDFLAGS:
           - "-lamber_ffi"
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS:
-          - "$(inherited)"
-          - "ENABLE_EXPERIMENTAL_TERMINAL_RUNTIMES"
         HEADER_SEARCH_PATHS[sdk=iphonesimulator*]:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim/Headers"
         HEADER_SEARCH_PATHS[sdk=iphoneos*]:
@@ -137,8 +131,6 @@ targets:
         product: NIOSSH
       - package: SwiftStreamingMarkdown
         product: SwiftStreamingMarkdown
-      - package: ish-arm64-pkg
-        product: IshEmbed
       - target: AmberAgentActivityWidget
     scheme:
       gatherCoverageData: false
@@ -203,7 +195,7 @@ targets:
       - path: iosApp/AgentActivityModels.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.activity
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.experimental-gpl.activity
         INFOPLIST_FILE: ActivityWidget/Info.plist
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
@@ -277,7 +269,7 @@ targets:
           fi
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.experimental-gpl
         INFOPLIST_FILE: iosApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: iosApp/AmberAgent.entitlements
         MARKETING_VERSION: "1.0.0"

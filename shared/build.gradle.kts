@@ -86,5 +86,9 @@ kotlin {
         commonMain.dependencies {
             sharedProjects.forEach { api(project(it)) }
         }
+
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

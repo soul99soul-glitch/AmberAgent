@@ -195,6 +195,11 @@ class MessageStreamAccumulator(
                 val existing = ((parts.find {
                     it is MutablePart.Tool && it.tool.toolCallId == deltaPart.toolCallId
                 } as? MutablePart.Tool)
+                    ?: deltaPart.responsesItemId()?.let { itemId ->
+                        parts.find {
+                            it is MutablePart.Tool && it.tool.responsesItemId() == itemId
+                        } as? MutablePart.Tool
+                    }
                     ?: deltaPart.streamToolIndex()?.let { index ->
                         parts.lastOrNull { it is MutablePart.Tool && it.tool.streamToolIndex() == index } as? MutablePart.Tool
                     })?.takeIf { it.tool.canMergeDelta(deltaPart) }

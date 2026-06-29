@@ -1037,7 +1037,7 @@ private final class ChatGenerationBindingState {
             persistMessages: { [weak self] _ in
                 self?.persistedCount += 1
             },
-            recordRun: { [weak self] _, _, status, _ in
+            recordRun: { [weak self] _, _, status, _, _ in
                 await MainActor.run {
                     self?.recordedRunStatuses.append(status)
                 }

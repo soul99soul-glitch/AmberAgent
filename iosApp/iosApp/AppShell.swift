@@ -54,7 +54,8 @@ struct AppShell: View {
         IOSDeepReadBackgroundCoordinator.shared.configure(sharedSettings: sharedSettingsStore)
         IOSChatBackgroundGenerationCoordinator.shared.configure(
             conversationStore: conversationStore,
-            toolRuntime: backgroundToolRuntime
+            toolRuntime: backgroundToolRuntime,
+            sharedSettings: sharedSettingsStore
         )
         IOSDeepReadRecoveryOnce.run()
         // [Slice 6] Load persisted memories (Documents/memories/memories.json)

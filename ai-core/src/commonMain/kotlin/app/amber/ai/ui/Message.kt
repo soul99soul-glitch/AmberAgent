@@ -8,6 +8,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.MessageRole
@@ -19,6 +20,7 @@ import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 const val STREAM_TOOL_INDEX_METADATA_KEY = "stream_tool_index"
+const val RESPONSES_ITEM_ID_METADATA_KEY = "responses_item_id"
 
 // 公共消息抽象, 具体的Provider实现会转换为API接口需要的DTO
 //
@@ -134,6 +136,11 @@ data class UIMessage(
                             val existsPart = ((acc.find {
                                 it is UIMessagePart.Tool && it.toolCallId == deltaPart.toolCallId
                             } as? UIMessagePart.Tool)
+                                ?: deltaPart.responsesItemId()?.let { itemId ->
+                                    acc.find {
+                                        it is UIMessagePart.Tool && it.responsesItemId() == itemId
+                                    } as? UIMessagePart.Tool
+                                }
                                 ?: streamIndex?.let { index ->
                                     acc.lastOrNull {
                                         it is UIMessagePart.Tool && it.streamToolIndex() == index
@@ -501,6 +508,9 @@ sealed class UIMessagePart {
 fun UIMessagePart.Tool.streamToolIndex(): Int? =
     streamIndex ?: metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
 
+fun UIMessagePart.Tool.responsesItemId(): String? =
+    metadata?.get(RESPONSES_ITEM_ID_METADATA_KEY)?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+
 /**
  * Combine the tool name of an existing streaming part with that of a [delta].
  *
@@ -539,8 +549,9 @@ private fun mergeToolNames(existing: String, delta: String): String = when {
  * ("unexpected content after document"), surfacing as an HTTP 500.
  */
 fun UIMessagePart.Tool.canMergeDelta(delta: UIMessagePart.Tool): Boolean {
+    val sameResponsesItem = responsesItemId()?.let { it == delta.responsesItemId() } == true
     if (toolCallId.isNotBlank() && delta.toolCallId.isNotBlank() &&
-        toolCallId != delta.toolCallId
+        toolCallId != delta.toolCallId && !sameResponsesItem
     ) {
         return false
     }

@@ -20,6 +20,7 @@ private struct IOSChatBackgroundRuntimeJob {
 private struct IOSChatBackgroundDependencies {
     let conversationStore: IOSConversationStore
     let toolRuntime: ChatToolRuntime
+    let sharedSettings: IOSSharedSettingsStore
     let liveActivityController: AgentLiveActivityController
     let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)?
 }
@@ -29,6 +30,7 @@ struct IOSChatBackgroundHandoff {
     let startedAt: Int64
     let inputDigest: String
     let conversationId: KotlinUuid
+    let providerId: String
     let providerSetting: ProviderSetting
     let params: TextGenerationParams
     let uploadMessages: [UIMessage]
@@ -104,13 +106,15 @@ final class IOSChatBackgroundGenerationCoordinator {
     func configure(
         conversationStore: IOSConversationStore? = nil,
         toolRuntime: ChatToolRuntime? = nil,
+        sharedSettings: IOSSharedSettingsStore? = nil,
         liveActivityController: AgentLiveActivityController = .shared,
         saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)? = nil
     ) {
-        if let conversationStore, let toolRuntime {
+        if let conversationStore, let toolRuntime, let sharedSettings {
             dependencies = IOSChatBackgroundDependencies(
                 conversationStore: conversationStore,
                 toolRuntime: toolRuntime,
+                sharedSettings: sharedSettings,
                 liveActivityController: liveActivityController,
                 saveMiniAppIfPresent: saveMiniAppIfPresent
             )
@@ -292,7 +296,13 @@ final class IOSChatBackgroundGenerationCoordinator {
             completedMessages: finalMessages,
             to: job.conversationId
         )
-        await recordRun(job.runId, startedAt: job.startedAt, status: "completed", inputDigest: job.inputDigest)
+        await recordRun(
+            job.runId,
+            startedAt: job.startedAt,
+            status: "completed",
+            inputDigest: job.inputDigest,
+            conversationId: job.conversationId
+        )
         await job.liveActivityController.end(runId: job.runId, presentation: .completed())
         progress.completedUnitCount = progress.totalUnitCount
         backgroundTask.setTaskCompleted(success: true)
@@ -313,7 +323,13 @@ final class IOSChatBackgroundGenerationCoordinator {
             completedMessages: finalMessages,
             to: job.conversationId
         )
-        await recordRun(job.runId, startedAt: job.startedAt, status: "failed", inputDigest: job.inputDigest)
+        await recordRun(
+            job.runId,
+            startedAt: job.startedAt,
+            status: "failed",
+            inputDigest: job.inputDigest,
+            conversationId: job.conversationId
+        )
         await job.liveActivityController.end(runId: job.runId, presentation: .failed())
         backgroundTask.setTaskCompleted(success: false)
         finish(runId: job.runId, requestId: backgroundTask.identifier)
@@ -358,12 +374,17 @@ final class IOSChatBackgroundGenerationCoordinator {
             let data = try Data(contentsOf: url)
             guard let json = String(data: data, encoding: .utf8) else { return nil }
             let payload = try IosChatBackgroundPayloadJsonBridge.shared.decode(json: json)
+            guard let providerSetting = providerSetting(for: payload.providerId) else {
+                NSLog("[AmberChatBG] Missing background provider \(payload.providerId) for \(requestId)")
+                return nil
+            }
             return IOSChatBackgroundHandoff(
                 runId: payload.runId,
                 startedAt: payload.startedAt,
                 inputDigest: payload.inputDigest,
                 conversationId: payload.conversationId,
-                providerSetting: payload.providerSetting,
+                providerId: payload.providerId,
+                providerSetting: providerSetting,
                 params: payload.params,
                 uploadMessages: payload.uploadMessages,
                 displayMessages: payload.displayMessages
@@ -403,7 +424,8 @@ final class IOSChatBackgroundGenerationCoordinator {
         _ runId: String,
         startedAt: Int64,
         status: String,
-        inputDigest: String
+        inputDigest: String,
+        conversationId: KotlinUuid
     ) async {
         let dao = db.agentRuntimeDao()
         let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -414,7 +436,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             parentRunId: nil,
             agentDescriptorId: "chat",
             agentVersion: "1",
-            conversationId: nil,
+            conversationId: conversationId.toHexDashString(),
             messageNodeId: nil,
             producesMessageId: nil,
             assistantId: nil,
@@ -491,5 +513,11 @@ final class IOSChatBackgroundGenerationCoordinator {
 
     private func taskMap() -> [String: String] {
         UserDefaults.standard.dictionary(forKey: taskMapKey) as? [String: String] ?? [:]
+    }
+
+    private func providerSetting(for providerId: String) -> ProviderSetting? {
+        dependencies?.sharedSettings.snapshot.providers.first {
+            $0.id.toHexDashString().caseInsensitiveCompare(providerId) == .orderedSame
+        }
     }
 }

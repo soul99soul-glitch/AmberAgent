@@ -321,12 +321,13 @@ final class ChatViewModel {
                 persistMessages: { [weak self] conversationId in
                     self?.persistMessages(conversationId: conversationId)
                 },
-                recordRun: { [weak self] runId, startedAt, status, inputDigest in
+                recordRun: { [weak self] runId, startedAt, status, inputDigest, conversationId in
                     await self?.recordRun(
                         runId: runId,
                         startedAt: startedAt,
                         status: status,
-                        inputDigest: inputDigest
+                        inputDigest: inputDigest,
+                        conversationId: conversationId
                     )
                 },
                 startLiveActivity: { [weak self] runId, presentation in
@@ -1389,7 +1390,8 @@ final class ChatViewModel {
         runId: String,
         startedAt: Int64,
         status: String,
-        inputDigest: String
+        inputDigest: String,
+        conversationId: String?
     ) async {
         let dao = db.agentRuntimeDao()
 
@@ -1406,7 +1408,7 @@ final class ChatViewModel {
             parentRunId: nil,
             agentDescriptorId: "chat",
             agentVersion: "1",
-            conversationId: nil,
+            conversationId: conversationId,
             messageNodeId: nil,
             producesMessageId: nil,
             assistantId: nil,

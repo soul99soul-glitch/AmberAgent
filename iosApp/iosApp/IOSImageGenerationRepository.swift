@@ -373,11 +373,84 @@ final class IOSImageGenerationRepository {
         guard (200...299).contains(response.statusCode) else {
             throw IOSImageGenerationError.httpStatus(response.statusCode, responseBodyPreview(data))
         }
-        let extraction = Self.codexImageExtraction(from: data)
+        return try await resolveCodexImageResult(
+            from: data,
+            token: token,
+            accountId: accountId,
+            transport: transport
+        )
+    }
+
+    func resolveCodexImageResult(
+        from data: Data,
+        token: String,
+        accountId: String?,
+        transport: any IOSImageGenerationHTTPTransport,
+        maxPollAttempts: Int = 30,
+        pollDelayNanoseconds: UInt64 = 2_000_000_000
+    ) async throws -> String {
+        var extraction = Self.codexImageExtraction(from: data)
         if let image = extraction.images.first {
             return image
         }
-        throw IOSImageGenerationError.noImages(extraction.failureReason ?? responseBodyPreview(data))
+        var lastFailureReason = extraction.failureReason ?? responseBodyPreview(data)
+        guard let responseId = extraction.pendingResponseId else {
+            throw IOSImageGenerationError.noImages(lastFailureReason)
+        }
+
+        for attempt in 0..<max(0, maxPollAttempts) {
+            if attempt > 0, pollDelayNanoseconds > 0 {
+                try await Task.sleep(nanoseconds: pollDelayNanoseconds)
+            }
+            try Task.checkCancellation()
+            let pollData = try await fetchCodexImageResponse(
+                responseId: responseId,
+                token: token,
+                accountId: accountId,
+                transport: transport
+            )
+            extraction = Self.codexImageExtraction(from: pollData)
+            if let image = extraction.images.first {
+                return image
+            }
+            if let reason = extraction.failureReason {
+                lastFailureReason = reason
+            } else {
+                lastFailureReason = responseBodyPreview(pollData)
+            }
+            if extraction.pendingResponseId == nil {
+                break
+            }
+        }
+        throw IOSImageGenerationError.noImages(lastFailureReason)
+    }
+
+    private func fetchCodexImageResponse(
+        responseId: String,
+        token: String,
+        accountId: String?,
+        transport: any IOSImageGenerationHTTPTransport
+    ) async throws -> Data {
+        let encodedId = responseId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? responseId
+        guard let url = URL(string: IOSCodexOAuthConstants.codexBackendBaseUrl + "/responses/" + encodedId) else {
+            throw IOSImageGenerationError.invalidBaseURL
+        }
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "GET"
+        urlRequest.timeoutInterval = 60
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        urlRequest.setValue("responses=experimental", forHTTPHeaderField: "OpenAI-Beta")
+        urlRequest.setValue(IOSCodexOAuthConstants.originator, forHTTPHeaderField: "originator")
+        if let accountId, !accountId.isEmpty {
+            urlRequest.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
+        }
+
+        let (response, data) = try await transport.send(urlRequest)
+        guard (200...299).contains(response.statusCode) else {
+            throw IOSImageGenerationError.httpStatus(response.statusCode, responseBodyPreview(data))
+        }
+        return data
     }
 
     static func codexResponsesRequestBody(for request: IOSImageGenerationRequest) -> [String: Any] {
@@ -418,16 +491,19 @@ final class IOSImageGenerationRepository {
     struct CodexImageExtraction: Equatable {
         var images: [String]
         var failureReason: String?
+        var pendingResponseId: String?
     }
 
     static func codexImageExtraction(from data: Data) -> CodexImageExtraction {
         var results: [String] = []
         var reasons: [String] = []
+        var pendingResponseIds: [String] = []
         var eventTypes: [String] = []
 
         if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             results.append(contentsOf: codexImageResults(fromJSONObject: root))
             reasons.append(contentsOf: codexImageFailureReasons(fromJSONObject: root))
+            pendingResponseIds.append(contentsOf: codexPendingResponseIds(fromJSONObject: root))
             if let type = root["type"] as? String, !type.isEmpty {
                 eventTypes.append(type)
             }
@@ -437,6 +513,7 @@ final class IOSImageGenerationRepository {
             for object in sseJSONObjects(from: text) {
                 results.append(contentsOf: codexImageResults(fromJSONObject: object))
                 reasons.append(contentsOf: codexImageFailureReasons(fromJSONObject: object))
+                pendingResponseIds.append(contentsOf: codexPendingResponseIds(fromJSONObject: object))
                 if let type = object["type"] as? String, !type.isEmpty {
                     eventTypes.append(type)
                 }
@@ -450,7 +527,11 @@ final class IOSImageGenerationRepository {
             return true
         }
         let reason = images.isEmpty ? (reasons.first ?? fallbackCodexImageReason(eventTypes: eventTypes, data: data)) : nil
-        return CodexImageExtraction(images: images, failureReason: reason)
+        return CodexImageExtraction(
+            images: images,
+            failureReason: reason,
+            pendingResponseId: images.isEmpty ? dedupedNonEmpty(pendingResponseIds).first : nil
+        )
     }
 
     private static func codexImageResults(fromJSONObject root: [String: Any]) -> [String] {
@@ -486,6 +567,23 @@ final class IOSImageGenerationRepository {
         }
 
         return results
+    }
+
+    private static func codexPendingResponseIds(fromJSONObject root: [String: Any]) -> [String] {
+        var ids: [String] = []
+
+        if let status = root["status"] as? String,
+           status == "in_progress",
+           let id = root["id"] as? String,
+           !id.isEmpty {
+            ids.append(id)
+        }
+
+        if let response = root["response"] as? [String: Any] {
+            ids.append(contentsOf: codexPendingResponseIds(fromJSONObject: response))
+        }
+
+        return dedupedNonEmpty(ids)
     }
 
     private static func codexImageFailureReasons(fromJSONObject root: [String: Any]) -> [String] {
