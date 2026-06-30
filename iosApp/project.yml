@@ -25,6 +25,9 @@ packages:
   SwiftStreamingMarkdown:
     url: https://github.com/microsoft/SwiftStreamingMarkdown
     branch: main
+  MarkdownView:
+    url: https://github.com/LiYanan2004/MarkdownView.git
+    revision: c1254af
   ish-arm64-pkg:
     url: https://github.com/Lolendor/ish-arm64-pkg
     exactVersion: 0.3.3
@@ -131,6 +134,8 @@ targets:
         product: NIOSSH
       - package: SwiftStreamingMarkdown
         product: SwiftStreamingMarkdown
+      - package: MarkdownView
+        product: MarkdownView
       - target: AmberAgentActivityWidget
     scheme:
       gatherCoverageData: false
@@ -308,6 +313,8 @@ targets:
         product: NIOSSH
       - package: SwiftStreamingMarkdown
         product: SwiftStreamingMarkdown
+      - package: MarkdownView
+        product: MarkdownView
       - package: ish-arm64-pkg
         product: IshEmbed
       - target: AmberAgentActivityWidgetExperimentalGPL

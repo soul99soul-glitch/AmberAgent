@@ -270,6 +270,7 @@ enum IOSDisplayPreferenceKeys {
     static let agentName = "app.amber.ios.display.agentName"
     static let followGeneration = "app.amber.ios.display.followGeneration"
     static let microsoftStreamingMarkdown = "app.amber.ios.display.microsoftStreamingMarkdown"
+    static let liyananStreamingMarkdown = "app.amber.ios.display.liyananStreamingMarkdown"
 }
 
 enum IOSChatFont: String, CaseIterable, Identifiable {

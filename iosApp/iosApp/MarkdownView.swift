@@ -26,7 +26,7 @@ private extension NodeType {
     }
 }
 
-struct MarkdownView: View {
+struct AmberMarkdownView: View {
     let markdown: String
     var displaySetting: DisplaySetting? = nil
     var style: MarkdownStyle = .standard

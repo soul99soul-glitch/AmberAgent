@@ -10,6 +10,7 @@ struct DisplayFontSettingsView: View {
     @AppStorage(IOSDisplayPreferenceKeys.agentName) private var agentName = true
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
+    @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
 
     private var selectedFont: IOSChatFont {
         IOSChatFont(rawValue: chatFont) ?? .default
@@ -140,6 +141,20 @@ struct DisplayFontSettingsView: View {
                     isOn: microsoftStreamingMarkdown
                 ) {
                     microsoftStreamingMarkdown.toggle()
+                    if microsoftStreamingMarkdown {
+                        liyananStreamingMarkdown = false
+                    }
+                }
+                DisplayDivider()
+                DisplayToggleRow(
+                    title: "使用 MarkdownView 流式渲染库",
+                    subtitle: "实验选项；与微软流式 MD 渲染库互斥。",
+                    isOn: liyananStreamingMarkdown
+                ) {
+                    liyananStreamingMarkdown.toggle()
+                    if liyananStreamingMarkdown {
+                        microsoftStreamingMarkdown = false
+                    }
                 }
             }
         }

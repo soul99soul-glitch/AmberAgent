@@ -1,6 +1,7 @@
 import SwiftUI
 import Shared
 import SwiftStreamingMarkdown
+import MarkdownView
 import Photos
 
 struct MessageBubbleView: View {
@@ -402,8 +403,8 @@ struct MessageBubbleView: View {
 }
 
 /// 唯一的 assistant Markdown 渲染入口:聊天页与模型议会共用同一组件,
-/// 跟随同一个「微软流式 Markdown」开关,默认走 App 自有同步渲染器(吃字体/排版偏好),
-/// 开关开时两处一起切到微软增量流式库。改成单一来源,避免两边各渲染各的、视觉不一致。
+/// 跟随同一组 Markdown 渲染偏好。默认走 App 自有同步渲染器(吃字体/排版偏好),
+/// 实验渲染器在这里互斥切换,避免两边各渲染各的、视觉不一致。
 struct ChatAssistantMarkdownView: View {
     let markdown: String
     var displaySetting: DisplaySetting?
@@ -412,6 +413,7 @@ struct ChatAssistantMarkdownView: View {
     var onGenerativeWidgetAction: (String) -> Void = { _ in }
 
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
+    @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
     @State private var hasUsedStreamingMarkdownRenderer = false
 
     var body: some View {
@@ -465,7 +467,8 @@ struct ChatAssistantMarkdownView: View {
     }
 
     private var shouldUseStreamingMarkdownRenderer: Bool {
-        microsoftStreamingMarkdown || isStreaming || hasUsedStreamingMarkdownRenderer
+        guard !liyananStreamingMarkdown else { return false }
+        return microsoftStreamingMarkdown || isStreaming || hasUsedStreamingMarkdownRenderer
     }
 
     private var streamingMarkdownConfig: SwiftStreamingMarkdown.MarkdownRenderConfig {
@@ -475,11 +478,31 @@ struct ChatAssistantMarkdownView: View {
 
     @ViewBuilder
     private func markdownText(_ content: String) -> some View {
-        if shouldUseStreamingMarkdownRenderer {
+        if liyananStreamingMarkdown {
+            LiyananStreamingMarkdownContentView(content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if shouldUseStreamingMarkdownRenderer {
             SwiftStreamingMarkdown.MarkdownView(text: content, config: streamingMarkdownConfig)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            MarkdownView(markdown: content, displaySetting: displaySetting)
+            AmberMarkdownView(markdown: content, displaySetting: displaySetting)
+        }
+    }
+}
+
+private struct LiyananStreamingMarkdownContentView: View {
+    let content: String
+    @State private var source = StreamingMarkdownSource()
+
+    var body: some View {
+        StreamingMarkdownReader(source) { parseResult in
+            MarkdownView(parseResult)
+        }
+        .onAppear {
+            source.text = content
+        }
+        .onChange(of: content) { _, newValue in
+            source.text = newValue
         }
     }
 }
