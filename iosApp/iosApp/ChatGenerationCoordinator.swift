@@ -53,7 +53,7 @@ struct ChatGenerationDependencies {
 struct ChatGenerationBindings {
     let getMessages: () -> [UIMessage]
     let setMessages: ([UIMessage]) -> Void
-    let bumpMessageRevision: () -> Void
+    let bumpMessageRevision: (ChatMessageUpdateReason) -> Void
     let setIsLoading: (Bool) -> Void
     let setPendingMemoryApproval: (MemoryToolApprovalRequest?) -> Void
     let setPendingSearchApproval: (SearchToolApprovalRequest?) -> Void
@@ -244,7 +244,7 @@ final class ChatGenerationCoordinator {
             translation: nil
         ))
         bindings.setMessages(snapshot)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.toolCallStarted)
         bindings.persistMessages(conversationId)
 
         Task { @MainActor [weak self] in
@@ -256,13 +256,14 @@ final class ChatGenerationCoordinator {
             )
             guard self.currentRunId == runId else { return }
             self.bindings.setMessages(resumed)
-            self.bindings.bumpMessageRevision()
+            self.bindings.bumpMessageRevision(.toolResultAppended)
             await self.bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationId?.toHexDashString())
             await self.dependencies.liveActivityController.end(
                 runId: runId,
                 presentation: .completed(toolTitle: "图片生成")
             )
             self.bindings.persistMessages(conversationId)
+            self.bindings.bumpMessageRevision(.generationCompleted)
             self.finishStreaming()
         }
     }
@@ -286,6 +287,9 @@ final class ChatGenerationCoordinator {
         clearPendingApprovals()
         bindings.setIsLoading(false)
         bindings.setContextCompactState(.idle)
+        if runId != nil {
+            bindings.bumpMessageRevision(.generationCancelled)
+        }
 
         guard let runId, let startedAt, let digest else { return }
         Task { @MainActor [dependencies, bindings] in
@@ -361,7 +365,7 @@ final class ChatGenerationCoordinator {
         streamJob = nil
         if let pendingStreamSnapshot {
             bindings.setMessages(pendingStreamSnapshot)
-            bindings.bumpMessageRevision()
+            bindings.bumpMessageRevision(.streamDelta)
         }
         cancelPendingStreamSnapshotPublish()
         currentRunId = nil
@@ -374,6 +378,7 @@ final class ChatGenerationCoordinator {
         clearPendingApprovals()
         bindings.setContextCompactState(.idle)
         bindings.setIsLoading(false)
+        bindings.bumpMessageRevision(.generationHandedOffToBackground)
         return true
     }
 
@@ -632,7 +637,7 @@ final class ChatGenerationCoordinator {
                     self.cancelPendingStreamSnapshotPublish()
                     let snapshot = accumulator.snapshot()
                     self.bindings.setMessages(snapshot)
-                    self.bindings.bumpMessageRevision()
+                    self.bindings.bumpMessageRevision(.assistantStreamClosed)
                     await self.presentStreamError(
                         rawMessage: error.message ?? String(describing: error),
                         modelId: params.model.modelId,
@@ -668,7 +673,7 @@ final class ChatGenerationCoordinator {
         guard let snapshot = pendingStreamSnapshot else { return }
         pendingStreamSnapshot = nil
         bindings.setMessages(snapshot)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.streamDelta)
     }
 
     private func cancelPendingStreamSnapshotPublish() {
@@ -705,7 +710,7 @@ final class ChatGenerationCoordinator {
         var updated = bindings.getMessages()
         updated.append(errMsg)
         bindings.setMessages(updated)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.generationFailed)
         await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationId?.toHexDashString())
         await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
         bindings.persistMessages(conversationId)
@@ -723,11 +728,12 @@ final class ChatGenerationCoordinator {
     ) async {
         guard currentRunId == runId else { return }
         bindings.setMessages(snapshot)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.assistantStreamClosed)
 
         if let pendingToolCall = toolRuntime.nextPendingToolCall(in: snapshot),
            currentToolResumeCount < maxToolResumeCount {
             currentToolResumeCount += 1
+            bindings.bumpMessageRevision(.toolCallStarted)
             streamJob = nil
             await executeToolCall(
                 pendingToolCall,
@@ -746,7 +752,7 @@ final class ChatGenerationCoordinator {
         if let miniAppNotice = bindings.saveMiniAppIfPresent(snapshot, conversationId) {
             finalSnapshot.append(miniAppNotice)
             bindings.setMessages(finalSnapshot)
-            bindings.bumpMessageRevision()
+            bindings.bumpMessageRevision(.toolResultAppended)
         }
 
         await bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationId?.toHexDashString())
@@ -755,6 +761,7 @@ final class ChatGenerationCoordinator {
             presentation: .completed()
         )
         bindings.persistMessages(conversationId)
+        bindings.bumpMessageRevision(.generationCompleted)
         finishStreaming()
     }
 
@@ -804,7 +811,7 @@ final class ChatGenerationCoordinator {
         switch result {
         case .completed(let resumedMessages):
             bindings.setMessages(resumedMessages)
-            bindings.bumpMessageRevision()
+            bindings.bumpMessageRevision(.toolResultAppended)
             await dependencies.liveActivityController.update(
                 runId: runId,
                 presentation: .generatingResponse(modelName: params.model.modelId),
@@ -850,7 +857,7 @@ final class ChatGenerationCoordinator {
             bindings.setPendingMcpApproval(request)
         }
         bindings.setMessages(pending.baseMessages)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.awaitingToolApproval)
         bindings.setIsLoading(false)
         Task { @MainActor [dependencies] in
             await dependencies.liveActivityController.update(
@@ -870,7 +877,7 @@ final class ChatGenerationCoordinator {
             writePolicy: writePolicy
         )
         bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
@@ -885,7 +892,7 @@ final class ChatGenerationCoordinator {
         )
         guard currentRunId == pending.runId else { return }
         bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
@@ -900,7 +907,7 @@ final class ChatGenerationCoordinator {
         )
         guard currentRunId == pending.runId else { return }
         bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
@@ -915,7 +922,7 @@ final class ChatGenerationCoordinator {
         )
         guard currentRunId == pending.runId else { return }
         bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
@@ -930,7 +937,7 @@ final class ChatGenerationCoordinator {
         )
         guard currentRunId == pending.runId else { return }
         bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
@@ -945,7 +952,7 @@ final class ChatGenerationCoordinator {
         )
         guard currentRunId == pending.runId else { return }
         bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision()
+        bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
@@ -956,6 +963,7 @@ final class ChatGenerationCoordinator {
         guard currentRunId == pending.runId else { return }
         guard dependencies.autoGenerateResponses else {
             bindings.persistMessages(pending.conversationId)
+            bindings.bumpMessageRevision(.generationCompleted)
             finishStreaming()
             return
         }

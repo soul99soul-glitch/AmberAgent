@@ -90,6 +90,7 @@ final class ChatViewModel {
     var selectedFileContextError: String?
     var reasoningLevel: ReasoningLevel = .off
     var messageRevision: Int = 0
+    var messageUpdateSignal = ChatMessageUpdateSignal()
     var pendingMemoryApproval: MemoryToolApprovalRequest?
     var pendingSearchApproval: SearchToolApprovalRequest?
     var pendingWebMountApproval: WebMountToolApprovalRequest?
@@ -283,8 +284,8 @@ final class ChatViewModel {
                 setMessages: { [weak self] messages in
                     self?.messages = messages
                 },
-                bumpMessageRevision: { [weak self] in
-                    self?.messageRevision &+= 1
+                bumpMessageRevision: { [weak self] reason in
+                    self?.bumpMessageRevision(reason: reason)
                 },
                 setIsLoading: { [weak self] isLoading in
                     guard let self else { return }
@@ -350,11 +351,16 @@ final class ChatViewModel {
 
     /// 从 store 的 currentConversation 灌入 messages（切换会话 / App 启动时调用）。
     /// 必须在主线程；调用方负责确保 store 已 bootstrap。
-    func reloadFromStore() {
+    func bumpMessageRevision(reason: ChatMessageUpdateReason) {
+        messageRevision &+= 1
+        messageUpdateSignal = ChatMessageUpdateSignal(revision: messageRevision, reason: reason)
+    }
+
+    func reloadFromStore(reason: ChatMessageUpdateReason = .initialLoad) {
         guard let store = conversationStore else { return }
         messages = store.currentMessages
         contextCompactState = .idle
-        messageRevision &+= 1
+        bumpMessageRevision(reason: reason)
         chatSuggestions = []
     }
 
@@ -395,14 +401,14 @@ final class ChatViewModel {
                     if saved {
                         self.pendingAssistantRegeneration = nil
                         self.messages = store.currentMessages
-                        self.messageRevision &+= 1
+                        self.bumpMessageRevision(reason: .branchChange)
                         return
                     }
                 }
             }
             self.pendingAssistantRegeneration = nil
             self.messages = store.currentMessages
-            self.messageRevision &+= 1
+            self.bumpMessageRevision(reason: .branchChange)
             return
         }
         if let targetConversationId {
@@ -477,8 +483,8 @@ final class ChatViewModel {
         // 批量加载/切换会话走 `messages = store.currentMessages`(不在事务内),不会逐条动画。
         withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
             messages.append(userMsg)
+            bumpMessageRevision(reason: .userAppend)
         }
-        messageRevision &+= 1
         inputText = ""
         chatSuggestions = []
         pendingSelectedFilePreview = nil
@@ -1042,7 +1048,7 @@ final class ChatViewModel {
                 // Re-sync the flat projection from the mutated tree.
                 if let updated = store.currentConversation {
                     self.messages = updated.currentMessages
-                    self.messageRevision &+= 1
+                    self.bumpMessageRevision(reason: .branchChange)
                 }
                 let digest = chatInputDigest(for: regenerateDigestSeed())
                 generateResponse(inputDigest: digest, conversationId: currentConversationId)
@@ -1065,7 +1071,7 @@ final class ChatViewModel {
                     generatedMessageIndex: uploadMessages.count
                 )
                 self.messages = uploadMessages
-                self.messageRevision &+= 1
+                self.bumpMessageRevision(reason: .branchChange)
                 let digest = chatInputDigest(for: regenerateDigestSeed())
                 generateResponse(inputDigest: digest, conversationId: conversation.id)
             }
@@ -1094,7 +1100,7 @@ final class ChatViewModel {
             await store.truncateAfter(messageIndex: index)
             if let updated = store.currentConversation {
                 self.messages = updated.currentMessages
-                self.messageRevision &+= 1
+                self.bumpMessageRevision(reason: .branchChange)
                 self.persistMessages(conversationId: currentConversationId)
             }
             let digest = chatInputDigest(for: trimmed)
@@ -1109,7 +1115,7 @@ final class ChatViewModel {
             await store.deleteMessage(messageIndex: index)
             if let updated = store.currentConversation {
                 self.messages = updated.currentMessages
-                self.messageRevision &+= 1
+                self.bumpMessageRevision(reason: .branchChange)
             }
             self.persistMessages(conversationId: currentConversationId)
         }
@@ -1122,7 +1128,7 @@ final class ChatViewModel {
             await store.selectVariant(messageIndex: messageIndex, variantIndex: variantIndex)
             if let updated = store.currentConversation {
                 self.messages = updated.currentMessages
-                self.messageRevision &+= 1
+                self.bumpMessageRevision(reason: .branchChange)
             }
         }
     }

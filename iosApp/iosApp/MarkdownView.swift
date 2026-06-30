@@ -38,20 +38,36 @@ struct AmberMarkdownView: View {
     @State private var cachedSource: String = ""
     @State private var parseFailed: Bool = false
 
+    /// 同步解析当前 markdown,返回格式化后的 children(带缓存)。
+    /// 不能依赖 onAppear 延后解析——那会让 LazyVStack 回收行后重新实现时,
+    /// 首帧渲染未格式化的 Text(markdown)(高度与格式化版本不同),导致 contentSize 跳变,
+    /// 上滑查看历史时每条 agent 消息被「弹过」,直接跳到下一条 user 消息。
+    /// 在 body 里同步算出 children,首帧就是格式化版本,高度稳定。
+    private var resolvedChildren: [PackedAstNode] {
+        if cachedMarkdown != markdown {
+            parseMarkdown(markdown)
+        }
+        return cachedChildren
+    }
+
+    private var resolvedFailed: Bool {
+        if cachedMarkdown != markdown {
+            parseMarkdown(markdown)
+        }
+        return parseFailed
+    }
+
     var body: some View {
         Group {
-            if parseFailed || cachedChildren.isEmpty {
+            if resolvedFailed || resolvedChildren.isEmpty {
                 Text(markdown)
                     .font(.body)
             } else {
-                blockStack(cachedChildren, source: markdown)
+                blockStack(resolvedChildren, source: markdown)
             }
         }
         .onChange(of: markdown) { _, newMarkdown in
             parseMarkdown(newMarkdown)
-        }
-        .onAppear {
-            parseMarkdown(markdown)
         }
     }
 

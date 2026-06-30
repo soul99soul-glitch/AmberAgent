@@ -57,8 +57,10 @@ class MessageStreamAccumulator(
         val replacement = message.copy(modelId = message.modelId ?: model?.id)
         if (active.role != replacement.role) {
             prefix += active.snapshot()
+            active = MutableMessage.from(replacement)
+            return
         }
-        active = MutableMessage.from(replacement)
+        active = MutableMessage.from(replacement.copy(id = active.snapshot().id))
     }
 
     private class MutableMessage(

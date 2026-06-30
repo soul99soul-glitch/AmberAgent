@@ -61,10 +61,18 @@ final class IOSConversationStore {
     /// 会话摘要列表（按 updateAt 倒序、置顶优先，由 KMP 层排序）。
     private(set) var summaries: [ConversationSummary] = []
 
-    /// 单调递增的修订号：每次 currentConversation 被替换（新建/切换/删除回退）时 +1。
-    /// 供 SwiftUI `.onChange` 观察——KotlinUuid 是否被 Swift 当作 Equatable 不可靠，
-    /// 用 Int 修订号保证切换会话一定能触发 reload。
+    /// 单调递增的修订号：每次 currentConversation 被替换（新建/切换/删除回退/落盘/分支）时 +1。
+    /// 供需要感知「当前会话内容可能变了」的 UI 观察（如 island 标题）。
+    /// 注意：它对「同会话落盘」也会 +1，因此不能用它判断「是否切到了别的会话」——
+    /// 那是 conversationSwitchedRevision 的职责。把两者混淆会导致 viewport 误把落盘当切会话，
+    /// 重建 ScrollView → 抖动 + 上滑看历史被甩回锚点。
     private(set) var currentRevision: Int = 0
+
+    /// 单调递增的「切会话」修订号：**只在真正切换到另一个会话时** +1
+    /// （newConversation / selectConversation / 删除当前后退到别的会话）。
+    /// 同会话落盘、分支编辑、重命名、置顶**不** bump 它。
+    /// 供 viewport/ChatView 观察以判断是否需要重灌历史 + 重新从底部实现落位。
+    private(set) var conversationSwitchedRevision: Int = 0
 
     /// 最近一次存储 I/O 错误（磁盘满/写失败/损坏）。绑定到顶层 `.alert(item:)`
     /// 让用户看到失败，避免"以为保存了实际没保存"的静默丢数据。nil = 无未读错误。
@@ -129,7 +137,7 @@ final class IOSConversationStore {
             newConversation: true
         )
         await persist(conversation)
-        setCurrent(conversation)
+        setCurrentAsSwitch(conversation)
         await refreshSummaries()
     }
 
@@ -143,7 +151,7 @@ final class IOSConversationStore {
             loaded = nil
         }
         if let loaded {
-            setCurrent(loaded)
+            setCurrentAsSwitch(loaded)
         }
         // load 失败时不切换 current，保留上一个；UI 层可提示。
     }
@@ -476,10 +484,20 @@ final class IOSConversationStore {
         return leading + prefix + suffix + trailing
     }
 
-    /// 替换 currentConversation 并 bump 修订号（驱动 SwiftUI onChange reload）。
+    /// 替换 currentConversation 并 bump currentRevision（驱动需要感知内容变化的 UI）。
+    /// 不 bump conversationSwitchedRevision——调用方若代表「切到了别的会话」，
+    /// 应改用 setCurrentAsSwitch。
     private func setCurrent(_ conversation: Conversation?) {
         currentConversation = conversation
         currentRevision &+= 1
+    }
+
+    /// 切换到另一个会话时调用：同时 bump currentRevision 与 conversationSwitchedRevision，
+    /// 让 viewport 能区分「真切换」与「同会话落盘/编辑」。
+    private func setCurrentAsSwitch(_ conversation: Conversation?) {
+        currentConversation = conversation
+        currentRevision &+= 1
+        conversationSwitchedRevision &+= 1
     }
 
     // MARK: - Message branching (Android ChatService parity)

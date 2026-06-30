@@ -1019,7 +1019,7 @@ private final class ChatGenerationBindingState {
             setMessages: { [weak self] messages in
                 self?.messages = messages
             },
-            bumpMessageRevision: { [weak self] in
+            bumpMessageRevision: { [weak self] _ in
                 self?.messageRevision += 1
             },
             setIsLoading: { [weak self] isLoading in

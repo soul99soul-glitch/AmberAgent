@@ -23,6 +23,9 @@ struct MessageBubbleView: View {
     /// True only for the last message — gates the live "thinking" timer so a stopped/older
     /// reasoning (whose finishedAt was never set on cancel) doesn't keep counting.
     var isLastMessage: Bool = false
+    /// 这条消息「曾经流式过」的记忆(来自 projection 层)。决定 assistant 文本是否走流式
+    /// markdown 渲染器 + 逐词淡入,避免完成态切 renderer 时块消失/高度塌陷闪烁。
+    var hasEverStreamed: Bool = false
     /// Reasoning effort label (e.g. "Auto") shown on the thinking pill. nil hides the suffix.
     var reasoningLevelLabel: String? = nil
 
@@ -265,6 +268,7 @@ struct MessageBubbleView: View {
                             displaySetting: displaySetting,
                             generativeUiSetting: generativeUiSetting,
                             isStreaming: isGenerating && isLastMessage,
+                            hasEverStreamed: hasEverStreamed,
                             onGenerativeWidgetAction: onGenerativeWidgetAction
                         )
                     }
@@ -410,10 +414,16 @@ struct ChatAssistantMarkdownView: View {
     var displaySetting: DisplaySetting?
     var generativeUiSetting: GenerativeUiSetting?
     var isStreaming = false
+    var hasEverStreamed = false
     var onGenerativeWidgetAction: (String) -> Void = { _ in }
 
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
+    /// per-view-instance 的「这个 bubble 曾经流式过」latch。
+    /// 关键特性:LazyVStack 回收行后,新 view 实例的 @State 重置为 false → 历史消息回滚到
+    /// 高度稳定的同步渲染器 AmberMarkdownView;而可视区内刚完成的消息仍保持流式渲染器
+    /// (latch=true),避免 completion 瞬间切渲染器闪烁。用 ChatView 层持久化的 hasEverStreamed
+    /// 代替它会破坏这个特性——回收的行依然收到 true → 用异步渲染器 → 首帧高度 0 → 上滑跳动。
     @State private var hasUsedStreamingMarkdownRenderer = false
 
     var body: some View {
@@ -468,7 +478,14 @@ struct ChatAssistantMarkdownView: View {
 
     private var shouldUseStreamingMarkdownRenderer: Bool {
         guard !liyananStreamingMarkdown else { return false }
-        return microsoftStreamingMarkdown || isStreaming || hasUsedStreamingMarkdownRenderer
+        // 异步渲染器(SwiftStreamingMarkdown/Liyanan)的首帧高度为 0(controller.renderable==nil
+        // → empty document)。LazyVStack 上滑回收再实现历史行时,这个 0→完整的高度跳变会让
+        // contentSize 骤变,把视图弹过 agent 消息。
+        // 因此:异步渲染器只用于「正在流式」的消息(isStreaming)或「本 view 实例曾流式过」
+        // 的消息(hasUsedStreamingMarkdownRenderer latch)。已完成的历史消息(LazyVStack 回收后
+        // 新实例 latch 重置为 false)回退到同步、高度稳定的 AmberMarkdownView。
+        // microsoftStreamingMarkdown 全局开关不再对历史消息强制异步渲染器——它只影响流式中的消息。
+        return isStreaming || hasUsedStreamingMarkdownRenderer
     }
 
     private var streamingMarkdownConfig: SwiftStreamingMarkdown.MarkdownRenderConfig {
