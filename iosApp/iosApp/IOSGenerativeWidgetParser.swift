@@ -81,6 +81,37 @@ enum IOSGenerativeWidgetParser {
         parseStandaloneFullHtmlWidget(content, idSeed: "standalone") != nil
     }
 
+    static func mayContainWidgetPayload(_ content: String) -> Bool {
+        let markerNeedles = ["```show-widget", "```widget", "```generative-ui"]
+        if markerNeedles.contains(where: { content.range(of: $0, options: [.caseInsensitive]) != nil }) {
+            return true
+        }
+
+        let htmlNeedles = [
+            "<!doctype html",
+            "<html",
+            "<div id=\"deck\"",
+            "<div id='deck'",
+            "class=\"slides\"",
+            "class='slides'",
+            "class=\"deck\"",
+            "class='deck'",
+            "id=\"card-set\"",
+            "class=\"poster",
+        ]
+        if htmlNeedles.contains(where: { content.range(of: $0, options: [.caseInsensitive]) != nil }) {
+            return true
+        }
+
+        guard let start = content.firstIndex(where: { !$0.isWhitespace }),
+              content[start] == "{" else {
+            return false
+        }
+        return content.range(of: #""renderer""#, options: [.caseInsensitive]) != nil ||
+            content.range(of: #""widget_code""#, options: [.caseInsensitive]) != nil ||
+            content.range(of: #""html""#, options: [.caseInsensitive]) != nil
+    }
+
     static func hasRenderableWidget(_ content: String) -> Bool {
         parse(content, streaming: false).contains { segment in
             if case .widget = segment { return true }

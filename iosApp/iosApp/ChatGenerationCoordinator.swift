@@ -98,7 +98,7 @@ final class ChatGenerationCoordinator {
     private let maxToolResumeCount = 4
     private var pendingStreamSnapshot: [UIMessage]?
     private var streamSnapshotFlushTask: Task<Void, Never>?
-    private let streamSnapshotFlushDelayNanos: UInt64 = 33_000_000
+    private let streamSnapshotFlushDelayNanos: UInt64 = 16_000_000
     private var pendingMemoryToolApproval: ChatPendingToolApproval?
     private var pendingSearchToolApproval: ChatPendingToolApproval?
     private var pendingWebMountToolApproval: ChatPendingToolApproval?
@@ -107,6 +107,10 @@ final class ChatGenerationCoordinator {
     private var pendingMcpToolApproval: ChatPendingToolApproval?
     private var backgroundHandoff: IOSChatBackgroundHandoff?
     private weak var pendingBackgroundConversationStore: IOSConversationStore?
+    private var foregroundToolExecutionTask: Task<ChatToolRuntimeResult, Never>?
+    private var foregroundToolExecutionToken: UUID?
+    private var foregroundImageToolExecutionTask: Task<[UIMessage], Never>?
+    private var foregroundImageToolExecutionToken: UUID?
 
     var isRunning: Bool {
         currentRunId != nil
@@ -212,7 +216,12 @@ final class ChatGenerationCoordinator {
         }
     }
 
-    func runImageTool(input: String, conversationId: KotlinUuid?) {
+    func runImageTool(
+        input: String,
+        conversationId: KotlinUuid?,
+        providerSetting: ProviderSetting?,
+        params: TextGenerationParams?
+    ) {
         if isRunning {
             cancel()
         }
@@ -246,21 +255,50 @@ final class ChatGenerationCoordinator {
         bindings.setMessages(snapshot)
         bindings.bumpMessageRevision(.toolCallStarted)
         bindings.persistMessages(conversationId)
+        if let conversationId, let providerSetting, let params {
+            backgroundHandoff = IOSChatBackgroundHandoff(
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                providerId: providerSetting.id.toHexDashString(),
+                providerSetting: providerSetting,
+                params: params,
+                uploadMessages: snapshot,
+                displayMessages: snapshot,
+                mode: .singleToolOnly
+            )
+        }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             await self.bindings.recordRun(runId, startedAt, "running", inputDigest, conversationId?.toHexDashString())
-            let resumed = await self.toolRuntime.messagesByExecutingImageToolCall(
-                toolCall,
-                in: snapshot
-            )
+            guard self.currentRunId == runId else { return }
+            let executionToken = UUID()
+            let executionTask = Task { @MainActor [toolRuntime] in
+                await toolRuntime.messagesByExecutingImageToolCall(
+                    toolCall,
+                    in: snapshot
+                )
+            }
+            self.foregroundImageToolExecutionToken = executionToken
+            self.foregroundImageToolExecutionTask = executionTask
+            let resumed = await executionTask.value
+            self.clearForegroundImageToolExecution(matching: executionToken)
             guard self.currentRunId == runId else { return }
             self.bindings.setMessages(resumed)
             self.bindings.bumpMessageRevision(.toolResultAppended)
-            await self.bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationId?.toHexDashString())
+            let failureReason = ChatToolOutputFormatter.imageFailureReason(in: resumed, matching: toolCall)
+            await self.bindings.recordRun(
+                runId,
+                startedAt,
+                failureReason == nil ? "completed" : "failed",
+                inputDigest,
+                conversationId?.toHexDashString()
+            )
             await self.dependencies.liveActivityController.end(
                 runId: runId,
-                presentation: .completed(toolTitle: "图片生成")
+                presentation: failureReason == nil ? .completed(toolTitle: "图片生成") : .failed()
             )
             self.bindings.persistMessages(conversationId)
             self.bindings.bumpMessageRevision(.generationCompleted)
@@ -276,6 +314,7 @@ final class ChatGenerationCoordinator {
 
         streamJob?.cancel(cause: nil)
         streamJob = nil
+        cancelForegroundToolExecutions()
         cancelPendingStreamSnapshotPublish()
         currentRunId = nil
         currentStartedAt = nil
@@ -333,7 +372,8 @@ final class ChatGenerationCoordinator {
                 providerSetting: backgroundProviderSetting ?? providerSetting,
                 params: params,
                 uploadMessages: uploadMessages,
-                displayMessages: displayMessages
+                displayMessages: displayMessages,
+                mode: .continueModel
             )
         } else {
             backgroundHandoff = nil
@@ -343,6 +383,14 @@ final class ChatGenerationCoordinator {
     @discardableResult
     func handoffCurrentGenerationToBackground(conversationStore: IOSConversationStore?) -> Bool {
         guard !hasPendingToolApproval else { return false }
+        // Once a foreground tool request is already in flight, keep that request
+        // as the owner. BG handoff is not guaranteed to start immediately; if we
+        // cancel/clear the foreground run here, the in-flight result can be
+        // discarded and the user returns to an empty pending tool bubble.
+        guard foregroundToolExecutionTask == nil,
+              foregroundImageToolExecutionTask == nil else {
+            return false
+        }
         guard let handoff = backgroundHandoff,
               let conversationStore else {
             if isRunning {
@@ -363,6 +411,7 @@ final class ChatGenerationCoordinator {
 
         streamJob?.cancel(cause: nil)
         streamJob = nil
+        cancelForegroundToolExecutions()
         if let pendingStreamSnapshot {
             bindings.setMessages(pendingStreamSnapshot)
             bindings.bumpMessageRevision(.streamDelta)
@@ -492,7 +541,11 @@ final class ChatGenerationCoordinator {
             return
         }
         guard currentRunId == runId else { return }
-        let runtimePreparedMessages = bindings.messagesByInjectingRuntimeContext(preparedUploadMessages)
+        let promptedUploadMessages = messagesByInjectingImageGenerationPromptIfNeeded(
+            preparedUploadMessages,
+            params: effectiveParams
+        )
+        let runtimePreparedMessages = bindings.messagesByInjectingRuntimeContext(promptedUploadMessages)
         let finalUploadMessages: [UIMessage]
         do {
             finalUploadMessages = try IOSContextCompactionCoordinator.shared.finalizedMessagesForRequest(
@@ -555,6 +608,34 @@ final class ChatGenerationCoordinator {
         case .idle:
             bindings.setContextCompactState(.idle)
         }
+    }
+
+    private func messagesByInjectingImageGenerationPromptIfNeeded(
+        _ messages: [UIMessage],
+        params: TextGenerationParams
+    ) -> [UIMessage] {
+        guard params.tools.contains(where: { $0.name == "generate_image" }) else {
+            return messages
+        }
+        let prompt = """
+        Image-generation routing guidance for AmberAgent iOS:
+        - When the user asks for a photographic, painted, illustrated, poster, wallpaper, concept-art, or character-art image, call `generate_image` exactly once instead of answering with SVG/HTML.
+        - Preserve the user's subject, style, aspect-ratio cues, and language. Prefer a detailed prompt with subject, composition, lighting, mood, and visual style.
+        - If the request references named fiction/IP, avoid brittle prompt wording like "fan art of <character> from <franchise>". Use an original inspired depiction that keeps the user's requested vibe and recognizable high-level visual cues without asking for an exact copyrighted character, logo, actor, or celebrity likeness.
+        - If `generate_image` fails, report the failure honestly and ask whether to retry or adjust the prompt. Do not substitute an SVG/code sketch as if image generation succeeded unless the user explicitly asks for a fallback sketch.
+        """
+        let systemMessage = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.system,
+            parts: [UIMessagePart.Text(text: prompt, metadata: nil)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        return [systemMessage] + messages
     }
 
     private func startStreaming(
@@ -805,7 +886,14 @@ final class ChatGenerationCoordinator {
             uploadMessages: baseMessages,
             displayMessages: bindings.getMessages()
         )
-        let result = await toolRuntime.execute(pendingToolCall, context: pending)
+        let executionToken = UUID()
+        let executionTask = Task { @MainActor [toolRuntime] in
+            await toolRuntime.execute(pendingToolCall, context: pending)
+        }
+        foregroundToolExecutionToken = executionToken
+        foregroundToolExecutionTask = executionTask
+        let result = await executionTask.value
+        clearForegroundToolExecution(matching: executionToken)
         guard currentRunId == runId else { return }
 
         switch result {
@@ -1026,10 +1114,39 @@ final class ChatGenerationCoordinator {
         currentInputDigest = nil
         currentConversationIdForRun = nil
         streamJob = nil
+        clearForegroundToolExecutions()
         backgroundHandoff = nil
         pendingBackgroundConversationStore = nil
         bindings.setIsLoading(false)
         clearPendingApprovals()
+    }
+
+    private func cancelForegroundToolExecutions() {
+        foregroundToolExecutionTask?.cancel()
+        foregroundToolExecutionTask = nil
+        foregroundToolExecutionToken = nil
+        foregroundImageToolExecutionTask?.cancel()
+        foregroundImageToolExecutionTask = nil
+        foregroundImageToolExecutionToken = nil
+    }
+
+    private func clearForegroundToolExecutions() {
+        foregroundToolExecutionTask = nil
+        foregroundToolExecutionToken = nil
+        foregroundImageToolExecutionTask = nil
+        foregroundImageToolExecutionToken = nil
+    }
+
+    private func clearForegroundToolExecution(matching token: UUID) {
+        guard foregroundToolExecutionToken == token else { return }
+        foregroundToolExecutionTask = nil
+        foregroundToolExecutionToken = nil
+    }
+
+    private func clearForegroundImageToolExecution(matching token: UUID) {
+        guard foregroundImageToolExecutionToken == token else { return }
+        foregroundImageToolExecutionTask = nil
+        foregroundImageToolExecutionToken = nil
     }
 
     private func clearPendingApprovals() {

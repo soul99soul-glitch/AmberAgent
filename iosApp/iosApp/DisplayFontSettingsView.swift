@@ -137,7 +137,7 @@ struct DisplayFontSettingsView: View {
                 DisplayDivider()
                 DisplayToggleRow(
                     title: "使用微软流式 MD 渲染库",
-                    subtitle: "实验选项；仅影响聊天中的助手 Markdown 正文。",
+                    subtitle: "仅用于生成中/刚生成的助手正文；历史消息仍回到稳定渲染器。",
                     isOn: microsoftStreamingMarkdown
                 ) {
                     microsoftStreamingMarkdown.toggle()
@@ -148,7 +148,7 @@ struct DisplayFontSettingsView: View {
                 DisplayDivider()
                 DisplayToggleRow(
                     title: "使用 MarkdownView 流式渲染库",
-                    subtitle: "实验选项；与微软流式 MD 渲染库互斥。",
+                    subtitle: "实验选项；同样只用于生成中/刚生成的助手正文。",
                     isOn: liyananStreamingMarkdown
                 ) {
                     liyananStreamingMarkdown.toggle()

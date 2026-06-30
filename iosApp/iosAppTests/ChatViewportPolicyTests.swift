@@ -38,7 +38,7 @@ final class ChatViewportPolicyTests: XCTestCase {
         XCTAssertEqual(state.conversationLoadToken, 5)
     }
 
-    func testStreamDeltaFollowsBottomWithoutAnimationWhenAutoFollowing() {
+    func testStreamDeltaFollowsBottomWithLightAnimationWhenAutoFollowing() {
         let command = ChatViewportPolicy.commandForMessageUpdate(
             reason: .streamDelta,
             canAutoFollow: true,
@@ -47,7 +47,7 @@ final class ChatViewportPolicyTests: XCTestCase {
 
         XCTAssertEqual(
             command,
-            .followBottom(animated: false, targetBottomAnchor: true, deferred: false)
+            .followBottom(animated: true, targetBottomAnchor: true, deferred: false)
         )
     }
 

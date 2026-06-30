@@ -350,25 +350,18 @@ final class IOSDeepReadBackgroundCoordinator {
     private var permittedIdentifier: String { "\(bundleIdentifier).deepread.*" }
     private var requestPrefix: String { "\(bundleIdentifier).deepread." }
     private var taskMapKey: String { "\(bundleIdentifier).deepread.backgroundTaskMap" }
-    private var registered = false
+    private var registeredRequestIds: Set<String> = []
     private var sharedSettings: IOSSharedSettingsStore?
 
     private init() {}
 
     func configure(sharedSettings: IOSSharedSettingsStore) {
         self.sharedSettings = sharedSettings
-        guard !registered else { return }
-        registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: permittedIdentifier, using: nil) { task in
-            guard let task = task as? BGContinuedProcessingTask else {
-                task.setTaskCompleted(success: false)
-                return
+        for (requestId, taskId) in taskMap() {
+            if !register(requestId: requestId) {
+                IOSDeepReadStore.shared.fail(id: taskId, message: "深度阅读后台任务注册失败，请重试。")
+                finish(taskId: taskId, requestId: requestId)
             }
-            Task { @MainActor in
-                await IOSDeepReadBackgroundCoordinator.shared.handle(task)
-            }
-        }
-        if !registered {
-            NSLog("[AmberDeepRead] BGContinuedProcessingTask registration failed for \(permittedIdentifier)")
         }
     }
 
@@ -381,9 +374,8 @@ final class IOSDeepReadBackgroundCoordinator {
     ) {
         configure(sharedSettings: sharedSettings)
         let requestId = requestIdentifier(for: taskId, generationId: generationId)
-        remember(taskId: taskId, requestId: requestId)
 
-        guard registered else {
+        guard register(requestId: requestId) else {
             finish(taskId: taskId)
             onStatus("后台任务注册失败，已以前台任务继续生成。", false)
             Task { @MainActor in
@@ -396,6 +388,7 @@ final class IOSDeepReadBackgroundCoordinator {
             }
             return
         }
+        remember(taskId: taskId, requestId: requestId)
 
         let request = BGContinuedProcessingTaskRequest(
             identifier: requestId,
@@ -405,7 +398,7 @@ final class IOSDeepReadBackgroundCoordinator {
         request.strategy = .fail
         do {
             try BGTaskScheduler.shared.submit(request)
-            onStatus("已开始后台生成深度阅读。离开 App 后系统会继续处理，并显示进度。", false)
+            onStatus("已提交后台生成深度阅读。离开 App 后系统会尝试继续处理并显示进度；如被中断，可回到 App 重试。", false)
         } catch {
             finish(taskId: taskId)
             NSLog("[AmberDeepRead] BGContinuedProcessingTask submit failed: \(error)")
@@ -419,6 +412,30 @@ final class IOSDeepReadBackgroundCoordinator {
                 )
             }
         }
+    }
+
+    private func register(requestId: String) -> Bool {
+        guard requestId.hasPrefix(requestPrefix) else {
+            NSLog("[AmberDeepRead] Refusing to register unexpected BGContinuedProcessingTask id \(requestId); expected prefix \(requestPrefix)")
+            return false
+        }
+        guard !registeredRequestIds.contains(requestId) else { return true }
+
+        let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: requestId, using: nil) { task in
+            guard let task = task as? BGContinuedProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            Task { @MainActor in
+                await IOSDeepReadBackgroundCoordinator.shared.handle(task)
+            }
+        }
+        if registered {
+            registeredRequestIds.insert(requestId)
+        } else {
+            NSLog("[AmberDeepRead] BGContinuedProcessingTask registration failed for \(requestId); permitted pattern \(permittedIdentifier)")
+        }
+        return registered
     }
 
     func finish(taskId: String, requestId: String? = nil) {

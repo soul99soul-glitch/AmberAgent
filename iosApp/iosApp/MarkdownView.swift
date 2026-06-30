@@ -10,6 +10,47 @@ enum MarkdownStyle {
     case magazine
 }
 
+private struct AmberMarkdownParseResult {
+    let children: [PackedAstNode]
+    let failed: Bool
+}
+
+private final class AmberMarkdownParseResultBox {
+    let value: AmberMarkdownParseResult
+
+    init(_ value: AmberMarkdownParseResult) {
+        self.value = value
+    }
+}
+
+private final class AmberMarkdownAstCache: @unchecked Sendable {
+    static let shared = AmberMarkdownAstCache()
+
+    private let cache = NSCache<NSString, AmberMarkdownParseResultBox>()
+
+    private init() {
+        cache.countLimit = 200
+    }
+
+    func result(for markdown: String) -> AmberMarkdownParseResult {
+        let key = markdown as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached.value
+        }
+
+        let result: AmberMarkdownParseResult
+        if let data = MarkdownBridge.parse(markdown),
+           let reader = PackedAstReader(data: data),
+           let root = reader.root() {
+            result = AmberMarkdownParseResult(children: root.children, failed: false)
+        } else {
+            result = AmberMarkdownParseResult(children: [], failed: true)
+        }
+        cache.setObject(AmberMarkdownParseResultBox(result), forKey: key)
+        return result
+    }
+}
+
 private extension NodeType {
     /// Block-level nodes get their own layout; everything else is inline content that
     /// must be coalesced into a flowing Text (see `renderListItemContent`).
@@ -31,59 +72,15 @@ struct AmberMarkdownView: View {
     var displaySetting: DisplaySetting? = nil
     var style: MarkdownStyle = .standard
 
-    /// Cache the parsed AST to avoid re-parsing on every SwiftUI body evaluation.
-    /// Only re-parses when `markdown` content changes.
-    @State private var cachedMarkdown: String = ""
-    @State private var cachedChildren: [PackedAstNode] = []
-    @State private var cachedSource: String = ""
-    @State private var parseFailed: Bool = false
-
-    /// 同步解析当前 markdown,返回格式化后的 children(带缓存)。
-    /// 不能依赖 onAppear 延后解析——那会让 LazyVStack 回收行后重新实现时,
-    /// 首帧渲染未格式化的 Text(markdown)(高度与格式化版本不同),导致 contentSize 跳变,
-    /// 上滑查看历史时每条 agent 消息被「弹过」,直接跳到下一条 user 消息。
-    /// 在 body 里同步算出 children,首帧就是格式化版本,高度稳定。
-    private var resolvedChildren: [PackedAstNode] {
-        if cachedMarkdown != markdown {
-            parseMarkdown(markdown)
-        }
-        return cachedChildren
-    }
-
-    private var resolvedFailed: Bool {
-        if cachedMarkdown != markdown {
-            parseMarkdown(markdown)
-        }
-        return parseFailed
-    }
-
     var body: some View {
+        let resolved = AmberMarkdownAstCache.shared.result(for: markdown)
         Group {
-            if resolvedFailed || resolvedChildren.isEmpty {
+            if resolved.failed || resolved.children.isEmpty {
                 Text(markdown)
                     .font(.body)
             } else {
-                blockStack(resolvedChildren, source: markdown)
+                blockStack(resolved.children, source: markdown)
             }
-        }
-        .onChange(of: markdown) { _, newMarkdown in
-            parseMarkdown(newMarkdown)
-        }
-    }
-
-    private func parseMarkdown(_ md: String) {
-        guard md != cachedMarkdown else { return }
-        cachedMarkdown = md
-        if let data = MarkdownBridge.parse(md),
-           let reader = PackedAstReader(data: data),
-           let root = reader.root() {
-            cachedChildren = root.children
-            cachedSource = md
-            parseFailed = false
-        } else {
-            cachedChildren = []
-            cachedSource = md
-            parseFailed = true
         }
     }
 

@@ -415,6 +415,13 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         )
     }
 
+    /// Executes only the pending tool calls already present in `messages`.
+    /// Used by direct image-edit background handoff where no follow-up model
+    /// turn should be requested after the tool result is filled.
+    public func executePreExistingToolsOnly(messages: [UIMessage]) async -> [UIMessage] {
+        await executePreExistingPendingTools(in: messages)
+    }
+
     // MARK: - Internals
 
     private func assistantMessage(from chunk: MessageChunk) -> UIMessage? {

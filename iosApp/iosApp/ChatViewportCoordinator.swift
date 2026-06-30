@@ -269,6 +269,7 @@ struct ChatViewportState: Equatable {
     var showScrollToBottom: Bool = false
     var isAtBottom: Bool = false
     var isContentScrollable: Bool = false
+    var liveRenderingFarFromBottom: Bool = false
     var conversationLoadToken: Int = 0
 
     mutating func resetForConversationLoad() {
@@ -277,6 +278,7 @@ struct ChatViewportState: Equatable {
         showScrollToBottom = false
         isAtBottom = false
         isContentScrollable = false
+        liveRenderingFarFromBottom = false
         conversationLoadToken &+= 1
     }
 }
@@ -289,6 +291,7 @@ struct ChatViewportEnvironment: Equatable {
 struct ChatViewportGeometrySnapshot: Equatable {
     var atBottom: Bool
     var isContentScrollable: Bool
+    var liveRenderingFarFromBottom: Bool
 }
 
 enum ChatViewportReducer {
@@ -319,6 +322,7 @@ enum ChatViewportReducer {
     ) -> [ChatViewportScrollCommand] {
         state.isAtBottom = snapshot.atBottom
         state.isContentScrollable = snapshot.isContentScrollable
+        state.liveRenderingFarFromBottom = snapshot.liveRenderingFarFromBottom
         state.followPaused = ChatViewportPolicy.followPausedAfterGeometryChange(
             wasPaused: state.followPaused,
             userDragging: state.userDragging,
@@ -360,7 +364,10 @@ enum ChatViewportPolicy {
             // 若滚动也走 spring 会和入场动画抢,产生画面跳动。滚动只负责"贴到底"。
             guard canAutoFollow, isContentScrollable else { return .none }
             return .followBottom(animated: false, targetBottomAnchor: true, deferred: false)
-        case .assistantStreamDelta, .assistantStreamClosed, .toolCallStarted, .toolResultAppended,
+        case .assistantStreamDelta:
+            guard canAutoFollow, isContentScrollable else { return .none }
+            return .followBottom(animated: true, targetBottomAnchor: true, deferred: false)
+        case .assistantStreamClosed, .toolCallStarted, .toolResultAppended,
              .awaitingToolApproval, .generationCompleted, .generationFailed, .generationCancelled,
              .generationHandedOffToBackground:
             guard canAutoFollow, isContentScrollable else { return .none }

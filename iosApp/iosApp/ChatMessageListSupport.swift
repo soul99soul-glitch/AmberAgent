@@ -11,11 +11,23 @@ enum ChatLayout {
     static let bottomRestGap: CGFloat = 26
     /// 内容最底部的不可见锚点 id:定位到它(而非最后一条气泡)即停在「带留白的内容底」。
     static let bottomAnchorID = "chat-bottom-rest-anchor"
+    /// 流式消息离底部足够远时冻结渲染,避免用户看历史时为不可见的新 token 重排 Markdown。
+    static let liveRenderingLODMinDistance: CGFloat = 700
+    static let liveRenderingLODScreenFactor: CGFloat = 1.15
 }
 
 struct ChatScrollGeometryState: Equatable {
     let atBottom: Bool
     let isScrollable: Bool
+    let liveRenderingFarFromBottom: Bool
+}
+
+struct ChatComposerHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
 
 struct ChatAssistantStack<Content: View>: View {

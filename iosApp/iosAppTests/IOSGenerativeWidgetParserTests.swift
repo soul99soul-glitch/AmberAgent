@@ -2,6 +2,32 @@ import XCTest
 @testable import iosApp
 
 final class IOSGenerativeWidgetParserTests: XCTestCase {
+    func testWidgetPayloadPreflightSkipsPlainMarkdown() {
+        XCTAssertFalse(IOSGenerativeWidgetParser.mayContainWidgetPayload(
+            """
+            ## 标题
+            - 第一条
+            - 第二条
+
+            普通 Markdown 正文不应该进入生成式 UI 完整解析路径。
+            """
+        ))
+    }
+
+    func testWidgetPayloadPreflightRecognizesWidgetAndHtmlPayloads() {
+        XCTAssertTrue(IOSGenerativeWidgetParser.mayContainWidgetPayload(
+            """
+            Intro
+            ```show-widget
+            {"title":"Flow","widget_code":"<svg></svg>"}
+            ```
+            """
+        ))
+        XCTAssertTrue(IOSGenerativeWidgetParser.mayContainWidgetPayload(
+            #"<!DOCTYPE html><html><body><div id="deck">A</div></body></html>"#
+        ))
+    }
+
     func testParsesWidgetBetweenMarkdownText() {
         let segments = IOSGenerativeWidgetParser.parse(
             """

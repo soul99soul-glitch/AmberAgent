@@ -34,7 +34,9 @@ struct ChatView: View {
     @State private var streamedMessageIDs: Set<String> = []
     @State private var scrollToBottomTrigger = 0
     @State private var composerInputHeight: CGFloat = 40
+    @State private var composerBarHeight: CGFloat = 0
     @State private var composerInputController = ComposerInputController()
+    @State private var keyboardFollowTask: Task<Void, Never>?
     @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.scenePhase) private var scenePhase
 
@@ -107,6 +109,16 @@ struct ChatView: View {
             // 若把内容强制成 light,前景图标/文字会按浅色调色板解析成深灰,贴在深色玻璃上发暗。
             // 让 composer 跟随真实外观(与顶栏一致),图标与玻璃明暗才匹配。
             inputBar
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(key: ChatComposerHeightPreferenceKey.self, value: proxy.size.height)
+                    }
+                }
+        }
+        .onPreferenceChange(ChatComposerHeightPreferenceKey.self) { height in
+            guard abs(composerBarHeight - height) > 0.5 else { return }
+            composerBarHeight = height
         }
         .sheet(isPresented: $isModelSheetPresented) {
             ComposerModelSheet(sharedSettings: sharedSettings, currentModel: composerCurrentModelSelection) { model in
@@ -506,7 +518,9 @@ struct ChatView: View {
                                 onModelDefaults: openModelDefaults
                             )
                         }
-                        ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
+                        ForEach(messageRows) { row in
+                            let index = row.index
+                            let message = row.message
                             VStack(spacing: 0) {
                                 MessageBubbleView(
                                     message: message,
@@ -533,14 +547,16 @@ struct ChatView: View {
                                             aspectRatio: aspectRatio
                                         )
                                     },
-                                    isGenerating: viewModel.isGenerationActive,
-                                    isLastMessage: index == viewModel.messages.count - 1,
+                                    isGenerating: row.isLast && viewModel.isGenerationActive,
+                                    isLastMessage: row.isLast,
+                                    hasEverStreamed: row.hasEverStreamed,
+                                    liveMarkdownRenderingEnabled: !shouldDegradeLiveAssistantRendering,
                                     reasoningLevelLabel: composerReasoningLabel
                                 )
 
                             }
-                            .id(message.id)
-                            .transition(message.role == MessageRole.user
+                            .id(row.messageId)
+                            .transition(row.canAnimateInsertion
                                 ? messageEntranceTransition(isUser: true)
                                 : .opacity
                             )
@@ -608,13 +624,20 @@ struct ChatView: View {
                 }
             }
             .onScrollGeometryChange(for: ChatScrollGeometryState.self) { geometry in
-                ChatScrollGeometryState(
-                    atBottom: geometry.contentSize.height - geometry.visibleRect.maxY <= ChatLayout.bottomStickThreshold,
-                    isScrollable: geometry.contentSize.height > geometry.visibleRect.height + ChatLayout.bottomStickThreshold
+                let distanceToBottom = max(0, geometry.contentSize.height - geometry.visibleRect.maxY)
+                let liveRenderingThreshold = max(
+                    ChatLayout.liveRenderingLODMinDistance,
+                    geometry.visibleRect.height * ChatLayout.liveRenderingLODScreenFactor
+                )
+                return ChatScrollGeometryState(
+                    atBottom: distanceToBottom <= ChatLayout.bottomStickThreshold,
+                    isScrollable: geometry.contentSize.height > geometry.visibleRect.height + ChatLayout.bottomStickThreshold,
+                    liveRenderingFarFromBottom: distanceToBottom > liveRenderingThreshold
                 )
             } action: { _, state in
                 viewportState.isAtBottom = state.atBottom
                 viewportState.isContentScrollable = state.isScrollable
+                viewportState.liveRenderingFarFromBottom = state.liveRenderingFarFromBottom
                 viewportState.followPaused = ChatViewportPolicy.followPausedAfterGeometryChange(
                     wasPaused: viewportState.followPaused,
                     userDragging: viewportState.userDragging,
@@ -638,7 +661,7 @@ struct ChatView: View {
                         generationActive: isStreamingFollowActive
                     )
                 )
-                commands.forEach { executeScrollCommand($0, proxy: proxy) }
+                commands.forEach { executeScrollCommand($0, proxy: proxy, sourceEvent: signal.event) }
             }
             .onChange(of: viewportState.isContentScrollable) { _, scrollable in
                 guard scrollable else { return }
@@ -651,15 +674,33 @@ struct ChatView: View {
             .onChange(of: isInputFocused) { _, focused in
                 // 键盘弹起时无论是否 followPaused 都应滚到底部,确保最新消息不被键盘遮挡。
                 guard focused, !viewModel.messages.isEmpty else { return }
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    guard !viewModel.messages.isEmpty else { return }
-                    scrollToLatestMessage(proxy, animated: true, deferred: false)
-                }
+                scheduleFocusedBottomFollow(proxy: proxy, settleDelay: 0.26)
+            }
+            .onChange(of: composerBarHeight) { _, _ in
+                guard isInputFocused, !viewModel.messages.isEmpty else { return }
+                scheduleFocusedBottomFollow(proxy: proxy, settleDelay: 0.12)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                guard isInputFocused, !viewModel.messages.isEmpty else { return }
+                scheduleFocusedBottomFollow(
+                    proxy: proxy,
+                    settleDelay: keyboardAnimationDuration(from: notification)
+                )
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { _ in
+                guard isInputFocused, !viewModel.messages.isEmpty else { return }
+                scheduleFocusedBottomFollow(proxy: proxy, settleDelay: 0)
             }
             // 「回到底部」悬浮按钮的触发(按钮在 composer 区,无法直接拿 proxy,用计数器桥接)。
             .onChange(of: scrollToBottomTrigger) { _, _ in
                 executeScrollCommand(ChatViewportPolicy.commandForExplicitBottomRequest(), proxy: proxy)
+            }
+            .onDisappear {
+                keyboardFollowTask?.cancel()
+                keyboardFollowTask = nil
+            }
+            .task(id: viewportState.conversationLoadToken) {
+                await scrollToBottomAfterConversationLoad(proxy: proxy)
             }
         }
         // 每加载一次会话就换新身份,让 initialOffset 锚点重新「从底部实现」落位
@@ -671,6 +712,14 @@ struct ChatView: View {
         viewModel.isGenerationActive || viewModel.isLoading
     }
 
+    private var shouldDegradeLiveAssistantRendering: Bool {
+        guard isStreamingFollowActive,
+              viewModel.messages.last?.role == MessageRole.assistant else {
+            return false
+        }
+        return viewportState.liveRenderingFarFromBottom
+    }
+
     private var isAwaitingFirstAssistantChunk: Bool {
         isStreamingFollowActive && viewModel.messages.last?.role == MessageRole.user
     }
@@ -679,7 +728,8 @@ struct ChatView: View {
         _ proxy: ScrollViewProxy,
         animated: Bool,
         deferred: Bool,
-        targetBottomAnchor: Bool = false
+        targetBottomAnchor: Bool = false,
+        animation: Animation? = nil
     ) {
         guard !viewModel.messages.isEmpty,
               let last = viewModel.messages.last else { return }
@@ -693,8 +743,14 @@ struct ChatView: View {
         }
         let action = {
             if animated {
-                withAnimation {
-                    scroll()
+                if let animation {
+                    withAnimation(animation) {
+                        scroll()
+                    }
+                } else {
+                    withAnimation {
+                        scroll()
+                    }
                 }
             } else {
                 var transaction = Transaction()
@@ -712,7 +768,11 @@ struct ChatView: View {
         }
     }
 
-    private func executeScrollCommand(_ command: ChatViewportScrollCommand, proxy: ScrollViewProxy) {
+    private func executeScrollCommand(
+        _ command: ChatViewportScrollCommand,
+        proxy: ScrollViewProxy,
+        sourceEvent: ChatEvent? = nil
+    ) {
         switch command {
         case .none, .initialAnchor, .showBottomButton, .resetForConversationSwitch:
             return
@@ -721,9 +781,64 @@ struct ChatView: View {
                 proxy,
                 animated: animated,
                 deferred: deferred,
-                targetBottomAnchor: targetBottomAnchor
+                targetBottomAnchor: targetBottomAnchor,
+                animation: scrollAnimation(for: sourceEvent)
             )
         }
+    }
+
+    private func scrollAnimation(for event: ChatEvent?) -> Animation? {
+        switch event {
+        case .assistantStreamDelta:
+            return .linear(duration: 0.08)
+        default:
+            return nil
+        }
+    }
+
+    private func scrollToBottomAfterConversationLoad(proxy: ScrollViewProxy) async {
+        let token = viewportState.conversationLoadToken
+        guard token > 0 else { return }
+        guard !viewModel.messages.isEmpty else { return }
+        // After a session switch, the ScrollView gets a fresh identity. Give the
+        // new LazyVStack one render pass so the bottom anchor exists before
+        // issuing the explicit bottom alignment.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        guard !Task.isCancelled,
+              viewportState.conversationLoadToken == token,
+              !viewModel.messages.isEmpty else { return }
+        scrollToLatestMessage(proxy, animated: false, deferred: false, targetBottomAnchor: true)
+    }
+
+    private func scheduleFocusedBottomFollow(proxy: ScrollViewProxy, settleDelay: TimeInterval) {
+        guard isInputFocused, !viewModel.messages.isEmpty else { return }
+
+        // Let the keyboard/composer move first, then align the transcript once the
+        // viewport has settled. This avoids stacking a scroll jump on top of the
+        // system keyboard animation.
+        keyboardFollowTask?.cancel()
+        keyboardFollowTask = Task { @MainActor in
+            if settleDelay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(settleDelay * 1_000_000_000))
+            } else {
+                await Task.yield()
+            }
+            guard !Task.isCancelled, isInputFocused, !viewModel.messages.isEmpty else { return }
+            scrollToLatestMessage(
+                proxy,
+                animated: true,
+                deferred: false,
+                targetBottomAnchor: true,
+                animation: .easeOut(duration: 0.18)
+            )
+        }
+    }
+
+    private func keyboardAnimationDuration(from notification: Notification) -> TimeInterval {
+        guard let value = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber else {
+            return 0.25
+        }
+        return max(0, value.doubleValue)
     }
 
     private func rememberStreamedRendererState(for event: ChatEvent) {
@@ -1255,4 +1370,3 @@ struct ChatView: View {
         )
     }
 }
-

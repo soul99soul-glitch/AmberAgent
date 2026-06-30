@@ -23,9 +23,14 @@ struct MessageBubbleView: View {
     /// True only for the last message — gates the live "thinking" timer so a stopped/older
     /// reasoning (whose finishedAt was never set on cancel) doesn't keep counting.
     var isLastMessage: Bool = false
-    /// 这条消息「曾经流式过」的记忆(来自 projection 层)。决定 assistant 文本是否走流式
-    /// markdown 渲染器 + 逐词淡入,避免完成态切 renderer 时块消失/高度塌陷闪烁。
+    /// 这条消息「曾经流式过」的记忆(来自 projection 层)。当前不直接驱动 Markdown
+    /// renderer:历史行被 LazyVStack 回收再创建时必须回到稳定同步渲染器,否则会重新出现
+    /// 首帧高度跳变。可见 bubble 的完成态防闪烁由 ChatAssistantMarkdownView 内部 latch 负责。
     var hasEverStreamed: Bool = false
+    /// False only when the live assistant message is far below the current viewport.
+    /// That lets the offscreen stream freeze its last rendered snapshot instead of reparsing
+    /// growing Markdown/widget payloads while the user is reading history.
+    var liveMarkdownRenderingEnabled: Bool = true
     /// Reasoning effort label (e.g. "Auto") shown on the thinking pill. nil hides the suffix.
     var reasoningLevelLabel: String? = nil
 
@@ -269,6 +274,7 @@ struct MessageBubbleView: View {
                             generativeUiSetting: generativeUiSetting,
                             isStreaming: isGenerating && isLastMessage,
                             hasEverStreamed: hasEverStreamed,
+                            liveRenderingEnabled: liveMarkdownRenderingEnabled,
                             onGenerativeWidgetAction: onGenerativeWidgetAction
                         )
                     }
@@ -415,6 +421,7 @@ struct ChatAssistantMarkdownView: View {
     var generativeUiSetting: GenerativeUiSetting?
     var isStreaming = false
     var hasEverStreamed = false
+    var liveRenderingEnabled = true
     var onGenerativeWidgetAction: (String) -> Void = { _ in }
 
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
@@ -425,12 +432,15 @@ struct ChatAssistantMarkdownView: View {
     /// (latch=true),避免 completion 瞬间切渲染器闪烁。用 ChatView 层持久化的 hasEverStreamed
     /// 代替它会破坏这个特性——回收的行依然收到 true → 用异步渲染器 → 首帧高度 0 → 上滑跳动。
     @State private var hasUsedStreamingMarkdownRenderer = false
+    @State private var renderedMarkdownSnapshot = ""
 
     var body: some View {
         let widgetSettings = IOSGenerativeWidgetSettings(generativeUiSetting)
+        let renderedMarkdown = frozenMarkdownSnapshot
+        let liveStreaming = isStreaming && liveRenderingEnabled
         Group {
-            if widgetSettings.enabled {
-                let segments = IOSGenerativeWidgetParser.parse(markdown, streaming: isStreaming)
+            if widgetSettings.enabled && IOSGenerativeWidgetParser.mayContainWidgetPayload(renderedMarkdown) {
+                let segments = IOSGenerativeWidgetParser.parse(renderedMarkdown, streaming: liveStreaming)
                 let hasWidgetSegment = segments.contains { segment in
                     switch segment {
                     case .widget, .loading:
@@ -444,7 +454,7 @@ struct ChatAssistantMarkdownView: View {
                         ForEach(segments) { segment in
                             switch segment {
                             case .text(_, let content):
-                                markdownText(content)
+                                markdownText(content, liveStreaming: liveStreaming)
                             case .widget(let widget):
                                 IOSGenerativeWidgetCard(
                                     widget: widget,
@@ -458,48 +468,83 @@ struct ChatAssistantMarkdownView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    markdownText(markdown)
+                    markdownText(renderedMarkdown, liveStreaming: liveStreaming)
                 }
             } else {
-                markdownText(markdown)
+                markdownText(renderedMarkdown, liveStreaming: liveStreaming)
             }
         }
         .onAppear {
-            if isStreaming {
+            if renderedMarkdownSnapshot.isEmpty {
+                renderedMarkdownSnapshot = markdown
+            }
+            if isStreaming && liveRenderingEnabled {
                 hasUsedStreamingMarkdownRenderer = true
             }
         }
+        .onChange(of: markdown) { _, newValue in
+            if liveRenderingEnabled || renderedMarkdownSnapshot.isEmpty {
+                renderedMarkdownSnapshot = newValue
+            }
+        }
         .onChange(of: isStreaming) { _, newValue in
+            if newValue && liveRenderingEnabled {
+                hasUsedStreamingMarkdownRenderer = true
+                renderedMarkdownSnapshot = markdown
+            } else if !newValue {
+                renderedMarkdownSnapshot = markdown
+            }
+        }
+        .onChange(of: liveRenderingEnabled) { _, newValue in
             if newValue {
+                renderedMarkdownSnapshot = markdown
+            }
+            if newValue && isStreaming {
                 hasUsedStreamingMarkdownRenderer = true
             }
         }
     }
 
-    private var shouldUseStreamingMarkdownRenderer: Bool {
-        guard !liyananStreamingMarkdown else { return false }
+    private var frozenMarkdownSnapshot: String {
+        if isStreaming && !liveRenderingEnabled && !renderedMarkdownSnapshot.isEmpty {
+            return renderedMarkdownSnapshot
+        }
+        return markdown
+    }
+
+    private func shouldUseExperimentalMarkdownRenderer(liveStreaming: Bool) -> Bool {
         // 异步渲染器(SwiftStreamingMarkdown/Liyanan)的首帧高度为 0(controller.renderable==nil
         // → empty document)。LazyVStack 上滑回收再实现历史行时,这个 0→完整的高度跳变会让
         // contentSize 骤变,把视图弹过 agent 消息。
         // 因此:异步渲染器只用于「正在流式」的消息(isStreaming)或「本 view 实例曾流式过」
         // 的消息(hasUsedStreamingMarkdownRenderer latch)。已完成的历史消息(LazyVStack 回收后
         // 新实例 latch 重置为 false)回退到同步、高度稳定的 AmberMarkdownView。
-        // microsoftStreamingMarkdown 全局开关不再对历史消息强制异步渲染器——它只影响流式中的消息。
-        return isStreaming || hasUsedStreamingMarkdownRenderer
+        return liveStreaming || hasUsedStreamingMarkdownRenderer
     }
 
-    private var streamingMarkdownConfig: SwiftStreamingMarkdown.MarkdownRenderConfig {
+    private func shouldUseFadeStreamingRenderer(liveStreaming: Bool) -> Bool {
+        // 逐词淡入目前只有 SwiftStreamingMarkdown 提供真实 glyph fade。
+        // LiYanan MarkdownView 的 StreamingMarkdownReader 负责增量解析,但没有文字淡入层。
+        // 所以可见的流式正文统一先走 SwiftStreamingMarkdown;LazyVStack 回收后的历史行仍回到
+        // AmberMarkdownView,避免异步 renderer 的首帧空高度拖累历史滚动。
+        liveStreaming || hasUsedStreamingMarkdownRenderer
+    }
+
+    private func streamingMarkdownConfig(liveStreaming: Bool) -> SwiftStreamingMarkdown.MarkdownRenderConfig {
         SwiftStreamingMarkdown.MarkdownRenderConfig.default
-            .withShouldAnimateText(value: isStreaming || hasUsedStreamingMarkdownRenderer)
+            .withShouldAnimateText(value: liveStreaming || hasUsedStreamingMarkdownRenderer)
     }
 
     @ViewBuilder
-    private func markdownText(_ content: String) -> some View {
-        if liyananStreamingMarkdown {
+    private func markdownText(_ content: String, liveStreaming: Bool) -> some View {
+        if shouldUseFadeStreamingRenderer(liveStreaming: liveStreaming) {
+            SwiftStreamingMarkdown.MarkdownView(text: content, config: streamingMarkdownConfig(liveStreaming: liveStreaming))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if liyananStreamingMarkdown && shouldUseExperimentalMarkdownRenderer(liveStreaming: liveStreaming) {
             LiyananStreamingMarkdownContentView(content: content)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        } else if shouldUseStreamingMarkdownRenderer {
-            SwiftStreamingMarkdown.MarkdownView(text: content, config: streamingMarkdownConfig)
+        } else if microsoftStreamingMarkdown && shouldUseExperimentalMarkdownRenderer(liveStreaming: liveStreaming) {
+            SwiftStreamingMarkdown.MarkdownView(text: content, config: streamingMarkdownConfig(liveStreaming: liveStreaming))
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             AmberMarkdownView(markdown: content, displaySetting: displaySetting)

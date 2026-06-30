@@ -554,6 +554,8 @@ enum ChatToolOutputFormatter {
     }
 
     nonisolated static func imageFailureReason(from output: [UIMessagePart]) -> String? {
+        let hasImage = output.contains { $0 is UIMessagePart.Image }
+        var sawStructuredSuccess = false
         let texts = output.compactMap { ($0 as? UIMessagePart.Text)?.text }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -567,13 +569,56 @@ enum ChatToolOutputFormatter {
             if object["ok"] as? Bool == false {
                 return stringValue(in: object, keys: ["reason", "error", "detail", "message"])
             }
+            if object["ok"] as? Bool == true {
+                sawStructuredSuccess = true
+                continue
+            }
+            if let status = (object["status"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                if ["error", "failed", "failure"].contains(status) {
+                    return stringValue(in: object, keys: ["reason", "error", "detail", "message"])
+                }
+                if ["ok", "success", "succeeded", "completed"].contains(status) {
+                    sawStructuredSuccess = true
+                    continue
+                }
+            }
+            if (object["source"] as? String) == "generate_image",
+               object["files"] != nil {
+                sawStructuredSuccess = true
+                continue
+            }
             if (object["tool"] as? String) == "generate_image",
                let reason = stringValue(in: object, keys: ["reason", "error", "detail", "message"]) {
                 return reason
             }
         }
 
+        if hasImage || sawStructuredSuccess {
+            return nil
+        }
         return texts.first
+    }
+
+    nonisolated static func imageFailureReason(
+        in messages: [UIMessage],
+        matching targetToolCall: UIMessagePart.Tool? = nil
+    ) -> String? {
+        for message in messages where message.role == MessageRole.assistant {
+            for case let tool as UIMessagePart.Tool in message.parts {
+                guard tool.toolName == "generate_image",
+                      !tool.output.isEmpty else {
+                    continue
+                }
+                if let targetToolCall,
+                   chatToolCallKey(tool) != chatToolCallKey(targetToolCall) {
+                    continue
+                }
+                if let reason = imageFailureReason(from: tool.output) {
+                    return reason
+                }
+            }
+        }
+        return nil
     }
 
     nonisolated private static func stringValue(in object: [String: Any], keys: [String]) -> String? {

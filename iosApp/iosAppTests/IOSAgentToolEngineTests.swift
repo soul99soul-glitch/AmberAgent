@@ -363,6 +363,29 @@ final class IOSAgentToolEngineTests: XCTestCase {
         XCTAssertEqual(output, "{\"error\":\"[engine] no executor registered for tool `ghost`\"}")
     }
 
+    func testImageFailureReasonIgnoresSuccessfulImageOutputJSON() {
+        let output: [UIMessagePart] = [
+            UIMessagePart.Image(url: "amber-image://image-generation/file.png", metadata: nil),
+            UIMessagePart.Text(
+                text: #"{"count":1,"files":[{"url":"amber-image://image-generation/file.png"}],"source":"generate_image","status":"ok"}"#,
+                metadata: nil
+            )
+        ]
+
+        XCTAssertNil(ChatToolOutputFormatter.imageFailureReason(from: output))
+    }
+
+    func testImageFailureReasonKeepsExplicitFailureJSON() {
+        let output: [UIMessagePart] = [
+            UIMessagePart.Text(
+                text: #"{"ok":false,"reason":"图片生成服务没有返回图片。","tool":"generate_image"}"#,
+                metadata: nil
+            )
+        ]
+
+        XCTAssertEqual(ChatToolOutputFormatter.imageFailureReason(from: output), "图片生成服务没有返回图片。")
+    }
+
     // MARK: - Background handoff parity: pre-existing empty-output tools
 
     /// When a run hands off to background, the input messages may already carry

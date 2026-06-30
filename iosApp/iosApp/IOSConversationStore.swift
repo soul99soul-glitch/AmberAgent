@@ -230,6 +230,42 @@ final class IOSConversationStore {
         await save(messages: nextMessages, to: id)
     }
 
+    func saveBackgroundToolCompletion(
+        baseMessages: [UIMessage],
+        completedMessages: [UIMessage],
+        to id: KotlinUuid
+    ) async {
+        let conversation: Conversation?
+        if currentConversation?.id == id {
+            conversation = currentConversation
+        } else {
+            do {
+                conversation = try await storage.loadConversation(id: id)
+            } catch {
+                lastIOError = IOSConversationIOError(operation: "保存后台工具结果", detail: "目标 \(id): \(error)")
+                conversation = nil
+            }
+        }
+        guard let conversation else { return }
+
+        let current = conversation.currentMessages
+        let nextMessages: [UIMessage]
+        if Self.sameMessageIdentity(current, baseMessages) {
+            nextMessages = completedMessages
+        } else {
+            let outputs = Self.completedToolOutputs(in: completedMessages)
+            let patched = Self.messagesByApplyingToolOutputs(outputs, to: current)
+            if patched.didApply {
+                nextMessages = patched.messages
+            } else {
+                let notice = UIMessage.companion.assistant(prompt: "后台工具执行已完成；当前会话期间已有新内容，以下是后台完成的结果。")
+                let toolMessages = Self.messagesContainingToolOutputs(outputs, in: completedMessages)
+                nextMessages = current + [notice] + toolMessages
+            }
+        }
+        await save(messages: nextMessages, to: id)
+    }
+
     /// 重建一个仅 title 不同的 Conversation（Swift 侧无 partial copy，用全字段构造器）。
     /// 所有其他字段保持原值；updateAt 刷新到当前时刻以反映「最近修改」。
     private func retitledCopy(of conversation: Conversation, title: String) -> Conversation {
@@ -463,6 +499,66 @@ final class IOSConversationStore {
         guard lhs.count == rhs.count else { return false }
         return zip(lhs, rhs).allSatisfy { left, right in
             String(describing: left.id) == String(describing: right.id)
+        }
+    }
+
+    private static func completedToolOutputs(in messages: [UIMessage]) -> [String: UIMessagePart.Tool] {
+        var outputs: [String: UIMessagePart.Tool] = [:]
+        for message in messages where message.role == MessageRole.assistant {
+            for case let tool as UIMessagePart.Tool in message.parts where !tool.output.isEmpty {
+                outputs[chatToolCallKey(tool)] = tool
+            }
+        }
+        return outputs
+    }
+
+    private static func messagesByApplyingToolOutputs(
+        _ outputs: [String: UIMessagePart.Tool],
+        to messages: [UIMessage]
+    ) -> (messages: [UIMessage], didApply: Bool) {
+        guard !outputs.isEmpty else { return (messages, false) }
+        var didApply = false
+        let updated = messages.map { message -> UIMessage in
+            guard message.role == MessageRole.assistant else { return message }
+            var changed = false
+            let parts = message.parts.map { part -> UIMessagePart in
+                guard let tool = part as? UIMessagePart.Tool,
+                      tool.output.isEmpty,
+                      let completed = outputs[chatToolCallKey(tool)] else {
+                    return part
+                }
+                changed = true
+                didApply = true
+                return completed
+            }
+            guard changed else { return message }
+            return UIMessage(
+                id: message.id,
+                role: message.role,
+                parts: parts,
+                annotations: message.annotations,
+                createdAt: message.createdAt,
+                finishedAt: message.finishedAt,
+                modelId: message.modelId,
+                usage: message.usage,
+                translation: message.translation
+            )
+        }
+        return (updated, didApply)
+    }
+
+    private static func messagesContainingToolOutputs(
+        _ outputs: [String: UIMessagePart.Tool],
+        in messages: [UIMessage]
+    ) -> [UIMessage] {
+        guard !outputs.isEmpty else { return [] }
+        let keys = Set(outputs.keys)
+        return messages.filter { message in
+            guard message.role == MessageRole.assistant else { return false }
+            return message.parts.contains { part in
+                guard let tool = part as? UIMessagePart.Tool else { return false }
+                return keys.contains(chatToolCallKey(tool))
+            }
         }
     }
 
