@@ -11,6 +11,7 @@ private struct IOSChatBackgroundRuntimeJob {
     let params: TextGenerationParams
     let uploadMessages: [UIMessage]
     let displayMessages: [UIMessage]
+    let mode: IOSChatBackgroundHandoffMode
     let conversationStore: IOSConversationStore
     let toolRuntime: ChatToolRuntime
     let liveActivityController: AgentLiveActivityController
@@ -35,6 +36,12 @@ struct IOSChatBackgroundHandoff {
     let params: TextGenerationParams
     let uploadMessages: [UIMessage]
     let displayMessages: [UIMessage]
+    let mode: IOSChatBackgroundHandoffMode
+}
+
+enum IOSChatBackgroundHandoffMode: String {
+    case continueModel = "continue_model"
+    case singleToolOnly = "single_tool_only"
 }
 
 private struct IOSChatBackgroundProvider: IOSAgentTextProvider {
@@ -96,7 +103,7 @@ final class IOSChatBackgroundGenerationCoordinator {
     private var permittedIdentifier: String { "\(bundleIdentifier).chat.*" }
     private var requestPrefix: String { "\(bundleIdentifier).chat." }
     private var taskMapKey: String { "\(bundleIdentifier).chat.backgroundTaskMap" }
-    private var registered = false
+    private var registeredRequestIds: Set<String> = []
     private var dependencies: IOSChatBackgroundDependencies?
     private var activeJobs: [String: IOSChatBackgroundRuntimeJob] = [:]
     private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
@@ -119,18 +126,10 @@ final class IOSChatBackgroundGenerationCoordinator {
                 saveMiniAppIfPresent: saveMiniAppIfPresent
             )
         }
-        guard !registered else { return }
-        registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: permittedIdentifier, using: nil) { task in
-            guard let task = task as? BGContinuedProcessingTask else {
-                task.setTaskCompleted(success: false)
-                return
+        for requestId in taskMap().keys {
+            if !register(requestId: requestId) {
+                finish(requestId: requestId)
             }
-            Task { @MainActor in
-                await IOSChatBackgroundGenerationCoordinator.shared.handle(task)
-            }
-        }
-        if !registered {
-            NSLog("[AmberChatBG] BGContinuedProcessingTask registration failed for \(permittedIdentifier)")
         }
     }
 
@@ -142,9 +141,10 @@ final class IOSChatBackgroundGenerationCoordinator {
         saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)? = nil
     ) -> Bool {
         configure()
-        guard registered else { return false }
 
         let requestId = requestIdentifier(for: handoff.runId)
+        guard register(requestId: requestId) else { return false }
+
         do {
             try persist(handoff: handoff, requestId: requestId)
         } catch {
@@ -179,6 +179,30 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
     }
 
+    private func register(requestId: String) -> Bool {
+        guard requestId.hasPrefix(requestPrefix) else {
+            NSLog("[AmberChatBG] Refusing to register unexpected BGContinuedProcessingTask id \(requestId); expected prefix \(requestPrefix)")
+            return false
+        }
+        guard !registeredRequestIds.contains(requestId) else { return true }
+
+        let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: requestId, using: nil) { task in
+            guard let task = task as? BGContinuedProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            Task { @MainActor in
+                await IOSChatBackgroundGenerationCoordinator.shared.handle(task)
+            }
+        }
+        if registered {
+            registeredRequestIds.insert(requestId)
+        } else {
+            NSLog("[AmberChatBG] BGContinuedProcessingTask registration failed for \(requestId); permitted pattern \(permittedIdentifier)")
+        }
+        return registered
+    }
+
     private func runtimeJob(
         handoff: IOSChatBackgroundHandoff,
         conversationStore: IOSConversationStore,
@@ -195,6 +219,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             params: handoff.params,
             uploadMessages: handoff.uploadMessages,
             displayMessages: handoff.displayMessages,
+            mode: handoff.mode,
             conversationStore: conversationStore,
             toolRuntime: toolRuntime,
             liveActivityController: liveActivityController,
@@ -245,12 +270,17 @@ final class IOSChatBackgroundGenerationCoordinator {
 
         await job.liveActivityController.update(
             runId: job.runId,
-            presentation: .generatingResponse(modelName: requestParams.model.modelId),
+            presentation: job.mode == .singleToolOnly
+                ? .runningTool(toolName: "generate_image")
+                : .generatingResponse(modelName: requestParams.model.modelId),
             force: true
         )
 
         progress.completedUnitCount = 1
-        backgroundTask.updateTitle("Amber 后台生成", subtitle: "正在生成回复")
+        backgroundTask.updateTitle(
+            "Amber 后台生成",
+            subtitle: job.mode == .singleToolOnly ? "正在执行工具" : "正在生成回复"
+        )
 
         let engine = IOSAgentToolEngine(
             provider: IOSChatBackgroundProvider(),
@@ -261,18 +291,31 @@ final class IOSChatBackgroundGenerationCoordinator {
             ),
             configuration: .init(maxSteps: 6, honorApprovalPause: false)
         )
-        let result = await engine.run(
-            providerSetting: requestProvider,
-            messages: job.uploadMessages,
-            params: requestParams
-        )
+        let result: IOSAgentToolEngineResult
+        switch job.mode {
+        case .continueModel:
+            result = await engine.run(
+                providerSetting: requestProvider,
+                messages: job.uploadMessages,
+                params: requestParams
+            )
+        case .singleToolOnly:
+            result = IOSAgentToolEngineResult(
+                messages: await engine.executePreExistingToolsOnly(messages: job.uploadMessages),
+                stepsExecuted: 0,
+                pendingApproval: nil,
+                hitStepLimit: false
+            )
+        }
         guard !runState.isExpired else { return }
 
         progress.completedUnitCount = 3
         backgroundTask.updateTitle("Amber 后台生成", subtitle: "正在保存结果")
 
-        let generatedSuffix = Array(result.messages.dropFirst(job.uploadMessages.count))
-        if let rawFailure = providerFailureMessage(in: generatedSuffix) {
+        let generatedSuffix = job.mode == .continueModel
+            ? Array(result.messages.dropFirst(job.uploadMessages.count))
+            : []
+        if job.mode == .continueModel, let rawFailure = providerFailureMessage(in: generatedSuffix) {
             await fail(
                 job: job,
                 backgroundTask: backgroundTask,
@@ -283,29 +326,47 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
 
         guard runState.reserveTerminal() else { return }
-        var finalMessages = job.displayMessages + generatedSuffix
-        if result.hitStepLimit {
+        var finalMessages = job.mode == .singleToolOnly
+            ? result.messages
+            : job.displayMessages + generatedSuffix
+        if job.mode == .continueModel, result.hitStepLimit {
             finalMessages.append(Self.assistantMessage("后台生成已达到工具循环上限，已保存当前结果。"))
         }
-        if let miniAppNotice = job.saveMiniAppIfPresent?(finalMessages, job.conversationId) {
+        if job.mode == .continueModel,
+           let miniAppNotice = job.saveMiniAppIfPresent?(finalMessages, job.conversationId) {
             finalMessages.append(miniAppNotice)
         }
+        let singleToolFailureReason = job.mode == .singleToolOnly
+            ? ChatToolOutputFormatter.imageFailureReason(in: finalMessages)
+            : nil
 
-        await job.conversationStore.saveBackgroundCompletion(
-            baseMessages: job.displayMessages,
-            completedMessages: finalMessages,
-            to: job.conversationId
-        )
+        switch job.mode {
+        case .continueModel:
+            await job.conversationStore.saveBackgroundCompletion(
+                baseMessages: job.displayMessages,
+                completedMessages: finalMessages,
+                to: job.conversationId
+            )
+        case .singleToolOnly:
+            await job.conversationStore.saveBackgroundToolCompletion(
+                baseMessages: job.displayMessages,
+                completedMessages: finalMessages,
+                to: job.conversationId
+            )
+        }
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: "completed",
+            status: singleToolFailureReason == nil ? "completed" : "failed",
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
-        await job.liveActivityController.end(runId: job.runId, presentation: .completed())
+        await job.liveActivityController.end(
+            runId: job.runId,
+            presentation: singleToolFailureReason == nil ? .completed() : .failed()
+        )
         progress.completedUnitCount = progress.totalUnitCount
-        backgroundTask.setTaskCompleted(success: true)
+        backgroundTask.setTaskCompleted(success: singleToolFailureReason == nil)
         finish(runId: job.runId, requestId: backgroundTask.identifier)
     }
 
@@ -361,7 +422,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             providerSetting: handoff.providerSetting,
             params: handoff.params,
             uploadMessages: handoff.uploadMessages,
-            displayMessages: handoff.displayMessages
+            displayMessages: handoff.displayMessages,
+            mode: handoff.mode.rawValue
         )
         let directory = try jobsDirectory()
         let url = payloadURL(for: requestId, in: directory)
@@ -387,7 +449,8 @@ final class IOSChatBackgroundGenerationCoordinator {
                 providerSetting: providerSetting,
                 params: payload.params,
                 uploadMessages: payload.uploadMessages,
-                displayMessages: payload.displayMessages
+                displayMessages: payload.displayMessages,
+                mode: IOSChatBackgroundHandoffMode(rawValue: payload.mode) ?? .continueModel
             )
         } catch {
             NSLog("[AmberChatBG] Failed to load background payload \(requestId): \(error)")

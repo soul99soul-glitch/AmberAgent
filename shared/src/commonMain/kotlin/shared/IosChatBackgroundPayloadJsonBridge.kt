@@ -21,6 +21,7 @@ data class IosChatBackgroundPayload(
     val params: TextGenerationParams,
     val uploadMessages: List<UIMessage>,
     val displayMessages: List<UIMessage>,
+    val mode: String = "continue_model",
 )
 
 /** Swift-facing bridge for persisted iOS chat background generation payloads. */
@@ -35,6 +36,7 @@ object IosChatBackgroundPayloadJsonBridge {
         params: TextGenerationParams,
         uploadMessages: List<UIMessage>,
         displayMessages: List<UIMessage>,
+        mode: String = "continue_model",
     ): String = JsonInstant.encodeToString(
         IosChatBackgroundPayload(
             runId = runId,
@@ -45,6 +47,7 @@ object IosChatBackgroundPayloadJsonBridge {
             params = params.withoutProviderOverwrite(),
             uploadMessages = uploadMessages,
             displayMessages = displayMessages,
+            mode = mode,
         )
     )
 

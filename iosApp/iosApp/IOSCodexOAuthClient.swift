@@ -31,7 +31,8 @@ enum IOSCodexOAuthConstants {
     /// `image_generation` tool, not a real `/images/generations` endpoint.
     static let imageModelId = "codex-oauth-image"
     /// Routing model sent in Codex Responses image-generation requests
-    /// (matches Android `CODEX_IMAGE_ROUTING_MODEL`).
+    /// (matches Android `CODEX_IMAGE_ROUTING_MODEL` and the previously working
+    /// iOS Codex image path).
     static let imageRoutingModel = "gpt-5.4"
 
     static let refreshSkewMillis: Int64 = 2 * 60 * 1000

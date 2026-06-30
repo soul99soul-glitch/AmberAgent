@@ -576,6 +576,28 @@ enum ChatToolOutputFormatter {
         return texts.first
     }
 
+    nonisolated static func imageFailureReason(
+        in messages: [UIMessage],
+        matching targetToolCall: UIMessagePart.Tool? = nil
+    ) -> String? {
+        for message in messages where message.role == MessageRole.assistant {
+            for case let tool as UIMessagePart.Tool in message.parts {
+                guard tool.toolName == "generate_image",
+                      !tool.output.isEmpty else {
+                    continue
+                }
+                if let targetToolCall,
+                   chatToolCallKey(tool) != chatToolCallKey(targetToolCall) {
+                    continue
+                }
+                if let reason = imageFailureReason(from: tool.output) {
+                    return reason
+                }
+            }
+        }
+        return nil
+    }
+
     nonisolated private static func stringValue(in object: [String: Any], keys: [String]) -> String? {
         for key in keys {
             if let value = object[key] as? String {

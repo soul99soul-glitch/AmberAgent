@@ -462,7 +462,12 @@ final class ChatViewModel {
             sourceImageURL: trimmedSource,
             aspectRatio: aspectRatio
         )
-        generationCoordinator.runImageTool(input: input, conversationId: currentConversationId)
+        generationCoordinator.runImageTool(
+            input: input,
+            conversationId: currentConversationId,
+            providerSetting: makeProviderSetting(),
+            params: makeTextGenerationParams()
+        )
     }
 
     /// Appends the user message (keeping image parts for in-bubble display) and persists it.

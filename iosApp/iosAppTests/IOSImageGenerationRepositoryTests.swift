@@ -101,7 +101,7 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
         XCTAssertEqual(request.sourceImageURL, "data:image/png;base64,QUJD")
     }
 
-    func testCodexResponsesRequestBodyMatchesAndroidShape() throws {
+    func testCodexResponsesRequestBodyUsesCodexImageToolShape() throws {
         let body = IOSImageGenerationRepository.codexResponsesRequestBody(for: IOSImageGenerationRequest(
             prompt: "A cat",
             model: IOSCodexOAuthConstants.imageModelId,
@@ -112,7 +112,9 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
         ))
 
         XCTAssertEqual(body["model"] as? String, "gpt-5.4")
-        XCTAssertEqual(body["instructions"] as? String, "")
+        let instructions = try XCTUnwrap(body["instructions"] as? String)
+        XCTAssertTrue(instructions.contains("image_generation"))
+        XCTAssertTrue(instructions.contains("fan art"))
         XCTAssertEqual(body["store"] as? Bool, false)
         XCTAssertEqual(body["stream"] as? Bool, true)
         XCTAssertEqual(body["tool_choice"] as? String, "required")
@@ -155,6 +157,27 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
         XCTAssertEqual(content[1]["image_url"] as? String, "data:image/png;base64,QUJD")
     }
 
+    func testCodexResponsesRequestBodyRewritesZeldaMarkersForOriginalImage() throws {
+        let body = IOSImageGenerationRepository.codexResponsesRequestBody(for: IOSImageGenerationRequest(
+            prompt: "A heroic young Hylian adventurer like Link from The Legend of Zelda in Breath of the Wild style",
+            model: IOSCodexOAuthConstants.imageModelId,
+            aspectRatio: .landscape,
+            count: 1,
+            style: "",
+            source: "test"
+        ))
+
+        let input = try XCTUnwrap(body["input"] as? [[String: Any]])
+        let firstInput = try XCTUnwrap(input.first)
+        let content = try XCTUnwrap(firstInput["content"] as? [[String: Any]])
+        let text = try XCTUnwrap(content.first?["text"] as? String)
+        XCTAssertTrue(text.contains("original"))
+        XCTAssertFalse(text.contains("Hylian"))
+        XCTAssertFalse(text.contains("Link"))
+        XCTAssertFalse(text.contains("The Legend of Zelda"))
+        XCTAssertFalse(text.contains("Breath of the Wild"))
+    }
+
     func testCodexImageExtractionParsesSSEOutputItemDone() {
         let sse = """
         event: response.output_item.done
@@ -185,7 +208,39 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
         XCTAssertEqual(extraction.failureReason, "Image generation refused by backend")
     }
 
-    func testCodexImageResultPollsInProgressResponse() async throws {
+    func testCodexImageResultResolvesStreamingOutputItemDone() async throws {
+        let stream = AsyncThrowingStream<IOSImageGenerationSSEEvent, Error> { continuation in
+            continuation.yield(IOSImageGenerationSSEEvent(
+                event: "response.output_item.done",
+                data: #"{"type":"response.output_item.done","item":{"type":"image_generation_call","id":"ig_1","status":"completed","result":"data:image/png;base64,QUJD"}}"#
+            ))
+            continuation.yield(IOSImageGenerationSSEEvent(event: nil, data: "[DONE]"))
+            continuation.finish()
+        }
+        let repository = IOSImageGenerationRepository(historyStore: isolatedHistory())
+
+        let image = try await repository.resolveCodexImageResult(fromEvents: stream)
+
+        XCTAssertEqual(image, "data:image/png;base64,QUJD")
+    }
+
+    func testStreamEventsPreservesNonSSERawBody() async throws {
+        let transport = MockImageTransport(responses: [
+            .json(#"{"detail":"Not Found"}"#, status: 404)
+        ])
+        let request = URLRequest(url: URL(string: "https://example.com/responses")!)
+
+        let (response, stream) = try await transport.streamEvents(request)
+        var payloads: [String] = []
+        for try await event in stream {
+            payloads.append(event.data)
+        }
+
+        XCTAssertEqual(response.statusCode, 404)
+        XCTAssertEqual(payloads, [#"{"detail":"Not Found"}"#])
+    }
+
+    func testCodexImageResultDoesNotPollInProgressResponse() async throws {
         let initial = """
         event: response.completed
         data: {"type":"response.completed","response":{"id":"resp_123","status":"in_progress"}}
@@ -193,29 +248,25 @@ final class IOSImageGenerationRepositoryTests: XCTestCase {
         data: [DONE]
 
         """
-        let transport = MockImageTransport(responses: [
-            .json(#"{"id":"resp_123","status":"completed","output":[{"type":"image_generation_call","id":"ig_1","status":"completed","result":"data:image/png;base64,QUJD"}]}"#)
-        ])
+        let transport = MockImageTransport(responses: [])
         let repository = IOSImageGenerationRepository(historyStore: isolatedHistory())
 
-        let image = try await repository.resolveCodexImageResult(
-            from: Data(initial.utf8),
-            token: "codex-token",
-            accountId: "account-1",
-            transport: transport,
-            maxPollAttempts: 1,
-            pollDelayNanoseconds: 0
-        )
-
-        XCTAssertEqual(image, "data:image/png;base64,QUJD")
-        let request = try XCTUnwrap(transport.requests.first)
-        XCTAssertEqual(request.httpMethod, "GET")
-        XCTAssertEqual(request.url?.absoluteString, "https://chatgpt.com/backend-api/codex/responses/resp_123")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer codex-token")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "OpenAI-Beta"), "responses=experimental")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "originator"), "amberagent_android")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-Id"), "account-1")
+        do {
+            _ = try await repository.resolveCodexImageResult(
+                from: Data(initial.utf8),
+                token: "codex-token",
+                accountId: "account-1",
+                transport: transport,
+                maxPollAttempts: 1,
+                pollDelayNanoseconds: 0
+            )
+            XCTFail("Expected no image when the stream closed with in_progress")
+        } catch IOSImageGenerationError.noImages(let reason) {
+            XCTAssertEqual(reason, "response status=in_progress")
+            XCTAssertTrue(transport.requests.isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
     func testToolResultJSONIncludesChatImageURLs() throws {
