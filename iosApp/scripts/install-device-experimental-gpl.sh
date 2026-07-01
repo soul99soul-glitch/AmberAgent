@@ -20,6 +20,7 @@ set +e
 xcodebuild -project AmberAgent.xcodeproj -scheme "${SCHEME}" \
   -destination "platform=iOS,id=${DESTINATION_ID}" \
   -allowProvisioningUpdates DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM}" CODE_SIGN_STYLE=Automatic \
+  -skipMacroValidation -skipPackagePluginValidation \
   -derivedDataPath "${DERIVED_DATA_PATH}" build 2>&1 | tee "${BUILD_LOG}"
 build_status=${PIPESTATUS[0]}
 set -e

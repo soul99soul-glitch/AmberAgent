@@ -201,17 +201,15 @@ final class ChatGenerationCoordinator {
                 )
                 self.dependencies.sharedSettings.syncLegacySettingsStoreForCurrentChat(self.dependencies.settingsStore)
             }
-            // Codex needs `OpenAI-Beta`/originator/account-id headers on the
-            // /responses request (else the backend 404s) — inject them for codex.
-            let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(params, provider: providerSetting)
             await self.prepareAndStartStreaming(
                 providerSetting: effectiveProvider,
-                params: effectiveParams,
+                params: params,
                 runId: runId,
                 startedAt: startedAt,
                 inputDigest: inputDigest,
                 conversationId: conversationId,
-                uploadMessages: uploadMessages
+                uploadMessages: uploadMessages,
+                diagnosticOriginalProvider: providerSetting
             )
         }
     }
@@ -486,7 +484,8 @@ final class ChatGenerationCoordinator {
         startedAt: Int64,
         inputDigest: String,
         conversationId: KotlinUuid?,
-        uploadMessages: [UIMessage]
+        uploadMessages: [UIMessage],
+        diagnosticOriginalProvider: ProviderSetting? = nil
     ) async {
         guard currentRunId == runId else { return }
         let effectiveProvider: ProviderSetting
@@ -504,6 +503,11 @@ final class ChatGenerationCoordinator {
             return
         }
         let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(params, provider: effectiveProvider)
+        IOSCodexProviderResolver.writeRequestDiagnostic(
+            originalProvider: diagnosticOriginalProvider ?? providerSetting,
+            resolvedProvider: effectiveProvider,
+            params: effectiveParams
+        )
 
         let runtimeBaseline = bindings.messagesByInjectingRuntimeContext(uploadMessages)
         let runtimeOverheadTokens = max(

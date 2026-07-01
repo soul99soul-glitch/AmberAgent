@@ -304,6 +304,15 @@ enum ChatViewportReducer {
         case .conversationLoaded, .conversationSwitched:
             state.resetForConversationLoad()
             return [.resetForConversationSwitch]
+        case .userMessageAppended:
+            state.followPaused = false
+            state.userDragging = false
+            let command = ChatViewportPolicy.commandForMessageUpdate(
+                event: event,
+                canAutoFollow: environment.followEnabled,
+                isContentScrollable: state.isContentScrollable
+            )
+            return command == .none ? [] : [command]
         default:
             let command = ChatViewportPolicy.commandForMessageUpdate(
                 event: event,

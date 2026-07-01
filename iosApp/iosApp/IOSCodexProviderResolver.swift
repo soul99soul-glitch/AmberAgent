@@ -84,6 +84,54 @@ enum IOSCodexProviderResolver {
         )
     }
 
+    static func writeRequestDiagnostic(
+        originalProvider: ProviderSetting,
+        resolvedProvider: ProviderSetting,
+        params: TextGenerationParams,
+        fileManager: FileManager = .default
+    ) {
+        guard isCodexProvider(originalProvider) || isCodexProvider(resolvedProvider) else { return }
+        let originalOpenAI = originalProvider as? ProviderSetting.OpenAI
+        let resolvedOpenAI = resolvedProvider as? ProviderSetting.OpenAI
+        let headerMap = params.customHeaders.reduce(into: [String: String]()) { result, header in
+            let name = header.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return }
+            result[name] = header.value
+        }
+        let line = requestDiagnosticLine(
+            originalAuthMode: originalOpenAI.map { String(describing: $0.authMode) } ?? String(describing: type(of: originalProvider)),
+            resolvedBaseUrl: resolvedOpenAI?.baseUrl ?? "",
+            finalURL: codexResponsesURL(for: resolvedOpenAI),
+            bearer: resolvedOpenAI?.apiKey ?? "",
+            model: params.model.modelId,
+            headers: headerMap
+        )
+        writeDiagnosticLine(line, fileManager: fileManager)
+    }
+
+    static func requestDiagnosticLine(
+        originalAuthMode: String,
+        resolvedBaseUrl: String,
+        finalURL: String,
+        bearer: String,
+        model: String,
+        headers: [String: String]
+    ) -> String {
+        let headerNames = Set<String>(headers.keys.compactMap { name -> String? in
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        })
+        .sorted { lhs, rhs in lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending }
+        return [
+            "original.authMode=\(originalAuthMode)",
+            "resolved.baseUrl=\(resolvedBaseUrl)",
+            "url=\(finalURL)",
+            "bearer=\(diagnosticBearerSummary(bearer))",
+            "model=\(model)",
+            "headers=[\(headerNames.joined(separator: ","))]"
+        ].joined(separator: " ")
+    }
+
     private static func isCodexConfiguration(_ openAI: ProviderSetting.OpenAI) -> Bool {
         if openAI.authMode == OpenAIAuthMode.codexOauth { return true }
         return hasCodexBackendBaseUrl(openAI.baseUrl)
@@ -99,6 +147,47 @@ enum IOSCodexProviderResolver {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             .lowercased()
         return path == "backend-api/codex" || path == "backend-api/codex/v1"
+    }
+
+    private static func codexResponsesURL(for openAI: ProviderSetting.OpenAI?) -> String {
+        let base = openAI?.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
+        guard !base.isEmpty else { return "" }
+        return base + "/responses"
+    }
+
+    private static func diagnosticBearerSummary(_ bearer: String) -> String {
+        let trimmed = bearer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "EMPTY" }
+        if trimmed == "__MASKED_BY_AMBERAGENT_IOS__" { return "MASK" }
+        if trimmed.split(separator: ".").count == 3 {
+            return "JWT(len=\(trimmed.count))"
+        }
+        return "SET(len=\(trimmed.count))"
+    }
+
+    private static func writeDiagnosticLine(_ line: String, fileManager: FileManager) {
+        guard let cacheDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first,
+              let data = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n".data(using: .utf8) else {
+            return
+        }
+        let url = cacheDirectory.appendingPathComponent("codex-debug.log", isDirectory: false)
+        rotateDiagnosticIfNeeded(at: url, fileManager: fileManager)
+        if fileManager.fileExists(atPath: url.path),
+           let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url, options: [.atomic])
+        }
+    }
+
+    private static func rotateDiagnosticIfNeeded(at url: URL, fileManager: FileManager) {
+        guard let size = try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber,
+              size.intValue > 256 * 1024 else {
+            return
+        }
+        try? fileManager.removeItem(at: url)
     }
 }
 

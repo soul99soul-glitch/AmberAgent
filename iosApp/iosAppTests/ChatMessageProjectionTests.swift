@@ -29,6 +29,39 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertTrue(rows.first?.canAnimateInsertion ?? false)
     }
 
+    func testUserAppendQueuesOnlyNewUserRowForInsertionAnimation() {
+        let previous = UIMessage.companion.assistant(prompt: "旧回复")
+        let user = UIMessage.companion.user(prompt: "新的问题")
+        let previousItemID = "message-\(ChatMessageProjector.messageId(for: previous))"
+        let rows = ChatMessageProjector.rows(
+            messages: [previous, user],
+            event: .userMessageAppended
+        )
+
+        let animationIDs = ChatInsertionAnimationPolicy.animatedInsertionItemIDs(
+            previousItemIDs: [previousItemID],
+            rows: rows
+        )
+
+        XCTAssertEqual(animationIDs, ["message-\(ChatMessageProjector.messageId(for: user))"])
+    }
+
+    func testUserAppendDoesNotQueueAnimationWhenUserItemAlreadyExists() {
+        let user = UIMessage.companion.user(prompt: "新的问题")
+        let existingItemID = "message-\(ChatMessageProjector.messageId(for: user))"
+        let rows = ChatMessageProjector.rows(
+            messages: [user],
+            event: .userMessageAppended
+        )
+
+        let animationIDs = ChatInsertionAnimationPolicy.animatedInsertionItemIDs(
+            previousItemIDs: [existingItemID],
+            rows: rows
+        )
+
+        XCTAssertEqual(animationIDs, [])
+    }
+
     func testBranchChangeDoesNotAnimateUserRows() {
         let rows = ChatMessageProjector.rows(
             messages: [UIMessage.companion.user(prompt: "切分支后的用户消息")],

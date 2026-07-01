@@ -76,6 +76,31 @@ final class ChatViewportPolicyTests: XCTestCase {
         )
     }
 
+    func testUserAppendResumesFollowWhenControllerWasPausedByHistoryDrag() {
+        var state = ChatViewportState(
+            followPaused: true,
+            userDragging: true,
+            showScrollToBottom: true,
+            isAtBottom: false,
+            isContentScrollable: true,
+            liveRenderingFarFromBottom: false,
+            conversationLoadToken: 0
+        )
+
+        let commands = ChatViewportReducer.reduce(
+            event: .userMessageAppended,
+            state: &state,
+            environment: .init(followEnabled: true, generationActive: true)
+        )
+
+        XCTAssertEqual(
+            commands,
+            [.followBottom(animated: false, targetBottomAnchor: true, deferred: false)]
+        )
+        XCTAssertFalse(state.followPaused)
+        XCTAssertFalse(state.userDragging)
+    }
+
     func testSettingsRefreshDoesNotStealViewport() {
         let command = ChatViewportPolicy.commandForMessageUpdate(
             reason: .settingsRefresh,

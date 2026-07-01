@@ -165,6 +165,7 @@ final class ChatCollectionViewController: UIViewController {
 
     private func configureDataSource() {
         let registration = UICollectionView.CellRegistration<UICollectionViewCell, String> { [weak self] cell, _, itemID in
+            Self.resetCellAnimationState(cell)
             guard let self,
                   let renderModel = self.store.renderModelsByID[itemID],
                   let displaySetting = self.latestConfiguration.displaySetting,
@@ -197,7 +198,11 @@ final class ChatCollectionViewController: UIViewController {
         guard let dataSource,
               let messages = messagesProvider?() else { return }
 
-        store.rememberStreamedRendererState(for: latestConfiguration.signal.event, messages: messages)
+        let event = latestConfiguration.signal.event
+        store.rememberStreamedRendererState(for: event, messages: messages)
+        if event != .userMessageAppended {
+            store.clearAnimatedInsertions()
+        }
         guard let displaySetting = latestConfiguration.displaySetting,
               let generativeUiSetting = latestConfiguration.generativeUiSetting else { return }
 
@@ -226,6 +231,11 @@ final class ChatCollectionViewController: UIViewController {
             variantInfoProvider: variantInfoProvider ?? { _ in nil }
         )
 
+        let previousItemIDs = dataSource.snapshot().itemIdentifiers
+        let animatedInsertionIDs = ChatInsertionAnimationPolicy.animatedInsertionItemIDs(
+            previousItemIDs: previousItemIDs,
+            rows: build.rows
+        )
         let commands = ChatViewportReducer.reduce(
             event: latestConfiguration.signal.event,
             state: &store.viewportState,
@@ -239,12 +249,13 @@ final class ChatCollectionViewController: UIViewController {
         store.renderModelsByID = build.renderModelsByID
         store.rowHeightCache.invalidate(itemIDs: build.changedIDs)
         store.signatures = build.signatures
+        store.queueAnimatedInsertions(animatedInsertionIDs)
 
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
         snapshot.appendItems(build.items.map { $0.id }, toSection: 0)
 
-        let currentIDs = Set(dataSource.snapshot().itemIdentifiers)
+        let currentIDs = Set(previousItemIDs)
         let reloadIDs = build.changedIDs.filter { currentIDs.contains($0) }
         if !reloadIDs.isEmpty {
             snapshot.reloadItems(reloadIDs)
@@ -465,6 +476,12 @@ final class ChatCollectionViewController: UIViewController {
     @objc private func dismissKeyboardFromListTap() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+
+    private static func resetCellAnimationState(_ cell: UICollectionViewCell) {
+        cell.layer.removeAllAnimations()
+        cell.alpha = 1
+        cell.transform = .identity
+    }
 }
 
 extension ChatCollectionViewController: UICollectionViewDelegate {
@@ -504,15 +521,37 @@ extension ChatCollectionViewController: UICollectionViewDelegate {
         if let messageID = store.messageID(for: itemID) {
             store.renderStateStore.markVisible(messageID, liveRenderingEnabled: true)
         }
+        if store.consumeAnimatedInsertion(itemID) {
+            animateInsertedUserMessageCell(cell)
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        Self.resetCellAnimationState(cell)
         guard let itemID = dataSource?.itemIdentifier(for: indexPath),
               let messageID = store.messageID(for: itemID) else { return }
         store.renderStateStore.freeze(
             messageID: messageID,
             latestText: store.latestText(for: itemID)
         )
+    }
+
+    private func animateInsertedUserMessageCell(_ cell: UICollectionViewCell) {
+        Self.resetCellAnimationState(cell)
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        cell.alpha = 0
+        cell.transform = CGAffineTransform(translationX: 0, y: 18)
+            .scaledBy(x: 0.965, y: 0.965)
+        UIView.animate(
+            withDuration: 0.34,
+            delay: 0,
+            usingSpringWithDamping: 0.82,
+            initialSpringVelocity: 0.18,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            cell.alpha = 1
+            cell.transform = .identity
+        }
     }
 }
 
@@ -679,6 +718,7 @@ private struct ChatListBuildResult {
     let renderModelsByID: [String: ChatListRenderModel]
     let signatures: [String: String]
     let changedIDs: [String]
+    let rows: [ChatMessageRowModel]
 }
 
 private enum ChatListSnapshotBuilder {
@@ -701,6 +741,7 @@ private enum ChatListSnapshotBuilder {
         var items: [ChatListItem] = []
         var models: [String: ChatListRenderModel] = [:]
         var signatures: [String: String] = [:]
+        var rows: [ChatMessageRowModel] = []
 
         func append(_ item: ChatListItem, model: ChatListRenderModel, signature: String) {
             items.append(item)
@@ -731,7 +772,7 @@ private enum ChatListSnapshotBuilder {
                 )
             }
 
-            let rows = ChatMessageProjector.rows(
+            rows = ChatMessageProjector.rows(
                 messages: messages,
                 event: signal.event,
                 streamedMessageIDs: streamedMessageIDs
@@ -803,7 +844,8 @@ private enum ChatListSnapshotBuilder {
             items: items,
             renderModelsByID: models,
             signatures: signatures,
-            changedIDs: changedIDs
+            changedIDs: changedIDs,
+            rows: rows
         )
     }
 
@@ -857,6 +899,7 @@ private final class ChatListControllerStore {
     var viewportState = ChatViewportState()
     let renderStateStore = ChatRenderStateStore()
     let rowHeightCache = ChatRowHeightCache()
+    private var animatedInsertionItemIDs: Set<String> = []
 
     var hasMessageItems: Bool {
         items.contains { item in
@@ -881,11 +924,24 @@ private final class ChatListControllerStore {
         return messageModel.row.message.toText()
     }
 
+    func queueAnimatedInsertions(_ itemIDs: [String]) {
+        animatedInsertionItemIDs.formUnion(itemIDs)
+    }
+
+    func clearAnimatedInsertions() {
+        animatedInsertionItemIDs.removeAll()
+    }
+
+    func consumeAnimatedInsertion(_ itemID: String) -> Bool {
+        animatedInsertionItemIDs.remove(itemID) != nil
+    }
+
     func rememberStreamedRendererState(for event: ChatEvent, messages: [UIMessage]) {
         switch event {
         case .conversationLoaded, .conversationSwitched, .branchChanged:
             streamedMessageIDs.removeAll()
             renderStateStore.removeAll()
+            animatedInsertionItemIDs.removeAll()
         default:
             break
         }

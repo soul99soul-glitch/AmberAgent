@@ -51,3 +51,17 @@ enum ChatMessageProjector {
         }
     }
 }
+
+enum ChatInsertionAnimationPolicy {
+    static func animatedInsertionItemIDs(
+        previousItemIDs: [String],
+        rows: [ChatMessageRowModel]
+    ) -> [String] {
+        let previous = Set(previousItemIDs)
+        return rows.compactMap { row in
+            guard row.canAnimateInsertion else { return nil }
+            let itemID = "message-\(row.messageId)"
+            return previous.contains(itemID) ? nil : itemID
+        }
+    }
+}
