@@ -28,6 +28,9 @@ packages:
   MarkdownView:
     url: https://github.com/LiYanan2004/MarkdownView.git
     revision: c1254af
+  ChatLayout:
+    url: https://github.com/ekazaev/ChatLayout.git
+    exactVersion: 2.4.2
   ish-arm64-pkg:
     url: https://github.com/Lolendor/ish-arm64-pkg
     exactVersion: 0.3.3
@@ -136,6 +139,8 @@ targets:
         product: SwiftStreamingMarkdown
       - package: MarkdownView
         product: MarkdownView
+      - package: ChatLayout
+        product: ChatLayout
       - target: AmberAgentActivityWidget
     scheme:
       gatherCoverageData: false
@@ -315,6 +320,8 @@ targets:
         product: SwiftStreamingMarkdown
       - package: MarkdownView
         product: MarkdownView
+      - package: ChatLayout
+        product: ChatLayout
       - package: ish-arm64-pkg
         product: IshEmbed
       - target: AmberAgentActivityWidgetExperimentalGPL

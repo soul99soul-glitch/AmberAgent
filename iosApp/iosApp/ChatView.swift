@@ -11,6 +11,14 @@ private enum ComposerPanel: String, Identifiable {
     var id: String { rawValue }
 }
 
+private struct ChatListSummarySnapshot {
+    var hasMessages = false
+    var awaitingFirstAssistantChunk = false
+    var lastAssistantHasOpenReasoning = false
+    var firstUserTitleSeed: String?
+    var activeToolStep: ChatToolStepModel?
+}
+
 struct ChatView: View {
 
     let settingsStore: SettingsStore
@@ -31,12 +39,11 @@ struct ChatView: View {
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
     @State private var pasteHintShown = false
     @State private var viewportState = ChatViewportState()
-    @State private var streamedMessageIDs: Set<String> = []
     @State private var scrollToBottomTrigger = 0
     @State private var composerInputHeight: CGFloat = 40
     @State private var composerBarHeight: CGFloat = 0
     @State private var composerInputController = ComposerInputController()
-    @State private var keyboardFollowTask: Task<Void, Never>?
+    @State private var chatListSummary = ChatListSummarySnapshot()
     @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.scenePhase) private var scenePhase
 
@@ -67,7 +74,7 @@ struct ChatView: View {
 
             // 视觉浮层,不参与 bottom safe-area inset 布局。否则按钮显隐会改变
             // ScrollView 的可视区域,和系统顶部/底部 rubber-band 回弹互相拉扯。
-            if viewportState.showScrollToBottom && !viewModel.messages.isEmpty {
+            if viewportState.showScrollToBottom && chatListSummary.hasMessages {
                 VStack {
                     Spacer()
                     ChatScrollToBottomButton {
@@ -156,45 +163,78 @@ struct ChatView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert(item: Binding(
-            get: { conversationStore.lastIOError },
-            set: { newValue in if newValue == nil { conversationStore.clearIOError() } }
-        )) { error in
+        .alert(item: conversationIOErrorBinding) { error in
             Alert(
                 title: Text("会话存储出错"),
                 message: Text(error.message),
                 dismissButton: .default(Text("好")) { conversationStore.clearIOError() }
             )
         }
-        .onAppear {
-            // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
-            viewModel.conversationStore = conversationStore
-            viewportState = ChatViewportState()
-            streamedMessageIDs.removeAll()
-            viewModel.reloadFromStore(reason: .initialLoad)
-            repairCurrentChatModelIfNeeded()
-            if let handoff = IOSWebMountContentHandoffStore.shared.consumeChatHandoff() {
-                viewModel.inputText = handoff.chatPrompt
-                viewModel.selectedFileContextError = nil
-            }
-        }
+        .onAppear(perform: handleChatAppear)
         // 仅观察 store 的「切会话」修订号——它只在真正切到另一个会话时 +1，
         // 不受同会话落盘（生成中 tool start/result/complete）影响。
         // 这样落盘不再触发重灌历史 + 重建 ScrollView，消除抖动和「上滑看历史被甩回锚点」。
         // 消息内容同步由 generation 链路的 setMessages 负责，不靠这里。
         .onChange(of: conversationStore.conversationSwitchedRevision) { _, _ in
-            streamedMessageIDs.removeAll()
-            viewModel.reloadFromStore(reason: .conversationSwitch)
+            handleConversationSwitch()
+        }
+        .onChange(of: viewModel.messageUpdateSignal) { _, signal in
+            handleMessageUpdateSignal(signal)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background {
-                _ = viewModel.handoffGenerationToBackgroundIfNeeded()
-            }
+            handleScenePhaseChange(phase)
         }
         .onChange(of: sharedSettings.revision) { _, _ in
-            repairCurrentChatModelIfNeeded()
-            viewModel.bumpMessageRevision(reason: .settingsRefresh)
+            handleSharedSettingsRevisionChange()
         }
+    }
+
+    private func handleChatAppear() {
+        // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
+        viewModel.conversationStore = conversationStore
+        viewportState = ChatViewportState()
+        viewModel.reloadFromStore(reason: .initialLoad)
+        refreshChatListSummary(resetTitleSeed: true)
+        repairCurrentChatModelIfNeeded()
+        if let handoff = IOSWebMountContentHandoffStore.shared.consumeChatHandoff() {
+            viewModel.inputText = handoff.chatPrompt
+            viewModel.selectedFileContextError = nil
+        }
+    }
+
+    private func handleConversationSwitch() {
+        viewModel.reloadFromStore(reason: .conversationSwitch)
+        refreshChatListSummary(resetTitleSeed: true)
+    }
+
+    private func handleMessageUpdateSignal(_ signal: ChatMessageUpdateSignal) {
+        refreshChatListSummary(
+            resetTitleSeed: signal.event == .conversationLoaded ||
+                signal.event == .conversationSwitched ||
+                signal.event == .branchChanged
+        )
+    }
+
+    private func handleScenePhaseChange(_ phase: ScenePhase) {
+        if phase == .background {
+            _ = viewModel.handoffGenerationToBackgroundIfNeeded()
+        }
+    }
+
+    private func handleSharedSettingsRevisionChange() {
+        repairCurrentChatModelIfNeeded()
+        viewModel.bumpMessageRevision(reason: .settingsRefresh)
+    }
+
+    private var conversationIOErrorBinding: Binding<IOSConversationIOError?> {
+        Binding(
+            get: { conversationStore.lastIOError },
+            set: { newValue in
+                if newValue == nil {
+                    conversationStore.clearIOError()
+                }
+            }
+        )
     }
 
     private func handleSelectedFileImport(_ result: Result<[URL], Error>) {
@@ -337,7 +377,7 @@ struct ChatView: View {
     }
 
     private var topIslandState: ChatActivityIslandState {
-        if let step = activeToolStepForIsland {
+        if let step = chatListSummary.activeToolStep {
             return ChatActivityIslandState.activity(
                 kind: step.systemImage == "photo.on.rectangle" ? .image : .tool,
                 title: compactIslandText(step.title, limit: 18),
@@ -357,7 +397,7 @@ struct ChatView: View {
             )
         }
 
-        if isAwaitingFirstAssistantChunk {
+        if chatListSummary.awaitingFirstAssistantChunk {
             return ChatActivityIslandState.activity(
                 kind: .waiting,
                 title: "连接模型",
@@ -368,7 +408,7 @@ struct ChatView: View {
         }
 
         if viewModel.isGenerationActive {
-            if lastAssistantHasOpenReasoning {
+            if chatListSummary.lastAssistantHasOpenReasoning {
                 return ChatActivityIslandState.activity(
                     kind: .thinking,
                     title: "思考中",
@@ -389,8 +429,23 @@ struct ChatView: View {
         return .conversationTitle(conversationTitleForIsland)
     }
 
-    private var activeToolStepForIsland: ChatToolStepModel? {
-        for message in viewModel.messages.suffix(3).reversed() {
+    private func refreshChatListSummary(resetTitleSeed: Bool = false) {
+        let messages = viewModel.messages
+        var next = chatListSummary
+        next.hasMessages = !messages.isEmpty
+        next.awaitingFirstAssistantChunk = isStreamingFollowActive && messages.last?.role == MessageRole.user
+        next.activeToolStep = activeToolStepForIsland(messages: messages)
+        next.lastAssistantHasOpenReasoning = lastAssistantHasOpenReasoning(messages: messages)
+        if resetTitleSeed || next.firstUserTitleSeed == nil {
+            next.firstUserTitleSeed = messages.first(where: { $0.role == MessageRole.user })?
+                .toText()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        chatListSummary = next
+    }
+
+    private func activeToolStepForIsland(messages: [UIMessage]) -> ChatToolStepModel? {
+        for message in messages.suffix(3).reversed() {
             let tools = message.parts.compactMap { $0 as? UIMessagePart.Tool }
             if let active = tools.reversed().first(where: { $0.output.isEmpty }) {
                 return ChatToolStepModel(tool: active)
@@ -399,8 +454,8 @@ struct ChatView: View {
         return nil
     }
 
-    private var lastAssistantHasOpenReasoning: Bool {
-        guard let last = viewModel.messages.last, last.role == MessageRole.assistant else { return false }
+    private func lastAssistantHasOpenReasoning(messages: [UIMessage]) -> Bool {
+        guard let last = messages.last, last.role == MessageRole.assistant else { return false }
         return last.parts.contains { part in
             guard let reasoning = part as? UIMessagePart.Reasoning else { return false }
             return reasoning.finishedAt == nil
@@ -414,9 +469,7 @@ struct ChatView: View {
         if !storedTitle.isEmpty {
             return compactIslandText(storedTitle, limit: 14)
         }
-        if let firstUserText = viewModel.messages.first(where: { $0.role == MessageRole.user })?
-            .toText()
-            .trimmingCharacters(in: .whitespacesAndNewlines),
+        if let firstUserText = chatListSummary.firstUserTitleSeed,
            !firstUserText.isEmpty {
             return compactIslandText(firstUserText, limit: 14)
         }
@@ -473,392 +526,29 @@ struct ChatView: View {
 
     // MARK: - Message List
 
-    /// iMessage 式上屏:气泡从底部升起 + 渐显 + 从对应一侧的下角轻微放大弹出(用户=右下,
-    /// 助手=左下)。仅新追加的用户消息会在 `withAnimation` 中触发此 transition;批量加载/
-    /// 切换会话走数组整体赋值,不在动画事务内,故不会逐条动画。移除时仅淡出收缩。
-    private func messageEntranceTransition(isUser: Bool) -> AnyTransition {
-        .asymmetric(
-            insertion: .move(edge: .bottom)
-                .combined(with: .opacity)
-                .combined(with: .scale(scale: 0.92, anchor: isUser ? .bottomTrailing : .bottomLeading)),
-            removal: .opacity.combined(with: .scale(scale: 0.96))
-        )
-    }
-
-    private var messageRows: [ChatMessageRowModel] {
-        ChatMessageProjector.rows(
-            messages: viewModel.messages,
-            event: viewModel.messageUpdateSignal.event,
-            streamedMessageIDs: streamedMessageIDs
-        )
-    }
-
     private var messageList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 14) {
-                    if viewModel.messages.isEmpty {
-                        if let configurationIssue {
-                            ChatConfigurationNoticeCard(
-                                issue: configurationIssue,
-                                onPrimary: openPrimaryConfigurationAction,
-                                onModelDefaults: openModelDefaults
-                            )
-                            .padding(.top, 72)
-                            .padding(.bottom, 150)
-                        } else {
-                            ChatEmptyState()
-                        }
-                    } else {
-                        if let configurationIssue {
-                            ChatConfigurationNoticeCard(
-                                issue: configurationIssue,
-                                compact: true,
-                                onPrimary: openPrimaryConfigurationAction,
-                                onModelDefaults: openModelDefaults
-                            )
-                        }
-                        ForEach(messageRows) { row in
-                            let index = row.index
-                            let message = row.message
-                            VStack(spacing: 0) {
-                                MessageBubbleView(
-                                    message: message,
-                                    messageIndex: index,
-                                    variantInfo: viewModel.variantInfo(atMessageIndex: index),
-                                    displaySetting: sharedSettings.displaySetting,
-                                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
-                                    onRegenerate: { viewModel.regenerate(atMessageIndex: index) },
-                                    onEdit: { newText in viewModel.editMessage(atMessageIndex: index, newText: newText) },
-                                    onDelete: { viewModel.deleteMessage(atMessageIndex: index) },
-                                    onSelectVariant: { variantIndex in viewModel.selectVariant(messageIndex: index, variantIndex: variantIndex) },
-                                    onGenerativeWidgetAction: { prompt in
-                                        guard !viewModel.isGenerationActive else { return }
-                                        viewModel.inputText = prompt
-                                        viewportState.followPaused = false
-                                        viewModel.sendMessage()
-                                    },
-                                    onModifyGeneratedImage: { imageURL, prompt, aspectRatio in
-                                        guard !viewModel.isGenerationActive else { return }
-                                        viewportState.followPaused = false
-                                        viewModel.modifyGeneratedImage(
-                                            sourceImageURL: imageURL,
-                                            prompt: prompt,
-                                            aspectRatio: aspectRatio
-                                        )
-                                    },
-                                    isGenerating: row.isLast && viewModel.isGenerationActive,
-                                    isLastMessage: row.isLast,
-                                    hasEverStreamed: row.hasEverStreamed,
-                                    liveMarkdownRenderingEnabled: !shouldDegradeLiveAssistantRendering,
-                                    reasoningLevelLabel: composerReasoningLabel
-                                )
-
-                            }
-                            .id(row.messageId)
-                            .transition(row.canAnimateInsertion
-                                ? messageEntranceTransition(isUser: true)
-                                : .opacity
-                            )
-                        }
-
-                        if isAwaitingFirstAssistantChunk {
-                            ChatAssistantPendingResponseView()
-                                .id("assistant-pending-response")
-                                .transition(.opacity)
-                        }
-
-                        if viewModel.isRecognizingImages {
-                            VisionRecognitionIndicator()
-                                .id("vision-recognition-indicator")
-                                .transition(.opacity.combined(with: .move(edge: .trailing)))
-                        }
-
-                        if viewModel.contextCompactState.isVisible {
-                            ContextCompactTimelineMarker(state: viewModel.contextCompactState)
-                                .id("context-compact-\(String(describing: viewModel.contextCompactState.status))-\(viewModel.contextCompactState.updatedAt.timeIntervalSince1970)")
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
-
-                        // 内容底部的静止留白兼定位锚:进入会话/回到底部都停在它的底边,
-                        // 即「内容底 + 一小段留白」,与手动上推回弹的自然停靠一致,不贴死输入框。
-                        Color.clear
-                            .frame(height: ChatLayout.bottomRestGap)
-                            .id(ChatLayout.bottomAnchorID)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .padding(.horizontal, ChatLayout.contentHorizontalInset)
-                .padding(.top, 12)
-                .animation(.spring(response: 0.35, dampingFraction: 0.82), value: viewModel.isRecognizingImages)
-                .animation(.easeOut(duration: 0.22), value: viewModel.contextCompactState)
-                // Tap anywhere in the message content to dismiss the keyboard. Attached to the
-                // content (not the ScrollView) so it reliably fires; simultaneousGesture so
-                // message bubbles/buttons still receive their taps; contentShape makes the gaps
-                // between messages tappable too.
-                .frame(maxWidth: .infinity, minHeight: 0)
-                .contentShape(Rectangle())
-                .simultaneousGesture(
-                    TapGesture().onEnded {
-                        // Only dismiss when the keyboard is already up. This prevents a tap that
-                        // is GAINING focus on the input field from immediately resigning it
-                        // (which would hide the composer controls).
-                        if isInputFocused { dismissKeyboard() }
-                    }
-                )
-            }
-            // 一开始滚动就收起键盘(查看历史消息时自动收回)。之前用 .interactively 需要把键盘
-            // 往下「拖」才收,普通上滑看历史不触发,所以感觉只有点击能收。Tap-to-dismiss 仍保留
-            // 在下方内容(LazyVStack)上,因为 ScrollView 自身的 TapGesture 会被 UIScrollView 吞掉。
-            .scrollDismissesKeyboard(.immediately)
-            .defaultScrollAnchor(viewModel.messages.isEmpty ? .top : .bottom, for: .initialOffset)
-            .onScrollPhaseChange { _, phase in
-                switch phase {
-                case .interacting:
-                    viewportState.userDragging = true
-                case .idle:
-                    viewportState.userDragging = false
-                default:
-                    break
-                }
-            }
-            .onScrollGeometryChange(for: ChatScrollGeometryState.self) { geometry in
-                let distanceToBottom = max(0, geometry.contentSize.height - geometry.visibleRect.maxY)
-                let liveRenderingThreshold = max(
-                    ChatLayout.liveRenderingLODMinDistance,
-                    geometry.visibleRect.height * ChatLayout.liveRenderingLODScreenFactor
-                )
-                return ChatScrollGeometryState(
-                    atBottom: distanceToBottom <= ChatLayout.bottomStickThreshold,
-                    isScrollable: geometry.contentSize.height > geometry.visibleRect.height + ChatLayout.bottomStickThreshold,
-                    liveRenderingFarFromBottom: distanceToBottom > liveRenderingThreshold
-                )
-            } action: { _, state in
-                viewportState.isAtBottom = state.atBottom
-                viewportState.isContentScrollable = state.isScrollable
-                viewportState.liveRenderingFarFromBottom = state.liveRenderingFarFromBottom
-                viewportState.followPaused = ChatViewportPolicy.followPausedAfterGeometryChange(
-                    wasPaused: viewportState.followPaused,
-                    userDragging: viewportState.userDragging,
-                    atBottom: state.atBottom
-                )
-                let autoFollowingGeneration = isStreamingFollowActive && followGeneration && !viewportState.followPaused
-                let shouldShow = !state.atBottom && !viewModel.messages.isEmpty && !autoFollowingGeneration
-                if shouldShow != viewportState.showScrollToBottom {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
-                        viewportState.showScrollToBottom = shouldShow
-                    }
-                }
-            }
-            .onChange(of: viewModel.messageUpdateSignal) { _, signal in
-                rememberStreamedRendererState(for: signal.event)
-                let commands = ChatViewportReducer.reduce(
-                    event: signal.event,
-                    state: &viewportState,
-                    environment: ChatViewportEnvironment(
-                        followEnabled: followGeneration,
-                        generationActive: isStreamingFollowActive
-                    )
-                )
-                commands.forEach { executeScrollCommand($0, proxy: proxy, sourceEvent: signal.event) }
-            }
-            .onChange(of: viewportState.isContentScrollable) { _, scrollable in
-                guard scrollable else { return }
-                let command = ChatViewportPolicy.commandForContentBecameScrollable(
-                    canAutoFollow: followGeneration && !viewportState.followPaused && !viewportState.userDragging,
-                    isStreamingFollowActive: isStreamingFollowActive
-                )
-                executeScrollCommand(command, proxy: proxy)
-            }
-            .onChange(of: isInputFocused) { _, focused in
-                // 键盘弹起时无论是否 followPaused 都应滚到底部,确保最新消息不被键盘遮挡。
-                guard focused, !viewModel.messages.isEmpty else { return }
-                scheduleFocusedBottomFollow(proxy: proxy, settleDelay: 0.26)
-            }
-            .onChange(of: composerBarHeight) { _, _ in
-                guard isInputFocused, !viewModel.messages.isEmpty else { return }
-                scheduleFocusedBottomFollow(proxy: proxy, settleDelay: 0.12)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                guard isInputFocused, !viewModel.messages.isEmpty else { return }
-                scheduleFocusedBottomFollow(
-                    proxy: proxy,
-                    settleDelay: keyboardAnimationDuration(from: notification)
-                )
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { _ in
-                guard isInputFocused, !viewModel.messages.isEmpty else { return }
-                scheduleFocusedBottomFollow(proxy: proxy, settleDelay: 0)
-            }
-            // 「回到底部」悬浮按钮的触发(按钮在 composer 区,无法直接拿 proxy,用计数器桥接)。
-            .onChange(of: scrollToBottomTrigger) { _, _ in
-                executeScrollCommand(ChatViewportPolicy.commandForExplicitBottomRequest(), proxy: proxy)
-            }
-            .onDisappear {
-                keyboardFollowTask?.cancel()
-                keyboardFollowTask = nil
-            }
-            .task(id: viewportState.conversationLoadToken) {
-                await scrollToBottomAfterConversationLoad(proxy: proxy)
-            }
-        }
-        // 每加载一次会话就换新身份,让 initialOffset 锚点重新「从底部实现」落位
-        // (切会话复用同一 ScrollView 时 initialOffset 不会自动重触发)。
-        .id(viewportState.conversationLoadToken)
+        ChatCollectionMessageList(
+            signal: viewModel.messageUpdateSignal,
+            configurationIssue: configurationIssue,
+            isGenerationActive: viewModel.isGenerationActive,
+            isLoading: viewModel.isLoading,
+            isRecognizingImages: viewModel.isRecognizingImages,
+            contextCompactState: viewModel.contextCompactState,
+            followGeneration: followGeneration,
+            displaySetting: sharedSettings.displaySetting,
+            generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
+            reasoningLevelLabel: composerReasoningLabel,
+            workspaceStore: workspaceStore,
+            scrollToBottomTrigger: scrollToBottomTrigger,
+            messagesProvider: { viewModel.messages },
+            variantInfoProvider: { messageId in viewModel.variantInfo(messageId: messageId) },
+            onAction: handleChatListAction,
+            onViewportStateChange: applyCollectionViewportState
+        )
     }
 
     private var isStreamingFollowActive: Bool {
         viewModel.isGenerationActive || viewModel.isLoading
-    }
-
-    private var shouldDegradeLiveAssistantRendering: Bool {
-        guard isStreamingFollowActive,
-              viewModel.messages.last?.role == MessageRole.assistant else {
-            return false
-        }
-        return viewportState.liveRenderingFarFromBottom
-    }
-
-    private var isAwaitingFirstAssistantChunk: Bool {
-        isStreamingFollowActive && viewModel.messages.last?.role == MessageRole.user
-    }
-
-    private func scrollToLatestMessage(
-        _ proxy: ScrollViewProxy,
-        animated: Bool,
-        deferred: Bool,
-        targetBottomAnchor: Bool = false,
-        animation: Animation? = nil
-    ) {
-        guard !viewModel.messages.isEmpty,
-              let last = viewModel.messages.last else { return }
-        let lastId = ChatMessageProjector.messageId(for: last)
-        let scroll = {
-            if targetBottomAnchor {
-                proxy.scrollTo(ChatLayout.bottomAnchorID, anchor: .bottom)
-            } else {
-                proxy.scrollTo(lastId, anchor: .bottom)
-            }
-        }
-        let action = {
-            if animated {
-                if let animation {
-                    withAnimation(animation) {
-                        scroll()
-                    }
-                } else {
-                    withAnimation {
-                        scroll()
-                    }
-                }
-            } else {
-                var transaction = Transaction()
-                transaction.animation = nil
-                withTransaction(transaction) {
-                    scroll()
-                }
-            }
-        }
-
-        if deferred {
-            Task { @MainActor in action() }
-        } else {
-            action()
-        }
-    }
-
-    private func executeScrollCommand(
-        _ command: ChatViewportScrollCommand,
-        proxy: ScrollViewProxy,
-        sourceEvent: ChatEvent? = nil
-    ) {
-        switch command {
-        case .none, .initialAnchor, .showBottomButton, .resetForConversationSwitch:
-            return
-        case let .followBottom(animated, targetBottomAnchor, deferred):
-            scrollToLatestMessage(
-                proxy,
-                animated: animated,
-                deferred: deferred,
-                targetBottomAnchor: targetBottomAnchor,
-                animation: scrollAnimation(for: sourceEvent)
-            )
-        }
-    }
-
-    private func scrollAnimation(for event: ChatEvent?) -> Animation? {
-        switch event {
-        case .assistantStreamDelta:
-            return .linear(duration: 0.08)
-        default:
-            return nil
-        }
-    }
-
-    private func scrollToBottomAfterConversationLoad(proxy: ScrollViewProxy) async {
-        let token = viewportState.conversationLoadToken
-        guard token > 0 else { return }
-        guard !viewModel.messages.isEmpty else { return }
-        // After a session switch, the ScrollView gets a fresh identity. Give the
-        // new LazyVStack one render pass so the bottom anchor exists before
-        // issuing the explicit bottom alignment.
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        guard !Task.isCancelled,
-              viewportState.conversationLoadToken == token,
-              !viewModel.messages.isEmpty else { return }
-        scrollToLatestMessage(proxy, animated: false, deferred: false, targetBottomAnchor: true)
-    }
-
-    private func scheduleFocusedBottomFollow(proxy: ScrollViewProxy, settleDelay: TimeInterval) {
-        guard isInputFocused, !viewModel.messages.isEmpty else { return }
-
-        // Let the keyboard/composer move first, then align the transcript once the
-        // viewport has settled. This avoids stacking a scroll jump on top of the
-        // system keyboard animation.
-        keyboardFollowTask?.cancel()
-        keyboardFollowTask = Task { @MainActor in
-            if settleDelay > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(settleDelay * 1_000_000_000))
-            } else {
-                await Task.yield()
-            }
-            guard !Task.isCancelled, isInputFocused, !viewModel.messages.isEmpty else { return }
-            scrollToLatestMessage(
-                proxy,
-                animated: true,
-                deferred: false,
-                targetBottomAnchor: true,
-                animation: .easeOut(duration: 0.18)
-            )
-        }
-    }
-
-    private func keyboardAnimationDuration(from notification: Notification) -> TimeInterval {
-        guard let value = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber else {
-            return 0.25
-        }
-        return max(0, value.doubleValue)
-    }
-
-    private func rememberStreamedRendererState(for event: ChatEvent) {
-        switch event {
-        case .conversationLoaded, .conversationSwitched, .branchChanged:
-            streamedMessageIDs.removeAll()
-            return
-        default:
-            break
-        }
-
-        let currentIDs = Set(viewModel.messages.map { ChatMessageProjector.messageId(for: $0) })
-        var retained = streamedMessageIDs
-        retained.formIntersection(currentIDs)
-        if event.remembersStreamingRenderer,
-           let last = viewModel.messages.last,
-           last.role == MessageRole.assistant {
-            retained.insert(ChatMessageProjector.messageId(for: last))
-        }
-        streamedMessageIDs = retained
     }
 
     /// Forcefully dismiss the keyboard. Clears the SwiftUI focus binding and also resigns the
@@ -1337,6 +1027,47 @@ struct ChatView: View {
 
     private func toggleComposerPanel(_ panel: ComposerPanel) {
         activeComposerPanel = activeComposerPanel == panel ? nil : panel
+    }
+
+    private func applyCollectionViewportState(_ newState: ChatViewportState) {
+        guard viewportState != newState else { return }
+        if viewportState.showScrollToBottom != newState.showScrollToBottom {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                viewportState = newState
+            }
+        } else {
+            viewportState = newState
+        }
+    }
+
+    private func handleChatListAction(_ action: ChatListAction) {
+        switch action {
+        case let .regenerate(messageId):
+            viewModel.regenerate(messageId: messageId)
+        case let .edit(messageId, newText):
+            viewModel.editMessage(messageId: messageId, newText: newText)
+        case let .delete(messageId):
+            viewModel.deleteMessage(messageId: messageId)
+        case let .selectVariant(messageId, variantIndex):
+            viewModel.selectVariant(messageId: messageId, variantIndex: variantIndex)
+        case let .generativeWidget(prompt):
+            guard !viewModel.isGenerationActive else { return }
+            viewModel.inputText = prompt
+            viewportState.followPaused = false
+            viewModel.sendMessage()
+        case let .modifyGeneratedImage(urlString, prompt, aspectRatio):
+            guard !viewModel.isGenerationActive else { return }
+            viewportState.followPaused = false
+            viewModel.modifyGeneratedImage(
+                sourceImageURL: urlString,
+                prompt: prompt,
+                aspectRatio: aspectRatio
+            )
+        case .primaryConfiguration:
+            openPrimaryConfigurationAction()
+        case .modelDefaults:
+            openModelDefaults()
+        }
     }
 
     private func openPrimaryConfigurationAction() {

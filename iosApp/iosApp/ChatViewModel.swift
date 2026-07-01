@@ -1143,6 +1143,35 @@ final class ChatViewModel {
         conversationStore?.variantInfo(forMessageIndex: index)
     }
 
+    func messageIndex(forMessageId messageId: String) -> Int? {
+        messages.firstIndex { ChatMessageProjector.messageId(for: $0) == messageId }
+    }
+
+    func regenerate(messageId: String) {
+        guard let index = messageIndex(forMessageId: messageId) else { return }
+        regenerate(atMessageIndex: index)
+    }
+
+    func editMessage(messageId: String, newText: String) {
+        guard let index = messageIndex(forMessageId: messageId) else { return }
+        editMessage(atMessageIndex: index, newText: newText)
+    }
+
+    func deleteMessage(messageId: String) {
+        guard let index = messageIndex(forMessageId: messageId) else { return }
+        deleteMessage(atMessageIndex: index)
+    }
+
+    func selectVariant(messageId: String, variantIndex: Int) {
+        guard let index = messageIndex(forMessageId: messageId) else { return }
+        selectVariant(messageIndex: index, variantIndex: variantIndex)
+    }
+
+    func variantInfo(messageId: String) -> IOSConversationStore.VariantInfo? {
+        guard let index = messageIndex(forMessageId: messageId) else { return nil }
+        return variantInfo(atMessageIndex: index)
+    }
+
     private func regenerateDigestSeed() -> String {
         messages.last(where: { $0.role == MessageRole.user })?.toText() ?? ""
     }
