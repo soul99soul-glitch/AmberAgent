@@ -1,0 +1,34 @@
+{
+  "colors" : [
+    {
+      "color" : {
+        "color-space" : "srgb",
+        "components" : {
+          "alpha" : "1.00",
+          "blue" : "0xF1",
+          "green" : "0xF4",
+          "red" : "0xF8"
+        }
+      },
+      "idiom" : "universal"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "color" : {
+        "color-space" : "srgb",
+        "components" : {
+          "alpha" : "1.00",
+          "blue" : "0x28",
+          "green" : "0x1A",
+          "red" : "0x15"
+        }
+      },
+      "idiom" : "universal"
+    }
+  ]
+}

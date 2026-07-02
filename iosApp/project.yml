@@ -23,8 +23,7 @@ packages:
     url: https://github.com/apple/swift-nio-ssh.git
     exactVersion: 0.13.0
   SwiftStreamingMarkdown:
-    url: https://github.com/microsoft/SwiftStreamingMarkdown
-    branch: main
+    path: vendor/SwiftStreamingMarkdown
   MarkdownView:
     url: https://github.com/LiYanan2004/MarkdownView.git
     revision: c1254af
