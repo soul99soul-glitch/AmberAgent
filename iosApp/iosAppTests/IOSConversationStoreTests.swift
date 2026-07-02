@@ -242,6 +242,178 @@ final class IOSConversationStoreTests: XCTestCase {
         XCTAssertTrue(store.currentMessages.map { $0.toText() }.joined(separator: "\n").contains("# 会话深读"))
     }
 
+    /// P2.5 回归防线:后台生成/工具回填落盘必须 bump 定向的 backgroundContentRevision +
+    /// 把目标会话 id 加入 pendingBackgroundContentConversationIds,但绝不能碰
+    /// conversationSwitchedRevision(否则会复发"每次落盘重灌历史"的甩回老 bug)。
+    /// 同时锁定普通前台落盘(saveCurrent/save)不得触碰这个定向信号。
+    func testBackgroundCompletionBumpsDirectedSignalWithoutTouchingSwitchRevision() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreBackgroundCompletion-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let convId = try XCTUnwrap(store.currentConversation?.id)
+
+        let baseMessages = [UIMessage.companion.user(prompt: "q")]
+        await store.saveCurrent(messages: baseMessages)
+
+        // 基线:先确认普通前台落盘(saveCurrent)不碰 backgroundContentRevision。
+        XCTAssertEqual(store.backgroundContentRevision, 0, "普通前台落盘不应 bump backgroundContentRevision")
+        XCTAssertTrue(
+            store.pendingBackgroundContentConversationIds.isEmpty,
+            "普通前台落盘不应往 pendingBackgroundContentConversationIds 塞任何 id"
+        )
+
+        let switchBaseline = store.conversationSwitchedRevision
+
+        // 1) saveBackgroundCompletion 成功落盘后:backgroundContentRevision +1、
+        //    pendingBackgroundContentConversationIds 含目标会话、conversationSwitchedRevision 不变。
+        let completedMessages = baseMessages + [UIMessage.companion.assistant(prompt: "背景生成结果")]
+        await store.saveBackgroundCompletion(
+            baseMessages: baseMessages,
+            completedMessages: completedMessages,
+            to: convId
+        )
+        XCTAssertEqual(store.backgroundContentRevision, 1, "saveBackgroundCompletion 应 bump backgroundContentRevision")
+        XCTAssertTrue(
+            store.pendingBackgroundContentConversationIds.contains(String(describing: convId)),
+            "saveBackgroundCompletion 应把目标会话加入 pendingBackgroundContentConversationIds"
+        )
+        XCTAssertEqual(
+            store.conversationSwitchedRevision, switchBaseline,
+            "saveBackgroundCompletion 不应 bump conversationSwitchedRevision"
+        )
+        XCTAssertEqual(store.currentMessages.map { $0.toText() }, ["q", "背景生成结果"])
+
+        // 2) saveBackgroundToolCompletion 同上验证。
+        let baseMessages2 = store.currentMessages
+        let completedMessages2 = baseMessages2 + [UIMessage.companion.assistant(prompt: "工具回填结果")]
+        await store.saveBackgroundToolCompletion(
+            baseMessages: baseMessages2,
+            completedMessages: completedMessages2,
+            to: convId
+        )
+        XCTAssertEqual(store.backgroundContentRevision, 2, "saveBackgroundToolCompletion 应再次 bump backgroundContentRevision")
+        XCTAssertTrue(
+            store.pendingBackgroundContentConversationIds.contains(String(describing: convId)),
+            "saveBackgroundToolCompletion 应把目标会话加入 pendingBackgroundContentConversationIds"
+        )
+        XCTAssertEqual(
+            store.conversationSwitchedRevision, switchBaseline,
+            "saveBackgroundToolCompletion 不应 bump conversationSwitchedRevision"
+        )
+
+        // 3) 再来一次普通前台落盘(save(messages:to:)):backgroundContentRevision 不应继续增长。
+        await store.save(messages: store.currentMessages + [UIMessage.companion.user(prompt: "foreground edit")], to: convId)
+        XCTAssertEqual(store.backgroundContentRevision, 2, "普通前台 save(messages:to:) 不应继续 bump backgroundContentRevision")
+    }
+
+    /// 观察合并丢通知防线:两会话在同一 tick 先后落盘时,单值信号会被后落盘的覆盖,
+    /// 先落的那个会话丢失通知。集合语义天然免疫——两个 id 都应留在待通知集合里。
+    func testPendingBackgroundContentConversationIdsSurvivesSameTickMultiConversationLanding() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStorePendingMerge-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let firstConvId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "q1")])
+
+        await store.newConversation()
+        let secondConvId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "q2")])
+
+        // 会话一先落盘后台完成。
+        await store.saveBackgroundCompletion(
+            baseMessages: [UIMessage.companion.user(prompt: "q1")],
+            completedMessages: [UIMessage.companion.user(prompt: "q1"), UIMessage.companion.assistant(prompt: "a1")],
+            to: firstConvId
+        )
+        // 会话二紧接着（同 tick）落盘后台完成。
+        await store.saveBackgroundCompletion(
+            baseMessages: [UIMessage.companion.user(prompt: "q2")],
+            completedMessages: [UIMessage.companion.user(prompt: "q2"), UIMessage.companion.assistant(prompt: "a2")],
+            to: secondConvId
+        )
+
+        XCTAssertTrue(
+            store.pendingBackgroundContentConversationIds.contains(String(describing: firstConvId)),
+            "先落盘的会话一不应被后落盘的会话二覆盖丢失"
+        )
+        XCTAssertTrue(
+            store.pendingBackgroundContentConversationIds.contains(String(describing: secondConvId)),
+            "后落盘的会话二也应保留在待通知集合里"
+        )
+    }
+
+    /// consumeBackgroundContentNotification 只应移除指定会话的待通知状态,不得误清其他会话。
+    func testConsumeBackgroundContentNotificationOnlyRemovesSpecifiedConversation() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreConsumeSelective-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let firstConvId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "q1")])
+
+        await store.newConversation()
+        let secondConvId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "q2")])
+
+        await store.saveBackgroundCompletion(
+            baseMessages: [UIMessage.companion.user(prompt: "q1")],
+            completedMessages: [UIMessage.companion.user(prompt: "q1"), UIMessage.companion.assistant(prompt: "a1")],
+            to: firstConvId
+        )
+        await store.saveBackgroundCompletion(
+            baseMessages: [UIMessage.companion.user(prompt: "q2")],
+            completedMessages: [UIMessage.companion.user(prompt: "q2"), UIMessage.companion.assistant(prompt: "a2")],
+            to: secondConvId
+        )
+
+        store.consumeBackgroundContentNotification(for: String(describing: firstConvId))
+
+        XCTAssertFalse(
+            store.pendingBackgroundContentConversationIds.contains(String(describing: firstConvId)),
+            "consume 应移除指定会话的待通知状态"
+        )
+        XCTAssertTrue(
+            store.pendingBackgroundContentConversationIds.contains(String(describing: secondConvId)),
+            "consume 不应误清其他会话的待通知状态"
+        )
+    }
+
+    /// 负向锁:普通前台落盘(saveCurrent/save)绝不能往 pendingBackgroundContentConversationIds 塞 id,
+    /// 否则会误触发 ChatView 的后台内容上屏路径。
+    func testForegroundSaveDoesNotPopulatePendingBackgroundContentConversationIds() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreForegroundNoPending-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let convId = try XCTUnwrap(store.currentConversation?.id)
+
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "q")])
+        await store.save(messages: [UIMessage.companion.user(prompt: "q"), UIMessage.companion.assistant(prompt: "a")], to: convId)
+
+        XCTAssertTrue(
+            store.pendingBackgroundContentConversationIds.isEmpty,
+            "普通前台落盘不应往 pendingBackgroundContentConversationIds 塞任何 id"
+        )
+    }
+
     private func waitFor(
         timeout: TimeInterval = 2,
         condition: @escaping @MainActor () -> Bool

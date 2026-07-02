@@ -74,6 +74,20 @@ final class IOSConversationStore {
     /// 供 viewport/ChatView 观察以判断是否需要重灌历史 + 重新从底部实现落位。
     private(set) var conversationSwitchedRevision: Int = 0
 
+    /// 后台生成/后台工具回填落盘完成的定向信号。只在后台路径 bump——
+    /// 普通前台落盘绝不碰它,否则会复发"每次落盘重灌历史"的甩回老 bug。
+    private(set) var backgroundContentRevision: Int = 0
+    /// 待通知的后台内容落盘会话集合。集合(而非单值)天然免疫同 tick 多会话
+    /// 落盘的观察合并;消费由 ChatView 显式调用 consume,门控跳过时不消费,
+    /// 生成收尾事件会补查——两类丢通知(覆盖/消费无重试)都由此闭环。
+    private(set) var pendingBackgroundContentConversationIds: Set<String> = []
+
+    /// ChatView 在真正完成"上屏"处理后调用，把该会话从待通知集合里移除。
+    /// 门控跳过（前台生成中）时不应调用——保留待通知状态，等收尾事件补查。
+    func consumeBackgroundContentNotification(for conversationId: String) {
+        pendingBackgroundContentConversationIds.remove(conversationId)
+    }
+
     /// 最近一次存储 I/O 错误（磁盘满/写失败/损坏）。绑定到顶层 `.alert(item:)`
     /// 让用户看到失败，避免"以为保存了实际没保存"的静默丢数据。nil = 无未读错误。
     /// 成功的 refreshSummaries 会清空它。
@@ -228,6 +242,8 @@ final class IOSConversationStore {
             nextMessages = current + [notice] + generatedSuffix
         }
         await save(messages: nextMessages, to: id)
+        pendingBackgroundContentConversationIds.insert(String(describing: id))
+        backgroundContentRevision &+= 1
     }
 
     func saveBackgroundToolCompletion(
@@ -264,6 +280,8 @@ final class IOSConversationStore {
             }
         }
         await save(messages: nextMessages, to: id)
+        pendingBackgroundContentConversationIds.insert(String(describing: id))
+        backgroundContentRevision &+= 1
     }
 
     /// 重建一个仅 title 不同的 Conversation（Swift 侧无 partial copy，用全字段构造器）。

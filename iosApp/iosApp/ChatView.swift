@@ -192,6 +192,9 @@ struct ChatView: View {
         .onChange(of: conversationStore.conversationSwitchedRevision) { _, _ in
             handleConversationSwitch()
         }
+        .onChange(of: conversationStore.backgroundContentRevision) { _, _ in
+            handleBackgroundContentLanded()
+        }
         .onChange(of: viewModel.messageUpdateSignal) { _, signal in
             handleMessageUpdateSignal(signal)
         }
@@ -221,12 +224,34 @@ struct ChatView: View {
         refreshChatListSummary(resetTitleSeed: true)
     }
 
+    /// 后台生成/工具回填落盘后的定向上屏:三重门控,绝不打扰进行中的前台流式,
+    /// 也绝不因别的会话的后台完成而重灌当前会话。
+    private func handleBackgroundContentLanded() {
+        guard let currentId = conversationStore.currentConversation?.id else { return }
+        let idString = String(describing: currentId)
+        guard conversationStore.pendingBackgroundContentConversationIds.contains(idString) else { return }
+        // 前台生成中不动 messages,也**不消费**——收尾事件会带着未消费的 pending 再进来。
+        guard !viewModel.isGenerationActive, !viewModel.isLoading else { return }
+        conversationStore.consumeBackgroundContentNotification(for: idString)
+        // .branchChange:语义=消息树被外部改写;affectsViewport=false 不发滚动命令;
+        // 且会清 contentHashCache——后台工具回填正是「同 id 原地变更」路径,必须清。
+        viewModel.reloadFromStore(reason: .branchChange)
+        refreshChatListSummary(resetTitleSeed: false)
+    }
+
     private func handleMessageUpdateSignal(_ signal: ChatMessageUpdateSignal) {
         refreshChatListSummary(
             resetTitleSeed: signal.event == .conversationLoaded ||
                 signal.event == .conversationSwitched ||
                 signal.event == .branchChanged
         )
+        // 后台内容若在本轮前台生成期间落盘,门控当时跳过且未消费;收尾时补查上屏。
+        switch signal.event {
+        case .generationCompleted, .generationFailed, .generationCancelled:
+            handleBackgroundContentLanded()
+        default:
+            break
+        }
     }
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {
