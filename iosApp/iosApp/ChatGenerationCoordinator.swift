@@ -314,6 +314,11 @@ final class ChatGenerationCoordinator {
         streamJob = nil
         cancelForegroundToolExecutions()
         cancelPendingStreamSnapshotPublish()
+        // 取消也是 run 的终结:与 finishStreaming/后台交接保持一致,关闭录制器,
+        // 否则取消路径会泄漏文件句柄与 per-run 字典条目。
+        if let runId {
+            ChatStreamRecorder.shared.finish(runId: runId)
+        }
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -411,10 +416,19 @@ final class ChatGenerationCoordinator {
         streamJob = nil
         cancelForegroundToolExecutions()
         if let pendingStreamSnapshot {
+            // Background handoff bypasses the normal scheduleStreamSnapshotPublish
+            // path, so without this the recorder would miss the last in-flight
+            // snapshot before ownership moves to the background coordinator.
+            if let runId = currentRunId {
+                ChatStreamRecorder.shared.record(runId: runId, snapshot: pendingStreamSnapshot)
+            }
             bindings.setMessages(pendingStreamSnapshot)
             bindings.bumpMessageRevision(.streamDelta)
         }
         cancelPendingStreamSnapshotPublish()
+        if let runId = currentRunId {
+            ChatStreamRecorder.shared.finish(runId: runId)
+        }
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -737,6 +751,7 @@ final class ChatGenerationCoordinator {
     }
 
     private func scheduleStreamSnapshotPublish(_ snapshot: [UIMessage], runId: String) {
+        ChatStreamRecorder.shared.record(runId: runId, snapshot: snapshot)
         pendingStreamSnapshot = snapshot
         guard streamSnapshotFlushTask == nil else { return }
         streamSnapshotFlushTask = Task { @MainActor [weak self] in
@@ -1113,6 +1128,9 @@ final class ChatGenerationCoordinator {
 
     private func finishStreaming() {
         cancelPendingStreamSnapshotPublish()
+        if let runId = currentRunId {
+            ChatStreamRecorder.shared.finish(runId: runId)
+        }
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil
