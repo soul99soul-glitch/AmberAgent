@@ -829,23 +829,44 @@ private struct ChatGeneratedImageDotPlaceholder: View {
     }
 }
 
-/// 宽度驱动的宽高比:高度 = 实测宽度 / aspectRatio,不响应垂直 proposal。
-/// UIHostingConfiguration 的 self-sizing 测量会把 cell 的 estimated 高度作为垂直
-/// proposal 传入,`.aspectRatio(_, .fit)` 会把图片 fit 进去,塌成缩略图;
-/// 文本行忽略垂直 proposal 所以不受影响。宽度 proposal 始终正确,用它推导高度。
+/// 宽度驱动的宽高比:自定义 Layout 在同一布局 pass 内由宽度 proposal 直接推导
+/// 高度(height = width / aspectRatio),首帧即正确,消除旧实现「fallback 220 →
+/// onGeometryChange 回填宽度再修正」的一帧高度跳变(cell 新建/复用重进视口都会重演)。
+/// UIHostingConfiguration self-sizing 的垂直 proposal 是 estimated cell 高度,不可信;
+/// 宽度 proposal 始终正确,所以只信宽度。
 private struct ChatWidthDrivenAspectRatio: ViewModifier {
     let aspectRatio: CGFloat
-    @State private var measuredWidth: CGFloat = 0
 
     func body(content: Content) -> some View {
-        content
-            .frame(maxWidth: .infinity)
-            .frame(height: measuredWidth > 0 ? measuredWidth / max(aspectRatio, 0.1) : 220)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.width
-            } action: { newWidth in
-                measuredWidth = newWidth
-            }
+        ChatWidthAspectLayout(aspectRatio: aspectRatio) {
+            content
+        }
+    }
+}
+
+private struct ChatWidthAspectLayout: Layout {
+    let aspectRatio: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let safeAspect = max(aspectRatio, 0.1)
+        let width: CGFloat
+        if let proposed = proposal.width, proposed.isFinite, proposed > 0 {
+            width = proposed
+        } else {
+            // 宽度 proposal 缺失/无穷时的兜底,等效旧实现的 220 高 fallback。
+            width = 220 * safeAspect
+        }
+        return CGSize(width: width, height: width / safeAspect)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            subview.place(
+                at: CGPoint(x: bounds.midX, y: bounds.midY),
+                anchor: .center,
+                proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
+            )
+        }
     }
 }
 

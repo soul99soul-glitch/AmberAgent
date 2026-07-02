@@ -87,6 +87,11 @@ struct ChatUserBubble: View {
             .font(.system(size: 17 * boundedScale, design: selectedFont.design))
             .foregroundStyle(.white)
             .lineSpacing(3 * boundedScale)
+            // cell self-sizing 测量会传入受限的垂直 proposal,普通 Text 会按 proposal
+            // 截断——曾表现为用户消息只显示一行。fixedSize 让文本按理想高度完整布局;
+            // 超长消息以 50 行为折叠上限,避免单条消息占掉数十屏。
+            .lineLimit(50)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(

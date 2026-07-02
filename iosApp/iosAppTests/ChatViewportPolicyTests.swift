@@ -218,11 +218,13 @@ final class ChatViewportPolicyTests: XCTestCase {
     }
 
     func testReachingBottomResumesFollowEvenAfterDragEnds() {
+        // 该用例模拟用户自己惯性滑回底部(userScrollActive=true),因此仍应清除暂停。
         XCTAssertFalse(
             ChatViewportPolicy.followPausedAfterGeometryChange(
                 wasPaused: true,
                 userDragging: false,
-                atBottom: true
+                atBottom: true,
+                userScrollActive: true
             )
         )
     }
@@ -232,7 +234,8 @@ final class ChatViewportPolicyTests: XCTestCase {
             ChatViewportPolicy.followPausedAfterGeometryChange(
                 wasPaused: false,
                 userDragging: true,
-                atBottom: false
+                atBottom: false,
+                userScrollActive: false
             )
         )
     }
@@ -242,8 +245,87 @@ final class ChatViewportPolicyTests: XCTestCase {
             ChatViewportPolicy.followPausedAfterGeometryChange(
                 wasPaused: true,
                 userDragging: false,
-                atBottom: false
+                atBottom: false,
+                userScrollActive: false
             )
         )
+    }
+
+    func testFakeAtBottomFromEstimatedHeightDoesNotClearPause() {
+        // 估算高度失真导致的瞬时假 atBottom(既非拖拽也非用户主动滚动)不应清掉暂停。
+        XCTAssertTrue(
+            ChatViewportPolicy.followPausedAfterGeometryChange(
+                wasPaused: true,
+                userDragging: false,
+                atBottom: true,
+                userScrollActive: false
+            )
+        )
+    }
+
+    func testUserScrollActiveAtBottomResumesFollow() {
+        // 惯性减速中(isDecelerating)滑到底部,应恢复跟随。
+        XCTAssertFalse(
+            ChatViewportPolicy.followPausedAfterGeometryChange(
+                wasPaused: true,
+                userDragging: false,
+                atBottom: true,
+                userScrollActive: true
+            )
+        )
+    }
+
+    func testReduceGeometryDoesNotDowngradeLODWhileAutoFollowing() {
+        var state = ChatViewportState(
+            followPaused: false,
+            userDragging: false,
+            showScrollToBottom: false,
+            isAtBottom: true,
+            isContentScrollable: true,
+            liveRenderingFarFromBottom: false,
+            conversationLoadToken: 0
+        )
+
+        _ = ChatViewportReducer.reduceGeometry(
+            ChatViewportGeometrySnapshot(
+                atBottom: false,
+                isContentScrollable: true,
+                liveRenderingFarFromBottom: true,
+                userScrollActive: false
+            ),
+            hasMessages: true,
+            state: &state,
+            environment: .init(followEnabled: true, generationActive: true)
+        )
+
+        XCTAssertFalse(state.followPaused)
+        XCTAssertFalse(state.liveRenderingFarFromBottom)
+    }
+
+    func testReduceGeometryDowngradesLODWhenUserHasLeftBottom() {
+        var state = ChatViewportState(
+            followPaused: false,
+            userDragging: true,
+            showScrollToBottom: false,
+            isAtBottom: true,
+            isContentScrollable: true,
+            liveRenderingFarFromBottom: false,
+            conversationLoadToken: 0
+        )
+
+        _ = ChatViewportReducer.reduceGeometry(
+            ChatViewportGeometrySnapshot(
+                atBottom: false,
+                isContentScrollable: true,
+                liveRenderingFarFromBottom: true,
+                userScrollActive: false
+            ),
+            hasMessages: true,
+            state: &state,
+            environment: .init(followEnabled: true, generationActive: true)
+        )
+
+        XCTAssertTrue(state.userDragging)
+        XCTAssertTrue(state.liveRenderingFarFromBottom)
     }
 }

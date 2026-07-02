@@ -292,6 +292,7 @@ struct ChatViewportGeometrySnapshot: Equatable {
     var atBottom: Bool
     var isContentScrollable: Bool
     var liveRenderingFarFromBottom: Bool
+    var userScrollActive: Bool = false
 }
 
 enum ChatViewportReducer {
@@ -332,12 +333,17 @@ enum ChatViewportReducer {
         let wasContentScrollable = state.isContentScrollable
         state.isAtBottom = snapshot.atBottom
         state.isContentScrollable = snapshot.isContentScrollable
-        state.liveRenderingFarFromBottom = snapshot.liveRenderingFarFromBottom
         state.followPaused = ChatViewportPolicy.followPausedAfterGeometryChange(
             wasPaused: state.followPaused,
             userDragging: state.userDragging,
-            atBottom: snapshot.atBottom
+            atBottom: snapshot.atBottom,
+            userScrollActive: snapshot.userScrollActive
         )
+        // LOD 降级只在用户真的离开底部(暂停跟随或拖拽中)时生效:
+        // 自动跟随中的 contentSize 瞬时跳变不算"远离底部",否则 rendererMode
+        // 翻转会经由 renderIdentity(.id)销毁重建流式气泡,逐词淡入丢失。
+        state.liveRenderingFarFromBottom = snapshot.liveRenderingFarFromBottom &&
+            (state.followPaused || state.userDragging)
 
         var commands: [ChatViewportScrollCommand] = []
         if !wasContentScrollable && snapshot.isContentScrollable {
@@ -415,10 +421,13 @@ enum ChatViewportPolicy {
     static func followPausedAfterGeometryChange(
         wasPaused: Bool,
         userDragging: Bool,
-        atBottom: Bool
+        atBottom: Bool,
+        userScrollActive: Bool
     ) -> Bool {
         if atBottom {
-            return false
+            // 只有"用户自己滚到底"(拖拽中或惯性减速中)才恢复跟随;
+            // 估算高度失真造成的瞬时假 atBottom 不能清掉用户的阅读暂停。
+            return (userDragging || userScrollActive) ? false : wasPaused
         }
         if userDragging {
             return true

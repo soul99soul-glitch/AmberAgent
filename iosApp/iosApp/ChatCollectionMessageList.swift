@@ -235,10 +235,12 @@ final class ChatCollectionViewController: UIViewController {
             contextCompactState: latestConfiguration.contextCompactState,
             displaySetting: displaySetting,
             generativeUiSetting: generativeUiSetting,
+            reasoningLevelLabel: latestConfiguration.reasoningLevelLabel,
             viewportState: store.viewportState,
             streamedMessageIDs: store.streamedMessageIDs,
             renderStateStore: store.renderStateStore,
-            previousSignatures: store.signatures,
+            previousDigests: store.digests,
+            contentHashCache: store.contentHashCache,
             variantInfoProvider: variantInfoProvider ?? { _ in nil }
         )
 
@@ -258,8 +260,8 @@ final class ChatCollectionViewController: UIViewController {
 
         store.items = build.items
         store.renderModelsByID = build.renderModelsByID
-        store.rowHeightCache.invalidate(itemIDs: build.changedIDs)
-        store.signatures = build.signatures
+        store.rowHeightCache.invalidate(itemIDs: build.heightChangedIDs)
+        store.digests = build.digests
         store.queueAnimatedInsertions(animatedInsertionIDs)
 
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
@@ -355,28 +357,37 @@ final class ChatCollectionViewController: UIViewController {
             row,
             isLiveRenderingFarFromBottom: store.viewportState.liveRenderingFarFromBottom
         )
-        let signature = ChatListSnapshotBuilder.signatureForRow(
-            row,
+        let variantInfo = variantInfoProvider?(row.index)
+        let digest = ChatRowDigests.digest(
+            row: row,
             renderState: renderState,
-            displaySetting: displaySetting,
-            generativeUiSetting: generativeUiSetting
+            contentHash: store.contentHashCache.contentHash(for: row),
+            isGenerationActive: latestConfiguration.isGenerationActive,
+            displaySettingSignature: String(describing: displaySetting),
+            generativeUiSettingSignature: String(describing: generativeUiSetting),
+            hasMultipleVariants: variantInfo?.hasMultipleVariants == true,
+            reasoningLevelLabel: latestConfiguration.reasoningLevelLabel
         )
         // 渲染状态没有实际变化时(比如行在底部附近反复进出视口)不要 reconfigure:
         // 高度缓存被无谓清掉后 sizeForItemAt 会退回估算值,造成 contentSize 抖动。
-        if skipIfSignatureUnchanged, store.signatures[itemID] == signature {
+        let previousDigest = store.digests[itemID]
+        if skipIfSignatureUnchanged, previousDigest == digest {
             return false
         }
         store.renderModelsByID[itemID] = .message(
             ChatListMessageRenderModel(
                 row: row,
-                variantInfo: variantInfoProvider?(row.index),
+                variantInfo: variantInfo,
                 renderState: renderState,
                 isGenerationActive: latestConfiguration.isGenerationActive,
                 renderIdentity: ChatListSnapshotBuilder.renderIdentityForRow(row, renderState: renderState)
             )
         )
-        store.signatures[itemID] = signature
-        store.rowHeightCache.invalidate(itemIDs: [itemID])
+        store.digests[itemID] = digest
+        // 高度只依赖 layout:presentation(index)变化不使高度失效。
+        if previousDigest?.layout != digest.layout {
+            store.rowHeightCache.invalidate(itemIDs: [itemID])
+        }
 
         snapshot.reconfigureItems([itemID])
         applyingSnapshotCount += 1
@@ -396,9 +407,11 @@ final class ChatCollectionViewController: UIViewController {
             case .none:
                 break
             case .initialAnchor, .resetForConversationSwitch:
-                scrollToBottom(animated: false)
+                anchorToBottomConverged()
             case let .followBottom(animated, _, deferred):
-                guard !store.viewportState.userDragging else { return }
+                // 只跳过这一条 followBottom,不能 return:否则同批后续命令
+                // 和末尾的 publishViewportStateIfNeeded() 会被一起吞掉。
+                guard !store.viewportState.userDragging else { continue }
                 let action = { [weak self] in
                     let useLinearFollow = animated && event == .assistantStreamDelta
                     self?.scrollToBottom(animated: animated, linear: useLinearFollow)
@@ -413,6 +426,22 @@ final class ChatCollectionViewController: UIViewController {
             }
         }
         publishViewportStateIfNeeded()
+    }
+
+    /// 进会话锚定:列表此时几乎全是估算高度,一次 scrollToItem 会落在"假底部",
+    /// 落点后尾屏 cell 实测修正又把真实底部推远。滚动→布局→校验,直到距底≤1pt
+    /// 或达到上限(尾屏行实测化后第二轮通常即收敛)。
+    private func anchorToBottomConverged() {
+        scrollToBottom(animated: false)
+        guard collectionView.bounds.height > 0 else { return }
+        for _ in 0..<2 {
+            collectionView.layoutIfNeeded()
+            let visibleHeight = collectionView.bounds.height - collectionView.adjustedContentInset.top - collectionView.adjustedContentInset.bottom
+            let visibleMaxY = collectionView.contentOffset.y + collectionView.adjustedContentInset.top + visibleHeight
+            let distanceToBottom = collectionView.contentSize.height - visibleMaxY
+            if distanceToBottom <= 1 { break }
+            scrollToBottom(animated: false)
+        }
     }
 
     private func scrollToBottom(animated: Bool, linear: Bool = false) {
@@ -452,7 +481,8 @@ final class ChatCollectionViewController: UIViewController {
         let geometry = ChatViewportGeometrySnapshot(
             atBottom: distanceToBottom <= ChatLayout.bottomStickThreshold,
             isContentScrollable: contentHeight > visibleHeight + ChatLayout.bottomStickThreshold,
-            liveRenderingFarFromBottom: distanceToBottom > liveRenderingThreshold
+            liveRenderingFarFromBottom: distanceToBottom > liveRenderingThreshold,
+            userScrollActive: collectionView.isTracking || collectionView.isDragging || collectionView.isDecelerating
         )
         let commands = ChatViewportReducer.reduceGeometry(
             geometry,
@@ -593,7 +623,7 @@ extension ChatCollectionViewController: UICollectionViewDelegate {
         store.rowHeightCache.set(
             height: cell.bounds.height,
             for: itemID,
-            signature: store.signatures[itemID],
+            signature: store.digests[itemID]?.layout,
             width: collectionView.bounds.width
         )
         if let messageID = store.messageID(for: itemID) {
@@ -659,7 +689,7 @@ extension ChatCollectionViewController: ChatLayoutDelegate {
         case .message:
             let estimate = store.rowHeightCache.height(
                 for: itemID,
-                signature: store.signatures[itemID],
+                signature: store.digests[itemID]?.layout,
                 width: width
             ) ?? 110
             return .estimated(CGSize(width: width, height: estimate))
@@ -828,8 +858,9 @@ private struct ChatListMessageRenderModel {
 private struct ChatListBuildResult {
     let items: [ChatListItem]
     let renderModelsByID: [String: ChatListRenderModel]
-    let signatures: [String: String]
+    let digests: [String: ChatRowDigest]
     let changedIDs: [String]
+    let heightChangedIDs: [String]
     let rows: [ChatMessageRowModel]
 }
 
@@ -844,21 +875,25 @@ private enum ChatListSnapshotBuilder {
         contextCompactState: ChatContextCompactState,
         displaySetting: DisplaySetting,
         generativeUiSetting: GenerativeUiSetting,
+        reasoningLevelLabel: String?,
         viewportState: ChatViewportState,
         streamedMessageIDs: Set<String>,
         renderStateStore: ChatRenderStateStore,
-        previousSignatures: [String: String],
+        previousDigests: [String: ChatRowDigest],
+        contentHashCache: ChatRowContentHashCache,
         variantInfoProvider: (Int) -> IOSConversationStore.VariantInfo?
     ) -> ChatListBuildResult {
         var items: [ChatListItem] = []
         var models: [String: ChatListRenderModel] = [:]
-        var signatures: [String: String] = [:]
+        var digests: [String: ChatRowDigest] = [:]
         var rows: [ChatMessageRowModel] = []
+        let displaySettingSignature = String(describing: displaySetting)
+        let generativeUiSettingSignature = String(describing: generativeUiSetting)
 
-        func append(_ item: ChatListItem, model: ChatListRenderModel, signature: String) {
+        func append(_ item: ChatListItem, model: ChatListRenderModel, digest: ChatRowDigest) {
             items.append(item)
             models[item.id] = model
-            signatures[item.id] = signature
+            digests[item.id] = digest
         }
 
         if messages.isEmpty {
@@ -866,13 +901,16 @@ private enum ChatListSnapshotBuilder {
                 append(
                     ChatListItem(id: "configuration-issue-empty", kind: .configurationIssue),
                     model: .configurationIssue(configurationIssue, compact: false),
-                    signature: "configuration-empty-\(configurationIssue.title)-\(configurationIssue.message)"
+                    digest: ChatRowDigest(
+                        layout: "configuration-empty-\(configurationIssue.title)-\(configurationIssue.message)",
+                        presentation: ""
+                    )
                 )
             } else {
                 append(
                     ChatListItem(id: "empty-state", kind: .emptyState),
                     model: .emptyState,
-                    signature: "empty"
+                    digest: ChatRowDigest(layout: "empty", presentation: "")
                 )
             }
         } else {
@@ -880,7 +918,10 @@ private enum ChatListSnapshotBuilder {
                 append(
                     ChatListItem(id: "configuration-issue-compact", kind: .configurationIssue),
                     model: .configurationIssue(configurationIssue, compact: true),
-                    signature: "configuration-compact-\(configurationIssue.title)-\(configurationIssue.message)"
+                    digest: ChatRowDigest(
+                        layout: "configuration-compact-\(configurationIssue.title)-\(configurationIssue.message)",
+                        presentation: ""
+                    )
                 )
             }
 
@@ -895,24 +936,29 @@ private enum ChatListSnapshotBuilder {
                     row,
                     isLiveRenderingFarFromBottom: viewportState.liveRenderingFarFromBottom
                 )
-                let signature = signatureForRow(
-                    row,
+                let variantInfo = variantInfoProvider(row.index)
+                let digest = ChatRowDigests.digest(
+                    row: row,
                     renderState: renderState,
-                    displaySetting: displaySetting,
-                    generativeUiSetting: generativeUiSetting
+                    contentHash: contentHashCache.contentHash(for: row),
+                    isGenerationActive: isGenerationActive,
+                    displaySettingSignature: displaySettingSignature,
+                    generativeUiSettingSignature: generativeUiSettingSignature,
+                    hasMultipleVariants: variantInfo?.hasMultipleVariants == true,
+                    reasoningLevelLabel: reasoningLevelLabel
                 )
                 append(
                     ChatListItem(id: itemID, kind: .message(messageId: row.messageId)),
                     model: .message(
                         ChatListMessageRenderModel(
                             row: row,
-                            variantInfo: variantInfoProvider(row.index),
+                            variantInfo: variantInfo,
                             renderState: renderState,
                             isGenerationActive: isGenerationActive,
                             renderIdentity: renderIdentityForRow(row, renderState: renderState)
                         )
                     ),
-                    signature: signature
+                    digest: digest
                 )
             }
 
@@ -921,7 +967,7 @@ private enum ChatListSnapshotBuilder {
                 append(
                     ChatListItem(id: "assistant-pending-response", kind: .pendingAssistant),
                     model: .pendingAssistant,
-                    signature: "pending"
+                    digest: ChatRowDigest(layout: "pending", presentation: "")
                 )
             }
 
@@ -929,7 +975,7 @@ private enum ChatListSnapshotBuilder {
                 append(
                     ChatListItem(id: "vision-recognition-indicator", kind: .visionRecognition),
                     model: .visionRecognition,
-                    signature: "vision"
+                    digest: ChatRowDigest(layout: "vision", presentation: "")
                 )
             }
 
@@ -938,7 +984,7 @@ private enum ChatListSnapshotBuilder {
                 append(
                     ChatListItem(id: id, kind: .contextMarker),
                     model: .contextMarker(contextCompactState),
-                    signature: "\(id)-\(contextCompactState.summary)"
+                    digest: ChatRowDigest(layout: "\(id)-\(contextCompactState.summary)", presentation: "")
                 )
             }
         }
@@ -946,45 +992,25 @@ private enum ChatListSnapshotBuilder {
         append(
             ChatListItem(id: ChatLayout.bottomAnchorID, kind: .bottomSpacer),
             model: .bottomSpacer,
-            signature: "bottom-\(ChatLayout.bottomRestGap)"
+            digest: ChatRowDigest(layout: "bottom-\(ChatLayout.bottomRestGap)", presentation: "")
         )
 
-        let changedIDs = signatures.compactMap { id, signature in
-            previousSignatures[id] == nil || previousSignatures[id] == signature ? nil : id
+        let changedIDs = digests.compactMap { id, digest -> String? in
+            guard let previous = previousDigests[id] else { return nil }
+            return previous == digest ? nil : id
+        }
+        let heightChangedIDs = digests.compactMap { id, digest -> String? in
+            guard let previous = previousDigests[id] else { return nil }
+            return previous.layout == digest.layout ? nil : id
         }
         return ChatListBuildResult(
             items: items,
             renderModelsByID: models,
-            signatures: signatures,
+            digests: digests,
             changedIDs: changedIDs,
+            heightChangedIDs: heightChangedIDs,
             rows: rows
         )
-    }
-
-    static func signatureForRow(
-        _ row: ChatMessageRowModel,
-        renderState: ChatRenderState,
-        displaySetting: DisplaySetting,
-        generativeUiSetting: GenerativeUiSetting
-    ) -> String {
-        var hasher = Hasher()
-        hasher.combine(row.messageId)
-        hasher.combine(String(describing: row.role))
-        hasher.combine(row.message.toText())
-        hasher.combine(row.parts.count)
-        for part in row.parts {
-            hasher.combine(String(describing: type(of: part)))
-            hasher.combine(String(describing: part))
-        }
-        hasher.combine(row.index)
-        hasher.combine(row.isLast)
-        hasher.combine(row.isStreaming)
-        hasher.combine(row.hasEverStreamed)
-        hasher.combine(renderState.rendererMode.rawValue)
-        hasher.combine(renderState.liveRenderingEnabled)
-        hasher.combine(String(describing: displaySetting))
-        hasher.combine(String(describing: generativeUiSetting))
-        return String(hasher.finalize())
     }
 
     static func renderIdentityForRow(_ row: ChatMessageRowModel, renderState: ChatRenderState) -> String {
@@ -1010,11 +1036,12 @@ private enum ChatListItemKind: Hashable {
 private final class ChatListControllerStore {
     var items: [ChatListItem] = []
     var renderModelsByID: [String: ChatListRenderModel] = [:]
-    var signatures: [String: String] = [:]
+    var digests: [String: ChatRowDigest] = [:]
     var streamedMessageIDs: Set<String> = []
     var viewportState = ChatViewportState()
     let renderStateStore = ChatRenderStateStore()
     let rowHeightCache = ChatRowHeightCache()
+    let contentHashCache = ChatRowContentHashCache()
     private var animatedInsertionItemIDs: Set<String> = []
 
     var hasMessageItems: Bool {
@@ -1068,32 +1095,37 @@ private final class ChatListControllerStore {
     }
 
     func rememberStreamedRendererState(for event: ChatEvent, messages: [UIMessage]) {
+        let currentIDs = Set(messages.map(ChatMessageProjector.messageId(for:)))
         switch event {
         case .conversationLoaded, .conversationSwitched, .branchChanged:
             streamedMessageIDs.removeAll()
             renderStateStore.removeAll()
+            contentHashCache.removeAll()
             animatedInsertionItemIDs.removeAll()
+            // 高度缓存条目只会因"消息被移除"而变陈旧,而移除只发生在这三类事件;
+            // retain 的前缀过滤是 O(条目×消息数),不能挂在每个流式 tick 上。
+            rowHeightCache.retain(messageItemIDs: Set(currentIDs.map { "message-\($0)" }))
         default:
             break
         }
 
-        let currentIDs = Set(messages.map(ChatMessageProjector.messageId(for:)))
         streamedMessageIDs = streamedMessageIDs.intersection(currentIDs)
         if event.remembersStreamingRenderer,
            let lastAssistant = messages.last(where: { $0.role == MessageRole.assistant }) {
             streamedMessageIDs.insert(ChatMessageProjector.messageId(for: lastAssistant))
         }
         renderStateStore.retain(ids: currentIDs)
+        contentHashCache.retain(ids: currentIDs)
     }
 }
 
-private enum ChatRendererMode: String {
+enum ChatRendererMode: String {
     case staticMarkdown
     case streamingMarkdown
     case frozen
 }
 
-private struct ChatRenderState: Equatable {
+struct ChatRenderState: Equatable {
     var rendererMode: ChatRendererMode
     var hasEverStreamed: Bool
     var liveRenderingEnabled: Bool
@@ -1156,16 +1188,87 @@ private final class ChatRenderStateStore {
     }
 }
 
+/// 消息内容哈希缓存:全量 build 对每行做 toText() + 逐 part describing 的
+/// O(全文) 哈希(跨 KMP 桥接)是长 session 卡顿主源,历史消息基本不可变,按行记忆化。
+/// 已核实的原地变更路径只有 tool output 空→非空回填(后台补全/审批恢复),
+/// 用 parts.count + tool output 计数指纹捕获;最后一条/流式行永不缓存。
+/// internal(非 private)是有意的:契约由 `ChatRowContentHashCacheTests` 通过
+/// `@testable import` 直接覆盖,`private`/`fileprivate` 会让测试文件完全看不到
+/// 这个类型。
+final class ChatRowContentHashCache {
+    private struct Entry {
+        let partsCount: Int
+        let toolOutputFingerprint: Int
+        let hash: Int
+    }
+
+    private var entries: [String: Entry] = [:]
+
+    func contentHash(for row: ChatMessageRowModel) -> Int {
+        let fingerprint = Self.toolOutputFingerprint(row.parts)
+        if let entry = entries[row.messageId],
+           entry.partsCount == row.parts.count,
+           entry.toolOutputFingerprint == fingerprint {
+            return entry.hash
+        }
+        var hasher = Hasher()
+        hasher.combine(row.message.toText())
+        hasher.combine(row.parts.count)
+        for part in row.parts {
+            hasher.combine(String(describing: type(of: part)))
+            hasher.combine(String(describing: part))
+        }
+        let hash = hasher.finalize()
+        if !row.isLast && !row.isStreaming {
+            entries[row.messageId] = Entry(
+                partsCount: row.parts.count,
+                toolOutputFingerprint: fingerprint,
+                hash: hash
+            )
+        }
+        return hash
+    }
+
+    /// 每个 Tool part 记 (非空标志 + output 条数),空→非空回填必然改变指纹。
+    private static func toolOutputFingerprint(_ parts: [UIMessagePart]) -> Int {
+        var fingerprint = 0
+        for part in parts {
+            guard let tool = part as? UIMessagePart.Tool else { continue }
+            fingerprint = fingerprint &* 31 &+ (tool.output.isEmpty ? 1 : 2 &+ tool.output.count)
+        }
+        return fingerprint
+    }
+
+    func retain(ids: Set<String>) {
+        entries = entries.filter { ids.contains($0.key) }
+    }
+
+    func removeAll() {
+        entries.removeAll()
+    }
+}
+
 private final class ChatRowHeightCache {
     private var heights: [String: CGFloat] = [:]
+    /// 每个 item 的最近一次实测高度(按宽度),签名失效后作为估算兜底:
+    /// 旧实测顶多差一两行,110 默认估算对巨型消息会差几千 pt,
+    /// 造成 contentSize 塌陷(完成后大片空白/上滑跳没的根因)。
+    private var latestHeights: [String: (width: CGFloat, height: CGFloat)] = [:]
 
     func height(for itemID: String, signature: String?, width: CGFloat) -> CGFloat? {
-        heights[key(itemID: itemID, signature: signature, width: width)]
+        if let exact = heights[key(itemID: itemID, signature: signature, width: width)] {
+            return exact
+        }
+        if let latest = latestHeights[itemID], Int(latest.width.rounded()) == Int(width.rounded()) {
+            return latest.height
+        }
+        return nil
     }
 
     func set(height: CGFloat, for itemID: String, signature: String?, width: CGFloat) {
         guard height > 0 else { return }
         heights[key(itemID: itemID, signature: signature, width: width)] = height
+        latestHeights[itemID] = (width: width, height: height)
     }
 
     func invalidate(itemIDs: [String]) {
@@ -1173,6 +1276,19 @@ private final class ChatRowHeightCache {
         let prefixes = itemIDs.map { "\($0)-" }
         heights = heights.filter { key, _ in
             !prefixes.contains { key.hasPrefix($0) }
+        }
+        // 有意不清 latestHeights:invalidate 的语义是"精确值不再可信",
+        // 兜底估算仍然比 110 默认值准得多。
+    }
+
+    /// 会话/分支切换后收口:只保留仍存在的 message 行与非 message 行(bottomSpacer 等
+    /// 固定 id),防止长期使用无界增长。
+    func retain(messageItemIDs: Set<String>) {
+        heights = heights.filter { key, _ in
+            !key.hasPrefix("message-") || messageItemIDs.contains(where: { key.hasPrefix("\($0)-") })
+        }
+        latestHeights = latestHeights.filter { itemID, _ in
+            !itemID.hasPrefix("message-") || messageItemIDs.contains(itemID)
         }
     }
 
