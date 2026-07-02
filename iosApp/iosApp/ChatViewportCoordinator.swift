@@ -329,6 +329,7 @@ enum ChatViewportReducer {
         state: inout ChatViewportState,
         environment: ChatViewportEnvironment
     ) -> [ChatViewportScrollCommand] {
+        let wasContentScrollable = state.isContentScrollable
         state.isAtBottom = snapshot.atBottom
         state.isContentScrollable = snapshot.isContentScrollable
         state.liveRenderingFarFromBottom = snapshot.liveRenderingFarFromBottom
@@ -338,11 +339,24 @@ enum ChatViewportReducer {
             atBottom: snapshot.atBottom
         )
 
+        var commands: [ChatViewportScrollCommand] = []
+        if !wasContentScrollable && snapshot.isContentScrollable {
+            let command = ChatViewportPolicy.commandForContentBecameScrollable(
+                canAutoFollow: environment.followEnabled && !state.followPaused && !state.userDragging,
+                isStreamingFollowActive: environment.generationActive
+            )
+            if command != .none {
+                commands.append(command)
+            }
+        }
+
         let autoFollowingGeneration = environment.generationActive && environment.followEnabled && !state.followPaused
         let shouldShow = !snapshot.atBottom && hasMessages && !autoFollowingGeneration
-        guard shouldShow != state.showScrollToBottom else { return [] }
-        state.showScrollToBottom = shouldShow
-        return [.showBottomButton(shouldShow)]
+        if shouldShow != state.showScrollToBottom {
+            state.showScrollToBottom = shouldShow
+            commands.append(.showBottomButton(shouldShow))
+        }
+        return commands
     }
 }
 

@@ -121,34 +121,17 @@ struct ChatReasoningCard: View {
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: hasBodyText ? 0.98 : 1, haptic: hasBodyText ? .selection : nil))
 
             if showsBody {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(bodyText)
-                                .font(.caption)
-                                .foregroundStyle(AmberTheme.muted)
-                                .lineSpacing(3)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Color.clear.frame(height: 1).id("reasoning-bottom")
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 2)
-                        .padding(.bottom, 10)
+                Text(bodyText)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineSpacing(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 2)
+                    .padding(.bottom, 10)
+                    .transaction { transaction in
+                        transaction.animation = nil
                     }
-                    .frame(height: isThinking ? 132 : nil)
-                    .frame(maxHeight: isThinking ? nil : 220)
-                    .onChange(of: bodyText) { _, _ in
-                        // Follow the streaming reasoning tail without adding a second animation
-                        // loop inside the chat scroll view.
-                        if isThinking {
-                            var transaction = Transaction()
-                            transaction.animation = nil
-                            withTransaction(transaction) {
-                                proxy.scrollTo("reasoning-bottom", anchor: .bottom)
-                            }
-                        }
-                    }
-                }
                 // Fade in place (no upward move) so the collapsing text doesn't slide up over
                 // the header.
                 .transition(.opacity)

@@ -28,7 +28,7 @@ struct ChatCollectionMessageList: UIViewControllerRepresentable {
     var workspaceStore: IOSWorkspaceStore
     var scrollToBottomTrigger: Int
     var messagesProvider: () -> [UIMessage]
-    var variantInfoProvider: (String) -> IOSConversationStore.VariantInfo?
+    var variantInfoProvider: (Int) -> IOSConversationStore.VariantInfo?
     var onAction: (ChatListAction) -> Void
     var onViewportStateChange: (ChatViewportState) -> Void
 
@@ -65,7 +65,7 @@ struct ChatCollectionMessageList: UIViewControllerRepresentable {
 
 final class ChatCollectionViewController: UIViewController {
     var messagesProvider: (() -> [UIMessage])?
-    var variantInfoProvider: ((String) -> IOSConversationStore.VariantInfo?)?
+    var variantInfoProvider: ((Int) -> IOSConversationStore.VariantInfo?)?
     var onAction: ((ChatListAction) -> Void)?
     var onViewportStateChange: ((ChatViewportState) -> Void)?
 
@@ -75,10 +75,13 @@ final class ChatCollectionViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>?
     private var latestConfiguration = ChatCollectionConfiguration()
     private var lastScrollToBottomTrigger = 0
-    private var isApplyingSnapshot = false
+    /// 计数器而非 Bool:tail-delta 与 viewport 刷新的 apply 可能重叠,
+    /// Bool 会被先完成的 completion 提前清掉。
+    private var applyingSnapshotCount = 0
     private var keyboardBottomInset: CGFloat = 0
     private var keyboardFollowGeneration = 0
     private var lastPublishedViewportState: ChatViewportState?
+    private var lastAppliedUpdateKey: ChatCollectionUpdateKey?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -106,7 +109,7 @@ final class ChatCollectionViewController: UIViewController {
         workspaceStore: IOSWorkspaceStore,
         scrollToBottomTrigger: Int
     ) {
-        latestConfiguration = ChatCollectionConfiguration(
+        let nextConfiguration = ChatCollectionConfiguration(
             signal: signal,
             configurationIssue: configurationIssue,
             isGenerationActive: isGenerationActive,
@@ -119,7 +122,14 @@ final class ChatCollectionViewController: UIViewController {
             reasoningLevelLabel: reasoningLevelLabel,
             workspaceStore: workspaceStore
         )
-        applyCurrentSnapshot()
+        latestConfiguration = nextConfiguration
+        let updateKey = ChatCollectionUpdateKey(configuration: nextConfiguration)
+        // 只有快照真正应用成功才记住 key:首次 update 可能早于 viewDidLoad
+        // (dataSource 还没建),那次 no-op 若也记 key,同 key 的后续 update
+        // 会被防重放拦住,列表就一直空白。
+        if updateKey != lastAppliedUpdateKey, applyCurrentSnapshot() {
+            lastAppliedUpdateKey = updateKey
+        }
 
         if scrollToBottomTrigger != lastScrollToBottomTrigger {
             lastScrollToBottomTrigger = scrollToBottomTrigger
@@ -132,7 +142,7 @@ final class ChatCollectionViewController: UIViewController {
     private func configureLayout() {
         collectionViewLayout.delegate = self
         collectionViewLayout.keepContentOffsetAtBottomOnBatchUpdates = true
-        collectionViewLayout.keepContentAtBottomOfVisibleArea = true
+        collectionViewLayout.keepContentAtBottomOfVisibleArea = false
         collectionViewLayout.settings.interItemSpacing = 14
         collectionViewLayout.settings.additionalInsets = UIEdgeInsets(
             top: 12,
@@ -194,9 +204,10 @@ final class ChatCollectionViewController: UIViewController {
         }
     }
 
-    private func applyCurrentSnapshot() {
+    @discardableResult
+    private func applyCurrentSnapshot() -> Bool {
         guard let dataSource,
-              let messages = messagesProvider?() else { return }
+              let messages = messagesProvider?() else { return false }
 
         let event = latestConfiguration.signal.event
         store.rememberStreamedRendererState(for: event, messages: messages)
@@ -204,14 +215,14 @@ final class ChatCollectionViewController: UIViewController {
             store.clearAnimatedInsertions()
         }
         guard let displaySetting = latestConfiguration.displaySetting,
-              let generativeUiSetting = latestConfiguration.generativeUiSetting else { return }
+              let generativeUiSetting = latestConfiguration.generativeUiSetting else { return false }
 
         if applyTailStreamDeltaIfPossible(
             messages: messages,
             displaySetting: displaySetting,
             generativeUiSetting: generativeUiSetting
         ) {
-            return
+            return true
         }
 
         let build = ChatListSnapshotBuilder.build(
@@ -256,19 +267,21 @@ final class ChatCollectionViewController: UIViewController {
         snapshot.appendItems(build.items.map { $0.id }, toSection: 0)
 
         let currentIDs = Set(previousItemIDs)
-        let reloadIDs = build.changedIDs.filter { currentIDs.contains($0) }
-        if !reloadIDs.isEmpty {
-            snapshot.reloadItems(reloadIDs)
+        let reconfigureIDs = build.changedIDs.filter { currentIDs.contains($0) }
+        if !reconfigureIDs.isEmpty {
+            snapshot.reconfigureItems(reconfigureIDs)
         }
 
-        isApplyingSnapshot = true
+        applyingSnapshotCount += 1
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self else { return }
-            self.isApplyingSnapshot = false
+            self.applyingSnapshotCount -= 1
+            self.invalidateLayoutForItemIDs(reconfigureIDs)
             self.collectionView.layoutIfNeeded()
             self.execute(commands: commands, event: self.latestConfiguration.signal.event)
             self.publishViewportGeometry()
         }
+        return true
     }
 
     private func applyTailStreamDeltaIfPossible(
@@ -277,10 +290,47 @@ final class ChatCollectionViewController: UIViewController {
         generativeUiSetting: GenerativeUiSetting
     ) -> Bool {
         guard latestConfiguration.signal.event == .assistantStreamDelta,
-              let dataSource,
               let lastMessage = messages.last,
               lastMessage.role == MessageRole.assistant else { return false }
 
+        // .assistantStreamDelta 走 reduce 的 default 分支,只产出命令、不改 state,
+        // 因此提前到 guard 之外计算是安全的(行不在快照里时 fallthrough 全量 build 会再算一次)。
+        let commands = ChatViewportReducer.reduce(
+            event: latestConfiguration.signal.event,
+            state: &store.viewportState,
+            environment: ChatViewportEnvironment(
+                followEnabled: latestConfiguration.followGeneration,
+                generationActive: latestConfiguration.isStreamingFollowActive
+            )
+        )
+
+        return reconfigureLastAssistantRow(
+            lastMessage: lastMessage,
+            messagesCount: messages.count,
+            isStreaming: true,
+            displaySetting: displaySetting,
+            generativeUiSetting: generativeUiSetting,
+            skipIfSignatureUnchanged: false
+        ) { controller in
+            controller.execute(commands: commands, event: controller.latestConfiguration.signal.event)
+            controller.publishViewportGeometry()
+        }
+    }
+
+    /// tail-delta 与 viewport 刷新共用的「最后一条 assistant 行重建 + reconfigure」路径。
+    /// row 的字段口径必须与 ChatMessageProjector.rows 对最后一条 assistant 的产出一致,
+    /// 否则 signature 会在这里与全量 build 之间来回翻转。
+    @discardableResult
+    private func reconfigureLastAssistantRow(
+        lastMessage: UIMessage,
+        messagesCount: Int,
+        isStreaming: Bool,
+        displaySetting: DisplaySetting,
+        generativeUiSetting: GenerativeUiSetting,
+        skipIfSignatureUnchanged: Bool,
+        onApplied: @escaping (ChatCollectionViewController) -> Void
+    ) -> Bool {
+        guard let dataSource else { return false }
         let messageID = ChatMessageProjector.messageId(for: lastMessage)
         let itemID = "message-\(messageID)"
         var snapshot = dataSource.snapshot()
@@ -295,10 +345,10 @@ final class ChatCollectionViewController: UIViewController {
             message: lastMessage,
             role: lastMessage.role,
             parts: lastMessage.parts,
-            index: max(0, messages.count - 1),
+            index: max(0, messagesCount - 1),
             isLast: true,
-            isStreaming: true,
-            hasEverStreamed: true,
+            isStreaming: isStreaming,
+            hasEverStreamed: isStreaming || store.streamedMessageIDs.contains(messageID),
             canAnimateInsertion: false
         )
         let renderState = store.renderStateStore.stateForRow(
@@ -311,35 +361,31 @@ final class ChatCollectionViewController: UIViewController {
             displaySetting: displaySetting,
             generativeUiSetting: generativeUiSetting
         )
+        // 渲染状态没有实际变化时(比如行在底部附近反复进出视口)不要 reconfigure:
+        // 高度缓存被无谓清掉后 sizeForItemAt 会退回估算值,造成 contentSize 抖动。
+        if skipIfSignatureUnchanged, store.signatures[itemID] == signature {
+            return false
+        }
         store.renderModelsByID[itemID] = .message(
             ChatListMessageRenderModel(
                 row: row,
-                variantInfo: variantInfoProvider?(messageID),
+                variantInfo: variantInfoProvider?(row.index),
                 renderState: renderState,
                 isGenerationActive: latestConfiguration.isGenerationActive,
-                renderIdentity: "\(row.messageId)-\(signature)"
+                renderIdentity: ChatListSnapshotBuilder.renderIdentityForRow(row, renderState: renderState)
             )
         )
         store.signatures[itemID] = signature
         store.rowHeightCache.invalidate(itemIDs: [itemID])
 
-        let commands = ChatViewportReducer.reduce(
-            event: latestConfiguration.signal.event,
-            state: &store.viewportState,
-            environment: ChatViewportEnvironment(
-                followEnabled: latestConfiguration.followGeneration,
-                generationActive: latestConfiguration.isStreamingFollowActive
-            )
-        )
-
-        snapshot.reloadItems([itemID])
-        isApplyingSnapshot = true
+        snapshot.reconfigureItems([itemID])
+        applyingSnapshotCount += 1
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self else { return }
-            self.isApplyingSnapshot = false
+            self.applyingSnapshotCount -= 1
+            self.invalidateLayoutForItemIDs([itemID])
             self.collectionView.layoutIfNeeded()
-            self.execute(commands: commands, event: self.latestConfiguration.signal.event)
-            self.publishViewportGeometry()
+            onApplied(self)
         }
         return true
     }
@@ -402,6 +448,7 @@ final class ChatCollectionViewController: UIViewController {
             ChatLayout.liveRenderingLODMinDistance,
             visibleHeight * ChatLayout.liveRenderingLODScreenFactor
         )
+        let previousLiveRenderingFarFromBottom = store.viewportState.liveRenderingFarFromBottom
         let geometry = ChatViewportGeometrySnapshot(
             atBottom: distanceToBottom <= ChatLayout.bottomStickThreshold,
             isContentScrollable: contentHeight > visibleHeight + ChatLayout.bottomStickThreshold,
@@ -421,12 +468,43 @@ final class ChatCollectionViewController: UIViewController {
         } else {
             execute(commands: commands, event: latestConfiguration.signal.event)
         }
+        if previousLiveRenderingFarFromBottom != store.viewportState.liveRenderingFarFromBottom {
+            refreshLastAssistantRenderState()
+        }
     }
 
     private func publishViewportStateIfNeeded() {
         guard lastPublishedViewportState != store.viewportState else { return }
         lastPublishedViewportState = store.viewportState
         onViewportStateChange?(store.viewportState)
+    }
+
+    private func refreshLastAssistantRenderState() {
+        guard let messages = messagesProvider?(),
+              let displaySetting = latestConfiguration.displaySetting,
+              let generativeUiSetting = latestConfiguration.generativeUiSetting,
+              let lastMessage = messages.last,
+              lastMessage.role == MessageRole.assistant else { return }
+
+        reconfigureLastAssistantRow(
+            lastMessage: lastMessage,
+            messagesCount: messages.count,
+            isStreaming: latestConfiguration.signal.event == .assistantStreamDelta,
+            displaySetting: displaySetting,
+            generativeUiSetting: generativeUiSetting,
+            skipIfSignatureUnchanged: true
+        ) { controller in
+            controller.publishViewportStateIfNeeded()
+        }
+    }
+
+    private func invalidateLayoutForItemIDs(_ itemIDs: [String]) {
+        guard !itemIDs.isEmpty else { return }
+        let indexPaths = itemIDs.compactMap { dataSource?.indexPath(for: $0) }
+        guard !indexPaths.isEmpty else { return }
+        let context = collectionViewLayout.invalidationContext(forBoundsChange: collectionView.bounds)
+        context.invalidateItems(at: indexPaths)
+        collectionViewLayout.invalidateLayout(with: context)
     }
 
     private func observeKeyboard() {
@@ -486,7 +564,7 @@ final class ChatCollectionViewController: UIViewController {
 
 extension ChatCollectionViewController: UICollectionViewDelegate {
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        if isApplyingSnapshot {
+        if applyingSnapshotCount > 0 {
             collectionView.layer.removeAllAnimations()
         }
         store.viewportState.userDragging = true
@@ -519,7 +597,12 @@ extension ChatCollectionViewController: UICollectionViewDelegate {
             width: collectionView.bounds.width
         )
         if let messageID = store.messageID(for: itemID) {
-            store.renderStateStore.markVisible(messageID, liveRenderingEnabled: true)
+            store.renderStateStore.markVisible(messageID)
+            if store.isLastAssistantItem(itemID) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.refreshLastAssistantRenderState()
+                }
+            }
         }
         if store.consumeAnimatedInsertion(itemID) {
             animateInsertedUserMessageCell(cell)
@@ -634,6 +717,34 @@ private struct ChatCollectionConfiguration {
     }
 }
 
+private struct ChatCollectionUpdateKey: Equatable {
+    let signal: ChatMessageUpdateSignal
+    let configurationIssue: ChatConfigurationIssue?
+    let isGenerationActive: Bool
+    let isLoading: Bool
+    let isRecognizingImages: Bool
+    let contextCompactState: ChatContextCompactState
+    let followGeneration: Bool
+    let displaySettingSignature: String
+    let generativeUiSettingSignature: String
+    let reasoningLevelLabel: String?
+    let workspaceStoreID: ObjectIdentifier?
+
+    init(configuration: ChatCollectionConfiguration) {
+        signal = configuration.signal
+        configurationIssue = configuration.configurationIssue
+        isGenerationActive = configuration.isGenerationActive
+        isLoading = configuration.isLoading
+        isRecognizingImages = configuration.isRecognizingImages
+        contextCompactState = configuration.contextCompactState
+        followGeneration = configuration.followGeneration
+        displaySettingSignature = String(describing: configuration.displaySetting)
+        generativeUiSettingSignature = String(describing: configuration.generativeUiSetting)
+        reasoningLevelLabel = configuration.reasoningLevelLabel
+        workspaceStoreID = configuration.workspaceStore.map(ObjectIdentifier.init)
+    }
+}
+
 private struct ChatListHostedItemView: View {
     let renderModel: ChatListRenderModel
     let displaySetting: DisplaySetting
@@ -676,6 +787,7 @@ private struct ChatListHostedItemView: View {
                 isLastMessage: model.row.isLast,
                 hasEverStreamed: model.renderState.hasEverStreamed,
                 liveMarkdownRenderingEnabled: model.renderState.liveRenderingEnabled,
+                frozenMarkdownSnapshot: model.renderState.frozenMarkdownSnapshot,
                 reasoningLevelLabel: reasoningLevelLabel
             )
             .environment(workspaceStore)
@@ -736,7 +848,7 @@ private enum ChatListSnapshotBuilder {
         streamedMessageIDs: Set<String>,
         renderStateStore: ChatRenderStateStore,
         previousSignatures: [String: String],
-        variantInfoProvider: (String) -> IOSConversationStore.VariantInfo?
+        variantInfoProvider: (Int) -> IOSConversationStore.VariantInfo?
     ) -> ChatListBuildResult {
         var items: [ChatListItem] = []
         var models: [String: ChatListRenderModel] = [:]
@@ -794,10 +906,10 @@ private enum ChatListSnapshotBuilder {
                     model: .message(
                         ChatListMessageRenderModel(
                             row: row,
-                            variantInfo: variantInfoProvider(row.messageId),
+                            variantInfo: variantInfoProvider(row.index),
                             renderState: renderState,
                             isGenerationActive: isGenerationActive,
-                            renderIdentity: "\(row.messageId)-\(signature)"
+                            renderIdentity: renderIdentityForRow(row, renderState: renderState)
                         )
                     ),
                     signature: signature
@@ -874,6 +986,10 @@ private enum ChatListSnapshotBuilder {
         hasher.combine(String(describing: generativeUiSetting))
         return String(hasher.finalize())
     }
+
+    static func renderIdentityForRow(_ row: ChatMessageRowModel, renderState: ChatRenderState) -> String {
+        "\(row.messageId)-\(renderState.rendererMode.rawValue)"
+    }
 }
 
 private struct ChatListItem: Hashable {
@@ -918,10 +1034,25 @@ private final class ChatListControllerStore {
         return messageID
     }
 
+    /// 冻结快照只在「恰好一个非空 text part」时被消费(MessageBubbleView 的
+    /// nonEmptyTextPartCount == 1 门槛),所以这里必须返回那个 part 自己的文本。
+    /// 不能用 message.toText():它把 Reasoning/Tool 等 part 映射成空串再用 "\n" 拼接,
+    /// 带思考的消息会多出前导空行,与 live 渲染不一致,冻结/解冻切换时产生跳变。
     func latestText(for itemID: String) -> String? {
         guard let renderModel = renderModelsByID[itemID],
               case let .message(messageModel) = renderModel else { return nil }
-        return messageModel.row.message.toText()
+        let textParts = messageModel.row.message.parts.compactMap { part -> String? in
+            guard let text = part as? UIMessagePart.Text, !text.text.isEmpty else { return nil }
+            return text.text
+        }
+        guard textParts.count == 1 else { return nil }
+        return textParts[0]
+    }
+
+    func isLastAssistantItem(_ itemID: String) -> Bool {
+        guard let renderModel = renderModelsByID[itemID],
+              case let .message(messageModel) = renderModel else { return false }
+        return messageModel.row.isLast && messageModel.row.role == MessageRole.assistant
     }
 
     func queueAnimatedInsertions(_ itemIDs: [String]) {
@@ -966,6 +1097,7 @@ private struct ChatRenderState: Equatable {
     var rendererMode: ChatRendererMode
     var hasEverStreamed: Bool
     var liveRenderingEnabled: Bool
+    var frozenMarkdownSnapshot: String?
 }
 
 private final class ChatRenderStateStore {
@@ -983,22 +1115,24 @@ private final class ChatRenderStateStore {
             return ChatRenderState(
                 rendererMode: live ? .streamingMarkdown : .frozen,
                 hasEverStreamed: true,
-                liveRenderingEnabled: live
+                liveRenderingEnabled: live,
+                frozenMarkdownSnapshot: live ? nil : frozenMarkdownByMessageID[row.messageId]
             )
         }
         return ChatRenderState(
             rendererMode: .staticMarkdown,
             hasEverStreamed: false,
-            liveRenderingEnabled: true
+            liveRenderingEnabled: true,
+            frozenMarkdownSnapshot: nil
         )
     }
 
-    func markVisible(_ messageID: String, liveRenderingEnabled: Bool) {
+    /// 行进入视口即解冻并丢弃冻结快照:可见的行必须显示真实内容,
+    /// 不能停在离屏时冻结的旧文本上。
+    func markVisible(_ messageID: String) {
         visibleMessageIDs.insert(messageID)
-        if liveRenderingEnabled {
-            frozenMessageIDs.remove(messageID)
-            frozenMarkdownByMessageID.removeValue(forKey: messageID)
-        }
+        frozenMessageIDs.remove(messageID)
+        frozenMarkdownByMessageID.removeValue(forKey: messageID)
     }
 
     func freeze(messageID: String, latestText: String?) {

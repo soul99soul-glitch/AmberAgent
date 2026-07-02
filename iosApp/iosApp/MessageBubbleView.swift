@@ -24,13 +24,17 @@ struct MessageBubbleView: View {
     /// reasoning (whose finishedAt was never set on cancel) doesn't keep counting.
     var isLastMessage: Bool = false
     /// 这条消息「曾经流式过」的记忆(来自 projection 层)。当前不直接驱动 Markdown
-    /// renderer:历史行被 LazyVStack 回收再创建时必须回到稳定同步渲染器,否则会重新出现
+    /// renderer:历史行被列表回收再创建时必须回到稳定同步渲染器,否则会重新出现
     /// 首帧高度跳变。可见 bubble 的完成态防闪烁由 ChatAssistantMarkdownView 内部 latch 负责。
     var hasEverStreamed: Bool = false
     /// False only when the live assistant message is far below the current viewport.
     /// That lets the offscreen stream freeze its last rendered snapshot instead of reparsing
     /// growing Markdown/widget payloads while the user is reading history.
     var liveMarkdownRenderingEnabled: Bool = true
+    /// Snapshot captured when the streaming assistant row left the viewport.
+    /// When present, offscreen/frozen rows render this stable text instead of the
+    /// ever-growing live message payload.
+    var frozenMarkdownSnapshot: String? = nil
     /// Reasoning effort label (e.g. "Auto") shown on the thinking pill. nil hides the suffix.
     var reasoningLevelLabel: String? = nil
 
@@ -275,6 +279,7 @@ struct MessageBubbleView: View {
                             isStreaming: isGenerating && isLastMessage,
                             hasEverStreamed: hasEverStreamed,
                             liveRenderingEnabled: liveMarkdownRenderingEnabled,
+                            frozenMarkdownSnapshot: nonEmptyTextPartCount == 1 ? frozenMarkdownSnapshot : nil,
                             onGenerativeWidgetAction: onGenerativeWidgetAction
                         )
                     }
@@ -353,6 +358,13 @@ struct MessageBubbleView: View {
         message.parts.contains { $0 is UIMessagePart.Reasoning }
     }
 
+    private var nonEmptyTextPartCount: Int {
+        message.parts.reduce(0) { count, part in
+            guard let text = part as? UIMessagePart.Text, !text.text.isEmpty else { return count }
+            return count + 1
+        }
+    }
+
     private static func partAnimationKey(_ part: UIMessagePart) -> String {
         if let tool = part as? UIMessagePart.Tool {
             let imageCount = tool.output.compactMap { $0 as? UIMessagePart.Image }.count
@@ -422,12 +434,13 @@ struct ChatAssistantMarkdownView: View {
     var isStreaming = false
     var hasEverStreamed = false
     var liveRenderingEnabled = true
+    var frozenMarkdownSnapshot: String?
     var onGenerativeWidgetAction: (String) -> Void = { _ in }
 
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
     /// per-view-instance 的「这个 bubble 曾经流式过」latch。
-    /// 关键特性:LazyVStack 回收行后,新 view 实例的 @State 重置为 false → 历史消息回滚到
+    /// 关键特性:列表回收行后,新 view 实例的 @State 重置为 false → 历史消息回滚到
     /// 高度稳定的同步渲染器 AmberMarkdownView;而可视区内刚完成的消息仍保持流式渲染器
     /// (latch=true),避免 completion 瞬间切渲染器闪烁。用 ChatView 层持久化的 hasEverStreamed
     /// 代替它会破坏这个特性——回收的行依然收到 true → 用异步渲染器 → 首帧高度 0 → 上滑跳动。
@@ -436,7 +449,7 @@ struct ChatAssistantMarkdownView: View {
 
     var body: some View {
         let widgetSettings = IOSGenerativeWidgetSettings(generativeUiSetting)
-        let renderedMarkdown = frozenMarkdownSnapshot
+        let renderedMarkdown = renderedMarkdownText
         let liveStreaming = isStreaming && liveRenderingEnabled
         Group {
             if widgetSettings.enabled && IOSGenerativeWidgetParser.mayContainWidgetPayload(renderedMarkdown) {
@@ -505,7 +518,10 @@ struct ChatAssistantMarkdownView: View {
         }
     }
 
-    private var frozenMarkdownSnapshot: String {
+    private var renderedMarkdownText: String {
+        if !liveRenderingEnabled, let frozenMarkdownSnapshot, !frozenMarkdownSnapshot.isEmpty {
+            return frozenMarkdownSnapshot
+        }
         if isStreaming && !liveRenderingEnabled && !renderedMarkdownSnapshot.isEmpty {
             return renderedMarkdownSnapshot
         }
@@ -514,10 +530,10 @@ struct ChatAssistantMarkdownView: View {
 
     private func shouldUseExperimentalMarkdownRenderer(liveStreaming: Bool) -> Bool {
         // 异步渲染器(SwiftStreamingMarkdown/Liyanan)的首帧高度为 0(controller.renderable==nil
-        // → empty document)。LazyVStack 上滑回收再实现历史行时,这个 0→完整的高度跳变会让
+        // → empty document)。列表上滑回收再实现历史行时,这个 0→完整的高度跳变会让
         // contentSize 骤变,把视图弹过 agent 消息。
         // 因此:异步渲染器只用于「正在流式」的消息(isStreaming)或「本 view 实例曾流式过」
-        // 的消息(hasUsedStreamingMarkdownRenderer latch)。已完成的历史消息(LazyVStack 回收后
+        // 的消息(hasUsedStreamingMarkdownRenderer latch)。已完成的历史消息(列表回收后
         // 新实例 latch 重置为 false)回退到同步、高度稳定的 AmberMarkdownView。
         return liveStreaming || hasUsedStreamingMarkdownRenderer
     }
@@ -525,7 +541,7 @@ struct ChatAssistantMarkdownView: View {
     private func shouldUseFadeStreamingRenderer(liveStreaming: Bool) -> Bool {
         // 逐词淡入目前只有 SwiftStreamingMarkdown 提供真实 glyph fade。
         // LiYanan MarkdownView 的 StreamingMarkdownReader 负责增量解析,但没有文字淡入层。
-        // 所以可见的流式正文统一先走 SwiftStreamingMarkdown;LazyVStack 回收后的历史行仍回到
+        // 所以可见的流式正文统一先走 SwiftStreamingMarkdown;列表回收后的历史行仍回到
         // AmberMarkdownView,避免异步 renderer 的首帧空高度拖累历史滚动。
         liveStreaming || hasUsedStreamingMarkdownRenderer
     }
@@ -760,7 +776,7 @@ private struct ChatGeneratedImageDotPlaceholder: View {
                 }
             }
         }
-        .aspectRatio(max(aspectRatio, 0.1), contentMode: .fit)
+        .modifier(ChatWidthDrivenAspectRatio(aspectRatio: aspectRatio))
         .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -810,6 +826,26 @@ private struct ChatGeneratedImageDotPlaceholder: View {
                 )
             }
         }
+    }
+}
+
+/// 宽度驱动的宽高比:高度 = 实测宽度 / aspectRatio,不响应垂直 proposal。
+/// UIHostingConfiguration 的 self-sizing 测量会把 cell 的 estimated 高度作为垂直
+/// proposal 传入,`.aspectRatio(_, .fit)` 会把图片 fit 进去,塌成缩略图;
+/// 文本行忽略垂直 proposal 所以不受影响。宽度 proposal 始终正确,用它推导高度。
+private struct ChatWidthDrivenAspectRatio: ViewModifier {
+    let aspectRatio: CGFloat
+    @State private var measuredWidth: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: .infinity)
+            .frame(height: measuredWidth > 0 ? measuredWidth / max(aspectRatio, 0.1) : 220)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { newWidth in
+                measuredWidth = newWidth
+            }
     }
 }
 
@@ -924,7 +960,7 @@ private struct ChatGeneratedImageTile: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .aspectRatio(display.aspectRatio, contentMode: .fit)
+            .modifier(ChatWidthDrivenAspectRatio(aspectRatio: display.aspectRatio))
             .contentShape(Rectangle())
             .onTapGesture {
                 previewTarget = ChatGeneratedImagePreviewTarget(urlString: urlString)

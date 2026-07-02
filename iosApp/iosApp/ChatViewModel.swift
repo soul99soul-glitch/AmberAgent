@@ -351,6 +351,9 @@ final class ChatViewModel {
 
     /// 从 store 的 currentConversation 灌入 messages（切换会话 / App 启动时调用）。
     /// 必须在主线程；调用方负责确保 store 已 bootstrap。
+    /// 不变量:任何对 `messages` 的写入都必须紧跟一次本方法调用。
+    /// chat 列表的 ChatCollectionUpdateKey 以 signal(revision+reason)判断是否重建快照,
+    /// 漏掉 bump 会静默漏刷新(key 不变 → apply 被跳过 → 列表停在旧内容),无编译期提示。
     func bumpMessageRevision(reason: ChatMessageUpdateReason) {
         messageRevision &+= 1
         messageUpdateSignal = ChatMessageUpdateSignal(revision: messageRevision, reason: reason)
@@ -1165,11 +1168,6 @@ final class ChatViewModel {
     func selectVariant(messageId: String, variantIndex: Int) {
         guard let index = messageIndex(forMessageId: messageId) else { return }
         selectVariant(messageIndex: index, variantIndex: variantIndex)
-    }
-
-    func variantInfo(messageId: String) -> IOSConversationStore.VariantInfo? {
-        guard let index = messageIndex(forMessageId: messageId) else { return nil }
-        return variantInfo(atMessageIndex: index)
     }
 
     private func regenerateDigestSeed() -> String {

@@ -153,6 +153,63 @@ final class ChatViewportPolicyTests: XCTestCase {
         )
     }
 
+    func testGeometryTransitionToScrollableFollowsActiveGeneration() {
+        var state = ChatViewportState(
+            followPaused: false,
+            userDragging: false,
+            showScrollToBottom: false,
+            isAtBottom: true,
+            isContentScrollable: false,
+            liveRenderingFarFromBottom: false,
+            conversationLoadToken: 0
+        )
+
+        let commands = ChatViewportReducer.reduceGeometry(
+            ChatViewportGeometrySnapshot(
+                atBottom: false,
+                isContentScrollable: true,
+                liveRenderingFarFromBottom: false
+            ),
+            hasMessages: true,
+            state: &state,
+            environment: .init(followEnabled: true, generationActive: true)
+        )
+
+        XCTAssertEqual(
+            commands,
+            [.followBottom(animated: false, targetBottomAnchor: true, deferred: false)]
+        )
+        XCTAssertTrue(state.isContentScrollable)
+        XCTAssertFalse(state.showScrollToBottom)
+    }
+
+    func testGeometryTransitionToScrollableDoesNotStealViewportWhenPaused() {
+        var state = ChatViewportState(
+            followPaused: true,
+            userDragging: false,
+            showScrollToBottom: false,
+            isAtBottom: false,
+            isContentScrollable: false,
+            liveRenderingFarFromBottom: false,
+            conversationLoadToken: 0
+        )
+
+        let commands = ChatViewportReducer.reduceGeometry(
+            ChatViewportGeometrySnapshot(
+                atBottom: false,
+                isContentScrollable: true,
+                liveRenderingFarFromBottom: false
+            ),
+            hasMessages: true,
+            state: &state,
+            environment: .init(followEnabled: true, generationActive: true)
+        )
+
+        XCTAssertEqual(commands, [.showBottomButton(true)])
+        XCTAssertTrue(state.isContentScrollable)
+        XCTAssertTrue(state.showScrollToBottom)
+    }
+
     func testExplicitBottomRequestUsesBottomAnchor() {
         XCTAssertEqual(
             ChatViewportPolicy.commandForExplicitBottomRequest(),

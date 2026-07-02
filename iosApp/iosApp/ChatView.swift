@@ -11,12 +11,26 @@ private enum ComposerPanel: String, Identifiable {
     var id: String { rawValue }
 }
 
-private struct ChatListSummarySnapshot {
+private struct ChatListSummarySnapshot: Equatable {
     var hasMessages = false
     var awaitingFirstAssistantChunk = false
     var lastAssistantHasOpenReasoning = false
     var firstUserTitleSeed: String?
     var activeToolStep: ChatToolStepModel?
+
+    // 手写 == 是有意的:只比较顶部活动岛实际渲染的字段。activeToolStep 的 tool 载荷
+    // (流式 output)与 id 被刻意排除,否则子代理流式输出的每个 chunk 都会刷新 summary。
+    // 若 ChatToolStepModel 新增会影响岛屿渲染的字段,必须同步加进这里的比较。
+    static func == (lhs: ChatListSummarySnapshot, rhs: ChatListSummarySnapshot) -> Bool {
+        lhs.hasMessages == rhs.hasMessages &&
+            lhs.awaitingFirstAssistantChunk == rhs.awaitingFirstAssistantChunk &&
+            lhs.lastAssistantHasOpenReasoning == rhs.lastAssistantHasOpenReasoning &&
+            lhs.firstUserTitleSeed == rhs.firstUserTitleSeed &&
+            lhs.activeToolStep?.title == rhs.activeToolStep?.title &&
+            lhs.activeToolStep?.detail == rhs.activeToolStep?.detail &&
+            lhs.activeToolStep?.state == rhs.activeToolStep?.state &&
+            lhs.activeToolStep?.systemImage == rhs.activeToolStep?.systemImage
+    }
 }
 
 struct ChatView: View {
@@ -441,7 +455,9 @@ struct ChatView: View {
                 .toText()
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        chatListSummary = next
+        if next != chatListSummary {
+            chatListSummary = next
+        }
     }
 
     private func activeToolStepForIsland(messages: [UIMessage]) -> ChatToolStepModel? {
@@ -541,7 +557,7 @@ struct ChatView: View {
             workspaceStore: workspaceStore,
             scrollToBottomTrigger: scrollToBottomTrigger,
             messagesProvider: { viewModel.messages },
-            variantInfoProvider: { messageId in viewModel.variantInfo(messageId: messageId) },
+            variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
             onAction: handleChatListAction,
             onViewportStateChange: applyCollectionViewportState
         )
