@@ -67,6 +67,88 @@ private extension NodeType {
     }
 }
 
+/// Two-pass table layout (same algorithm as the vendored SwiftStreamingMarkdown
+/// `TableLayout`): pass 1 resolves each column width from the cells' unconstrained
+/// ideal widths (capped at `maxColumnWidth`); pass 2 resolves each row height by
+/// re-measuring every cell at its final column width, so wrapped multi-line cells
+/// report their true height and rows never overlap.
+///
+/// Subviews must be supplied in row-major order with exactly
+/// `columnCount` cells per row (header row first).
+private struct AmberTableLayout: Layout {
+    struct CacheData {
+        let columnWidths: [CGFloat]
+        let rowHeights: [CGFloat]
+    }
+
+    let columnCount: Int
+
+    private let maxColumnWidth: CGFloat = 300
+    private let defaultRowHeight: CGFloat = 44
+
+    func makeCache(subviews: Subviews) -> CacheData {
+        guard columnCount > 0, !subviews.isEmpty else {
+            return CacheData(columnWidths: [], rowHeights: [])
+        }
+        let rowCount = (subviews.count + columnCount - 1) / columnCount
+
+        // Pass 1: column widths from unconstrained ideal sizes, capped.
+        var columnWidths = Array(repeating: CGFloat(0), count: columnCount)
+        for row in 0..<rowCount {
+            for col in 0..<columnCount {
+                let index = row * columnCount + col
+                guard index < subviews.count else { break }
+                let size = subviews[index].sizeThatFits(.unspecified)
+                columnWidths[col] = min(max(columnWidths[col], size.width), maxColumnWidth)
+            }
+        }
+
+        // Pass 2: row heights re-measured at the resolved column widths.
+        var rowHeights = Array(repeating: CGFloat(0), count: rowCount)
+        for row in 0..<rowCount {
+            var rowHeight: CGFloat = 0
+            for col in 0..<columnCount {
+                let index = row * columnCount + col
+                guard index < subviews.count else { break }
+                let height = subviews[index]
+                    .sizeThatFits(ProposedViewSize(width: columnWidths[col], height: nil))
+                    .height
+                rowHeight = max(rowHeight, height.isFinite ? height : defaultRowHeight)
+            }
+            rowHeights[row] = rowHeight
+        }
+
+        return CacheData(columnWidths: columnWidths, rowHeights: rowHeights)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout CacheData) -> CGSize {
+        CGSize(
+            width: cache.columnWidths.reduce(0, +),
+            height: cache.rowHeights.reduce(0, +)
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout CacheData) {
+        guard columnCount > 0, bounds.origin.y.isFinite else { return }
+        var y = bounds.minY
+        for row in 0..<cache.rowHeights.count {
+            var x = bounds.minX.isNaN ? 0 : bounds.minX
+            let rowHeight = cache.rowHeights[row]
+            for col in 0..<columnCount {
+                let index = row * columnCount + col
+                guard index < subviews.count else { break }
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: cache.columnWidths[col], height: rowHeight)
+                )
+                x += cache.columnWidths[col]
+            }
+            y += rowHeight
+        }
+    }
+}
+
 struct AmberMarkdownView: View {
     let markdown: String
     var displaySetting: DisplaySetting? = nil
@@ -131,6 +213,9 @@ struct AmberMarkdownView: View {
 
         case .horizontalRule:
             return AnyView(Divider())
+
+        case .table:
+            return AnyView(renderTable(node, source: source))
 
         case .listItem:
             return renderListItemContent(node, source: source)
@@ -213,6 +298,87 @@ struct AmberMarkdownView: View {
         }
         .background(Color(.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Table
+
+    /// GFM table AST shape (mirrors pulldown-cmark's event stream, see
+    /// native/markdown-parser/src/tree_builder.rs): `.table` has one `.tableHead`
+    /// child (whose children are `.tableCell` directly) followed by zero or more
+    /// `.tableRow` children (whose children are also `.tableCell` directly —
+    /// cells are never wrapped in an extra row node inside `.tableHead`).
+    private func renderTable(_ node: PackedAstNode, source: String) -> AnyView {
+        var headerCells: [PackedAstNode] = []
+        var bodyRows: [[PackedAstNode]] = []
+        for child in node.children {
+            switch child.type {
+            case .tableHead:
+                headerCells = child.children.filter { $0.type == .tableCell }
+            case .tableRow:
+                bodyRows.append(child.children.filter { $0.type == .tableCell })
+            default:
+                break
+            }
+        }
+
+        // Malformed/empty table: fall back to the default inline-text flattening
+        // rather than rendering an empty box.
+        guard !headerCells.isEmpty else {
+            return AnyView(buildInlineText(node.children, source: source))
+        }
+
+        let columnCount = headerCells.count
+
+        return AnyView(
+            ScrollView(.horizontal, showsIndicators: false) {
+                // Subviews are emitted in row-major order (header row first); the
+                // layout maps index i to (row: i / columnCount, col: i % columnCount).
+                AmberTableLayout(columnCount: columnCount) {
+                    ForEach(Array(headerCells.enumerated()), id: \.offset) { _, cell in
+                        renderTableCell(
+                            cell, source: source,
+                            isHeader: true, isLastRow: bodyRows.isEmpty
+                        )
+                    }
+                    ForEach(Array(bodyRows.enumerated()), id: \.offset) { rowIndex, row in
+                        // Pad/trim ragged rows so every layout row contributes exactly
+                        // `columnCount` subviews and the index arithmetic stays valid.
+                        ForEach(0..<columnCount, id: \.self) { colIndex in
+                            renderTableCell(
+                                colIndex < row.count ? row[colIndex] : nil, source: source,
+                                isHeader: false, isLastRow: rowIndex == bodyRows.count - 1
+                            )
+                        }
+                    }
+                }
+                .background(Color(.systemGray6).opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator), lineWidth: 0.5))
+            }
+        )
+    }
+
+    private func renderTableCell(
+        _ cell: PackedAstNode?, source: String, isHeader: Bool, isLastRow: Bool
+    ) -> some View {
+        // No fixedSize / maxWidth here: AmberTableLayout measures each cell at the
+        // resolved column width and proposes (columnWidth, rowHeight), so the Text
+        // wraps naturally and never gets truncated or overlapped.
+        buildInlineText(cell?.children ?? [], source: source)
+            .font(isHeader ? .subheadline.weight(.semibold) : .body)
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(isHeader ? Color(.systemGray6) : Color.clear)
+            .overlay(alignment: .bottom) {
+                if !isLastRow {
+                    // Per-cell bottom hairline; adjacent cells join into a full row rule.
+                    Rectangle()
+                        .fill(Color(.separator))
+                        .frame(height: 0.5)
+                }
+            }
     }
 
     // MARK: - Blockquote
