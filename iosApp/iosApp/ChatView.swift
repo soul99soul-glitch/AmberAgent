@@ -987,6 +987,8 @@ struct ChatView: View {
             "先切换服务商"
         case .codexNotSignedIn:
             "先登录 Codex"
+        case .grokNotSignedIn:
+            "先登录 Grok"
         case nil:
             "发消息给 Amber..."
         }
@@ -1115,7 +1117,8 @@ struct ChatView: View {
         switch configurationIssue {
         case .missingModel:
             openModelDefaults()
-        case .missingAPIKey, .invalidBaseURL, .missingProvider, .unsupportedProvider, .codexNotSignedIn, nil:
+        case .missingAPIKey, .invalidBaseURL, .missingProvider, .unsupportedProvider,
+             .codexNotSignedIn, .grokNotSignedIn, nil:
             router.navigate(to: .providers)
         }
     }

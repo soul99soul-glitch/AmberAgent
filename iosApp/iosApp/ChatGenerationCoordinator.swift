@@ -76,6 +76,7 @@ final class ChatGenerationCoordinator {
     private let bindings: ChatGenerationBindings
     private lazy var provider = OpenAIKmpProvider()
     private lazy var claudeProvider = ClaudeKmpProvider()
+    private var grokWebStreamTask: Task<Void, Never>?
     private let streamJobBox = StreamJobBox()
     private lazy var toolRuntime = ChatToolRuntime(
         settingsStore: dependencies.settingsStore,
@@ -312,6 +313,8 @@ final class ChatGenerationCoordinator {
 
         streamJob?.cancel(cause: nil)
         streamJob = nil
+        grokWebStreamTask?.cancel()
+        grokWebStreamTask = nil
         cancelForegroundToolExecutions()
         cancelPendingStreamSnapshotPublish()
         // 取消也是 run 的终结:与 finishStreaming/后台交接保持一致,关闭录制器,
@@ -401,6 +404,9 @@ final class ChatGenerationCoordinator {
             }
             return false
         }
+        guard !IOSGrokWebProviderResolver.isGrokWebProvider(handoff.providerSetting) else {
+            return false
+        }
         let didStart = IOSChatBackgroundGenerationCoordinator.shared.start(
             handoff: handoff,
             conversationStore: conversationStore,
@@ -414,6 +420,8 @@ final class ChatGenerationCoordinator {
 
         streamJob?.cancel(cause: nil)
         streamJob = nil
+        grokWebStreamTask?.cancel()
+        grokWebStreamTask = nil
         cancelForegroundToolExecutions()
         if let pendingStreamSnapshot {
             // Background handoff bypasses the normal scheduleStreamSnapshotPublish
@@ -1103,6 +1111,27 @@ final class ChatGenerationCoordinator {
         onError: @escaping (KotlinThrowable) -> Void
     ) -> Kotlinx_coroutines_coreJob? {
         if let openAI = providerSetting as? ProviderSetting.OpenAI {
+            if IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI) {
+                grokWebStreamTask?.cancel()
+                let providerId = IOSGrokWebProviderResolver.providerKey(openAI)
+                grokWebStreamTask = Task {
+                    do {
+                        try await IOSGrokWebClient(providerId: providerId).streamText(
+                            messages: messages,
+                            params: params,
+                            onChunk: onChunk
+                        )
+                        guard !Task.isCancelled else { return }
+                        onComplete()
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        guard !Task.isCancelled else { return }
+                        onError(KotlinThrowable(message: (error as NSError).localizedDescription))
+                    }
+                }
+                return nil
+            }
             return provider.streamTextCancellable(
                 providerSetting: openAI,
                 messages: messages,
@@ -1131,6 +1160,8 @@ final class ChatGenerationCoordinator {
         if let runId = currentRunId {
             ChatStreamRecorder.shared.finish(runId: runId)
         }
+        grokWebStreamTask?.cancel()
+        grokWebStreamTask = nil
         currentRunId = nil
         currentStartedAt = nil
         currentInputDigest = nil

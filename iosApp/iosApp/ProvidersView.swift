@@ -10,11 +10,10 @@ enum ProviderRouteKind: String, Hashable {
 
     /// A preset provider whose protocol can actually run in the iOS chat chain
     /// today, so its API Key is worth editing and it can be set as current.
-    /// OpenAI-compatible (non-Response-API, non-MiMo-placeholder) and Claude
-    /// qualify. Gemini / Response-API / MiMo-placeholder do not.
+    /// OpenAI-compatible/Responses API (non-MiMo-placeholder) and Claude qualify.
+    /// Gemini / MiMo-placeholder do not.
     static func isEditablePreset(_ preset: ProviderSetting) -> Bool {
         if let openAI = preset as? ProviderSetting.OpenAI {
-            if openAI.useResponseApi { return false }
             if openAI.brand === OpenAIBrand.mimo { return false }
             return true
         }
@@ -30,23 +29,30 @@ struct ProvidersView: View {
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
+    @State private var pendingDeleteProvider: ProviderDeleteCandidate?
 
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 0) {
-                    header
-                    searchPill
-                    savedProvidersSection
-                }
-                .padding(.bottom, 40)
+            VStack(spacing: 0) {
+                header
+                searchPill
+                savedProvidersList
             }
-            .scrollIndicators(.hidden)
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .alert(item: $pendingDeleteProvider) { candidate in
+            Alert(
+                title: Text("删除服务商？"),
+                message: Text("\(candidate.name) 的配置、模型和 API Key 将被删除，此操作无法撤销。"),
+                primaryButton: .destructive(Text("删除")) {
+                    deleteProvider(candidate)
+                },
+                secondaryButton: .cancel(Text("取消"))
+            )
+        }
     }
 
     private var header: some View {
@@ -117,52 +123,69 @@ struct ProvidersView: View {
         return sharedSettings.snapshot.providers.filter(ChatProviderConfiguration.supportsChatStreaming)
     }
 
-    private var currentProviderId: String? {
-        _ = sharedSettings.revision
-        let snapshot = sharedSettings.snapshot
-        guard let currentModel = snapshot.getCurrentChatModel(),
-              let provider = currentModel.findProvider(providers: snapshot.providers, checkOverwrite: true) else {
-            return nil
-        }
-        return provider.id.description()
-    }
-
-    private var savedProvidersSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "服务商模板")
-
-            AmberFormGroup {
-                ForEach(Array(sharedProviders.enumerated()), id: \.offset) { index, provider in
+    private var savedProvidersList: some View {
+        List {
+            Section {
+                ForEach(Array(sharedProviders.enumerated()), id: \.offset) { _, provider in
+                    let providerId = provider.id.description()
                     let hasKey = ProviderRowModel.hasUsableKey(provider)
+                    let isCustom = sharedSettings.canRemoveProvider(providerId: providerId)
                     RegistryProviderRow(
                         model: ProviderRowModel(preset: provider),
-                        isSelected: currentProviderId == provider.id.description(),
+                        isCustom: isCustom,
                         hasStoredKey: hasKey
                     ) {
-                        router.navigate(to: .providerDetail(id: provider.id.description()))
+                        router.navigate(to: .providerDetail(id: providerId))
                     }
-
-                    if index < sharedProviders.count - 1 {
-                        ProviderDivider()
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(AmberTheme.surface)
+                    .listRowSeparatorTint(AmberTheme.borderSoft)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        if isCustom {
+                            Button(role: .destructive) {
+                                pendingDeleteProvider = ProviderDeleteCandidate(id: providerId, name: provider.name)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                            .tint(.red)
+                        }
                     }
                 }
+            } header: {
+                Text("服务商")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .textCase(nil)
             }
-
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .contentMargins(.top, 8, for: .scrollContent)
+        .scrollIndicators(.hidden)
         .id(sharedSettings.revision)
     }
+
+    private func deleteProvider(_ candidate: ProviderDeleteCandidate) {
+        guard sharedSettings.removeProvider(providerId: candidate.id) else { return }
+        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+    }
+}
+
+private struct ProviderDeleteCandidate: Identifiable {
+    let id: String
+    let name: String
 }
 
 private struct RegistryProviderRow: View {
     let model: ProviderRowModel
-    let isSelected: Bool
+    let isCustom: Bool
     let hasStoredKey: Bool
     let onSelect: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 12) {
-                ProviderAvatar(initial: model.initial, isSelected: isSelected, hasStoredKey: hasStoredKey)
+                ProviderAvatar(initial: model.initial, hasStoredKey: hasStoredKey)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.name)
@@ -183,22 +206,16 @@ private struct RegistryProviderRow: View {
             .frame(minHeight: 62)
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
-            .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(AmberTheme.accent.opacity(0.06))
-                }
-            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(model.name)\(isSelected ? "，当前服务商" : "")")
+        .accessibilityLabel("\(model.name)\(isCustom ? "，自定义服务商" : "")")
     }
 
     @ViewBuilder private var trailing: some View {
-        if isSelected {
-            ProviderStatusBadge(title: "当前", systemImage: "checkmark.circle.fill", tint: AmberTheme.accentGreen)
+        if isCustom {
+            ProviderStatusBadge(title: "自定义", systemImage: "slider.horizontal.3", tint: AmberTheme.accent)
         } else {
             ProviderStatusBadge(
                 title: hasStoredKey ? "已配置" : "未填写",
@@ -211,27 +228,26 @@ private struct RegistryProviderRow: View {
 
 private struct ProviderAvatar: View {
     let initial: String
-    let isSelected: Bool
     let hasStoredKey: Bool
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Text(initial)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isSelected ? AmberTheme.accent : AmberTheme.foreground2)
+                .foregroundStyle(AmberTheme.foreground2)
                 .frame(width: 38, height: 38)
                 .background(
-                    isSelected ? AmberTheme.accentTint : AmberTheme.surface2.opacity(0.86),
+                    AmberTheme.surface2.opacity(0.86),
                     in: Circle()
                 )
                 .overlay {
                     Circle()
-                        .stroke(isSelected ? AmberTheme.accent.opacity(0.14) : AmberTheme.borderSoft, lineWidth: 0.5)
+                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
                 }
 
-            if hasStoredKey || isSelected {
+            if hasStoredKey {
                 Circle()
-                    .fill(isSelected ? AmberTheme.accentGreen : AmberTheme.muted2)
+                    .fill(AmberTheme.muted2)
                     .frame(width: 9, height: 9)
                     .overlay {
                         Circle()
@@ -552,14 +568,7 @@ struct ProviderAddView: View {
     }
 
     private static func isValidHTTPBaseURL(_ value: String) -> Bool {
-        guard let components = URLComponents(string: value),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = components.host,
-              !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return false
-        }
-        return true
+        IOSProviderEndpointPolicy.isValidBaseURL(value)
     }
 }
 
@@ -602,7 +611,7 @@ private enum ProviderAddAlert: Identifiable {
         case .unsupportedPath:
             "当前版本使用默认 /chat/completions 路径。"
         case .invalidBaseURL:
-            "请填写包含 http 或 https scheme 且带 host 的 base URL，例如 https://api.openai.com/v1。"
+            "请填写 HTTPS 地址，或使用 HTTP IP 地址，例如 http://203.0.113.10:8080/v1。"
         case .activationFailed:
             "API Key 没有成功保存到本机钥匙串，当前聊天服务商未切换。请重新保存一次。"
         case .modelRequired:

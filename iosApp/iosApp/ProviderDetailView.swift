@@ -25,6 +25,7 @@ struct ProviderDetailView: View {
     @State private var draftUseResponseAPI = false
     @State private var draftPromptCaching = false
     @State private var showCodexLogin = false
+    @State private var showGrokLogin = false
 
     var body: some View {
         ZStack {
@@ -33,15 +34,17 @@ struct ProviderDetailView: View {
             VStack(spacing: 0) {
                 chrome
 
-                Group {
+                ZStack {
                     if provider == nil {
                         missingProviderPanel
                     } else {
                         switch selectedTab {
                         case .config:
                             configPanel
+                                .transition(.move(edge: .leading).combined(with: .opacity))
                         case .models:
                             modelsPanel
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
                 }
@@ -51,13 +54,7 @@ struct ProviderDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear(perform: loadDraft)
         .onChange(of: sharedSettings.revision) { _, _ in loadDraft() }
-        .alert(item: $alert) { alert in
-            Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
-                dismissButton: .default(Text("知道了"))
-            )
-        }
+        .alert(item: $alert, content: makeAlert)
         .sheet(item: $modelDraft) { draft in
             ProviderModelEditorSheet(
                 draft: draft,
@@ -83,6 +80,47 @@ struct ProviderDetailView: View {
                     if isCurrentProvider {
                         sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
                     }
+                }
+            )
+        }
+        .sheet(isPresented: $showGrokLogin) {
+            GrokWebLoginView(
+                providerId: providerId,
+                providerBackup: grokProviderBackup,
+                onSignedIn: {
+                    let shouldSeedModels = provider?.models.contains { $0.type == ModelType.chat } != true
+                    _ = sharedSettings.updateProviderEndpoint(
+                        providerId: providerId,
+                        baseUrl: IOSGrokWebConstants.webBaseUrl,
+                        chatCompletionsPath: "/conversations/new",
+                        useResponseApi: true,
+                        promptCaching: false
+                    )
+                    if shouldSeedModels {
+                        _ = sharedSettings.updateProviderChatModels(
+                            providerId: providerId,
+                            models: IOSGrokWebConstants.fallbackModels
+                        )
+                    }
+                    if isCurrentProvider {
+                        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                    }
+                    loadDraft()
+                },
+                onLoggedOut: { backup in
+                    if let backup {
+                        _ = sharedSettings.updateProviderEndpoint(
+                            providerId: providerId,
+                            baseUrl: backup.baseUrl,
+                            chatCompletionsPath: backup.chatCompletionsPath,
+                            useResponseApi: backup.useResponseApi,
+                            promptCaching: false
+                        )
+                    }
+                    if isCurrentProvider {
+                        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                    }
+                    loadDraft()
                 }
             )
         }
@@ -131,8 +169,18 @@ struct ProviderDetailView: View {
 
                 Spacer()
 
-                Color.clear
-                    .frame(width: 44, height: 44)
+                AmberGlassIconButton(
+                    systemImage: "checkmark",
+                    accessibilityLabel: "保存服务商",
+                    size: 44,
+                    symbolSize: 17,
+                    tint: AmberTheme.accent,
+                    prominent: true
+                ) {
+                    commitPendingTextInput {
+                        _ = saveConfig(showSuccess: true)
+                    }
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
@@ -174,6 +222,8 @@ struct ProviderDetailView: View {
                     ProviderDetailDivider()
                     protocolRow
                 }
+
+                grokSection
 
                 AmberSectionLabel(text: "连接")
                 AmberFormGroup {
@@ -255,7 +305,10 @@ struct ProviderDetailView: View {
             AmberSectionLabel(text: "ChatGPT 登录 (Codex)")
             AmberFormGroup {
                 Button {
-                    showCodexLogin = true
+                    commitPendingTextInput {
+                        guard saveConfig(showSuccess: false) else { return }
+                        showCodexLogin = true
+                    }
                 } label: {
                     ProviderRowContent(
                         title: codexSignedIn ? "已登录 Codex" : "用 ChatGPT 登录",
@@ -285,6 +338,53 @@ struct ProviderDetailView: View {
     }
 
     @ViewBuilder
+    private var grokSection: some View {
+        if IOSGrokWebProviderResolver.isXAIProvider(provider) {
+            AmberSectionLabel(text: "Grok 登录 (Web)")
+            AmberFormGroup {
+                Button {
+                    commitPendingTextInput {
+                        guard saveConfig(showSuccess: false) else { return }
+                        showGrokLogin = true
+                    }
+                } label: {
+                    ProviderRowContent(
+                        title: grokSignedIn ? "已登录 Grok" : "用 grok.com 登录",
+                        subtitle: grokSubtitle,
+                        value: grokSignedIn ? "管理" : "登录",
+                        valueStyle: .accent,
+                        showsChevron: true
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var grokSignedIn: Bool {
+        _ = sharedSettings.revision
+        guard let session = IOSGrokWebAuthStore.load(providerId: providerId) else { return false }
+        return session.isInvalidated != true
+            && IOSGrokWebCookieValidator.hasSSOCookie(in: session.cookieHeader)
+    }
+
+    private var grokSubtitle: String {
+        if grokSignedIn {
+            return "使用 grok.com Cookie 私有链路，仅支持文本聊天"
+        }
+        return "使用 Grok Web 账号，无需 xAI API Key"
+    }
+
+    private var grokProviderBackup: IOSGrokWebProviderBackup? {
+        guard let openAI = provider as? ProviderSetting.OpenAI else { return nil }
+        return IOSGrokWebProviderBackup(
+            baseUrl: openAI.baseUrl,
+            chatCompletionsPath: openAI.chatCompletionsPath,
+            useResponseApi: openAI.useResponseApi
+        )
+    }
+
+    @ViewBuilder
     private var legacyKeyImportSection: some View {
         let oldKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let providerKey = apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -310,31 +410,35 @@ struct ProviderDetailView: View {
 
     private var configActions: some View {
         VStack(spacing: 10) {
-            Button {
-                saveAndFetchModels()
-            } label: {
-                ProviderActionRow(
-                    systemImage: fetchState.isLoading ? "hourglass" : "square.and.arrow.down",
-                    title: fetchState.isLoading ? "正在获取模型" : "保存并获取模型",
-                    tint: AmberTheme.accent
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(fetchState.isLoading)
-            .opacity(fetchState.isLoading ? 0.65 : 1)
+            HStack(spacing: 10) {
+                Button {
+                    commitPendingTextInput {
+                        testConnection()
+                    }
+                } label: {
+                    ProviderActionRow(
+                        systemImage: connectionStatus.isTesting ? "hourglass" : "bolt.horizontal",
+                        title: connectionStatus.isTesting ? "正在测试" : "测试连接",
+                        tint: AmberTheme.accentAmber
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(connectionStatus.isTesting)
+                .opacity(connectionStatus.isTesting ? 0.65 : 1)
 
-            Button {
-                testConnection()
-            } label: {
-                ProviderActionRow(
-                    systemImage: connectionStatus.isTesting ? "hourglass" : "bolt.horizontal",
-                    title: connectionStatus.isTesting ? "正在测试" : "测试连接",
-                    tint: AmberTheme.accentAmber
-                )
+                if sharedSettings.canRemoveProvider(providerId: providerId) {
+                    Button(role: .destructive) {
+                        alert = .deleteProvider(providerName)
+                    } label: {
+                        ProviderActionRow(
+                            systemImage: "trash",
+                            title: "删除",
+                            tint: .red
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(connectionStatus.isTesting)
-            .opacity(connectionStatus.isTesting ? 0.65 : 1)
 
             if let message = connectionStatus.message {
                 ProviderConnectionResultRow(status: connectionStatus, message: message)
@@ -342,6 +446,33 @@ struct ProviderDetailView: View {
         }
         .padding(.top, 16)
         .padding(.horizontal, 16)
+    }
+
+    private func makeAlert(_ alert: ProviderDetailAlert) -> Alert {
+        switch alert {
+        case .deleteProvider:
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                primaryButton: .destructive(Text("删除"), action: deleteProvider),
+                secondaryButton: .cancel(Text("取消"))
+            )
+        default:
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("知道了"))
+            )
+        }
+    }
+
+    private func deleteProvider() {
+        guard sharedSettings.removeProvider(providerId: providerId) else {
+            alert = .providerDeleteFailed
+            return
+        }
+        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+        dismiss()
     }
 
     private var modelsPanel: some View {
@@ -515,14 +646,14 @@ struct ProviderDetailView: View {
         return true
     }
 
-    private func saveAndFetchModels() {
-        guard saveConfig(showSuccess: false) else { return }
-        guard let provider else { return }
-        guard !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            alert = .saved
-            return
-        }
-        fetchModels(saveBeforeFetch: false, revealModels: true)
+    private func commitPendingTextInput(then action: @escaping () -> Void) {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        DispatchQueue.main.async(execute: action)
     }
 
     private func switchProtocol(to option: ProviderProtocolOption) {
@@ -657,7 +788,7 @@ struct ProviderDetailView: View {
             return
         }
         connectionStatus = .testing
-        fetchModels()
+        fetchModels(saveBeforeFetch: false)
         connectionStatus = .success("连接测试已发起；模型获取结果会显示在模型页。")
     }
 
@@ -700,16 +831,7 @@ struct ProviderDetailView: View {
     }
 
     private func isValidHTTPBaseURL(_ value: String) -> Bool {
-        guard
-            let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
-            let scheme = components.scheme?.lowercased(),
-            scheme == "http" || scheme == "https",
-            let host = components.host,
-            !host.isEmpty
-        else {
-            return false
-        }
-        return true
+        IOSProviderEndpointPolicy.isValidBaseURL(value)
     }
 
     private func intValue(_ value: KotlinInt?) -> Int? {
@@ -780,6 +902,8 @@ private enum ProviderDetailAlert: Identifiable {
     case currentModelSet(String)
     case currentModelDeleted
     case legacyKeyImported
+    case deleteProvider(String)
+    case providerDeleteFailed
 
     var id: String {
         switch self {
@@ -791,6 +915,8 @@ private enum ProviderDetailAlert: Identifiable {
         case .currentModelSet(let model): "current-model-\(model)"
         case .currentModelDeleted: "current-model-deleted"
         case .legacyKeyImported: "legacy-key-imported"
+        case .deleteProvider: "delete-provider"
+        case .providerDeleteFailed: "provider-delete-failed"
         }
     }
 
@@ -804,6 +930,8 @@ private enum ProviderDetailAlert: Identifiable {
         case .currentModelSet: "已设为当前"
         case .currentModelDeleted: "当前模型已删除"
         case .legacyKeyImported: "已导入"
+        case .deleteProvider: "删除服务商？"
+        case .providerDeleteFailed: "无法删除服务商"
         }
     }
 
@@ -812,7 +940,7 @@ private enum ProviderDetailAlert: Identifiable {
         case .saved:
             "服务商配置已写入当前设置。"
         case .invalidBaseURL:
-            "请输入有效的 http/https API 地址。"
+            "请输入 HTTPS 地址，或使用 http://IP:端口形式的 API 地址。"
         case .protocolSwitchFailed:
             "没有找到可切换的服务商配置。"
         case .unsupportedProtocol:
@@ -825,6 +953,10 @@ private enum ProviderDetailAlert: Identifiable {
             "你删除的是当前聊天模型，请在模型页重新选择一个当前模型。"
         case .legacyKeyImported:
             "旧 API Key 已写入当前服务商。"
+        case .deleteProvider(let name):
+            "\(name) 的配置、模型和 API Key 将被删除，此操作无法撤销。"
+        case .providerDeleteFailed:
+            "内置服务商不能删除；当前服务商没有可切换的备用聊天模型时也不能删除。"
         }
     }
 }
@@ -875,26 +1007,30 @@ private struct ProviderHeaderDraft: Identifiable, Equatable {
 
 private struct ProviderSegmentedControl: View {
     @Binding var selection: ProviderDetailTab
+    @Namespace private var selectionIndicator
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(ProviderDetailTab.allCases) { tab in
                 Button {
-                    selection = tab
+                    withAnimation(.smooth(duration: 0.2)) {
+                        selection = tab
+                    }
                 } label: {
                     Text(tab.title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(selection == tab ? AmberTheme.foreground : AmberTheme.foreground2)
                         .frame(maxWidth: .infinity)
                         .frame(height: 38)
-                        .background(
-                            selection == tab ? AmberTheme.background.opacity(0.92) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        )
-                        .overlay {
+                        .background {
                             if selection == tab {
                                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                    .stroke(AmberTheme.borderSoft.opacity(0.9), lineWidth: 0.5)
+                                    .fill(AmberTheme.background.opacity(0.92))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                            .stroke(AmberTheme.borderSoft.opacity(0.9), lineWidth: 0.5)
+                                    }
+                                    .matchedGeometryEffect(id: "selection", in: selectionIndicator)
                             }
                         }
                 }

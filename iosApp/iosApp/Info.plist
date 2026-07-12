@@ -59,6 +59,22 @@
     <string>AmberAgent can request identity capabilities when you choose to enable supported identity features.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>AmberAgent can request local network access when you choose to discover or connect to nearby services.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>0.0.0.0/0</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+            </dict>
+            <key>::/0</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+            </dict>
+        </dict>
+    </dict>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>AmberAgent can request always-on location access when you choose to enable background location capabilities.</string>
     <key>NSLocationTemporaryUsageDescriptionDictionary</key>

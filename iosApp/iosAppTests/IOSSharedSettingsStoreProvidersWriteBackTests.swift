@@ -115,6 +115,44 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         )
     }
 
+    func testRemoveProviderDeletesCredentialAndRetargetsCurrentChatModel() throws {
+        let suiteName = "ProviderDelete-\(UUID().uuidString)"
+        let store = makeIsolatedStore(suiteName: suiteName)
+        let provider = IosSettingsMutations.shared.buildOpenAIProvider(
+            name: "待删除服务商",
+            apiKey: "sk-delete-me",
+            baseUrl: "https://example.com/v1",
+            modelName: "待删除模型",
+            modelId: "delete-model"
+        )
+        let added = store.addProvider(provider)
+        let providerId = added.id.description()
+        let model = try XCTUnwrap(added.models.first)
+        store.setCurrentChatModelId(model.id.description())
+        store.setCurrentAssistantChatModelId(model.id.description())
+        XCTAssertEqual(store.snapshot.getCurrentChatModel()?.id, model.id)
+
+        XCTAssertTrue(store.removeProvider(providerId: providerId))
+        XCTAssertFalse(store.snapshot.providers.contains { $0.id.description() == providerId })
+        XCTAssertNotEqual(store.snapshot.getCurrentChatModel()?.id, model.id)
+        XCTAssertNil(
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.providerApiKey(providerId: providerId))
+        )
+
+        let restarted = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertFalse(restarted.snapshot.providers.contains { $0.id.description() == providerId })
+    }
+
+    func testRemoveProviderRefusesBuiltInProvider() throws {
+        let store = makeIsolatedStore()
+        let builtIn = try XCTUnwrap(store.snapshot.providers.first)
+        let providerId = builtIn.id.description()
+
+        XCTAssertFalse(store.canRemoveProvider(providerId: providerId))
+        XCTAssertFalse(store.removeProvider(providerId: providerId))
+        XCTAssertTrue(store.snapshot.providers.contains { $0.id.description() == providerId })
+    }
+
     // ---- TTS engines ----
 
     func testAddOpenAITtsEngineMergesIntoSnapshot() {

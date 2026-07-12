@@ -110,6 +110,12 @@ object IosSettingsMutations {
         return settings.copy(providers = settings.providers + provider)
     }
 
+    /** Whether [id] belongs to the bundled provider catalog. */
+    fun isDefaultProvider(id: String): Boolean {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return false
+        return DEFAULT_PROVIDERS.any { it.id == parsed }
+    }
+
     /** Replace an existing provider by id; no-op if the provider is not present. */
     fun replaceProvider(settings: Settings, provider: ProviderSetting): Settings {
         return settings.copy(
@@ -117,10 +123,33 @@ object IosSettingsMutations {
         )
     }
 
-    /** Remove a provider by [id] (Uuid string); no-op if not found. */
+    /** Remove a provider by [id] and keep chat-model references valid. */
     fun removeProvider(settings: Settings, id: String): Settings {
         val parsed = kotlin.uuid.Uuid.parse(id)
-        return settings.copy(providers = settings.providers.filterNot { it.id == parsed })
+        val removed = settings.providers.firstOrNull { it.id == parsed } ?: return settings
+        val remaining = settings.providers.filterNot { it.id == parsed }
+        val removedModelIds = removed.models.mapTo(mutableSetOf()) { it.id }
+        val replacementModelId = remaining
+            .asSequence()
+            .flatMap { it.models.asSequence() }
+            .firstOrNull { it.type == ModelType.CHAT }
+            ?.id
+
+        val needsReplacement = settings.chatModelId in removedModelIds ||
+            settings.assistants.any { it.chatModelId in removedModelIds }
+        if (needsReplacement && replacementModelId == null) return settings
+
+        return settings.copy(
+            providers = remaining,
+            chatModelId = if (settings.chatModelId in removedModelIds) replacementModelId!! else settings.chatModelId,
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.chatModelId in removedModelIds) {
+                    assistant.copy(chatModelId = replacementModelId)
+                } else {
+                    assistant
+                }
+            },
+        )
     }
 
     /**

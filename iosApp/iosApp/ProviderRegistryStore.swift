@@ -146,11 +146,10 @@ final class ProviderRegistryStore {
     }
 
     /// Whether this provider can be faithfully used by the current iOS chat chain.
-    /// OpenAI-compatible and Claude have KMP executors; xAI needs the Response API,
-    /// Google needs its own executor, and MiMo's bundled base is a placeholder.
+    /// OpenAI-compatible/Responses API and Claude have KMP executors; Google needs
+    /// its own executor, and MiMo's bundled base is a placeholder.
     func canActivate(_ provider: ProviderSetting) -> Bool {
         if let openAI = provider as? ProviderSetting.OpenAI {
-            if openAI.useResponseApi { return false }
             if openAI.brand === OpenAIBrand.mimo { return false }
             return true
         }

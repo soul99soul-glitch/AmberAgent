@@ -692,6 +692,27 @@ final class IOSSharedSettingsStore {
         return provider
     }
 
+    func canRemoveProvider(providerId: String) -> Bool {
+        snapshot.providers.contains { $0.id.description() == providerId }
+            && !IosSettingsMutations.shared.isDefaultProvider(id: providerId)
+    }
+
+    /// Delete a user-created provider and its credential. Bundled providers are immutable.
+    @discardableResult
+    func removeProvider(providerId: String) -> Bool {
+        guard canRemoveProvider(providerId: providerId) else { return false }
+
+        let merged = IosSettingsMutations.shared.removeProvider(settings: snapshot, id: providerId)
+        guard !merged.providers.contains(where: { $0.id.description() == providerId }) else {
+            return false
+        }
+
+        IOSCredentialSideTable.delete(key: IOSCredentialSideTable.providerApiKey(providerId: providerId))
+        savedCustomModels.removeAll { $0["providerId"] == providerId }
+        restoreSnapshot(merged)
+        return true
+    }
+
     /// Execution-path provider resolution that mirrors chat (the canonical store
     /// the formal Provider UI writes and chat reads): resolves the current chat
     /// model's provider — a full `ProviderSetting` with the real apiKey

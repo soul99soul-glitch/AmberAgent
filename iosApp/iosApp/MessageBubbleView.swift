@@ -1556,6 +1556,8 @@ struct ChatConfigurationNoticeCard: View {
             "exclamationmark.triangle"
         case .codexNotSignedIn:
             "person.crop.circle"
+        case .grokNotSignedIn:
+            "bolt.circle"
         }
     }
 
@@ -1573,6 +1575,8 @@ struct ChatConfigurationNoticeCard: View {
             "exclamationmark.triangle.fill"
         case .codexNotSignedIn:
             "person.crop.circle.fill"
+        case .grokNotSignedIn:
+            "bolt.circle.fill"
         }
     }
 
@@ -1590,6 +1594,8 @@ struct ChatConfigurationNoticeCard: View {
             "切换服务商"
         case .codexNotSignedIn:
             "登录 Codex"
+        case .grokNotSignedIn:
+            "登录 Grok"
         }
     }
 }

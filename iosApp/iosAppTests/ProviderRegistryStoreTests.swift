@@ -133,6 +133,31 @@ final class ProviderRegistryStoreTests: XCTestCase {
         XCTAssertEqual(restarted.storedKey(for: preset), "sk-preset-registry-test")
     }
 
+    func testResponseApiOpenAIProviderIsSupportedAndActivatable() {
+        let namespace = "ResponseApiProvider-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: namespace)!
+        defaults.removePersistentDomain(forName: namespace)
+        let settings = SettingsStore(
+            userDefaults: defaults,
+            storageKey: "\(namespace).settings",
+            apiKeyStore: TestSettingsAPIKeyStore()
+        )
+        let registry = ProviderRegistryStore(
+            settingsStore: settings,
+            userDefaults: defaults,
+            keyNamespace: namespace,
+            keychainPrefix: "app.amber.ios.tests.provider.\(UUID().uuidString).",
+            keyStore: TestProviderRegistryKeyStore(defaults: defaults, prefix: namespace)
+        )
+        let provider = makeOpenAIProvider(useResponseApi: true, apiKey: "xai-test-key")
+        let model = provider.models[0]
+
+        XCTAssertTrue(ChatProviderConfiguration.supportsChatStreaming(provider))
+        XCTAssertNil(ChatProviderConfiguration.issue(for: model, provider: provider))
+        XCTAssertTrue(registry.canActivate(provider))
+        XCTAssertTrue(ProviderRouteKind.isEditablePreset(provider))
+    }
+
     func testSettingsStorePersistsProviderConfigurationAcrossRestart() throws {
         let namespace = "SettingsStorePersistence-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: namespace)!
@@ -420,6 +445,25 @@ final class ProviderRegistryStoreTests: XCTestCase {
             tools: Set<BuiltInTools>(),
             contextWindowTokens: nil,
             providerOverwrite: nil
+        )
+    }
+
+    private func makeOpenAIProvider(useResponseApi: Bool, apiKey: String) -> ProviderSetting.OpenAI {
+        ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: useResponseApi ? "xAI Responses" : "OpenAI Compatible",
+            models: [makeChatModel("grok-4")],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: true,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: apiKey,
+            baseUrl: "https://api.x.ai/v1",
+            chatCompletionsPath: useResponseApi ? "/responses" : "/chat/completions",
+            useResponseApi: useResponseApi,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
         )
     }
 }

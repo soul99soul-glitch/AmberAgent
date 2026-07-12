@@ -14,6 +14,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Represents events in an SSE connection.
@@ -33,6 +35,71 @@ sealed class SseEvent {
 }
 
 /**
+ * Incremental SSE line parser with one narrow OpenAI-compatible extension:
+ * a complete JSON `data:` line (or `[DONE]`) is an event by itself even when
+ * a proxy omits the spec's blank separator. Incomplete/multiline data keeps
+ * the standard blank-line behavior.
+ */
+internal class OpenAISseLineParser {
+    private companion object {
+        val json = Json { ignoreUnknownKeys = true }
+    }
+
+    private var id: String? = null
+    private var type: String? = null
+    private val dataLines = mutableListOf<String>()
+
+    fun consume(rawLine: String): SseEvent.Event? {
+        val line = rawLine.trimEnd('\r')
+        if (line.isEmpty()) return flush()
+        if (line.startsWith(":")) return null
+
+        val trimmed = line.trim()
+        if (!trimmed.startsWith("data:") && trimmed.isStandaloneOpenAIPayload()) {
+            dataLines += trimmed
+            return flush()
+        }
+
+        val colonIndex = line.indexOf(':')
+        val field = if (colonIndex >= 0) line.substring(0, colonIndex) else line
+        val rawValue = if (colonIndex >= 0) line.substring(colonIndex + 1) else ""
+        val value = rawValue.removePrefix(" ")
+        when (field) {
+            "id" -> id = value
+            "event" -> type = value
+            "data" -> {
+                dataLines += value
+                if (value.isStandaloneOpenAIPayload()) return flush()
+            }
+        }
+        return null
+    }
+
+    fun finish(): SseEvent.Event? = flush()
+
+    private fun flush(): SseEvent.Event? {
+        val event = if (id != null || type != null || dataLines.isNotEmpty()) {
+            SseEvent.Event(id = id, type = type, data = dataLines.joinToString("\n"))
+        } else {
+            null
+        }
+        id = null
+        type = null
+        dataLines.clear()
+        return event
+    }
+
+    private fun String.isStandaloneOpenAIPayload(): Boolean {
+        var payload = trim()
+        while (payload.startsWith("data:")) {
+            payload = payload.removePrefix("data:").trimStart()
+        }
+        return payload == "[DONE]" ||
+            runCatching { json.parseToJsonElement(payload) is JsonObject }.getOrDefault(false)
+    }
+}
+
+/**
  * Wraps Ktor's SSE client into a reactive [Flow] of [SseEvent].
  *
  * Ktor's SSE plugin is flaky with Darwin in this app: successful HTTP 200
@@ -43,7 +110,7 @@ fun HttpClient.sseFlow(
     url: String,
     block: HttpRequestBuilder.() -> Unit = {},
 ): Flow<SseEvent> = callbackFlow {
-    trySend(SseEvent.Open)
+    send(SseEvent.Open)
     try {
         this@sseFlow.prepareRequest(url) {
             block()
@@ -56,50 +123,18 @@ fun HttpClient.sseFlow(
                 } else {
                     "HTTP ${response.status.value}: ${body.take(1200)}"
                 }
-                trySend(SseEvent.Failure(Exception(detail)))
+                send(SseEvent.Failure(Exception(detail)))
                 return@execute
             }
 
             val channel = response.bodyAsChannel()
-            var id: String? = null
-            var type: String? = null
-            val dataLines = mutableListOf<String>()
-
-            fun flushEvent() {
-                if (id != null || type != null || dataLines.isNotEmpty()) {
-                    trySend(
-                        SseEvent.Event(
-                            id = id,
-                            type = type,
-                            data = dataLines.joinToString("\n"),
-                        ),
-                    )
-                }
-                id = null
-                type = null
-                dataLines.clear()
-            }
+            val parser = OpenAISseLineParser()
 
             while (true) {
                 val rawLine = channel.readUTF8Line() ?: break
-                val line = rawLine.trimEnd('\r')
-                if (line.isEmpty()) {
-                    flushEvent()
-                    continue
-                }
-                if (line.startsWith(":")) continue
-
-                val colonIndex = line.indexOf(':')
-                val field = if (colonIndex >= 0) line.substring(0, colonIndex) else line
-                val rawValue = if (colonIndex >= 0) line.substring(colonIndex + 1) else ""
-                val value = rawValue.removePrefix(" ")
-                when (field) {
-                    "id" -> id = value
-                    "event" -> type = value
-                    "data" -> dataLines += value
-                }
+                parser.consume(rawLine)?.let { send(it) }
             }
-            flushEvent()
+            parser.finish()?.let { send(it) }
         }
     } catch (e: CancellationException) {
         throw e
@@ -107,15 +142,15 @@ fun HttpClient.sseFlow(
         val status = e.response.status.value
         val body = runCatching { e.response.bodyAsText() }.getOrDefault("")
         val detail = if (body.isBlank()) "HTTP $status" else "HTTP $status: ${body.take(1200)}"
-        trySend(SseEvent.Failure(Exception(detail, e)))
+        send(SseEvent.Failure(Exception(detail, e)))
         close()
         return@callbackFlow
     } catch (e: Exception) {
-        trySend(SseEvent.Failure(e))
+        send(SseEvent.Failure(e))
         close()
         return@callbackFlow
     }
-    trySend(SseEvent.Closed)
+    send(SseEvent.Closed)
     close()
     awaitClose { }
 }

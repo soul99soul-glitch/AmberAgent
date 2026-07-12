@@ -42,7 +42,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -165,15 +165,12 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             contentType(ContentType.Application.Json)
             configureAuth(providerSetting, params)
             setBody(json.encodeToString(requestBody))
-        }.mapNotNull { event ->
+        }.transform { event ->
             when (event) {
-                is SseEvent.Event -> {
-                    val payloads = normalizeOpenAIStreamDataLines(event.data)
-                    payloads.mapNotNull { parseStreamChunk(it) }.lastOrNull()
-                }
+                is SseEvent.Event -> parseChatCompletionStreamData(event.data).forEach { emit(it) }
 
                 is SseEvent.Failure -> throw event.throwable ?: Exception("Stream failed")
-                is SseEvent.Open, is SseEvent.Closed -> null
+                is SseEvent.Open, is SseEvent.Closed -> Unit
             }
         }
     }
@@ -224,7 +221,7 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
 
     // ---- request building ----
 
-    private fun buildChatCompletionRequest(
+    internal fun buildChatCompletionRequest(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
@@ -329,6 +326,7 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
                     })
                 }
             }
+            put("parallel_tool_calls", false)
         }
     }.mergeCustomBody(params.customBody)
 
@@ -469,6 +467,9 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     }
 
     // ---- response parsing ----
+
+    internal fun parseChatCompletionStreamData(data: String): List<MessageChunk> =
+        normalizeOpenAIStreamDataLines(data).mapNotNull(::parseStreamChunk)
 
     private fun parseStreamChunk(payload: String): MessageChunk? {
         val obj = runCatching { json.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return null
@@ -650,23 +651,24 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             header("Authorization", "Bearer ${providerSetting.apiKey}")
             params.customHeaders.filter { it.name.isNotBlank() }.forEach { header(it.name, it.value) }
             setBody(json.encodeToString(requestBody))
-        }.mapNotNull { event ->
+        }.transform { event ->
             when (event) {
-                is SseEvent.Event -> {
-                    val payloads = normalizeOpenAIStreamDataLines(event.data)
-                    payloads.mapNotNull { payload ->
-                        val obj = runCatching { json.parseToJsonElement(payload) as? JsonObject }
-                            .getOrNull() ?: return@mapNotNull null
-                        obj["error"]?.let { throw it.parseErrorDetail() }
-                        parseResponseDelta(obj)?.normalizeResponseStreamAssistant(streamAssistantId)
-                    }.lastOrNull()
-                }
+                is SseEvent.Event -> parseResponsesStreamData(event.data)
+                    .forEach { emit(it.normalizeResponseStreamAssistant(streamAssistantId)) }
 
                 is SseEvent.Failure -> throw event.throwable ?: Exception("Stream failed")
-                is SseEvent.Open, is SseEvent.Closed -> null
+                is SseEvent.Open, is SseEvent.Closed -> Unit
             }
         }
     }
+
+    internal fun parseResponsesStreamData(data: String): List<MessageChunk> =
+        normalizeOpenAIStreamDataLines(data).mapNotNull { payload ->
+            val obj = runCatching { json.parseToJsonElement(payload) as? JsonObject }
+                .getOrNull() ?: return@mapNotNull null
+            obj["error"]?.let { throw it.parseErrorDetail() }
+            parseResponseDelta(obj)
+        }
 
     private fun MessageChunk.normalizeResponseStreamAssistant(streamAssistantId: Uuid): MessageChunk = copy(
         choices = choices.map { choice ->
@@ -693,7 +695,7 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
 
     // ---- Responses request building (port of buildRequestBody) ----
 
-    private fun buildResponsesRequestBody(
+    internal fun buildResponsesRequestBody(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
@@ -767,6 +769,7 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             }
             if (toolDefinitions.isNotEmpty()) {
                 put("tools", toolDefinitions)
+                put("parallel_tool_calls", false)
             }
         }.mergeCustomBody(params.customBody)
     }

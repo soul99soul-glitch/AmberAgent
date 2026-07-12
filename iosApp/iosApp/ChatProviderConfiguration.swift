@@ -1,5 +1,32 @@
 import Foundation
 import Shared
+import Darwin
+
+enum IOSProviderEndpointPolicy {
+    static func isValidBaseURL(_ value: String) -> Bool {
+        guard let components = URLComponents(
+            string: value.trimmingCharacters(in: .whitespacesAndNewlines)
+        ), let scheme = components.scheme?.lowercased(),
+           let host = components.host,
+           !host.isEmpty else {
+            return false
+        }
+        if scheme == "https" {
+            return true
+        }
+        return scheme == "http" && isIPAddress(host)
+    }
+
+    private static func isIPAddress(_ host: String) -> Bool {
+        let candidate = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        var ipv4 = in_addr()
+        if candidate.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
+            return true
+        }
+        var ipv6 = in6_addr()
+        return candidate.withCString({ inet_pton(AF_INET6, $0, &ipv6) }) == 1
+    }
+}
 
 enum ChatConfigurationIssue: Equatable {
     case missingAPIKey
@@ -8,6 +35,7 @@ enum ChatConfigurationIssue: Equatable {
     case missingProvider
     case unsupportedProvider
     case codexNotSignedIn
+    case grokNotSignedIn
 
     var title: String {
         switch self {
@@ -23,6 +51,8 @@ enum ChatConfigurationIssue: Equatable {
             "当前服务商暂不支持聊天"
         case .codexNotSignedIn:
             "还没有登录 Codex"
+        case .grokNotSignedIn:
+            "还没有登录 Grok"
         }
     }
 
@@ -31,7 +61,7 @@ enum ChatConfigurationIssue: Equatable {
         case .missingAPIKey:
             "请先添加服务商 API Key，再发送第一条消息。"
         case .invalidBaseURL:
-            "当前服务商 API 地址不是有效的 http/https URL，请修正后再试。"
+            "当前地址不是有效的 HTTPS 或 HTTP IP 地址，请修正后再试。"
         case .missingModel:
             "请选择当前服务商可用的聊天模型，或填写服务商文档中的 Model ID。"
         case .missingProvider:
@@ -40,6 +70,8 @@ enum ChatConfigurationIssue: Equatable {
             "当前服务商类型的 iOS 聊天执行器尚未移植，请先切换到 OpenAI 兼容或 Anthropic 服务商。"
         case .codexNotSignedIn:
             "请先在服务商设置里用 ChatGPT 账号登录 Codex，再发送消息。"
+        case .grokNotSignedIn:
+            "请先在 xAI 服务商设置里登录 grok.com，再发送消息。"
         }
     }
 }
@@ -70,6 +102,11 @@ enum ChatProviderConfiguration {
             if model.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .missingModel }
             return nil
         }
+        if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
+            if !IOSGrokWebProviderResolver.isSignedIn(provider) { return .grokNotSignedIn }
+            if model.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .missingModel }
+            return nil
+        }
         return issue(
             baseUrl: baseURL(of: provider),
             apiKey: apiKey(of: provider),
@@ -96,22 +133,17 @@ enum ChatProviderConfiguration {
             // supported through the codex request path (token injected at
             // request time) even though it implies useResponseApi.
             if IOSCodexProviderResolver.isCodexProvider(openAI) { return true }
-            return !openAI.useResponseApi
+            // KMP OpenAI provider owns both chat-completions and Responses API
+            // routing via the provider setting. MiMo's seeded endpoint is still
+            // a placeholder, so keep it out until it has a real runnable config.
+            if openAI.brand === OpenAIBrand.mimo { return false }
+            return true
         }
         return provider is ProviderSetting.Claude
     }
 
     private static func isValidHTTPBaseURL(_ value: String) -> Bool {
-        guard
-            let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
-            let scheme = components.scheme?.lowercased(),
-            scheme == "http" || scheme == "https",
-            let host = components.host,
-            !host.isEmpty
-        else {
-            return false
-        }
-        return true
+        IOSProviderEndpointPolicy.isValidBaseURL(value)
     }
 
     static func apiKey(of provider: ProviderSetting) -> String {
