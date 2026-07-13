@@ -2,6 +2,24 @@ import Foundation
 import Observation
 @preconcurrency import Shared
 
+// MARK: - IOSUserVisibleError
+
+enum IOSUserVisibleErrorSeverity: String, Equatable {
+    case info
+    case warning
+    case error
+}
+
+/// A user-facing error that can be surfaced through the app-level alert bus.
+/// Keep it domain-neutral so storage, workspace sync, MCP, memory, and board
+/// failures can share the same visible channel without inventing new alerts.
+struct IOSUserVisibleError: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let severity: IOSUserVisibleErrorSeverity
+}
+
 // MARK: - IOSConversationIOError
 
 /// A storage I/O failure surfaced to the UI (disk full / write failed /
@@ -14,6 +32,14 @@ struct IOSConversationIOError: Identifiable, Equatable {
 
     var message: String {
         "会话存储「\(operation)」失败：\(detail)。请检查存储空间后重试。"
+    }
+
+    var userVisibleError: IOSUserVisibleError {
+        IOSUserVisibleError(
+            title: "会话存储出错",
+            message: message,
+            severity: .error
+        )
     }
 }
 
@@ -39,6 +65,11 @@ struct IOSConversationSearchResult: Identifiable {
     let preview: String
     let highlight: String
     let updateAt: Int64
+}
+
+struct IOSConversationWriteBaseline: Equatable {
+    fileprivate let key: String
+    fileprivate let sequence: UInt64
 }
 
 /// iOS 端会话生命周期管理器。把 [JsonConversationStorage]（KMP 文件 JSON 存储）包成
@@ -90,17 +121,42 @@ final class IOSConversationStore {
 
     /// 最近一次存储 I/O 错误（磁盘满/写失败/损坏）。绑定到顶层 `.alert(item:)`
     /// 让用户看到失败，避免"以为保存了实际没保存"的静默丢数据。nil = 无未读错误。
-    /// 成功的 refreshSummaries 会清空它。
+    /// 成功刷新列表不会自动清空它；只有用户 dismiss alert 时才清空。
     private(set) var lastIOError: IOSConversationIOError?
+
+    /// App-level visible error bus. `lastIOError` remains for compatibility and
+    /// tests, while new domains should publish here directly.
+    private(set) var lastUserVisibleError: IOSUserVisibleError?
 
     /// Dismiss the current IO error (called by the alert's OK action).
     func clearIOError() {
+        clearUserVisibleError()
+    }
+
+    func clearUserVisibleError() {
         lastIOError = nil
+        lastUserVisibleError = nil
+    }
+
+    func publishUserVisibleError(_ error: IOSUserVisibleError) {
+        lastUserVisibleError = error
+    }
+
+    private func publishIOError(operation: String, detail: String) {
+        let error = IOSConversationIOError(operation: operation, detail: detail)
+        lastIOError = error
+        publishUserVisibleError(error.userVisibleError)
     }
 
     // MARK: - Private
 
     private let storage: JsonConversationStorage
+    private var deletedConversationIds: Set<String> = []
+    private var writeSequences: [String: UInt64] = [:]
+
+#if DEBUG
+    var beforePersistForTesting: ((Conversation) async -> Void)?
+#endif
 
     // MARK: - Init
 
@@ -128,7 +184,7 @@ final class IOSConversationStore {
         } catch {
             // listSummaries 内部已对损坏 index 做了 rebuild 兜底；到这里的 error 是更底层
             // 的 I/O 故障。不致命：降级为空列表，下面会新建会话，内存里仍可用。
-            lastIOError = IOSConversationIOError(operation: "读取列表", detail: "\(error)")
+            publishIOError(operation: "读取列表", detail: "\(error)")
             summaries = []
         }
 
@@ -150,18 +206,45 @@ final class IOSConversationStore {
             messages: [],
             newConversation: true
         )
-        await persist(conversation)
-        setCurrentAsSwitch(conversation)
+        let persisted = await persist(conversation) ?? conversation
+        setCurrentAsSwitch(persisted)
         await refreshSummaries()
+    }
+
+    /// 用户入口的“新建对话”：优先复用当前或最近的空会话，避免连续点击新建制造垃圾空文件。
+    /// 底层 `newConversation()` 保持强制新建语义，供测试、删除回退等内部场景使用。
+    func startNewConversationReusingEmpty() async {
+        if let currentConversation, Self.isReusableEmptyConversation(currentConversation) {
+            return
+        }
+
+        let sourceSummaries: [ConversationSummary]
+        if summaries.isEmpty {
+            sourceSummaries = (try? await storage.listSummaries()) ?? []
+        } else {
+            sourceSummaries = summaries
+        }
+
+        if let mostRecent = sourceSummaries.first,
+           currentConversation?.id != mostRecent.id,
+           !isDeletedConversation(mostRecent.id),
+           let conversation = try? await storage.loadConversation(id: mostRecent.id),
+           Self.isReusableEmptyConversation(conversation) {
+            setCurrentAsSwitch(conversation)
+            return
+        }
+
+        await newConversation()
     }
 
     /// 切换到指定会话：从磁盘 load 完整对象，设为 current。
     func selectConversation(id: KotlinUuid) async {
+        guard !isDeletedConversation(id) else { return }
         let loaded: Conversation?
         do {
             loaded = try await storage.loadConversation(id: id)
         } catch {
-            lastIOError = IOSConversationIOError(operation: "加载会话", detail: "\(id): \(error)")
+            publishIOError(operation: "加载会话", detail: "\(id): \(error)")
             loaded = nil
         }
         if let loaded {
@@ -177,9 +260,21 @@ final class IOSConversationStore {
         await save(messages: messages, to: id)
     }
 
+    func writeBaseline(for id: KotlinUuid) -> IOSConversationWriteBaseline {
+        let key = sequenceKey(for: id)
+        return IOSConversationWriteBaseline(key: key, sequence: writeSequences[key, default: 0])
+    }
+
     /// 把 [messages] 保存到指定会话 id。用于生成回调按 run 发起时的 conversation 归属落盘，
     /// 避免用户在流式生成期间切换/新建会话后把旧 run 写进当前新会话。
-    func save(messages: [UIMessage], to id: KotlinUuid) async {
+    @discardableResult
+    func save(
+        messages: [UIMessage],
+        to id: KotlinUuid,
+        ifUnchangedSince baseline: IOSConversationWriteBaseline? = nil
+    ) async -> Bool {
+        guard !isDeletedConversation(id) else { return false }
+        guard acceptsWrite(to: id, baseline: baseline) else { return false }
         let conversation: Conversation?
         if currentConversation?.id == id {
             conversation = currentConversation
@@ -187,11 +282,12 @@ final class IOSConversationStore {
             do {
                 conversation = try await storage.loadConversation(id: id)
             } catch {
-                lastIOError = IOSConversationIOError(operation: "保存会话", detail: "目标 \(id): \(error)")
+                publishIOError(operation: "保存会话", detail: "目标 \(id): \(error)")
                 conversation = nil
             }
         }
-        guard let conversation else { return }
+        guard let conversation, !isDeletedConversation(id) else { return false }
+        guard acceptsWrite(to: id, baseline: baseline) else { return false }
 
         // updateCurrentMessages 已做 identity 短路：消息没变时返回同一引用，节省落盘。
         var updated = conversation.updateCurrentMessages(messages: messages)
@@ -207,81 +303,98 @@ final class IOSConversationStore {
             }
         }
 
-        await persist(updated)
+        guard let persisted = await persist(updated, ifUnchangedSince: baseline) else { return false }
         if currentConversation?.id == id {
-            setCurrent(updated)
+            setCurrent(persisted)
         }
         await refreshSummaries()
+        return true
     }
 
+    @discardableResult
     func saveBackgroundCompletion(
         baseMessages: [UIMessage],
         completedMessages: [UIMessage],
         to id: KotlinUuid
-    ) async {
-        let conversation: Conversation?
-        if currentConversation?.id == id {
-            conversation = currentConversation
-        } else {
-            do {
-                conversation = try await storage.loadConversation(id: id)
-            } catch {
-                lastIOError = IOSConversationIOError(operation: "保存后台回复", detail: "目标 \(id): \(error)")
-                conversation = nil
+    ) async -> Bool {
+        for _ in 0..<3 {
+            guard !isDeletedConversation(id) else { return false }
+            let baseline = writeBaseline(for: id)
+            let conversation: Conversation?
+            if currentConversation?.id == id {
+                conversation = currentConversation
+            } else {
+                do {
+                    conversation = try await storage.loadConversation(id: id)
+                } catch {
+                    publishIOError(operation: "保存后台回复", detail: "目标 \(id): \(error)")
+                    conversation = nil
+                }
             }
-        }
-        guard let conversation else { return }
+            guard let conversation, !isDeletedConversation(id) else { return false }
 
-        let current = conversation.currentMessages
-        let nextMessages: [UIMessage]
-        if Self.sameMessageIdentity(current, baseMessages) {
-            nextMessages = completedMessages
-        } else {
-            let generatedSuffix = Array(completedMessages.dropFirst(baseMessages.count))
-            let notice = UIMessage.companion.assistant(prompt: "后台生成已完成；当前会话期间已有新内容，以下是后台完成的结果。")
-            nextMessages = current + [notice] + generatedSuffix
+            let current = conversation.currentMessages
+            let nextMessages: [UIMessage]
+            if Self.sameMessageIdentity(current, baseMessages) {
+                nextMessages = completedMessages
+            } else {
+                let generatedSuffix = Array(completedMessages.dropFirst(baseMessages.count))
+                let notice = UIMessage.companion.assistant(prompt: "后台生成已完成；当前会话期间已有新内容，以下是后台完成的结果。")
+                nextMessages = current + [notice] + generatedSuffix
+            }
+            guard await save(messages: nextMessages, to: id, ifUnchangedSince: baseline) else { continue }
+            pendingBackgroundContentConversationIds.insert(String(describing: id))
+            backgroundContentRevision &+= 1
+            return true
         }
-        await save(messages: nextMessages, to: id)
-        pendingBackgroundContentConversationIds.insert(String(describing: id))
-        backgroundContentRevision &+= 1
+        print("[AA-STORE] background completion save skipped after retries id=\(sequenceKey(for: id))")
+        return false
     }
 
+    @discardableResult
     func saveBackgroundToolCompletion(
         baseMessages: [UIMessage],
         completedMessages: [UIMessage],
         to id: KotlinUuid
-    ) async {
-        let conversation: Conversation?
-        if currentConversation?.id == id {
-            conversation = currentConversation
-        } else {
-            do {
-                conversation = try await storage.loadConversation(id: id)
-            } catch {
-                lastIOError = IOSConversationIOError(operation: "保存后台工具结果", detail: "目标 \(id): \(error)")
-                conversation = nil
-            }
-        }
-        guard let conversation else { return }
-
-        let current = conversation.currentMessages
-        let nextMessages: [UIMessage]
-        if Self.sameMessageIdentity(current, baseMessages) {
-            nextMessages = completedMessages
-        } else {
-            let outputs = Self.completedToolOutputs(in: completedMessages)
-            let patched = Self.messagesByApplyingToolOutputs(outputs, to: current)
-            if patched.didApply {
-                nextMessages = patched.messages
+    ) async -> Bool {
+        for _ in 0..<3 {
+            guard !isDeletedConversation(id) else { return false }
+            let baseline = writeBaseline(for: id)
+            let conversation: Conversation?
+            if currentConversation?.id == id {
+                conversation = currentConversation
             } else {
-                let notice = UIMessage.companion.assistant(prompt: "后台工具执行已完成；当前会话期间已有新内容，以下是后台完成的结果。")
-                let toolMessages = Self.messagesContainingToolOutputs(outputs, in: completedMessages)
-                nextMessages = current + [notice] + toolMessages
+                do {
+                    conversation = try await storage.loadConversation(id: id)
+                } catch {
+                    publishIOError(operation: "保存后台工具结果", detail: "目标 \(id): \(error)")
+                    conversation = nil
+                }
             }
+            guard let conversation, !isDeletedConversation(id) else { return false }
+
+            let current = conversation.currentMessages
+            let nextMessages: [UIMessage]
+            if Self.sameMessageIdentity(current, baseMessages) {
+                nextMessages = completedMessages
+            } else {
+                let outputs = Self.completedToolOutputs(in: completedMessages)
+                let patched = Self.messagesByApplyingToolOutputs(outputs, to: current)
+                if patched.didApply {
+                    nextMessages = patched.messages
+                } else {
+                    let notice = UIMessage.companion.assistant(prompt: "后台工具执行已完成；当前会话期间已有新内容，以下是后台完成的结果。")
+                    let toolMessages = Self.messagesContainingToolOutputs(outputs, in: completedMessages)
+                    nextMessages = current + [notice] + toolMessages
+                }
+            }
+            guard await save(messages: nextMessages, to: id, ifUnchangedSince: baseline) else { continue }
+            pendingBackgroundContentConversationIds.insert(String(describing: id))
+            backgroundContentRevision &+= 1
+            return true
         }
-        await save(messages: nextMessages, to: id)
-        pendingBackgroundContentConversationIds.insert(String(describing: id))
-        backgroundContentRevision &+= 1
+        print("[AA-STORE] background tool completion save skipped after retries id=\(sequenceKey(for: id))")
+        return false
     }
 
     /// 重建一个仅 title 不同的 Conversation（Swift 侧无 partial copy，用全字段构造器）。
@@ -311,10 +424,12 @@ final class IOSConversationStore {
 
     /// 删除会话：磁盘删除 + 刷新 summaries。若删的是 current，自动切到下一条或新建。
     func deleteConversation(id: KotlinUuid) async {
+        markDeletedConversation(id)
+        pendingBackgroundContentConversationIds.remove(String(describing: id))
         do {
             try await storage.deleteConversation(id: id)
         } catch {
-            lastIOError = IOSConversationIOError(operation: "删除会话", detail: "\(id): \(error)")
+            publishIOError(operation: "删除会话", detail: "\(id): \(error)")
         }
         await refreshSummaries()
 
@@ -331,8 +446,9 @@ final class IOSConversationStore {
     func renameConversation(id: KotlinUuid, title: String) async {
         do {
             try await storage.updateMetadata(id: id, title: title, isPinned: nil)
+            advanceWriteSequence(for: id)
         } catch {
-            lastIOError = IOSConversationIOError(operation: "重命名", detail: "\(id): \(error)")
+            publishIOError(operation: "重命名", detail: "\(id): \(error)")
         }
         await refreshSummaries()
         if currentConversation?.id == id, let refreshed = try? await storage.loadConversation(id: id) {
@@ -346,8 +462,9 @@ final class IOSConversationStore {
         let newPinned = KotlinBoolean(value: !currentPinned)
         do {
             try await storage.updateMetadata(id: id, title: nil, isPinned: newPinned)
+            advanceWriteSequence(for: id)
         } catch {
-            lastIOError = IOSConversationIOError(operation: "置顶", detail: "\(id): \(error)")
+            publishIOError(operation: "置顶", detail: "\(id): \(error)")
         }
         await refreshSummaries()
         if currentConversation?.id == id, let refreshed = try? await storage.loadConversation(id: id) {
@@ -513,6 +630,10 @@ final class IOSConversationStore {
         return conversation.currentMessages
     }
 
+    private static func isReusableEmptyConversation(_ conversation: Conversation) -> Bool {
+        !searchableMessages(in: conversation).contains { $0.role == MessageRole.user }
+    }
+
     private static func sameMessageIdentity(_ lhs: [UIMessage], _ rhs: [UIMessage]) -> Bool {
         guard lhs.count == rhs.count else { return false }
         return zip(lhs, rhs).allSatisfy { left, right in
@@ -667,8 +788,8 @@ final class IOSConversationStore {
             isFavorite: node.isFavorite
         )
         let updated = conversationWithNodes(conversation, nodes: nodes)
-        await persist(updated)
-        setCurrent(updated)
+        guard let persisted = await persist(updated) else { return }
+        setCurrent(persisted)
     }
 
     /// Append a new variant to a node and select it. This is the shared
@@ -695,8 +816,8 @@ final class IOSConversationStore {
             isFavorite: node.isFavorite
         )
         let updated = conversationWithNodes(conversation, nodes: nodes)
-        await persist(updated)
-        setCurrent(updated)
+        guard let persisted = await persist(updated) else { return nil }
+        setCurrent(persisted)
         return messageIndex
     }
 
@@ -711,7 +832,7 @@ final class IOSConversationStore {
             do {
                 conversation = try await storage.loadConversation(id: conversationId)
             } catch {
-                lastIOError = IOSConversationIOError(operation: "保存重新生成分支", detail: "\(conversationId): \(error)")
+                publishIOError(operation: "保存重新生成分支", detail: "\(conversationId): \(error)")
                 conversation = nil
             }
         }
@@ -731,9 +852,9 @@ final class IOSConversationStore {
             isFavorite: node.isFavorite
         )
         let updated = conversationWithNodes(conversation, nodes: nodes)
-        await persist(updated)
+        guard let persisted = await persist(updated) else { return false }
         if currentConversation?.id == conversationId {
-            setCurrent(updated)
+            setCurrent(persisted)
         }
         await refreshSummaries()
         return true
@@ -753,8 +874,8 @@ final class IOSConversationStore {
         // `node.messages.remove(at:)` + clamp logic would go.
         nodes.remove(at: messageIndex)
         let updated = conversationWithNodes(conversation, nodes: nodes)
-        await persist(updated)
-        setCurrent(updated)
+        guard let persisted = await persist(updated) else { return }
+        setCurrent(persisted)
         await refreshSummaries()
     }
 
@@ -770,8 +891,8 @@ final class IOSConversationStore {
         let kept = Array(conversation.messageNodes.prefix(messageIndex + 1))
         guard kept.count != conversation.messageNodes.count else { return }
         let updated = conversationWithNodes(conversation, nodes: kept)
-        await persist(updated)
-        setCurrent(updated)
+        guard let persisted = await persist(updated) else { return }
+        setCurrent(persisted)
     }
 
     /// Rebuild a Conversation with a different `messageNodes` list (full-field
@@ -791,24 +912,67 @@ final class IOSConversationStore {
         )
     }
 
-    private func persist(_ conversation: Conversation) async {
+    @discardableResult
+    private func persist(
+        _ conversation: Conversation,
+        ifUnchangedSince baseline: IOSConversationWriteBaseline? = nil
+    ) async -> Conversation? {
         do {
+            guard !isDeletedConversation(conversation.id) else { return nil }
+            guard acceptsWrite(to: conversation.id, baseline: baseline) else { return nil }
+#if DEBUG
+            if let beforePersistForTesting {
+                await beforePersistForTesting(conversation)
+            }
+#endif
+            guard !isDeletedConversation(conversation.id) else { return nil }
+            guard acceptsWrite(to: conversation.id, baseline: baseline) else { return nil }
             try await storage.saveConversation(conversation: conversation)
+            advanceWriteSequence(for: conversation.id)
+            return try await storage.loadConversation(id: conversation.id) ?? conversation
         } catch {
             // 写盘失败：不丢内存会话（currentConversation 仍由调用方更新），
             // 但上抛给用户，避免"以为保存了实际没保存"的静默丢数据。
-            lastIOError = IOSConversationIOError(operation: "保存会话", detail: "\(error)")
+            publishIOError(operation: "保存会话", detail: "\(error)")
+            return nil
         }
+    }
+
+    private func acceptsWrite(to id: KotlinUuid, baseline: IOSConversationWriteBaseline?) -> Bool {
+        guard let baseline else { return true }
+        let key = sequenceKey(for: id)
+        guard key == baseline.key else { return false }
+        guard writeSequences[key, default: 0] == baseline.sequence else {
+            print("[AA-STORE] skip stale snapshot write id=\(key) baseline=\(baseline.sequence) current=\(writeSequences[key, default: 0])")
+            return false
+        }
+        return true
+    }
+
+    private func advanceWriteSequence(for id: KotlinUuid) {
+        let key = sequenceKey(for: id)
+        writeSequences[key, default: 0] &+= 1
+    }
+
+    private func sequenceKey(for id: KotlinUuid) -> String {
+        String(describing: id)
     }
 
     private func refreshSummaries() async {
         do {
             summaries = try await storage.listSummaries()
-            // A successful refresh clears any stale IO error (the store is healthy again).
-            lastIOError = nil
+                .filter { !isDeletedConversation($0.id) }
         } catch {
-            lastIOError = IOSConversationIOError(operation: "刷新列表", detail: "\(error)")
+            publishIOError(operation: "刷新列表", detail: "\(error)")
         }
+    }
+
+    private func markDeletedConversation(_ id: KotlinUuid) {
+        deletedConversationIds.insert(String(describing: id))
+    }
+
+    private func isDeletedConversation(_ id: KotlinUuid) -> Bool {
+        deletedConversationIds.contains(String(describing: id))
     }
 }
 

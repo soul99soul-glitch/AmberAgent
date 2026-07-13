@@ -1,4 +1,6 @@
 import SwiftUI
+import SwiftStreamingMarkdown
+import UIKit
 import Shared
 
 /// Visual treatment for rendered Markdown.
@@ -48,6 +50,40 @@ private final class AmberMarkdownAstCache: @unchecked Sendable {
         }
         cache.setObject(AmberMarkdownParseResultBox(result), forKey: key)
         return result
+    }
+}
+
+enum AmberMarkdownMath {
+    static func blockLatex(from node: PackedAstNode, source: String) -> String {
+        let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let unwrapped: String
+
+        if raw.hasPrefix("$$"), raw.hasSuffix("$$"), raw.count >= 4 {
+            unwrapped = String(raw.dropFirst(2).dropLast(2))
+        } else if raw.hasPrefix("\\["), raw.hasSuffix("\\]"), raw.count >= 4 {
+            unwrapped = String(raw.dropFirst(2).dropLast(2))
+        } else {
+            unwrapped = raw
+        }
+
+        return unwrapped.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func sliceSource(_ source: String, start: Int, end: Int) -> String {
+        guard start < end else { return "" }
+        guard let startIndex = source.utf8.index(
+            source.utf8.startIndex,
+            offsetBy: start,
+            limitedBy: source.utf8.endIndex
+        ), let endIndex = source.utf8.index(
+            source.utf8.startIndex,
+            offsetBy: end,
+            limitedBy: source.utf8.endIndex
+        ) else {
+            return ""
+        }
+        return String(source[startIndex..<endIndex])
     }
 }
 
@@ -164,6 +200,13 @@ struct AmberMarkdownView: View {
                 blockStack(resolved.children, source: markdown)
             }
         }
+        // UIHostingConfiguration cell self-sizing 会以无约束提案询问理想尺寸,
+        // 裸 Text 按"理想单行宽度"报高 → 多行段落被按一行计高,历史行高度系统性
+        // 低估、内容被裁(与 ChatMessageListSupport.swift:90-94 修过的 user 气泡
+        // 单行化是同一个坑)。fixedSize(h:false,v:true) 让文本在提案宽度内折行、
+        // 垂直按完整理想高度参与测量。
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Block Rendering
@@ -220,13 +263,31 @@ struct AmberMarkdownView: View {
         case .listItem:
             return renderListItemContent(node, source: source)
 
-        default:
-            if node.children.isEmpty {
-                let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
-                return AnyView(raw.isEmpty ? AnyView(EmptyView()) : AnyView(Text(raw).font(.body)))
-            } else {
-                return AnyView(buildInlineText(node.children, source: source))
+        case .mathBlock:
+            let latex = AmberMarkdownMath.blockLatex(from: node, source: source)
+            guard !latex.isEmpty else {
+                return renderDefaultBlock(node, source: source)
             }
+            return AnyView(
+                BlockMathView(
+                    latex: latex,
+                    color: .primary,
+                    pointSize: UIFont.preferredFont(forTextStyle: .body).pointSize
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            )
+
+        default:
+            return renderDefaultBlock(node, source: source)
+        }
+    }
+
+    private func renderDefaultBlock(_ node: PackedAstNode, source: String) -> AnyView {
+        if node.children.isEmpty {
+            let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
+            return AnyView(raw.isEmpty ? AnyView(EmptyView()) : AnyView(Text(raw).font(.body)))
+        } else {
+            return AnyView(buildInlineText(node.children, source: source))
         }
     }
 
@@ -541,7 +602,7 @@ struct AmberMarkdownView: View {
             var result = buildInlineAttrString(node.children, source: source)
             result.foregroundColor = .blue
             result.underlineStyle = .single
-            if let urlString = node.linkHref(), let url = URL(string: urlString) {
+            if let urlString = node.linkHref(), let url = safeExternalURL(from: urlString) {
                 result.link = url
             }
             return result
@@ -558,6 +619,15 @@ struct AmberMarkdownView: View {
             guard !raw.isEmpty else { return nil }
             return AttributedString(raw)
         }
+    }
+
+    private func safeExternalURL(from raw: String) -> URL? {
+        guard let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        return url
     }
 
     /// Build a plain AttributedString by concatenating inline children.

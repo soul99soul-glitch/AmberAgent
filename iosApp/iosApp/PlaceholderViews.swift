@@ -271,6 +271,7 @@ enum IOSDisplayPreferenceKeys {
     static let followGeneration = "app.amber.ios.display.followGeneration"
     static let microsoftStreamingMarkdown = "app.amber.ios.display.microsoftStreamingMarkdown"
     static let liyananStreamingMarkdown = "app.amber.ios.display.liyananStreamingMarkdown"
+    static let streamingBlockMarkdown = "app.amber.ios.display.streamingBlockMarkdown"
 }
 
 enum IOSChatFont: String, CaseIterable, Identifiable {
@@ -707,6 +708,7 @@ private struct HomeAccountAvatar: View {
 
 struct ConversationsView: View {
     let sharedSettings: IOSSharedSettingsStore
+    let chatViewModel: ChatViewModel
 
     @Environment(RouterPath.self) private var router
     @Environment(IOSConversationStore.self) private var conversationStore
@@ -731,10 +733,10 @@ struct ConversationsView: View {
                 route: .miniApps
             ),
             .init(
-                title: "核心记忆",
-                systemImage: "brain.head.profile",
+                title: "小说创作",
+                systemImage: "text.book.closed",
                 color: AmberTheme.accentCyan,
-                route: .memory
+                route: .novelCreation
             ),
             .init(
                 title: "WebMount",
@@ -809,7 +811,8 @@ struct ConversationsView: View {
 
             Button {
                 Task { @MainActor in
-                    await conversationStore.newConversation()
+                    guard chatViewModel.prepareForConversationChange() else { return }
+                    await conversationStore.startNewConversationReusingEmpty()
                     router.navigate(to: .chat)
                 }
             } label: {
@@ -852,6 +855,12 @@ struct ConversationsView: View {
             Button("删除", role: .destructive) {
                 if let id = deletingConversationId {
                     Task { @MainActor in
+                        if chatViewModel.isGenerationActive(conversationId: id) {
+                            if conversationStore.currentConversation?.id == id {
+                                chatViewModel.cancelGeneration()
+                            }
+                            IOSChatBackgroundGenerationCoordinator.shared.cancelJobs(conversationId: id)
+                        }
                         await conversationStore.deleteConversation(id: id)
                     }
                 }
@@ -988,9 +997,14 @@ struct ConversationsView: View {
             ConversationSummaryRow(
                 summary: summary,
                 isCurrent: conversationStore.currentConversation?.id == summary.id,
+                isGenerating: chatViewModel.isGenerationActive(conversationId: summary.id),
                 onTap: {
                     Task { @MainActor in
-                        await conversationStore.selectConversation(id: summary.id)
+                        let isAlreadyCurrent = conversationStore.currentConversation?.id == summary.id
+                        guard chatViewModel.prepareForConversationChange(to: summary.id) else { return }
+                        if !isAlreadyCurrent {
+                            await conversationStore.selectConversation(id: summary.id)
+                        }
                         router.navigate(to: .chat)
                     }
                 },
@@ -1018,6 +1032,7 @@ struct ConversationsView: View {
 private struct ConversationSummaryRow: View {
     let summary: ConversationSummary
     let isCurrent: Bool
+    let isGenerating: Bool
     let onTap: () -> Void
     let onRename: () -> Void
     let onTogglePin: () -> Void
@@ -1026,20 +1041,7 @@ private struct ConversationSummaryRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(isCurrent ? AmberTheme.accent.opacity(0.16) : AmberTheme.surface2)
-                    if summary.isPinned {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(AmberTheme.accent)
-                    } else {
-                        Image(systemName: "bubble.left.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(isCurrent ? AmberTheme.accent : AmberTheme.muted2)
-                    }
-                }
-                .frame(width: 40, height: 40)
+                iconView
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(summary.title.isEmpty ? "新对话" : summary.title)
@@ -1081,7 +1083,7 @@ private struct ConversationSummaryRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("会话 \(summary.title.isEmpty ? "新对话" : summary.title)，\(summary.messageCount) 条消息\(summary.isPinned ? "，已置顶" : "")")
+        .accessibilityLabel("会话 \(summary.title.isEmpty ? "新对话" : summary.title)，\(summary.messageCount) 条消息\(summary.isPinned ? "，已置顶" : "")\(isGenerating ? "，正在生成" : "")")
         // 主操作:Apple Music 同款左右滑动(原生 List swipeActions，iOS 26 自带 Liquid Glass 渲染)。
         // 右滑→删除(整行划到底即删) / 重命名;左滑→置顶切换。删除仍走二次确认弹窗，避免误删。
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -1124,6 +1126,26 @@ private struct ConversationSummaryRow: View {
         }
     }
 
+    private var iconView: some View {
+        ZStack {
+            Circle()
+                .fill(isCurrent ? AmberTheme.accent.opacity(0.16) : AmberTheme.surface2)
+            if summary.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accent)
+            } else {
+                Image(systemName: "bubble.left.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isCurrent || isGenerating ? AmberTheme.accent : AmberTheme.muted2)
+            }
+            if isGenerating {
+                ConversationGeneratingRing()
+            }
+        }
+        .frame(width: 40, height: 40)
+    }
+
     /// 相对时间：updateAt -> "刚刚 / N分钟前 / N小时前 / 昨天 / M月D日"。
     private var relativeTime: String {
         let ms = summary.updateAt.toEpochMilliseconds()
@@ -1134,9 +1156,32 @@ private struct ConversationSummaryRow: View {
     }
 }
 
+private struct ConversationGeneratingRing: View {
+    @State private var start = Date()
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            Circle()
+                .trim(from: 0.0, to: 0.78)
+                .stroke(
+                    AmberTheme.accent,
+                    style: StrokeStyle(lineWidth: 1.05, lineCap: .round)
+                )
+                .rotationEffect(.degrees(rotationAngle(at: context.date)))
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func rotationAngle(at date: Date) -> Double {
+        let elapsed = date.timeIntervalSince(start)
+        return elapsed.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
+    }
+}
+
 struct SearchView: View {
     @Environment(RouterPath.self) private var router
     @Environment(IOSConversationStore.self) private var conversationStore
+    @Environment(ChatViewModel.self) private var chatViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var query: String
@@ -1352,7 +1397,11 @@ struct SearchView: View {
 
     private func openConversation(_ id: KotlinUuid) {
         Task { @MainActor in
-            await conversationStore.selectConversation(id: id)
+            let isAlreadyCurrent = conversationStore.currentConversation?.id == id
+            guard chatViewModel.prepareForConversationChange(to: id) else { return }
+            if !isAlreadyCurrent {
+                await conversationStore.selectConversation(id: id)
+            }
             router.navigate(to: .chat)
         }
     }

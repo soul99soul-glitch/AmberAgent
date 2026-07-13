@@ -12,7 +12,7 @@ struct OrderedListView: View {
   @Environment(\.markdownConfig) var config: MarkdownRenderConfig
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8, content: {
+    VStack(alignment: .leading, spacing: config.listItemSpacing, content: {
       ForEach(0..<items.count, id: \.self) { idx in
         HStack(alignment: .centerOfFirstLine, spacing: 11) {
           Text(verbatim: "\(idx+1).")

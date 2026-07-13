@@ -36,6 +36,28 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
   /// Vertical spacing between adjacent blocks (paragraphs, headings,
   /// code blocks, lists, etc.). Defaults to 30.
   public let blockSpacing: CGFloat
+  /// Extra line spacing applied within a paragraph's `UITextView`, on top of
+  /// each glyph run's natural line height. Defaults to 5.
+  public let paragraphLineSpacing: CGFloat
+  /// Horizontal padding applied inside each table cell (header and body). Defaults to 12.
+  public let tableCellHorizontalPadding: CGFloat
+  /// Vertical padding applied inside each table cell (header and body). Defaults to 12.
+  public let tableCellVerticalPadding: CGFloat
+  /// Vertical spacing between items in an ordered/unordered list. Defaults to 8.
+  public let listItemSpacing: CGFloat
+  /// Extra line spacing applied to heading paragraphs. `nil` (default) keeps
+  /// the font's natural line height.
+  public let headingLineSpacing: CGFloat?
+  /// Maximum width a table column may grow to before its content wraps.
+  /// Defaults to 200.
+  public let tableMaxColumnWidth: CGFloat
+  /// Width reserved for the bullet glyph column in unordered lists (the item
+  /// content starts after this width plus the item spacing). Defaults to 22.
+  public let unorderedListBulletWidth: CGFloat
+  /// When `true`, soft breaks (single newlines inside a paragraph) collapse to
+  /// a space per CommonMark — or to nothing between CJK characters — instead
+  /// of rendering as hard line breaks. Defaults to `false` (hard line breaks).
+  public let collapsesSoftBreaks: Bool
 
   /// Font and color style for a uniformly-styled run of markdown text.
   public struct MarkdownTextStyle: Hashable, Sendable {
@@ -181,6 +203,24 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
   /// Default inter-block spacing.
   public static let defaultBlockSpacing: CGFloat = 30
 
+  /// Default paragraph line spacing.
+  public static let defaultParagraphLineSpacing: CGFloat = 5
+
+  /// Default table cell horizontal padding.
+  public static let defaultTableCellHorizontalPadding: CGFloat = 12
+
+  /// Default table cell vertical padding.
+  public static let defaultTableCellVerticalPadding: CGFloat = 12
+
+  /// Default list item spacing.
+  public static let defaultListItemSpacing: CGFloat = 8
+
+  /// Default maximum table column width.
+  public static let defaultTableMaxColumnWidth: CGFloat = 200
+
+  /// Default unordered-list bullet column width.
+  public static let defaultUnorderedListBulletWidth: CGFloat = 22
+
   /// Default styling for `blockQuoteStyle`.
   public static let defaultBlockQuoteStyle = MarkdownTextStyle(
     textFonts: Typography.baseTextFonts,
@@ -244,7 +284,15 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
     inlineStyle: MarkdownInlineTextStyle = MarkdownRenderConfig.defaultInlineStyle,
     textContextMenu: TextContextMenu? = nil,
     citationConfig: CitationConfig = .default,
-    blockSpacing: CGFloat = MarkdownRenderConfig.defaultBlockSpacing
+    blockSpacing: CGFloat = MarkdownRenderConfig.defaultBlockSpacing,
+    paragraphLineSpacing: CGFloat = MarkdownRenderConfig.defaultParagraphLineSpacing,
+    tableCellHorizontalPadding: CGFloat = MarkdownRenderConfig.defaultTableCellHorizontalPadding,
+    tableCellVerticalPadding: CGFloat = MarkdownRenderConfig.defaultTableCellVerticalPadding,
+    listItemSpacing: CGFloat = MarkdownRenderConfig.defaultListItemSpacing,
+    headingLineSpacing: CGFloat? = nil,
+    tableMaxColumnWidth: CGFloat = MarkdownRenderConfig.defaultTableMaxColumnWidth,
+    unorderedListBulletWidth: CGFloat = MarkdownRenderConfig.defaultUnorderedListBulletWidth,
+    collapsesSoftBreaks: Bool = false
   ) {
     self.shouldAnimateText = shouldAnimateText
     self.blockQuoteStyle = blockQuoteStyle
@@ -256,6 +304,14 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
     self.textContextMenu = textContextMenu
     self.citationConfig = citationConfig
     self.blockSpacing = blockSpacing
+    self.paragraphLineSpacing = paragraphLineSpacing
+    self.tableCellHorizontalPadding = tableCellHorizontalPadding
+    self.tableCellVerticalPadding = tableCellVerticalPadding
+    self.listItemSpacing = listItemSpacing
+    self.headingLineSpacing = headingLineSpacing
+    self.tableMaxColumnWidth = tableMaxColumnWidth
+    self.unorderedListBulletWidth = unorderedListBulletWidth
+    self.collapsesSoftBreaks = collapsesSoftBreaks
   }
 
   /// The default render config, equivalent to calling `init()` with no

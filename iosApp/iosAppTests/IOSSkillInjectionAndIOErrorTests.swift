@@ -34,6 +34,49 @@ final class IOSSkillInjectionAndIOErrorTests: XCTestCase {
         XCTAssertFalse(hasSkillBlock)
     }
 
+    func testRuntimeSystemMessagesAreCoalescedForSingleSystemProviders() {
+        let prepared = ChatRuntimeContextBuilder.coalescingSystemMessages([
+            UIMessage.companion.system(prompt: "assistant persona"),
+            UIMessage.companion.system(prompt: "memory context"),
+            UIMessage.companion.user(prompt: "hello"),
+        ])
+
+        XCTAssertEqual(prepared.filter { $0.role == MessageRole.system }.count, 1)
+        XCTAssertEqual(prepared.filter { $0.role == MessageRole.user }.count, 1)
+        let systemText = prepared.first?.toText() ?? ""
+        XCTAssertTrue(systemText.contains("assistant persona"))
+        XCTAssertTrue(systemText.contains("memory context"))
+        XCTAssertEqual(prepared.last?.toText(), "hello")
+    }
+
+    func testCompactHandoffIsTrimmedBeforeRuntimeSystemMessagesAreCoalesced() {
+        let tailMarker = "TAIL_MARKER_MUST_BE_TRIMMED"
+        let compactHandoff = """
+        [Conversation compact handoff: handoff-id]
+
+        \(String(repeating: "旧摘要前段。", count: 2_000))
+        \(tailMarker)
+        \(String(repeating: "旧摘要后段。", count: 2_000))
+        """
+        let uploadMessages = [
+            UIMessage.companion.system(prompt: compactHandoff),
+            UIMessage.companion.user(prompt: "继续")
+        ]
+
+        let finalMessages = ChatGenerationRequestPreparationTestSupport.finalizedUploadMessagesForTesting(
+            uploadMessages: uploadMessages,
+            maxTokens: 1_200,
+            messagesByInjectingRuntimeContext: { messages in
+                [UIMessage.companion.system(prompt: "runtime context")] + messages
+            }
+        )
+        let finalText = finalMessages.map { $0.toText() }.joined(separator: "\n")
+
+        XCTAssertTrue(finalText.contains("[Conversation compact handoff:"))
+        XCTAssertFalse(finalText.contains(tailMarker))
+        XCTAssertEqual(finalMessages.filter { $0.role == MessageRole.system }.count, 1)
+    }
+
     func testEnabledSkillIsInjectedAsSystemMessage() throws {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
 
@@ -84,12 +127,15 @@ final class IOSSkillInjectionAndIOErrorTests: XCTestCase {
         let store = IOSConversationStore(baseDirectory: badBase)
         await store.bootstrap()
 
-        // A failing save/delete/rename must surface lastIOError (non-nil),
-        // not silently swallow it. The exact operation that fails depends on the
-        // KMP backend, but at least one bootstrap-path error should be recorded.
-        // We assert the error property exists and is settable/clearable.
-        store.clearIOError()
+        XCTAssertNotNil(store.lastIOError)
+        XCTAssertTrue(store.lastIOError?.message.contains("会话存储") ?? false)
+        XCTAssertEqual(store.lastUserVisibleError?.title, "会话存储出错")
+        XCTAssertEqual(store.lastUserVisibleError?.severity, .error)
+        XCTAssertEqual(store.lastUserVisibleError?.message, store.lastIOError?.message)
+
+        store.clearUserVisibleError()
         XCTAssertNil(store.lastIOError)
+        XCTAssertNil(store.lastUserVisibleError)
     }
 
     func testClearIOErrorResetsToNil() {
@@ -103,5 +149,29 @@ final class IOSSkillInjectionAndIOErrorTests: XCTestCase {
         let store = IOSConversationStore(baseDirectory: tempRoot)
         store.clearIOError()
         XCTAssertNil(store.lastIOError)
+        XCTAssertNil(store.lastUserVisibleError)
+    }
+
+    func testUserVisibleErrorBusCanPublishNonConversationErrors() {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSUserVisibleError-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let store = IOSConversationStore(baseDirectory: tempRoot)
+
+        store.publishUserVisibleError(
+            IOSUserVisibleError(
+                title: "Workspace 同步失败",
+                message: "无法保存 artifact，请稍后重试。",
+                severity: .warning
+            )
+        )
+
+        XCTAssertNil(store.lastIOError)
+        XCTAssertEqual(store.lastUserVisibleError?.title, "Workspace 同步失败")
+        XCTAssertEqual(store.lastUserVisibleError?.severity, .warning)
+
+        store.clearUserVisibleError()
+        XCTAssertNil(store.lastUserVisibleError)
     }
 }

@@ -260,6 +260,10 @@ final class ChatToolRuntime {
         return nil
     }
 
+    func hasUnresolvedToolCall(in messages: [UIMessage]) -> Bool {
+        unresolvedToolCall(in: messages) != nil
+    }
+
     func execute(
         _ pendingToolCall: ChatPendingToolCall,
         context: ChatPendingToolApproval
@@ -491,6 +495,36 @@ final class ChatToolRuntime {
     ) -> [UIMessage] {
         let outputPart = UIMessagePart.Text(text: outputText, metadata: nil)
         return messagesByFinishingToolCall(targetToolCall, outputParts: [outputPart], in: messages)
+    }
+
+    func messagesByFailingPendingToolCalls(
+        in messages: [UIMessage],
+        outputText: String
+    ) -> [UIMessage] {
+        var resolvedMessages = messages
+        var resolvedKeys = Set<String>()
+
+        while let toolCall = unresolvedToolCall(in: resolvedMessages) {
+            let key = chatToolCallKey(toolCall)
+            guard resolvedKeys.insert(key).inserted else { break }
+            resolvedMessages = messagesByFinishingToolCall(
+                toolCall,
+                outputText: outputText,
+                in: resolvedMessages
+            )
+        }
+
+        return resolvedMessages
+    }
+
+    private func unresolvedToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+        for message in messages.reversed() where message.role == MessageRole.assistant {
+            if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
+                .first(where: { $0.output.isEmpty }) {
+                return toolCall
+            }
+        }
+        return nil
     }
 
     private func pendingSearchToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {

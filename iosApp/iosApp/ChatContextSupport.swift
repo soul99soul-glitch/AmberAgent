@@ -113,14 +113,28 @@ struct ChatRuntimeContextBuilder {
     var skillFileStore = IOSSkillFileStore()
 
     @MainActor
-    func injectingRuntimeContext(into messages: [UIMessage]) -> [UIMessage] {
+    func injectingRuntimeContext(
+        into messages: [UIMessage],
+        coalesceSystemMessages: Bool = true
+    ) -> [UIMessage] {
         var prepared = messagesByInjectingMiniAppInstruction(messages)
         prepared = messagesByInjectingMcpContext(prepared)
         prepared = messagesByInjectingMemoryContext(prepared)
         prepared = messagesByInjectingSkillContext(prepared)
         prepared = messagesByInjectingWorkspaceToolPolicy(prepared)
         prepared = messagesByInjectingSystemPrompt(prepared)
-        return prepared
+        return coalesceSystemMessages ? Self.coalescingSystemMessages(prepared) : prepared
+    }
+
+    static func coalescingSystemMessages(_ messages: [UIMessage]) -> [UIMessage] {
+        let systemText = messages
+            .filter { $0.role == MessageRole.system }
+            .map { messageText($0)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        let nonSystem = messages.filter { $0.role != MessageRole.system }
+        guard !systemText.isEmpty else { return nonSystem }
+        return [UIMessage.companion.system(prompt: systemText)] + nonSystem
     }
 
     private func messagesByInjectingWorkspaceToolPolicy(_ messages: [UIMessage]) -> [UIMessage] {

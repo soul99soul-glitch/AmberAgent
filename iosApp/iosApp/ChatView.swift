@@ -33,6 +33,66 @@ private struct ChatListSummarySnapshot: Equatable {
     }
 }
 
+private struct ChatMessageEditSheet: View {
+    let messageId: String
+    let onSubmit: (String, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var text: String
+
+    init(
+        draft: ChatMessageEditDraft,
+        onSubmit: @escaping (String, String) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.messageId = draft.messageId
+        self.onSubmit = onSubmit
+        self.onCancel = onCancel
+        self._text = State(initialValue: draft.text)
+    }
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $text)
+                .font(.body)
+                .padding(8)
+                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(16)
+                .navigationTitle("编辑消息")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消", action: onCancel)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("发送") {
+                            onSubmit(messageId, text)
+                        }
+                        .disabled(trimmedText.isEmpty)
+                    }
+                }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(false)
+        .presentationBackground(.regularMaterial)
+        .presentationCornerRadius(30)
+        .presentationContentInteraction(.resizes)
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct ChatMessageEditDraft: Identifiable {
+    let messageId: String
+    var text: String
+
+    var id: String { messageId }
+}
+
 struct ChatView: View {
 
     let settingsStore: SettingsStore
@@ -51,13 +111,18 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key) private var nativeTimelineStaticRenderEnabled = false
+    @AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key) private var nativeTimelineStreamingTailEnabled = false
     @State private var pasteHintShown = false
     @State private var viewportState = ChatViewportState()
     @State private var scrollToBottomTrigger = 0
+    @State private var scrollToBottomSource: NativeTimelineBottomIntentSource = .button
     @State private var composerInputHeight: CGFloat = 40
     @State private var composerBarHeight: CGFloat = 0
     @State private var composerInputController = ComposerInputController()
     @State private var chatListSummary = ChatListSummarySnapshot()
+    @State private var nativeTimelineMirror = NativeChatTimelineMirror()
+    @State private var messageEditDraft: ChatMessageEditDraft?
     @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.scenePhase) private var scenePhase
 
@@ -66,18 +131,20 @@ struct ChatView: View {
         sharedSettings: IOSSharedSettingsStore = IOSSharedSettingsStore(),
         localToolExecutor: IOSLocalToolExecutor? = nil,
         documentStore: DocumentAccessStore? = nil,
-        workspaceStore: IOSWorkspaceStore = .shared
+        workspaceStore: IOSWorkspaceStore = .shared,
+        viewModel: ChatViewModel? = nil
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
         self.documentStore = documentStore
         self.workspaceStore = workspaceStore
+        let resolvedViewModel = viewModel ?? ChatViewModel(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettings,
+            localToolExecutor: localToolExecutor
+        )
         self._viewModel = State(
-            initialValue: ChatViewModel(
-                settingsStore: settingsStore,
-                sharedSettings: sharedSettings,
-                localToolExecutor: localToolExecutor
-            )
+            initialValue: resolvedViewModel
         )
     }
 
@@ -92,14 +159,15 @@ struct ChatView: View {
                 VStack {
                     Spacer()
                     ChatScrollToBottomButton {
-                        viewportState.followPaused = false
+                        scrollToBottomSource = .button
                         scrollToBottomTrigger &+= 1
+                        recordNativeTimelineMirrorIfEnabled()
                     }
-                    .padding(.bottom, 10)
+                    .padding(.bottom, max(10, composerBarHeight + 10))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
-                .zIndex(1)
+                .zIndex(10)
             }
 
             // Tap-outside scrim for the attachment glass panel.
@@ -114,6 +182,7 @@ struct ChatView: View {
                     }
                     .transition(.opacity)
             }
+
         }
         .safeAreaBar(edge: .top, spacing: 0) {
             topBar
@@ -149,8 +218,16 @@ struct ChatView: View {
                 viewModel.bumpMessageRevision(reason: .settingsRefresh)
                 isModelSheetPresented = false
             }
-            .presentationDetents([.fraction(0.72), .large])
-            .presentationDragIndicator(.hidden)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $messageEditDraft) { draft in
+            ChatMessageEditSheet(draft: draft) { messageId, newText in
+                viewModel.editMessage(messageId: messageId, newText: newText)
+                messageEditDraft = nil
+            } onCancel: {
+                messageEditDraft = nil
+            }
         }
         .fileImporter(
             isPresented: $isImportingSelectedFile,
@@ -177,11 +254,11 @@ struct ChatView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .alert(item: conversationIOErrorBinding) { error in
+        .alert(item: userVisibleErrorBinding) { error in
             Alert(
-                title: Text("会话存储出错"),
+                title: Text(error.title),
                 message: Text(error.message),
-                dismissButton: .default(Text("好")) { conversationStore.clearIOError() }
+                dismissButton: .default(Text("好")) { conversationStore.clearUserVisibleError() }
             )
         }
         .onAppear(perform: handleChatAppear)
@@ -201,6 +278,13 @@ struct ChatView: View {
         .onChange(of: scenePhase) { _, phase in
             handleScenePhaseChange(phase)
         }
+        .onChange(of: isInputFocused) { wasFocused, isFocused in
+            guard !wasFocused, isFocused else { return }
+            handleComposerFocusStarted()
+        }
+        .onChange(of: followGeneration) { _, _ in
+            recordNativeTimelineMirrorIfEnabled()
+        }
         .onChange(of: sharedSettings.revision) { _, _ in
             handleSharedSettingsRevisionChange()
         }
@@ -210,16 +294,26 @@ struct ChatView: View {
         // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
         viewModel.conversationStore = conversationStore
         viewportState = ChatViewportState()
-        viewModel.reloadFromStore(reason: .initialLoad)
+        if !viewModel.isGenerationActiveForCurrentConversation {
+            viewModel.reloadFromStore(reason: .initialLoad)
+        }
         refreshChatListSummary(resetTitleSeed: true)
         repairCurrentChatModelIfNeeded()
         if let handoff = IOSWebMountContentHandoffStore.shared.consumeChatHandoff() {
             viewModel.inputText = handoff.chatPrompt
             viewModel.selectedFileContextError = nil
         }
+        recordNativeTimelineMirrorIfEnabled()
     }
 
     private func handleConversationSwitch() {
+        if viewModel.isGenerationActiveForCurrentConversation {
+            refreshChatListSummary(resetTitleSeed: true)
+            return
+        }
+        if viewModel.isGenerationActive, !viewModel.handoffGenerationToBackgroundIfNeeded() {
+            viewModel.cancelGeneration()
+        }
         viewModel.reloadFromStore(reason: .conversationSwitch)
         refreshChatListSummary(resetTitleSeed: true)
     }
@@ -245,6 +339,7 @@ struct ChatView: View {
                 signal.event == .conversationSwitched ||
                 signal.event == .branchChanged
         )
+        recordNativeTimelineMirrorIfEnabled()
         // 后台内容若在本轮前台生成期间落盘,门控当时跳过且未消费;收尾时补查上屏。
         switch signal.event {
         case .generationCompleted, .generationFailed, .generationCancelled:
@@ -260,17 +355,48 @@ struct ChatView: View {
         }
     }
 
+    private func handleComposerFocusStarted() {
+        // Composer focus is a direct navigation intent: the user is preparing to type
+        // at the tail. Do not depend on ChatListSummary here; during first session
+        // entry that summary can lag behind the message list by one render pass.
+        scrollToBottomSource = .composerFocus
+        scrollToBottomTrigger &+= 1
+        recordNativeTimelineMirrorIfEnabled()
+    }
+
     private func handleSharedSettingsRevisionChange() {
         repairCurrentChatModelIfNeeded()
         viewModel.bumpMessageRevision(reason: .settingsRefresh)
     }
 
-    private var conversationIOErrorBinding: Binding<IOSConversationIOError?> {
+    private func recordNativeTimelineMirrorIfEnabled() {
+        guard NativeChatTimelineMirrorFeatureFlags.isEnabled else { return }
+        nativeTimelineMirror.record(
+            NativeTimelineMirrorInput(
+                signal: viewModel.messageUpdateSignal,
+                messages: viewModel.messages,
+                configurationIssue: configurationIssue,
+                isGenerationActive: viewModel.isGenerationActive,
+                isLoading: viewModel.isLoading,
+                isRecognizingImages: viewModel.isRecognizingImages,
+                contextCompactState: viewModel.contextCompactState,
+                followGeneration: followGeneration,
+                displaySettingSignature: String(describing: sharedSettings.displaySetting),
+                generativeUiSettingSignature: String(describing: sharedSettings.agentRuntime.generativeUi),
+                reasoningLevelLabel: composerReasoningLabel,
+                scrollToBottomTrigger: scrollToBottomTrigger,
+                viewportState: viewportState,
+                variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) }
+            )
+        )
+    }
+
+    private var userVisibleErrorBinding: Binding<IOSUserVisibleError?> {
         Binding(
-            get: { conversationStore.lastIOError },
+            get: { conversationStore.lastUserVisibleError },
             set: { newValue in
                 if newValue == nil {
-                    conversationStore.clearIOError()
+                    conversationStore.clearUserVisibleError()
                 }
             }
         )
@@ -555,12 +681,12 @@ struct ChatView: View {
 
     private var newChatToolbarButton: some View {
         ChatToolbarIconButton(systemImage: "square.and.pencil", accessibilityLabel: "新建对话", size: 38, symbolSize: 16) {
-            viewModel.cancelGeneration()
+            guard viewModel.prepareForConversationChange() else { return }
             Task { @MainActor in
                 // newConversation 会 bump conversationSwitchedRevision,onChange 观察者会
                 // 自动触发 reloadFromStore(.conversationSwitch) + 重新落位,无需手动调。
                 // (与 PlaceholderViews 的其它切换入口一致。)
-                await conversationStore.newConversation()
+                await conversationStore.startNewConversationReusingEmpty()
             }
         }
     }
@@ -568,23 +694,84 @@ struct ChatView: View {
     // MARK: - Message List
 
     private var messageList: some View {
-        ChatCollectionMessageList(
-            signal: viewModel.messageUpdateSignal,
-            configurationIssue: configurationIssue,
+        let route = messageListRoute
+        return Group {
+            if route == .nativeTimelineSwiftUI {
+                NativeChatTimelineView(
+                    signal: viewModel.messageUpdateSignal,
+                    configurationIssue: configurationIssue,
+                    isGenerationActive: viewModel.isGenerationActive,
+                    isLoading: viewModel.isLoading,
+                    isRecognizingImages: viewModel.isRecognizingImages,
+                    contextCompactState: viewModel.contextCompactState,
+                    followGeneration: followGeneration,
+                    displaySetting: sharedSettings.displaySetting,
+                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
+                    reasoningLevelLabel: composerReasoningLabel,
+                    workspaceStore: workspaceStore,
+                    scrollToBottomTrigger: scrollToBottomTrigger,
+                    scrollToBottomSource: scrollToBottomSource,
+                    composerHeight: composerBarHeight,
+                    messagesProvider: { viewModel.messages },
+                    variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
+                    onAction: handleChatListAction,
+                    onViewportStateChange: applyCollectionViewportState,
+                    onDismissKeyboard: dismissKeyboard
+                )
+                .id(NativeChatTimelineSessionIdentity.viewID(conversationId: conversationStore.currentConversation?.id))
+            } else if route == .swiftUICleanList {
+                ChatSwiftUIMessageList(
+                    signal: viewModel.messageUpdateSignal,
+                    configurationIssue: configurationIssue,
+                    isGenerationActive: viewModel.isGenerationActive,
+                    isLoading: viewModel.isLoading,
+                    isRecognizingImages: viewModel.isRecognizingImages,
+                    contextCompactState: viewModel.contextCompactState,
+                    followGeneration: followGeneration,
+                    displaySetting: sharedSettings.displaySetting,
+                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
+                    reasoningLevelLabel: composerReasoningLabel,
+                    workspaceStore: workspaceStore,
+                    scrollToBottomTrigger: scrollToBottomTrigger,
+                    scrollToBottomSource: scrollToBottomSource,
+                    messagesProvider: { viewModel.messages },
+                    variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
+                    onAction: handleChatListAction,
+                    onViewportStateChange: applyCollectionViewportState,
+                    onDismissKeyboard: dismissKeyboard
+                )
+            } else {
+                ChatCollectionMessageList(
+                    signal: viewModel.messageUpdateSignal,
+                    configurationIssue: configurationIssue,
+                    isGenerationActive: viewModel.isGenerationActive,
+                    isLoading: viewModel.isLoading,
+                    isRecognizingImages: viewModel.isRecognizingImages,
+                    contextCompactState: viewModel.contextCompactState,
+                    followGeneration: followGeneration,
+                    displaySetting: sharedSettings.displaySetting,
+                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
+                    reasoningLevelLabel: composerReasoningLabel,
+                    workspaceStore: workspaceStore,
+                    scrollToBottomTrigger: scrollToBottomTrigger,
+                    messagesProvider: { viewModel.messages },
+                    variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
+                    onAction: handleChatListAction,
+                    onViewportStateChange: applyCollectionViewportState
+                )
+            }
+        }
+    }
+
+    private var messageListRoute: ChatMessageListRoute {
+        ChatMessageListRoutePolicy.route(
+            nativeTimelineStaticRenderEnabled: nativeTimelineStaticRenderEnabled,
+            nativeTimelineStreamingTailEnabled: nativeTimelineStreamingTailEnabled,
+            swiftUICleanListEnabled: ChatSwiftUIMessageListFeatureFlags.isEnabled,
+            messages: viewModel.messages,
+            event: viewModel.messageUpdateSignal.event,
             isGenerationActive: viewModel.isGenerationActive,
-            isLoading: viewModel.isLoading,
-            isRecognizingImages: viewModel.isRecognizingImages,
-            contextCompactState: viewModel.contextCompactState,
-            followGeneration: followGeneration,
-            displaySetting: sharedSettings.displaySetting,
-            generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
-            reasoningLevelLabel: composerReasoningLabel,
-            workspaceStore: workspaceStore,
-            scrollToBottomTrigger: scrollToBottomTrigger,
-            messagesProvider: { viewModel.messages },
-            variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
-            onAction: handleChatListAction,
-            onViewportStateChange: applyCollectionViewportState
+            isLoading: viewModel.isLoading
         )
     }
 
@@ -792,10 +979,11 @@ struct ChatView: View {
                                     .frame(height: 26)
                             }
                             .buttonStyle(.plain)
-                            .amberGlass(cornerRadius: 13)
+                            .amberGlass(cornerRadius: 13, interactive: false)
                         }
                     }
                     .padding(.horizontal, 2)
+                    .padding(.vertical, 3)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -975,21 +1163,21 @@ struct ChatView: View {
 
     private var inputPlaceholder: String {
         switch configurationIssue {
-        case .missingAPIKey:
+        case .some(.missingAPIKey):
             "先添加 API Key"
-        case .invalidBaseURL:
+        case .some(.invalidBaseURL):
             "先修正服务商地址"
-        case .missingModel:
+        case .some(.missingModel):
             "先选择模型"
-        case .missingProvider:
+        case .some(.missingProvider):
             "先配置服务商"
-        case .unsupportedProvider:
+        case .some(.unsupportedProvider):
             "先切换服务商"
-        case .codexNotSignedIn:
+        case .some(.codexNotSignedIn):
             "先登录 Codex"
-        case .grokNotSignedIn:
+        case .some(.grokNotSignedIn):
             "先登录 Grok"
-        case nil:
+        case .none:
             "发消息给 Amber..."
         }
     }
@@ -1073,20 +1261,23 @@ struct ChatView: View {
     }
 
     private func applyCollectionViewportState(_ newState: ChatViewportState) {
+        viewModel.streamPresentationPacingEnabled =
+            !newState.followPaused && !newState.userDragging && !newState.liveRenderingFarFromBottom
         guard viewportState != newState else { return }
-        if viewportState.showScrollToBottom != newState.showScrollToBottom {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
-                viewportState = newState
-            }
-        } else {
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
             viewportState = newState
         }
+        recordNativeTimelineMirrorIfEnabled()
     }
 
     private func handleChatListAction(_ action: ChatListAction) {
         switch action {
         case let .regenerate(messageId):
             viewModel.regenerate(messageId: messageId)
+        case let .requestEdit(messageId, currentText):
+            messageEditDraft = ChatMessageEditDraft(messageId: messageId, text: currentText)
         case let .edit(messageId, newText):
             viewModel.editMessage(messageId: messageId, newText: newText)
         case let .delete(messageId):
@@ -1115,10 +1306,10 @@ struct ChatView: View {
 
     private func openPrimaryConfigurationAction() {
         switch configurationIssue {
-        case .missingModel:
+        case .some(.missingModel):
             openModelDefaults()
-        case .missingAPIKey, .invalidBaseURL, .missingProvider, .unsupportedProvider,
-             .codexNotSignedIn, .grokNotSignedIn, nil:
+        case .some(.missingAPIKey), .some(.invalidBaseURL), .some(.missingProvider),
+             .some(.unsupportedProvider), .some(.codexNotSignedIn), .some(.grokNotSignedIn), .none:
             router.navigate(to: .providers)
         }
     }

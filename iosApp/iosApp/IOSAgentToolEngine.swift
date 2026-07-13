@@ -179,8 +179,114 @@ public struct IOSPendingToolApproval: Sendable {
 /// (conservative) inability to prove it.
 private final class StreamStepState: @unchecked Sendable {
     let accumulator: MessageStreamAccumulator
-    var resumed = false
+    private let lock = NSLock()
+    private var assistantText = ""
+    private var continuation: CheckedContinuation<MessageChunk, Error>?
+    private var job: Kotlinx_coroutines_coreJob?
+    private var cancellationRequested = false
+    private var resumed = false
+
     init(accumulator: MessageStreamAccumulator) { self.accumulator = accumulator }
+
+    func appendAssistantTextDelta(from chunk: MessageChunk) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        var changed = false
+        for choice in chunk.choices {
+            if let delta = choice.delta, delta.role == MessageRole.assistant {
+                let deltaText = Self.text(in: delta)
+                if !deltaText.isEmpty {
+                    assistantText += deltaText
+                    changed = true
+                }
+            } else if let message = choice.message, message.role == MessageRole.assistant {
+                let fullText = Self.text(in: message)
+                if !fullText.isEmpty {
+                    assistantText = fullText
+                    changed = true
+                }
+            }
+        }
+        return changed && !assistantText.isEmpty ? assistantText : nil
+    }
+
+    func install(continuation: CheckedContinuation<MessageChunk, Error>) {
+        lock.lock()
+        if cancellationRequested {
+            resumed = true
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func install(job: Kotlinx_coroutines_coreJob?) {
+        guard let job else { return }
+        lock.lock()
+        let shouldCancel = cancellationRequested
+        if !shouldCancel, !resumed {
+            self.job = job
+        }
+        lock.unlock()
+        if shouldCancel {
+            job.cancel(cause: nil)
+        }
+    }
+
+    func resume(returning chunk: MessageChunk) {
+        let continuation: CheckedContinuation<MessageChunk, Error>?
+        lock.lock()
+        if !resumed {
+            resumed = true
+            continuation = self.continuation
+            self.continuation = nil
+            job = nil
+        } else {
+            continuation = nil
+        }
+        lock.unlock()
+        continuation?.resume(returning: chunk)
+    }
+
+    func resume(throwing error: Error) {
+        let continuation: CheckedContinuation<MessageChunk, Error>?
+        lock.lock()
+        if !resumed {
+            resumed = true
+            continuation = self.continuation
+            self.continuation = nil
+            job = nil
+        } else {
+            continuation = nil
+        }
+        lock.unlock()
+        continuation?.resume(throwing: error)
+    }
+
+    func cancel() {
+        let continuation: CheckedContinuation<MessageChunk, Error>?
+        let job: Kotlinx_coroutines_coreJob?
+        lock.lock()
+        cancellationRequested = true
+        job = self.job
+        self.job = nil
+        if !resumed, self.continuation != nil {
+            resumed = true
+            continuation = self.continuation
+            self.continuation = nil
+        } else {
+            continuation = nil
+        }
+        lock.unlock()
+        job?.cancel(cause: nil)
+        continuation?.resume(throwing: CancellationError())
+    }
+
+    private static func text(in message: UIMessage) -> String {
+        message.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+    }
 }
 
 public final class IOSAgentToolEngine: @unchecked Sendable {
@@ -249,40 +355,45 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         // coroutine (no concurrent access), but Swift 6 can't prove it. The box
         // also makes the @Sendable callbacks legal.
         let state = StreamStepState(accumulator: MessageStreamAccumulator(initialMessages: [seed], model: nil))
-        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<MessageChunk, Error>) in
-            _ = streaming.streamText(
-                providerSetting: providerSetting,
-                messages: messages,
-                params: params,
-                onChunk: { chunk in
-                    state.accumulator.append(chunk: chunk)
-                    if let last = state.accumulator.snapshot().last, last.role == MessageRole.assistant {
-                        let text = last.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
-                        if !text.isEmpty { onAssistantText?(text) }
-                    }
-                },
-                onComplete: {
-                    guard !state.resumed else { return }
-                    state.resumed = true
-                    let last = state.accumulator.snapshot().last
-                    let finalMessage: UIMessage = (last?.role == MessageRole.assistant) ? last! : Self.emptyAssistant()
-                    cont.resume(returning: MessageChunk(
-                        id: "",
-                        model: "",
-                        choices: [UIMessageChoice(index: 0, delta: nil, message: finalMessage, finishReason: "stop")],
-                        usage: nil
-                    ))
-                },
-                onError: { error in
-                    guard !state.resumed else { return }
-                    state.resumed = true
-                    cont.resume(throwing: NSError(
-                        domain: "AmberAgent.SubAgentStream",
-                        code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: error.message ?? "stream failed"]
-                    ))
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MessageChunk, Error>) in
+                state.install(continuation: continuation)
+                guard !Task.isCancelled else {
+                    state.cancel()
+                    return
                 }
-            )
+                let job = streaming.streamText(
+                    providerSetting: providerSetting,
+                    messages: messages,
+                    params: params,
+                    onChunk: { chunk in
+                        state.accumulator.append(chunk: chunk)
+                        if let text = state.appendAssistantTextDelta(from: chunk) {
+                            onAssistantText?(text)
+                        }
+                    },
+                    onComplete: {
+                        let last = state.accumulator.snapshot().last
+                        let finalMessage: UIMessage = (last?.role == MessageRole.assistant) ? last! : Self.emptyAssistant()
+                        state.resume(returning: MessageChunk(
+                            id: "",
+                            model: "",
+                            choices: [UIMessageChoice(index: 0, delta: nil, message: finalMessage, finishReason: "stop")],
+                            usage: nil
+                        ))
+                    },
+                    onError: { error in
+                        state.resume(throwing: NSError(
+                            domain: "AmberAgent.SubAgentStream",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: error.message ?? "stream failed"]
+                        ))
+                    }
+                )
+                state.install(job: job)
+            }
+        } onCancel: {
+            state.cancel()
         }
     }
 
@@ -307,6 +418,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
+        onAssistantTurnStarted: (@Sendable () -> Void)? = nil,
         onAssistantText: (@Sendable (String) -> Void)? = nil
     ) async -> IOSAgentToolEngineResult {
         var working = messages
@@ -329,12 +441,20 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
 
         while steps < configuration.maxSteps {
             let chunk: MessageChunk
+            onAssistantTurnStarted?()
             do {
                 chunk = try await streamStep(
                     providerSetting: providerSetting,
                     messages: working,
                     params: params,
                     onAssistantText: onAssistantText
+                )
+            } catch is CancellationError {
+                return IOSAgentToolEngineResult(
+                    messages: working,
+                    stepsExecuted: steps,
+                    pendingApproval: nil,
+                    hitStepLimit: false
                 )
             } catch {
                 // A provider failure ends the loop. Surface the assistant

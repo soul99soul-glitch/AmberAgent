@@ -2,10 +2,17 @@ package app.amber.core.storage.conversation
 
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.model.Conversation
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlin.uuid.Uuid
 
 private val SUMMARY_STORAGE_JSON: Json = JsonInstant
+
+class ConversationStorageException(
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
 
 /**
  * 文件 JSON 持久化的实现。目录布局（PLAN_CONVERSATION_PERSISTENCE.md 已定）：
@@ -20,35 +27,42 @@ private val SUMMARY_STORAGE_JSON: Json = JsonInstant
  * 临时目录用于测试）。
  *
  * ## 并发契约（重要）
- * `upsertIndex` / `removeFromIndex` 对 index.json 做 read-modify-write，**非线程安全**。
- * iOS 调用方（IOSConversationStore）必须在 `@MainActor` 上串行调用本类的 suspend 方法；
- * 任何后台 `Task.detached` / 并发写都会丢失 index 更新。
- * 单写者假设是 Phase 2 的硬约束，违反会导致 index 漂移（但 listSummaries 有 rebuild
- * 兜底，最终一致）。
+ * 文件与 index 的读改写窗口由 [operationMutex] 串行化。`saveConversation` 是消息树写入口：
+ * 对已存在会话会保留 metadata owner 字段（title/isPinned），避免旧消息快照反向覆盖
+ * `updateMetadata` 的结果。
  */
 class JsonConversationStorage(
     private val baseDir: ConversationFile,
 ) : ConversationStorageInterface {
 
+    private val operationMutex = Mutex()
     private val indexFile: ConversationFile get() = baseDir.child(INDEX_FILENAME)
+
+    internal var beforeUpdateMetadataSaveForTesting: (suspend () -> Unit)? = null
 
     init {
         // 确保目录存在；不存在则静默创建（首次启动/全新安装场景）。
         baseDir.mkdirs()
     }
 
-    override suspend fun listSummaries(): List<ConversationSummary> {
+    @Throws(Throwable::class)
+    override suspend fun listSummaries(): List<ConversationSummary> = operationMutex.withLock {
         ensureBaseDir()
         val cached = readIndex()
         if (cached != null) {
-            return orderSummaries(cached)
+            return@withLock orderSummaries(cached)
         }
         // index 损坏或缺失：从 {id}.json 扫描重建。
         val rebuilt = rebuildIndex()
-        return orderSummaries(rebuilt)
+        return@withLock orderSummaries(rebuilt)
     }
 
-    override suspend fun loadConversation(id: Uuid): Conversation? {
+    @Throws(Throwable::class)
+    override suspend fun loadConversation(id: Uuid): Conversation? = operationMutex.withLock {
+        loadConversationUnlocked(id)
+    }
+
+    private fun loadConversationUnlocked(id: Uuid): Conversation? {
         ensureBaseDir()
         val file = conversationFile(id)
         val text = file.readText() ?: return null
@@ -61,26 +75,63 @@ class JsonConversationStorage(
         }
     }
 
-    override suspend fun saveConversation(conversation: Conversation) {
-        ensureBaseDir()
-        val text = JsonInstant.encodeToString(conversation)
-        conversationFile(conversation.id).writeText(text)
-        upsertIndex(conversation.toSummary())
+    @Throws(Throwable::class)
+    override suspend fun saveConversation(conversation: Conversation) = operationMutex.withLock {
+        saveConversationLocked(conversation)
     }
 
-    override suspend fun deleteConversation(id: Uuid) {
+    private fun saveConversationLocked(conversation: Conversation) {
+        ensureBaseDir()
+        saveConversationReplacingAllFieldsLocked(mergeMessageWriteWithExistingMetadata(conversation))
+    }
+
+    private fun saveConversationReplacingAllFieldsLocked(conversationToSave: Conversation) {
+        val text = runCatching {
+            JsonInstant.encodeToString(conversationToSave)
+        }.getOrElse {
+            throw ConversationStorageException(
+                "Failed to encode conversation ${conversationToSave.id} for storage",
+                it,
+            )
+        }
+        conversationFile(conversationToSave.id).writeText(text)
+        upsertIndex(conversationToSave.toSummary())
+    }
+
+    private fun mergeMessageWriteWithExistingMetadata(incoming: Conversation): Conversation {
+        val existing = loadConversationUnlocked(incoming.id) ?: return incoming
+        val title = if (existing.title.isEmpty()) incoming.title else existing.title
+        if (title == incoming.title
+            && existing.chatSuggestions == incoming.chatSuggestions
+            && existing.isPinned == incoming.isPinned
+            && existing.autoApproveToolCalls == incoming.autoApproveToolCalls
+        ) {
+            return incoming
+        }
+        return incoming.copy(
+            title = title,
+            chatSuggestions = existing.chatSuggestions,
+            isPinned = existing.isPinned,
+            autoApproveToolCalls = existing.autoApproveToolCalls,
+        )
+    }
+
+    @Throws(Throwable::class)
+    override suspend fun deleteConversation(id: Uuid) = operationMutex.withLock {
         ensureBaseDir()
         conversationFile(id).delete()
         removeFromIndex(id)
     }
 
-    override suspend fun updateMetadata(id: Uuid, title: String?, isPinned: Boolean?) {
-        val current = loadConversation(id) ?: return
+    @Throws(Throwable::class)
+    override suspend fun updateMetadata(id: Uuid, title: String?, isPinned: Boolean?) = operationMutex.withLock {
+        val current = loadConversationUnlocked(id) ?: return@withLock
+        beforeUpdateMetadataSaveForTesting?.invoke()
         val updated = current.copy(
             title = title ?: current.title,
             isPinned = isPinned ?: current.isPinned,
         )
-        saveConversation(updated)
+        saveConversationReplacingAllFieldsLocked(updated)
     }
 
     // ---- 内部：index 维护 ----
@@ -93,7 +144,11 @@ class JsonConversationStorage(
     }
 
     private fun writeIndex(summaries: List<ConversationSummary>) {
-        val text = SUMMARY_STORAGE_JSON.encodeToString(summaries)
+        val text = runCatching {
+            SUMMARY_STORAGE_JSON.encodeToString(summaries)
+        }.getOrElse {
+            throw ConversationStorageException("Failed to encode conversation index", it)
+        }
         indexFile.writeText(text)
     }
 
@@ -139,7 +194,9 @@ class JsonConversationStorage(
     // ---- 路径助手 ----
 
     private fun ensureBaseDir() {
-        baseDir.mkdirs()
+        if (!baseDir.mkdirs()) {
+            throw ConversationStorageException("Failed to create conversation storage directory: ${baseDir.path}")
+        }
     }
 
     private fun conversationFile(id: Uuid): ConversationFile =

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Observation
 import SwiftUI
 @preconcurrency import Shared
@@ -91,6 +92,9 @@ final class ChatViewModel {
     var reasoningLevel: ReasoningLevel = .off
     var messageRevision: Int = 0
     var messageUpdateSignal = ChatMessageUpdateSignal()
+    /// UI presentation pacing is useful only while the live tail is being watched.
+    /// The authoritative stream accumulator is independent from this flag.
+    var streamPresentationPacingEnabled = true
     var pendingMemoryApproval: MemoryToolApprovalRequest?
     var pendingSearchApproval: SearchToolApprovalRequest?
     var pendingWebMountApproval: WebMountToolApprovalRequest?
@@ -99,6 +103,8 @@ final class ChatViewModel {
     var pendingMcpApproval: McpToolApprovalRequest?
     var configurationError: String?
     var contextCompactState: ChatContextCompactState = .idle
+    private var pendingVisionFailures: [String: String] = [:]
+    private static let visionRecognitionPendingMessage = "图片识别中，请稍候"
 
     /// 持久化存储（由 AppShell 注入）。nil 时退化为纯内存模式（向后兼容旧调用方）。
     weak var conversationStore: IOSConversationStore?
@@ -177,8 +183,51 @@ final class ChatViewModel {
         sharedSettings.currentAssistantReasoningLevels().contains { $0 != .off }
     }
 
+#if DEBUG
+    var generationActiveOverrideForTesting: ((KotlinUuid?) -> Bool)?
+#endif
+
     var isGenerationActive: Bool {
-        generationCoordinator.isRunning
+#if DEBUG
+        if generationActiveOverrideForTesting?(currentConversationId) == true { return true }
+#endif
+        return generationCoordinator.isRunning || hasActiveBackgroundGenerationForCurrentConversation
+    }
+
+    var isGenerationActiveForCurrentConversation: Bool {
+        guard let currentConversationId else { return false }
+        if let activeConversationId = generationCoordinator.activeConversationId,
+           String(describing: currentConversationId) == String(describing: activeConversationId) {
+            return true
+        }
+        return IOSChatBackgroundGenerationCoordinator.shared.hasActiveJob(conversationId: currentConversationId)
+    }
+
+    func isGenerationActive(conversationId: KotlinUuid) -> Bool {
+#if DEBUG
+        if generationActiveOverrideForTesting?(conversationId) == true { return true }
+#endif
+        if let activeConversationId = generationCoordinator.activeConversationId,
+           String(describing: conversationId) == String(describing: activeConversationId) {
+            return true
+        }
+        return IOSChatBackgroundGenerationCoordinator.shared.hasActiveJob(conversationId: conversationId)
+    }
+
+    private var hasActiveBackgroundGenerationForCurrentConversation: Bool {
+        guard let currentConversationId else { return false }
+        return IOSChatBackgroundGenerationCoordinator.shared.hasActiveJob(conversationId: currentConversationId)
+    }
+
+    @discardableResult
+    func prepareForConversationChange(to targetConversationId: KotlinUuid?) -> Bool {
+        guard generationCoordinator.isRunning else { return true }
+        if let targetConversationId,
+           let activeConversationId = generationCoordinator.activeConversationId,
+           String(describing: targetConversationId) == String(describing: activeConversationId) {
+            return true
+        }
+        return handoffGenerationToBackgroundIfNeeded()
     }
 
     var configurationIssue: ChatConfigurationIssue? {
@@ -287,6 +336,9 @@ final class ChatViewModel {
                 bumpMessageRevision: { [weak self] reason in
                     self?.bumpMessageRevision(reason: reason)
                 },
+                shouldPaceStreamPresentation: { [weak self] in
+                    self?.streamPresentationPacingEnabled ?? false
+                },
                 setIsLoading: { [weak self] isLoading in
                     guard let self else { return }
                     let wasLoading = self.isLoading
@@ -321,6 +373,20 @@ final class ChatViewModel {
                 },
                 persistMessages: { [weak self] conversationId in
                     self?.persistMessages(conversationId: conversationId)
+                },
+                capturePersistMessagesBaseline: { [weak self] conversationId in
+                    guard let store = self?.conversationStore,
+                          let targetConversationId = conversationId ?? store.currentConversation?.id else {
+                        return nil
+                    }
+                    return store.writeBaseline(for: targetConversationId)
+                },
+                persistMessagesSnapshot: { [weak self] snapshot, conversationId, writeBaseline in
+                    self?.persistMessages(
+                        snapshot,
+                        conversationId: conversationId,
+                        writeBaseline: writeBaseline
+                    )
                 },
                 recordRun: { [weak self] runId, startedAt, status, inputDigest, conversationId in
                     await self?.recordRun(
@@ -365,6 +431,7 @@ final class ChatViewModel {
         contextCompactState = .idle
         bumpMessageRevision(reason: reason)
         chatSuggestions = []
+        flushPendingVisionFailureIfNeeded()
     }
 
     /// 把当前 messages 落盘（节流：只在流式结束/取消/切换时调，不在每个 chunk 调）。
@@ -373,12 +440,33 @@ final class ChatViewModel {
         let snapshot = messages
         let targetConversationId = conversationId ?? store.currentConversation?.id
         let pendingRegeneration = pendingAssistantRegeneration
+        let writeBaseline = targetConversationId.map { store.writeBaseline(for: $0) }
         Task { @MainActor in
             await persistMessagesSnapshot(
                 snapshot,
                 targetConversationId: targetConversationId,
                 pendingRegeneration: pendingRegeneration,
-                store: store
+                store: store,
+                writeBaseline: writeBaseline
+            )
+        }
+    }
+
+    private func persistMessages(
+        _ snapshot: [UIMessage],
+        conversationId: KotlinUuid? = nil,
+        writeBaseline: IOSConversationWriteBaseline?
+    ) {
+        guard let store = conversationStore else { return }
+        let targetConversationId = conversationId ?? store.currentConversation?.id
+        let pendingRegeneration = pendingAssistantRegeneration
+        Task { @MainActor in
+            await persistMessagesSnapshot(
+                snapshot,
+                targetConversationId: targetConversationId,
+                pendingRegeneration: pendingRegeneration,
+                store: store,
+                writeBaseline: writeBaseline
             )
         }
     }
@@ -387,7 +475,8 @@ final class ChatViewModel {
         _ snapshot: [UIMessage],
         targetConversationId: KotlinUuid?,
         pendingRegeneration: PendingAssistantRegeneration?,
-        store: IOSConversationStore
+        store: IOSConversationStore,
+        writeBaseline: IOSConversationWriteBaseline?
     ) async {
         if let pendingRegeneration,
            let targetConversationId,
@@ -415,7 +504,7 @@ final class ChatViewModel {
             return
         }
         if let targetConversationId {
-            await store.save(messages: snapshot, to: targetConversationId)
+            await store.save(messages: snapshot, to: targetConversationId, ifUnchangedSince: writeBaseline)
         } else {
             await store.saveCurrent(messages: snapshot)
         }
@@ -425,7 +514,7 @@ final class ChatViewModel {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasImages = !pendingImages.isEmpty
         guard (!text.isEmpty || hasImages),
-              !generationCoordinator.isRunning,
+              !isGenerationActive,
               !isAttachingSelectedFile,
               !isRecognizingImages,
               pendingMemoryApproval == nil,
@@ -461,9 +550,10 @@ final class ChatViewModel {
     func modifyGeneratedImage(sourceImageURL: String, prompt: String, aspectRatio: String) {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedSource = sourceImageURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rejectVisionRecognitionMutationIfNeeded() else { return }
         guard !trimmedPrompt.isEmpty,
               !trimmedSource.isEmpty,
-              !generationCoordinator.isRunning else { return }
+              !isGenerationActive else { return }
 
         configurationError = nil
         let input = Self.imageEditToolInput(
@@ -482,7 +572,7 @@ final class ChatViewModel {
     /// Appends the user message (keeping image parts for in-bubble display) and persists it.
     /// Returns the input digest + conversation id so the caller can start generation.
     @discardableResult
-    private func appendUserMessage(text: String, images: [PendingChatImage]) -> (digest: String, conversationId: KotlinUuid?) {
+    private func appendUserMessage(text: String, images: [PendingChatImage]) -> (digest: String, conversationId: KotlinUuid?, messageId: String) {
         let prompt = Self.promptText(userText: text, selectedFilePreview: pendingSelectedFilePreview)
         let digest = chatInputDigest(for: prompt.isEmpty ? "[image]" : prompt)
         let userMsg = makeUserMessage(prompt: prompt, images: images)
@@ -501,14 +591,14 @@ final class ChatViewModel {
         let runConversationId = currentConversationId
         // 用户消息立即落盘：即使随后生成崩溃/被杀进程，用户输入也不会丢。
         persistMessages(conversationId: runConversationId)
-        return (digest, runConversationId)
+        return (digest, runConversationId, ChatMessageProjector.messageId(for: userMsg))
     }
 
     /// Sends the user message and kicks off generation. For non-vision models the image
     /// parts are swapped for the cached recognition text inside
     /// `messagesByInjectingRuntimeContext` before the request leaves for the provider.
     private func sendUserMessage(text: String, images: [PendingChatImage]) {
-        let (digest, conversationId) = appendUserMessage(text: text, images: images)
+        let (digest, conversationId, _) = appendUserMessage(text: text, images: images)
         guard autoGenerateResponses else { return }
         generateResponse(inputDigest: digest, conversationId: conversationId)
     }
@@ -539,22 +629,104 @@ final class ChatViewModel {
     /// a recognition indicator runs on the user side while the vision model reads each
     /// image, then the main model responds. On failure the message stays and an error shows.
     private func startVisionFallbackAndSend(text: String, images: [PendingChatImage]) {
-        let (digest, conversationId) = appendUserMessage(text: text, images: images)
+        let (digest, conversationId, userMessageId) = appendUserMessage(text: text, images: images)
         guard autoGenerateResponses else { return }
         isRecognizingImages = true
         Task {
             let result = await performVisionRecognition(images: images)
             await MainActor.run {
                 isRecognizingImages = false
+                clearVisionRecognitionPendingPrompt()
                 switch result {
                 case .failure(let error):
-                    selectedFileContextError = error.message
+                    applyVisionRecognitionFailure(
+                        message: error.message,
+                        conversationId: conversationId,
+                        userMessageId: userMessageId
+                    )
                 case .success(let texts):
-                    for (key, value) in texts { visionRecognitionTexts[key] = value }
+                    guard shouldApplyVisionRecognitionResult(
+                        conversationId: conversationId,
+                        userMessageId: userMessageId
+                    ) else { return }
+                    cacheVisionRecognitionTexts(texts)
                     generateResponse(inputDigest: digest, conversationId: conversationId)
                 }
             }
         }
+    }
+
+    private func shouldApplyVisionRecognitionResult(
+        conversationId: KotlinUuid?,
+        userMessageId: String
+    ) -> Bool {
+        let sameConversation: Bool
+        if let conversationId {
+            sameConversation = currentConversationId.map { String(describing: $0) } == String(describing: conversationId)
+        } else {
+            sameConversation = currentConversationId == nil
+        }
+        guard sameConversation else { return false }
+        guard currentConversationContainsMessage(id: userMessageId) else { return false }
+        if let conversationId {
+            return !isGenerationActive(conversationId: conversationId)
+        }
+        return !isGenerationActive
+    }
+
+    private func applyVisionRecognitionFailure(
+        message: String,
+        conversationId: KotlinUuid?,
+        userMessageId: String
+    ) {
+        guard shouldApplyVisionRecognitionResult(conversationId: conversationId, userMessageId: userMessageId) else {
+            if !isCurrentConversation(conversationId) {
+                pendingVisionFailures[visionFailureKey(conversationId)] = message
+            }
+            return
+        }
+        pendingVisionFailures.removeValue(forKey: visionFailureKey(conversationId))
+        selectedFileContextError = message
+    }
+
+    private func isCurrentConversation(_ conversationId: KotlinUuid?) -> Bool {
+        if let conversationId {
+            return currentConversationId.map { String(describing: $0) } == String(describing: conversationId)
+        }
+        return currentConversationId == nil
+    }
+
+    private func visionFailureKey(_ conversationId: KotlinUuid?) -> String {
+        conversationId.map { String(describing: $0) } ?? "__memory__"
+    }
+
+    private func flushPendingVisionFailureIfNeeded() {
+        let key = visionFailureKey(currentConversationId)
+        guard let message = pendingVisionFailures.removeValue(forKey: key) else { return }
+        selectedFileContextError = message
+    }
+
+    private func clearVisionRecognitionPendingPrompt() {
+        if selectedFileContextError == Self.visionRecognitionPendingMessage {
+            selectedFileContextError = nil
+        }
+    }
+
+    private func currentConversationContainsMessage(id messageId: String) -> Bool {
+        if messages.contains(where: { ChatMessageProjector.messageId(for: $0) == messageId }) {
+            return true
+        }
+        guard let currentMessages = conversationStore?.currentConversation?.currentMessages else {
+            return false
+        }
+        return currentMessages.contains(where: { ChatMessageProjector.messageId(for: $0) == messageId })
+    }
+
+    @discardableResult
+    private func rejectVisionRecognitionMutationIfNeeded() -> Bool {
+        guard isRecognizingImages else { return false }
+        selectedFileContextError = Self.visionRecognitionPendingMessage
+        return true
     }
 
     struct VisionRecognitionError: LocalizedError {
@@ -591,7 +763,7 @@ final class ChatViewModel {
         let adapter = OpenAIKmpProviderAdapter()
         var results: [String: String] = [:]
         for image in images {
-            if let cached = visionRecognitionTexts[image.dataUrl] {
+            if let cached = cachedVisionRecognitionText(for: image.dataUrl) {
                 results[image.dataUrl] = cached
                 continue
             }
@@ -788,6 +960,41 @@ final class ChatViewModel {
         )
     }
 
+    static func editedUserMessage(original: UIMessage, newText: String) -> UIMessage {
+        var parts: [UIMessagePart] = []
+        var didInsertText = false
+        for part in original.parts {
+            if part is UIMessagePart.Text {
+                if !didInsertText {
+                    parts.append(UIMessagePart.Text(text: newText, metadata: nil))
+                    didInsertText = true
+                }
+                continue
+            }
+            parts.append(part)
+        }
+        if !didInsertText {
+            parts.insert(UIMessagePart.Text(text: newText, metadata: nil), at: 0)
+        }
+        return UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.user,
+            parts: parts,
+            annotations: original.annotations,
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
+#if DEBUG
+    static func editedUserMessageForTesting(original: UIMessage, newText: String) -> UIMessage {
+        editedUserMessage(original: original, newText: newText)
+    }
+#endif
+
     func attachSelectedFilePreviewToNextMessage() async {
         guard !isAttachingSelectedFile else { return }
         guard let localToolExecutor else {
@@ -898,9 +1105,45 @@ final class ChatViewModel {
         case blocked(String)
     }
 
-    /// Cached `<image_context>` recognition text per image `data:` URL, so the vision
+    /// Cached `<image_context>` recognition text per image digest, so the vision
     /// model is called once per image (covers regeneration within the session too).
     @ObservationIgnored private var visionRecognitionTexts: [String: String] = [:]
+    @ObservationIgnored private var visionRecognitionTextKeys: [String] = []
+    private static let maxVisionRecognitionCacheEntries = 16
+
+    private func cachedVisionRecognitionText(for dataUrl: String) -> String? {
+        let key = Self.visionRecognitionCacheKey(for: dataUrl)
+        guard let text = visionRecognitionTexts[key] else { return nil }
+        visionRecognitionTextKeys.removeAll { $0 == key }
+        visionRecognitionTextKeys.append(key)
+        return text
+    }
+
+    private func cacheVisionRecognitionTexts(_ texts: [String: String]) {
+        for (dataUrl, value) in texts {
+            let key = Self.visionRecognitionCacheKey(for: dataUrl)
+            visionRecognitionTexts[key] = value
+            visionRecognitionTextKeys.removeAll { $0 == key }
+            visionRecognitionTextKeys.append(key)
+        }
+
+        while visionRecognitionTextKeys.count > Self.maxVisionRecognitionCacheEntries {
+            let evicted = visionRecognitionTextKeys.removeFirst()
+            visionRecognitionTexts.removeValue(forKey: evicted)
+        }
+    }
+
+    private static func visionRecognitionCacheKey(for dataUrl: String) -> String {
+        let digest = SHA256.hash(data: Data(dataUrl.utf8))
+        let prefix = digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+        return "vision:\(prefix)"
+    }
+
+#if DEBUG
+    static func visionRecognitionCacheKeyForTesting(_ dataUrl: String) -> String {
+        visionRecognitionCacheKey(for: dataUrl)
+    }
+#endif
 
     func addPendingImage(dataUrl: String, previewData: Data) {
         guard pendingImages.count < Self.maxImagesPerMessage else {
@@ -1026,6 +1269,11 @@ final class ChatViewModel {
         generationCoordinator.handoffCurrentGenerationToBackground(conversationStore: conversationStore)
     }
 
+    @discardableResult
+    func prepareForConversationChange() -> Bool {
+        prepareForConversationChange(to: nil)
+    }
+
     // MARK: - Message branching actions (Android ChatService parity)
     //
     // These operate on the Conversation tree via IOSConversationStore. After
@@ -1043,7 +1291,7 @@ final class ChatViewModel {
     ///   retention is surfaced via selectVariant for nodes that already have
     ///   multiple siblings).
     func regenerate(atMessageIndex index: Int) {
-        guard !isGenerationActive else { return }
+        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive else { return }
         guard let store = conversationStore,
               let conversation = store.currentConversation,
               index >= 0, index < conversation.messageNodes.count else { return }
@@ -1090,7 +1338,7 @@ final class ChatViewModel {
     /// text replaces the selected variant; the conversation is truncated after
     /// the edited user turn (Android's editMessage = append-variant + re-run).
     func editMessage(atMessageIndex index: Int, newText: String) {
-        guard !isGenerationActive else { return }
+        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive else { return }
         let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard let store = conversationStore,
@@ -1100,7 +1348,10 @@ final class ChatViewModel {
         let node = conversation.messageNodes[index]
         guard node.role == MessageRole.user else { return }
 
-        let edited = UIMessage.companion.user(prompt: trimmed)
+        let original = store.currentMessages.indices.contains(index)
+            ? store.currentMessages[index]
+            : node.messages[Int(node.selectIndex)]
+        let edited = Self.editedUserMessage(original: original, newText: trimmed)
         Task { @MainActor in
             pendingAssistantRegeneration = nil
             await store.appendVariant(messageIndex: index, message: edited)
@@ -1118,7 +1369,7 @@ final class ChatViewModel {
 
     /// Delete a single message (and its node). No generation.
     func deleteMessage(atMessageIndex index: Int) {
-        guard !isGenerationActive, let store = conversationStore else { return }
+        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive, let store = conversationStore else { return }
         Task { @MainActor in
             await store.deleteMessage(messageIndex: index)
             if let updated = store.currentConversation {
@@ -1131,7 +1382,7 @@ final class ChatViewModel {
 
     /// Switch the visible variant of a node (no generation).
     func selectVariant(messageIndex: Int, variantIndex: Int) {
-        guard !isGenerationActive, let store = conversationStore else { return }
+        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive, let store = conversationStore else { return }
         Task { @MainActor in
             await store.selectVariant(messageIndex: messageIndex, variantIndex: variantIndex)
             if let updated = store.currentConversation {
@@ -1170,6 +1421,35 @@ final class ChatViewModel {
         selectVariant(messageIndex: index, variantIndex: variantIndex)
     }
 
+#if DEBUG
+    func generateResponseForTesting(inputDigest: String, conversationId: KotlinUuid?) {
+        generateResponse(inputDigest: inputDigest, conversationId: conversationId)
+    }
+
+    func shouldApplyVisionRecognitionResultForTesting(
+        conversationId: KotlinUuid?,
+        userMessageId: String
+    ) -> Bool {
+        shouldApplyVisionRecognitionResult(conversationId: conversationId, userMessageId: userMessageId)
+    }
+
+    func applyVisionRecognitionFailureForTesting(
+        message: String,
+        conversationId: KotlinUuid?,
+        userMessageId: String
+    ) {
+        applyVisionRecognitionFailure(message: message, conversationId: conversationId, userMessageId: userMessageId)
+    }
+
+    func applyVisionRecognitionSuccessForTesting(
+        conversationId: KotlinUuid?,
+        userMessageId: String
+    ) {
+        guard shouldApplyVisionRecognitionResult(conversationId: conversationId, userMessageId: userMessageId) else { return }
+        clearVisionRecognitionPendingPrompt()
+    }
+#endif
+
     private func regenerateDigestSeed() -> String {
         messages.last(where: { $0.role == MessageRole.user })?.toText() ?? ""
     }
@@ -1177,8 +1457,10 @@ final class ChatViewModel {
     // MARK: - Private
 
     private func generateResponse(inputDigest: String, conversationId: KotlinUuid?) {
-        if generationCoordinator.isRunning {
-            cancelGeneration()
+        if let conversationId {
+            guard !isGenerationActive(conversationId: conversationId) else { return }
+        } else {
+            guard !isGenerationActive else { return }
         }
         isLoading = true
 
@@ -1206,7 +1488,7 @@ final class ChatViewModel {
             mcpTools: mcpManager.tools,
             miniAppRepository: miniAppRepository,
             miniAppRuntimeEnabled: isMiniAppRuntimeEnabled
-        ).injectingRuntimeContext(into: messages)
+        ).injectingRuntimeContext(into: messages, coalesceSystemMessages: false)
         return replacingImagesForNonVisionModel(withContext)
     }
 
@@ -1226,7 +1508,7 @@ final class ChatViewModel {
             guard message.parts.contains(where: { $0 is UIMessagePart.Image }) else { return message }
             let newParts: [UIMessagePart] = message.parts.map { part in
                 guard let image = part as? UIMessagePart.Image else { return part }
-                let recognized = visionRecognitionTexts[image.url] ?? "[图片未能识别]"
+                let recognized = cachedVisionRecognitionText(for: image.url) ?? "[图片未能识别]"
                 return UIMessagePart.Text(text: recognized, metadata: nil)
             }
             return UIMessage(
@@ -1282,17 +1564,25 @@ final class ChatViewModel {
                     sourceMessageId: sourceMessageId
                 )
             }
-            _ = try? IOSWorkspaceStore.shared.saveArtifact(
-                title: record.title,
-                content: record.htmlContent,
-                type: .miniApp,
-                sourceKind: "miniapp",
-                sourceId: record.id
-            )
+            let workspaceNotice: String
+            do {
+                _ = try IOSWorkspaceStore.shared.saveArtifact(
+                    title: record.title,
+                    content: record.htmlContent,
+                    type: .miniApp,
+                    sourceKind: "miniapp",
+                    sourceId: record.id
+                )
+                workspaceNotice = "已同步保存到 Workspace。"
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                workspaceNotice = "但保存到 Workspace 失败：\(message)"
+            }
             let notice = """
             已保存 MiniApp「\(record.title)」v\(record.version)。
             appId: \(record.id)
             可在小应用列表中打开并管理版本、grant 和运行状态。
+            \(workspaceNotice)
             """
             return UIMessage(
                 id: KotlinUuid.companion.random(),
@@ -1685,7 +1975,8 @@ final class ChatViewModel {
             snapshot,
             targetConversationId: conversationId,
             pendingRegeneration: pending,
-            store: store
+            store: store,
+            writeBaseline: store.writeBaseline(for: conversationId)
         )
     }
     #endif

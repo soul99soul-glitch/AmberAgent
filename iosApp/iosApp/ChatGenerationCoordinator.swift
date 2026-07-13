@@ -29,6 +29,257 @@ private final class StreamJobBox {
     }
 }
 
+final class ChatStreamEvent: @unchecked Sendable {
+    enum Payload {
+        case chunk(MessageChunk)
+        case complete
+        case error(KotlinThrowable)
+    }
+
+    let payload: Payload
+
+    private init(_ payload: Payload) {
+        self.payload = payload
+    }
+
+    static func chunk(_ chunk: MessageChunk) -> ChatStreamEvent {
+        ChatStreamEvent(.chunk(chunk))
+    }
+
+    static func complete() -> ChatStreamEvent {
+        ChatStreamEvent(.complete)
+    }
+
+    static func error(_ error: KotlinThrowable) -> ChatStreamEvent {
+        ChatStreamEvent(.error(error))
+    }
+}
+
+final class ChatStreamEventSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: AsyncStream<ChatStreamEvent>.Continuation?
+    private var pendingEvents: [ChatStreamEvent] = []
+    private var pendingEventHead = 0
+    private var isFinished = false
+
+    func bind(_ continuation: AsyncStream<ChatStreamEvent>.Continuation) {
+        lock.lock()
+        guard !isFinished else {
+            lock.unlock()
+            continuation.finish()
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func yield(_ event: ChatStreamEvent) {
+        lock.lock()
+        guard !isFinished, let continuation else {
+            lock.unlock()
+            return
+        }
+        pendingEvents.append(event)
+        // `yield` 也放在锁内，确保不同 provider 回调线程看到同一 FIFO 次序。
+        continuation.yield(event)
+        lock.unlock()
+    }
+
+    func claim(_ event: ChatStreamEvent) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard pendingEventHead < pendingEvents.count,
+              pendingEvents[pendingEventHead] === event else {
+            return false
+        }
+        pendingEventHead += 1
+        compactClaimedPrefixIfNeeded()
+        return true
+    }
+
+    func takePendingChunks() -> [MessageChunk] {
+        lock.lock()
+        defer { lock.unlock() }
+        var chunks: [MessageChunk] = []
+        var retained: [ChatStreamEvent] = []
+        if pendingEventHead < pendingEvents.count {
+            retained.reserveCapacity(pendingEvents.count - pendingEventHead)
+            for event in pendingEvents[pendingEventHead...] {
+                if case .chunk(let chunk) = event.payload {
+                    chunks.append(chunk)
+                } else {
+                    retained.append(event)
+                }
+            }
+        }
+        pendingEvents = retained
+        pendingEventHead = 0
+        return chunks
+    }
+
+    func finish() {
+        lock.lock()
+        let continuation = continuation
+        self.continuation = nil
+        isFinished = true
+        lock.unlock()
+        continuation?.finish()
+    }
+
+    /// Atomically chooses background ownership against a racing provider terminal callback.
+    /// Accepted chunks remain drainable; a queued complete/error keeps foreground ownership.
+    @MainActor
+    func transitionToBackgroundIfNoTerminal(_ startBackground: () -> Bool) -> Bool {
+        lock.lock()
+        guard !isFinished,
+              !pendingEvents[pendingEventHead...].contains(where: { event in
+                switch event.payload {
+                case .complete, .error:
+                    return true
+                case .chunk:
+                    return false
+                }
+              }) else {
+            lock.unlock()
+            return false
+        }
+        let didStart = startBackground()
+        let continuation = didStart ? continuation : nil
+        if didStart {
+            self.continuation = nil
+            isFinished = true
+        }
+        lock.unlock()
+        continuation?.finish()
+        return didStart
+    }
+
+    private func compactClaimedPrefixIfNeeded() {
+        guard pendingEventHead >= 64,
+              pendingEventHead * 2 >= pendingEvents.count else { return }
+        pendingEvents.removeFirst(pendingEventHead)
+        pendingEventHead = 0
+    }
+
+#if DEBUG
+    var pendingEventCountForTesting: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingEvents.count - pendingEventHead
+    }
+#endif
+}
+
+@MainActor
+private final class ChatStreamAccumulatorSession {
+    let accumulator: MessageStreamAccumulator
+    let eventSink: ChatStreamEventSink
+    var detectedToolCallIds = Set<String>()
+
+    init(accumulator: MessageStreamAccumulator, eventSink: ChatStreamEventSink) {
+        self.accumulator = accumulator
+        self.eventSink = eventSink
+    }
+}
+
+struct ChatStreamPresentationStep {
+    let snapshot: [UIMessage]
+    let isCaughtUp: Bool
+}
+
+enum ChatStreamPresentationPacer {
+    /// Keeps one UI publication below a typical phone-width prose line while
+    /// retaining the existing 48ms publication clock.
+    static let maximumTextAdvance = 12
+
+    static func step(current: [UIMessage], target: [UIMessage]) -> ChatStreamPresentationStep {
+        guard let targetAssistant = target.last,
+              targetAssistant.role == MessageRole.assistant else {
+            return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
+        }
+
+        let currentAssistant: UIMessage?
+        let currentPrefix: ArraySlice<UIMessage>
+        if current.count == target.count,
+           let last = current.last,
+           last.role == MessageRole.assistant,
+           last.id == targetAssistant.id {
+            currentAssistant = last
+            currentPrefix = current.dropLast()
+        } else if current.count + 1 == target.count {
+            currentAssistant = nil
+            currentPrefix = current[...]
+        } else {
+            return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
+        }
+
+        let targetPrefix = target.dropLast()
+        guard currentPrefix.count == targetPrefix.count,
+              zip(currentPrefix, targetPrefix).allSatisfy({ $0.id == $1.id }) else {
+            return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
+        }
+
+        let currentParts = currentAssistant?.parts ?? []
+        guard currentParts.count <= targetAssistant.parts.count else {
+            return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
+        }
+
+        var remainingBudget = maximumTextAdvance
+        var caughtUp = true
+        var pacedParts: [UIMessagePart] = []
+        pacedParts.reserveCapacity(targetAssistant.parts.count)
+
+        for (index, targetPart) in targetAssistant.parts.enumerated() {
+            guard let targetText = targetPart as? UIMessagePart.Text else {
+                if index < currentParts.count,
+                   currentParts[index] is UIMessagePart.Text {
+                    return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
+                }
+                pacedParts.append(targetPart)
+                continue
+            }
+
+            let currentText: String
+            if index < currentParts.count {
+                guard let text = currentParts[index] as? UIMessagePart.Text else {
+                    return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
+                }
+                currentText = text.text
+            } else {
+                currentText = ""
+            }
+            guard targetText.text.hasPrefix(currentText) else {
+                return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
+            }
+
+            let suffix = targetText.text.dropFirst(currentText.count)
+            let advanceCount = min(remainingBudget, suffix.count)
+            let pacedText = currentText + suffix.prefix(advanceCount)
+            remainingBudget -= advanceCount
+            if advanceCount < suffix.count {
+                caughtUp = false
+            }
+            pacedParts.append(UIMessagePart.Text(text: String(pacedText), metadata: targetText.metadata))
+        }
+
+        let pacedAssistant = UIMessage(
+            id: targetAssistant.id,
+            role: targetAssistant.role,
+            parts: pacedParts,
+            annotations: targetAssistant.annotations,
+            createdAt: targetAssistant.createdAt,
+            finishedAt: caughtUp ? targetAssistant.finishedAt : currentAssistant?.finishedAt,
+            modelId: targetAssistant.modelId,
+            usage: caughtUp ? targetAssistant.usage : currentAssistant?.usage,
+            translation: targetAssistant.translation
+        )
+        return ChatStreamPresentationStep(
+            snapshot: Array(targetPrefix) + [pacedAssistant],
+            isCaughtUp: caughtUp
+        )
+    }
+}
+
 struct ChatPendingToolApproval {
     let toolCall: UIMessagePart.Tool
     let providerSetting: ProviderSetting
@@ -54,6 +305,7 @@ struct ChatGenerationBindings {
     let getMessages: () -> [UIMessage]
     let setMessages: ([UIMessage]) -> Void
     let bumpMessageRevision: (ChatMessageUpdateReason) -> Void
+    let shouldPaceStreamPresentation: () -> Bool
     let setIsLoading: (Bool) -> Void
     let setPendingMemoryApproval: (MemoryToolApprovalRequest?) -> Void
     let setPendingSearchApproval: (SearchToolApprovalRequest?) -> Void
@@ -63,6 +315,8 @@ struct ChatGenerationBindings {
     let setPendingMcpApproval: (McpToolApprovalRequest?) -> Void
     let setContextCompactState: (ChatContextCompactState) -> Void
     let persistMessages: (KotlinUuid?) -> Void
+    let capturePersistMessagesBaseline: (KotlinUuid?) -> IOSConversationWriteBaseline?
+    let persistMessagesSnapshot: ([UIMessage], KotlinUuid?, IOSConversationWriteBaseline?) -> Void
     let recordRun: (String, Int64, String, String, String?) async -> Void
     let startLiveActivity: (String, AgentActivityPresentation) -> Void
     let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> UIMessage?
@@ -98,8 +352,18 @@ final class ChatGenerationCoordinator {
     private var currentToolResumeCount = 0
     private let maxToolResumeCount = 4
     private var pendingStreamSnapshot: [UIMessage]?
+    private var pendingStreamSnapshotProvider: (() -> [UIMessage])?
     private var streamSnapshotFlushTask: Task<Void, Never>?
-    private let streamSnapshotFlushDelayNanos: UInt64 = 16_000_000
+    private var streamEventTask: Task<Void, Never>?
+    private var streamEventSink: ChatStreamEventSink?
+    private var activeStreamSession: ChatStreamAccumulatorSession?
+    /// 流式 UI 快照的发布间隔。每次发布都会让整个消息列表子树跑一轮 SwiftUI
+    /// 事务(采样实测:子树全部短路后,事务图遍历本身仍是长内容流式的主线程
+    /// 地板)。因此 48ms(≈20Hz)把事务频率从 60Hz 降到 20Hz；它不是屏幕或
+    /// 动画帧率。普通小 delta 原样发布，超过一行量级的 provider burst 则在
+    /// 同一时钟上分帧追上。cancel/error/handoff 始终从 accumulator 取权威快照；
+    /// complete 只延后可见终态，直到分帧追上，数据完整性不受影响。
+    private let streamSnapshotFlushDelayNanos: UInt64 = 48_000_000
     private var pendingMemoryToolApproval: ChatPendingToolApproval?
     private var pendingSearchToolApproval: ChatPendingToolApproval?
     private var pendingWebMountToolApproval: ChatPendingToolApproval?
@@ -115,6 +379,10 @@ final class ChatGenerationCoordinator {
 
     var isRunning: Bool {
         currentRunId != nil
+    }
+
+    var activeConversationId: KotlinUuid? {
+        currentConversationIdForRun
     }
 
     private var hasPendingToolApproval: Bool {
@@ -315,11 +583,21 @@ final class ChatGenerationCoordinator {
         streamJob = nil
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
+        streamEventSink?.finish()
+        drainPendingStreamChunksIntoAccumulator()
+        let pendingStreamSnapshotAtCancellation = latestPendingStreamSnapshot()
+        let messagesAtCancellation = pendingStreamSnapshotAtCancellation ?? bindings.getMessages()
+        let writeBaselineAtCancellation = bindings.capturePersistMessagesBaseline(conversationId)
+        if let pendingStreamSnapshotAtCancellation {
+            bindings.setMessages(pendingStreamSnapshotAtCancellation)
+        }
+        cancelStreamEventConsumer()
         cancelForegroundToolExecutions()
         cancelPendingStreamSnapshotPublish()
         // 取消也是 run 的终结:与 finishStreaming/后台交接保持一致,关闭录制器,
         // 否则取消路径会泄漏文件句柄与 per-run 字典条目。
         if let runId {
+            ChatStreamRecorder.shared.record(runId: runId, snapshot: messagesAtCancellation)
             ChatStreamRecorder.shared.finish(runId: runId)
         }
         currentRunId = nil
@@ -343,7 +621,7 @@ final class ChatGenerationCoordinator {
                 presentation: .cancelled()
             )
             await bindings.recordRun(runId, startedAt, "interrupted", digest, conversationId?.toHexDashString())
-            bindings.persistMessages(conversationId)
+            bindings.persistMessagesSnapshot(messagesAtCancellation, conversationId, writeBaselineAtCancellation)
         }
     }
 
@@ -386,6 +664,11 @@ final class ChatGenerationCoordinator {
         }
     }
 
+    private func backgroundToolHandoffUploadMessages(from baseMessages: [UIMessage]) -> [UIMessage] {
+        let runtimeMessages = bindings.messagesByInjectingRuntimeContext(baseMessages)
+        return ChatRuntimeContextBuilder.coalescingSystemMessages(runtimeMessages)
+    }
+
     @discardableResult
     func handoffCurrentGenerationToBackground(conversationStore: IOSConversationStore?) -> Bool {
         guard !hasPendingToolApproval else { return false }
@@ -407,23 +690,28 @@ final class ChatGenerationCoordinator {
         guard !IOSGrokWebProviderResolver.isGrokWebProvider(handoff.providerSetting) else {
             return false
         }
-        let didStart = IOSChatBackgroundGenerationCoordinator.shared.start(
-            handoff: handoff,
-            conversationStore: conversationStore,
-            toolRuntime: toolRuntime,
-            liveActivityController: dependencies.liveActivityController,
-            saveMiniAppIfPresent: { [bindings] messages, conversationId in
-                bindings.saveMiniAppIfPresent(messages, conversationId)
-            }
-        )
+        let startBackground = { [self] in
+            IOSChatBackgroundGenerationCoordinator.shared.start(
+                handoff: handoff,
+                conversationStore: conversationStore,
+                toolRuntime: self.toolRuntime,
+                liveActivityController: self.dependencies.liveActivityController,
+                saveMiniAppIfPresent: { [bindings = self.bindings] messages, conversationId in
+                    bindings.saveMiniAppIfPresent(messages, conversationId)
+                }
+            )
+        }
+        let didStart = streamEventSink?.transitionToBackgroundIfNoTerminal(startBackground)
+            ?? startBackground()
         guard didStart else { return false }
 
         streamJob?.cancel(cause: nil)
         streamJob = nil
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
+        drainPendingStreamChunksIntoAccumulator()
         cancelForegroundToolExecutions()
-        if let pendingStreamSnapshot {
+        if let pendingStreamSnapshot = latestPendingStreamSnapshot() {
             // Background handoff bypasses the normal scheduleStreamSnapshotPublish
             // path, so without this the recorder would miss the last in-flight
             // snapshot before ownership moves to the background coordinator.
@@ -433,6 +721,7 @@ final class ChatGenerationCoordinator {
             bindings.setMessages(pendingStreamSnapshot)
             bindings.bumpMessageRevision(.streamDelta)
         }
+        cancelStreamEventConsumer()
         cancelPendingStreamSnapshotPublish()
         if let runId = currentRunId {
             ChatStreamRecorder.shared.finish(runId: runId)
@@ -548,7 +837,12 @@ final class ChatGenerationCoordinator {
                 fallbackProvider: effectiveProvider,
                 promptOverheadTokens: runtimeOverheadTokens,
                 onEvent: { [weak self] event in
-                    guard let self, self.currentRunId == runId else { return }
+                    guard let self,
+                          ChatContextCompactEventRouter.shouldApply(
+                            event: event,
+                            eventRunId: runId,
+                            currentRunId: self.currentRunId
+                          ) else { return }
                     self.applyCompactEvent(event)
                 }
             )
@@ -572,9 +866,9 @@ final class ChatGenerationCoordinator {
             params: effectiveParams
         )
         let runtimePreparedMessages = bindings.messagesByInjectingRuntimeContext(promptedUploadMessages)
-        let finalUploadMessages: [UIMessage]
+        let finalizedUploadMessages: [UIMessage]
         do {
-            finalUploadMessages = try IOSContextCompactionCoordinator.shared.finalizedMessagesForRequest(
+            finalizedUploadMessages = try IOSContextCompactionCoordinator.shared.finalizedMessagesForRequest(
                 runtimePreparedMessages,
                 settings: dependencies.sharedSettings.snapshot,
                 params: effectiveParams
@@ -593,6 +887,7 @@ final class ChatGenerationCoordinator {
             )
             return
         }
+        let finalUploadMessages = ChatRuntimeContextBuilder.coalescingSystemMessages(finalizedUploadMessages)
         startStreaming(
             providerSetting: effectiveProvider,
             params: effectiveParams,
@@ -696,36 +991,50 @@ final class ChatGenerationCoordinator {
             initialMessages: displayMessages,
             model: params.model
         )
-        var detectedToolCallIds = Set<String>()
-
-        streamJob = dispatchStream(
-            providerSetting: providerSetting,
-            messages: uploadMessages,
-            params: params,
-            onChunk: { chunk in
-                Task { @MainActor [weak self] in
-                    guard let self, self.currentRunId == runId else { return }
+        let eventSink = ChatStreamEventSink()
+        cancelStreamEventConsumer()
+        let streamSession = ChatStreamAccumulatorSession(
+            accumulator: accumulator,
+            eventSink: eventSink
+        )
+        streamEventSink = eventSink
+        activeStreamSession = streamSession
+        // 从 session 建立起就保留快照入口；即使 MainActor 尚未消费首个 chunk，
+        // cancel / background handoff 也能在 drain 后拿到累加器的最新状态。
+        pendingStreamSnapshotProvider = { accumulator.snapshot() }
+        let eventStream = AsyncStream<ChatStreamEvent>(bufferingPolicy: .unbounded) { continuation in
+            eventSink.bind(continuation)
+        }
+        streamEventTask = Task { @MainActor [weak self] in
+            for await event in eventStream {
+                guard eventSink.claim(event) else { continue }
+                guard let self, self.currentRunId == runId else { return }
+                switch event.payload {
+                case .chunk(let chunk):
                     accumulator.append(chunk: chunk)
                     let toolCalls = Self.toolCalls(in: chunk)
                         .filter { toolCall in
                             let key = chatToolCallKey(toolCall)
-                            guard !detectedToolCallIds.contains(key) else { return false }
-                            detectedToolCallIds.insert(key)
+                            guard !streamSession.detectedToolCallIds.contains(key) else { return false }
+                            streamSession.detectedToolCallIds.insert(key)
                             return true
                         }
-                    let snapshot = accumulator.snapshot()
                     if !toolCalls.isEmpty {
                         self.handleDetectedToolCalls(toolCalls, runId: runId)
                     }
-                    self.scheduleStreamSnapshotPublish(snapshot, runId: runId)
-                }
-            },
-            onComplete: {
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    guard self.currentRunId == runId else { return }
+                    self.scheduleStreamSnapshotPublish(
+                        snapshotProvider: { accumulator.snapshot() },
+                        runId: runId
+                    )
+                case .complete:
                     self.cancelPendingStreamSnapshotPublish()
                     let snapshot = accumulator.snapshot()
+                    // Terminal hands authority to bindings/tool execution. Keeping this
+                    // accumulator reachable would let a later cancel restore a stale pre-tool snapshot.
+                    self.activeStreamSession = nil
+                    guard await self.drainStreamPresentation(to: snapshot, runId: runId) else {
+                        return
+                    }
                     await self.handleCompletedStream(
                         snapshot: snapshot,
                         providerSetting: providerSetting,
@@ -735,14 +1044,13 @@ final class ChatGenerationCoordinator {
                         inputDigest: inputDigest,
                         conversationId: conversationId
                     )
-                }
-            },
-            onError: { error in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    guard self.currentRunId == runId else { return }
+                    return
+                case .error(let error):
                     self.cancelPendingStreamSnapshotPublish()
                     let snapshot = accumulator.snapshot()
+                    // The terminal snapshot is published below; it is no longer a cancel fallback.
+                    self.activeStreamSession = nil
+                    ChatStreamRecorder.shared.record(runId: runId, snapshot: snapshot)
                     self.bindings.setMessages(snapshot)
                     self.bindings.bumpMessageRevision(.assistantStreamClosed)
                     await self.presentStreamError(
@@ -753,18 +1061,38 @@ final class ChatGenerationCoordinator {
                         inputDigest: inputDigest,
                         conversationId: conversationId
                     )
+                    return
                 }
+            }
+        }
+
+        streamJob = dispatchStream(
+            providerSetting: providerSetting,
+            messages: uploadMessages,
+            params: params,
+            onChunk: { chunk in
+                eventSink.yield(.chunk(chunk))
+            },
+            onComplete: {
+                eventSink.yield(.complete())
+                eventSink.finish()
+            },
+            onError: { error in
+                eventSink.yield(.error(error))
+                eventSink.finish()
             }
         )
     }
 
-    private func scheduleStreamSnapshotPublish(_ snapshot: [UIMessage], runId: String) {
-        ChatStreamRecorder.shared.record(runId: runId, snapshot: snapshot)
-        pendingStreamSnapshot = snapshot
+    private func scheduleStreamSnapshotPublish(
+        snapshotProvider: @escaping () -> [UIMessage],
+        runId: String
+    ) {
+        pendingStreamSnapshotProvider = snapshotProvider
         guard streamSnapshotFlushTask == nil else { return }
         streamSnapshotFlushTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: self?.streamSnapshotFlushDelayNanos ?? 16_000_000)
+                try await Task.sleep(nanoseconds: self?.streamSnapshotFlushDelayNanos ?? 48_000_000)
             } catch {
                 return
             }
@@ -776,18 +1104,78 @@ final class ChatGenerationCoordinator {
         streamSnapshotFlushTask = nil
         guard currentRunId == runId else {
             pendingStreamSnapshot = nil
+            pendingStreamSnapshotProvider = nil
             return
         }
-        guard let snapshot = pendingStreamSnapshot else { return }
-        pendingStreamSnapshot = nil
-        bindings.setMessages(snapshot)
+        ChatPerfTrace.measure("StreamFlush") {
+            guard let targetSnapshot = latestPendingStreamSnapshot() else { return }
+            pendingStreamSnapshot = nil
+            pendingStreamSnapshotProvider = nil
+            let caughtUp = publishPacedStreamSnapshot(targetSnapshot, runId: runId)
+            if !caughtUp {
+                pendingStreamSnapshot = targetSnapshot
+                scheduleStreamSnapshotPublish(
+                    snapshotProvider: { targetSnapshot },
+                    runId: runId
+                )
+            }
+        }
+    }
+
+    @discardableResult
+    private func publishPacedStreamSnapshot(_ target: [UIMessage], runId: String) -> Bool {
+        let step = bindings.shouldPaceStreamPresentation()
+            ? ChatStreamPresentationPacer.step(current: bindings.getMessages(), target: target)
+            : ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
+        ChatStreamRecorder.shared.record(runId: runId, snapshot: step.snapshot)
+        bindings.setMessages(step.snapshot)
         bindings.bumpMessageRevision(.streamDelta)
+        return step.isCaughtUp
+    }
+
+    private func drainStreamPresentation(to target: [UIMessage], runId: String) async -> Bool {
+        // Keep the authoritative terminal snapshot reachable while presentation
+        // catches up. A cancellation during this short window must persist the
+        // full provider result rather than the currently visible prefix.
+        pendingStreamSnapshot = target
+        while currentRunId == runId, !Task.isCancelled {
+            if publishPacedStreamSnapshot(target, runId: runId) {
+                pendingStreamSnapshot = nil
+                return true
+            }
+            do {
+                try await Task.sleep(nanoseconds: streamSnapshotFlushDelayNanos)
+            } catch {
+                return false
+            }
+        }
+        return false
+    }
+
+    private func latestPendingStreamSnapshot() -> [UIMessage]? {
+        if let provider = pendingStreamSnapshotProvider {
+            let snapshot = provider()
+            pendingStreamSnapshot = snapshot
+            return snapshot
+        }
+        if let pendingStreamSnapshot {
+            return pendingStreamSnapshot
+        }
+        return activeStreamSession?.accumulator.snapshot()
+    }
+
+    private func drainPendingStreamChunksIntoAccumulator() {
+        guard let activeStreamSession else { return }
+        for chunk in activeStreamSession.eventSink.takePendingChunks() {
+            activeStreamSession.accumulator.append(chunk: chunk)
+        }
     }
 
     private func cancelPendingStreamSnapshotPublish() {
         streamSnapshotFlushTask?.cancel()
         streamSnapshotFlushTask = nil
         pendingStreamSnapshot = nil
+        pendingStreamSnapshotProvider = nil
     }
 
     /// Surfaces a generation failure as an assistant error bubble and finalizes
@@ -838,8 +1226,19 @@ final class ChatGenerationCoordinator {
         bindings.setMessages(snapshot)
         bindings.bumpMessageRevision(.assistantStreamClosed)
 
-        if let pendingToolCall = toolRuntime.nextPendingToolCall(in: snapshot),
-           currentToolResumeCount < maxToolResumeCount {
+        if let pendingToolCall = toolRuntime.nextPendingToolCall(in: snapshot) {
+            guard currentToolResumeCount < maxToolResumeCount else {
+                await failPendingToolCalls(
+                    snapshot: snapshot,
+                    failureText: "工具调用未执行：已达到本轮工具循环上限（\(maxToolResumeCount) 次）。请继续对话或拆分任务后重试。",
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId
+                )
+                return
+            }
+
             currentToolResumeCount += 1
             bindings.bumpMessageRevision(.toolCallStarted)
             streamJob = nil
@@ -852,6 +1251,18 @@ final class ChatGenerationCoordinator {
                 inputDigest: inputDigest,
                 conversationId: conversationId,
                 baseMessages: snapshot
+            )
+            return
+        }
+
+        if toolRuntime.hasUnresolvedToolCall(in: snapshot) {
+            await failPendingToolCalls(
+                snapshot: snapshot,
+                failureText: "工具调用未执行：该工具当前未启用或不可执行。请在设置中启用对应能力后重试。",
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
             )
             return
         }
@@ -870,6 +1281,28 @@ final class ChatGenerationCoordinator {
         )
         bindings.persistMessages(conversationId)
         bindings.bumpMessageRevision(.generationCompleted)
+        finishStreaming()
+    }
+
+    private func failPendingToolCalls(
+        snapshot: [UIMessage],
+        failureText: String,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?
+    ) async {
+        let writeBaseline = bindings.capturePersistMessagesBaseline(conversationId)
+        let finalSnapshot = toolRuntime.messagesByFailingPendingToolCalls(
+            in: snapshot,
+            outputText: failureText
+        )
+        bindings.setMessages(finalSnapshot)
+        bindings.bumpMessageRevision(.toolResultAppended)
+        await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationId?.toHexDashString())
+        await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
+        bindings.persistMessagesSnapshot(finalSnapshot, conversationId, writeBaseline)
+        bindings.bumpMessageRevision(.generationFailed)
         finishStreaming()
     }
 
@@ -910,7 +1343,7 @@ final class ChatGenerationCoordinator {
             providerSetting: providerSetting,
             backgroundProviderSetting: nil,
             params: params,
-            uploadMessages: baseMessages,
+            uploadMessages: backgroundToolHandoffUploadMessages(from: baseMessages),
             displayMessages: bindings.getMessages()
         )
         let executionToken = UUID()
@@ -1157,6 +1590,7 @@ final class ChatGenerationCoordinator {
 
     private func finishStreaming() {
         cancelPendingStreamSnapshotPublish()
+        cancelStreamEventConsumer()
         if let runId = currentRunId {
             ChatStreamRecorder.shared.finish(runId: runId)
         }
@@ -1172,6 +1606,14 @@ final class ChatGenerationCoordinator {
         pendingBackgroundConversationStore = nil
         bindings.setIsLoading(false)
         clearPendingApprovals()
+    }
+
+    private func cancelStreamEventConsumer() {
+        streamEventSink?.finish()
+        streamEventSink = nil
+        streamEventTask?.cancel()
+        streamEventTask = nil
+        activeStreamSession = nil
     }
 
     private func cancelForegroundToolExecutions() {
@@ -1281,6 +1723,10 @@ final class ChatGenerationCoordinator {
         pauseForApproval(.search(request), pending: pending)
     }
 
+    func backgroundToolHandoffUploadMessagesForTesting(_ baseMessages: [UIMessage]) -> [UIMessage] {
+        backgroundToolHandoffUploadMessages(from: baseMessages)
+    }
+
     func finishedToolCallMessagesForTesting(
         _ targetToolCall: UIMessagePart.Tool,
         outputText: String,
@@ -1290,6 +1736,16 @@ final class ChatGenerationCoordinator {
             targetToolCall,
             outputText: outputText,
             in: messages
+        )
+    }
+
+    func failingPendingToolCallMessagesForTesting(
+        outputText: String,
+        in messages: [UIMessage]
+    ) -> [UIMessage] {
+        toolRuntime.messagesByFailingPendingToolCalls(
+            in: messages,
+            outputText: outputText
         )
     }
 

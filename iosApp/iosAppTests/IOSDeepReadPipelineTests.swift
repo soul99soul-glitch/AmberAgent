@@ -146,6 +146,44 @@ final class IOSDeepReadPipelineTests: XCTestCase {
         XCTAssertTrue(provider.userPrompts[3].contains("分析分歧"))
     }
 
+    func testRunExistingTaskPersistsWorkspaceSyncFailureWithoutStatusHandler() async throws {
+        enum SaveFailure: LocalizedError {
+            case denied
+            var errorDescription: String? { "workspace unavailable" }
+        }
+
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeepReadWorkspaceSyncFailure-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let store = IOSDeepReadStore(baseDirectory: base)
+        let source = try IOSDeepReadSourceNormalizer.manualText(
+            title: "Manual",
+            text: "A source with enough text for an offline deep-read draft.",
+            now: 100
+        )
+        let task = try store.createTask(
+            title: "Workspace sync",
+            sources: [source],
+            templateId: IOSDeepReadTemplate.analysis.id,
+            now: 1_000
+        )
+
+        let didComplete = await IOSDeepReadLauncher.runExistingTask(
+            taskId: task.id,
+            sharedSettings: IOSSharedSettingsStore(userDefaults: UserDefaults(suiteName: "deepread-\(UUID().uuidString)")!),
+            store: store,
+            workspaceArtifactSaver: { _, _, _, _, _ in throw SaveFailure.denied }
+        )
+
+        XCTAssertTrue(didComplete)
+        let reloaded = try XCTUnwrap(IOSDeepReadStore(baseDirectory: base).task(id: task.id))
+        XCTAssertEqual(reloaded.status, .succeeded)
+        XCTAssertEqual(reloaded.workspaceSyncFailed, "workspace unavailable")
+    }
+
     func testOfflineFallbackDeterministicDraftStillWorks() {
         // The deterministic offline generator must still produce a structured
         // draft (used when no provider/key is configured, and as the fallback).

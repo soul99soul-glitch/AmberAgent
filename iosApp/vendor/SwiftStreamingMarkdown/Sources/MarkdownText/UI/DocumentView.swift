@@ -17,25 +17,36 @@ public struct DocumentView: View {
 
   let renderableDocument: RenderableDocument
   let config: MarkdownRenderConfig
+  let animateInitialText: Bool
+  let usesLayerBackedTableAnimation: Bool
 
   /// Create a `DocumentView`.
   /// - Parameters:
   ///   - renderableDocument: The parsed Markdown document to render.
   ///   - config: Render configuration. Defaults to `.default`.
+  ///   - animateInitialText: Whether newly mounted paragraphs should fade in.
+  ///   - usesLayerBackedTableAnimation: Whether table text entrances should be
+  ///     composited by Core Animation instead of SwiftUI's text renderer.
   ///   - listener: Optional listener that receives render and interaction events.
   public init(
     renderableDocument: RenderableDocument,
     config: MarkdownRenderConfig = .default,
+    animateInitialText: Bool = true,
+    usesLayerBackedTableAnimation: Bool = false,
     listener: MarkdownListener? = nil
   ) {
     self.renderableDocument = renderableDocument
     self.config = config
+    self.animateInitialText = animateInitialText
+    self.usesLayerBackedTableAnimation = usesLayerBackedTableAnimation
     self._controller = StateObject(wrappedValue: MarkdownController(listener: listener))
   }
 
   public var body: some View {
     BlockView(renderables: renderableDocument.renderables)
     .environment(\.markdownConfig, config)
+    .environment(\.markdownAnimateInitialText, animateInitialText)
+    .environment(\.markdownUsesLayerBackedTableAnimation, usesLayerBackedTableAnimation)
     .environment(\.markdownController, controller)
     .task {
       controller.onAppear(markdown: renderableDocument)
@@ -52,6 +63,11 @@ public struct DocumentView: View {
 extension EnvironmentValues {
   /// The render configuration applied to descendant Markdown views.
   @Entry public var markdownConfig: MarkdownRenderConfig = .default
+  /// Whether newly mounted paragraph views should run their initial fade.
+  @Entry public var markdownAnimateInitialText: Bool = true
+  /// Whether table text entrances should run on Core Animation layers instead
+  /// of invalidating the surrounding SwiftUI table on every animation frame.
+  @Entry public var markdownUsesLayerBackedTableAnimation: Bool = false
   /// The shared controller used by descendant Markdown views to route
   /// table/context-menu events to the configured `MarkdownListener`.
   @Entry public var markdownController: MarkdownController?

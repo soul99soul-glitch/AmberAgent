@@ -9,18 +9,38 @@ import SwiftUI
 struct FadeInTextTransitionViewModifier: ViewModifier {
 
   @State private var show = false
+  /// Vendored fix (AmberAgent): tear down the transition scaffolding once the
+  /// one-shot fade completes. A mounted transition keeps a
+  /// `content.transaction { animation = ... }` rewrite plus a `TextRenderer`
+  /// attached to the text forever, so every transaction flowing through the
+  /// subtree re-resolves and re-draws the text (`TextRendererBox.draw` /
+  /// `makeRBDisplayList` dominated long-table streaming profiles, 2026-07-10).
+  /// After the fade the content is fully opaque and static — rendering it bare
+  /// is visually identical and costs nothing on later updates.
+  @State private var settled = false
   let config: FadeInTransitionConfig
 
   func body(content: Content) -> some View {
     if #available(iOS 18.0, *) {
-      ZStack {
-        if show {
-          content
-            .transition(config.asTransition)
+      if settled {
+        content
+      } else {
+        ZStack {
+          if show {
+            content
+              .transition(config.asTransition)
+          }
         }
-      }
-      .onAppear {
-        show = true
+        .onAppear {
+          show = true
+        }
+        .task {
+          // Generous margin past the fade's total duration so the teardown can
+          // never clip the tail of the animation.
+          let holdNanos = UInt64((config.totalDuration + 0.25) * 1_000_000_000)
+          try? await Task.sleep(nanoseconds: holdNanos)
+          settled = true
+        }
       }
     } else {
       content
@@ -38,6 +58,17 @@ extension View {
 enum FadeInTransitionConfig {
   case fixedDuration(duration: TimeInterval, glyphDelay: TimeInterval, glyphDuration: TimeInterval)
   case variableDuration(glyphCount: Int, glyphDelay: TimeInterval, glyphDuration: TimeInterval)
+
+  /// Vendored fix (AmberAgent): total wall time of the one-shot fade, used to
+  /// schedule the post-completion scaffolding teardown.
+  var totalDuration: TimeInterval {
+    switch self {
+    case .fixedDuration(let duration, _, _):
+      return duration
+    case .variableDuration(let glyphCount, let glyphDelay, let glyphDuration):
+      return max(0, Double(glyphCount - 1) * glyphDelay) + glyphDuration
+    }
+  }
 
   @available(iOS 18.0, *)
   var asTransition: AnyTransition {

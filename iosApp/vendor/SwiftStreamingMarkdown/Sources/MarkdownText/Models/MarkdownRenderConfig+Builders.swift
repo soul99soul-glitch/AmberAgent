@@ -18,7 +18,15 @@ extension MarkdownRenderConfig {
       inlineStyle: inlineStyle,
       textContextMenu: textContextMenu,
       citationConfig: citationConfig,
-      blockSpacing: blockSpacing
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 
@@ -34,7 +42,15 @@ extension MarkdownRenderConfig {
       inlineStyle: inlineStyle,
       textContextMenu: textContextMenu,
       citationConfig: citationConfig,
-      blockSpacing: blockSpacing
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 
@@ -50,7 +66,15 @@ extension MarkdownRenderConfig {
       inlineStyle: inlineStyle,
       textContextMenu: textContextMenu,
       citationConfig: citationConfig,
-      blockSpacing: blockSpacing
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 
@@ -66,7 +90,15 @@ extension MarkdownRenderConfig {
       inlineStyle: inlineStyle,
       textContextMenu: textContextMenu,
       citationConfig: citationConfig,
-      blockSpacing: blockSpacing
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 
@@ -82,7 +114,15 @@ extension MarkdownRenderConfig {
       inlineStyle: inlineStyle,
       textContextMenu: textContextMenu,
       citationConfig: citationConfig,
-      blockSpacing: blockSpacing
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 
@@ -98,7 +138,15 @@ extension MarkdownRenderConfig {
       inlineStyle: inlineStyle,
       textContextMenu: textContextMenu,
       citationConfig: citationConfig,
-      blockSpacing: blockSpacing
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 
@@ -114,7 +162,15 @@ extension MarkdownRenderConfig {
       inlineStyle: value,
       textContextMenu: textContextMenu,
       citationConfig: citationConfig,
-      blockSpacing: blockSpacing
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 
@@ -131,7 +187,15 @@ extension MarkdownRenderConfig {
       inlineStyle: inlineStyle,
       textContextMenu: value,
       citationConfig: citationConfig,
-      blockSpacing: blockSpacing
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 
@@ -147,7 +211,207 @@ extension MarkdownRenderConfig {
       inlineStyle: inlineStyle,
       textContextMenu: textContextMenu,
       citationConfig: citationConfig,
-      blockSpacing: value
+      blockSpacing: value,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
+    )
+  }
+
+  /// Returns a copy with `paragraphLineSpacing` replaced.
+  public func withParagraphLineSpacing(value: CGFloat) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: value,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
+    )
+  }
+
+  /// Returns a copy with `tableCellHorizontalPadding` replaced.
+  public func withTableCellHorizontalPadding(value: CGFloat) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: value,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
+    )
+  }
+
+  /// Returns a copy with `tableCellVerticalPadding` replaced.
+  public func withTableCellVerticalPadding(value: CGFloat) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: value,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
+    )
+  }
+
+  /// Returns a copy with `listItemSpacing` replaced.
+  public func withListItemSpacing(value: CGFloat) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: value,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
+    )
+  }
+
+  /// Returns a copy with `headingLineSpacing` replaced.
+  public func withHeadingLineSpacing(value: CGFloat?) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: value,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
+    )
+  }
+
+  /// Returns a copy with `collapsesSoftBreaks` replaced.
+  public func withCollapsesSoftBreaks(value: Bool) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: value
+    )
+  }
+
+  /// Returns a copy with `tableMaxColumnWidth` replaced.
+  public func withTableMaxColumnWidth(value: CGFloat) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: value,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks
+    )
+  }
+
+  /// Returns a copy with `unorderedListBulletWidth` replaced.
+  public func withUnorderedListBulletWidth(value: CGFloat) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: value,
+      collapsesSoftBreaks: collapsesSoftBreaks
     )
   }
 }

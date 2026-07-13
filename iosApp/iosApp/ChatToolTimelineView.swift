@@ -105,12 +105,13 @@ struct ChatToolStepModel: Identifiable {
         // 用包含匹配才不会漏判、掉进裸名回退。
         if tool.toolName.contains("subagent_dispatch") {
             let executed = !tool.output.isEmpty
+            let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
                 systemImage: "person.2.fill",
                 title: Self.subAgentTitle(from: tool.input),
-                detail: Self.subAgentDetail(from: tool.input),
-                state: executed ? .done : .active,
+                detail: failureReason ?? Self.subAgentDetail(from: tool.input),
+                state: Self.state(executed: executed, failureReason: failureReason),
                 isSubAgent: true,
                 tool: tool
             )
@@ -120,12 +121,13 @@ struct ChatToolStepModel: Identifiable {
         if tool.toolName == "search_web" {
             let query = Self.searchQuery(from: tool.input)
             let executed = !tool.output.isEmpty
+            let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
                 systemImage: "magnifyingglass",
                 title: Self.combinedLine(executed ? "已搜索" : "正在搜索", query),
-                detail: executed ? Self.searchResultSummary(from: tool.output) : query.map { "关键词：\($0)" },
-                state: executed ? .done : .active
+                detail: executed ? (failureReason ?? Self.searchResultSummary(from: tool.output)) : query.map { "关键词：\($0)" },
+                state: Self.state(executed: executed, failureReason: failureReason)
             )
             return
         }
@@ -133,48 +135,52 @@ struct ChatToolStepModel: Identifiable {
         if tool.toolName == "scrape_web" {
             let url = Self.scrapeURL(from: tool.input)
             let executed = !tool.output.isEmpty
+            let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
                 systemImage: "globe",
                 title: Self.combinedLine(executed ? "已读取网页" : "正在读取网页", url),
-                detail: executed ? Self.searchResultSummary(from: tool.output) : url.map { "链接：\($0)" },
-                state: executed ? .done : .active
+                detail: executed ? (failureReason ?? Self.searchResultSummary(from: tool.output)) : url.map { "链接：\($0)" },
+                state: Self.state(executed: executed, failureReason: failureReason)
             )
             return
         }
 
         if tool.toolName == "memory_tool" {
             let executed = !tool.output.isEmpty
+            let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
                 systemImage: "brain.head.profile",
                 title: executed ? "已更新核心记忆" : "正在更新核心记忆",
-                detail: nil,
-                state: executed ? .done : .active
+                detail: failureReason,
+                state: Self.state(executed: executed, failureReason: failureReason)
             )
             return
         }
 
         if tool.toolName == "mcp_call" {
             let executed = !tool.output.isEmpty
+            let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
                 systemImage: "puzzlepiece.extension",
                 title: Self.combinedLine(executed ? "已调用 MCP" : "正在调用 MCP", Self.mcpName(from: tool.input)),
-                detail: nil,
-                state: executed ? .done : .active
+                detail: failureReason,
+                state: Self.state(executed: executed, failureReason: failureReason)
             )
             return
         }
 
         if tool.toolName == "model_council_run" {
             let executed = !tool.output.isEmpty
+            let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
                 systemImage: "person.3.sequence",
                 title: executed ? "模型议会已完成" : "模型议会进行中",
-                detail: nil,
-                state: executed ? .done : .active
+                detail: failureReason,
+                state: Self.state(executed: executed, failureReason: failureReason)
             )
             return
         }
@@ -231,6 +237,7 @@ struct ChatToolStepModel: Identifiable {
 
         if tool.toolName.hasPrefix("wm_") {
             let executed = !tool.output.isEmpty
+            let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
                 systemImage: "globe.badge.chevron.backward",
@@ -238,14 +245,15 @@ struct ChatToolStepModel: Identifiable {
                     executed ? Self.webMountCompletedTitle(for: tool) : Self.webMountPendingTitle(for: tool.toolName),
                     Self.webMountInputSummary(from: tool.input)
                 ),
-                detail: executed ? Self.webMountResultSummary(from: tool.output) : Self.webMountInputSummary(from: tool.input),
-                state: executed ? .done : .active
+                detail: executed ? (failureReason ?? Self.webMountResultSummary(from: tool.output)) : Self.webMountInputSummary(from: tool.input),
+                state: Self.state(executed: executed, failureReason: failureReason)
             )
             return
         }
 
         if IOSWorkspaceToolCatalog.supportedToolNames.contains(tool.toolName) {
             let executed = !tool.output.isEmpty
+            let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
                 systemImage: "folder",
@@ -253,20 +261,26 @@ struct ChatToolStepModel: Identifiable {
                     executed ? Self.workspaceCompletedTitle(for: tool.toolName) : Self.workspacePendingTitle(for: tool.toolName),
                     Self.workspaceInputSummary(from: tool.input)
                 ),
-                detail: executed ? Self.workspaceResultSummary(from: tool.output) : Self.workspaceInputSummary(from: tool.input),
-                state: executed ? .done : .active
+                detail: executed ? (failureReason ?? Self.workspaceResultSummary(from: tool.output)) : Self.workspaceInputSummary(from: tool.input),
+                state: Self.state(executed: executed, failureReason: failureReason)
             )
             return
         }
 
         let executed = !tool.output.isEmpty
+        let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
         self.init(
             id: stableID,
             systemImage: Self.icon(for: tool.toolName),
             title: Self.friendlyToolTitle(tool.toolName, executed: executed),
-            detail: tool.input.isEmpty ? nil : tool.input,
-            state: executed ? .done : .active
+            detail: failureReason ?? (tool.input.isEmpty ? nil : tool.input),
+            state: Self.state(executed: executed, failureReason: failureReason)
         )
+    }
+
+    private static func state(executed: Bool, failureReason: String?) -> ChatToolStepState {
+        guard executed else { return .active }
+        return failureReason == nil ? .done : .failed
     }
 
     private static func stableID(for tool: UIMessagePart.Tool) -> String {

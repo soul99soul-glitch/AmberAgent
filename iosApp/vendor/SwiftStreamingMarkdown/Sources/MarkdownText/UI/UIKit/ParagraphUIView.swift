@@ -14,7 +14,6 @@ struct AccessibilityContent {
 }
 
 struct FadeAnimationData {
-  let id: UUID = UUID()
   let startTime: CFTimeInterval
   let duration: CFTimeInterval
   let range: NSRange
@@ -302,29 +301,15 @@ class ParagraphUIView: UITextView {
 
   @objc private func updateFadeAnimation() {
     let currentTime = CACurrentMediaTime()
-    var completedAnimations: [UUID] = []
-
-    updateTextViewWithCurrentAnimations()
-
-    // Remove completed animations
-    for animation in activeAnimations {
-      let elapsed = currentTime - animation.startTime
-      let progress = elapsed / animation.duration
-
-      if progress >= 1.0 {
-        completedAnimations.append(animation.id)
-      }
-    }
-    activeAnimations.removeAll { completedAnimations.contains($0.id) }
+    updateTextViewWithCurrentAnimations(at: currentTime)
+    activeAnimations.removeAll { currentTime - $0.startTime >= $0.duration }
 
     if activeAnimations.isEmpty {
       tearDownDisplayLink()
     }
   }
 
-  private func updateTextViewWithCurrentAnimations() {
-    let currentTime = CACurrentMediaTime()
-
+  private func updateTextViewWithCurrentAnimations(at currentTime: CFTimeInterval = CACurrentMediaTime()) {
     textStorage.beginEditing()
     defer { textStorage.endEditing() }
 
@@ -356,7 +341,11 @@ class ParagraphUIView: UITextView {
 
   private func setUpDisplayLink() {
     fadeAnimationDisplayLink = CADisplayLink(target: self, selector: #selector(updateFadeAnimation))
-    fadeAnimationDisplayLink?.preferredFramesPerSecond = 60
+    fadeAnimationDisplayLink?.preferredFrameRateRange = CAFrameRateRange(
+      minimum: 60,
+      maximum: 120,
+      preferred: 120
+    )
     fadeAnimationDisplayLink?.add(to: .main, forMode: .common)
   }
 

@@ -8,6 +8,7 @@ import SwiftUI
 struct ParagraphView: UIViewRepresentable {
   @Environment(\.openURL) var openURL
   @Environment(\.markdownConfig) var config: MarkdownRenderConfig
+  @Environment(\.markdownAnimateInitialText) var animateInitialText
   @Environment(\.markdownController) var markdownController: MarkdownController?
 
   var contents: NSMutableAttributedString
@@ -25,7 +26,7 @@ struct ParagraphView: UIViewRepresentable {
     view.setTextContextMenu(config.textContextMenu)
     view.setMarkdownController(markdownController)
 
-    if config.shouldAnimateText {
+    if config.shouldAnimateText && animateInitialText {
       view.alpha = 0
       UIView.animate(withDuration: ParagraphUIView.animationDuration) {
         view.alpha = 1
@@ -35,8 +36,17 @@ struct ParagraphView: UIViewRepresentable {
     return view
   }
 
+  static func dismantleUIView(_ uiView: ParagraphUIView, coordinator: Coordinator) {
+    ParagraphUIViewCache.shared.recycle(uiView)
+  }
+
   func updateUIView(_ view: ParagraphUIView, context: Context) {
-    if view.paragraphContents != contents || view.lineSpacing != lineSpacing {
+    // Vendored fix (AmberAgent): identity-first short circuit. Frozen/settled
+    // streaming blocks re-pass the same NSMutableAttributedString instance on
+    // every layout pass; the deep attributed-string compare is O(content) per
+    // paragraph per pass and dominated long-document streaming profiles.
+    let contentsUnchanged = view.paragraphContents === contents || view.paragraphContents == contents
+    if !contentsUnchanged || view.lineSpacing != lineSpacing {
       let shouldAnimate = view.window != nil && config.shouldAnimateText // only animate when visible
       view.setParagraphContents(contents, lineSpacing: lineSpacing, animatedByWord: shouldAnimate)
     }
@@ -51,7 +61,10 @@ struct ParagraphView: UIViewRepresentable {
     }
 
     // Check if content or lineSpacing changed - if so, clear the cache
-    if contents != context.coordinator.lastContents || lineSpacing != context.coordinator.lastLineSpacing {
+    // Vendored fix (AmberAgent): identity-first short circuit, see updateUIView.
+    let contentsUnchanged = contents === context.coordinator.lastContents
+      || contents == context.coordinator.lastContents
+    if !contentsUnchanged || lineSpacing != context.coordinator.lastLineSpacing {
       context.coordinator.sizeCache.removeAll()
       context.coordinator.lastContents = contents
       context.coordinator.lastLineSpacing = lineSpacing
@@ -87,6 +100,8 @@ struct ParagraphView: UIViewRepresentable {
 
 extension ParagraphView: Equatable {
   static func == (lhs: ParagraphView, rhs: ParagraphView) -> Bool {
-    lhs.contents == rhs.contents && lhs.lineSpacing == rhs.lineSpacing
+    // Vendored fix (AmberAgent): identity-first short circuit, see updateUIView.
+    (lhs.contents === rhs.contents || lhs.contents == rhs.contents)
+      && lhs.lineSpacing == rhs.lineSpacing
   }
 }

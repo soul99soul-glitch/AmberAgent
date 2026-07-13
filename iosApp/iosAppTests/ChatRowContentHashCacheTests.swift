@@ -145,4 +145,201 @@ final class ChatRowContentHashCacheTests: XCTestCase {
             "isLast/isStreaming 行必须永不缓存,否则流式增量会被卡在第一次算出的哈希上"
         )
     }
+
+    func testStreamingTailLayoutTokenChangesWithAppendedText() {
+        let cache = ChatRowContentHashCache()
+        let messageId = KotlinUuid.companion.random()
+
+        func message(text: String) -> UIMessage {
+            UIMessage(
+                id: messageId,
+                role: MessageRole.assistant,
+                parts: [UIMessagePart.Text(text: text, metadata: nil)],
+                annotations: [],
+                createdAt: chatNowLocalDateTime(),
+                finishedAt: nil,
+                modelId: nil,
+                usage: nil,
+                translation: nil
+            )
+        }
+
+        let first = makeRow(message: message(text: "正在生成"), isLast: true, isStreaming: true)
+        let second = makeRow(message: message(text: "正在生成更长的内容"), isLast: true, isStreaming: true)
+
+        XCTAssertNotEqual(
+            cache.streamingTailLayoutToken(for: first),
+            cache.streamingTailLayoutToken(for: second)
+        )
+    }
+
+    func testSuspendedStreamingTailLayoutTokenIgnoresInvisibleTextGrowth() {
+        let cache = ChatRowContentHashCache()
+        let messageId = KotlinUuid.companion.random()
+        let first = makeRow(
+            message: makeTextMessage(id: messageId, text: "正在生成"),
+            isLast: true,
+            isStreaming: true
+        )
+        let second = makeRow(
+            message: makeTextMessage(id: messageId, text: "正在生成更长且当前不可见的内容"),
+            isLast: true,
+            isStreaming: true
+        )
+
+        XCTAssertEqual(
+            cache.suspendedStreamingTailLayoutToken(for: first),
+            cache.suspendedStreamingTailLayoutToken(for: second),
+            "用户查看历史时，不可见流式尾行不应被每个文本 delta 反复失效。"
+        )
+        XCTAssertNotEqual(
+            cache.streamingTailLayoutToken(for: first),
+            cache.streamingTailLayoutToken(for: second),
+            "恢复可见后仍需用实时 token 接收最新累计全文。"
+        )
+    }
+
+    func testStreamingTailLayoutTokenChangesWhenCitationArrivesWithoutTextDelta() {
+        let cache = ChatRowContentHashCache()
+        let messageId = KotlinUuid.companion.random()
+        let base = makeTextMessage(id: messageId, text: "带来源的回答")
+        let cited = UIMessage(
+            id: messageId,
+            role: base.role,
+            parts: base.parts,
+            annotations: [UIMessageAnnotation.UrlCitation(title: "来源", url: "https://example.com")],
+            createdAt: base.createdAt,
+            finishedAt: base.finishedAt,
+            modelId: base.modelId,
+            usage: base.usage,
+            translation: base.translation
+        )
+
+        XCTAssertNotEqual(
+            cache.streamingTailLayoutToken(for: makeRow(message: base, isLast: true, isStreaming: true)),
+            cache.streamingTailLayoutToken(for: makeRow(message: cited, isLast: true, isStreaming: true)),
+            "Late citation annotations are visible rows and must invalidate the equatable bubble."
+        )
+    }
+
+    func testStreamingTailLayoutTokenChangesWithToolInputAndOutputContent() {
+        let cache = ChatRowContentHashCache()
+        let messageId = KotlinUuid.companion.random()
+
+        func message(input: String, output: String) -> UIMessage {
+            UIMessage(
+                id: messageId,
+                role: MessageRole.assistant,
+                parts: [UIMessagePart.Tool(
+                    toolCallId: "tool-1",
+                    toolName: "search_web",
+                    input: input,
+                    output: output.isEmpty ? [] : [UIMessagePart.Text(text: output, metadata: nil)],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                )],
+                annotations: [],
+                createdAt: chatNowLocalDateTime(),
+                finishedAt: nil,
+                modelId: nil,
+                usage: nil,
+                translation: nil
+            )
+        }
+
+        let partialInput = makeRow(message: message(input: #"{"query":"sw"}"#, output: ""), isLast: true, isStreaming: true)
+        let completeInput = makeRow(message: message(input: #"{"query":"swift"}"#, output: ""), isLast: true, isStreaming: true)
+        XCTAssertNotEqual(
+            cache.streamingTailLayoutToken(for: partialInput),
+            cache.streamingTailLayoutToken(for: completeInput)
+        )
+
+        let firstOutput = makeRow(message: message(input: #"{"query":"swift"}"#, output: "结果 A"), isLast: true, isStreaming: true)
+        let changedOutput = makeRow(message: message(input: #"{"query":"swift"}"#, output: "结果 B"), isLast: true, isStreaming: true)
+        XCTAssertNotEqual(
+            cache.streamingTailLayoutToken(for: firstOutput),
+            cache.streamingTailLayoutToken(for: changedOutput)
+        )
+    }
+
+    func testSwiftUICleanListKeepsHistoricalStreamedRowsOnStreamingRenderer() {
+        let message = makeTextMessage(id: KotlinUuid.companion.random(), text: "已完成的流式 Markdown")
+        let streamedHistory = makeRow(message: message, isLast: false, isStreaming: false)
+        let row = ChatMessageRowModel(
+            rowId: streamedHistory.rowId,
+            messageId: streamedHistory.messageId,
+            message: streamedHistory.message,
+            role: streamedHistory.role,
+            parts: streamedHistory.parts,
+            index: streamedHistory.index,
+            isLast: false,
+            isStreaming: false,
+            hasEverStreamed: true,
+            canAnimateInsertion: false
+        )
+
+        let state = ChatSwiftUICleanListRenderPolicy.nonLiveTailState(for: row)
+
+        XCTAssertEqual(state?.rendererMode, .streamingMarkdown)
+        XCTAssertEqual(state?.hasEverStreamed, true)
+        XCTAssertEqual(state?.liveRenderingEnabled, true)
+        XCTAssertNil(state?.frozenMarkdownSnapshot)
+    }
+
+    func testSwiftUICleanListKeepsLiveTailRendererStableWhileUpdatesAreSuspended() {
+        let row = makeRow(
+            message: makeTextMessage(id: KotlinUuid.companion.random(), text: "正在流式生成"),
+            isLast: true,
+            isStreaming: true
+        )
+
+        let state = ChatSwiftUICleanListRenderPolicy.liveTailState(for: row)
+
+        XCTAssertEqual(state?.rendererMode, .streamingMarkdown)
+        XCTAssertEqual(state?.hasEverStreamed, true)
+        XCTAssertEqual(state?.liveRenderingEnabled, true)
+        XCTAssertNil(state?.frozenMarkdownSnapshot)
+    }
+
+    func testSwiftUICleanListRowsUseDigestEquatableWrapper() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let source = try String(
+            contentsOf: appDirectory.appendingPathComponent("ChatCollectionMessageList.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            source.contains("private struct ChatSwiftUIMessageBubble: View, @MainActor Equatable"),
+            "Default SwiftUI clean-list rows must have their own Equatable wrapper; native-only row gating does not protect the default path."
+        )
+        XCTAssertTrue(
+            source.contains("ChatSwiftUIMessageBubble(") && source.contains(".equatable()"),
+            "ChatSwiftUIMessageList.messageRow should render through the Equatable wrapper."
+        )
+        XCTAssertTrue(
+            source.contains("@State private var swiftUIContentHashCache = ChatRowContentHashCache()") &&
+                source.contains("@State private var swiftUIRenderStateStore = ChatRenderStateStore()") &&
+                source.contains("ChatRowDigests.digest("),
+            "Default SwiftUI rows must use the shared digest/content-hash gate instead of comparing full UIMessage values."
+        )
+        XCTAssertTrue(
+            source.contains("ChatSwiftUIStreamingTailRenderPolicy.shouldSuspend(") &&
+                source.contains("isLastAssistant: row.isLast && row.role == MessageRole.assistant") &&
+                source.contains("hasEverStreamed: row.hasEverStreamed") &&
+                source.contains("swiftUIContentHashCache.suspendedStreamingTailLayoutToken(for: row)") &&
+                source.contains("proxy.bounds(of: .scrollView)"),
+            "The default clean-list may suspend streaming-tail invalidation only after that tail row is confirmed offscreen."
+        )
+        XCTAssertTrue(
+            source.contains("if lhs.updatesSuspended") &&
+                source.contains("lhs.updatesSuspended == rhs.updatesSuspended"),
+            "Streaming deltas must keep a confirmed-offscreen tail bubble stable until it becomes visible."
+        )
+        XCTAssertFalse(
+            source.contains("row.isStreaming && viewportState.liveRenderingFarFromBottom"),
+            "Distance-to-bottom is not proof that a very tall streaming tail is invisible."
+        )
+    }
 }

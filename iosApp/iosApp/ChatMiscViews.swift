@@ -2,6 +2,68 @@ import SwiftUI
 import UIKit
 import Shared
 
+/// UIKit 驱动的 variableColor SF Symbol 动画(等价 SwiftUI
+/// `.symbolEffect(.variableColor.iterative.reversing, isActive:)`)。
+/// 动画运行在 CA/UIKit 层,不占用 SwiftUI ViewGraph 的每帧更新预算——
+/// 这是"隔离常驻指示动画"的标准做法,不是动画降级。
+struct ChatUIKitVariableColorSymbol: UIViewRepresentable {
+    let systemName: String
+    let pointSize: CGFloat
+    let weight: UIFont.Weight
+    let tint: UIColor
+    let isActive: Bool
+
+    func makeUIView(context: Context) -> UIImageView {
+        let view = UIImageView()
+        view.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+            pointSize: pointSize,
+            weight: symbolWeight
+        )
+        view.image = UIImage(systemName: systemName)
+        view.tintColor = tint
+        view.setContentHuggingPriority(.required, for: .horizontal)
+        view.setContentHuggingPriority(.required, for: .vertical)
+        view.setContentCompressionResistancePriority(.required, for: .horizontal)
+        view.setContentCompressionResistancePriority(.required, for: .vertical)
+        applyEffect(to: view, active: isActive)
+        context.coordinator.effectActive = isActive
+        return view
+    }
+
+    func updateUIView(_ view: UIImageView, context: Context) {
+        view.tintColor = tint
+        if context.coordinator.effectActive != isActive {
+            applyEffect(to: view, active: isActive)
+            context.coordinator.effectActive = isActive
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        var effectActive = false
+    }
+
+    private var symbolWeight: UIImage.SymbolWeight {
+        switch weight {
+        case .bold: return .bold
+        case .medium: return .medium
+        case .regular: return .regular
+        default: return .semibold
+        }
+    }
+
+    private func applyEffect(to view: UIImageView, active: Bool) {
+        if active {
+            view.addSymbolEffect(.variableColor.iterative.reversing)
+        } else {
+            view.removeAllSymbolEffects()
+        }
+    }
+}
+
 struct ChatReasoningCard: View {
     let bodyText: String
     var isThinking: Bool = false
@@ -54,6 +116,18 @@ struct ChatReasoningCard: View {
         AmberTheme.accent.opacity(isThinking ? 0.20 : 0.16)
     }
 
+    /// 思考内容顶部底部的渐变模糊 mask。
+    /// 顶部 0→1(前 12pt 淡出),中间全不透明,底部 1→0(末 12pt 淡出)。
+    private var reasoningFadeMask: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                .frame(height: 12)
+            Rectangle()
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: 12)
+        }
+    }
+
     private func titleText(elapsed: Int?) -> String {
         if isThinking {
             if let elapsed { return "思考中 \(elapsed) 秒\(levelSuffix)" }
@@ -96,10 +170,19 @@ struct ChatReasoningCard: View {
                 withAnimation(.easeInOut(duration: 0.22)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(AmberTheme.accentAmber)
-                        .symbolEffect(.variableColor.iterative.reversing, isActive: isThinking && !reduceMotion)
+                    // 思考中的时钟动画由 UIKit addSymbolEffect 驱动(视觉与 SwiftUI
+                    // .symbolEffect 相同)。SwiftUI 的永动 symbolEffect 会把
+                    // ViewGraphDisplayLink 钉在 60fps,每帧渲染器工作量 ∝ 整窗显示
+                    // 列表——长表格/代码块在屏时实测 ~240ms CPU/秒(2026-07-10
+                    // idleDecay 探针,裸挂 markdown 后降到 ~17ms/秒)。UIKit 版由
+                    // CA 层驱动同一动画,SwiftUI 零每帧成本,屏幕内动画不降级。
+                    ChatUIKitVariableColorSymbol(
+                        systemName: "clock",
+                        pointSize: 12.5,
+                        weight: .semibold,
+                        tint: UIColor(AmberTheme.accentAmber),
+                        isActive: isThinking && !reduceMotion
+                    )
 
                     titleLabel
 
@@ -121,20 +204,34 @@ struct ChatReasoningCard: View {
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: hasBodyText ? 0.98 : 1, haptic: hasBodyText ? .selection : nil))
 
             if showsBody {
-                Text(bodyText)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineSpacing(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 2)
-                    .padding(.bottom, 10)
-                    .transaction { transaction in
-                        transaction.animation = nil
+                // 自适应高度 + maxHeight 上限 + 顶部底部渐变模糊。
+                // 短文本:Text 高度 < maxHeight,ScrollView 不滚,整体高度 = 文本高度(不留白)。
+                // 长文本:超过 maxHeight,ScrollView 可滚查看。
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        Text(bodyText)
+                            .font(.caption2)
+                            .foregroundStyle(AmberTheme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 2)
+                            .padding(.bottom, 10)
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("reasoning-bottom")
                     }
-                // Fade in place (no upward move) so the collapsing text doesn't slide up over
-                // the header.
-                .transition(.opacity)
+                    .onAppear {
+                        scrollReasoningToBottom(proxy)
+                    }
+                    .onChange(of: bodyText) { _, _ in
+                        scrollReasoningToBottom(proxy)
+                    }
+                }
+                .frame(maxHeight: isThinking ? 180 : 260)
+                .mask(reasoningFadeMask)
+                // 从底部滑入/滑出:展开时从下往上出现,收回时从上往下消失(底部先收)。
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .background(
@@ -147,21 +244,75 @@ struct ChatReasoningCard: View {
         }
         // Clip to the capsule so the collapsing content can never render outside / through it.
         .clipShape(RoundedRectangle(cornerRadius: showsBody ? AmberTheme.radiusLarge : 17, style: .continuous))
+        // 统一驱动所有依赖 showsBody/isExpanded 的视觉变化(圆角、chevron、高度增删),
+        // 覆盖自动展开/收回路径(它们不经过 withAnimation)和用户 toggle 路径。
+        .animation(.easeInOut(duration: 0.28), value: showsBody)
         .onChange(of: bodyText) { _, newValue in
             guard isThinking, !userToggled else { return }
             if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                isExpanded = true
+                withAnimation(.easeInOut(duration: 0.28)) { isExpanded = true }
             }
         }
         .onChange(of: isThinking) { _, nowThinking in
             guard !userToggled else { return }
             if nowThinking {
-                isExpanded = hasBodyText
+                withAnimation(.easeInOut(duration: 0.28)) { isExpanded = hasBodyText }
             } else if autoCloseThinking {
-                var transaction = Transaction()
-                transaction.animation = nil
-                withTransaction(transaction) {
+                withAnimation(.easeInOut(duration: 0.28)) {
                     isExpanded = false
+                }
+            }
+        }
+    }
+
+    private func scrollReasoningToBottom(_ proxy: ScrollViewProxy) {
+        guard isThinking, showsBody else { return }
+        DispatchQueue.main.async {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            transaction.animation = nil
+            withTransaction(transaction) {
+                proxy.scrollTo("reasoning-bottom", anchor: .bottom)
+            }
+        }
+    }
+}
+
+private struct ChatReasoningBodyTextView: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.backgroundColor = .clear
+        textView.isEditable = false
+        textView.isSelectable = true
+        // isScrollEnabled = true:保持可滚动(超长内容可查看),且不覆盖标题(VStack 布局正常)。
+        // 短文本在固定 frame 内上方对齐(textContainerInset 控制留白)。
+        textView.isScrollEnabled = true
+        textView.showsVerticalScrollIndicator = false
+        textView.textContainerInset = UIEdgeInsets(top: 2, left: 12, bottom: 10, right: 12)
+        textView.textContainer.lineFragmentPadding = 0
+        textView.font = UIFont.preferredFont(forTextStyle: .caption1)
+        textView.textColor = UIColor(AmberTheme.muted)
+        textView.adjustsFontForContentSizeCategory = true
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if textView.text != text {
+            let wasAtBottom = textView.contentSize.height <= textView.bounds.height + 1 ||
+                textView.contentOffset.y >= textView.contentSize.height - textView.bounds.height - 8
+            textView.text = text
+            textView.font = UIFont.preferredFont(forTextStyle: .caption1)
+            textView.textColor = UIColor(AmberTheme.muted)
+            if wasAtBottom {
+                DispatchQueue.main.async { [weak textView] in
+                    guard let textView else { return }
+                    let maxY = max(
+                        -textView.adjustedContentInset.top,
+                        textView.contentSize.height - textView.bounds.height + textView.adjustedContentInset.bottom
+                    )
+                    textView.setContentOffset(CGPoint(x: 0, y: maxY), animated: false)
                 }
             }
         }
@@ -169,23 +320,104 @@ struct ChatReasoningCard: View {
 }
 
 struct ChatEmptyState: View {
+    @State private var prompt = Self.randomPrompt()
+
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(AmberTheme.accent)
+        VStack(spacing: 18) {
+            AmberEmptyStateMark()
+                .padding(.bottom, 2)
 
-            Text("Amber")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(AmberTheme.foreground)
+            VStack(spacing: 7) {
+                Text("今天想聊点什么？")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
 
-            Text("准备好了")
-                .font(.subheadline)
-                .foregroundStyle(AmberTheme.muted)
+                Text(prompt)
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.muted)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 96)
+        .padding(.horizontal, 34)
+        .padding(.top, 104)
         .padding(.bottom, 180)
+    }
+
+    private static func randomPrompt() -> String {
+        [
+            "先随便说一句也可以。",
+            "有个念头的话，直接丢给我。",
+            "想写、想查、想整理，都可以从一句话开始。",
+            "要解决问题也行，只是聊聊也行。",
+            "不知道从哪开始的话，先说现在卡在哪。"
+        ].randomElement() ?? "先随便说一句也可以。"
+    }
+}
+
+private struct AmberEmptyStateMark: View {
+    private static let markDiameter: CGFloat = 56
+    private static let orbitDiameter: CGFloat = 62
+    private static let orbitLineWidth: CGFloat = 1
+    private static let dotDiameter: CGFloat = 5
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let progress = reduceMotion ? 0 : orbitProgress(at: timeline.date)
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                AmberTheme.surface.opacity(0.94),
+                                AmberTheme.accent.opacity(0.08)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: Self.markDiameter, height: Self.markDiameter)
+                    .overlay {
+                        Circle()
+                            .stroke(AmberTheme.borderSoft.opacity(0.9), lineWidth: 0.7)
+                    }
+                    .shadow(color: AmberTheme.accent.opacity(0.10), radius: 9, x: 0, y: 5)
+
+                Circle()
+                    .stroke(AmberTheme.accent.opacity(0.22), lineWidth: Self.orbitLineWidth)
+                    .frame(width: Self.orbitDiameter, height: Self.orbitDiameter)
+                    .opacity(reduceMotion ? 0.12 : 1)
+
+                Text("A")
+                    .font(.system(size: 30, weight: .semibold, design: .serif))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .offset(y: -1)
+
+                orbitDot(progress: progress)
+            }
+            .frame(width: 76, height: 76)
+        }
+    }
+
+    private func orbitDot(progress: Double) -> some View {
+        let angle = progress * 2 * .pi - .pi / 2
+        let radius = Self.orbitDiameter / 2
+        let x = CGFloat(cos(angle)) * radius
+        let y = CGFloat(sin(angle)) * radius
+
+        return Circle()
+            .fill(AmberTheme.accent)
+            .frame(width: Self.dotDiameter, height: Self.dotDiameter)
+            .offset(x: x, y: y)
+            .shadow(color: AmberTheme.accent.opacity(0.45), radius: 5, x: 0, y: 0)
+            .opacity(0.9)
+    }
+
+    private func orbitProgress(at date: Date) -> Double {
+        let cycle = 7.2
+        return date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycle) / cycle
     }
 }
 

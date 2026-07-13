@@ -17,7 +17,11 @@ struct AppShell: View {
     @State private var sharedSettings: IOSSharedSettingsStore
     @State private var mcpConfigStore: IOSMcpConfigStore
     @State private var conversationStore: IOSConversationStore
+    @State private var chatViewModel: ChatViewModel
+    @State private var novelCreationViewModel: NovelCreationViewModel?
+    @State private var novelCreationErrorMessage: String?
     @State private var rootRouter = RouterPath()
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.system.rawValue
 
     init(settingsStore: SettingsStore) {
@@ -41,6 +45,22 @@ struct AppShell: View {
             searchTransport: IOSURLSessionSearchHTTPTransport(),
             mcpManager: backgroundMcpManager
         )
+        let chatViewModel = ChatViewModel(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettingsStore,
+            localToolExecutor: localToolExecutor
+        )
+        let novelCreationViewModel: NovelCreationViewModel?
+        let novelCreationErrorMessage: String?
+        do {
+            novelCreationViewModel = try NovelCreationComposition.makeViewModel(
+                sharedSettings: sharedSettingsStore
+            )
+            novelCreationErrorMessage = nil
+        } catch {
+            novelCreationViewModel = nil
+            novelCreationErrorMessage = error.localizedDescription
+        }
         self.settingsStore = settingsStore
         self._permissionStore = State(initialValue: permissionStore)
         self._documentAccessStore = State(initialValue: documentAccessStore)
@@ -51,6 +71,9 @@ struct AppShell: View {
         self._sharedSettings = State(initialValue: sharedSettingsStore)
         self._mcpConfigStore = State(initialValue: IOSMcpConfigStore())
         self._conversationStore = State(initialValue: conversationStore)
+        self._chatViewModel = State(initialValue: chatViewModel)
+        self._novelCreationViewModel = State(initialValue: novelCreationViewModel)
+        self._novelCreationErrorMessage = State(initialValue: novelCreationErrorMessage)
         IOSDeepReadBackgroundCoordinator.shared.configure(sharedSettings: sharedSettingsStore)
         IOSChatBackgroundGenerationCoordinator.shared.configure(
             conversationStore: conversationStore,
@@ -66,7 +89,7 @@ struct AppShell: View {
 
     var body: some View {
         NavigationStack(path: Binding(get: { rootRouter.path }, set: { rootRouter.path = $0 })) {
-            ConversationsView(sharedSettings: sharedSettings)
+            ConversationsView(sharedSettings: sharedSettings, chatViewModel: chatViewModel)
                 .withAppDestinations(
                     settingsStore: settingsStore,
                     providerRegistry: providerRegistry,
@@ -76,7 +99,11 @@ struct AppShell: View {
                     documentStore: documentAccessStore,
                     workspaceStore: workspaceStore,
                     systemPermissionCoordinator: systemPermissionCoordinator,
-                    localToolExecutor: localToolExecutor
+                    localToolExecutor: localToolExecutor,
+                    chatViewModel: chatViewModel,
+                    novelCreationViewModel: novelCreationViewModel,
+                    novelCreationErrorMessage: novelCreationErrorMessage,
+                    router: rootRouter
                 )
         }
         .sheet(item: Binding(get: { rootRouter.presentedSheet }, set: { rootRouter.presentedSheet = $0 })) { sheet in
@@ -84,10 +111,16 @@ struct AppShell: View {
         }
         .environment(rootRouter)
         .environment(conversationStore)
+        .environment(chatViewModel)
         .environment(documentAccessStore)
         .environment(workspaceStore)
         .tint(AmberTheme.accent)
         .preferredColorScheme(preferredColorScheme)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                _ = chatViewModel.handoffGenerationToBackgroundIfNeeded()
+            }
+        }
         .task {
             // 启动时引导会话存储：加载历史摘要，选最近一条或新建。
             // 仅做一次——SwiftUI .task 在 view identity 存活期间重启时会重跑，
@@ -144,7 +177,8 @@ enum AppTab: String, CaseIterable, Identifiable {
         sharedSettings: IOSSharedSettingsStore,
         localToolExecutor: IOSLocalToolExecutor,
         documentStore: DocumentAccessStore? = nil,
-        workspaceStore: IOSWorkspaceStore = .shared
+        workspaceStore: IOSWorkspaceStore = .shared,
+        chatViewModel: ChatViewModel? = nil
     ) -> some View {
         switch self {
         case .chat:
@@ -153,7 +187,8 @@ enum AppTab: String, CaseIterable, Identifiable {
                 sharedSettings: sharedSettings,
                 localToolExecutor: localToolExecutor,
                 documentStore: documentStore,
-                workspaceStore: workspaceStore
+                workspaceStore: workspaceStore,
+                viewModel: chatViewModel
             )
         case .workspace:
             if sharedSettings.isCapabilityGateEnabled(.workspace) {
@@ -266,6 +301,8 @@ enum Route: Hashable {
     case miniApps
     case miniAppSettings
     case miniAppRunner(appId: String)
+    case novelCreation
+    case novelProject(id: NovelProjectID)
     case webMount
     case webMountSite(site: WebMountSiteRoute)
     case workspace
@@ -308,7 +345,11 @@ private extension View {
         documentStore: DocumentAccessStore,
         workspaceStore: IOSWorkspaceStore,
         systemPermissionCoordinator: IOSSystemPermissionCoordinator,
-        localToolExecutor: IOSLocalToolExecutor
+        localToolExecutor: IOSLocalToolExecutor,
+        chatViewModel: ChatViewModel,
+        novelCreationViewModel: NovelCreationViewModel?,
+        novelCreationErrorMessage: String?,
+        router: RouterPath
     ) -> some View {
         navigationDestination(for: Route.self) { route in
             switch route {
@@ -318,7 +359,8 @@ private extension View {
                     sharedSettings: sharedSettings,
                     localToolExecutor: localToolExecutor,
                     documentStore: documentStore,
-                    workspaceStore: workspaceStore
+                    workspaceStore: workspaceStore,
+                    viewModel: chatViewModel
                 )
             case .search(let initialQuery):
                 if sharedSettings.isCapabilityGateEnabled(.standaloneSearch) {
@@ -426,6 +468,37 @@ private extension View {
                 MiniAppSettingsView(sharedSettings: sharedSettings)
             case .miniAppRunner(let appId):
                 MiniAppRunnerView(appId: appId, settingsStore: settingsStore, sharedSettings: sharedSettings)
+            case .novelCreation:
+                if let novelCreationViewModel {
+                    NovelProjectListView(
+                        viewModel: novelCreationViewModel,
+                        onOpen: { projectID in
+                            router.navigate(to: .novelProject(id: projectID))
+                        }
+                    )
+                    .novelCreationErrorAlert(viewModel: novelCreationViewModel)
+                } else {
+                    ContentUnavailableView(
+                        "小说创作暂不可用",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(novelCreationErrorMessage ?? "无法打开项目存储。")
+                    )
+                }
+            case .novelProject(let projectID):
+                if let novelCreationViewModel {
+                    NovelProjectWorkspaceView(
+                        viewModel: novelCreationViewModel,
+                        sharedSettings: sharedSettings,
+                        projectID: projectID
+                    )
+                    .novelCreationErrorAlert(viewModel: novelCreationViewModel)
+                } else {
+                    ContentUnavailableView(
+                        "小说创作暂不可用",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(novelCreationErrorMessage ?? "无法打开项目存储。")
+                    )
+                }
             case .webMount:
                 WebMountView()
             case .webMountSite(let site):

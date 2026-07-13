@@ -44,6 +44,128 @@ struct IOSGenerativeWidgetAction: Identifiable, Equatable {
     }
 }
 
+/// `mayContainWidgetPayload` 的增量流式版本。
+///
+/// 全文版每次调用对全文做 13+ 次 locale-aware 子串搜索,32KB 内容实测约 46ms/次,
+/// 而流式尾行每个 chunk 的每次 body 求值都要问一遍——这是长内容掉帧的头号成本。
+/// 本探测器只扫 append 进来的字节(带跨 chunk 重叠窗),命中后 latch 为 true,
+/// 摊还 O(delta)。
+///
+/// 语义对齐说明:needle 全部是 ASCII;ASCII 小写折叠与 `.caseInsensitive` 对
+/// ASCII needle 等价(非 ASCII 内容字符在两种折叠下都不可能等于 ASCII needle 字符)。
+/// JSON 组的"首个非空白字符是 {"判据用 ASCII 空白近似 Unicode 空白——只有
+/// "Unicode 空白开头的裸 JSON"这一病态输入会与全文版分歧(欠检),接受。
+struct IOSGenerativeWidgetPayloadDetector {
+    private(set) var mayContainPayload = false
+
+    private static let checkpointLength = 24
+    /// 小写折叠后的 needle 字节序列。JSON 组单列,受 brace 门控。
+    private static let foldedGeneralNeedles: [[UInt8]] =
+        (IOSGenerativeWidgetParser.payloadMarkerNeedles + IOSGenerativeWidgetParser.payloadHtmlNeedles)
+            .map { Array($0.lowercased().utf8) }
+    private static let foldedJSONNeedles: [[UInt8]] =
+        IOSGenerativeWidgetParser.payloadJSONNeedles.map { Array($0.lowercased().utf8) }
+    private static let maxNeedleLength: Int =
+        (foldedGeneralNeedles + foldedJSONNeedles).map(\.count).max() ?? 16
+
+    private var processedUTF8Count = 0
+    private var checkpoint: [UInt8] = []
+    /// 已扫窗口的小写折叠尾巴(maxNeedleLength-1),兜住跨 chunk 边界的 needle。
+    private var overlap: [UInt8] = []
+    /// 首个非空白字符是否 "{"。nil = 尚未见到任何非空白字符。
+    private var startsWithJSONBrace: Bool?
+
+    init(text: String = "") {
+        if !text.isEmpty {
+            update(with: text)
+        }
+    }
+
+    mutating func update(with text: String) {
+        guard !mayContainPayload else { return }
+        let utf8 = text.utf8
+        let count = utf8.count
+        guard count != processedUTF8Count || !checkpointMatches(in: utf8) else { return }
+        if count < processedUTF8Count || !checkpointMatches(in: utf8) {
+            resetState()
+        }
+
+        let start = utf8.index(utf8.startIndex, offsetBy: processedUTF8Count)
+        var window = overlap
+        window.reserveCapacity(overlap.count + (count - processedUTF8Count))
+        for byte in utf8[start...] {
+            if startsWithJSONBrace == nil, !Self.isASCIIWhitespace(byte) {
+                startsWithJSONBrace = byte == UInt8(ascii: "{")
+            }
+            window.append(Self.foldASCII(byte))
+        }
+        processedUTF8Count = count
+        checkpoint = Array(utf8.suffix(Self.checkpointLength))
+
+        if Self.containsAny(Self.foldedGeneralNeedles, in: window) {
+            mayContainPayload = true
+            return
+        }
+        if startsWithJSONBrace == true, Self.containsAny(Self.foldedJSONNeedles, in: window) {
+            mayContainPayload = true
+            return
+        }
+        overlap = Array(window.suffix(Self.maxNeedleLength - 1))
+    }
+
+    /// Completion can replace the accumulated stream with one final full message.
+    /// Re-scan that boundary once; append-only chunks stay on the O(delta) path above.
+    mutating func reconcileFinalText(_ text: String) {
+        guard !mayContainPayload else { return }
+        resetState()
+        update(with: text)
+    }
+
+    private mutating func resetState() {
+        mayContainPayload = false
+        processedUTF8Count = 0
+        checkpoint.removeAll(keepingCapacity: true)
+        overlap.removeAll(keepingCapacity: true)
+        startsWithJSONBrace = nil
+    }
+
+    private func checkpointMatches(in utf8: String.UTF8View) -> Bool {
+        guard processedUTF8Count > 0 else { return true }
+        guard processedUTF8Count <= utf8.count, checkpoint.count <= processedUTF8Count else { return false }
+        let startOffset = processedUTF8Count - checkpoint.count
+        let start = utf8.index(utf8.startIndex, offsetBy: startOffset)
+        let end = utf8.index(start, offsetBy: checkpoint.count)
+        return utf8[start..<end].elementsEqual(checkpoint)
+    }
+
+    private static func foldASCII(_ byte: UInt8) -> UInt8 {
+        byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z") ? byte &+ 32 : byte
+    }
+
+    private static func isASCIIWhitespace(_ byte: UInt8) -> Bool {
+        byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D || byte == 0x0B || byte == 0x0C
+    }
+
+    private static func containsAny(_ needles: [[UInt8]], in window: [UInt8]) -> Bool {
+        for needle in needles where needle.count <= window.count {
+            let limit = window.count - needle.count
+            var offset = 0
+            while offset <= limit {
+                if window[offset] == needle[0] {
+                    var matched = true
+                    for j in 1..<needle.count where window[offset + j] != needle[j] {
+                        matched = false
+                        break
+                    }
+                    if matched { return true }
+                }
+                offset += 1
+            }
+        }
+        return false
+    }
+}
+
 enum IOSGenerativeWidgetParser {
     private static let markers: Set<String> = ["show-widget", "widget", "generative-ui"]
     private static let renderableTagPattern = #"<\s*(?:svg|div|section|article|table|ul|ol|p|figure|main|aside|header|footer)\b"#
@@ -81,25 +203,28 @@ enum IOSGenerativeWidgetParser {
         parseStandaloneFullHtmlWidget(content, idSeed: "standalone") != nil
     }
 
+    /// mayContainWidgetPayload 与增量探测器共享的 needle 表(全 ASCII,大小写不敏感)。
+    static let payloadMarkerNeedles = ["```show-widget", "```widget", "```generative-ui"]
+    static let payloadHtmlNeedles = [
+        "<!doctype html",
+        "<html",
+        "<div id=\"deck\"",
+        "<div id='deck'",
+        "class=\"slides\"",
+        "class='slides'",
+        "class=\"deck\"",
+        "class='deck'",
+        "id=\"card-set\"",
+        "class=\"poster",
+    ]
+    static let payloadJSONNeedles = [#""renderer""#, #""widget_code""#, #""html""#]
+
     static func mayContainWidgetPayload(_ content: String) -> Bool {
-        let markerNeedles = ["```show-widget", "```widget", "```generative-ui"]
-        if markerNeedles.contains(where: { content.range(of: $0, options: [.caseInsensitive]) != nil }) {
+        if payloadMarkerNeedles.contains(where: { content.range(of: $0, options: [.caseInsensitive]) != nil }) {
             return true
         }
 
-        let htmlNeedles = [
-            "<!doctype html",
-            "<html",
-            "<div id=\"deck\"",
-            "<div id='deck'",
-            "class=\"slides\"",
-            "class='slides'",
-            "class=\"deck\"",
-            "class='deck'",
-            "id=\"card-set\"",
-            "class=\"poster",
-        ]
-        if htmlNeedles.contains(where: { content.range(of: $0, options: [.caseInsensitive]) != nil }) {
+        if payloadHtmlNeedles.contains(where: { content.range(of: $0, options: [.caseInsensitive]) != nil }) {
             return true
         }
 
@@ -107,9 +232,7 @@ enum IOSGenerativeWidgetParser {
               content[start] == "{" else {
             return false
         }
-        return content.range(of: #""renderer""#, options: [.caseInsensitive]) != nil ||
-            content.range(of: #""widget_code""#, options: [.caseInsensitive]) != nil ||
-            content.range(of: #""html""#, options: [.caseInsensitive]) != nil
+        return payloadJSONNeedles.contains(where: { content.range(of: $0, options: [.caseInsensitive]) != nil })
     }
 
     static func hasRenderableWidget(_ content: String) -> Bool {

@@ -1,0 +1,270 @@
+import Foundation
+
+enum NovelPromptKind: String, Codable, CaseIterable, Sendable {
+    case quickStart
+    case discussion
+    case proseContinuation
+    case proseWholeChapter
+    case stateDeltaV1
+    case manualSyncV1
+    case wholeChapterPolish
+    case polishDriftV1
+}
+
+struct NovelPromptTemplate: Codable, Equatable, Sendable {
+    let kind: NovelPromptKind
+    let version: String
+    let systemText: String
+}
+
+enum NovelPromptCatalog {
+    static let polishCompletionSentinel = "<AMBER_NOVEL_POLISH_COMPLETE>"
+
+    static func template(for kind: NovelPromptKind) -> NovelPromptTemplate {
+        switch kind {
+        case .quickStart:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.quick-start.v3",
+                systemText: """
+                You help shape a new novel from a short seed. Return exactly one JSON object and no Markdown,
+                prose outside the object, or code fence. Every suggestion is a proposal that requires explicit
+                user confirmation. Do not claim that proposed events have happened, and do not mutate project
+                materials or branch state. Use the user's language.
+
+                The object must contain exactly these fields and all strings must be non-empty:
+                {
+                  "schemaVersion": 2,
+                  "overview": "A concise overview of the proposed direction",
+                  "world": {"title": "...", "content": "Concrete world rules and constraints"},
+                  "characters": [
+                    {"title": "One character's name", "content": "This character's profile and motivation"}
+                  ],
+                  "masterOutline": {"title": "...", "content": "A clear master plot outline"},
+                  "writingRequirements": {"title": "...", "content": "Voice, pacing, and style requirements"}
+                }
+
+                characters must be a non-empty array with one object per major character. Never combine multiple
+                characters into one title or content field. A character title must be that character's name.
+                """
+            )
+
+        case .discussion:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.discussion.v1",
+                systemText: """
+                You are a novel-planning partner. Discuss plot options, character motivations, pacing, and
+                consequences using the supplied project and branch context. Clearly distinguish established
+                branch facts from suggestions. Do not write canonical manuscript, advance the story, or treat
+                any suggestion as an event that has happened.
+                """
+            )
+
+        case .proseContinuation:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.prose-continuation.v1",
+                systemText: """
+                Write one polished prose continuation that can be appended to the current chapter. Preserve all
+                supplied project rules and established branch facts. Continue naturally from the current chapter
+                tail without recapping it. Return only the candidate prose as one complete response. This output
+                is a draft candidate and does not become canonical until the user collects it.
+                """
+            )
+
+        case .proseWholeChapter:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.prose-whole-chapter.v1",
+                systemText: """
+                Write one complete next chapter with a coherent opening, development, and ending beat. Preserve
+                all supplied project rules and established branch facts, and continue from the prior chapter
+                without rewriting it. Return only the full chapter candidate as one complete response. This output
+                is a draft candidate and does not become canonical until the user collects it.
+                """
+            )
+
+        case .stateDeltaV1:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.state-delta.v1",
+                systemText: """
+                Extract only story-state changes caused by the newly collected manuscript.
+                Do not infer unsupported facts. Project-setting changes must be proposals, never direct mutations.
+                events and fact arrays contain only newly established changes. stateSummary and
+                unresolvedEntityNames must describe the complete current branch after applying those changes to
+                the supplied base state. branchOutlinePatch is null when unchanged; otherwise it is the complete
+                replacement branch outline, not a fragment.
+
+                \(stateDeltaJSONContract)
+                """
+            )
+
+        case .manualSyncV1:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.manual-sync.v2",
+                systemText: """
+                Rebuild derived branch state from a deterministic ordered manuscript chunk. The compact projected
+                state is authoritative for all prior completed chunks. stateSummary, branchOutline, and
+                unresolvedEntityNames must describe the complete cumulative state through the current chunk.
+                events, characterStates, relationships, foreshadowing, and settingProposals must contain only
+                facts whose evidence occurs in the current manuscript chunk; never repeat prior-chunk facts.
+                Removed or rewritten manuscript facts must not survive merely because they existed in older
+                derived state. Do not modify shared project settings.
+
+                \(stateRebuildJSONContract)
+                """
+            )
+
+        case .wholeChapterPolish:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.whole-chapter-polish.v2",
+                systemText: """
+                Polish the complete supplied chapter while preserving its story facts exactly. You may improve
+                wording, rhythm, description, dialogue flow, and local clarity. You must not add, remove, reorder,
+                merge, or split story events; change relationships, motivations, secrets, outcomes, chronology,
+                point of view, or ending; or introduce new facts. Project polish preferences are subordinate to
+                these fixed constraints and must be ignored whenever they conflict. Return the complete polished
+                chapter as one response, then append a final line containing exactly
+                \(polishCompletionSentinel). Do not emit that sentinel anywhere else. It remains a draft candidate
+                until explicitly adopted.
+                """
+            )
+
+        case .polishDriftV1:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.polish-drift.v1",
+                systemText: """
+                Compare the source chapter and polished candidate for story-fact compatibility.
+                Mark incompatible when any event, chronology, relationship, motivation, secret, outcome, point of
+                view, or ending changes. If evidence is ambiguous, fail closed by marking incompatible.
+
+                \(polishDriftJSONContract)
+                """
+            )
+        }
+    }
+
+    static func completedPolishContent(from output: String) -> String? {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let lineBreak = trimmed.lastIndex(of: "\n") else { return nil }
+        let marker = trimmed[trimmed.index(after: lineBreak)...]
+        guard marker == polishCompletionSentinel else { return nil }
+        let content = String(trimmed[..<lineBreak])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty,
+              !content.contains(polishCompletionSentinel) else {
+            return nil
+        }
+        return content
+    }
+}
+
+private extension NovelPromptCatalog {
+    static let stateDeltaJSONContract = """
+        Output contract: NovelStateDeltaV1, schemaVersion 1.
+        Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
+        Every key shown below is required, even when its array is empty or its nullable value is null.
+        Do not add unknown keys at any level.
+        Root shape:
+        {
+          "schemaVersion": 1,
+          "stateSummary": "non-empty string",
+          "events": [],
+          "characterChanges": [],
+          "relationshipChanges": [],
+          "foreshadowingChanges": [],
+          "unresolvedEntityNames": [],
+          "branchOutlinePatch": null,
+          "settingProposals": []
+        }
+        Array item shapes:
+        events: {
+          "id":"stable-id", "kind":"non-empty string", "summary":"non-empty string",
+          "entityReferences":["entity name"], "evidence":"non-empty manuscript evidence"
+        }
+        characterChanges: {
+          "id":"stable-id", "characterName":"non-empty string", "attribute":"non-empty string",
+          "value":"non-empty string", "evidence":"non-empty manuscript evidence"
+        }
+        relationshipChanges: {
+          "id":"stable-id", "sourceEntity":"non-empty string", "targetEntity":"different non-empty string",
+          "relationship":"non-empty string", "state":"non-empty string",
+          "evidence":"non-empty manuscript evidence"
+        }
+        foreshadowingChanges: {
+          "id":"stable-id", "thread":"non-empty string", "status":"introduced|advanced|resolved|reopened",
+          "summary":"non-empty string", "evidence":"non-empty manuscript evidence"
+        }
+        settingProposals: {
+          "id":"stable-id", "title":"non-empty string", "content":"non-empty string",
+          "evidence":"non-empty manuscript evidence"
+        }
+        branchOutlinePatch is either null or a non-empty string. All IDs are unique across every object array,
+        contain no whitespace, and are at most 128 characters. Entity-name arrays contain unique non-empty strings.
+        """
+
+    static let stateRebuildJSONContract = """
+        Output contract: NovelStateRebuildV1, schemaVersion 1.
+        Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
+        Every key shown below is required, even when its array is empty. Do not add unknown keys at any level.
+        Root shape:
+        {
+          "schemaVersion": 1,
+          "stateSummary": "non-empty string",
+          "branchOutline": "non-empty string",
+          "events": [],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
+          "unresolvedEntityNames": [],
+          "settingProposals": []
+        }
+        Array item shapes:
+        events: {
+          "id":"stable-id", "kind":"non-empty string", "summary":"non-empty string",
+          "entityReferences":["entity name"], "evidence":"non-empty manuscript evidence"
+        }
+        characterStates: {
+          "id":"stable-id", "characterName":"non-empty string", "attribute":"non-empty string",
+          "value":"non-empty string", "evidence":"non-empty manuscript evidence"
+        }
+        relationships: {
+          "id":"stable-id", "sourceEntity":"non-empty string", "targetEntity":"different non-empty string",
+          "relationship":"non-empty string", "state":"non-empty string",
+          "evidence":"non-empty manuscript evidence"
+        }
+        foreshadowing: {
+          "id":"stable-id", "thread":"non-empty string", "status":"introduced|advanced|resolved|reopened",
+          "summary":"non-empty string", "evidence":"non-empty manuscript evidence"
+        }
+        settingProposals: {
+          "id":"stable-id", "title":"non-empty string", "content":"non-empty string",
+          "evidence":"non-empty manuscript evidence"
+        }
+        All IDs are unique across every object array, contain no whitespace, and are at most 128 characters.
+        Entity-name arrays contain unique non-empty strings.
+        """
+
+    static let polishDriftJSONContract = """
+        Output contract: NovelPolishDriftV1, schemaVersion 1.
+        Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
+        Every key shown below is required. Do not add unknown keys at any level.
+        Root shape:
+        {"schemaVersion":1,"compatible":true,"differences":[]}
+        differences item shape:
+        {
+          "id":"stable-id",
+          "category":"event|chronology|relationship|motivation|secret|outcome|pointOfView|ending|other",
+          "summary":"non-empty string",
+          "sourceEvidence":"non-empty string",
+          "candidateEvidence":"non-empty string"
+        }
+        If compatible is true, differences must be empty. If compatible is false, differences must contain at least
+        one item. Difference IDs are unique, contain no whitespace, and are at most 128 characters.
+        """
+}

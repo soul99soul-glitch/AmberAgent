@@ -870,6 +870,7 @@ struct IOSDeepReadTaskDetailView: View {
     @State private var toast: String?
     @State private var statusPulse = false
     @State private var editorialHeight: CGFloat = 600
+    @State private var isRetryingWorkspaceSync = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(RouterPath.self) private var router
     @Environment(IOSConversationStore.self) private var conversationStore
@@ -907,6 +908,7 @@ struct IOSDeepReadTaskDetailView: View {
 
                     if let task {
                         masthead(task)
+                        workspaceSyncBanner(task)
                         content(task)
                         sourcesSection(task)
                         Color.clear.frame(height: state(for: task) == .done ? 24 : 36)
@@ -1080,6 +1082,51 @@ struct IOSDeepReadTaskDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private func workspaceSyncBanner(_ task: IOSDeepReadTask) -> some View {
+        if state(for: task) == .done, let message = task.workspaceSyncFailed {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accentAmber)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("已生成，但未保存到 Workspace")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(3)
+                    }
+                }
+                Button {
+                    retryWorkspaceSync(task)
+                } label: {
+                    HStack(spacing: 6) {
+                        if isRetryingWorkspaceSync {
+                            ProgressView()
+                                .controlSize(.mini)
+                        }
+                        Text(isRetryingWorkspaceSync ? "正在保存到 Workspace" : "仅重试保存到 Workspace")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AmberTheme.accent)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isRetryingWorkspaceSync)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(AmberTheme.accentAmber.opacity(0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AmberTheme.accentAmber.opacity(0.28), lineWidth: 1) }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     // 失败 inline 琥珀横幅(非浮卡、非 modal)。
     @ViewBuilder
     private func failBanner() -> some View {
@@ -1165,6 +1212,27 @@ struct IOSDeepReadTaskDetailView: View {
         IOSDeepReadLauncher.retry(taskId: task.id, sharedSettings: sharedSettings) { message, isError in
             showToast(message)
         }
+    }
+
+    private func retryWorkspaceSync(_ task: IOSDeepReadTask) {
+        guard !isRetryingWorkspaceSync else { return }
+        isRetryingWorkspaceSync = true
+        do {
+            _ = try IOSWorkspaceStore.shared.saveArtifact(
+                title: task.title,
+                content: task.resultMarkdown,
+                type: .deepRead,
+                sourceKind: "deep_read",
+                sourceId: task.id
+            )
+            store.clearWorkspaceSyncFailure(id: task.id)
+            showToast("已保存到 Workspace")
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            store.markWorkspaceSyncFailed(id: task.id, message: message)
+            showToast("保存到 Workspace 失败：\(message)")
+        }
+        isRetryingWorkspaceSync = false
     }
 
     /// Builds the Android-style editorial HTML for a completed deep read: title

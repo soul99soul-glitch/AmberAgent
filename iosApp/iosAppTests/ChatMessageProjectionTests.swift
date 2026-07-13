@@ -1,8 +1,483 @@
 import XCTest
 import Shared
+@testable import SwiftStreamingMarkdown
 @testable import iosApp
 
+@MainActor
 final class ChatMessageProjectionTests: XCTestCase {
+
+    func testPackedAstReaderParsesBlockMathNode() throws {
+        let markdown = "$$E=mc^2$$"
+        let node = try XCTUnwrap(Self.firstNode(ofType: .mathBlock, in: Self.astNodes(for: markdown)))
+
+        XCTAssertEqual(Self.slice(markdown, node: node), "$$E=mc^2$$")
+    }
+
+    func testBlockMathLatexExtraction() throws {
+        let inline = try XCTUnwrap(Self.firstNode(ofType: .mathBlock, in: Self.astNodes(for: "$$E=mc^2$$")))
+        XCTAssertEqual(AmberMarkdownMath.blockLatex(from: inline, source: "$$E=mc^2$$"), "E=mc^2")
+
+        let multilineMarkdown = """
+        $$
+          a^2 + b^2 = c^2
+        $$
+        """
+        let multiline = try XCTUnwrap(Self.firstNode(ofType: .mathBlock, in: Self.astNodes(for: multilineMarkdown)))
+        XCTAssertEqual(AmberMarkdownMath.blockLatex(from: multiline, source: multilineMarkdown), "a^2 + b^2 = c^2")
+    }
+
+    func testKnownGap_B3b_inlineMathRendersAsLiteralText() throws {
+        // B3b 实现时本测试应转红并被替换为真渲染断言；设计见 IOS_FIX_PLAN_2026-07-08.md B3b。
+        let markdown = "inline $x^2$ math"
+        let node = try XCTUnwrap(Self.firstNode(ofType: .mathInline, in: Self.astNodes(for: markdown)))
+
+        XCTAssertEqual(Self.slice(markdown, node: node), "$x^2$")
+    }
+
+    func testToolStepModelMarksStructuredFailureOutputAsFailed() {
+        let tool = UIMessagePart.Tool(
+            toolCallId: "search-denied",
+            toolName: "search_web",
+            input: #"{"query":"swift"}"#,
+            output: [
+                UIMessagePart.Text(
+                    text: #"{"ok":false,"denied":true,"reason":"用户拒绝搜索。","tool":"search_web"}"#,
+                    metadata: nil
+                )
+            ],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+
+        let model = ChatToolStepModel(tool: tool)
+
+        XCTAssertEqual(model.state, .failed)
+        XCTAssertEqual(model.detail, "用户拒绝搜索。")
+    }
+
+    func testChatMarkdownOpenURLPolicyAllowsOnlyWebAndMailtoSchemes() throws {
+        XCTAssertTrue(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "https://example.com/a"))))
+        XCTAssertTrue(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "http://example.com/a"))))
+        XCTAssertTrue(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "mailto:hello@example.com"))))
+
+        XCTAssertFalse(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "shortcuts://run-shortcut?name=bad"))))
+        XCTAssertFalse(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "file:///private/var/mobile/Library/foo"))))
+        XCTAssertFalse(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "javascript:alert(1)"))))
+    }
+
+    func testNativeTimelineSessionIdentityChangesAcrossConversations() {
+        let first = KotlinUuid.companion.random()
+        let second = KotlinUuid.companion.random()
+
+        XCTAssertNotEqual(
+            NativeChatTimelineSessionIdentity.viewID(conversationId: first),
+            NativeChatTimelineSessionIdentity.viewID(conversationId: second)
+        )
+    }
+
+    func testTableCellFadeInPolicyDoesNotDisableVisibleAnimationForLargeTables() {
+        XCTAssertTrue(
+            TableViewAnimationPolicy.shouldAnimateCellText(
+                configShouldAnimateText: true,
+                headingCount: 4,
+                rowCount: 8,
+                characterCount: 120
+            )
+        )
+    }
+
+    func testStreamingMarkdownConfigCacheKeyTracksPaperAndAccent() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testDirectory.deletingLastPathComponent()
+                .appendingPathComponent("iosApp/MessageBubbleView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("let themePaper: String"))
+        XCTAssertTrue(source.contains("let themeAccentHex: UInt32"))
+        XCTAssertTrue(source.contains("themePaper: AmberThemeRuntime.shared.paper.rawValue"))
+        XCTAssertTrue(source.contains("themeAccentHex: AmberThemeRuntime.shared.accentHex"))
+        XCTAssertEqual(
+            ChatStreamingMarkdownConfigCacheTestSupport.buildCount(themeKeys: [
+                (paper: "paper", accentHex: 0xB8623A),
+                (paper: "paper", accentHex: 0xB8623A),
+                (paper: "neutral", accentHex: 0xB8623A),
+                (paper: "neutral", accentHex: 0x5E9C6E),
+            ]),
+            3,
+            "相同主题必须命中缓存，paper/accent 任一变化必须重建 config"
+        )
+    }
+
+    func testStreamingBlockParserKeepsHeadingContextInOneMarkdownDocument() {
+        let markdown = """
+        [文档][reference]
+
+        # 标题
+
+        [reference]: https://example.com
+
+        <script>
+        # 这不是 Markdown 标题
+        </script>
+        """
+
+        let blocks = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: markdown,
+            includeTrailingPartialTableRow: true
+        )
+
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks.first?.kind, "text")
+        XCTAssertEqual(blocks.first?.text, markdown)
+    }
+
+    func testStreamingBlockParserKeepsPartialHashAppendInOneTextBlock() {
+        let prefix = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: "正文\n\n#",
+            includeTrailingPartialTableRow: false
+        )
+        let completed = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: "正文\n\n#tag",
+            includeTrailingPartialTableRow: false
+        )
+
+        XCTAssertEqual(prefix.count, 1)
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertEqual(prefix.first?.kind, "text")
+        XCTAssertEqual(completed.first?.kind, "text")
+    }
+
+    func testStreamingTableParserDoesNotLeakTrimmedTrailingRowAsPipeText() {
+        let markdown = """
+        | 阶段 | 能力 |
+        | --- | --- |
+        | 初觉 | 雷感 |
+        | 一劫雷 | 掌心
+        """
+
+        let blocks = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: markdown,
+            includeTrailingPartialTableRow: false
+        )
+
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks.first?.kind, "table")
+        XCTAssertEqual(blocks.first?.rows, [["初觉", "雷感"]])
+        XCTAssertFalse(blocks.contains { $0.kind == "text" && $0.text.contains("|") })
+    }
+
+    func testStreamingTableParserKeepsSinglePartialRowAsEmptyTableBlock() {
+        let markdown = """
+        | 层次 | 说明 |
+        | --- | --- |
+        | 人间界 | 现代都市
+        """
+
+        let blocks = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: markdown,
+            includeTrailingPartialTableRow: false
+        )
+
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks.first?.kind, "table")
+        XCTAssertEqual(blocks.first?.headers, ["层次", "说明"])
+        XCTAssertEqual(blocks.first?.rows, [])
+        XCTAssertFalse(blocks.contains { $0.kind == "text" && $0.text.contains("|") })
+    }
+
+    func testStreamingTableParserHidesNoLeadingPipePartialRow() {
+        let markdown = """
+        名称 | 数值
+        --- | ---
+        Alpha | 1
+        Bet
+        """
+
+        let blocks = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: markdown,
+            includeTrailingPartialTableRow: false
+        )
+
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks.first?.kind, "table")
+        XCTAssertEqual(blocks.first?.rows, [["Alpha", "1"]])
+    }
+
+    func testStreamingTableDetectorMatchesAcceptedSyntaxAndIgnoresFences() {
+        XCTAssertTrue(ChatStreamingMarkdownBlockParserTestSupport.containsTable(in: """
+        名称 | 数值
+        --- | ---
+        Alpha | 1
+        """))
+        XCTAssertFalse(ChatStreamingMarkdownBlockParserTestSupport.containsTable(in: """
+        ~~~markdown
+        ```not-a-closing-fence
+        | 名称 | 数值 |
+        | --- | --- |
+        ~~~
+        """))
+    }
+
+    func testStreamingTableDetectorConsumesOnlyAppendedUTF8AcrossDeltas() {
+        let chunks = [
+            "普通文本",
+            "继续增长",
+            "\n名称 | 数值",
+            "\n---",
+            " | ---"
+        ]
+        var text = ""
+        let prefixes = chunks.map { chunk -> String in
+            text += chunk
+            return text
+        }
+
+        let result = ChatStreamingTableDetectionTestSupport.replay(prefixes)
+
+        XCTAssertTrue(result.containsTable)
+        XCTAssertEqual(result.consumedUTF8Count, text.utf8.count)
+    }
+
+    func testIncrementalStreamingTableDetectorKeepsFenceStateAcrossDeltas() {
+        let prefixes = [
+            "~~~markdown\n",
+            "~~~markdown\n| 名称 | 数值 |\n",
+            "~~~markdown\n| 名称 | 数值 |\n| --- | --- |"
+        ]
+
+        XCTAssertFalse(ChatStreamingTableDetectionTestSupport.replay(prefixes).containsTable)
+    }
+
+    func testStreamingTableRowCacheReusesCompletedRowsAcrossDeltas() {
+        ChatStreamingMarkdownBlockParserTestSupport.resetRowCache()
+        let prefix = """
+        | 名称 | 数值 |
+        | --- | --- |
+        | Alpha | 1 |
+        | Beta | 2 |
+        """
+        _ = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: prefix,
+            includeTrailingPartialTableRow: false
+        )
+        let firstMetrics = ChatStreamingMarkdownBlockParserTestSupport.rowCacheMetrics
+
+        _ = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: prefix + "\n| Gamma | 3",
+            includeTrailingPartialTableRow: false
+        )
+        let secondMetrics = ChatStreamingMarkdownBlockParserTestSupport.rowCacheMetrics
+
+        XCTAssertGreaterThan(firstMetrics.misses, 0)
+        XCTAssertGreaterThan(secondMetrics.hits, firstMetrics.hits)
+    }
+
+    func testProductionStreamingTableBlocksDoNotMaterializeUnusedCellModels() {
+        let markdown = """
+        | 名称 | 数值 |
+        | --- | --- |
+        | Alpha | 1 |
+        | Beta | 2 |
+        """
+
+        let counts = ChatStreamingMarkdownBlockParserTestSupport.productionTableCellCounts(in: markdown)
+
+        XCTAssertEqual(counts?.headers, 0)
+        XCTAssertEqual(counts?.rows, 0)
+    }
+
+    func testStreamingTableBlockPreservesEscapedPipeForRealMarkdownRenderer() {
+        let markdown = """
+        | 表达式 | 含义 |
+        | --- | --- |
+        | `a \\| b` | escaped pipe |
+        """
+
+        let blocks = ChatStreamingMarkdownBlockParserTestSupport.blocks(
+            in: markdown,
+            includeTrailingPartialTableRow: true
+        )
+
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks.first?.kind, "table")
+        XCTAssertEqual(blocks.first?.rows, [["`a | b`", "escaped pipe"]])
+        XCTAssertEqual(blocks.first?.markdown, markdown)
+    }
+
+    func testStreamingTableBlockUsesVendorMarkdownRendererAndAsyncBlockController() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testDirectory.deletingLastPathComponent()
+                .appendingPathComponent("iosApp/MessageBubbleView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("text: table.markdown,"))
+        XCTAssertTrue(source.contains("cacheIdentity: renderCacheNamespace.map"))
+        XCTAssertTrue(source.contains("private final class ChatStreamingMarkdownBlockController"))
+        XCTAssertTrue(source.contains("Task.detached(priority: .userInitiated)"))
+
+        let controllerSource = source
+            .components(separatedBy: "private final class ChatStreamingMarkdownBlockController")
+            .last?
+            .components(separatedBy: "private struct ChatStreamingMarkdownBlock:")
+            .first ?? ""
+        XCTAssertTrue(controllerSource.contains("publishPreservingSettledBlocks(parsed)"))
+        XCTAssertFalse(
+            controllerSource.contains("if pendingParse == nil"),
+            "Continuous deltas must not starve every completed block parse publication."
+        )
+    }
+
+    func testCompletedMarkdownRenderableCacheDoesNotReuseSpeculativeStreamingEntry() {
+        ChatStableStreamingMarkdownCacheTestSupport.reset()
+        let markdown = """
+        | 层次 | 说明 |
+        | --- | --- |
+        | 人间界 |
+        """
+
+        ChatStableStreamingMarkdownCacheTestSupport.store(text: markdown, animate: true)
+
+        XCTAssertFalse(
+            ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: markdown, animate: false)
+        )
+    }
+
+    func testCompletedMarkdownRenderableCacheDoesNotUsePrefixFallback() {
+        ChatStableStreamingMarkdownCacheTestSupport.reset()
+        let prefix = "第一段已经解析"
+        let completedText = "\(prefix)\n第二段完成态新增内容"
+
+        ChatStableStreamingMarkdownCacheTestSupport.store(text: prefix, animate: true)
+
+        XCTAssertTrue(
+            ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: completedText, animate: true)
+        )
+        XCTAssertFalse(
+            ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: completedText, animate: false)
+        )
+    }
+
+    func testStableStreamingMarkdownControllerResumesAnimatedParsingAfterNonAnimatedParseCompletes() async {
+        let renderedText = await ChatStableStreamingMarkdownControllerTestSupport
+            .renderedTextAfterNonAnimatedThenAnimatedParse()
+
+        XCTAssertEqual(renderedText, "initial completed text with live delta")
+    }
+
+    func testStableStreamingMarkdownControllerQueuesAnimatedDeltaDuringNonAnimatedParse() async {
+        let renderedText = await ChatStableStreamingMarkdownControllerTestSupport
+            .renderedTextWhenAnimatedParseArrivesDuringNonAnimatedParse()
+
+        XCTAssertEqual(renderedText, "non-animated parse followed immediately by live delta")
+    }
+
+    func testStableStreamingMarkdownControllerReusesOnlyGrowingPrefixRenderable() {
+        XCTAssertTrue(
+            ChatStableStreamingMarkdownControllerTestSupport.hasStaleRenderable(
+                renderedText: "已解析前缀",
+                requestedText: "已解析前缀继续增长"
+            )
+        )
+        XCTAssertFalse(
+            ChatStableStreamingMarkdownControllerTestSupport.hasStaleRenderable(
+                renderedText: "正文\n| 表头 | 数值 |",
+                requestedText: "正文"
+            ),
+            "表格拆块使文本收缩时不能继续显示包含表头的旧 renderable"
+        )
+    }
+
+    func testStableStreamingMarkdownControllerRejectsInstanceRenderableAcrossSpeculativeModeChange() {
+        XCTAssertFalse(
+            ChatStableStreamingMarkdownControllerTestSupport
+                .hasInstanceRenderableAfterSpeculativeModeChange(),
+            "完成态不能先复用流式 speculative renderable 再异步重组。"
+        )
+    }
+
+    func testStableStreamingMarkdownControllerRejectsInstanceRenderableAcrossVisualConfigChange() {
+        XCTAssertFalse(
+            ChatStableStreamingMarkdownControllerTestSupport
+                .hasInstanceRenderableAfterVisualConfigChange(),
+            "字体或排版配置变化后不能先显示旧 config renderable。"
+        )
+    }
+
+    func testStableStreamingMarkdownControllerReusesIdentityPrefixOnColdReentry() {
+        let result = ChatStableStreamingMarkdownControllerTestSupport
+            .coldReentryIdentityPrefixResolution()
+
+        XCTAssertTrue(result.hasRenderable, "冷重入必须复用该消息块已解析的累计前缀，而不是退回 raw Markdown。")
+        XCTAssertTrue(result.suppressesInitialFade, "重建已有前缀时不能把整段内容再次从 alpha 0 淡入。")
+    }
+
+    func testStreamingTableHonorsColdReentryFadeSuppression() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let tableViewURL = testDirectory.deletingLastPathComponent()
+            .appendingPathComponent("vendor/SwiftStreamingMarkdown/Sources/MarkdownText/UI/TableView.swift")
+        let source = try String(contentsOf: tableViewURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("@Environment(\\.markdownAnimateInitialText) var animateInitialText"))
+        XCTAssertTrue(source.contains("config.shouldAnimateText && animateInitialText"))
+    }
+
+    func testCompletedStreamedMarkdownKeepsBlockTopologyAfterColdRecreation() {
+        XCTAssertTrue(
+            ChatStreamingMarkdownRendererPolicy.initialBlockRendererLatch(
+                isStreaming: false,
+                hasEverStreamed: true,
+                liveRenderingEnabled: true
+            ),
+            "完成态流式消息回收后必须继续使用 block renderer，不能切回 monolith。"
+        )
+    }
+
+    func testStreamingMarkdownTypographyFollowsChatFont() {
+        let defaultFont = ChatStreamingMarkdownTypographyTestSupport.bodyFontName(chatFont: .default)
+        let serifFont = ChatStreamingMarkdownTypographyTestSupport.bodyFontName(chatFont: .serif)
+        let monospaceFont = ChatStreamingMarkdownTypographyTestSupport.bodyFontName(chatFont: .monospace)
+
+        XCTAssertNotEqual(defaultFont, serifFont)
+        XCTAssertNotEqual(defaultFont, monospaceFont)
+        XCTAssertNotEqual(serifFont, monospaceFont)
+    }
+
+    func testStreamingParagraphAnimationUsesPromotionFrameRateRange() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let paragraphViewURL = testDirectory.deletingLastPathComponent()
+            .appendingPathComponent("vendor/SwiftStreamingMarkdown/Sources/MarkdownText/UI/UIKit/ParagraphUIView.swift")
+        let source = try String(contentsOf: paragraphViewURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("preferredFrameRateRange"))
+        XCTAssertFalse(source.contains("preferredFramesPerSecond = 60"))
+        XCTAssertFalse(source.contains("completedAnimations.contains"))
+        XCTAssertFalse(source.contains("let id: UUID = UUID()"))
+    }
+
+    func testCheckedOutParagraphViewCannotBeIssuedTwice() {
+        let contents = NSMutableAttributedString(string: "streaming paragraph")
+        let first = ParagraphUIViewCache.shared.createOrReuseParagraphUIView(
+            contents: contents,
+            lineSpacing: nil
+        )
+        let second = ParagraphUIViewCache.shared.createOrReuseParagraphUIView(
+            contents: contents,
+            lineSpacing: nil
+        )
+
+        XCTAssertFalse(
+            first === second,
+            "同一个 ParagraphUIView 不能同时交给两个 SwiftUI representable"
+        )
+
+        ParagraphUIViewCache.shared.recycle(first)
+        ParagraphUIViewCache.shared.recycle(second)
+    }
 
     func testInitialLoadRowsDoNotAnimateInsertion() {
         let rows = ChatMessageProjector.rows(
@@ -88,5 +563,963 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertEqual(streamingRows.first?.rowId, finalRows.first?.rowId)
         XCTAssertTrue(streamingRows.first?.isStreaming ?? false)
         XCTAssertTrue(finalRows.first?.hasEverStreamed ?? false)
+    }
+
+    func testTimelinePlanAlwaysEndsWithStableBottomAnchor() {
+        let plan = ChatTimelinePlanner.build(
+            messages: [UIMessage.companion.user(prompt: "你好")],
+            event: .userMessageAppended
+        )
+
+        XCTAssertEqual(plan.entries.last, .bottomAnchor(id: ChatTimelinePlanner.bottomAnchorID))
+    }
+
+    func testTimelinePlanKeepsStreamingRendererAfterGenerationCompletes() {
+        let assistant = UIMessage.companion.assistant(prompt: "# 标题\n\n正在生成长内容")
+        let messageId = ChatMessageProjector.messageId(for: assistant)
+
+        let streamingPlan = ChatTimelinePlanner.build(
+            messages: [assistant],
+            event: .assistantStreamDelta
+        )
+        let completedPlan = ChatTimelinePlanner.build(
+            messages: [assistant],
+            event: .generationCompleted,
+            streamedMessageIDs: [messageId]
+        )
+
+        XCTAssertEqual(streamingPlan.messageEntry(for: messageId)?.id, completedPlan.messageEntry(for: messageId)?.id)
+        XCTAssertEqual(streamingPlan.messageEntry(for: messageId)?.renderer, .streamingAssistantMarkdown)
+        XCTAssertEqual(completedPlan.messageEntry(for: messageId)?.renderer, .streamingAssistantMarkdown)
+        XCTAssertFalse(completedPlan.messageEntry(for: messageId)?.isStreaming ?? true)
+        XCTAssertTrue(completedPlan.messageEntry(for: messageId)?.hasEverStreamed ?? false)
+    }
+
+    func testTimelinePlanUsesStaticRendererForHistoricalAssistantWithoutStreamMemory() {
+        let assistant = UIMessage.companion.assistant(prompt: "历史回复")
+        let messageId = ChatMessageProjector.messageId(for: assistant)
+
+        let plan = ChatTimelinePlanner.build(
+            messages: [assistant],
+            event: .conversationLoaded
+        )
+
+        XCTAssertEqual(plan.messageEntry(for: messageId)?.renderer, .staticAssistantMarkdown)
+    }
+
+    func testTimelineRenderTokenChangesWhenStreamingTextChanges() {
+        let short = UIMessage.companion.assistant(prompt: "第一段")
+        let longer = UIMessage.companion.assistant(prompt: "第一段，继续追加新的 token")
+
+        let shortPlan = ChatTimelinePlanner.build(messages: [short], event: .assistantStreamDelta)
+        let longerPlan = ChatTimelinePlanner.build(messages: [longer], event: .assistantStreamDelta)
+
+        XCTAssertNotEqual(shortPlan.latestRenderToken, longerPlan.latestRenderToken)
+    }
+
+    func testNativeTimelineProjectionMirrorsTimelinePlanIdentityAndDecorations() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+        let plan = ChatTimelinePlanner.build(
+            messages: [user, assistant],
+            event: .assistantStreamDelta,
+            includePendingAssistant: true
+        )
+        let projection = NativeTimelineProjector.build(
+            messages: [user, assistant],
+            event: .assistantStreamDelta,
+            includePendingAssistant: true
+        )
+
+        XCTAssertEqual(projection.latestRenderToken, plan.latestRenderToken)
+        XCTAssertEqual(projection.entries.map(\.id), plan.entries.map(\.id))
+        XCTAssertEqual(projection.entries.map(\.kind), [
+            .message,
+            .message,
+            .pendingAssistant,
+            .bottomAnchor
+        ])
+        XCTAssertEqual(projection.entries.last?.id, ChatTimelinePlanner.bottomAnchorID)
+    }
+
+    func testNativeTimelineProjectionIncludesEmptyAndConfigurationDecorations() {
+        let emptyProjection = NativeTimelineProjector.build(
+            messages: [],
+            event: .conversationLoaded
+        )
+        let configurationProjection = NativeTimelineProjector.build(
+            messages: [],
+            event: .conversationLoaded,
+            configurationIssue: .missingAPIKey
+        )
+
+        XCTAssertEqual(emptyProjection.entries.map(\.kind), [.emptyState, .bottomAnchor])
+        XCTAssertEqual(configurationProjection.entries.map(\.kind), [
+            .configurationIssue(compact: false),
+            .bottomAnchor
+        ])
+    }
+
+    func testNativeTimelineProjectionIncludesTailDecorationsBeforeBottomAnchor() {
+        let context = ChatContextCompactState(
+            status: .completed,
+            summary: "已压缩上下文",
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        let projection = NativeTimelineProjector.build(
+            messages: [UIMessage.companion.assistant(prompt: "回答")],
+            event: .conversationLoaded,
+            isRecognizingImages: true,
+            contextCompactState: context
+        )
+
+        XCTAssertEqual(projection.entries.map(\.kind), [
+            .message,
+            .visionRecognition,
+            .contextMarker,
+            .bottomAnchor
+        ])
+    }
+
+    func testNativeTimelineProjectionAddsPendingOnlyForLoadingOrGeneratingAfterUserMessage() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+
+        let loadingAfterUser = NativeTimelineProjector.build(
+            messages: [user],
+            event: .userMessageAppended,
+            isLoading: true
+        )
+        let generatingAfterAssistant = NativeTimelineProjector.build(
+            messages: [assistant],
+            event: .assistantStreamDelta,
+            isGenerationActive: true
+        )
+
+        XCTAssertEqual(loadingAfterUser.entries.map(\.kind), [.message, .pendingAssistant, .bottomAnchor])
+        XCTAssertEqual(generatingAfterAssistant.entries.map(\.kind), [.message, .bottomAnchor])
+    }
+
+    func testNativeTimelineProjectionPreservesStreamingRendererMemory() {
+        let assistant = UIMessage.companion.assistant(prompt: "流式内容")
+        let messageId = ChatMessageProjector.messageId(for: assistant)
+
+        let completedProjection = NativeTimelineProjector.build(
+            messages: [assistant],
+            event: .generationCompleted,
+            streamedMessageIDs: [messageId]
+        )
+        let entry = completedProjection.messageEntry(for: messageId)
+
+        XCTAssertEqual(entry?.kind, .message)
+        XCTAssertEqual(entry?.messageId, messageId)
+        XCTAssertEqual(entry?.renderer, .streamingAssistantMarkdown)
+        XCTAssertFalse(entry?.isStreaming ?? true)
+        XCTAssertTrue(entry?.hasEverStreamed ?? false)
+    }
+
+    func testNativeTimelineRendererMatrixMatchesTimelinePlanner() {
+        let historical = UIMessage.companion.assistant(prompt: "历史回复")
+        let streaming = UIMessage.companion.assistant(prompt: "正在生成")
+        let completed = UIMessage.companion.assistant(prompt: "刚刚完成")
+        let completedId = ChatMessageProjector.messageId(for: completed)
+        let cases: [(message: UIMessage, event: ChatEvent, streamedIDs: Set<String>)] = [
+            (historical, .conversationLoaded, []),
+            (streaming, .assistantStreamDelta, []),
+            (completed, .generationCompleted, [completedId])
+        ]
+
+        for item in cases {
+            let messageId = ChatMessageProjector.messageId(for: item.message)
+            let plan = ChatTimelinePlanner.build(
+                messages: [item.message],
+                event: item.event,
+                streamedMessageIDs: item.streamedIDs
+            )
+            let projection = NativeTimelineProjector.build(
+                messages: [item.message],
+                event: item.event,
+                streamedMessageIDs: item.streamedIDs
+            )
+
+            XCTAssertEqual(
+                projection.messageEntry(for: messageId)?.renderer,
+                plan.messageEntry(for: messageId)?.renderer
+            )
+            XCTAssertEqual(
+                projection.messageEntry(for: messageId)?.hasEverStreamed,
+                plan.messageEntry(for: messageId)?.hasEverStreamed
+            )
+            XCTAssertEqual(
+                projection.messageEntry(for: messageId)?.isStreaming,
+                plan.messageEntry(for: messageId)?.isStreaming
+            )
+        }
+    }
+
+    func testNativeTimelineProjectionCarriesActiveStreamingTailRendererIdentity() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "正在流式")
+        let messageId = ChatMessageProjector.messageId(for: assistant)
+
+        let projection = NativeTimelineProjector.build(
+            messages: [user, assistant],
+            event: .assistantStreamDelta,
+            isGenerationActive: true,
+            streamedMessageIDs: [messageId]
+        )
+        let entry = projection.messageEntry(for: messageId)
+
+        XCTAssertEqual(entry?.renderer, .streamingAssistantMarkdown)
+        XCTAssertTrue(entry?.isStreaming ?? false)
+        XCTAssertTrue(entry?.hasEverStreamed ?? false)
+    }
+
+    func testNativeTimelineProjectionCarriesFullVariantInfoAndRenderDigest() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let messageId = ChatMessageProjector.messageId(for: user)
+        let projection = NativeTimelineProjector.build(
+            messages: [user],
+            event: .conversationLoaded,
+            displaySettingSignature: "display",
+            generativeUiSettingSignature: "generative",
+            variantInfoProvider: { index in
+                index == 0
+                    ? IOSConversationStore.VariantInfo(variantCount: 3, selectedIndex: 1)
+                    : nil
+            },
+            contentHashProvider: { _, _ in 42 }
+        )
+        let entry = projection.messageEntry(for: messageId)
+
+        XCTAssertEqual(entry?.variantInfo, NativeTimelineVariantInfo(variantCount: 3, selectedIndex: 1))
+        XCTAssertEqual(entry?.hasMultipleVariants, true)
+        XCTAssertNotNil(entry?.renderDigest)
+    }
+
+    func testNativeStaticTimelineEligibilityExcludesActiveStreamingButAllowsStaticAndPending() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+
+        XCTAssertTrue(
+            NativeChatTimelineStaticRenderEligibility.canRender(
+                messages: [user, assistant],
+                event: .conversationLoaded,
+                isGenerationActive: false,
+                isLoading: false
+            )
+        )
+        XCTAssertFalse(
+            NativeChatTimelineStaticRenderEligibility.canRender(
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+        XCTAssertTrue(
+            NativeChatTimelineStaticRenderEligibility.canRender(
+                messages: [user],
+                event: .userMessageAppended,
+                isGenerationActive: false,
+                isLoading: true
+            )
+        )
+        XCTAssertFalse(
+            NativeChatTimelineStaticRenderEligibility.canRender(
+                messages: [assistant],
+                event: .conversationLoaded,
+                isGenerationActive: false,
+                isLoading: true
+            )
+        )
+    }
+
+    func testNativeStreamingTailEligibilityRequiresFlagAndAllowsLoadingUserTail() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+        defer {
+            UserDefaults.standard.removeObject(forKey: NativeChatTimelineStreamingTailFeatureFlags.key)
+        }
+        UserDefaults.standard.removeObject(forKey: NativeChatTimelineStreamingTailFeatureFlags.key)
+
+        XCTAssertFalse(
+            NativeChatTimelineStreamingTailEligibility.canRender(
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+
+        UserDefaults.standard.set(true, forKey: NativeChatTimelineStreamingTailFeatureFlags.key)
+
+        XCTAssertTrue(
+            NativeChatTimelineStreamingTailEligibility.canRender(
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+        XCTAssertFalse(
+            NativeChatTimelineStreamingTailEligibility.canRender(
+                messages: [user],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+        XCTAssertTrue(
+            NativeChatTimelineStreamingTailEligibility.canRender(
+                messages: [user],
+                event: .userMessageAppended,
+                isGenerationActive: false,
+                isLoading: true
+            )
+        )
+        XCTAssertFalse(
+            NativeChatTimelineStreamingTailEligibility.canRender(
+                messages: [user, assistant],
+                event: .conversationLoaded,
+                isGenerationActive: false,
+                isLoading: false
+            )
+        )
+    }
+
+    func testNativeTimelineEligibilityRequiresStaticFlagBeforeStreamingTailCanRender() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+        defer {
+            UserDefaults.standard.removeObject(forKey: NativeChatTimelineStaticRenderFeatureFlags.key)
+            UserDefaults.standard.removeObject(forKey: NativeChatTimelineStreamingTailFeatureFlags.key)
+        }
+        UserDefaults.standard.removeObject(forKey: NativeChatTimelineStaticRenderFeatureFlags.key)
+        UserDefaults.standard.removeObject(forKey: NativeChatTimelineStreamingTailFeatureFlags.key)
+
+        XCTAssertFalse(
+            NativeChatTimelineEligibility.canRender(
+                messages: [user, assistant],
+                event: .conversationLoaded,
+                isGenerationActive: false,
+                isLoading: false
+            )
+        )
+
+        UserDefaults.standard.set(true, forKey: NativeChatTimelineStreamingTailFeatureFlags.key)
+
+        XCTAssertFalse(
+            NativeChatTimelineEligibility.canRender(
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+
+        UserDefaults.standard.set(true, forKey: NativeChatTimelineStaticRenderFeatureFlags.key)
+        UserDefaults.standard.set(false, forKey: NativeChatTimelineStreamingTailFeatureFlags.key)
+
+        XCTAssertTrue(
+            NativeChatTimelineEligibility.canRender(
+                messages: [user, assistant],
+                event: .conversationLoaded,
+                isGenerationActive: false,
+                isLoading: false
+            )
+        )
+        XCTAssertFalse(
+            NativeChatTimelineEligibility.canRender(
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+
+        UserDefaults.standard.set(true, forKey: NativeChatTimelineStreamingTailFeatureFlags.key)
+
+        XCTAssertTrue(
+            NativeChatTimelineEligibility.canRender(
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+    }
+
+    func testNativeTimelineRouteKeepsNativeRootStableWhenExperimentalStreamingIsEnabled() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+
+        XCTAssertFalse(
+            NativeChatTimelineRoutePolicy.shouldUseNativeTimeline(
+                staticRenderEnabled: false,
+                streamingTailEnabled: true,
+                messages: [user],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+
+        XCTAssertTrue(
+            NativeChatTimelineRoutePolicy.shouldUseNativeTimeline(
+                staticRenderEnabled: true,
+                streamingTailEnabled: true,
+                messages: [user],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+
+        XCTAssertTrue(
+            NativeChatTimelineRoutePolicy.shouldUseNativeTimeline(
+                staticRenderEnabled: true,
+                streamingTailEnabled: true,
+                messages: [user, assistant],
+                event: .toolCallStarted,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+
+        XCTAssertFalse(
+            NativeChatTimelineRoutePolicy.shouldUseNativeTimeline(
+                staticRenderEnabled: true,
+                streamingTailEnabled: false,
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            )
+        )
+    }
+
+    func testExperimentalNativeContainerRoutesToNativeTimelineBeforeDefaultSwiftUIPath() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+
+        XCTAssertEqual(
+            ChatMessageListRoutePolicy.route(
+                nativeTimelineStaticRenderEnabled: true,
+                nativeTimelineStreamingTailEnabled: true,
+                swiftUICleanListEnabled: true,
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            ),
+            .nativeTimelineSwiftUI
+        )
+
+        XCTAssertEqual(
+            ChatMessageListRoutePolicy.route(
+                nativeTimelineStaticRenderEnabled: true,
+                nativeTimelineStreamingTailEnabled: true,
+                swiftUICleanListEnabled: true,
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            ),
+            .nativeTimelineSwiftUI
+        )
+
+        XCTAssertEqual(
+            ChatMessageListRoutePolicy.route(
+                nativeTimelineStaticRenderEnabled: false,
+                nativeTimelineStreamingTailEnabled: false,
+                swiftUICleanListEnabled: true,
+                messages: [user, assistant],
+                event: .assistantStreamDelta,
+                isGenerationActive: true,
+                isLoading: false
+            ),
+            .swiftUICleanList
+        )
+    }
+
+    func testNativeStaticTimelineViewportPolicyPublishesBottomButtonAndLODState() {
+        let shortContent = NativeStaticTimelineViewportPolicy.state(
+            distanceToBottom: 0,
+            visibleHeight: 800,
+            contentHeight: 400,
+            hasMessages: true
+        )
+        XCTAssertTrue(shortContent.isAtBottom)
+        XCTAssertFalse(shortContent.isContentScrollable)
+        XCTAssertFalse(shortContent.showScrollToBottom)
+        XCTAssertFalse(shortContent.followPaused)
+        XCTAssertFalse(shortContent.liveRenderingFarFromBottom)
+
+        let awayFromBottom = NativeStaticTimelineViewportPolicy.state(
+            distanceToBottom: 950,
+            visibleHeight: 800,
+            contentHeight: 2_200,
+            hasMessages: true
+        )
+        XCTAssertFalse(awayFromBottom.isAtBottom)
+        XCTAssertTrue(awayFromBottom.isContentScrollable)
+        XCTAssertTrue(awayFromBottom.showScrollToBottom)
+        XCTAssertFalse(awayFromBottom.followPaused)
+        XCTAssertTrue(awayFromBottom.liveRenderingFarFromBottom)
+
+        let userDraggingAwayFromBottom = NativeStaticTimelineViewportPolicy.state(
+            distanceToBottom: 950,
+            visibleHeight: 800,
+            contentHeight: 2_200,
+            hasMessages: true,
+            userInteracting: true
+        )
+        XCTAssertTrue(userDraggingAwayFromBottom.followPaused)
+
+        let bottomOfScrollableContent = NativeStaticTimelineViewportPolicy.state(
+            distanceToBottom: 0,
+            visibleHeight: 800,
+            contentHeight: 2_200,
+            hasMessages: true
+        )
+        XCTAssertTrue(bottomOfScrollableContent.isAtBottom)
+        XCTAssertTrue(bottomOfScrollableContent.isContentScrollable)
+        XCTAssertFalse(bottomOfScrollableContent.showScrollToBottom)
+        XCTAssertFalse(bottomOfScrollableContent.followPaused)
+        XCTAssertFalse(bottomOfScrollableContent.liveRenderingFarFromBottom)
+    }
+
+    func testNativeStaticTimelineRendererMemoryKeepsCompletedStreamingAssistant() {
+        let user = UIMessage.companion.user(prompt: "问题")
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+        let assistantID = ChatMessageProjector.messageId(for: assistant)
+
+        let remembered = NativeStaticTimelineRendererMemory.nextStreamedMessageIDs(
+            previous: [],
+            event: .generationCompleted,
+            messages: [user, assistant]
+        )
+
+        XCTAssertEqual(remembered, Set([assistantID]))
+    }
+
+    func testNativeStaticTimelineRendererMemoryResetsOnConversationBoundary() {
+        let assistant = UIMessage.companion.assistant(prompt: "回答")
+        let assistantID = ChatMessageProjector.messageId(for: assistant)
+
+        let reset = NativeStaticTimelineRendererMemory.nextStreamedMessageIDs(
+            previous: [assistantID],
+            event: .conversationLoaded,
+            messages: [assistant]
+        )
+
+        XCTAssertTrue(reset.isEmpty)
+    }
+
+    func testNativeTimelineMirrorDiffsWithoutScrollWritesAndKeepsStreamMemory() {
+        let mirror = NativeChatTimelineMirror()
+        let first = UIMessage.companion.assistant(prompt: "第一段")
+        let firstResult = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
+                messages: [first],
+                configurationIssue: nil,
+                isGenerationActive: true,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle
+            )
+        )
+        let messageId = ChatMessageProjector.messageId(for: first)
+
+        XCTAssertEqual(firstResult.insertedIDs, ["message-\(messageId)", ChatTimelinePlanner.bottomAnchorID])
+        XCTAssertFalse(firstResult.didProposeScrollWrite)
+        XCTAssertFalse(firstResult.followGeneration)
+        XCTAssertEqual(firstResult.scrollToBottomTrigger, 0)
+        XCTAssertEqual(firstResult.retainedStreamedMessageIDs, [messageId])
+
+        let completed = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 2, reason: .generationCompleted),
+                messages: [first],
+                configurationIssue: nil,
+                isGenerationActive: false,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle
+            )
+        )
+
+        XCTAssertFalse(completed.didProposeScrollWrite)
+        XCTAssertEqual(completed.projection.messageEntry(for: messageId)?.renderer, .streamingAssistantMarkdown)
+        XCTAssertTrue(completed.projection.messageEntry(for: messageId)?.hasEverStreamed ?? false)
+    }
+
+    func testNativeTimelineMirrorHasNoChangesForIdenticalInputAndChangesOnlyGrowingMessage() {
+        let mirror = NativeChatTimelineMirror()
+        let messageID = KotlinUuid.companion.random()
+        let short = UIMessage(
+            id: messageID,
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(text: "第一段", metadata: nil)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        let longer = UIMessage(
+            id: messageID,
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(text: "第一段，继续追加", metadata: nil)],
+            annotations: [],
+            createdAt: short.createdAt,
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        let shortID = ChatMessageProjector.messageId(for: short)
+        _ = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
+                messages: [short],
+                configurationIssue: nil,
+                isGenerationActive: true,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle
+            )
+        )
+        let same = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
+                messages: [short],
+                configurationIssue: nil,
+                isGenerationActive: true,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle
+            )
+        )
+        let grown = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 2, reason: .streamDelta),
+                messages: [longer],
+                configurationIssue: nil,
+                isGenerationActive: true,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle
+            )
+        )
+
+        XCTAssertTrue(same.insertedIDs.isEmpty)
+        XCTAssertTrue(same.removedIDs.isEmpty)
+        XCTAssertTrue(same.changedIDs.isEmpty)
+        XCTAssertEqual(grown.changedIDs, ["message-\(shortID)"])
+        XCTAssertFalse(grown.didProposeScrollWrite)
+    }
+
+    func testNativeTimelineMirrorStreamingMemoryEventMatrix() {
+        let rememberedReasons: [ChatMessageUpdateReason] = [
+            .streamDelta,
+            .streamFinish,
+            .toolCallStarted,
+            .toolResultAppended,
+            .awaitingToolApproval,
+            .generationCompleted,
+            .generationFailed,
+            .generationHandedOffToBackground
+        ]
+        let notRememberedReasons: [ChatMessageUpdateReason] = [
+            .generationCancelled,
+            .settingsRefresh,
+            .userAppend
+        ]
+
+        for reason in rememberedReasons {
+            let mirror = NativeChatTimelineMirror()
+            let assistant = UIMessage.companion.assistant(prompt: "内容")
+            let messageId = ChatMessageProjector.messageId(for: assistant)
+            let result = mirror.record(
+                NativeTimelineMirrorInput(
+                    signal: ChatMessageUpdateSignal(revision: 1, reason: reason),
+                    messages: [assistant],
+                    configurationIssue: nil,
+                    isGenerationActive: reason == .streamDelta,
+                    isLoading: false,
+                    isRecognizingImages: false,
+                    contextCompactState: .idle
+                )
+            )
+
+            XCTAssertEqual(result.retainedStreamedMessageIDs, [messageId], "reason=\(reason)")
+        }
+
+        for reason in notRememberedReasons {
+            let mirror = NativeChatTimelineMirror()
+            let assistant = UIMessage.companion.assistant(prompt: "内容")
+            let result = mirror.record(
+                NativeTimelineMirrorInput(
+                    signal: ChatMessageUpdateSignal(revision: 1, reason: reason),
+                    messages: [assistant],
+                    configurationIssue: nil,
+                    isGenerationActive: false,
+                    isLoading: false,
+                    isRecognizingImages: false,
+                    contextCompactState: .idle
+                )
+            )
+
+            XCTAssertTrue(result.retainedStreamedMessageIDs.isEmpty, "reason=\(reason)")
+        }
+    }
+
+    func testNativeTimelineMirrorEnvironmentChangeInvalidatesExistingEntriesButDoesNotScroll() {
+        let mirror = NativeChatTimelineMirror()
+        let assistant = UIMessage.companion.assistant(prompt: "内容")
+        let itemID = "message-\(ChatMessageProjector.messageId(for: assistant))"
+        _ = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 1, reason: .initialLoad),
+                messages: [assistant],
+                configurationIssue: nil,
+                isGenerationActive: false,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle,
+                displaySettingSignature: "display-a"
+            )
+        )
+        let changed = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 2, reason: .settingsRefresh),
+                messages: [assistant],
+                configurationIssue: nil,
+                isGenerationActive: false,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle,
+                displaySettingSignature: "display-b"
+            )
+        )
+
+        XCTAssertTrue(changed.changedIDs.contains(itemID))
+        XCTAssertFalse(changed.didProposeScrollWrite)
+    }
+
+    func testNativeTimelineMirrorViewportRenderStateChangeInvalidatesVisibleEntryOnly() {
+        let mirror = NativeChatTimelineMirror()
+        let assistant = UIMessage.companion.assistant(prompt: "正在流式生成")
+        let itemID = "message-\(ChatMessageProjector.messageId(for: assistant))"
+        _ = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
+                messages: [assistant],
+                configurationIssue: nil,
+                isGenerationActive: true,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle,
+                viewportState: ChatViewportState(liveRenderingFarFromBottom: false)
+            )
+        )
+        let farFromBottom = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
+                messages: [assistant],
+                configurationIssue: nil,
+                isGenerationActive: true,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle,
+                viewportState: ChatViewportState(liveRenderingFarFromBottom: true)
+            )
+        )
+
+        XCTAssertEqual(farFromBottom.changedIDs, [itemID])
+        XCTAssertFalse(farFromBottom.didProposeScrollWrite)
+        XCTAssertTrue(farFromBottom.viewportState.liveRenderingFarFromBottom)
+    }
+
+    func testNativeTimelineProjectionUsesSharedRenderStateStoreFreezeLifecycle() {
+        let assistant = UIMessage.companion.assistant(prompt: "正在流式生成")
+        let messageId = ChatMessageProjector.messageId(for: assistant)
+        let streamedIDs: Set<String> = [messageId]
+        let liveStore = ChatRenderStateStore()
+        let frozenStore = ChatRenderStateStore()
+        frozenStore.freeze(messageID: messageId, latestText: "冻结快照")
+
+        let live = NativeTimelineProjector.build(
+            messages: [assistant],
+            event: .generationCompleted,
+            streamedMessageIDs: streamedIDs,
+            renderStateStore: liveStore,
+            contentHashProvider: { _, _ in 1 }
+        )
+        let frozen = NativeTimelineProjector.build(
+            messages: [assistant],
+            event: .generationCompleted,
+            streamedMessageIDs: streamedIDs,
+            renderStateStore: frozenStore,
+            contentHashProvider: { _, _ in 1 }
+        )
+
+        XCTAssertNotEqual(
+            live.messageEntry(for: messageId)?.renderDigest,
+            frozen.messageEntry(for: messageId)?.renderDigest
+        )
+    }
+
+    func testNativeTimelineFrozenStreamingTailDoesNotRequestContentHash() {
+        let assistant = UIMessage.companion.assistant(prompt: "正在流式生成")
+        let messageId = ChatMessageProjector.messageId(for: assistant)
+        var contentHashCallCount = 0
+
+        let projection = NativeTimelineProjector.build(
+            messages: [assistant],
+            event: .assistantStreamDelta,
+            isGenerationActive: true,
+            viewportState: ChatViewportState(liveRenderingFarFromBottom: true),
+            streamedMessageIDs: [messageId],
+            renderStateStore: ChatRenderStateStore(),
+            contentHashProvider: { _, _ in
+                contentHashCallCount += 1
+                return 1
+            }
+        )
+
+        XCTAssertEqual(projection.messageEntry(for: messageId)?.renderState?.rendererMode, .frozen)
+        XCTAssertEqual(contentHashCallCount, 0)
+    }
+
+    func testNativeTimelineProjectionCarriesRenderStateForNativeUIConsumption() {
+        let assistant = UIMessage.companion.assistant(prompt: "正在流式生成")
+        let messageId = ChatMessageProjector.messageId(for: assistant)
+        let store = ChatRenderStateStore()
+        store.freeze(messageID: messageId, latestText: "冻结快照")
+
+        let projection = NativeTimelineProjector.build(
+            messages: [assistant],
+            event: .generationCompleted,
+            viewportState: ChatViewportState(liveRenderingFarFromBottom: true),
+            streamedMessageIDs: [messageId],
+            renderStateStore: store,
+            contentHashProvider: { _, _ in 1 }
+        )
+        let entry = projection.messageEntry(for: messageId)
+
+        XCTAssertEqual(entry?.renderState?.rendererMode, .frozen)
+        XCTAssertEqual(entry?.renderHasEverStreamed, true)
+        XCTAssertEqual(entry?.liveMarkdownRenderingEnabled, false)
+        XCTAssertEqual(entry?.frozenMarkdownSnapshot, "冻结快照")
+    }
+
+    func testNativeTimelineMirrorAcceptsVisibleAndFreezeLifecycleEvents() {
+        let mirror = NativeChatTimelineMirror()
+        let assistant = UIMessage.companion.assistant(prompt: "正在流式生成")
+        let messageId = ChatMessageProjector.messageId(for: assistant)
+        let input = NativeTimelineMirrorInput(
+            signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
+            messages: [assistant],
+            configurationIssue: nil,
+            isGenerationActive: true,
+            isLoading: false,
+            isRecognizingImages: false,
+            contextCompactState: .idle
+        )
+        let live = mirror.record(input)
+
+        mirror.freeze(messageID: messageId, latestText: "冻结快照")
+        let frozen = mirror.record(input)
+
+        mirror.markVisible(messageID: messageId)
+        let visibleAgain = mirror.record(input)
+
+        XCTAssertNotEqual(
+            live.projection.messageEntry(for: messageId)?.renderDigest,
+            frozen.projection.messageEntry(for: messageId)?.renderDigest
+        )
+        XCTAssertEqual(
+            live.projection.messageEntry(for: messageId)?.renderDigest,
+            visibleAgain.projection.messageEntry(for: messageId)?.renderDigest
+        )
+    }
+
+    func testNativeTimelineMirrorResetsOnBranchChangeAndDoesNotTreatBackgroundReloadAsScrollIntent() {
+        let mirror = NativeChatTimelineMirror()
+        let oldMessage = UIMessage.companion.assistant(prompt: "旧回复")
+        _ = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 1, reason: .initialLoad),
+                messages: [oldMessage],
+                configurationIssue: nil,
+                isGenerationActive: false,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle
+            )
+        )
+
+        let newMessage = UIMessage.companion.assistant(prompt: "后台工具回填后的回复")
+        let result = mirror.record(
+            NativeTimelineMirrorInput(
+                signal: ChatMessageUpdateSignal(revision: 2, reason: .branchChange),
+                messages: [newMessage],
+                configurationIssue: nil,
+                isGenerationActive: false,
+                isLoading: false,
+                isRecognizingImages: false,
+                contextCompactState: .idle
+            )
+        )
+
+        XCTAssertFalse(result.didProposeScrollWrite)
+        XCTAssertEqual(result.removedIDs, [])
+        XCTAssertEqual(result.insertedIDs, [
+            "message-\(ChatMessageProjector.messageId(for: newMessage))",
+            ChatTimelinePlanner.bottomAnchorID
+        ])
+        XCTAssertTrue(result.retainedStreamedMessageIDs.isEmpty)
+    }
+
+    private static func astNodes(for markdown: String) -> [PackedAstNode] {
+        guard let data = MarkdownBridge.parse(markdown),
+              let reader = PackedAstReader(data: data),
+              let root = reader.root() else {
+            return []
+        }
+        return root.children
+    }
+
+    private static func firstNode(ofType type: NodeType, in nodes: [PackedAstNode]) -> PackedAstNode? {
+        for node in nodes {
+            if node.type == type {
+                return node
+            }
+            if let found = firstNode(ofType: type, in: node.children) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    private static func slice(_ source: String, node: PackedAstNode) -> String {
+        guard node.startOffset < node.endOffset else { return "" }
+        guard let startIndex = source.utf8.index(
+            source.utf8.startIndex,
+            offsetBy: node.startOffset,
+            limitedBy: source.utf8.endIndex
+        ), let endIndex = source.utf8.index(
+            source.utf8.startIndex,
+            offsetBy: node.endOffset,
+            limitedBy: source.utf8.endIndex
+        ) else {
+            return ""
+        }
+        return String(source[startIndex..<endIndex])
     }
 }

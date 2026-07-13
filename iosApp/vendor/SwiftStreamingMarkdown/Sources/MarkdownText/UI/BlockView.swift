@@ -40,14 +40,14 @@ struct SingleBlockView: View {
       switch renderable {
       case .heading(_, _, let contents):
         HStack(spacing: 0) {
-          ParagraphView(contents: contents)
+          ParagraphView(contents: contents, lineSpacing: config.headingLineSpacing)
             .transition(.opacity)
             .accessibilityAddTraits(.isHeader)
           Spacer()
         }
       case .paragraph(_, let contents):
         HStack(spacing: 0) {
-          ParagraphView(contents: contents, lineSpacing: 5)
+          ParagraphView(contents: contents, lineSpacing: config.paragraphLineSpacing)
             .fixedSize(horizontal: false, vertical: true)
             .transition(.opacity)
           Spacer()
@@ -55,7 +55,11 @@ struct SingleBlockView: View {
       case .latex(_, let latexString):
         ScrollView(.horizontal) {
           HStack(spacing: 0) {
-            BlockMathView(latex: latexString, color: Color(config.paragraphStyle.textColor))
+            BlockMathView(
+              latex: latexString,
+              color: Color(config.paragraphStyle.textColor),
+              pointSize: Typography.base.uiFont.pointSize
+            )
             Spacer()
           }
         }.scrollIndicators(.hidden)

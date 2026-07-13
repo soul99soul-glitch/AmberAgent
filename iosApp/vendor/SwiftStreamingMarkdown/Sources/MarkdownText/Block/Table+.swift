@@ -38,6 +38,11 @@ extension Markdown.Table: BlockConvertible {
     let headerColumnCount = self.head.childCount
     let isWellFormed = self.body.children.allSatisfy { $0.childCount == headerColumnCount }
     let rawMarkdown = isWellFormed ? self.format() : ""
-    return .table(id: self.id, headers: headerCells, rows: rows, rawMarkdown: rawMarkdown)
+    return .table(
+      id: self.id,
+      headers: headerCells.map { AttributedString($0) },
+      rows: rows.map { $0.map(RowContent.init) },
+      rawMarkdown: rawMarkdown
+    )
   }
 }

@@ -30,7 +30,7 @@ indirect enum MarkdownRenderable: Identifiable, Equatable, @unchecked Sendable {
   case codeBlock(id: String, language: String?, code: String)
 
   /// To be rendered as a table
-  case table(id: String, headers: [NSMutableAttributedString], rows: [[NSMutableAttributedString]], rawMarkdown: String)
+  case table(id: String, headers: [AttributedString], rows: [[RowContent]], rawMarkdown: String)
 
   /// To be rendered as thematic break
   case thematicBreak(id: String)

@@ -5,7 +5,10 @@ import app.amber.ai.core.MessageRole
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -109,12 +112,13 @@ class JsonConversationStorageTest {
         val first = sampleConversation(id = id, title = "v1", userText = "first")
         storage.saveConversation(first)
 
-        val second = first.copy(title = "v2")
+        val second = sampleConversation(id = id, title = "v2", userText = "second")
         storage.saveConversation(second)
 
         val summaries = storage.listSummaries()
         assertEquals(1, summaries.size, "upsert 不应新增列表条目")
-        assertEquals("v2", summaries.first().title)
+        assertEquals("v1", summaries.first().title, "消息写入不拥有标题 metadata")
+        assertEquals("second", storage.loadConversation(id)?.currentMessages?.first()?.toText())
     }
 
     @Test
@@ -173,6 +177,92 @@ class JsonConversationStorageTest {
     fun updateMetadataNonexistentIsNoop() = runTest {
         storage.updateMetadata(Uuid.random(), title = "x")
         assertEquals(0, storage.listSummaries().size)
+    }
+
+    @Test
+    fun saveConversationMessageWritePreservesExistingMetadataOwnerFields() = runTest {
+        val id = Uuid.parse("00000000-0000-0000-0000-000000000043")
+        storage.saveConversation(
+            sampleConversation(
+                id = id,
+                title = "orig",
+                userText = "old message",
+                isPinned = false,
+                chatSuggestions = listOf("kept suggestion"),
+                autoApproveToolCalls = true,
+            )
+        )
+        storage.updateMetadata(id, title = "renamed", isPinned = true)
+
+        storage.saveConversation(
+            sampleConversation(
+                id = id,
+                title = "stale title",
+                userText = "new message",
+                isPinned = false,
+                chatSuggestions = listOf("stale suggestion"),
+                autoApproveToolCalls = false,
+            )
+        )
+
+        val loaded = storage.loadConversation(id)
+        assertNotNull(loaded)
+        assertEquals("new message", loaded.currentMessages.first().toText())
+        assertEquals("renamed", loaded.title, "message 写入不得反向覆盖 metadata owner 的标题")
+        assertTrue(loaded.isPinned, "message 写入不得反向覆盖 metadata owner 的置顶状态")
+        assertEquals(
+            listOf("kept suggestion"),
+            loaded.chatSuggestions,
+            "message 写入不得反向覆盖非消息 owner 的建议状态"
+        )
+        assertTrue(loaded.autoApproveToolCalls, "message 写入不得反向覆盖工具审批 owner 状态")
+    }
+
+    @Test
+    fun updateMetadataSerializesAgainstConcurrentSaveWithoutOverwritingMessages() = runTest {
+        val id = Uuid.parse("00000000-0000-0000-0000-000000000042")
+        storage.saveConversation(
+            sampleConversation(id = id, title = "orig", userText = "old message", isPinned = false)
+        )
+
+        val metadataSaveReached = CompletableDeferred<Unit>()
+        val releaseMetadataSave = CompletableDeferred<Unit>()
+        storage.beforeUpdateMetadataSaveForTesting = {
+            metadataSaveReached.complete(Unit)
+            releaseMetadataSave.await()
+        }
+
+        val renameTask = async {
+            storage.updateMetadata(id, title = "renamed", isPinned = true)
+        }
+        metadataSaveReached.await()
+
+        var concurrentSaveCompleted = false
+        val saveTask = async {
+            storage.saveConversation(
+                sampleConversation(id = id, title = "new save", userText = "new message", isPinned = false)
+            )
+            concurrentSaveCompleted = true
+        }
+
+        withTimeoutOrNull(100) {
+            saveTask.await()
+        }
+        assertFalse(
+            concurrentSaveCompleted,
+            "metadata 的读改写窗口内不应允许完整 save 穿插，否则旧 metadata 快照会覆盖新消息"
+        )
+
+        releaseMetadataSave.complete(Unit)
+        renameTask.await()
+        saveTask.await()
+        storage.beforeUpdateMetadataSaveForTesting = null
+
+        val loaded = storage.loadConversation(id)
+        assertNotNull(loaded)
+        assertEquals("new message", loaded.currentMessages.first().toText())
+        assertEquals("renamed", loaded.title)
+        assertTrue(loaded.isPinned)
     }
 
     @Test
@@ -297,6 +387,8 @@ class JsonConversationStorageTest {
         title: String = "test",
         userText: String = "hello",
         isPinned: Boolean = false,
+        chatSuggestions: List<String> = emptyList(),
+        autoApproveToolCalls: Boolean = false,
     ): Conversation {
         // 用 UIMessage.companion.user 工厂构造，避免直接依赖 UIMessagePart 抽象——
         // 后者在 commonTest sourceSet 上解析不稳定（api 透传链对该 sourceSet 不保证可见）。
@@ -307,7 +399,9 @@ class JsonConversationStorageTest {
             assistantId = app.amber.core.model.DEFAULT_ASSISTANT_ID,
             title = title,
             messageNodes = listOf(node),
+            chatSuggestions = chatSuggestions,
             isPinned = isPinned,
+            autoApproveToolCalls = autoApproveToolCalls,
         )
     }
 }

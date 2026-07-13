@@ -379,22 +379,10 @@ struct ComposerModelSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Capsule()
-                .fill(AmberTheme.border)
-                .frame(width: 36, height: 5)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
-
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("选择模型")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(AmberTheme.foreground)
-
-                    Text("选择当前配置要使用的 Model ID")
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                }
+                Text("选择模型")
+                    .font(.headline)
+                    .foregroundStyle(AmberTheme.foreground)
 
                 Spacer()
 
@@ -402,17 +390,18 @@ struct ComposerModelSheet: View {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(AmberTheme.foreground2)
                         .frame(width: 34, height: 34)
                         .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
-                .amberGlass(cornerRadius: 17)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
                 .accessibilityLabel("关闭模型选择")
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 14)
+            .padding(.top, 18)
+            .padding(.bottom, 10)
 
             Divider()
                 .overlay(AmberTheme.borderSoft)
@@ -454,7 +443,7 @@ struct ComposerModelSheet: View {
                             }
                         }
                     }
-                    .background(AmberTheme.background.opacity(0.72))
+                    .background(AmberTheme.glass)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -468,14 +457,13 @@ struct ComposerModelSheet: View {
             .scrollIndicators(.hidden)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(AmberTheme.background)
         .onAppear {
             expandedProviderIDs = Set([Self.selectedProviderID(for: currentModel, providers: providers)])
         }
     }
 
     private func toggleProvider(_ id: String) {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(.snappy(duration: 0.25)) {
             if expandedProviderIDs.contains(id) {
                 expandedProviderIDs.remove(id)
             } else {
@@ -503,14 +491,14 @@ struct ComposerProviderGroupView: View {
             Button(action: onToggle) {
                 HStack(spacing: 10) {
                     Text(provider.name)
-                        .font(.subheadline.weight(providerContainsSelection ? .semibold : .regular))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(providerContainsSelection ? AmberTheme.accent : AmberTheme.foreground)
 
                     Spacer()
 
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AmberTheme.muted)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AmberTheme.muted2)
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
                 .padding(.horizontal, 16)
@@ -522,6 +510,10 @@ struct ComposerProviderGroupView: View {
             .accessibilityValue(isExpanded ? "已展开" : "已收起")
 
             if isExpanded {
+                Divider()
+                    .overlay(AmberTheme.borderSoft)
+                    .padding(.leading, 16)
+
                 VStack(spacing: 0) {
                     ForEach(Array(provider.models.enumerated()), id: \.element.id) { index, model in
                         if index > 0 {
@@ -558,8 +550,8 @@ struct ComposerModelRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Text(model.name)
-                    .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                    .foregroundStyle(AmberTheme.foreground)
+                    .font(.subheadline.weight(isSelected ? .medium : .regular))
+                    .foregroundStyle(isSelected ? AmberTheme.foreground : AmberTheme.foreground2)
                     .lineLimit(1)
 
                 if let context = model.context {
@@ -573,11 +565,16 @@ struct ComposerModelRow: View {
                 }
 
                 Spacer(minLength: 8)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                }
             }
             .padding(.leading, 36)
             .padding(.trailing, 16)
-            .frame(minHeight: 46)
-            .background(isSelected ? AmberTheme.accentTint : Color.clear)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

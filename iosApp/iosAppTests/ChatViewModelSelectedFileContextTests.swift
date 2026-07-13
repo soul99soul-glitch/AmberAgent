@@ -19,6 +19,269 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertNil(viewModel.pendingSelectedFilePreview)
     }
 
+    func testSendMessageIsRejectedWhenBackgroundGenerationIsActiveForCurrentConversation() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+        viewModel.inputText = "should not append while background generation is active"
+
+        viewModel.sendMessage()
+
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertEqual(viewModel.inputText, "should not append while background generation is active")
+    }
+
+    func testGenerateResponseIsRejectedWhenBackgroundGenerationIsActiveForCurrentConversation() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+
+        viewModel.generateResponseForTesting(inputDigest: "digest", conversationId: nil)
+
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertNil(viewModel.configurationError)
+    }
+
+    func testStaleCompactTerminalEventIsAppliedAfterRunFinishes() {
+        XCTAssertTrue(ChatContextCompactEventRouter.shouldApply(
+            event: .completed(summary: "上下文已压缩。"),
+            eventRunId: "run-a",
+            currentRunId: nil
+        ))
+        XCTAssertTrue(ChatContextCompactEventRouter.shouldApply(
+            event: .idle,
+            eventRunId: "run-a",
+            currentRunId: nil
+        ))
+        XCTAssertFalse(ChatContextCompactEventRouter.shouldApply(
+            event: .compacting,
+            eventRunId: "run-a",
+            currentRunId: nil
+        ))
+        XCTAssertFalse(ChatContextCompactEventRouter.shouldApply(
+            event: .completed(summary: "旧任务完成"),
+            eventRunId: "run-a",
+            currentRunId: "run-b"
+        ))
+    }
+
+    func testEditingUserMessagePreservesImageParts() {
+        let original = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.user,
+            parts: [
+                UIMessagePart.Text(text: "old caption", metadata: nil),
+                UIMessagePart.Image(url: "data:image/png;base64,AAA", metadata: nil)
+            ],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+
+        let edited = ChatViewModel.editedUserMessageForTesting(original: original, newText: "new caption")
+
+        XCTAssertEqual(
+            edited.parts.compactMap { ($0 as? UIMessagePart.Text)?.text },
+            ["new caption"]
+        )
+        XCTAssertEqual(
+            edited.parts.compactMap { ($0 as? UIMessagePart.Image)?.url },
+            ["data:image/png;base64,AAA"]
+        )
+    }
+
+    func testVisionRecognitionCacheKeyUsesDigestInsteadOfDataUrl() {
+        let dataUrl = "data:image/png;base64," + String(repeating: "QUJD", count: 512)
+
+        let key = ChatViewModel.visionRecognitionCacheKeyForTesting(dataUrl)
+
+        XCTAssertEqual(key, ChatViewModel.visionRecognitionCacheKeyForTesting(dataUrl))
+        XCTAssertNotEqual(key, dataUrl)
+        XCTAssertFalse(key.contains("QUJD"))
+        XCTAssertEqual(key.count, "vision:".count + 32)
+    }
+
+    func testBackgroundToolHandoffUploadMessagesInjectsRuntimeContextAndCoalescesSystem() {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        harness.state.messagesByInjectingRuntimeContext = { messages in
+            [UIMessage.companion.system(prompt: "runtime context")] + messages
+        }
+        let baseMessages = [
+            UIMessage.companion.system(prompt: "base system"),
+            UIMessage.companion.user(prompt: "需要工具")
+        ]
+
+        let prepared = harness.coordinator.backgroundToolHandoffUploadMessagesForTesting(baseMessages)
+        let systemMessages = prepared.filter { $0.role == MessageRole.system }
+
+        XCTAssertEqual(systemMessages.count, 1)
+        XCTAssertTrue(systemMessages[0].toText().contains("runtime context"))
+        XCTAssertTrue(systemMessages[0].toText().contains("base system"))
+        XCTAssertEqual(prepared.filter { $0.role == MessageRole.user }.map { $0.toText() }, ["需要工具"])
+    }
+
+    func testBranchMutationsAreRejectedWhileVisionRecognitionIsPending() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatViewModelVisionRecognitionBranchGuard-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.newConversation()
+        await store.saveCurrent(messages: [
+            UIMessage.companion.user(prompt: "question"),
+            UIMessage.companion.assistant(prompt: "answer")
+        ])
+
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+        viewModel.isRecognizingImages = true
+
+        viewModel.editMessage(atMessageIndex: 0, newText: "edited question")
+        viewModel.regenerate(atMessageIndex: 0)
+        viewModel.deleteMessage(atMessageIndex: 1)
+        viewModel.selectVariant(messageIndex: 1, variantIndex: 0)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(store.currentMessages.map { $0.toText() }, ["question", "answer"])
+        XCTAssertEqual(viewModel.messages.map { $0.toText() }, ["question", "answer"])
+        XCTAssertEqual(viewModel.selectedFileContextError, "图片识别中，请稍候")
+    }
+
+    func testVisionRecognitionResultSurvivesUnrelatedRevisionBumpWhenUserMessageStillExists() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        let userMessage = UIMessage.companion.user(prompt: "image question")
+        viewModel.messages = [userMessage]
+        let userMessageId = ChatMessageProjector.messageId(for: userMessage)
+
+        XCTAssertTrue(viewModel.shouldApplyVisionRecognitionResultForTesting(
+            conversationId: nil,
+            userMessageId: userMessageId
+        ))
+
+        viewModel.messageRevision &+= 1
+
+        XCTAssertTrue(viewModel.shouldApplyVisionRecognitionResultForTesting(
+            conversationId: nil,
+            userMessageId: userMessageId
+        ))
+    }
+
+    func testVisionRecognitionResultIsRejectedAfterUserMessageDisappears() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        let userMessage = UIMessage.companion.user(prompt: "image question")
+        let userMessageId = ChatMessageProjector.messageId(for: userMessage)
+        viewModel.messages = []
+
+        XCTAssertFalse(viewModel.shouldApplyVisionRecognitionResultForTesting(
+            conversationId: nil,
+            userMessageId: userMessageId
+        ))
+    }
+
+    func testVisionRecognitionFailureIsIgnoredAfterConversationChanges() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        let userMessage = UIMessage.companion.user(prompt: "image question")
+        let userMessageId = ChatMessageProjector.messageId(for: userMessage)
+        viewModel.messages = []
+
+        viewModel.applyVisionRecognitionFailureForTesting(
+            message: "OCR failed",
+            conversationId: nil,
+            userMessageId: userMessageId
+        )
+
+        XCTAssertNil(viewModel.selectedFileContextError)
+    }
+
+    func testVisionRecognitionFailureIsFlushedWhenOriginalConversationReturns() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatViewModelVisionFailureFlush-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let firstConversationId = try XCTUnwrap(store.currentConversation?.id)
+        let userMessage = UIMessage.companion.user(prompt: "image question")
+        await store.saveCurrent(messages: [userMessage])
+        let userMessageId = ChatMessageProjector.messageId(for: userMessage)
+
+        await store.newConversation()
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "other conversation")])
+
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+
+        viewModel.applyVisionRecognitionFailureForTesting(
+            message: "OCR failed",
+            conversationId: firstConversationId,
+            userMessageId: userMessageId
+        )
+        XCTAssertNil(viewModel.selectedFileContextError)
+
+        await store.selectConversation(id: firstConversationId)
+        viewModel.reloadFromStore()
+
+        XCTAssertEqual(viewModel.selectedFileContextError, "OCR failed")
+    }
+
+    func testVisionRecognitionSuccessClearsTransientPendingPrompt() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        let userMessage = UIMessage.companion.user(prompt: "image question")
+        viewModel.messages = [userMessage]
+        viewModel.selectedFileContextError = "图片识别中，请稍候"
+
+        viewModel.applyVisionRecognitionSuccessForTesting(
+            conversationId: nil,
+            userMessageId: ChatMessageProjector.messageId(for: userMessage)
+        )
+
+        XCTAssertNil(viewModel.selectedFileContextError)
+    }
+
+    func testModifyGeneratedImageIsRejectedWhileVisionRecognitionIsPending() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.isRecognizingImages = true
+
+        viewModel.modifyGeneratedImage(
+            sourceImageURL: "file:///tmp/source.png",
+            prompt: "make it brighter",
+            aspectRatio: "1:1"
+        )
+
+        XCTAssertEqual(viewModel.selectedFileContextError, "图片识别中，请稍候")
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
     func testAttachSuccessAddsPreviewToNextMessageAndClearsIt() async throws {
         let documentStore = DocumentAccessStore()
         _ = documentStore.registerPickedFile(try makeTempFile(text: "Selected file body"))
@@ -792,6 +1055,69 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(councilText, "council conclusion")
     }
 
+    func testFailingPendingToolCallsFillsAllUnfinishedOutputs() throws {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        let searchCall = UIMessagePart.Tool(
+            toolCallId: "pending-search",
+            toolName: "search_web",
+            input: #"{"query":"swift concurrency"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let imageCall = UIMessagePart.Tool(
+            toolCallId: "pending-image",
+            toolName: "generate_image",
+            input: #"{"prompt":"amber icon"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let seed = UIMessage.companion.assistant(prompt: "")
+        let assistant = UIMessage(
+            id: seed.id,
+            role: seed.role,
+            parts: [searchCall, imageCall],
+            annotations: seed.annotations,
+            createdAt: seed.createdAt,
+            finishedAt: seed.finishedAt,
+            modelId: seed.modelId,
+            usage: seed.usage,
+            translation: seed.translation
+        )
+
+        let failed = harness.coordinator.failingPendingToolCallMessagesForTesting(
+            outputText: "tool loop exhausted",
+            in: [UIMessage.companion.user(prompt: "run tools"), assistant]
+        )
+        let tools = failed.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }
+        let searchOutput = try XCTUnwrap(tools.first { $0.toolCallId == "pending-search" }).output
+        let imageOutput = try XCTUnwrap(tools.first { $0.toolCallId == "pending-image" }).output
+
+        XCTAssertEqual(searchOutput.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(), "tool loop exhausted")
+        XCTAssertEqual(imageOutput.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(), "tool loop exhausted")
+    }
+
+    func testFailingPendingToolCallsSeesSearchToolWhenSearchGateDisabled() throws {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: []),
+            enableWebSearch: false
+        )
+
+        let failed = harness.coordinator.failingPendingToolCallMessagesForTesting(
+            outputText: "tool disabled",
+            in: harness.state.messages
+        )
+        let tool = try XCTUnwrap(failed.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first)
+        let outputText = tool.output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+
+        XCTAssertEqual(outputText, "tool disabled")
+    }
+
     func testPendingSearchApprovalKeepsCoordinatorActive() throws {
         let harness = makeGenerationCoordinatorHarness(
             transport: ChatSearchTransport(responses: [])
@@ -839,6 +1165,50 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertNil(harness.state.pendingSearchApproval)
     }
 
+    func testCancelPersistsCancellationSnapshotInsteadOfLaterActiveMessages() async throws {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        harness.coordinator.installPendingSearchApprovalForTesting(
+            pending: harness.pending,
+            request: harness.request
+        )
+
+        harness.state.onRecordRun = { [weak state = harness.state] in
+            state?.messages = [
+                UIMessage.companion.user(prompt: "different conversation after reload"),
+            ]
+        }
+
+        harness.coordinator.cancel()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(
+            harness.state.persistedSnapshots.last,
+            ["search", ""],
+            "取消收尾必须持久化 cancel 时刻的 run 快照,不能在延迟 Task 中回读当前活跃会话 messages"
+        )
+    }
+
+    func testCancelCapturesWriteBaselineBeforeDelayedTerminalWork() async throws {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        harness.coordinator.installPendingSearchApprovalForTesting(
+            pending: harness.pending,
+            request: harness.request
+        )
+
+        harness.coordinator.cancel()
+
+        XCTAssertEqual(harness.state.persistenceEvents.first, "capture-baseline")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(
+            harness.state.persistenceEvents,
+            ["capture-baseline", "record-run", "persist-snapshot"]
+        )
+    }
+
     private func textContent(of message: UIMessage) -> String {
         message.parts
             .compactMap { ($0 as? UIMessagePart.Text)?.text }
@@ -879,10 +1249,11 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
     }
 
     private func makeGenerationCoordinatorHarness(
-        transport: any IOSSearchHTTPTransport
+        transport: any IOSSearchHTTPTransport,
+        enableWebSearch: Bool = true
     ) -> ChatGenerationCoordinatorHarness {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
-        sharedSettings.setEnableWebSearch(true)
+        sharedSettings.setEnableWebSearch(enableWebSearch)
         let toolCall = UIMessagePart.Tool(
             toolCallId: "search-approval-test",
             toolName: "search_web",
@@ -1005,7 +1376,11 @@ private final class ChatGenerationBindingState {
     var isLoading = false
     var pendingSearchApproval: SearchToolApprovalRequest?
     var persistedCount = 0
+    var persistedSnapshots: [[String]] = []
     var recordedRunStatuses: [String] = []
+    var persistenceEvents: [String] = []
+    var onRecordRun: (() -> Void)?
+    var messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage] = { $0 }
 
     init(messages: [UIMessage]) {
         self.messages = messages
@@ -1022,6 +1397,7 @@ private final class ChatGenerationBindingState {
             bumpMessageRevision: { [weak self] _ in
                 self?.messageRevision += 1
             },
+            shouldPaceStreamPresentation: { true },
             setIsLoading: { [weak self] isLoading in
                 self?.isLoading = isLoading
             },
@@ -1037,14 +1413,27 @@ private final class ChatGenerationBindingState {
             persistMessages: { [weak self] _ in
                 self?.persistedCount += 1
             },
+            capturePersistMessagesBaseline: { [weak self] _ in
+                self?.persistenceEvents.append("capture-baseline")
+                return nil
+            },
+            persistMessagesSnapshot: { [weak self] messages, _, _ in
+                self?.persistedCount += 1
+                self?.persistedSnapshots.append(messages.map { $0.toText() })
+                self?.persistenceEvents.append("persist-snapshot")
+            },
             recordRun: { [weak self] _, _, status, _, _ in
                 await MainActor.run {
                     self?.recordedRunStatuses.append(status)
+                    self?.persistenceEvents.append("record-run")
+                    self?.onRecordRun?()
                 }
             },
             startLiveActivity: { _, _ in },
             saveMiniAppIfPresent: { _, _ in nil },
-            messagesByInjectingRuntimeContext: { messages in messages },
+            messagesByInjectingRuntimeContext: { [weak self] messages in
+                self?.messagesByInjectingRuntimeContext(messages) ?? messages
+            },
             userFacingGenerationError: { rawMessage, _ in rawMessage }
         )
     }

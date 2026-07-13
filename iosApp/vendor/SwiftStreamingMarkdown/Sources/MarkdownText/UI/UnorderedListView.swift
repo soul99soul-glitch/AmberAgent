@@ -8,11 +8,13 @@ import SwiftUI
 
 struct UnorderedListView: View {
 
+  @Environment(\.markdownConfig) var config: MarkdownRenderConfig
+
   let items: [MarkdownListItem]
   let nestedLevel: Int
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8, content: {
+    VStack(alignment: .leading, spacing: config.listItemSpacing, content: {
       ForEach(0..<items.count, id: \.self) { idx in
         HStack(alignment: .centerOfFirstLine, spacing: 1) {
           bulletView(forListItem: items[idx])
@@ -53,7 +55,7 @@ struct UnorderedListView: View {
           .foregroundStyle( Color.Theme.Foreground.Primary.Primary450)
           .transition(.opacity)
       }
-    }.frame(width: 22.0)
+    }.frame(width: config.unorderedListBulletWidth)
   }
 }
 

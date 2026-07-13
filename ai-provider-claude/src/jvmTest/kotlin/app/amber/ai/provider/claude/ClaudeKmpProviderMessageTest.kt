@@ -125,6 +125,28 @@ class ClaudeKmpProviderMessageTest {
     }
 
     @Test
+    fun `tools disable parallel tool use`() {
+        val tool = Tool(
+            name = "get_weather",
+            description = "Get the weather",
+            parameters = {
+                app.amber.ai.core.InputSchema.Obj(
+                    properties = buildJsonObject { },
+                    required = emptyList(),
+                )
+            },
+            execute = { emptyList() },
+        )
+        val params = TextGenerationParams(model = reasoningModel(), tools = listOf(tool))
+        val msgs = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("weather?"))))
+
+        val body = provider.callBuildMessageRequest(claudeSetting, msgs, params)
+        val toolChoice = body.getValue("tool_choice").jsonObject
+
+        assertTrue(toolChoice.getValue("disable_parallel_tool_use").jsonPrimitive.boolean)
+    }
+
+    @Test
     fun `promptCaching on adds cache_control to the last tool`() {
         val cachingSetting = claudeSetting.copy(promptCaching = true)
         val tool = Tool(
@@ -145,7 +167,7 @@ class ClaudeKmpProviderMessageTest {
         val toolObj = body["tools"]!!.jsonArray[0].jsonObject
         val cache = toolObj["cache_control"]
         assertNotNull(cache)
-        assertEquals("ephemeral", cache!!.jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals("ephemeral", cache.jsonObject.getValue("type").jsonPrimitive.content)
     }
 }
 

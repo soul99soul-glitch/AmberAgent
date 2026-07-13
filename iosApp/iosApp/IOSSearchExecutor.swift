@@ -865,7 +865,9 @@ struct IOSSearchExecutor {
     ) async throws -> [String: Any] {
         let (response, data) = try await transport.send(request)
         guard (200...299).contains(response.statusCode) else {
+#if DEBUG
             NSLog("[AmberSearch] \(provider) HTTP \(response.statusCode) body=\(String(data: data, encoding: .utf8)?.prefix(400) ?? "")")
+#endif
             throw IOSSearchExecutorError.httpStatus(provider, response.statusCode)
         }
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

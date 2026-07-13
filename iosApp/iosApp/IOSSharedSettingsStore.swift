@@ -148,18 +148,22 @@ final class IOSSharedSettingsStore {
         // migrates any pre-redactor plaintext values still in the JSON: if a
         // provider's apiKey is non-empty AND non-mask, store it to the side-table
         // now (so the next persist redacts it), then keep it in memory.
-        Self.rehydrateProviderApiKeys(into: &self.snapshot)
-        Self.rehydrateSearchServiceApiKeys(into: &self.snapshot)
+        let migratedProviderPlaintext = Self.rehydrateProviderApiKeys(into: &self.snapshot)
+        let migratedSearchPlaintext = Self.rehydrateSearchServiceApiKeys(into: &self.snapshot)
         // iOS identity: introduce as "Amber" and don't claim to run on Android.
         // Applied on every load (idempotent) so persisted snapshots are rebranded too.
         self.snapshot = IosSettingsMutations.shared.rebrandAmberIdentity(settings: self.snapshot)
+        if migratedProviderPlaintext || migratedSearchPlaintext {
+            restoreSnapshot(self.snapshot)
+        }
     }
 
     /// Rehydrates provider apiKeys in a snapshot from the Keychain side-table
     /// (scheme B). Masked values are replaced with the real key; non-empty non-
     /// mask values are migrated to the side-table (first-time migration from a
     /// pre-redactor plaintext store).
-    private static func rehydrateProviderApiKeys(into snapshot: inout Settings) {
+    private static func rehydrateProviderApiKeys(into snapshot: inout Settings) -> Bool {
+        var migratedPlaintext = false
         for provider in snapshot.providers {
             let providerId = provider.id.description() as String
             let current = apiKey(of: provider)
@@ -170,10 +174,16 @@ final class IOSSharedSettingsStore {
                 }
             } else if !current.isEmpty {
                 // Pre-redactor plaintext still in the JSON → migrate to side-table
-                // (next persist will redact it). Real value stays in memory.
-                IOSCredentialSideTable.store(key: IOSCredentialSideTable.providerApiKey(providerId: providerId), value: current)
+                // and immediately rewrite persisted JSON through restoreSnapshot.
+                if IOSCredentialSideTable.store(
+                    key: IOSCredentialSideTable.providerApiKey(providerId: providerId),
+                    value: current
+                ) {
+                    migratedPlaintext = true
+                }
             }
         }
+        return migratedPlaintext
     }
 
     /// Reads the apiKey from a provider by sealed type.
@@ -184,7 +194,8 @@ final class IOSSharedSettingsStore {
         return ""
     }
 
-    private static func rehydrateSearchServiceApiKeys(into snapshot: inout Settings) {
+    private static func rehydrateSearchServiceApiKeys(into snapshot: inout Settings) -> Bool {
+        var migratedPlaintext = false
         for service in snapshot.searchServices {
             let serviceId = service.id.description()
             let current = searchApiKey(of: service)
@@ -201,12 +212,15 @@ final class IOSSharedSettingsStore {
                     )
                 }
             } else if !current.isEmpty {
-                IOSCredentialSideTable.store(
+                if IOSCredentialSideTable.store(
                     key: IOSCredentialSideTable.searchServiceApiKey(serviceId: serviceId),
                     value: current
-                )
+                ) {
+                    migratedPlaintext = true
+                }
             }
         }
+        return migratedPlaintext
     }
 
     private static func searchApiKey(of service: SearchServiceOptions) -> String {

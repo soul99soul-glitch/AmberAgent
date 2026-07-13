@@ -34,27 +34,34 @@ data class ConversationSummary(
  * 在 Documents/conversations/ 下做文件 JSON 持久化；JVM target 仅为编译通过。
  *
  * 线程/协程模型：所有方法为 suspend，调用方需自行选择 Dispatcher。
- * 实现内部不做并发加锁——iOS 调用方（IOSConversationStore）在 @MainActor 上
- * 串行调用，单写者即可。
+ * 实现内部必须串行化文件与 index 的读改写窗口，避免 metadata 与消息树写入互相覆盖。
  */
 interface ConversationStorageInterface {
 
     /** 列出所有会话摘要（按 updateAt 倒序、isPinned 优先）。读 index.json。 */
+    @Throws(Throwable::class)
     suspend fun listSummaries(): List<ConversationSummary>
 
     /** 加载完整会话；不存在返回 null。读 {id}.json。 */
+    @Throws(Throwable::class)
     suspend fun loadConversation(id: Uuid): Conversation?
 
-    /** upsert：存在则覆盖，不存在则新建。同时刷新 index.json。 */
+    /**
+     * upsert 会话内容：不存在则新建；已存在时，消息树/建议等内容字段随入参更新，
+     * 但标题和置顶状态由 [updateMetadata] 拥有，不被旧快照反向覆盖。
+     */
+    @Throws(Throwable::class)
     suspend fun saveConversation(conversation: Conversation)
 
     /** 删除 {id}.json，并从 index.json 移除对应条目。不存在则空操作。 */
+    @Throws(Throwable::class)
     suspend fun deleteConversation(id: Uuid)
 
     /**
      * 仅更新标题/置顶状态（partial update）。传 null 表示保持原值。
      * 实现：load → copy → save（简单且与完整 save 共享原子写路径）。
      */
+    @Throws(Throwable::class)
     suspend fun updateMetadata(id: Uuid, title: String? = null, isPinned: Boolean? = null)
 }
 

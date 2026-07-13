@@ -4,6 +4,7 @@ import Shared
 enum ChatLayout {
     static let contentHorizontalInset: CGFloat = 22
     static let userMaxWidth: CGFloat = 300
+    static let userMessageRowVerticalPadding: CGFloat = 10
     static let followBottomGap: CGFloat = 96
     static let bottomStickThreshold: CGFloat = 40
     /// 内容底部的静止留白:进入会话定位、回到底部时最后一条与输入框之间留出的小距离,
@@ -131,6 +132,7 @@ struct ChatAssistantText<Content: View>: View {
             .font(.system(size: 17 * boundedScale, design: selectedFont.design))
             .foregroundStyle(AmberTheme.foreground)
             .lineSpacing(4 * boundedScale)
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

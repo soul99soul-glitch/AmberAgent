@@ -68,9 +68,11 @@ struct QuoteTextView: View {
 }
 
 struct QuoteDivider: View {
+  @Environment(\.markdownConfig) var config: MarkdownRenderConfig
+
   var body: some View {
     RoundedRectangle(cornerRadius: 8.0, style: .continuous)
-      .foregroundStyle(Color.Theme.Stroke.Muted.Muted300)
+      .foregroundStyle(Color(config.blockQuoteStyle.textColor).opacity(0.55))
   }
 }
 

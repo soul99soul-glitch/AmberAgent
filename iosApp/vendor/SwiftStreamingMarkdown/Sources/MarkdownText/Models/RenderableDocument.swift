@@ -37,6 +37,13 @@ public struct RenderableDocument: Equatable, Sendable {
   /// with `config.paragraphStyle`. Useful for showing non-markdown text in a
   /// `MarkdownView` without round-tripping through the parser.
   public init(plainText: String, config: MarkdownRenderConfig) {
+    self.init(plainText: plainText, id: UUID().uuidString, config: config)
+  }
+
+  /// Construct a single plain-text paragraph with a caller-owned stable id.
+  /// Streaming callers should keep this id stable across text updates so SwiftUI
+  /// updates the existing paragraph view instead of recreating it from alpha 0.
+  public init(plainText: String, id: String, config: MarkdownRenderConfig) {
     var attributes: [NSAttributedString.Key: Any] = [
       .font: config.paragraphStyle.textFonts.normal,
       .foregroundColor: config.paragraphStyle.textColor
@@ -45,7 +52,7 @@ public struct RenderableDocument: Equatable, Sendable {
       attributes[.kern] = kern
     }
     let content = NSMutableAttributedString(string: plainText, attributes: attributes)
-    self.init(renderables: [.paragraph(id: UUID().uuidString, content: content)])
+    self.init(renderables: [.paragraph(id: id, content: content)])
   }
 
   init(renderables: [MarkdownRenderable]) {
@@ -73,7 +80,7 @@ extension MarkdownRenderable {
     case .unorderedList(_, let items, _):
       return items.flatMap { $0.attributedStrings() }
     case .table(_, let headers, let rows, _):
-      return headers + rows.flatMap { $0 }
+      return headers.map(NSAttributedString.init) + rows.flatMap { $0.map(\.attributedString) }
     default:
       return []
     }

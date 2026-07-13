@@ -1804,7 +1804,9 @@ enum IOSHotListTitleTranslator {
         provider: IOSAgentTextProvider = OpenAIKmpProviderAdapter()
     ) async -> [String: String] {
         let pending = Array(Set(titles.filter(needsTranslation))).prefix(60).map { $0 }
+#if DEBUG
         NSLog("[AmberTranslate] translate() in=\(titles.count) pending=\(pending.count) model=\(modelId)")
+#endif
         guard !pending.isEmpty else { return [:] }
         let numbered = pending.enumerated()
             .map { "\($0.offset + 1). \($0.element)" }
@@ -1838,11 +1840,15 @@ enum IOSHotListTitleTranslator {
                 .map { $0.text }
                 .joined(separator: "")
         } catch {
+#if DEBUG
             NSLog("[AmberTranslate] generateText threw: \(error)")
+#endif
             return [:]
         }
         let result = parse(text, pending: pending)
+#if DEBUG
         NSLog("[AmberTranslate] llm chars=\(text.count) parsed=\(result.count) head=\(text.prefix(120))")
+#endif
         return result
     }
 
@@ -2035,7 +2041,9 @@ final class IOSHotListDashboardStore {
         let pending = working.flatMap(\.items)
             .filter { ($0.displayTitle ?? "").isEmpty && IOSHotListTitleTranslator.needsTranslation($0.title) }
             .map(\.title)
+#if DEBUG
         NSLog("[AmberTranslate] apply pending=\(pending.count) translatorNil=\(translate == nil) cached=\(cache.count)")
+#endif
         guard !pending.isEmpty, let translate else { return working }
         let translations = await translate(Array(Set(pending)))
         guard !translations.isEmpty else { return working }
@@ -2559,6 +2567,10 @@ struct IOSDeepReadTask: Codable, Equatable, Identifiable, Sendable {
     /// the reader renders the rich editorial cards from it. nil → flat-markdown reader.
     /// Optional so old persisted tasks decode unchanged.
     var structuredJSON: String? = nil
+    /// Non-nil when the reading itself succeeded but the best-effort Workspace
+    /// artifact sync failed. Persisted because true background execution has no
+    /// live status closure to surface this problem.
+    var workspaceSyncFailed: String? = nil
 
     var sourceSummary: String {
         let counts = Dictionary(grouping: sources, by: \.kind)
@@ -2660,8 +2672,23 @@ final class IOSDeepReadStore {
             task.resultMarkdown = markdown
             task.structuredJSON = structuredJSON
             task.failureMessage = nil
+            task.workspaceSyncFailed = nil
             task.updatedAt = now
             task.completedAt = now
+        }
+    }
+
+    func markWorkspaceSyncFailed(id: String, message: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        update(id: id) { task in
+            task.workspaceSyncFailed = message.prefixString(500)
+            task.updatedAt = now
+        }
+    }
+
+    func clearWorkspaceSyncFailure(id: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        update(id: id) { task in
+            task.workspaceSyncFailed = nil
+            task.updatedAt = now
         }
     }
 
@@ -2687,6 +2714,7 @@ final class IOSDeepReadStore {
             task.resultMarkdown = ""
             task.structuredJSON = nil
             task.failureMessage = nil
+            task.workspaceSyncFailed = nil
             task.completedAt = nil
             task.retryCount += 1
             task.updatedAt = now
@@ -3329,7 +3357,9 @@ enum IOSDeepReadDraftGenerator {
                 return lines
             }.joined(separator: "\n\n")
             .prefixString(9000)
+#if DEBUG
         NSLog("[AmberDeepRead] sources=\(task.sources.count) usable=\(usableSources.count) used=\(min(usableSources.count, 10)) sourcesBlockChars=\(sourcesBlock.count)")
+#endif
 
         // 4 JSON stages merged into one IOSDeepReadOutput (Android DeepReadPrompt parity):
         // overview -> narrative -> analysis -> extended-reading. A stage that throws or

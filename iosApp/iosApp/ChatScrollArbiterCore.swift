@@ -9,9 +9,10 @@ import CoreGraphics
 /// 任何现有产品代码。
 ///
 /// 两个关键机制,不可简化:
-/// 1. **virtual offset**:following 状态自持一份虚拟偏移,插值永远从上次写入值
-///    出发,绝不从实时 offset 出发。实时值会被 ChatLayout 批量补偿瞬移,若插值
-///    从它出发就没有东西可平滑——这正是上次振荡事故的根因。
+/// 1. **virtual offset + 前向收编**:following 状态自持一份虚拟偏移,插值从
+///    max(上次写入值, 被外部同步写者推进的实时值) 出发,且绝不写回低于实时
+///    offset 的值。ChatLayout 批量补偿会在帧内 layout 阶段瞬移实时值(晚于
+///    display link 回调),若无视它回写落后的虚拟值,就是上次锯齿事故的根因。
 /// 2. **单调目标钳制**:following 期间 target 只增不减(纯追加流式中
 ///    contentSize 真值只增,估算导致的下探是伪信号)。状态退出/会话重置时清除。
 enum ChatScrollArbiterState: Equatable {
@@ -200,7 +201,15 @@ enum ChatScrollArbiterCore {
         // 单调目标钳制:估算导致的下探是伪信号,target 只增不减。与 reduce 的
         // followTail-while-following 分支共享同一个 clampedTarget 实现。
         let newTarget = clampedTarget(current: target, incoming: geometry.bottomTarget)
-        let remaining = newTarget - virtualOffset
+
+        // 前向收编:ChatLayout 的批量更新贴底补偿是同步写者,会把实时 offset 直接
+        // 推进到底部;display link 回调发生在每帧 layout 之前,若无视实时值、继续写
+        // 落后的虚拟值,就会形成"补偿推进→下一帧回写倒退"的锯齿(实测每 chunk
+        // 10-43pt)。因此基线取 max(虚拟链, 已被外部推进的实时值),但绝不超过
+        // target——虚拟链只被外部写者向前收编,永不倒退,平滑语义保持不变。
+        let externallyAdvanced = min(geometry.currentOffset, newTarget)
+        let baseVirtual = max(virtualOffset, externallyAdvanced)
+        let remaining = newTarget - baseVirtual
 
         if abs(remaining) < arrivalEpsilon {
             let settledVirtual = newTarget
@@ -213,18 +222,25 @@ enum ChatScrollArbiterCore {
                 target: newTarget,
                 lastFollowRequestAt: lastFollowRequestAt
             )
-            return (settledState, [.writeOffset(settledVirtual)])
+            let actions: [ChatScrollArbiterAction] =
+                abs(settledVirtual - geometry.currentOffset) < arrivalEpsilon
+                    ? [.none]
+                    : [.writeOffset(settledVirtual)]
+            return (settledState, actions)
         }
 
-        // virtual 链上的指数趋近,writeOffset 的值永远来自 virtual,绝不来自
-        // geometry.currentOffset(followTail 起步基线除外)——这是上次振荡事故的正解。
+        // virtual 链上的指数趋近;基线经前向收编后,写入值不可能低于实时 offset。
         let alpha = 1 - exp(-safeDt / tau)
-        let newVirtual = virtualOffset + remaining * alpha
+        let newVirtual = baseVirtual + remaining * alpha
         let newState = ChatScrollArbiterState.following(
             virtualOffset: newVirtual,
             target: newTarget,
             lastFollowRequestAt: lastFollowRequestAt
         )
-        return (newState, [.writeOffset(newVirtual)])
+        let actions: [ChatScrollArbiterAction] =
+            abs(newVirtual - geometry.currentOffset) < arrivalEpsilon
+                ? [.none]
+                : [.writeOffset(newVirtual)]
+        return (newState, actions)
     }
 }

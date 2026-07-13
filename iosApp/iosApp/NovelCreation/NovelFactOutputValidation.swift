@@ -1,0 +1,496 @@
+import Foundation
+
+extension NovelFactTransactionReducer {
+    struct StoryEventDraft {
+        let stableID: String
+        let kind: String
+        let summary: String
+        let entityReferences: [String]
+        let chronologicalGroup: Int
+        let evidenceOffset: Int
+        let stableOrder: Int
+    }
+
+    private struct RawStoryEventDraft {
+        let stableID: String
+        let kind: String
+        let summary: String
+        let entityReferences: [String]
+        let evidence: String
+    }
+
+    static func validate(_ value: NovelStateDeltaV1) throws -> NovelStateDeltaV1 {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let encodedObject = try JSONSerialization.jsonObject(with: encoder.encode(value))
+        guard var object = encodedObject as? [String: Any] else {
+            throw NovelError.invalidInput("The state delta is not a JSON object.")
+        }
+        if value.branchOutlinePatch == nil {
+            object["branchOutlinePatch"] = NSNull()
+        }
+        return try NovelStructuredOutputDecoder.decodeStateDelta(
+            from: JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        )
+    }
+
+    static func validate(_ value: NovelStateRebuildV1) throws -> NovelStateRebuildV1 {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try NovelStructuredOutputDecoder.decodeStateRebuild(from: encoder.encode(value))
+    }
+
+    static func validateManualChunkOutput(
+        _ value: NovelStateRebuildV1,
+        evidenceSource: String,
+        accumulated: NovelStateRebuildV1?,
+        baseState: NovelStateSnapshotRecord,
+        branchID: NovelBranchID,
+        in document: NovelProjectDocumentV1
+    ) throws {
+        let validated = try validate(value)
+        guard let branch = document.branches.first(where: { $0.id == branchID }) else {
+            throw NovelError.branchNotFound(branchID)
+        }
+        let projectedBase = NovelStateSnapshotRecord(
+            id: baseState.id,
+            eventIDs: baseState.eventIDs,
+            summary: accumulated?.stateSummary ?? baseState.summary,
+            branchOutline: accumulated?.branchOutline ?? baseState.branchOutline,
+            unresolvedEntityNames: accumulated?.unresolvedEntityNames ??
+                baseState.unresolvedEntityNames,
+            createdAt: baseState.createdAt,
+            settingProposalIDs: baseState.settingProposalIDs
+        )
+        try validateStateFacts(
+            validated,
+            evidenceSource: evidenceSource,
+            branch: branch,
+            baseState: projectedBase,
+            in: document
+        )
+    }
+
+    static func validateStateFacts(
+        _ value: NovelStateDeltaV1,
+        evidenceSource: String,
+        branch: NovelBranchRecord,
+        baseState: NovelStateSnapshotRecord,
+        in document: NovelProjectDocumentV1
+    ) throws {
+        let factEvidence = value.events.map(\.evidence) +
+            value.characterChanges.map(\.evidence) +
+            value.relationshipChanges.map(\.evidence) +
+            value.foreshadowingChanges.map(\.evidence)
+        try validateEvidence(
+            factEvidence + value.settingProposals.map(\.evidence),
+            in: evidenceSource
+        )
+        try validateDerivedStateChange(
+            stateSummary: value.stateSummary,
+            branchOutline: value.branchOutlinePatch ?? baseState.branchOutline,
+            unresolved: value.unresolvedEntityNames,
+            baseState: baseState,
+            hasEvidenceBackedFacts: !factEvidence.isEmpty
+        )
+        try validateEntities(
+            eventReferences: value.events.flatMap(\.entityReferences),
+            characterNames: value.characterChanges.map(\.characterName),
+            relationshipNames: value.relationshipChanges.flatMap {
+                [$0.sourceEntity, $0.targetEntity]
+            },
+            unresolved: value.unresolvedEntityNames,
+            branch: branch,
+            baseUnresolved: baseState.unresolvedEntityNames,
+            in: document
+        )
+    }
+
+    static func validateStateFacts(
+        _ value: NovelStateRebuildV1,
+        evidenceSource: String,
+        branch: NovelBranchRecord,
+        baseState: NovelStateSnapshotRecord,
+        in document: NovelProjectDocumentV1
+    ) throws {
+        let factEvidence = value.events.map(\.evidence) +
+            value.characterStates.map(\.evidence) +
+            value.relationships.map(\.evidence) +
+            value.foreshadowing.map(\.evidence)
+        try validateEvidence(
+            factEvidence + value.settingProposals.map(\.evidence),
+            in: evidenceSource
+        )
+        try validateDerivedStateChange(
+            stateSummary: value.stateSummary,
+            branchOutline: value.branchOutline,
+            unresolved: value.unresolvedEntityNames,
+            baseState: baseState,
+            hasEvidenceBackedFacts: !factEvidence.isEmpty
+        )
+        try validateEntities(
+            eventReferences: value.events.flatMap(\.entityReferences),
+            characterNames: value.characterStates.map(\.characterName),
+            relationshipNames: value.relationships.flatMap {
+                [$0.sourceEntity, $0.targetEntity]
+            },
+            unresolved: value.unresolvedEntityNames,
+            branch: branch,
+            baseUnresolved: baseState.unresolvedEntityNames,
+            in: document
+        )
+    }
+
+    static func storyEventDrafts(
+        _ value: NovelStateDeltaV1,
+        evidenceSource: String
+    ) throws -> [StoryEventDraft] {
+        try chronologicalDrafts(
+            rawStoryEventDrafts(value),
+            evidenceSource: evidenceSource,
+            chronologicalGroup: 0,
+            stableIDPrefix: ""
+        )
+    }
+
+    static func storyEventDrafts(
+        _ value: NovelStateRebuildV1,
+        evidenceSource: String
+    ) throws -> [StoryEventDraft] {
+        try chronologicalDrafts(
+            rawStoryEventDrafts(value),
+            evidenceSource: evidenceSource,
+            chronologicalGroup: 0,
+            stableIDPrefix: ""
+        )
+    }
+
+    static func storyEventDrafts(
+        _ progress: NovelManualSyncProgress,
+        manuscript: String
+    ) throws -> [StoryEventDraft] {
+        let characters = Array(manuscript)
+        return try progress.completedChunks.flatMap { chunk in
+            guard chunk.startCharacterOffset >= 0,
+                  chunk.endCharacterOffset > chunk.startCharacterOffset,
+                  chunk.endCharacterOffset <= characters.count else {
+                throw NovelError.invalidInput(
+                    "Manual-sync event ordering encountered an invalid chunk range."
+                )
+            }
+            let evidenceSource = String(
+                characters[chunk.startCharacterOffset..<chunk.endCharacterOffset]
+            )
+            let namespaced = NovelManualSyncProgressReducer.merge(
+                chunk.rebuild,
+                into: nil,
+                chunkIndex: chunk.index
+            )
+            return try chronologicalDrafts(
+                rawStoryEventDrafts(namespaced),
+                evidenceSource: evidenceSource,
+                chronologicalGroup: chunk.index,
+                stableIDPrefix: ""
+            )
+        }
+    }
+
+    static func storyEvents(
+        _ drafts: [StoryEventDraft],
+        namespace: NovelOperationID,
+        baseState: NovelStateSnapshotRecord,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> [NovelStoryEventRecord] {
+        for eventID in baseState.eventIDs where
+            !document.events.contains(where: { $0.id == eventID }) {
+            throw NovelError.invalidInput("The base state references a missing event.")
+        }
+        let orderedDrafts = drafts.sorted { lhs, rhs in
+            if lhs.chronologicalGroup != rhs.chronologicalGroup {
+                return lhs.chronologicalGroup < rhs.chronologicalGroup
+            }
+            if lhs.evidenceOffset != rhs.evidenceOffset {
+                return lhs.evidenceOffset < rhs.evidenceOffset
+            }
+            if lhs.stableOrder != rhs.stableOrder {
+                return lhs.stableOrder < rhs.stableOrder
+            }
+            return lhs.stableID < rhs.stableID
+        }
+        let baseSequence = document.events.map(\.sequence).max() ?? -1
+        var ids: Set<NovelEventID> = []
+        return try orderedDrafts.enumerated().map { index, draft in
+            let id = NovelEventID(deterministicUUID(
+                namespace: namespace,
+                category: "event",
+                stableID: draft.stableID
+            ))
+            guard ids.insert(id).inserted,
+                  document.events.allSatisfy({ $0.id != id }) else {
+                throw NovelError.immutableRecordConflict("event \(id)")
+            }
+            return NovelStoryEventRecord(
+                id: id,
+                sequence: baseSequence + Int64(index) + 1,
+                kind: draft.kind,
+                summary: draft.summary,
+                entityReferences: draft.entityReferences,
+                createdAt: now
+            )
+        }
+    }
+
+    static func settingProposals(
+        _ drafts: [NovelSettingProposalDraftV1],
+        namespace: NovelOperationID,
+        branchID: NovelBranchID,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> [NovelSettingProposalRecord] {
+        var ids: Set<NovelProposalID> = []
+        return try drafts.map { draft in
+            let id = NovelProposalID(deterministicUUID(
+                namespace: namespace,
+                category: "proposal",
+                stableID: draft.id
+            ))
+            guard ids.insert(id).inserted,
+                  document.settingProposals.allSatisfy({ $0.id != id }) else {
+                throw NovelError.immutableRecordConflict("setting proposal \(id)")
+            }
+            return NovelSettingProposalRecord(
+                id: id,
+                branchID: branchID,
+                title: draft.title,
+                content: draft.content,
+                createdAt: now,
+                isResolved: false,
+                origin: .derivedState
+            )
+        }
+    }
+
+    private static func validateDerivedStateChange(
+        stateSummary: String,
+        branchOutline: String,
+        unresolved: [String],
+        baseState: NovelStateSnapshotRecord,
+        hasEvidenceBackedFacts: Bool
+    ) throws {
+        let changed = stateSummary != baseState.summary ||
+            branchOutline != baseState.branchOutline ||
+            Set(unresolved.map(normalizedEntity)) !=
+                Set(baseState.unresolvedEntityNames.map(normalizedEntity))
+        guard !changed || hasEvidenceBackedFacts else {
+            throw NovelError.invalidInput(
+                "Derived summary, outline, or unresolved entities changed without evidence-backed facts."
+            )
+        }
+    }
+
+    private static func validateEvidence(
+        _ evidence: [String],
+        in manuscript: String
+    ) throws {
+        let source = normalizeEvidenceWhitespace(manuscript)
+        for item in evidence {
+            let normalized = normalizeEvidenceWhitespace(item)
+            guard !normalized.isEmpty,
+                  source.contains(normalized) else {
+                throw NovelError.invalidInput(
+                    "A derived fact contains evidence outside the authoritative manuscript."
+                )
+            }
+        }
+    }
+
+    private static func validateEntities(
+        eventReferences: [String],
+        characterNames: [String],
+        relationshipNames: [String],
+        unresolved: [String],
+        branch: NovelBranchRecord,
+        baseUnresolved: [String],
+        in document: NovelProjectDocumentV1
+    ) throws {
+        let effective: [NovelEffectiveMaterialRevision]
+        do {
+            effective = try NovelMaterialResolver.effectiveRevisions(
+                document: document,
+                branch: branch
+            )
+        } catch NovelMaterialResolutionError.missingRevision(let revisionID) {
+            throw NovelError.invalidInput(
+                "The branch references missing material revision \(revisionID)."
+            )
+        }
+        let known = Set(effective.map { normalizedEntity($0.revision.title) })
+        let unresolvedKeys = Set(unresolved.map(normalizedEntity))
+        let baseUnresolvedKeys = Set(baseUnresolved.map(normalizedEntity))
+        let referenced = eventReferences + characterNames + relationshipNames
+        let referencedKeys = Set(referenced.map(normalizedEntity))
+        let newlyUnresolved = unresolvedKeys.subtracting(baseUnresolvedKeys)
+        guard newlyUnresolved.isSubset(of: referencedKeys) else {
+            throw NovelError.invalidInput(
+                "A newly unresolved entity is not referenced by an evidence-backed fact."
+            )
+        }
+        guard unresolvedKeys.isDisjoint(with: known) else {
+            throw NovelError.invalidInput(
+                "A known project material cannot be listed as an unresolved entity."
+            )
+        }
+        guard baseUnresolvedKeys.subtracting(known).isSubset(of: unresolvedKeys) else {
+            throw NovelError.invalidInput(
+                "An unresolved entity disappeared without a matching project material."
+            )
+        }
+        for name in referenced {
+            let key = normalizedEntity(name)
+            guard known.contains(key) || unresolvedKeys.contains(key) else {
+                throw NovelError.invalidInput(
+                    "Unknown entity '\(name)' must be listed as unresolved."
+                )
+            }
+        }
+    }
+
+    private static func rawStoryEventDrafts(
+        _ value: NovelStateDeltaV1
+    ) -> [RawStoryEventDraft] {
+        value.events.map {
+            RawStoryEventDraft(
+                stableID: $0.id,
+                kind: $0.kind,
+                summary: $0.summary,
+                entityReferences: $0.entityReferences,
+                evidence: $0.evidence
+            )
+        } + value.characterChanges.map {
+            RawStoryEventDraft(
+                stableID: $0.id,
+                kind: "character.\($0.attribute)",
+                summary: "\($0.characterName): \($0.attribute) = \($0.value)",
+                entityReferences: [$0.characterName],
+                evidence: $0.evidence
+            )
+        } + value.relationshipChanges.map {
+            RawStoryEventDraft(
+                stableID: $0.id,
+                kind: "relationship.\($0.relationship)",
+                summary: "\($0.sourceEntity) -> \($0.targetEntity): \($0.state)",
+                entityReferences: [$0.sourceEntity, $0.targetEntity],
+                evidence: $0.evidence
+            )
+        } + value.foreshadowingChanges.map {
+            RawStoryEventDraft(
+                stableID: $0.id,
+                kind: "foreshadowing.\($0.status.rawValue)",
+                summary: "\($0.thread): \($0.summary)",
+                entityReferences: [],
+                evidence: $0.evidence
+            )
+        }
+    }
+
+    private static func rawStoryEventDrafts(
+        _ value: NovelStateRebuildV1
+    ) -> [RawStoryEventDraft] {
+        value.events.map {
+            RawStoryEventDraft(
+                stableID: $0.id,
+                kind: $0.kind,
+                summary: $0.summary,
+                entityReferences: $0.entityReferences,
+                evidence: $0.evidence
+            )
+        } + value.characterStates.map {
+            RawStoryEventDraft(
+                stableID: $0.id,
+                kind: "character.\($0.attribute)",
+                summary: "\($0.characterName): \($0.attribute) = \($0.value)",
+                entityReferences: [$0.characterName],
+                evidence: $0.evidence
+            )
+        } + value.relationships.map {
+            RawStoryEventDraft(
+                stableID: $0.id,
+                kind: "relationship.\($0.relationship)",
+                summary: "\($0.sourceEntity) -> \($0.targetEntity): \($0.state)",
+                entityReferences: [$0.sourceEntity, $0.targetEntity],
+                evidence: $0.evidence
+            )
+        } + value.foreshadowing.map {
+            RawStoryEventDraft(
+                stableID: $0.id,
+                kind: "foreshadowing.\($0.status.rawValue)",
+                summary: "\($0.thread): \($0.summary)",
+                entityReferences: [],
+                evidence: $0.evidence
+            )
+        }
+    }
+
+    private static func chronologicalDrafts(
+        _ drafts: [RawStoryEventDraft],
+        evidenceSource: String,
+        chronologicalGroup: Int,
+        stableIDPrefix: String
+    ) throws -> [StoryEventDraft] {
+        let normalizedSource = normalizeEvidenceWhitespace(evidenceSource)
+        return try drafts.enumerated().map { stableOrder, draft in
+            let evidence = normalizeEvidenceWhitespace(draft.evidence)
+            guard !evidence.isEmpty,
+                  let range = normalizedSource.range(of: evidence) else {
+                throw NovelError.invalidInput(
+                    "A story event cannot be ordered outside the authoritative manuscript."
+                )
+            }
+            return StoryEventDraft(
+                stableID: stableIDPrefix + draft.stableID,
+                kind: draft.kind,
+                summary: draft.summary,
+                entityReferences: draft.entityReferences,
+                chronologicalGroup: chronologicalGroup,
+                evidenceOffset: normalizedSource.distance(
+                    from: normalizedSource.startIndex,
+                    to: range.lowerBound
+                ),
+                stableOrder: stableOrder
+            )
+        }
+    }
+
+    private static func normalizeEvidenceWhitespace(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
+    private static func deterministicUUID(
+        namespace: NovelOperationID,
+        category: String,
+        stableID: String
+    ) -> UUID {
+        let hex = NovelDocumentValidator.sha256(
+            namespace.description + "|" + category + "|" + stableID
+        )
+        let value = String(hex.prefix(8)) + "-" +
+            String(hex.dropFirst(8).prefix(4)) + "-" +
+            String(hex.dropFirst(12).prefix(4)) + "-" +
+            String(hex.dropFirst(16).prefix(4)) + "-" +
+            String(hex.dropFirst(20).prefix(12))
+        return UUID(uuidString: value)!
+    }
+
+    private static func normalizedEntity(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
+    }
+}

@@ -158,6 +158,83 @@ final class IOSAgentToolEngineTests: XCTestCase {
         }
     }
 
+    final class ScriptedStreamingProvider: IOSAgentTextProvider, IOSAgentStreamingProvider, @unchecked Sendable {
+        let chunks: [MessageChunk]
+
+        init(_ chunks: [MessageChunk]) {
+            self.chunks = chunks
+        }
+
+        func generateText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams
+        ) async throws -> MessageChunk {
+            chunks.last ?? MessageChunk(id: "empty", model: "test-model", choices: [], usage: nil)
+        }
+
+        func streamText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams,
+            onChunk: @escaping @Sendable (MessageChunk) -> Void,
+            onComplete: @escaping @Sendable () -> Void,
+            onError: @escaping @Sendable (KotlinThrowable) -> Void
+        ) -> Kotlinx_coroutines_coreJob? {
+            chunks.forEach(onChunk)
+            onComplete()
+            return nil
+        }
+    }
+
+    final class DelayedCompletingStreamingProvider: IOSAgentTextProvider, IOSAgentStreamingProvider, @unchecked Sendable {
+        let delayNanos: UInt64
+
+        init(delayNanos: UInt64) {
+            self.delayNanos = delayNanos
+        }
+
+        func generateText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams
+        ) async throws -> MessageChunk {
+            MessageChunk(id: "unused", model: "test-model", choices: [], usage: nil)
+        }
+
+        func streamText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams,
+            onChunk: @escaping @Sendable (MessageChunk) -> Void,
+            onComplete: @escaping @Sendable () -> Void,
+            onError: @escaping @Sendable (KotlinThrowable) -> Void
+        ) -> Kotlinx_coroutines_coreJob? {
+            Task {
+                try? await Task.sleep(nanoseconds: delayNanos)
+                onComplete()
+            }
+            return nil
+        }
+    }
+
+    final class AssistantTextRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [String] = []
+
+        func append(_ value: String) {
+            lock.lock()
+            values.append(value)
+            lock.unlock()
+        }
+
+        var snapshot: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return values
+        }
+    }
+
     /// A scripted executor that returns a fixed result per tool name, and
     /// records every call so tests can assert dispatch.
     final class RecordingExecutor: IOSToolExecutor {
@@ -384,6 +461,96 @@ final class IOSAgentToolEngineTests: XCTestCase {
         ]
 
         XCTAssertEqual(ChatToolOutputFormatter.imageFailureReason(from: output), "图片生成服务没有返回图片。")
+    }
+
+    func testStreamingAssistantTextDoesNotSnapshotOnEveryChunk() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let source = try String(
+            contentsOf: appDirectory.appendingPathComponent("IOSAgentToolEngine.swift"),
+            encoding: .utf8
+        )
+
+        guard let onChunkStart = source.range(of: "onChunk: { chunk in"),
+              let onCompleteStart = source.range(of: "onComplete:", range: onChunkStart.upperBound..<source.endIndex) else {
+            return XCTFail("Expected streamStep to have onChunk before onComplete")
+        }
+        let onChunkBody = source[onChunkStart.upperBound..<onCompleteStart.lowerBound]
+        XCTAssertFalse(
+            onChunkBody.contains("accumulator.snapshot()"),
+            "Background/sub-agent streaming must not snapshot+join the full accumulator on every chunk; long streams make this O(n²)."
+        )
+        XCTAssertTrue(
+            source.contains("appendAssistantTextDelta"),
+            "streamStep should maintain cumulative assistant text incrementally and publish that text without a per-chunk full snapshot."
+        )
+    }
+
+    func testStreamingAssistantTextPublishesCumulativeTextAndHonorsFinalReplacement() async {
+        func delta(_ text: String) -> MessageChunk {
+            MessageChunk(
+                id: UUID().uuidString,
+                model: "test-model",
+                choices: [UIMessageChoice(
+                    index: 0,
+                    delta: assistantText(text),
+                    message: nil,
+                    finishReason: nil
+                )],
+                usage: nil
+            )
+        }
+        let final = MessageChunk(
+            id: "final",
+            model: "test-model",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: nil,
+                message: assistantText("Hello!"),
+                finishReason: "stop"
+            )],
+            usage: nil
+        )
+        let recorder = AssistantTextRecorder()
+        let engine = IOSAgentToolEngine(
+            provider: ScriptedStreamingProvider([delta("Hel"), delta("lo"), final]),
+            executors: [:]
+        )
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("ask")],
+            params: makeParams(tools: []),
+            onAssistantText: { recorder.append($0) }
+        )
+
+        XCTAssertEqual(recorder.snapshot, ["Hel", "Hello", "Hello!"])
+        XCTAssertEqual(result.messages.last?.toText(), "Hello!")
+    }
+
+    func testCancellingEngineTaskStopsWaitingForStreamingTerminal() async {
+        let engine = IOSAgentToolEngine(
+            provider: DelayedCompletingStreamingProvider(delayNanos: 400_000_000),
+            executors: [:]
+        )
+        let providerSetting = makeProviderSetting()
+        let params = makeParams(tools: [])
+        let messages = [userMessage("ask")]
+        let finished = expectation(description: "cancelled engine returns without provider terminal")
+        let task = Task {
+            let result = await engine.run(
+                providerSetting: providerSetting,
+                messages: messages,
+                params: params
+            )
+            finished.fulfill()
+            return result
+        }
+
+        await Task.yield()
+        task.cancel()
+        await fulfillment(of: [finished], timeout: 0.15)
+        _ = await task.value
     }
 
     // MARK: - Background handoff parity: pre-existing empty-output tools

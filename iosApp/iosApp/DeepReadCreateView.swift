@@ -11,6 +11,13 @@ import UniformTypeIdentifiers
 @MainActor
 enum IOSDeepReadLauncher {
     typealias StatusHandler = @MainActor (String, Bool) -> Void
+    typealias WorkspaceArtifactSaver = @MainActor (
+        _ title: String,
+        _ content: String,
+        _ type: IOSWorkspaceArtifactType,
+        _ sourceKind: String,
+        _ sourceId: String?
+    ) throws -> Void
 
     static func createAndGenerate(
         title: String,
@@ -57,10 +64,11 @@ enum IOSDeepReadLauncher {
         taskId: String,
         requestId: String? = nil,
         sharedSettings: IOSSharedSettingsStore,
+        store: IOSDeepReadStore = .shared,
+        workspaceArtifactSaver: WorkspaceArtifactSaver = IOSDeepReadLauncher.defaultWorkspaceArtifactSaver,
         backgroundTask: BGContinuedProcessingTask? = nil,
         onStatus: StatusHandler? = nil
     ) async -> Bool {
-        let store = IOSDeepReadStore.shared
         let runState = IOSDeepReadRunState()
         defer {
             IOSDeepReadBackgroundCoordinator.shared.finish(taskId: taskId, requestId: requestId)
@@ -170,16 +178,33 @@ enum IOSDeepReadLauncher {
         guard runState.reserveTerminal() else { return false }
         updateProgress(progress?.totalUnitCount ?? generationBase + 5, "正在保存结果")
         store.complete(id: taskId, markdown: output, structuredJSON: structuredJSON)
-        _ = try? IOSWorkspaceStore.shared.saveArtifact(
-            title: running.title,
-            content: output,
-            type: .deepRead,
-            sourceKind: "deep_read",
-            sourceId: running.id
-        )
-        onStatus?("已生成并保存深度阅读。", false)
+        do {
+            try workspaceArtifactSaver(running.title, output, .deepRead, "deep_read", running.id)
+            store.clearWorkspaceSyncFailure(id: taskId)
+            onStatus?("已生成并保存深度阅读。", false)
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            store.markWorkspaceSyncFailed(id: taskId, message: message)
+            onStatus?("深度阅读已生成，但保存到 Workspace 失败：\(message)", true)
+        }
         backgroundTask?.setTaskCompleted(success: true)
         return true
+    }
+
+    private static func defaultWorkspaceArtifactSaver(
+        title: String,
+        content: String,
+        type: IOSWorkspaceArtifactType,
+        sourceKind: String,
+        sourceId: String?
+    ) throws {
+        _ = try IOSWorkspaceStore.shared.saveArtifact(
+            title: title,
+            content: content,
+            type: type,
+            sourceKind: sourceKind,
+            sourceId: sourceId
+        )
     }
 
     private static func failRun(
@@ -264,11 +289,15 @@ enum IOSDeepReadLauncher {
                     order.append(key)
                 }
             } catch {
+#if DEBUG
                 NSLog("[AmberDeepRead] topic-search angle failed (\(query.prefix(20))…): \(error)")
+#endif
             }
         }
         let merged = Array(order.prefix(12).compactMap { byURL[$0] })
+#if DEBUG
         NSLog("[AmberDeepRead] topic-search angles=\(queries.count) distinct=\(byURL.count) used=\(merged.count)")
+#endif
         guard !merged.isEmpty else { return [] }
         return (try? IOSDeepReadSourceNormalizer.searchSources(query: title, results: merged)) ?? []
     }

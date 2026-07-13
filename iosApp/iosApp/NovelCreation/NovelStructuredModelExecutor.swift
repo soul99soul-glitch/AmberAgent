@@ -1,0 +1,451 @@
+import Foundation
+
+enum NovelStructuredModelTaskKind: String, Codable, Equatable, Sendable {
+    case stateDelta
+    case stateRebuild
+    case polishDrift
+}
+
+enum NovelStructuredModelTask: Equatable, Sendable {
+    case stateDelta(context: String, manuscript: String)
+    case stateRebuild(baseContext: String, manuscript: String)
+    case polishDrift(sourceChapter: String, candidate: String)
+}
+
+struct NovelStructuredModelExecutionRequest: Equatable, Sendable {
+    let runID: NovelRunID
+    let modelPolicy: NovelProjectModelPolicy
+    let task: NovelStructuredModelTask
+}
+
+enum NovelStructuredModelOutput: Equatable, Sendable {
+    case stateDelta(NovelStateDeltaV1)
+    case stateRebuild(NovelStateRebuildV1)
+    case polishDrift(NovelPolishDriftV1)
+}
+
+struct NovelStructuredModelExecutionEvidence: Equatable, Sendable {
+    let output: NovelStructuredModelOutput
+    let resolvedModel: NovelResolvedModel
+    let modelRequest: NovelModelRequest
+    let requestSHA256: String
+    let parameters: [String: String]
+}
+
+struct NovelStructuredModelInvocation: Equatable, Sendable {
+    let executionRequest: NovelStructuredModelExecutionRequest
+    let resolvedModel: NovelResolvedModel
+    let modelRequest: NovelModelRequest
+    let requestSHA256: String
+    let parameters: [String: String]
+}
+
+struct NovelStructuredModelPreparation: Equatable, Sendable {
+    let modelPolicy: NovelProjectModelPolicy
+    let taskKind: NovelStructuredModelTaskKind
+    let resolvedModel: NovelResolvedModel
+    let parameters: NovelModelParameters
+    let requestedInputBudgetTokens: Int
+    let effectiveInputBudgetTokens: Int
+}
+
+struct NovelStructuredModelExecutionFailure: Error, Equatable, Sendable {
+    let failure: NovelFailure
+    let structuredOutputFailure: NovelStructuredOutputFailure?
+
+    init(
+        code: String,
+        message: String,
+        isRetryable: Bool,
+        structuredOutputFailure: NovelStructuredOutputFailure? = nil
+    ) {
+        failure = NovelFailure(
+            code: code,
+            message: message,
+            isRetryable: isRetryable
+        )
+        self.structuredOutputFailure = structuredOutputFailure
+    }
+}
+
+extension NovelStructuredModelExecutionFailure: LocalizedError {
+    var errorDescription: String? { failure.message }
+}
+
+/// Executes the module's hidden JSON-only model calls. It deliberately sits
+/// above `NovelModelRunning`, so live and scripted transports share terminal
+/// handling and strict decoding before a reducer can see model output.
+struct NovelStructuredModelExecutor: Sendable {
+    static let maximumInternalInputBudgetTokens = 64_000
+    static let unknownWindowFallbackInputBudgetTokens = 16_000
+
+    let modelRunner: any NovelModelRunning
+
+    func prepare(
+        modelPolicy: NovelProjectModelPolicy,
+        taskKind: NovelStructuredModelTaskKind,
+        requestedInputBudgetTokens: Int
+    ) async throws -> NovelStructuredModelPreparation {
+        let model = try await resolveModel(for: modelPolicy)
+        let parameters = taskKind.parameters
+        return NovelStructuredModelPreparation(
+            modelPolicy: modelPolicy,
+            taskKind: taskKind,
+            resolvedModel: model,
+            parameters: parameters,
+            requestedInputBudgetTokens: requestedInputBudgetTokens,
+            effectiveInputBudgetTokens: try effectiveInputBudget(
+                requestedInputBudgetTokens: requestedInputBudgetTokens,
+                model: model,
+                parameters: parameters
+            )
+        )
+    }
+
+    func execute(
+        _ request: NovelStructuredModelExecutionRequest
+    ) async throws -> NovelStructuredModelOutput {
+        try await executeWithEvidence(request).output
+    }
+
+    func executeWithEvidence(
+        _ request: NovelStructuredModelExecutionRequest
+    ) async throws -> NovelStructuredModelExecutionEvidence {
+        let model = try await resolveModel(for: request.modelPolicy)
+        let invocation = try makeInvocation(
+            request,
+            resolvedModel: model,
+            parameters: request.task.parameters
+        )
+        return try await executePrepared(invocation)
+    }
+
+    func executeWithEvidence(
+        _ request: NovelStructuredModelExecutionRequest,
+        preparation: NovelStructuredModelPreparation
+    ) async throws -> NovelStructuredModelExecutionEvidence {
+        guard preparation.modelPolicy == request.modelPolicy,
+              preparation.taskKind == request.task.kind else {
+            throw NovelError.invalidInput(
+                "The structured model preparation does not match its request."
+            )
+        }
+        return try await executePrepared(try makeInvocation(
+            request,
+            resolvedModel: preparation.resolvedModel,
+            parameters: preparation.parameters
+        ))
+    }
+
+    func prepareInvocation(
+        _ request: NovelStructuredModelExecutionRequest,
+        preparation: NovelStructuredModelPreparation
+    ) throws -> NovelStructuredModelInvocation {
+        guard preparation.modelPolicy == request.modelPolicy,
+              preparation.taskKind == request.task.kind else {
+            throw NovelError.invalidInput(
+                "The structured model preparation does not match its request."
+            )
+        }
+        return try makeInvocation(
+            request,
+            resolvedModel: preparation.resolvedModel,
+            parameters: preparation.parameters
+        )
+    }
+
+    private func resolveModel(
+        for policy: NovelProjectModelPolicy
+    ) async throws -> NovelResolvedModel {
+        do {
+            return try await modelRunner.resolveModel(for: policy)
+        } catch let failure as NovelModelFailure {
+            throw NovelStructuredModelExecutionFailure(
+                code: failure.code,
+                message: failure.message,
+                isRetryable: failure.isRetryable
+            )
+        } catch {
+            throw NovelStructuredModelExecutionFailure(
+                code: "model_unavailable",
+                message: error.localizedDescription,
+                isRetryable: true
+            )
+        }
+    }
+
+    func executePrepared(
+        _ invocation: NovelStructuredModelInvocation
+    ) async throws -> NovelStructuredModelExecutionEvidence {
+        let request = invocation.executionRequest
+        let modelRequest = invocation.modelRequest
+        let stream: AsyncStream<NovelModelEvent>
+        do {
+            stream = try await modelRunner.start(modelRequest)
+        } catch let failure as NovelModelFailure {
+            throw NovelStructuredModelExecutionFailure(
+                code: failure.code,
+                message: failure.message,
+                isRetryable: failure.isRetryable
+            )
+        } catch {
+            throw NovelStructuredModelExecutionFailure(
+                code: "model_start_failed",
+                message: error.localizedDescription,
+                isRetryable: true
+            )
+        }
+
+        let text: String
+        do {
+            text = try await withTaskCancellationHandler {
+                try await consume(stream)
+            } onCancel: {
+                Task { await modelRunner.cancel(runID: request.runID) }
+            }
+        } catch let failure as NovelStructuredModelExecutionFailure {
+            throw failure
+        } catch is CancellationError {
+            throw NovelStructuredModelExecutionFailure(
+                code: "cancelled",
+                message: "The structured model request was cancelled.",
+                isRetryable: true
+            )
+        } catch {
+            throw NovelStructuredModelExecutionFailure(
+                code: "model_stream_failed",
+                message: error.localizedDescription,
+                isRetryable: true
+            )
+        }
+
+        do {
+            let output = try request.task.decode(text)
+            return NovelStructuredModelExecutionEvidence(
+                output: output,
+                resolvedModel: invocation.resolvedModel,
+                modelRequest: modelRequest,
+                requestSHA256: invocation.requestSHA256,
+                parameters: invocation.parameters
+            )
+        } catch let failure as NovelStructuredOutputFailure {
+            throw NovelStructuredModelExecutionFailure(
+                code: "invalid_structured_output",
+                message: failure.message,
+                isRetryable: true,
+                structuredOutputFailure: failure
+            )
+        } catch {
+            throw NovelStructuredModelExecutionFailure(
+                code: "invalid_structured_output",
+                message: error.localizedDescription,
+                isRetryable: true
+            )
+        }
+    }
+
+    private func makeInvocation(
+        _ request: NovelStructuredModelExecutionRequest,
+        resolvedModel: NovelResolvedModel,
+        parameters: NovelModelParameters
+    ) throws -> NovelStructuredModelInvocation {
+        let modelRequest = NovelModelRequest(
+            runID: request.runID,
+            model: resolvedModel,
+            purpose: request.task.purpose,
+            messages: request.task.messages,
+            parameters: parameters
+        )
+        return NovelStructuredModelInvocation(
+            executionRequest: request,
+            resolvedModel: resolvedModel,
+            modelRequest: modelRequest,
+            requestSHA256: try modelRequest.canonicalSHA256(),
+            parameters: modelRequest.parameters.evidenceDictionary
+        )
+    }
+
+    private func effectiveInputBudget(
+        requestedInputBudgetTokens: Int,
+        model: NovelResolvedModel,
+        parameters: NovelModelParameters
+    ) throws -> Int {
+        guard requestedInputBudgetTokens > 0 else {
+            throw NovelError.invalidInput("The structured model input budget must be positive.")
+        }
+        guard let window = model.contextWindowTokens else {
+            return min(
+                requestedInputBudgetTokens,
+                Self.unknownWindowFallbackInputBudgetTokens
+            )
+        }
+        let output = parameters.maxOutputTokens ?? 0
+        let available = max(0, window - output - 1_024)
+        guard available > 0 else {
+            throw NovelError.injectionBudgetExceeded(
+                required: 1,
+                limit: available,
+                items: [NovelInjectionBudgetItem(
+                    label: "Minimum structured input context",
+                    estimatedTokens: 1
+                )]
+            )
+        }
+        return min(requestedInputBudgetTokens, available)
+    }
+
+    private func consume(_ stream: AsyncStream<NovelModelEvent>) async throws -> String {
+        var text = ""
+        var terminal: NovelModelEvent?
+
+        for await event in stream {
+            try Task.checkCancellation()
+            if terminal != nil {
+                throw NovelStructuredModelExecutionFailure(
+                    code: "duplicate_model_terminal",
+                    message: "The model emitted data after its structured response ended.",
+                    isRetryable: true
+                )
+            }
+            switch event {
+            case .textDelta(let delta):
+                text += delta
+            case .textReplacement(let replacement):
+                text = replacement
+            case .usage:
+                break
+            case .completed:
+                terminal = event
+            case .failed(let failure):
+                terminal = event
+                throw NovelStructuredModelExecutionFailure(
+                    code: failure.code,
+                    message: failure.message,
+                    isRetryable: failure.isRetryable
+                )
+            }
+        }
+
+        guard terminal != nil else {
+            throw NovelStructuredModelExecutionFailure(
+                code: "incomplete_model_stream",
+                message: "The model stream ended before completing its structured response.",
+                isRetryable: true
+            )
+        }
+        return text
+    }
+}
+
+extension NovelStructuredModelTask {
+    static func polishDriftMessages(
+        sourceChapter: String,
+        candidate: String
+    ) -> [NovelModelMessage] {
+        let prompt = NovelPromptCatalog.template(for: .polishDriftV1)
+        return [
+            .init(role: .system, content: prompt.systemText),
+            .init(
+                role: .user,
+                content: "SOURCE CHAPTER\n" + sourceChapter +
+                    "\n\nPOLISHED CANDIDATE\n" + candidate
+            ),
+        ]
+    }
+}
+
+private extension NovelStructuredModelTask {
+    var kind: NovelStructuredModelTaskKind {
+        switch self {
+        case .stateDelta: .stateDelta
+        case .stateRebuild: .stateRebuild
+        case .polishDrift: .polishDrift
+        }
+    }
+
+    var promptKind: NovelPromptKind {
+        switch self {
+        case .stateDelta: .stateDeltaV1
+        case .stateRebuild: .manualSyncV1
+        case .polishDrift: .polishDriftV1
+        }
+    }
+
+    var purpose: NovelModelPurpose {
+        switch self {
+        case .stateDelta: .stateExtraction
+        case .stateRebuild: .stateRebuild
+        case .polishDrift: .driftCheck
+        }
+    }
+
+    var messages: [NovelModelMessage] {
+        let prompt = NovelPromptCatalog.template(for: promptKind)
+        switch self {
+        case .stateDelta(let context, let manuscript):
+            return [
+                .init(
+                    role: .system,
+                    content: prompt.systemText + "\n\nAUTHORITATIVE CONTEXT\n" + context
+                ),
+                .init(role: .user, content: "NEWLY COLLECTED MANUSCRIPT\n" + manuscript)
+            ]
+        case .stateRebuild(let baseContext, let manuscript):
+            return [
+                .init(
+                    role: .system,
+                    content: prompt.systemText + "\n\nBASE CHECKPOINT CONTEXT\n" + baseContext
+                ),
+                .init(role: .user, content: "ORDERED MANUSCRIPT INPUT\n" + manuscript)
+            ]
+        case .polishDrift(let sourceChapter, let candidate):
+            return Self.polishDriftMessages(
+                sourceChapter: sourceChapter,
+                candidate: candidate
+            )
+        }
+    }
+
+    var parameters: NovelModelParameters {
+        kind.parameters
+    }
+
+    func decode(_ text: String) throws -> NovelStructuredModelOutput {
+        switch self {
+        case .stateDelta:
+            .stateDelta(try NovelStructuredOutputDecoder.decodeStateDelta(from: text))
+        case .stateRebuild:
+            .stateRebuild(try NovelStructuredOutputDecoder.decodeStateRebuild(from: text))
+        case .polishDrift:
+            .polishDrift(try NovelStructuredOutputDecoder.decodePolishDrift(from: text))
+        }
+    }
+}
+
+private extension NovelStructuredModelTaskKind {
+    var parameters: NovelModelParameters {
+        switch self {
+        case .stateDelta:
+            .init(
+                temperature: 0.1,
+                topP: 0.8,
+                maxOutputTokens: 4_096,
+                reasoningLevel: .automatic
+            )
+        case .stateRebuild:
+            .init(
+                temperature: 0.1,
+                topP: 0.8,
+                maxOutputTokens: 8_192,
+                reasoningLevel: .automatic
+            )
+        case .polishDrift:
+            .init(
+                temperature: 0,
+                topP: 1,
+                maxOutputTokens: 4_096,
+                reasoningLevel: .automatic
+            )
+        }
+    }
+}

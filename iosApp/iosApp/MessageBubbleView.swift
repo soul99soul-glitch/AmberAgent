@@ -4,6 +4,19 @@ import SwiftStreamingMarkdown
 import MarkdownView
 import Photos
 
+enum ChatMarkdownOpenURLPolicy {
+    static func isAllowed(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else {
+            return false
+        }
+        return scheme == "http" || scheme == "https" || scheme == "mailto"
+    }
+
+    static func result(for url: URL) -> OpenURLAction.Result {
+        isAllowed(url) ? .systemAction : .discarded
+    }
+}
+
 struct MessageBubbleView: View {
 
     let message: UIMessage
@@ -14,6 +27,7 @@ struct MessageBubbleView: View {
     // Branching actions (Android ChatService parity). Defaults are no-ops so
     // existing call sites / previews that don't supply them still compile.
     var onRegenerate: () -> Void = {}
+    var onRequestEdit: (String) -> Void = { _ in }
     var onEdit: (String) -> Void = { _ in }
     var onDelete: () -> Void = {}
     var onSelectVariant: (Int) -> Void = { _ in }
@@ -23,9 +37,8 @@ struct MessageBubbleView: View {
     /// True only for the last message — gates the live "thinking" timer so a stopped/older
     /// reasoning (whose finishedAt was never set on cancel) doesn't keep counting.
     var isLastMessage: Bool = false
-    /// 这条消息「曾经流式过」的记忆(来自 projection 层)。当前不直接驱动 Markdown
-    /// renderer:历史行被列表回收再创建时必须回到稳定同步渲染器,否则会重新出现
-    /// 首帧高度跳变。可见 bubble 的完成态防闪烁由 ChatAssistantMarkdownView 内部 latch 负责。
+    /// 这条消息「曾经流式过」的记忆(来自 projection 层)。控制层用它让完成后的
+    /// 可见行继续走同一套流式 renderer,避免回收后切回同步 renderer 造成行高跳变。
     var hasEverStreamed: Bool = false
     /// False only when the live assistant message is far below the current viewport.
     /// That lets the offscreen stream freeze its last rendered snapshot instead of reparsing
@@ -39,8 +52,6 @@ struct MessageBubbleView: View {
     var reasoningLevelLabel: String? = nil
 
     @Environment(IOSWorkspaceStore.self) private var workspaceStore
-    @State private var editing: Bool = false
-    @State private var editDraft: String = ""
     @State private var workspaceSaveAlert: WorkspaceSaveAlert?
     @State private var toolDetailTarget: ToolDetailTarget?
 
@@ -65,9 +76,6 @@ struct MessageBubbleView: View {
                         messageParts
                     }
                     .frame(maxWidth: ChatLayout.userMaxWidth, alignment: .trailing)
-                }
-                .sheet(isPresented: $editing) {
-                    editSheet
                 }
             } else {
                 ChatAssistantStack {
@@ -106,7 +114,7 @@ struct MessageBubbleView: View {
         if !citations.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(citations.enumerated()), id: \.offset) { index, citation in
-                    if let url = URL(string: citation.url) {
+                    if let url = Self.safeExternalURL(from: citation.url) {
                         Link(destination: url) {
                             HStack(spacing: 4) {
                                 Image(systemName: "link")
@@ -140,6 +148,15 @@ struct MessageBubbleView: View {
             }
             return nil
         }
+    }
+
+    private static func safeExternalURL(from raw: String) -> URL? {
+        guard let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        return url
     }
 
     // MARK: - Branching controls
@@ -177,7 +194,7 @@ struct MessageBubbleView: View {
     }
 
     private var variantBadge: some View {
-        Text("\(variantInfo?.selectedIndex ?? 0 + 1)/\(variantInfo?.variantCount ?? 1)")
+        Text("\((variantInfo?.selectedIndex ?? 0) + 1)/\(variantInfo?.variantCount ?? 1)")
             .font(.caption2.monospacedDigit())
             .foregroundStyle(AmberTheme.muted2)
     }
@@ -187,8 +204,7 @@ struct MessageBubbleView: View {
         if canBranch {
             if isUser {
                 Button {
-                    editDraft = message.toText()
-                    editing = true
+                    onRequestEdit(message.toText())
                 } label: {
                     Label("编辑", systemImage: "pencil")
                 }
@@ -220,40 +236,11 @@ struct MessageBubbleView: View {
         }
     }
 
-    /// Edit-user-message sheet (Android editMessage parity). On submit it calls
-    /// `onEdit` with the trimmed draft; ChatViewModel appends the edited text
-    /// as a new variant, truncates the stale reply, and re-runs generation.
-    private var editSheet: some View {
-        NavigationStack {
-            VStack {
-                TextEditor(text: $editDraft)
-                    .font(.body)
-                    .padding(8)
-                    .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(16)
-            }
-            .navigationTitle("编辑消息")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { editing = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("发送") {
-                        onEdit(editDraft)
-                        editing = false
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
     // MARK: - Subviews
 
     @ViewBuilder
     private var messageParts: some View {
-        ForEach(Array(message.parts.enumerated()), id: \.offset) { _, part in
+        ForEach(Array(message.parts.enumerated()), id: \.offset) { partIndex, part in
             if let textPart = part as? UIMessagePart.Text, !textPart.text.isEmpty {
                 if isUser {
                     // 气泡现在是内容尺寸(已移除其内部的 300pt 框),contextMenu 的高亮平台贴合气泡。
@@ -274,6 +261,7 @@ struct MessageBubbleView: View {
                     ChatAssistantText {
                         ChatAssistantMarkdownView(
                             markdown: textPart.text,
+                            renderCacheNamespace: "\(message.id):text:\(partIndex)",
                             displaySetting: displaySetting,
                             generativeUiSetting: generativeUiSetting,
                             isStreaming: isGenerating && isLastMessage,
@@ -429,6 +417,7 @@ struct MessageBubbleView: View {
 /// 实验渲染器在这里互斥切换,避免两边各渲染各的、视觉不一致。
 struct ChatAssistantMarkdownView: View {
     let markdown: String
+    var renderCacheNamespace: String?
     var displaySetting: DisplaySetting?
     var generativeUiSetting: GenerativeUiSetting?
     var isStreaming = false
@@ -439,20 +428,83 @@ struct ChatAssistantMarkdownView: View {
 
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
-    /// per-view-instance 的「这个 bubble 曾经流式过」latch。
-    /// 关键特性:列表回收行后,新 view 实例的 @State 重置为 false → 历史消息回滚到
-    /// 高度稳定的同步渲染器 AmberMarkdownView;而可视区内刚完成的消息仍保持流式渲染器
-    /// (latch=true),避免 completion 瞬间切渲染器闪烁。用 ChatView 层持久化的 hasEverStreamed
-    /// 代替它会破坏这个特性——回收的行依然收到 true → 用异步渲染器 → 首帧高度 0 → 上滑跳动。
+    @AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown) private var streamingBlockMarkdown = true
+    @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
+    @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
+    /// per-view-instance 的「这个 bubble 曾经流式过」latch。它覆盖 completion 瞬间;
+    /// 回收后的完成态则由 projection 层的 hasEverStreamed + liveRenderingEnabled 明确驱动。
     @State private var hasUsedStreamingMarkdownRenderer = false
+    @State private var hasUsedBlockMarkdownRenderer = false
     @State private var renderedMarkdownSnapshot = ""
+    /// 表格/widget 探测器放在引用盒子里而不是 @State 值类型:探测器每个 chunk 都要
+    /// 增量消费新字节,值类型 @State 的突变会让每个 delta 额外触发一轮 body 重求值,
+    /// 与 signal 驱动的那轮叠加成倍放大热路径成本。body 只依赖下面两个显式 latch。
+    @State private var detection: ChatStreamingDetectionBox
+    /// body 读取的 widget 探测 latch(IOSGenerativeWidgetPayloadDetector 的增量结果)。
+    /// 只在 false→true 翻转时写入一次,不随每个 chunk 失效。
+    @State private var mayContainWidgetPayload: Bool
+
+    init(
+        markdown: String,
+        renderCacheNamespace: String? = nil,
+        displaySetting: DisplaySetting? = nil,
+        generativeUiSetting: GenerativeUiSetting? = nil,
+        isStreaming: Bool = false,
+        hasEverStreamed: Bool = false,
+        liveRenderingEnabled: Bool = true,
+        frozenMarkdownSnapshot: String? = nil,
+        onGenerativeWidgetAction: @escaping (String) -> Void = { _ in }
+    ) {
+        self.markdown = markdown
+        self.renderCacheNamespace = renderCacheNamespace
+        self.displaySetting = displaySetting
+        self.generativeUiSetting = generativeUiSetting
+        self.isStreaming = isStreaming
+        self.hasEverStreamed = hasEverStreamed
+        self.liveRenderingEnabled = liveRenderingEnabled
+        self.frozenMarkdownSnapshot = frozenMarkdownSnapshot
+        self.onGenerativeWidgetAction = onGenerativeWidgetAction
+        // 流式尾行的 view struct 每个 delta 重建,State(initialValue:) 首帧之后
+        // 全部被丢弃——eager 种子扫描曾按"微秒级"评估保留,采样实测占主线程
+        // ~6.6%(24KB×逐字节×每 delta×两次 body eval),证伪。改为:只有
+        // 非流式行(历史行,首帧结果必须就位且不会每 delta 重建)做 eager 扫描;
+        // 流式行从空状态起步,由 onAppear/onChange 的持久盒增量补齐——
+        // 代价仅是"流式中途重进入"首帧探测未就位(下一帧补齐)。
+        if isStreaming {
+            let detection = ChatStreamingDetectionBox(markdown: "")
+            _detection = State(initialValue: detection)
+            _mayContainWidgetPayload = State(initialValue: false)
+            _hasUsedBlockMarkdownRenderer = State(initialValue:
+                ChatStreamingMarkdownRendererPolicy.initialBlockRendererLatch(
+                    isStreaming: isStreaming,
+                    hasEverStreamed: hasEverStreamed,
+                    liveRenderingEnabled: liveRenderingEnabled
+                )
+            )
+        } else {
+            let detection = ChatStreamingDetectionBox(markdown: markdown)
+            _detection = State(initialValue: detection)
+            _mayContainWidgetPayload = State(initialValue: detection.widget.mayContainPayload)
+            _hasUsedBlockMarkdownRenderer = State(initialValue:
+                ChatStreamingMarkdownRendererPolicy.initialBlockRendererLatch(
+                    isStreaming: isStreaming,
+                    hasEverStreamed: hasEverStreamed,
+                    liveRenderingEnabled: liveRenderingEnabled
+                )
+            )
+        }
+    }
 
     var body: some View {
         let widgetSettings = IOSGenerativeWidgetSettings(generativeUiSetting)
         let renderedMarkdown = renderedMarkdownText
         let liveStreaming = isStreaming && liveRenderingEnabled
         Group {
-            if widgetSettings.enabled && IOSGenerativeWidgetParser.mayContainWidgetPayload(renderedMarkdown) {
+            // 探测走增量 latch(mayContainWidgetPayload @State),不再每次 body 求值
+            // 对全文做 13+ 次 caseInsensitive 扫描(32KB 实测 46ms/次,是长内容
+            // 流式掉帧的头号单项)。latch 基于完整 markdown,对 frozen snapshot
+            // 只可能过检不可能欠检;过检时 parse 找不到 widget 段仍走纯文本分支。
+            if widgetSettings.enabled && mayContainWidgetPayload {
                 let segments = IOSGenerativeWidgetParser.parse(renderedMarkdown, streaming: liveStreaming)
                 let hasWidgetSegment = segments.contains { segment in
                     switch segment {
@@ -466,8 +518,12 @@ struct ChatAssistantMarkdownView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(segments) { segment in
                             switch segment {
-                            case .text(_, let content):
-                                markdownText(content, liveStreaming: liveStreaming)
+                            case .text(let id, let content):
+                                markdownText(
+                                    content,
+                                    liveStreaming: liveStreaming,
+                                    cacheIdentitySuffix: "widget:\(id)"
+                                )
                             case .widget(let widget):
                                 IOSGenerativeWidgetCard(
                                     widget: widget,
@@ -491,31 +547,59 @@ struct ChatAssistantMarkdownView: View {
             if renderedMarkdownSnapshot.isEmpty {
                 renderedMarkdownSnapshot = markdown
             }
+            updateWidgetPayloadLatch(with: markdown)
             if isStreaming && liveRenderingEnabled {
                 hasUsedStreamingMarkdownRenderer = true
+                updateTableRendererLatch(with: renderedMarkdown)
             }
         }
         .onChange(of: markdown) { _, newValue in
-            if liveRenderingEnabled || renderedMarkdownSnapshot.isEmpty {
-                renderedMarkdownSnapshot = newValue
+            updateWidgetPayloadLatch(with: newValue)
+            if isStreaming,
+               liveRenderingEnabled,
+               !hasUsedBlockMarkdownRenderer {
+                updateTableRendererLatch(with: newValue)
             }
         }
         .onChange(of: isStreaming) { _, newValue in
             if newValue && liveRenderingEnabled {
                 hasUsedStreamingMarkdownRenderer = true
                 renderedMarkdownSnapshot = markdown
+                if !hasUsedBlockMarkdownRenderer {
+                    updateTableRendererLatch(with: markdown)
+                }
             } else if !newValue {
                 renderedMarkdownSnapshot = markdown
+                // Completion may replace the cumulative stream with one final full
+                // message. Reconcile once here instead of validating the whole prefix
+                // on every append-only chunk.
+                reconcileFinalWidgetPayloadLatch(with: markdown)
             }
         }
         .onChange(of: liveRenderingEnabled) { _, newValue in
-            if newValue {
-                renderedMarkdownSnapshot = markdown
+            // Capture once at the live/frozen boundary. Mirroring every live delta
+            // into @State only schedules a duplicate body update.
+            renderedMarkdownSnapshot = markdown
+            if ChatStreamingMarkdownRendererPolicy.initialBlockRendererLatch(
+                isStreaming: isStreaming,
+                hasEverStreamed: hasEverStreamed,
+                liveRenderingEnabled: newValue
+            ) {
+                hasUsedBlockMarkdownRenderer = true
             }
             if newValue && isStreaming {
                 hasUsedStreamingMarkdownRenderer = true
+                if !hasUsedBlockMarkdownRenderer {
+                    updateTableRendererLatch(with: markdown)
+                }
             }
         }
+        .environment(
+            \.openURL,
+            OpenURLAction { url in
+                ChatMarkdownOpenURLPolicy.result(for: url)
+            }
+        )
     }
 
     private var renderedMarkdownText: String {
@@ -529,42 +613,1769 @@ struct ChatAssistantMarkdownView: View {
     }
 
     private func shouldUseExperimentalMarkdownRenderer(liveStreaming: Bool) -> Bool {
-        // 异步渲染器(SwiftStreamingMarkdown/Liyanan)的首帧高度为 0(controller.renderable==nil
-        // → empty document)。列表上滑回收再实现历史行时,这个 0→完整的高度跳变会让
-        // contentSize 骤变,把视图弹过 agent 消息。
-        // 因此:异步渲染器只用于「正在流式」的消息(isStreaming)或「本 view 实例曾流式过」
-        // 的消息(hasUsedStreamingMarkdownRenderer latch)。已完成的历史消息(列表回收后
-        // 新实例 latch 重置为 false)回退到同步、高度稳定的 AmberMarkdownView。
-        return liveStreaming || hasUsedStreamingMarkdownRenderer
+        liveStreaming || hasUsedStreamingMarkdownRenderer || (hasEverStreamed && liveRenderingEnabled)
     }
 
     private func shouldUseFadeStreamingRenderer(liveStreaming: Bool) -> Bool {
         // 逐词淡入目前只有 SwiftStreamingMarkdown 提供真实 glyph fade。
         // LiYanan MarkdownView 的 StreamingMarkdownReader 负责增量解析,但没有文字淡入层。
-        // 所以可见的流式正文统一先走 SwiftStreamingMarkdown;列表回收后的历史行仍回到
-        // AmberMarkdownView,避免异步 renderer 的首帧空高度拖累历史滚动。
-        liveStreaming || hasUsedStreamingMarkdownRenderer
+        // 正在流式的可见尾行、完成瞬间和重新进入可见区的已流式消息继续走
+        // SwiftStreamingMarkdown，避免同一条消息在两套 renderer 间反复切换。
+        liveStreaming || hasUsedStreamingMarkdownRenderer || (hasEverStreamed && liveRenderingEnabled)
+    }
+
+    private func shouldUseBlockStreamingRenderer(liveStreaming: Bool) -> Bool {
+        guard streamingBlockMarkdown else { return false }
+        // 流式从首帧一律走同一块路径，表格前后的稳定块可以冻结复用；绝不允许
+        // 中途从单文档切到块路径，否则 vendor ParagraphView 重建会让已上屏内容
+        // 整段重淡入。latch 保证完成瞬间保持 renderer 连续；表格探测仍兜底
+        // 回收后历史行的入场判定。
+        return liveStreaming || hasUsedBlockMarkdownRenderer ||
+            (hasEverStreamed && liveRenderingEnabled)
+    }
+
+    private func updateTableRendererLatch(with text: String) {
+        if isStreaming, liveRenderingEnabled {
+            hasUsedBlockMarkdownRenderer = true
+        }
+        detection.table.update(with: text)
+        if detection.table.containsTable {
+            hasUsedBlockMarkdownRenderer = true
+        }
+    }
+
+    private func updateWidgetPayloadLatch(with text: String) {
+        guard !mayContainWidgetPayload else { return }
+        detection.widget.update(with: text)
+        if detection.widget.mayContainPayload {
+            mayContainWidgetPayload = true
+        }
+    }
+
+    private func reconcileFinalWidgetPayloadLatch(with text: String) {
+        guard !mayContainWidgetPayload else { return }
+        detection.widget.reconcileFinalText(text)
+        if detection.widget.mayContainPayload {
+            mayContainWidgetPayload = true
+        }
+    }
+
+    /// 流式渲染器(SwiftStreamingMarkdown)排版参数单侧对齐紧凑基准 AmberMarkdownView,
+    /// 全部取设计原值:字体 17×scale、行距 4×scale(与 ChatAssistantText wrapper 同源,
+    /// 见 ChatMessageListSupport.swift:112-136)、块间距 8pt(MarkdownView.swift:173)、
+    /// 列表项间距 4pt(MarkdownView.swift:413/424)、表格 cell padding 水平 12/垂直 8、
+    /// 表格正文 17pt(MarkdownView.swift:368-371)。heading 行距同样传 4×scale——
+    /// 紧凑基准的标题(SwiftUI Text)吃 wrapper 的 .lineSpacing environment。
+    /// collapsesSoftBreaks 对齐紧凑基准的 CommonMark softBreak 语义(段内单换行折叠
+    /// 为空格、CJK 间折叠为空,而非硬换行)——这是行数级差异,不折叠则每个 softBreak
+    /// 多出一行。
+    /// 只调排版度量,不碰渲染管线——渐进渲染/逐词淡入只在真正 liveStreaming 时开启。
+    /// 完成态的 view 实例可以继续使用 SwiftStreamingMarkdown 保持 renderer 连续性,但必须
+    /// 退出文字动画路径,避免 UIKit 段落视图在完成/回收阶段继续走动态文字更新和尺寸缓存。
+    private var boundedFontScale: Double {
+        min(max(fontScale, 0.88), 1.25)
     }
 
     private func streamingMarkdownConfig(liveStreaming: Bool) -> SwiftStreamingMarkdown.MarkdownRenderConfig {
-        SwiftStreamingMarkdown.MarkdownRenderConfig.default
-            .withShouldAnimateText(value: liveStreaming || hasUsedStreamingMarkdownRenderer)
+        let scale = boundedFontScale
+        let foreground = UIColor(AmberTheme.foreground)
+        let foreground2 = UIColor(AmberTheme.foreground2)
+        let muted = UIColor(AmberTheme.muted)
+        let surface2 = UIColor(AmberTheme.surface2)
+        let border = UIColor(AmberTheme.border)
+        let accent = UIColor(AmberTheme.accent)
+        let bodyFonts = ChatStreamingMarkdownTypography.bodyFonts(
+            chatFont: IOSChatFont(rawValue: chatFont) ?? .default,
+            pointSize: 17 * scale
+        )
+        let headingFonts = ChatStreamingMarkdownTypography.applyingChatFont(
+            IOSChatFont(rawValue: chatFont) ?? .default,
+            to: SwiftStreamingMarkdown.MarkdownRenderConfig.defaultHeadingStyle
+        )
+        let paragraphStyle = SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownTextStyle(
+            textFonts: bodyFonts,
+            textColor: foreground
+        )
+        let blockQuoteStyle = SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownTextStyle(
+            textFonts: bodyFonts,
+            textColor: muted
+        )
+        let orderedListStyle = SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownTextStyle(
+            textFonts: bodyFonts,
+            textColor: foreground
+        )
+        let headingStyle = SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownHeadingTextStyle(
+            h1Font: headingFonts.h1Font,
+            h2Font: headingFonts.h2Font,
+            h3Font: headingFonts.h3Font,
+            h4Font: headingFonts.h4Font,
+            h5Font: headingFonts.h5Font,
+            h6Font: headingFonts.h6Font,
+            textColor: foreground
+        )
+        let tableStyle = SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownTableTextStyle(
+            textFonts: bodyFonts,
+            headerTextColor: foreground,
+            regularTextColor: foreground,
+            headerBackgroundColor: surface2,
+            borderColor: border,
+            actionButtonColor: accent
+        )
+        let inlineStyle = SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownInlineTextStyle(
+            boldTextColor: foreground,
+            linkTextFont: bodyFonts.normal,
+            linkTextColor: accent,
+            codeTextFont: SwiftStreamingMarkdown.MarkdownRenderConfig.defaultInlineStyle.codeTextFont,
+            codeTextColor: foreground2,
+            codeBackgroundColor: surface2,
+            codeUnderlineColor: border
+        )
+        return SwiftStreamingMarkdown.MarkdownRenderConfig.default
+            .withShouldAnimateText(value: liveStreaming)
+            .withBlockQuoteStyle(value: blockQuoteStyle)
+            .withHeadingStyle(value: headingStyle)
+            .withOrderedListStyle(value: orderedListStyle)
+            .withParagraphStyle(value: paragraphStyle)
+            .withTableStyle(value: tableStyle)
+            .withInlineStyle(value: inlineStyle)
+            .withParagraphLineSpacing(value: 4 * scale)
+            .withHeadingLineSpacing(value: 4 * scale)
+            .withBlockSpacing(value: 8)
+            .withListItemSpacing(value: 4)
+            .withTableCellHorizontalPadding(value: 12)
+            .withTableCellVerticalPadding(value: 8)
+            .withTableMaxColumnWidth(value: 300)
+            // 紧凑基准无序列表的内容缩进 = Text("•") 宽(~7pt)+ spacing 8 ≈ 15pt;
+            // vendor 内容缩进 = bulletWidth + spacing 1,故 bulletWidth 取 15 对齐,
+            // 消除因内容可用宽度不同导致的折行行数差。
+            .withUnorderedListBulletWidth(value: 15)
+            .withCollapsesSoftBreaks(value: true)
     }
 
     @ViewBuilder
-    private func markdownText(_ content: String, liveStreaming: Bool) -> some View {
-        if shouldUseFadeStreamingRenderer(liveStreaming: liveStreaming) {
-            SwiftStreamingMarkdown.MarkdownView(text: content, config: streamingMarkdownConfig(liveStreaming: liveStreaming))
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private func markdownText(
+        _ content: String,
+        liveStreaming: Bool,
+        cacheIdentitySuffix: String = "document"
+    ) -> some View {
+        let config = detection.markdownConfig(
+            for: ChatStreamingDetectionBox.MarkdownConfigKey(
+                liveStreaming: liveStreaming,
+                fontScale: boundedFontScale,
+                chatFont: chatFont,
+                themePaper: AmberThemeRuntime.shared.paper.rawValue,
+                themeAccentHex: AmberThemeRuntime.shared.accentHex
+            ),
+            build: { streamingMarkdownConfig(liveStreaming: liveStreaming) }
+        )
+        if shouldUseBlockStreamingRenderer(liveStreaming: liveStreaming) {
+            ChatStreamingBlockMarkdownView(
+                text: content,
+                config: config,
+                liveStreaming: liveStreaming,
+                renderCacheNamespace: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix)" }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if shouldUseFadeStreamingRenderer(liveStreaming: liveStreaming) {
+            ChatStableStreamingMarkdownView(
+                text: content,
+                config: config,
+                cacheIdentity: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix):monolith" }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if liyananStreamingMarkdown && shouldUseExperimentalMarkdownRenderer(liveStreaming: liveStreaming) {
             LiyananStreamingMarkdownContentView(content: content)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if microsoftStreamingMarkdown && shouldUseExperimentalMarkdownRenderer(liveStreaming: liveStreaming) {
-            SwiftStreamingMarkdown.MarkdownView(text: content, config: streamingMarkdownConfig(liveStreaming: liveStreaming))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            ChatStableStreamingMarkdownView(
+                text: content,
+                config: config,
+                cacheIdentity: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix):monolith" }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             AmberMarkdownView(markdown: content, displaySetting: displaySetting)
         }
+    }
+}
+
+enum ChatStreamingMarkdownRendererPolicy {
+    static func initialBlockRendererLatch(
+        isStreaming: Bool,
+        hasEverStreamed: Bool,
+        liveRenderingEnabled: Bool
+    ) -> Bool {
+        (isStreaming || hasEverStreamed) && liveRenderingEnabled
+    }
+}
+
+private enum ChatStreamingMarkdownTypography {
+    static func bodyFonts(chatFont: IOSChatFont, pointSize: CGFloat) -> SwiftStreamingMarkdown.TextFonts {
+        let regular = UIFont.systemFont(ofSize: pointSize, weight: .regular)
+        let semibold = UIFont.systemFont(ofSize: pointSize, weight: .semibold)
+        return SwiftStreamingMarkdown.TextFonts(
+            normal: applyingChatFont(chatFont, to: regular),
+            italic: applyingChatFont(chatFont, to: regular.withItalicTrait()),
+            bold: applyingChatFont(chatFont, to: semibold),
+            boldItalic: applyingChatFont(chatFont, to: semibold.withItalicTrait()),
+            preferredLetterSpacing: 0,
+            preferredLineHeight: nil
+        )
+    }
+
+    static func applyingChatFont(
+        _ chatFont: IOSChatFont,
+        to style: SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownHeadingTextStyle
+    ) -> SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownHeadingTextStyle {
+        SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownHeadingTextStyle(
+            h1Font: applyingChatFont(chatFont, to: style.h1Font),
+            h2Font: applyingChatFont(chatFont, to: style.h2Font),
+            h3Font: applyingChatFont(chatFont, to: style.h3Font),
+            h4Font: applyingChatFont(chatFont, to: style.h4Font),
+            h5Font: applyingChatFont(chatFont, to: style.h5Font),
+            h6Font: applyingChatFont(chatFont, to: style.h6Font),
+            textColor: style.textColor
+        )
+    }
+
+    private static func applyingChatFont(
+        _ chatFont: IOSChatFont,
+        to fonts: SwiftStreamingMarkdown.TextFonts
+    ) -> SwiftStreamingMarkdown.TextFonts {
+        SwiftStreamingMarkdown.TextFonts(
+            normal: applyingChatFont(chatFont, to: fonts.normal),
+            italic: fonts.italic.map { applyingChatFont(chatFont, to: $0) },
+            bold: fonts.bold.map { applyingChatFont(chatFont, to: $0) },
+            boldItalic: fonts.boldItalic.map { applyingChatFont(chatFont, to: $0) },
+            preferredLetterSpacing: fonts.preferredLetterSpacing,
+            preferredLineHeight: fonts.preferredLineHeight
+        )
+    }
+
+    private static func applyingChatFont(_ chatFont: IOSChatFont, to font: UIFont) -> UIFont {
+        let design: UIFontDescriptor.SystemDesign
+        switch chatFont {
+        case .default:
+            return font
+        case .serif:
+            design = .serif
+        case .monospace:
+            design = .monospaced
+        }
+        guard let descriptor = font.fontDescriptor.withDesign(design) else {
+            return font
+        }
+        return UIFont(descriptor: descriptor, size: font.pointSize)
+    }
+}
+
+#if DEBUG
+enum ChatStreamingMarkdownTypographyTestSupport {
+    static func bodyFontName(chatFont: IOSChatFont) -> String {
+        ChatStreamingMarkdownTypography.bodyFonts(chatFont: chatFont, pointSize: 17).normal.fontName
+    }
+}
+#endif
+
+private struct ChatStreamingBlockMarkdownView: View {
+    let text: String
+    let config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    let liveStreaming: Bool
+    let renderCacheNamespace: String?
+    @StateObject private var controller: ChatStreamingMarkdownBlockController
+
+    init(
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig,
+        liveStreaming: Bool,
+        renderCacheNamespace: String? = nil
+    ) {
+        self.text = text
+        self.config = config
+        self.liveStreaming = liveStreaming
+        self.renderCacheNamespace = renderCacheNamespace
+        _controller = StateObject(wrappedValue: ChatStreamingMarkdownBlockController(
+            text: text,
+            includeTrailingPartialTableRow: !liveStreaming
+        ))
+    }
+
+    var body: some View {
+        // 结构性隔离:本层每个 delta 都因 `text` 变化重求值,但块列表子树
+        // 只依赖 controller 的结构发布。已稳定块继续复用；普通文本尾块把可见
+        // 节奏交给内部 Markdown controller，表格尾块仍在本层限频，避免每个
+        // table token 都重建整张表。
+        ChatStreamingMarkdownBlockListView(
+            controller: controller,
+            config: config,
+            renderCacheNamespace: renderCacheNamespace
+        )
+            .task(id: ChatStreamingMarkdownBlockParseKey(
+                text: text,
+                includeTrailingPartialTableRow: !liveStreaming
+            )) {
+                controller.scheduleParse(
+                    text: text,
+                    includeTrailingPartialTableRow: !liveStreaming
+                )
+            }
+    }
+}
+
+private struct ChatStreamingMarkdownBlockListView: View {
+    @ObservedObject var controller: ChatStreamingMarkdownBlockController
+    let config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    let renderCacheNamespace: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: config.blockSpacing) {
+            ForEach(controller.blocks) { block in
+                switch block.kind {
+                case .text(let content):
+                    ChatStableStreamingMarkdownView(
+                        text: content,
+                        config: config,
+                        cacheIdentity: renderCacheNamespace.map { "\($0):\(block.id)" }
+                    )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case .table(let table):
+                    // 用 vendor 的真实 Markdown 表格渲染，保留 inline 样式、链接与
+                    // shouldAnimateText 淡入；块解析只负责隐藏尚未闭合的尾行。
+                    ChatStableStreamingMarkdownView(
+                        text: table.markdown,
+                        config: config,
+                        cacheIdentity: renderCacheNamespace.map { "\($0):\(block.id)" }
+                    )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+}
+
+private struct ChatStreamingMarkdownBlockParseKey: Equatable {
+    let text: String
+    let includeTrailingPartialTableRow: Bool
+}
+
+@MainActor
+private final class ChatStreamingMarkdownBlockController: ObservableObject {
+    @Published private(set) var blocks: [ChatStreamingMarkdownBlock]
+
+    private var pendingParse: (text: String, includeTrailingPartialTableRow: Bool)?
+    private var parseTask: Task<Void, Never>?
+    private var lastPublishAt = Date.distantPast
+
+    init(text: String, includeTrailingPartialTableRow: Bool) {
+        blocks = ChatPerfTrace.measure("MarkdownBlockSplitInitial", count: { text.utf16.count }) {
+            ChatStreamingMarkdownBlockParser.blocks(
+                in: text,
+                includeTrailingPartialTableRow: includeTrailingPartialTableRow
+            )
+        }
+    }
+
+    deinit {
+        parseTask?.cancel()
+    }
+
+    /// 普通文本尾块不在这里重复限频:块控制器只负责结构拆分，实际 Markdown
+    /// 解析已有 single-flight/latest-wins 背压。表格尾块仍保留低频发布，避免
+    /// 每个表格 token 都让整张表进入布局；半截行由 block parser 隐藏。
+    private func publishInterval(for text: String) -> TimeInterval {
+        guard let tail = blocks.last,
+              case .table = tail.kind else { return 0 }
+        let length = text.utf16.count
+        if length < 1_200 {
+            return 0.09
+        }
+        if length < 4_000 {
+            return 0.12
+        }
+        return 0.16
+    }
+
+    func scheduleParse(text: String, includeTrailingPartialTableRow: Bool) {
+        pendingParse = (text, includeTrailingPartialTableRow)
+        guard parseTask == nil else { return }
+        parseTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { parseTask = nil }
+            while !Task.isCancelled, let next = pendingParse {
+                pendingParse = nil
+
+                let elapsed = Date().timeIntervalSince(lastPublishAt)
+                let interval = publishInterval(for: next.text)
+                if elapsed < interval {
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64((interval - elapsed) * 1_000_000_000))
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled else { return }
+                }
+                // 节流窗内若有更新的累计文本到达,直接解析最新值。
+                let target = pendingParse ?? next
+                pendingParse = nil
+
+                let parsed = await Task.detached(priority: .userInitiated) {
+                    ChatPerfTrace.measure("MarkdownBlockSplit", count: { target.text.utf16.count }) {
+                        ChatStreamingMarkdownBlockParser.blocks(
+                            in: target.text,
+                            includeTrailingPartialTableRow: target.includeTrailingPartialTableRow
+                        )
+                    }
+                }.value
+                guard !Task.isCancelled else { return }
+                // 解析串行消费累计全文，当前结果一定晚于上次已发布结果。即使
+                // 解析期间又来了 delta，也先发布这次前缀再继续消费最新 pending；
+                // 否则长内容解析慢于 chunk 间隔时会永久没有任何结果能发布。
+                lastPublishAt = Date()
+                ChatPerfTrace.measure("MarkdownBlockPublish", count: { parsed.count }) {
+                    publishPreservingSettledBlocks(parsed)
+                }
+            }
+        }
+    }
+
+    /// 前缀块冻结的核心:新解析结果与上一次逐块比较,内容未变的块**复用旧实例**
+    /// (包括其中的 String 存储)。这样 ForEach 里已定块的子视图输入按位与上一帧
+    /// 完全一致,SwiftUI 直接短路整棵子树;真正重新求值/布局的只有变化中的尾部块。
+    /// 全部相等时不发布,避免无效的 objectWillChange。
+    private func publishPreservingSettledBlocks(_ parsed: [ChatStreamingMarkdownBlock]) {
+        var merged = parsed
+        var changed = merged.count != blocks.count
+        for index in merged.indices {
+            if index < blocks.count, blocks[index] == merged[index] {
+                merged[index] = blocks[index]
+            } else {
+                changed = true
+            }
+        }
+        if changed {
+            blocks = merged
+        }
+    }
+}
+
+private struct ChatStreamingMarkdownBlock: Identifiable, Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case text(String)
+        case table(ChatStreamingMarkdownTable)
+    }
+
+    let id: String
+    let kind: Kind
+}
+
+private struct ChatStreamingMarkdownTable: Equatable, Sendable {
+    let id: String
+    let markdown: String
+    let headers: [String]
+    let rows: [[String]]
+}
+
+private struct ChatStreamingMarkdownParsedTable: Sendable {
+    let table: ChatStreamingMarkdownTable
+    let consumedLineCount: Int
+}
+
+private enum ChatStreamingMarkdownBlockParser {
+    static func containsTable(in text: String) -> Bool {
+        let lines = text.components(separatedBy: .newlines)
+        guard lines.count >= 2 else { return false }
+        var activeFenceMarker: Character?
+
+        for index in 0..<(lines.count - 1) {
+            let line = lines[index]
+            if let marker = fenceMarker(in: line) {
+                if activeFenceMarker == nil {
+                    activeFenceMarker = marker
+                } else if activeFenceMarker == marker {
+                    activeFenceMarker = nil
+                }
+                continue
+            }
+            guard activeFenceMarker == nil else { continue }
+            let headers = splitTableCells(line)
+            if headers.count >= 2,
+               isDelimiterLine(lines[index + 1], expectedCount: headers.count) {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func startsWithTable(in text: String) -> Bool {
+        let firstLines = text.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
+        guard firstLines.count >= 2 else { return false }
+        let headers = splitTableCells(String(firstLines[0]))
+        return headers.count >= 2 &&
+            isDelimiterLine(String(firstLines[1]), expectedCount: headers.count)
+    }
+
+    static func blocks(
+        in text: String,
+        includeTrailingPartialTableRow: Bool = true,
+        includeParsedTableCells: Bool = false
+    ) -> [ChatStreamingMarkdownBlock] {
+        parseBlocks(
+            in: text,
+            includeTrailingPartialTableRow: includeTrailingPartialTableRow,
+            includeParsedTableCells: includeParsedTableCells
+        )
+    }
+
+    private static func parseBlocks(
+        in text: String,
+        includeTrailingPartialTableRow: Bool,
+        includeParsedTableCells: Bool
+    ) -> [ChatStreamingMarkdownBlock] {
+        let lines = text.components(separatedBy: .newlines)
+        var blocks: [ChatStreamingMarkdownBlock] = []
+        var textStart = 0
+        var index = 0
+        var blockOrdinal = 0
+        var activeFenceMarker: Character?
+
+        func flushText(until end: Int) {
+            guard textStart < end else { return }
+            let content = lines[textStart..<end].joined(separator: "\n")
+            guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                textStart = end
+                return
+            }
+            blocks.append(ChatStreamingMarkdownBlock(
+                id: "text-\(blockOrdinal)",
+                kind: .text(content)
+            ))
+            blockOrdinal += 1
+            textStart = end
+        }
+
+        while index < lines.count {
+            let line = lines[index]
+            if let marker = fenceMarker(in: line) {
+                if activeFenceMarker == nil {
+                    activeFenceMarker = marker
+                } else if activeFenceMarker == marker {
+                    activeFenceMarker = nil
+                }
+                index += 1
+                continue
+            }
+
+            if activeFenceMarker == nil,
+               index + 1 < lines.count,
+               let parsedTable = parseTable(
+                lines: lines,
+                start: index,
+                sourceEndsWithNewline: text.hasSuffix("\n"),
+                includeTrailingPartialTableRow: includeTrailingPartialTableRow,
+                includeParsedTableCells: includeParsedTableCells
+               ) {
+                flushText(until: index)
+                blocks.append(ChatStreamingMarkdownBlock(
+                    id: "table-\(blockOrdinal)",
+                    kind: .table(parsedTable.table)
+                ))
+                blockOrdinal += 1
+                index += parsedTable.consumedLineCount
+                textStart = index
+                continue
+            }
+
+            index += 1
+        }
+
+        flushText(until: lines.count)
+        return blocks
+    }
+
+    private static func parseTable(
+        lines: [String],
+        start: Int,
+        sourceEndsWithNewline: Bool,
+        includeTrailingPartialTableRow: Bool,
+        includeParsedTableCells: Bool
+    ) -> ChatStreamingMarkdownParsedTable? {
+        guard start + 1 < lines.count else { return nil }
+        let headers = splitTableCells(lines[start])
+        guard headers.count >= 2, isDelimiterLine(lines[start + 1], expectedCount: headers.count) else {
+            return nil
+        }
+
+        var rows: [[String]] = []
+        var index = start + 2
+        var renderedEndIndex = start + 2
+        let headerUsesLeadingPipe = lines[start]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .hasPrefix("|")
+        while index < lines.count {
+            let line = lines[index]
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isTrailingPartialLine = !includeTrailingPartialTableRow &&
+                !sourceEndsWithNewline &&
+                index == lines.count - 1
+            let canBeNoLeadingPipePartialRow = isTrailingPartialLine && !headerUsesLeadingPipe
+            guard !trimmed.isEmpty,
+                  line.contains("|") || canBeNoLeadingPipePartialRow,
+                  !isDelimiterLine(line, expectedCount: headers.count) else {
+                break
+            }
+            // 流式尾行尚未闭合时只消费、不解析、不渲染。这样带/不带前导 pipe 的
+            // 表格都不会先冒出半行普通文本，再瞬间重组为 table row。
+            if isTrailingPartialLine {
+                index += 1
+                break
+            }
+            if includeParsedTableCells {
+                let cells = ChatStreamingMarkdownTableRowCache.shared.cells(
+                    for: line,
+                    expectedCount: headers.count
+                ) {
+                    normalizedRow(splitTableCells(line), count: headers.count)
+                }
+                rows.append(cells)
+            }
+            renderedEndIndex = index + 1
+            index += 1
+        }
+        let consumedLineCount = index - start
+
+        return ChatStreamingMarkdownParsedTable(
+            table: ChatStreamingMarkdownTable(
+                id: "table-\(start)",
+                markdown: lines[start..<renderedEndIndex].joined(separator: "\n"),
+                headers: includeParsedTableCells ? normalizedRow(headers, count: headers.count) : [],
+                rows: rows
+            ),
+            consumedLineCount: consumedLineCount
+        )
+    }
+
+    private static func splitTableCells(_ line: String) -> [String] {
+        let characters = Array(line.trimmingCharacters(in: .whitespacesAndNewlines))
+        var cells: [String] = []
+        var current = ""
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character == "\\",
+               index + 1 < characters.count,
+               characters[index + 1] == "|" {
+                current.append("|")
+                index += 2
+                continue
+            }
+            if character == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+                current = ""
+            } else {
+                current.append(character)
+            }
+            index += 1
+        }
+        cells.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+        if cells.first?.isEmpty == true {
+            cells.removeFirst()
+        }
+        if cells.last?.isEmpty == true {
+            cells.removeLast()
+        }
+        return cells
+    }
+
+    private static func normalizedRow(_ cells: [String], count: Int) -> [String] {
+        if cells.count == count {
+            return cells
+        }
+        if cells.count > count {
+            return Array(cells.prefix(count))
+        }
+        return cells + Array(repeating: "", count: count - cells.count)
+    }
+
+    private static func isDelimiterLine(_ line: String, expectedCount: Int) -> Bool {
+        let cells = splitTableCells(line)
+        guard cells.count == expectedCount else { return false }
+        return cells.allSatisfy { cell in
+            let normalized = cell.replacingOccurrences(of: ":", with: "")
+            return normalized.count >= 3 && normalized.allSatisfy { $0 == "-" }
+        }
+    }
+
+    private static func fenceMarker(in line: String) -> Character? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("```") { return "`" }
+        if trimmed.hasPrefix("~~~") { return "~" }
+        return nil
+    }
+
+    static func tableHeaderColumnCountForDetection(in line: String) -> Int? {
+        let count = splitTableCells(line).count
+        return count >= 2 ? count : nil
+    }
+
+    static func isDelimiterLineForDetection(_ line: String, expectedCount: Int) -> Bool {
+        isDelimiterLine(line, expectedCount: expectedCount)
+    }
+
+    static func fenceMarkerForDetection(in line: String) -> Character? {
+        fenceMarker(in: line)
+    }
+}
+
+/// 表格/widget 增量探测器的引用盒。
+/// `ChatAssistantMarkdownView` 的 body 不读取盒内字段(只读显式的 latch @State),
+/// 因此每个 chunk 的增量消费不触发 SwiftUI 失效。新增探测器时保持这个约束。
+@MainActor
+private final class ChatStreamingDetectionBox {
+    struct MarkdownConfigKey: Hashable {
+        let liveStreaming: Bool
+        let fontScale: Double
+        let chatFont: String
+        let themePaper: String
+        let themeAccentHex: UInt32
+    }
+
+    var table: ChatStreamingTableDetectionState
+    var widget: IOSGenerativeWidgetPayloadDetector
+    /// 渲染 config 记忆化。此前每次 body 求值都重建 config,其中
+    /// `UIColor(AmberTheme.xxx)` 每次产生新的 dynamic-provider UIColor 实例,
+    /// `isEqual` 恒 false → `MarkdownRenderConfig ==` 每 delta 必假 →
+    /// vendor `DocumentView` 的 Equatable 短路每 delta 被击穿,全部表格块
+    /// 33Hz 重建+整表重测量(2026-07-10 缩放矩阵 tables24≈284ms/delta 的根因),
+    /// 同时 configHash 漂移让 renderable 静态缓存与 `.task(id:)` 全部失效。
+    /// 复用同一 config 实例后,动态色仍按 trait 在绘制时解析,明暗模式不受影响。
+    private var configCache: [MarkdownConfigKey: SwiftStreamingMarkdown.MarkdownRenderConfig] = [:]
+
+    init(markdown: String) {
+        table = ChatStreamingTableDetectionState(text: markdown)
+        widget = IOSGenerativeWidgetPayloadDetector(text: markdown)
+    }
+
+    func markdownConfig(
+        for key: MarkdownConfigKey,
+        build: () -> SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) -> SwiftStreamingMarkdown.MarkdownRenderConfig {
+        if let cached = configCache[key] {
+            return cached
+        }
+        let built = build()
+        configCache[key] = built
+        // 键随排版/主题变化，旧键不会再被读取；限个上限防设置反复横跳。
+        if configCache.count > 6 {
+            configCache.removeAll()
+            configCache[key] = built
+        }
+        return built
+    }
+}
+
+private struct ChatStreamingTableDetectionState {
+    private static let checkpointLength = 32
+
+    private var processedUTF8Count = 0
+    private var checkpoint: [UInt8] = []
+    private var pendingLineBytes: [UInt8] = []
+    private var previousHeaderColumnCount: Int?
+    private var activeFenceMarker: Character?
+    private(set) var containsTable = false
+    private(set) var totalConsumedUTF8Count = 0
+
+    init(text: String = "") {
+        if !text.isEmpty {
+            update(with: text)
+        }
+    }
+
+    mutating func update(with text: String) {
+        guard !containsTable else { return }
+        let utf8 = text.utf8
+        let count = utf8.count
+        guard count != processedUTF8Count || !checkpointMatches(in: utf8) else { return }
+
+        if count < processedUTF8Count || !checkpointMatches(in: utf8) {
+            resetParserState()
+        }
+
+        let start = utf8.index(utf8.startIndex, offsetBy: processedUTF8Count)
+        let appended = utf8[start...]
+        totalConsumedUTF8Count += appended.count
+        for byte in appended {
+            if byte == 0x0A {
+                processCompletedLine()
+                pendingLineBytes.removeAll(keepingCapacity: true)
+            } else {
+                pendingLineBytes.append(byte)
+            }
+            if containsTable { break }
+        }
+        processedUTF8Count = count
+        checkpoint = Array(utf8.suffix(Self.checkpointLength))
+        evaluatePendingDelimiter()
+    }
+
+    private func checkpointMatches(in utf8: String.UTF8View) -> Bool {
+        guard processedUTF8Count > 0 else { return true }
+        guard processedUTF8Count <= utf8.count, checkpoint.count <= processedUTF8Count else { return false }
+        let startOffset = processedUTF8Count - checkpoint.count
+        let start = utf8.index(utf8.startIndex, offsetBy: startOffset)
+        let end = utf8.index(start, offsetBy: checkpoint.count)
+        return utf8[start..<end].elementsEqual(checkpoint)
+    }
+
+    private mutating func resetParserState() {
+        processedUTF8Count = 0
+        checkpoint.removeAll(keepingCapacity: true)
+        pendingLineBytes.removeAll(keepingCapacity: true)
+        previousHeaderColumnCount = nil
+        activeFenceMarker = nil
+        containsTable = false
+    }
+
+    private mutating func processCompletedLine() {
+        if pendingLineBytes.last == 0x0D {
+            pendingLineBytes.removeLast()
+        }
+        let line = String(decoding: pendingLineBytes, as: UTF8.self)
+        if let marker = ChatStreamingMarkdownBlockParser.fenceMarkerForDetection(in: line) {
+            if activeFenceMarker == nil {
+                activeFenceMarker = marker
+            } else if activeFenceMarker == marker {
+                activeFenceMarker = nil
+            }
+            previousHeaderColumnCount = nil
+            return
+        }
+        guard activeFenceMarker == nil else {
+            previousHeaderColumnCount = nil
+            return
+        }
+        if let expectedCount = previousHeaderColumnCount,
+           ChatStreamingMarkdownBlockParser.isDelimiterLineForDetection(
+            line,
+            expectedCount: expectedCount
+           ) {
+            containsTable = true
+            return
+        }
+        previousHeaderColumnCount = ChatStreamingMarkdownBlockParser
+            .tableHeaderColumnCountForDetection(in: line)
+    }
+
+    private mutating func evaluatePendingDelimiter() {
+        guard !containsTable,
+              activeFenceMarker == nil,
+              let expectedCount = previousHeaderColumnCount else { return }
+        let line = String(decoding: pendingLineBytes, as: UTF8.self)
+        guard ChatStreamingMarkdownBlockParser.fenceMarkerForDetection(in: line) == nil else { return }
+        if ChatStreamingMarkdownBlockParser.isDelimiterLineForDetection(
+            line,
+            expectedCount: expectedCount
+        ) {
+            containsTable = true
+        }
+    }
+}
+
+private final class ChatStreamingMarkdownTableRowCache: @unchecked Sendable {
+    static let shared = ChatStreamingMarkdownTableRowCache()
+
+    private final class Box {
+        let cells: [String]
+
+        init(_ cells: [String]) {
+            self.cells = cells
+        }
+    }
+
+    private let cache = NSCache<NSString, Box>()
+#if DEBUG
+    private let metricsLock = NSLock()
+    private var hitCount = 0
+    private var missCount = 0
+#endif
+
+    private init() {
+        cache.countLimit = 512
+    }
+
+    func cells(for line: String, expectedCount: Int, build: () -> [String]) -> [String] {
+        let key = "\(expectedCount):\(line)" as NSString
+        if let cached = cache.object(forKey: key) {
+#if DEBUG
+            recordHit()
+#endif
+            return cached.cells
+        }
+        let cells = build()
+        cache.setObject(Box(cells), forKey: key)
+#if DEBUG
+        recordMiss()
+#endif
+        return cells
+    }
+
+#if DEBUG
+    private func recordHit() {
+        metricsLock.lock()
+        hitCount += 1
+        metricsLock.unlock()
+    }
+
+    private func recordMiss() {
+        metricsLock.lock()
+        missCount += 1
+        metricsLock.unlock()
+    }
+
+    func resetForTesting() {
+        cache.removeAllObjects()
+        metricsLock.lock()
+        hitCount = 0
+        missCount = 0
+        metricsLock.unlock()
+    }
+
+    var metricsForTesting: (hits: Int, misses: Int) {
+        metricsLock.lock()
+        defer { metricsLock.unlock() }
+        return (hitCount, missCount)
+    }
+#endif
+}
+
+#if DEBUG
+struct ChatStreamingMarkdownBlockParserTestBlock: Equatable {
+    let kind: String
+    let text: String
+    let markdown: String
+    let headers: [String]
+    let rows: [[String]]
+}
+
+enum ChatStreamingMarkdownBlockParserTestSupport {
+    static func containsTable(in text: String) -> Bool {
+        ChatStreamingMarkdownBlockParser.containsTable(in: text)
+    }
+
+    static func blocks(
+        in text: String,
+        includeTrailingPartialTableRow: Bool
+    ) -> [ChatStreamingMarkdownBlockParserTestBlock] {
+        ChatStreamingMarkdownBlockParser.blocks(
+            in: text,
+            includeTrailingPartialTableRow: includeTrailingPartialTableRow,
+            includeParsedTableCells: true
+        ).map { block in
+            switch block.kind {
+            case .text(let content):
+                return ChatStreamingMarkdownBlockParserTestBlock(
+                    kind: "text",
+                    text: content,
+                    markdown: content,
+                    headers: [],
+                    rows: []
+                )
+            case .table(let table):
+                return ChatStreamingMarkdownBlockParserTestBlock(
+                    kind: "table",
+                    text: "",
+                    markdown: table.markdown,
+                    headers: table.headers,
+                    rows: table.rows
+                )
+            }
+        }
+    }
+
+    static func productionTableCellCounts(in text: String) -> (headers: Int, rows: Int)? {
+        for block in ChatStreamingMarkdownBlockParser.blocks(in: text) {
+            if case .table(let table) = block.kind {
+                return (table.headers.count, table.rows.count)
+            }
+        }
+        return nil
+    }
+
+    static func resetRowCache() {
+        ChatStreamingMarkdownTableRowCache.shared.resetForTesting()
+    }
+
+    static var rowCacheMetrics: (hits: Int, misses: Int) {
+        ChatStreamingMarkdownTableRowCache.shared.metricsForTesting
+    }
+}
+
+@MainActor
+enum ChatStreamingMarkdownConfigCacheTestSupport {
+    static func buildCount(themeKeys: [(paper: String, accentHex: UInt32)]) -> Int {
+        let detection = ChatStreamingDetectionBox(markdown: "")
+        var buildCount = 0
+        for theme in themeKeys {
+            _ = detection.markdownConfig(
+                for: ChatStreamingDetectionBox.MarkdownConfigKey(
+                    liveStreaming: true,
+                    fontScale: 1,
+                    chatFont: IOSChatFont.default.rawValue,
+                    themePaper: theme.paper,
+                    themeAccentHex: theme.accentHex
+                ),
+                build: {
+                    buildCount += 1
+                    return SwiftStreamingMarkdown.MarkdownRenderConfig.default
+                }
+            )
+        }
+        return buildCount
+    }
+}
+
+enum ChatStreamingTableDetectionTestSupport {
+    static func replay(_ texts: [String]) -> (containsTable: Bool, consumedUTF8Count: Int) {
+        var detector = ChatStreamingTableDetectionState()
+        for text in texts {
+            detector.update(with: text)
+        }
+        return (detector.containsTable, detector.totalConsumedUTF8Count)
+    }
+}
+#endif
+
+private struct ChatStreamingMarkdownTableView: View {
+    let table: ChatStreamingMarkdownTable
+
+    @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
+    @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
+
+    private var boundedScale: Double {
+        min(max(fontScale, 0.88), 1.25)
+    }
+
+    private var columnWidth: CGFloat {
+        let scale = CGFloat(boundedScale)
+        switch table.headers.count {
+        case 0...2:
+            return 168 * scale
+        case 3:
+            return 142 * scale
+        default:
+            return 124 * scale
+        }
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                ChatStreamingMarkdownTableRowView(
+                    cells: table.headers,
+                    isHeader: true,
+                    isLastRow: table.rows.isEmpty,
+                    columnWidth: columnWidth,
+                    fontScale: boundedScale,
+                    chatFontRawValue: chatFont
+                )
+                .equatable()
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { index, row in
+                    ChatStreamingMarkdownTableRowView(
+                        cells: normalizedRow(row),
+                        isHeader: false,
+                        isLastRow: index == table.rows.count - 1,
+                        columnWidth: columnWidth,
+                        fontScale: boundedScale,
+                        chatFontRawValue: chatFont
+                    )
+                    .equatable()
+                }
+            }
+            .background(AmberTheme.background)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(AmberTheme.border, lineWidth: 0.6)
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func normalizedRow(_ cells: [String]) -> [String] {
+        if cells.count == table.headers.count {
+            return cells
+        }
+        if cells.count > table.headers.count {
+            return Array(cells.prefix(table.headers.count))
+        }
+        return cells + Array(repeating: "", count: table.headers.count - cells.count)
+    }
+}
+
+private struct ChatStreamingMarkdownTableRowView: View, Equatable {
+    let cells: [String]
+    let isHeader: Bool
+    let isLastRow: Bool
+    let columnWidth: CGFloat
+    let fontScale: Double
+    let chatFontRawValue: String
+
+    private var selectedFont: IOSChatFont {
+        IOSChatFont(rawValue: chatFontRawValue) ?? .default
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(cells.enumerated()), id: \.offset) { index, cell in
+                tableCell(cell, isHeader: isHeader, isLastColumn: index == cells.count - 1)
+            }
+        }
+        .background(isHeader ? AmberTheme.surface2 : Color.clear)
+        .overlay(alignment: .bottom) {
+            if !isLastRow {
+                Rectangle()
+                    .fill(AmberTheme.border)
+                    .frame(height: 0.6)
+            }
+        }
+    }
+
+    private func tableCell(_ rawText: String, isHeader: Bool, isLastColumn: Bool) -> some View {
+        Text(inlineDisplayText(rawText))
+            .font(.system(
+                size: (isHeader ? 16 : 16.5) * fontScale,
+                weight: isHeader ? .semibold : .regular,
+                design: selectedFont.design
+            ))
+            .foregroundStyle(AmberTheme.foreground)
+            .lineSpacing(3 * fontScale)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: columnWidth, alignment: .topLeading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .overlay(alignment: .trailing) {
+                if !isLastColumn {
+                    Rectangle()
+                        .fill(AmberTheme.border)
+                        .frame(width: 0.6)
+                }
+            }
+    }
+
+    private func inlineDisplayText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: #"**"#, with: "")
+            .replacingOccurrences(of: #"`"#, with: "")
+            .replacingOccurrences(of: #"<br>"#, with: "\n")
+            .replacingOccurrences(of: #"<br/>"#, with: "\n")
+            .replacingOccurrences(of: #"<br />"#, with: "\n")
+    }
+}
+
+private struct ChatStableStreamingMarkdownView: View {
+    let text: String
+    let config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    var cacheIdentity: String? = nil
+    @StateObject private var controller = ChatStableStreamingMarkdownController()
+    @State private var plainFallbackID = "chat-streaming-plain-\(UUID().uuidString)"
+
+    var body: some View {
+        let resolution = controller.resolution(
+            for: text,
+            config: config,
+            cacheIdentity: cacheIdentity
+        )
+        let renderable = resolution.renderable
+            ?? SwiftStreamingMarkdown.RenderableDocument(plainText: text, id: plainFallbackID, config: config)
+        SwiftStreamingMarkdown.DocumentView(
+            renderableDocument: renderable,
+            config: config,
+            animateInitialText: !resolution.suppressesInitialFade,
+            usesLayerBackedTableAnimation: config.shouldAnimateText
+        )
+            .task(id: ChatStableStreamingMarkdownParseKey(
+                text: text,
+                animate: config.shouldAnimateText,
+                configHash: config.hashValue,
+                cacheIdentity: cacheIdentity
+            )) {
+                controller.scheduleParse(text: text, config: config, cacheIdentity: cacheIdentity)
+            }
+    }
+}
+
+private struct ChatStableStreamingMarkdownParseKey: Equatable {
+    let text: String
+    let animate: Bool
+    let configHash: Int
+    let cacheIdentity: String?
+}
+
+@MainActor
+private final class ChatStableStreamingMarkdownController: ObservableObject {
+    private struct RenderSignature: Hashable {
+        let visualConfigHash: Int
+        let speculative: Bool
+    }
+
+    private struct RenderableCacheKey: Hashable {
+        let text: String
+        let signature: RenderSignature
+    }
+
+    private struct IdentityCacheKey: Hashable {
+        let identity: String
+        let signature: RenderSignature
+    }
+
+    private struct IdentityCacheEntry {
+        let text: String
+        let renderable: SwiftStreamingMarkdown.RenderableDocument
+    }
+
+    private static var renderableCache: [RenderableCacheKey: SwiftStreamingMarkdown.RenderableDocument] = [:]
+    private static var renderableCacheOrder: [RenderableCacheKey] = []
+    private static let renderableCacheLimit = 12
+    private static var identityCache: [IdentityCacheKey: IdentityCacheEntry] = [:]
+    private static var identityCacheOrder: [IdentityCacheKey] = []
+    private static let identityCacheLimit = 64
+
+    @Published private(set) var revision = 0
+    private var renderedText: String?
+    private var renderableDocument: SwiftStreamingMarkdown.RenderableDocument?
+    private var renderedSignature: RenderSignature?
+    private var pendingParse: (
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig,
+        cacheIdentity: String?
+    )?
+    private var parseTask: Task<Void, Never>?
+    private var parseTaskGeneration: UInt64 = 0
+    private var lastLiveParseAt = Date.distantPast
+
+    deinit {
+        parseTask?.cancel()
+    }
+
+    func renderable(
+        for text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) -> SwiftStreamingMarkdown.RenderableDocument? {
+        resolution(for: text, config: config, cacheIdentity: nil).renderable
+    }
+
+    func resolution(
+        for text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig,
+        cacheIdentity: String?
+    ) -> (renderable: SwiftStreamingMarkdown.RenderableDocument?, suppressesInitialFade: Bool) {
+        let signature = Self.renderSignature(for: config)
+        // 完全匹配:返回最新解析结果。utf16.count 先行短路,避免流式期每次
+        // body 求值都对不等长文本做 O(n) 字符串比较。
+        if renderedSignature == signature,
+           let rendered = renderedText,
+           rendered.utf16.count == text.utf16.count,
+           rendered == text {
+            return (renderableDocument, false)
+        }
+        // 解析落后于最新 delta:返回上一次成功解析的结果(对应稍旧的文本前缀),
+        // 让已格式化的内容持续显示,新增尾部文本会在下次解析完成后补上。
+        // 之前用严格相等导致高速 delta 下 renderedText 永远落后于 text,
+        // 恒返回 nil → 退回纯文本 fallback(用户看不到表格/代码块等格式)。
+        //
+        // 顺序说明:本实例的 stale-prefix 命中放在静态缓存之前——流式期几乎
+        // 每次都命中这条,静态缓存查询(全文 Hasher + 最多 12 次 hasPrefix,
+        // 32KB 实测 ~0.2ms)只留给实例重建/LOD 翻转等冷路径。追加式流式下
+        // 静态缓存不可能持有比本实例更新的精确条目(旧条目都是当前文本的前缀)。
+        if renderedSignature == signature,
+           signature.speculative,
+           let renderedText,
+           !renderedText.isEmpty,
+           text.utf16.count >= renderedText.utf16.count,
+           text.hasPrefix(renderedText) {
+            return (renderableDocument, false)
+        }
+        if let cacheIdentity,
+           let cached = Self.cachedIdentityRenderable(
+            for: cacheIdentity,
+            text: text,
+            signature: signature
+           ) {
+            return (cached, true)
+        }
+        if let cached = Self.cachedRenderable(for: text, config: config) {
+            return (cached, true)
+        }
+        return (nil, false)
+    }
+
+    func scheduleParse(
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig,
+        cacheIdentity: String? = nil
+    ) {
+        if !config.shouldAnimateText {
+            pendingParse = nil
+            parseTaskGeneration &+= 1
+            let generation = parseTaskGeneration
+            parseTask?.cancel()
+            parseTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.parseNow(text: text, config: config, cacheIdentity: cacheIdentity)
+                guard self.parseTaskGeneration == generation else { return }
+                self.parseTask = nil
+                self.startPendingAnimatedParseIfNeeded()
+            }
+            return
+        }
+
+        pendingParse = (text, config, cacheIdentity)
+        startPendingAnimatedParseIfNeeded()
+    }
+
+    private func startPendingAnimatedParseIfNeeded() {
+        guard parseTask == nil, pendingParse != nil else { return }
+        parseTaskGeneration &+= 1
+        let generation = parseTaskGeneration
+        parseTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.parseTaskGeneration == generation {
+                    self.parseTask = nil
+                    self.startPendingAnimatedParseIfNeeded()
+                }
+            }
+            while !Task.isCancelled {
+                guard let next = self.pendingParse else { return }
+                self.pendingParse = nil
+
+                let elapsed = Date().timeIntervalSince(self.lastLiveParseAt)
+                let liveParseInterval = self.liveParseInterval(for: next.text)
+                if elapsed < liveParseInterval {
+                    let delay = UInt64((liveParseInterval - elapsed) * 1_000_000_000)
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled else { return }
+                }
+
+                self.lastLiveParseAt = Date()
+                await self.parseNow(
+                    text: next.text,
+                    config: next.config,
+                    cacheIdentity: next.cacheIdentity
+                )
+            }
+        }
+    }
+
+    private func liveParseInterval(for text: String) -> TimeInterval {
+        let length = text.utf16.count
+        if ChatStreamingMarkdownBlockParser.startsWithTable(in: text) {
+            if length < 1_200 {
+                return 0.12
+            }
+            if length < 4_000 {
+                return 0.20
+            }
+            return 0.32
+        }
+        // 普通文本已经经过 coordinator 的 48ms snapshot gate。这里不能再加
+        // 独立定时门：两个窗口错相时会把可见高度更新合并到约 132ms，表现为
+        // 累计数行后整段上跳。解析仍由 single-flight/latest-wins 自然背压。
+        return 0
+    }
+
+    private func parseNow(
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig,
+        cacheIdentity: String?
+    ) async {
+        // S3: 流式场景(shouldAnimateText=true)启用 speculativeRewrite,
+        // 让 PartialTableMarkupPostParsingRewriter/PartialStrongMarkupPostParsingRewriter 生效,
+        // 半截表格/未闭合强调不会渲染成乱码,而是降级成段落,等后续 delta 补齐再升级。
+        let animate = config.shouldAnimateText
+        let renderable = await Task.detached(priority: .userInitiated) {
+            let parser = SwiftStreamingMarkdown.MarkdownParserImpl()
+            let option = SwiftStreamingMarkdown.MarkdownParseOption(speculativeRewrite: animate)
+            let result = await ChatPerfTrace.measure("MarkdownParse", count: { text.utf16.count }) {
+                await parser.parse(text: text, option: option)
+            }
+            return await ChatPerfTrace.measure("MarkdownConvert", count: { text.utf16.count }) {
+                await SwiftStreamingMarkdown.RenderableDocument(
+                    document: result.document,
+                    config: config
+                )
+            }
+        }.value
+        guard !Task.isCancelled else { return }
+        let signature = Self.renderSignature(for: config)
+        guard renderedText != text || renderedSignature != signature || renderableDocument != renderable else {
+            return
+        }
+        ChatPerfTrace.measure("MarkdownPublish", count: { text.utf16.count }) {
+            renderedText = text
+            renderableDocument = renderable
+            renderedSignature = signature
+            Self.storeCachedRenderable(renderable, for: text, config: config)
+            if let cacheIdentity {
+                Self.storeIdentityRenderable(
+                    renderable,
+                    for: cacheIdentity,
+                    text: text,
+                    signature: signature
+                )
+            }
+            revision &+= 1
+        }
+    }
+
+    private static func cachedRenderable(
+        for text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) -> SwiftStreamingMarkdown.RenderableDocument? {
+        let signature = renderSignature(for: config)
+        let exactKey = RenderableCacheKey(
+            text: text,
+            signature: signature
+        )
+        if let exact = renderableCache[exactKey] {
+            return exact
+        }
+        guard signature.speculative else { return nil }
+        return renderableCacheOrder.reversed().lazy.compactMap { key -> SwiftStreamingMarkdown.RenderableDocument? in
+            guard key.signature == signature,
+                  text.hasPrefix(key.text),
+                  !key.text.isEmpty else { return nil }
+            return renderableCache[key]
+        }.first
+    }
+
+    private static func storeCachedRenderable(
+        _ renderable: SwiftStreamingMarkdown.RenderableDocument,
+        for text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) {
+        let key = RenderableCacheKey(
+            text: text,
+            signature: renderSignature(for: config)
+        )
+        if renderableCache[key] == nil {
+            renderableCacheOrder.append(key)
+        }
+        renderableCache[key] = renderable
+        while renderableCacheOrder.count > renderableCacheLimit {
+            let removed = renderableCacheOrder.removeFirst()
+            renderableCache.removeValue(forKey: removed)
+        }
+    }
+
+    private static func cachedIdentityRenderable(
+        for identity: String,
+        text: String,
+        signature: RenderSignature
+    ) -> SwiftStreamingMarkdown.RenderableDocument? {
+        let key = IdentityCacheKey(identity: identity, signature: signature)
+        guard let entry = identityCache[key] else { return nil }
+        if entry.text.utf16.count == text.utf16.count, entry.text == text {
+            return entry.renderable
+        }
+        guard signature.speculative,
+              !entry.text.isEmpty,
+              text.utf16.count >= entry.text.utf16.count,
+              text.hasPrefix(entry.text) else {
+            return nil
+        }
+        return entry.renderable
+    }
+
+    private static func storeIdentityRenderable(
+        _ renderable: SwiftStreamingMarkdown.RenderableDocument,
+        for identity: String,
+        text: String,
+        signature: RenderSignature
+    ) {
+        let key = IdentityCacheKey(identity: identity, signature: signature)
+        if identityCache[key] != nil {
+            identityCacheOrder.removeAll { $0 == key }
+        }
+        identityCache[key] = IdentityCacheEntry(text: text, renderable: renderable)
+        identityCacheOrder.append(key)
+        while identityCacheOrder.count > identityCacheLimit {
+            let removed = identityCacheOrder.removeFirst()
+            identityCache.removeValue(forKey: removed)
+        }
+    }
+
+    private static func renderSignature(
+        for config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) -> RenderSignature {
+        RenderSignature(
+            visualConfigHash: visualConfigHash(for: config),
+            speculative: config.shouldAnimateText
+        )
+    }
+
+    private static func visualConfigHash(for config: SwiftStreamingMarkdown.MarkdownRenderConfig) -> Int {
+        config.withShouldAnimateText(value: false).hashValue
+    }
+
+#if DEBUG
+    var renderedTextForTesting: String? {
+        renderedText
+    }
+
+    func seedRenderableForTesting(
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig,
+        cacheIdentity: String? = nil
+    ) {
+        renderedText = text
+        let renderable = SwiftStreamingMarkdown.RenderableDocument(plainText: text, config: config)
+        let signature = Self.renderSignature(for: config)
+        renderableDocument = renderable
+        renderedSignature = signature
+        if let cacheIdentity {
+            Self.storeIdentityRenderable(
+                renderable,
+                for: cacheIdentity,
+                text: text,
+                signature: signature
+            )
+        }
+    }
+
+    static func resetRenderableCacheForTesting() {
+        renderableCache.removeAll()
+        renderableCacheOrder.removeAll()
+        identityCache.removeAll()
+        identityCacheOrder.removeAll()
+    }
+
+    static func storeRenderableForTesting(
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) {
+        storeCachedRenderable(
+            SwiftStreamingMarkdown.RenderableDocument(plainText: text, config: config),
+            for: text,
+            config: config
+        )
+    }
+
+    static func hasCachedRenderableForTesting(
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) -> Bool {
+        cachedRenderable(for: text, config: config) != nil
+    }
+#endif
+}
+
+#if DEBUG
+@MainActor
+enum ChatStableStreamingMarkdownCacheTestSupport {
+    static func reset() {
+        ChatStableStreamingMarkdownController.resetRenderableCacheForTesting()
+    }
+
+    static func store(text: String, animate: Bool) {
+        ChatStableStreamingMarkdownController.storeRenderableForTesting(
+            text: text,
+            config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: animate)
+        )
+    }
+
+    static func hasCachedRenderable(text: String, animate: Bool) -> Bool {
+        ChatStableStreamingMarkdownController.hasCachedRenderableForTesting(
+            text: text,
+            config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: animate)
+        )
+    }
+}
+
+@MainActor
+enum ChatStableStreamingMarkdownControllerTestSupport {
+    static func renderedTextAfterNonAnimatedThenAnimatedParse() async -> String? {
+        let controller = ChatStableStreamingMarkdownController()
+        let initialText = "initial completed text"
+        let updatedText = "initial completed text with live delta"
+
+        controller.scheduleParse(
+            text: initialText,
+            config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: false)
+        )
+        guard await waitUntilRendered(initialText, by: controller) else {
+            return controller.renderedTextForTesting
+        }
+
+        controller.scheduleParse(
+            text: updatedText,
+            config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: true)
+        )
+        _ = await waitUntilRendered(updatedText, by: controller)
+        return controller.renderedTextForTesting
+    }
+
+    static func renderedTextWhenAnimatedParseArrivesDuringNonAnimatedParse() async -> String? {
+        let controller = ChatStableStreamingMarkdownController()
+        let updatedText = "non-animated parse followed immediately by live delta"
+
+        controller.scheduleParse(
+            text: "non-animated parse",
+            config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: false)
+        )
+        controller.scheduleParse(
+            text: updatedText,
+            config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: true)
+        )
+
+        _ = await waitUntilRendered(updatedText, by: controller)
+        return controller.renderedTextForTesting
+    }
+
+    static func hasStaleRenderable(
+        renderedText: String,
+        requestedText: String
+    ) -> Bool {
+        ChatStableStreamingMarkdownController.resetRenderableCacheForTesting()
+        let controller = ChatStableStreamingMarkdownController()
+        let config = SwiftStreamingMarkdown.MarkdownRenderConfig.default
+            .withShouldAnimateText(value: true)
+        controller.seedRenderableForTesting(text: renderedText, config: config)
+        return controller.renderable(for: requestedText, config: config) != nil
+    }
+
+    static func hasInstanceRenderableAfterSpeculativeModeChange() -> Bool {
+        ChatStableStreamingMarkdownController.resetRenderableCacheForTesting()
+        let controller = ChatStableStreamingMarkdownController()
+        let streamingConfig = SwiftStreamingMarkdown.MarkdownRenderConfig.default
+            .withShouldAnimateText(value: true)
+        let completedConfig = streamingConfig.withShouldAnimateText(value: false)
+        controller.seedRenderableForTesting(text: "same text", config: streamingConfig)
+        return controller.renderable(for: "same text", config: completedConfig) != nil
+    }
+
+    static func hasInstanceRenderableAfterVisualConfigChange() -> Bool {
+        ChatStableStreamingMarkdownController.resetRenderableCacheForTesting()
+        let controller = ChatStableStreamingMarkdownController()
+        let initialConfig = SwiftStreamingMarkdown.MarkdownRenderConfig.default
+            .withShouldAnimateText(value: true)
+        let changedConfig = initialConfig.withParagraphLineSpacing(value: 9)
+        controller.seedRenderableForTesting(text: "same text", config: initialConfig)
+        return controller.renderable(for: "same text", config: changedConfig) != nil
+    }
+
+    static func coldReentryIdentityPrefixResolution() -> (
+        hasRenderable: Bool,
+        suppressesInitialFade: Bool
+    ) {
+        ChatStableStreamingMarkdownController.resetRenderableCacheForTesting()
+        let config = SwiftStreamingMarkdown.MarkdownRenderConfig.default
+            .withShouldAnimateText(value: true)
+        let cacheIdentity = "message:text-0"
+        let firstController = ChatStableStreamingMarkdownController()
+        firstController.seedRenderableForTesting(
+            text: "already rendered prefix",
+            config: config,
+            cacheIdentity: cacheIdentity
+        )
+
+        let reenteredController = ChatStableStreamingMarkdownController()
+        let resolution = reenteredController.resolution(
+            for: "already rendered prefix with new delta",
+            config: config,
+            cacheIdentity: cacheIdentity
+        )
+        return (resolution.renderable != nil, resolution.suppressesInitialFade)
+    }
+
+    private static func waitUntilRendered(
+        _ expectedText: String,
+        by controller: ChatStableStreamingMarkdownController
+    ) async -> Bool {
+        for _ in 0..<200 {
+            if controller.renderedTextForTesting == expectedText {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return false
+    }
+}
+#endif
+
+private struct ChatSelfSizingInvalidationBridge: UIViewRepresentable {
+    let token: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isHidden = true
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        guard token != context.coordinator.lastToken else { return }
+        context.coordinator.lastToken = token
+        DispatchQueue.main.async { [weak view] in
+            guard let view,
+                  let cell = view.chatAncestor(of: UICollectionViewCell.self),
+                  let collectionView = cell.chatAncestor(of: UICollectionView.self) else { return }
+            cell.setNeedsLayout()
+            cell.contentView.setNeedsLayout()
+            cell.layoutIfNeeded()
+            cell.contentView.layoutIfNeeded()
+            if let indexPath = collectionView.indexPath(for: cell) {
+                let attributes = (
+                    collectionView.layoutAttributesForItem(at: indexPath)?
+                        .copy() as? UICollectionViewLayoutAttributes
+                ) ?? UICollectionViewLayoutAttributes(forCellWith: indexPath)
+                let measuredWidth = cell.bounds.width > 1 ? cell.bounds.width : collectionView.bounds.width
+                attributes.size.width = measuredWidth
+                _ = cell.preferredLayoutAttributesFitting(attributes)
+                let context = collectionView.collectionViewLayout
+                    .invalidationContext(forBoundsChange: collectionView.bounds)
+                context.invalidateItems(at: [indexPath])
+                collectionView.collectionViewLayout.invalidateLayout(with: context)
+            } else {
+                collectionView.collectionViewLayout.invalidateLayout()
+            }
+            collectionView.setNeedsLayout()
+        }
+    }
+
+    final class Coordinator {
+        var lastToken = -1
+    }
+}
+
+private extension UIView {
+    func chatAncestor<T: UIView>(of type: T.Type) -> T? {
+        var current = superview
+        while let view = current {
+            if let match = view as? T {
+                return match
+            }
+            current = view.superview
+        }
+        return nil
+    }
+}
+
+private extension UIFont {
+    /// 给已有字体叠加斜体符号特征,用于构造流式渲染器排版对齐所需的 boldItalic 变体。
+    func withItalicTrait() -> UIFont {
+        let traits = fontDescriptor.symbolicTraits.union(.traitItalic)
+        guard let descriptor = fontDescriptor.withSymbolicTraits(traits) else {
+            return self
+        }
+        return UIFont(descriptor: descriptor, size: pointSize)
     }
 }
 

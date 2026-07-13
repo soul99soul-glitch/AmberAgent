@@ -165,7 +165,7 @@ enum IOSMcpConnectionStatus: Equatable {
     }
 }
 
-enum IOSMcpClientError: LocalizedError {
+enum IOSMcpClientError: LocalizedError, Equatable {
     case invalidURL(String)
     case httpStatus(Int)
     case invalidResponse
@@ -512,13 +512,15 @@ protocol IOSMcpClienting {
 
 final class IOSMcpClient: IOSMcpClienting {
     private let transport: IOSMcpHTTPTransport
+    private let requestTimeoutSeconds: TimeInterval
     private var config: IOSMcpServerConfig?
     private var nextId = 1
 
     private(set) var status: IOSMcpConnectionStatus = .idle
 
-    init(transport: IOSMcpHTTPTransport = URLSessionMcpHTTPTransport()) {
+    init(transport: IOSMcpHTTPTransport = URLSessionMcpHTTPTransport(), requestTimeoutSeconds: TimeInterval = 120) {
         self.transport = transport
+        self.requestTimeoutSeconds = requestTimeoutSeconds
     }
 
     func connect(config: IOSMcpServerConfig) async throws -> Bool {
@@ -590,7 +592,7 @@ final class IOSMcpClient: IOSMcpClienting {
             "method": method,
             "params": params
         ]
-        let response = try await transport.sendJSONRPC(payload, to: config)
+        let response = try await sendJSONRPCWithTimeout(payload, to: config, method: method)
         if let error = response["error"] as? [String: Any] {
             throw IOSMcpClientError.rpcError(error["message"] as? String ?? "MCP JSON-RPC error")
         }
@@ -607,7 +609,137 @@ final class IOSMcpClient: IOSMcpClienting {
             "method": method,
             "params": params
         ]
-        try await transport.sendJSONRPCNotification(payload, to: config)
+        try await sendJSONRPCNotificationWithTimeout(payload, to: config, method: method)
+    }
+
+    private func sendJSONRPCWithTimeout(
+        _ payload: [String: Any],
+        to config: IOSMcpServerConfig,
+        method: String
+    ) async throws -> [String: Any] {
+        let timeout = max(0.001, requestTimeoutSeconds)
+        let timeoutText = Self.formatTimeout(timeout)
+        let payloadBox = IOSMcpJSONRPCPayloadBox(payload: payload)
+        return try await raceAgainstTimeout(method: method, timeout: timeout, timeoutText: timeoutText) {
+            IOSMcpJSONRPCResponseBox(response: try await self.transport.sendJSONRPC(payloadBox.payload, to: config))
+        }.response
+    }
+
+    private func raceAgainstTimeout<T: Sendable>(
+        method: String,
+        timeout: TimeInterval,
+        timeoutText: String,
+        operation: @escaping @MainActor () async throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            let gate = IOSMcpContinuationGate<T>()
+            let operationTaskBox = IOSMcpOperationTaskBox()
+            let timerTask = Task {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    let didResume = gate.resume(
+                        throwing: IOSMcpClientError.requestTimedOut(
+                            "MCP request \(method) timed out after \(timeoutText)s"
+                        ),
+                        continuation
+                    )
+                    if didResume {
+                        operationTaskBox.cancel()
+                    }
+                } catch {
+                    // Timer task was cancelled after the operation completed.
+                }
+            }
+            let operationTask = Task { @MainActor in
+                do {
+                    let value = try await operation()
+                    if gate.resume(returning: value, continuation) {
+                        timerTask.cancel()
+                    }
+                } catch {
+                    if gate.resume(throwing: error, continuation) {
+                        timerTask.cancel()
+                    }
+                }
+            }
+            operationTaskBox.task = operationTask
+        }
+    }
+
+    private func sendJSONRPCNotificationWithTimeout(
+        _ payload: [String: Any],
+        to config: IOSMcpServerConfig,
+        method: String
+    ) async throws {
+        let timeout = max(0.001, requestTimeoutSeconds)
+        let timeoutText = Self.formatTimeout(timeout)
+        let payloadBox = IOSMcpJSONRPCPayloadBox(payload: payload)
+        try await raceAgainstTimeout(method: method, timeout: timeout, timeoutText: timeoutText) {
+            try await self.transport.sendJSONRPCNotification(payloadBox.payload, to: config)
+        }
+    }
+
+    nonisolated private static func formatTimeout(_ value: TimeInterval) -> String {
+        let rounded = (value * 100).rounded() / 100
+        if rounded == rounded.rounded() {
+            return String(Int(rounded))
+        }
+        return String(format: "%.2f", rounded)
+    }
+}
+
+private struct IOSMcpJSONRPCPayloadBox: @unchecked Sendable {
+    let payload: [String: Any]
+}
+
+private struct IOSMcpJSONRPCResponseBox: @unchecked Sendable {
+    let response: [String: Any]
+}
+
+private final class IOSMcpContinuationGate<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    @discardableResult
+    func resume(returning value: T, _ continuation: CheckedContinuation<T, Error>) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResume else { return false }
+        didResume = true
+        continuation.resume(returning: value)
+        return true
+    }
+
+    @discardableResult
+    func resume(throwing error: Error, _ continuation: CheckedContinuation<T, Error>) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResume else { return false }
+        didResume = true
+        continuation.resume(throwing: error)
+        return true
+    }
+}
+
+private final class IOSMcpOperationTaskBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedTask: Task<Void, Never>?
+
+    var task: Task<Void, Never>? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedTask
+        }
+        set {
+            lock.lock()
+            storedTask = newValue
+            lock.unlock()
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
     }
 }
 

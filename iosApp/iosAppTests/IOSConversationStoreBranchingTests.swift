@@ -146,6 +146,23 @@ final class IOSConversationStoreBranchingTests: XCTestCase {
         XCTAssertEqual(store.currentMessages[0].toText(), "what is 2+2")
     }
 
+    func testDeleteMessageRemovesWholeNodeIncludingSiblingVariants() async throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await seedUserAssistantPair(store)
+
+        _ = await store.appendVariant(
+            messageIndex: 1,
+            message: UIMessage.companion.assistant(prompt: "variant answer")
+        )
+        XCTAssertEqual(store.variantInfo(forMessageIndex: 1)?.variantCount, 2)
+
+        await store.deleteMessage(messageIndex: 1)
+
+        XCTAssertEqual(store.currentMessages.map { $0.toText() }, ["what is 2+2"])
+        XCTAssertNil(store.variantInfo(forMessageIndex: 1))
+    }
+
     // MARK: - persistence round-trip
 
     func testBranchSurvivesReloadFromDisk() async throws {

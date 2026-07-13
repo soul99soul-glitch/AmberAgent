@@ -5,21 +5,40 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 
 enum RowContent: Equatable {
   case text(string: AttributedString)
   case containsAttachment(string: NSAttributedString)
+
+  init(_ content: NSMutableAttributedString) {
+    if content.containsAttachments(in: NSRange(location: 0, length: content.length)) {
+      self = .containsAttachment(string: content)
+    } else {
+      self = .text(string: AttributedString(content))
+    }
+  }
+
+  var attributedString: NSAttributedString {
+    switch self {
+    case .text(let string):
+      NSAttributedString(string)
+    case .containsAttachment(let string):
+      string
+    }
+  }
 }
 
 struct TableView: View {
   @Environment(\.markdownConfig) var config: MarkdownRenderConfig
+  @Environment(\.markdownAnimateInitialText) var animateInitialText
   @Environment(\.markdownController) var controller: MarkdownController?
+  @Environment(\.markdownUsesLayerBackedTableAnimation) var usesLayerBackedTableAnimation
 
   let headings: [AttributedString]
   let rows: [[RowContent]]
   let columnMaxWidths: [Int: CGFloat]
 
-  private let defaultMaxColumnWidth: CGFloat = 200
   @State private var scrollWidth: CGFloat = 0
   @State private var isExpanded: Bool = false
   @State private var isCopyPressed: Bool = false
@@ -27,20 +46,20 @@ struct TableView: View {
 
   private let rawMarkdown: String
 
-  init(headings: [NSMutableAttributedString], rows: [[NSMutableAttributedString]], columnMaxWidths: [Int: CGFloat] = [:], rawMarkdown: String = "") {
-    self.headings = headings.map { AttributedString($0) }
-    self.rows = rows.map { row in
-      row.map { content in
-        if content.containsAttachments(in: NSRange(location: 0, length: content.length)) {
-          return .containsAttachment(string: content)
-        } else {
-          return .text(string: AttributedString(content))
-        }
-      }
-    }
-
+  init(headings: [AttributedString], rows: [[RowContent]], columnMaxWidths: [Int: CGFloat] = [:], rawMarkdown: String = "") {
+    self.headings = headings
+    self.rows = rows
     self.columnMaxWidths = columnMaxWidths
     self.rawMarkdown = rawMarkdown
+  }
+
+  init(headings: [NSMutableAttributedString], rows: [[NSMutableAttributedString]], columnMaxWidths: [Int: CGFloat] = [:], rawMarkdown: String = "") {
+    self.init(
+      headings: headings.map { AttributedString($0) },
+      rows: rows.map { $0.map(RowContent.init) },
+      columnMaxWidths: columnMaxWidths,
+      rawMarkdown: rawMarkdown
+    )
   }
 
   private var numOfRows: Int {
@@ -49,18 +68,18 @@ struct TableView: View {
 
   private func headerView(colIdx: Int) -> some View {
     HStack(spacing: 0) {
-      Text(headings[colIdx])
-        .foregroundStyle(Color(config.tableStyle.headerTextColor))
-        .lineLimit(nil)
-        .multilineTextAlignment(.leading)
+      TableCellTextView(
+        attributedString: headings[colIdx],
+        foregroundColor: config.tableStyle.headerTextColor,
+        shouldAnimate: shouldAnimateTableText(headings[colIdx]),
+        usesLayerBackedAnimation: usesLayerBackedTableAnimation
+      )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .if(config.shouldAnimateText) { view in
-          view.fadeInTextTransition(attributedString: headings[colIdx])
-        }
         .accessibilityValue(String.itemPositionInTable(rowIndex: 1, totalRow: numOfRows + 1, columnIndex: colIdx + 1, totalColumn: headings.count))
       Spacer()
     }
-    .padding(12)
+    .padding(.horizontal, config.tableCellHorizontalPadding)
+    .padding(.vertical, config.tableCellVerticalPadding)
     .id("\(colIdx)-heading")
     .background(Color(config.tableStyle.headerBackgroundColor))
     .applyHeaderBorder(colIndex: colIdx, colCount: headings.count, color: Color(config.tableStyle.borderColor))
@@ -87,7 +106,7 @@ struct TableView: View {
     let averageWidth = scrollWidth / CGFloat(headings.count)
     var actualColumnMaxWidths = Array(repeating: CGFloat(0), count: headings.count)
     for idx in 0..<headings.count {
-      let maxColumnWidth = columnMaxWidths[idx] ?? defaultMaxColumnWidth
+      let maxColumnWidth = columnMaxWidths[idx] ?? config.tableMaxColumnWidth
       actualColumnMaxWidths[idx] = max(averageWidth, maxColumnWidth)
     }
 
@@ -106,24 +125,25 @@ struct TableView: View {
         Spacer()
       }
       .frame(maxHeight: .infinity)
-      .padding(12)
+      .padding(.horizontal, config.tableCellHorizontalPadding)
+      .padding(.vertical, config.tableCellVerticalPadding)
       .id("\(colIdx)-\(rowIdx)")
       .applyCellBorder(colIndex: colIdx, colCount: headings.count, rowIndex: rowIdx, rowCount: numOfRows, color: Color(config.tableStyle.borderColor))
     case .text(let attributedString):
       HStack(spacing: 0) {
-        Text(attributedString)
-          .foregroundStyle(Color(config.tableStyle.regularTextColor))
-          .lineLimit(nil)
-          .multilineTextAlignment(.leading)
+        TableCellTextView(
+          attributedString: attributedString,
+          foregroundColor: config.tableStyle.regularTextColor,
+          shouldAnimate: shouldAnimateTableText(attributedString),
+          usesLayerBackedAnimation: usesLayerBackedTableAnimation
+        )
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-          .if(config.shouldAnimateText) { view in
-            view.fadeInTextTransition(attributedString: attributedString)
-          }
           .accessibilityValue(String.itemPositionInTable(rowIndex: rowIdx + 2, totalRow: numOfRows + 1, columnIndex: colIdx + 1, totalColumn: headings.count))
         Spacer()
       }
       .frame(maxHeight: .infinity)
-      .padding(12)
+      .padding(.horizontal, config.tableCellHorizontalPadding)
+      .padding(.vertical, config.tableCellVerticalPadding)
       .id("\(colIdx)-\(rowIdx)")
       .applyCellBorder(colIndex: colIdx, colCount: headings.count, rowIndex: rowIdx, rowCount: numOfRows, color: Color(config.tableStyle.borderColor))
     }
@@ -151,6 +171,15 @@ struct TableView: View {
         .transition(.opacity)
       }
     }
+  }
+
+  private func shouldAnimateTableText(_ attributedString: AttributedString) -> Bool {
+    TableViewAnimationPolicy.shouldAnimateCellText(
+      configShouldAnimateText: config.shouldAnimateText && animateInitialText,
+      headingCount: headings.count,
+      rowCount: numOfRows,
+      characterCount: attributedString.characters.count
+    )
   }
 
   var scrollView: some View {
@@ -227,6 +256,163 @@ struct TableView: View {
     })
     .frame(width: 32, height: 32)
     .contentShape(Rectangle())
+  }
+}
+
+private struct TableCellTextView: View {
+  let attributedString: AttributedString
+  let foregroundColor: UIColor
+  let shouldAnimate: Bool
+  let usesLayerBackedAnimation: Bool
+
+  @State private var layerAnimationCompleted = false
+
+  var body: some View {
+    let text = Text(attributedString)
+      .foregroundStyle(Color(foregroundColor))
+      .lineLimit(nil)
+      .multilineTextAlignment(.leading)
+
+    if shouldAnimate && usesLayerBackedAnimation && !layerAnimationCompleted {
+      text
+        .opacity(0)
+        .overlay(alignment: .topLeading) {
+          TableTextEntranceOverlay(
+            attributedString: attributedString,
+            foregroundColor: foregroundColor
+          ) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+              layerAnimationCompleted = true
+            }
+          }
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+        }
+    } else {
+      text.if(shouldAnimate && !usesLayerBackedAnimation) { view in
+        view.fadeInTextTransition(attributedString: attributedString)
+      }
+    }
+  }
+}
+
+private struct TableTextEntranceOverlay: UIViewRepresentable {
+  let attributedString: AttributedString
+  let foregroundColor: UIColor
+  let onCompletion: () -> Void
+
+  func makeUIView(context: Context) -> TableTextEntranceLabel {
+    let label = TableTextEntranceLabel()
+    label.numberOfLines = 0
+    label.lineBreakMode = .byWordWrapping
+    label.backgroundColor = .clear
+    label.setContentHuggingPriority(.defaultHigh, for: .vertical)
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    label.configure(
+      attributedString: themedAttributedString(),
+      onCompletion: onCompletion
+    )
+    return label
+  }
+
+  func updateUIView(_ uiView: TableTextEntranceLabel, context: Context) {
+    uiView.attributedText = themedAttributedString()
+  }
+
+  func sizeThatFits(
+    _ proposal: ProposedViewSize,
+    uiView: TableTextEntranceLabel,
+    context: Context
+  ) -> CGSize? {
+    guard let width = proposal.width, width > 0, width.isFinite else { return nil }
+    return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+  }
+
+  private func themedAttributedString() -> NSAttributedString {
+    let result = NSMutableAttributedString(attributedString: NSAttributedString(attributedString))
+    let range = NSRange(location: 0, length: result.length)
+    result.enumerateAttribute(.foregroundColor, in: range) { value, subrange, _ in
+      if value == nil {
+        result.addAttribute(.foregroundColor, value: foregroundColor, range: subrange)
+      }
+    }
+    return result
+  }
+}
+
+private final class TableTextEntranceLabel: UILabel {
+  private var hasStarted = false
+  private var onCompletion: (() -> Void)?
+
+  func configure(attributedString: NSAttributedString, onCompletion: @escaping () -> Void) {
+    attributedText = attributedString
+    alpha = 0
+    self.onCompletion = onCompletion
+    setNeedsLayout()
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    startAnimationIfNeeded()
+  }
+
+  override func drawText(in rect: CGRect) {
+    let fitted = super.textRect(forBounds: rect, limitedToNumberOfLines: numberOfLines)
+    super.drawText(in: CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: fitted.height))
+  }
+
+  private func startAnimationIfNeeded() {
+    guard !hasStarted, window != nil, bounds.width > 0, bounds.height > 0 else { return }
+    hasStarted = true
+
+    let gradient = CAGradientLayer()
+    gradient.colors = [
+      UIColor.white.cgColor,
+      UIColor.white.cgColor,
+      UIColor.clear.cgColor,
+      UIColor.clear.cgColor
+    ]
+    gradient.locations = [0, 0.55, 0.65, 1]
+    gradient.startPoint = CGPoint(x: 0, y: 0.5)
+    gradient.endPoint = CGPoint(x: 1, y: 0.5)
+    gradient.frame = CGRect(x: 0, y: 0, width: bounds.width * 2, height: bounds.height)
+    layer.mask = gradient
+    alpha = 1
+
+    transform = CGAffineTransform(translationX: 0, y: 3).scaledBy(x: 0.995, y: 0.995)
+    let sweep = CABasicAnimation(keyPath: "transform.translation.x")
+    sweep.fromValue = -bounds.width * 2
+    sweep.toValue = 0
+    sweep.duration = 0.34
+    sweep.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    sweep.fillMode = .forwards
+    sweep.isRemovedOnCompletion = false
+    gradient.add(sweep, forKey: "table-text-reveal")
+
+    UIView.animate(
+      withDuration: 0.34,
+      delay: 0,
+      options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState]
+    ) {
+      self.transform = .identity
+    } completion: { _ in
+      self.layer.mask = nil
+      self.onCompletion?()
+      self.onCompletion = nil
+    }
+  }
+}
+
+enum TableViewAnimationPolicy {
+  static func shouldAnimateCellText(
+    configShouldAnimateText: Bool,
+    headingCount: Int,
+    rowCount: Int,
+    characterCount: Int
+  ) -> Bool {
+    configShouldAnimateText
   }
 }
 

@@ -4,17 +4,18 @@ import QuartzCore
 
 /// DEBUG-only, opt-in recorder for live assistant streaming snapshots.
 ///
-/// Purpose: capture the *real* per-chunk cadence of `scheduleStreamSnapshotPublish`
-/// (before the 16ms UI-flush throttle collapses deltas) into a small newline-delimited
-/// JSON fixture, so `ChatStreamReplayTests` can replay a faithful reproduction of a real
-/// stream against `ChatCollectionViewController` without a live network connection.
+/// Purpose: capture the snapshots actually published to the UI after the flush window
+/// coalesces provider chunks, plus terminal/cancel boundary snapshots. The newline-delimited JSON fixture lets
+/// `ChatStreamReplayTests` replay the UI's real input cadence without a live network
+/// connection; it is not a recording of the provider's raw per-chunk cadence.
 ///
 /// Zero-invasive by construction:
 /// - Disabled by default (`chat.stream.recording.enabled` UserDefaults flag, default
 ///   `false`). When disabled, `record` costs exactly one `UserDefaults.bool(forKey:)`
 ///   read and returns.
-/// - All actual work (text extraction, diffing, file I/O) happens off the caller's
-///   thread on a private serial queue.
+/// - When enabled, the caller extracts the last assistant text once; diffing and file I/O
+///   happen off the caller's thread on a private serial queue. Recording can therefore
+///   perturb diagnostic timing slightly and is not a zero-cost profiler.
 /// - In `RELEASE` builds the entire implementation compiles away to an empty function
 ///   body — the call site in `ChatGenerationCoordinator` pays no cost at all.
 final class ChatStreamRecorder: @unchecked Sendable {
@@ -31,7 +32,7 @@ final class ChatStreamRecorder: @unchecked Sendable {
     /// `Library/Caches/stream-recordings/<runId>.jsonl`.
     ///
     /// Safe to call on any thread/actor (e.g. `@MainActor` from
-    /// `scheduleStreamSnapshotPublish`); the enabled-check happens synchronously and
+    /// `flushPendingStreamSnapshot`); the enabled-check happens synchronously and
     /// cheaply, everything else is dispatched to a background serial queue.
     func record(runId: String, snapshot: [UIMessage]) {
 #if DEBUG

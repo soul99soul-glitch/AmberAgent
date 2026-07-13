@@ -55,6 +55,27 @@ enum IOSContextCompactionEvent {
     case failed(message: String)
 }
 
+enum ChatContextCompactEventRouter {
+    static func shouldApply(
+        event: IOSContextCompactionEvent,
+        eventRunId: String,
+        currentRunId: String?
+    ) -> Bool {
+        if currentRunId == eventRunId {
+            return true
+        }
+        guard currentRunId == nil else {
+            return false
+        }
+        switch event {
+        case .idle, .completed, .failed:
+            return true
+        case .planning, .compacting:
+            return false
+        }
+    }
+}
+
 @MainActor
 final class IOSContextCompactionCoordinator {
     static let shared = IOSContextCompactionCoordinator()
@@ -1464,6 +1485,24 @@ private extension IOSContextCompactionCoordinator {
         return max(count, text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : 1)
     }
 }
+
+#if DEBUG
+@MainActor
+enum ChatGenerationRequestPreparationTestSupport {
+    static func finalizedUploadMessagesForTesting(
+        uploadMessages: [UIMessage],
+        maxTokens: Int,
+        messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
+    ) -> [UIMessage] {
+        let runtimeInjectedMessages = messagesByInjectingRuntimeContext(uploadMessages)
+        let fitted = IOSContextCompactionCoordinator.fitMessagesToTokenBudget(
+            runtimeInjectedMessages,
+            maxTokens: maxTokens
+        )
+        return ChatRuntimeContextBuilder.coalescingSystemMessages(fitted)
+    }
+}
+#endif
 
 private extension String {
     var weightedTokenChars: Int {

@@ -44,7 +44,7 @@ enum IOSChatBackgroundHandoffMode: String {
     case singleToolOnly = "single_tool_only"
 }
 
-private struct IOSChatBackgroundProvider: IOSAgentTextProvider {
+struct IOSChatBackgroundProvider: IOSAgentTextProvider, IOSAgentStreamingProvider {
     private let openAIProvider = OpenAIKmpProvider()
     private let claudeProvider = ClaudeKmpProvider()
 
@@ -65,12 +65,45 @@ private struct IOSChatBackgroundProvider: IOSAgentTextProvider {
             userInfo: [NSLocalizedDescriptionKey: "当前服务商类型暂不支持后台生成"]
         )
     }
+
+    func streamText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onChunk: @escaping @Sendable (MessageChunk) -> Void,
+        onComplete: @escaping @Sendable () -> Void,
+        onError: @escaping @Sendable (KotlinThrowable) -> Void
+    ) -> Kotlinx_coroutines_coreJob? {
+        if let openAI = providerSetting as? ProviderSetting.OpenAI {
+            return openAIProvider.streamTextCancellable(
+                providerSetting: openAI,
+                messages: messages,
+                params: params,
+                onChunk: onChunk,
+                onComplete: onComplete,
+                onError: onError
+            )
+        }
+        if let claude = providerSetting as? ProviderSetting.Claude {
+            return claudeProvider.streamTextCancellable(
+                providerSetting: claude,
+                messages: messages,
+                params: params,
+                onChunk: onChunk,
+                onComplete: onComplete,
+                onError: onError
+            )
+        }
+        onError(KotlinThrowable(message: "当前服务商类型暂不支持后台生成"))
+        return nil
+    }
 }
 
-private final class IOSChatBackgroundRunState {
+final class IOSChatBackgroundRunState: @unchecked Sendable {
     private let lock = NSLock()
     private var expired = false
     private var terminalReserved = false
+    private var operationTask: Task<IOSAgentToolEngineResult, Never>?
 
     var isExpired: Bool {
         lock.lock()
@@ -78,12 +111,38 @@ private final class IOSChatBackgroundRunState {
         return expired
     }
 
-    func expire() -> Bool {
+    func expireAndReserveTerminal() -> Bool {
+        let task: Task<IOSAgentToolEngineResult, Never>?
         lock.lock()
-        defer { lock.unlock() }
-        guard !terminalReserved else { return false }
+        guard !terminalReserved else {
+            lock.unlock()
+            return false
+        }
         expired = true
+        terminalReserved = true
+        task = operationTask
+        operationTask = nil
+        lock.unlock()
+        task?.cancel()
         return true
+    }
+
+    func installOperationTask(_ task: Task<IOSAgentToolEngineResult, Never>) {
+        lock.lock()
+        let shouldCancel = expired
+        if !shouldCancel {
+            operationTask = task
+        }
+        lock.unlock()
+        if shouldCancel {
+            task.cancel()
+        }
+    }
+
+    func clearOperationTask() {
+        lock.lock()
+        operationTask = nil
+        lock.unlock()
     }
 
     func reserveTerminal() -> Bool {
@@ -91,7 +150,25 @@ private final class IOSChatBackgroundRunState {
         defer { lock.unlock() }
         guard !expired, !terminalReserved else { return false }
         terminalReserved = true
+        operationTask = nil
         return true
+    }
+}
+
+private final class IOSChatBackgroundAssistantTextSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latestText = ""
+
+    var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestText
+    }
+
+    func replace(with text: String) {
+        lock.lock()
+        latestText = text
+        lock.unlock()
     }
 }
 
@@ -179,6 +256,24 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
     }
 
+    func hasActiveJob(conversationId: KotlinUuid) -> Bool {
+        activeJobs.values.contains { job in
+            String(describing: job.conversationId) == String(describing: conversationId)
+        }
+    }
+
+    func cancelJobs(conversationId: KotlinUuid) {
+        let matchingJobs = activeJobs.filter { _, job in
+            String(describing: job.conversationId) == String(describing: conversationId)
+        }
+        for (requestId, job) in matchingJobs {
+            finish(runId: job.runId, requestId: requestId)
+            Task { @MainActor in
+                await job.liveActivityController.end(runId: job.runId, presentation: .failed())
+            }
+        }
+    }
+
     private func register(requestId: String) -> Bool {
         guard requestId.hasPrefix(requestPrefix) else {
             NSLog("[AmberChatBG] Refusing to register unexpected BGContinuedProcessingTask id \(requestId); expected prefix \(requestPrefix)")
@@ -235,19 +330,20 @@ final class IOSChatBackgroundGenerationCoordinator {
             return
         }
         let runState = IOSChatBackgroundRunState()
+        let assistantTextSnapshot = IOSChatBackgroundAssistantTextSnapshot()
         let progress = backgroundTask.progress
         progress.totalUnitCount = 4
         progress.completedUnitCount = 0
         backgroundTask.updateTitle("Amber 后台生成", subtitle: "准备上下文")
         backgroundTask.expirationHandler = { [weak self] in
             guard let self else { return }
-            if runState.expire() {
+            if runState.expireAndReserveTerminal() {
                 Task { @MainActor in
-                    await self.fail(
+                    await self.failAfterTerminalReservation(
                         job: job,
                         backgroundTask: backgroundTask,
-                        runState: runState,
-                        rawMessage: "后台生成被系统中断，可回到 App 后重试。"
+                        rawMessage: "后台生成被系统中断，可回到 App 后重试。",
+                        partialAssistantText: assistantTextSnapshot.text
                     )
                 }
             }
@@ -291,23 +387,33 @@ final class IOSChatBackgroundGenerationCoordinator {
             ),
             configuration: .init(maxSteps: 6, honorApprovalPause: false)
         )
-        let result: IOSAgentToolEngineResult
-        switch job.mode {
-        case .continueModel:
-            result = await engine.run(
-                providerSetting: requestProvider,
-                messages: job.uploadMessages,
-                params: requestParams
-            )
-        case .singleToolOnly:
-            result = IOSAgentToolEngineResult(
-                messages: await engine.executePreExistingToolsOnly(messages: job.uploadMessages),
-                stepsExecuted: 0,
-                pendingApproval: nil,
-                hitStepLimit: false
-            )
+        let operationTask = Task { () -> IOSAgentToolEngineResult in
+            switch job.mode {
+            case .continueModel:
+                return await engine.run(
+                    providerSetting: requestProvider,
+                    messages: job.uploadMessages,
+                    params: requestParams,
+                    onAssistantTurnStarted: {
+                        assistantTextSnapshot.replace(with: "")
+                    },
+                    onAssistantText: { text in
+                        assistantTextSnapshot.replace(with: text)
+                    }
+                )
+            case .singleToolOnly:
+                return IOSAgentToolEngineResult(
+                    messages: await engine.executePreExistingToolsOnly(messages: job.uploadMessages),
+                    stepsExecuted: 0,
+                    pendingApproval: nil,
+                    hitStepLimit: false
+                )
+            }
         }
-        guard !runState.isExpired else { return }
+        runState.installOperationTask(operationTask)
+        let result = await operationTask.value
+        runState.clearOperationTask()
+        guard runState.reserveTerminal() else { return }
 
         progress.completedUnitCount = 3
         backgroundTask.updateTitle("Amber 后台生成", subtitle: "正在保存结果")
@@ -316,16 +422,16 @@ final class IOSChatBackgroundGenerationCoordinator {
             ? Array(result.messages.dropFirst(job.uploadMessages.count))
             : []
         if job.mode == .continueModel, let rawFailure = providerFailureMessage(in: generatedSuffix) {
-            await fail(
+            await failAfterTerminalReservation(
                 job: job,
                 backgroundTask: backgroundTask,
-                runState: runState,
-                rawMessage: rawFailure
+                rawMessage: rawFailure,
+                preservedGeneratedSuffix: Array(generatedSuffix.dropLast()),
+                partialAssistantText: assistantTextSnapshot.text
             )
             return
         }
 
-        guard runState.reserveTerminal() else { return }
         var finalMessages = job.mode == .singleToolOnly
             ? result.messages
             : job.displayMessages + generatedSuffix
@@ -340,19 +446,25 @@ final class IOSChatBackgroundGenerationCoordinator {
             ? ChatToolOutputFormatter.imageFailureReason(in: finalMessages)
             : nil
 
+        let didSave: Bool
         switch job.mode {
         case .continueModel:
-            await job.conversationStore.saveBackgroundCompletion(
+            didSave = await job.conversationStore.saveBackgroundCompletion(
                 baseMessages: job.displayMessages,
                 completedMessages: finalMessages,
                 to: job.conversationId
             )
         case .singleToolOnly:
-            await job.conversationStore.saveBackgroundToolCompletion(
+            didSave = await job.conversationStore.saveBackgroundToolCompletion(
                 baseMessages: job.displayMessages,
                 completedMessages: finalMessages,
                 to: job.conversationId
             )
+        }
+        guard didSave else {
+            backgroundTask.updateTitle("Amber 后台生成", subtitle: "保存结果失败")
+            await completeAsFailureWithoutClearingPayload(job: job, backgroundTask: backgroundTask)
+            return
         }
         await recordRun(
             job.runId,
@@ -374,16 +486,44 @@ final class IOSChatBackgroundGenerationCoordinator {
         job: IOSChatBackgroundRuntimeJob,
         backgroundTask: BGContinuedProcessingTask,
         runState: IOSChatBackgroundRunState,
-        rawMessage: String
+        rawMessage: String,
+        preservedGeneratedSuffix: [UIMessage] = [],
+        partialAssistantText: String? = nil
     ) async {
         guard runState.reserveTerminal() else { return }
-        let errorText = ChatViewModel.userFacingGenerationError(rawMessage, modelId: job.params.model.modelId)
-        let finalMessages = job.displayMessages + [Self.assistantMessage(errorText)]
-        await job.conversationStore.saveBackgroundCompletion(
+        await failAfterTerminalReservation(
+            job: job,
+            backgroundTask: backgroundTask,
+            rawMessage: rawMessage,
+            preservedGeneratedSuffix: preservedGeneratedSuffix,
+            partialAssistantText: partialAssistantText
+        )
+    }
+
+    private func failAfterTerminalReservation(
+        job: IOSChatBackgroundRuntimeJob,
+        backgroundTask: BGContinuedProcessingTask,
+        rawMessage: String,
+        preservedGeneratedSuffix: [UIMessage] = [],
+        partialAssistantText: String? = nil
+    ) async {
+        let finalMessages = Self.failedMessages(
+            displayMessages: job.displayMessages,
+            preservedGeneratedSuffix: preservedGeneratedSuffix,
+            partialAssistantText: partialAssistantText,
+            rawMessage: rawMessage,
+            modelId: job.params.model.modelId
+        )
+        let didSave = await job.conversationStore.saveBackgroundCompletion(
             baseMessages: job.displayMessages,
             completedMessages: finalMessages,
             to: job.conversationId
         )
+        guard didSave else {
+            backgroundTask.updateTitle("Amber 后台生成", subtitle: "无法保存失败状态")
+            await completeAsFailureWithoutClearingPayload(job: job, backgroundTask: backgroundTask)
+            return
+        }
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
@@ -394,6 +534,22 @@ final class IOSChatBackgroundGenerationCoordinator {
         await job.liveActivityController.end(runId: job.runId, presentation: .failed())
         backgroundTask.setTaskCompleted(success: false)
         finish(runId: job.runId, requestId: backgroundTask.identifier)
+    }
+
+    private func completeAsFailureWithoutClearingPayload(
+        job: IOSChatBackgroundRuntimeJob,
+        backgroundTask: BGContinuedProcessingTask
+    ) async {
+        await recordRun(
+            job.runId,
+            startedAt: job.startedAt,
+            status: "failed",
+            inputDigest: job.inputDigest,
+            conversationId: job.conversationId
+        )
+        await job.liveActivityController.end(runId: job.runId, presentation: .failed())
+        backgroundTask.setTaskCompleted(success: false)
+        activeJobs.removeValue(forKey: backgroundTask.identifier)
     }
 
     private func job(for requestId: String) -> IOSChatBackgroundRuntimeJob? {
@@ -544,6 +700,42 @@ final class IOSChatBackgroundGenerationCoordinator {
             translation: nil
         )
     }
+
+    private static func failedMessages(
+        displayMessages: [UIMessage],
+        preservedGeneratedSuffix: [UIMessage] = [],
+        partialAssistantText: String?,
+        rawMessage: String,
+        modelId: String
+    ) -> [UIMessage] {
+        var finalMessages = displayMessages + preservedGeneratedSuffix
+        let partial = partialAssistantText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let errorText = ChatViewModel.userFacingGenerationError(rawMessage, modelId: modelId)
+        if partial.isEmpty {
+            finalMessages.append(assistantMessage(errorText))
+        } else {
+            finalMessages.append(assistantMessage("\(partial)\n\n\(errorText)"))
+        }
+        return finalMessages
+    }
+
+#if DEBUG
+    static func failedMessagesForTesting(
+        displayMessages: [UIMessage],
+        preservedGeneratedSuffix: [UIMessage] = [],
+        partialAssistantText: String?,
+        rawMessage: String,
+        modelId: String
+    ) -> [UIMessage] {
+        failedMessages(
+            displayMessages: displayMessages,
+            preservedGeneratedSuffix: preservedGeneratedSuffix,
+            partialAssistantText: partialAssistantText,
+            rawMessage: rawMessage,
+            modelId: modelId
+        )
+    }
+#endif
 
     private func requestIdentifier(for runId: String) -> String {
         requestPrefix + String(runId.map { character -> Character in

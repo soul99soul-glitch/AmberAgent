@@ -2,6 +2,7 @@ package app.amber.core.storage.conversation
 
 import kotlin.random.Random
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import platform.Foundation.NSTemporaryDirectory
@@ -25,6 +26,18 @@ class ConversationFileIosTest {
         assertTrue(file.exists())
         assertTrue(file.delete())
         assertFalse(file.exists())
+    }
+
+    @Test
+    fun writeTextToDirectoryThrows() {
+        val directory = ConversationFile(tempPath("write-target-dir"))
+
+        assertTrue(directory.mkdirs())
+
+        assertFailsWith<IllegalStateException> {
+            directory.writeText("payload")
+        }
+        assertTrue(directory.delete())
     }
 
     private fun tempPath(prefix: String): String {

@@ -553,9 +553,7 @@ enum ChatToolOutputFormatter {
         return text
     }
 
-    nonisolated static func imageFailureReason(from output: [UIMessagePart]) -> String? {
-        let hasImage = output.contains { $0 is UIMessagePart.Image }
-        var sawStructuredSuccess = false
+    nonisolated static func failureReason(from output: [UIMessagePart]) -> String? {
         let texts = output.compactMap { ($0 as? UIMessagePart.Text)?.text }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -569,14 +567,42 @@ enum ChatToolOutputFormatter {
             if object["ok"] as? Bool == false {
                 return stringValue(in: object, keys: ["reason", "error", "detail", "message"])
             }
+            if let denied = object["denied"] as? Bool, denied {
+                return stringValue(in: object, keys: ["reason", "error", "detail", "message"]) ?? "用户已拒绝"
+            }
+            if let status = (object["status"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                if ["error", "failed", "failure", "denied", "timed_out", "timeout"].contains(status) {
+                    return stringValue(in: object, keys: ["reason", "error", "detail", "message"])
+                }
+            }
+            if let exitCode = object["exit_code"] as? Int, exitCode != 0 {
+                return stringValue(in: object, keys: ["stderr", "error", "reason", "message"]) ?? "exit \(exitCode)"
+            }
+        }
+        return nil
+    }
+
+    nonisolated static func imageFailureReason(from output: [UIMessagePart]) -> String? {
+        let hasImage = output.contains { $0 is UIMessagePart.Image }
+        var sawStructuredSuccess = false
+        let texts = output.compactMap { ($0 as? UIMessagePart.Text)?.text }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !texts.isEmpty else { return nil }
+
+        for text in texts {
+            guard let data = text.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            if let reason = failureReason(from: [UIMessagePart.Text(text: text, metadata: nil)]) {
+                return reason
+            }
             if object["ok"] as? Bool == true {
                 sawStructuredSuccess = true
                 continue
             }
             if let status = (object["status"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-                if ["error", "failed", "failure"].contains(status) {
-                    return stringValue(in: object, keys: ["reason", "error", "detail", "message"])
-                }
                 if ["ok", "success", "succeeded", "completed"].contains(status) {
                     sawStructuredSuccess = true
                     continue

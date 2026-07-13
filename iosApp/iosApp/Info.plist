@@ -20,7 +20,46 @@
     <string>1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Amber Novel Project</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>app.amber.ios.novel-project</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>Amber Novel Project</string>
+            <key>UTTypeIdentifier</key>
+            <string>app.amber.ios.novel-project</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>ambernovel</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/vnd.amberagent.novel+json</string>
+            </dict>
+        </dict>
+    </array>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <false/>
     <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
     <key>NSSupportsLiveActivities</key>
     <true/>
@@ -114,6 +153,8 @@
     <array/>
     <key>UILaunchScreen</key>
     <dict/>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <false/>
     <key>UIBackgroundModes</key>
     <array>
         <string>processing</string>

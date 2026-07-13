@@ -143,29 +143,33 @@ final class ChatScrollArbiterCoreTests: XCTestCase {
         XCTAssertEqual(target2, 1200)
     }
 
-    // MARK: 5. Virtual offset independence from real offset jumps
+    // MARK: 5. Backward-teleported real offset must be ignored
 
-    func testTickWriteOffsetDerivesFromVirtualNotFromCompensatedRealOffset() {
-        let following = ChatScrollArbiterState.following(virtualOffset: 100, target: 500, lastFollowRequestAt: 0)
+    func testTickIgnoresBackwardTeleportedRealOffset() {
+        // 前向收编只收编向前推进的实时值;向后瞬移(如内容收缩补偿把实时 offset
+        // 拉回)必须被忽略,否则平滑从低点重启、锯齿复发。前向收编的正向行为由
+        // testTickForwardAdoptsExternallyAdvancedRealOffsetToTarget 覆盖。
+        let following = ChatScrollArbiterState.following(virtualOffset: 300, target: 500, lastFollowRequestAt: 0)
         let dt: TimeInterval = 1.0 / 120.0
 
-        // Simulate a batch-compensated teleport on the real offset far from virtual.
-        let jumped = ChatScrollArbiterCore.tick(
+        let result = ChatScrollArbiterCore.tick(
             state: following,
-            geometry: geometry(currentOffset: 9000, bottomTarget: 500, userInteracting: false),
+            geometry: geometry(currentOffset: 100, bottomTarget: 500, userInteracting: false),
             now: dt,
             dt: dt
         )
 
-        let alpha = 1 - exp(-dt / ChatScrollArbiterCore.tau)
-        let expectedVirtual = 100 + (500 - 100) * alpha
-
-        guard case .writeOffset(let written) = jumped.actions.first else {
+        // externallyAdvanced = min(100, 500) = 100 不得拖低基线:插值仍从
+        // virtual=300 出发向 target=500 趋近,写入值绝不接近 100。
+        guard case .writeOffset(let written) = result.actions.first else {
             return XCTFail("expected writeOffset action")
         }
-        XCTAssertEqual(written, expectedVirtual, accuracy: 0.001)
-        // Explicitly not derived from the teleported currentOffset (9000).
-        XCTAssertLessThan(written, 200)
+        XCTAssertGreaterThan(written, 300)
+        XCTAssertLessThan(written, 500)
+        guard case .following(let newVirtual, _, _) = result.state else {
+            return XCTFail("expected following state")
+        }
+        XCTAssertGreaterThan(newVirtual, 300)
     }
 
     // MARK: 6. Arrival + idle timeout vs. still-fresh follow request
@@ -197,7 +201,10 @@ final class ChatScrollArbiterCoreTests: XCTestCase {
         }
         XCTAssertEqual(virtual, 500)
         XCTAssertEqual(target, 500)
-        XCTAssertEqual(result.actions, [.writeOffset(500)])
+        // 贴近实时值的无效写入被抑制:|settledVirtual(500) - currentOffset(499.8)|
+        // = 0.2 < arrivalEpsilon,动作为 .none;状态推进不受影响,virtualOffset
+        // 仍精确落到 target。
+        XCTAssertEqual(result.actions, [.none])
     }
 
     // MARK: 7. followTail bootstrap semantics
@@ -379,10 +386,9 @@ final class ChatScrollArbiterCoreTests: XCTestCase {
         // safeDt clamps negative dt to 0 → alpha == 0 → virtual stays exactly
         // at its previous value: never jumps past target, never reverses
         // below its starting point.
-        guard case .writeOffset(let written) = result.actions.first else {
-            return XCTFail("expected writeOffset action")
-        }
-        XCTAssertEqual(written, 100)
+        // 防护语义(不过冲不倒退)不变;newVirtual(100) 与 currentOffset(100)
+        // 之差 < arrivalEpsilon,原地写入被抑制为 .none,状态保持不动。
+        XCTAssertEqual(result.actions, [.none])
         guard case .following(let virtual, let target, _) = result.state else {
             return XCTFail("expected following state")
         }
@@ -429,9 +435,11 @@ final class ChatScrollArbiterCoreTests: XCTestCase {
         let virtualOffset = target - ChatScrollArbiterCore.arrivalEpsilon // remaining == epsilon exactly
         let following = ChatScrollArbiterState.following(virtualOffset: virtualOffset, target: target, lastFollowRequestAt: 0)
         let dt: TimeInterval = 1.0 / 120.0
+        // currentOffset 取远低于 newVirtual 的合法值(0),使"贴近实时值不写"
+        // 的写入抑制不触发,本测试只锁边界比较语义本身。
         let result = ChatScrollArbiterCore.tick(
             state: following,
-            geometry: geometry(currentOffset: virtualOffset, bottomTarget: target, userInteracting: false),
+            geometry: geometry(currentOffset: 0, bottomTarget: target, userInteracting: false),
             now: 0.01,
             dt: dt
         )
@@ -498,5 +506,85 @@ final class ChatScrollArbiterCoreTests: XCTestCase {
         )
         XCTAssertEqual(result.state, .idle)
         XCTAssertEqual(result.actions, [])
+    }
+
+    // MARK: 19. Forward-adoption of externally advanced real offset
+
+    func testTickForwardAdoptsExternallyAdvancedRealOffsetToTarget() {
+        // ChatLayout's batch-update bottom compensation teleported the real
+        // offset to exactly the target between display link callbacks. The
+        // arbiter must adopt this forward progress rather than smoothing
+        // "backwards" from a stale, lower virtualOffset.
+        let following = ChatScrollArbiterState.following(virtualOffset: 100, target: 500, lastFollowRequestAt: 0)
+        let result = ChatScrollArbiterCore.tick(
+            state: following,
+            geometry: geometry(currentOffset: 500, bottomTarget: 500, userInteracting: false),
+            now: 0.01,
+            dt: 1.0 / 120.0
+        )
+        if case .writeOffset(let written) = result.actions.first {
+            XCTAssertGreaterThanOrEqual(written, 500)
+        } else {
+            XCTAssertEqual(result.actions, [.none])
+        }
+        guard case .following(let newVirtual, let newTarget, _) = result.state else {
+            return XCTFail("expected following state")
+        }
+        XCTAssertEqual(newVirtual, newTarget)
+        XCTAssertEqual(newTarget, 500)
+    }
+
+    // MARK: 20. No external writer: behavior matches legacy virtual-only interpolation
+
+    func testTickWithoutExternalAdvanceMatchesLegacyVirtualOnlyInterpolation() {
+        // currentOffset lags behind virtualOffset (no external writer moved
+        // the real offset since the last tick) — baseline must stay exactly
+        // virtualOffset, and the written value must match the pre-forward-
+        // adoption formula precisely.
+        let virtualOffset: CGFloat = 200
+        let target: CGFloat = 1000
+        let following = ChatScrollArbiterState.following(virtualOffset: virtualOffset, target: target, lastFollowRequestAt: 0)
+        let dt: TimeInterval = 1.0 / 120.0
+
+        let result = ChatScrollArbiterCore.tick(
+            state: following,
+            geometry: geometry(currentOffset: 50, bottomTarget: target, userInteracting: false),
+            now: dt,
+            dt: dt
+        )
+
+        let alpha = 1 - exp(-dt / ChatScrollArbiterCore.tau)
+        let expected = virtualOffset + (target - virtualOffset) * CGFloat(alpha)
+        guard case .writeOffset(let written) = result.actions.first else {
+            return XCTFail("expected writeOffset action")
+        }
+        XCTAssertEqual(written, expected, accuracy: 0.001)
+        guard case .following(let newVirtual, _, _) = result.state else {
+            return XCTFail("expected following state")
+        }
+        XCTAssertEqual(newVirtual, expected, accuracy: 0.001)
+    }
+
+    // MARK: 21. Real offset overshoots target: baseline clamps to target, no over-target write
+
+    func testTickWithRealOffsetOvershootingTargetClampsBaselineAndDoesNotWriteBeyondTarget() {
+        // currentOffset > target (e.g. a transient overscroll/compensation
+        // sample). The forward-adoption baseline must clamp to target, never
+        // pull virtual past it.
+        let following = ChatScrollArbiterState.following(virtualOffset: 100, target: 500, lastFollowRequestAt: 0)
+        let result = ChatScrollArbiterCore.tick(
+            state: following,
+            geometry: geometry(currentOffset: 650, bottomTarget: 500, userInteracting: false),
+            now: 0.01,
+            dt: 1.0 / 120.0
+        )
+        guard case .following(let newVirtual, let newTarget, _) = result.state else {
+            return XCTFail("expected following state")
+        }
+        XCTAssertEqual(newTarget, 500)
+        XCTAssertLessThanOrEqual(newVirtual, 500)
+        if case .writeOffset(let written) = result.actions.first {
+            XCTAssertLessThanOrEqual(written, 500)
+        }
     }
 }

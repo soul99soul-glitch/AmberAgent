@@ -62,6 +62,13 @@ extension BlockMarkup {
           // Add the citation directly to result
           result.append(attachmentString)
         }
+      } else if config.collapsesSoftBreaks, child is Markdown.SoftBreak {
+        // CommonMark semantics: a soft break renders as a space. For CJK text a
+        // mid-sentence space reads wrong, so append nothing when the preceding
+        // character is CJK (mirrors the host app's synchronous renderer).
+        if let last = result.string.last, !last.isWhitespace, !last.isCJKCharacter {
+          result.append(NSMutableAttributedString(string: " ").mergingAttributes(container))
+        }
       } else {
         let stringPart = convertible.convert(attributeContainer: container, config: config)
         result.append(stringPart)
@@ -69,5 +76,27 @@ extension BlockMarkup {
     }
 
     return result
+  }
+}
+
+extension Character {
+  /// Whether the character belongs to a CJK script (or CJK/fullwidth
+  /// punctuation); a collapsed soft break between such characters needs no
+  /// joining space.
+  fileprivate var isCJKCharacter: Bool {
+    for scalar in unicodeScalars {
+      switch scalar.value {
+      case 0x3000...0x303F,   // CJK symbols & punctuation
+           0x3040...0x30FF,   // Hiragana + Katakana
+           0x3400...0x4DBF,   // CJK Unified Ideographs Ext A
+           0x4E00...0x9FFF,   // CJK Unified Ideographs
+           0xF900...0xFAFF,   // CJK Compatibility Ideographs
+           0xFF00...0xFFEF:   // Halfwidth & Fullwidth forms
+        return true
+      default:
+        continue
+      }
+    }
+    return false
   }
 }

@@ -90,6 +90,24 @@ final class IOSMcpClientTests: XCTestCase {
         XCTAssertTrue(output.contains(#""type":"image""#))
     }
 
+    func testCallToolTimesOutWhenTransportNeverProducesTerminalResponse() async throws {
+        let transport = FakeMcpHTTPTransport(
+            responses: [
+                ["jsonrpc": "2.0", "id": 1, "result": ["protocolVersion": "2024-11-05", "capabilities": [:], "serverInfo": ["name": "fake", "version": "1"]]]
+            ],
+            hangingMethods: ["tools/call"]
+        )
+        let client = IOSMcpClient(transport: transport, requestTimeoutSeconds: 0.01)
+        _ = try await client.connect(config: .streamableHTTP(name: "docs", url: "https://example.com/mcp"))
+
+        do {
+            _ = try await client.callTool(name: "slow", arguments: [:])
+            XCTFail("Expected MCP call to time out")
+        } catch let error as IOSMcpClientError {
+            XCTAssertEqual(error, .requestTimedOut("MCP request tools/call timed out after 0.01s"))
+        }
+    }
+
     func testDisconnectClearsTransportSession() async throws {
         let transport = FakeMcpHTTPTransport(responses: [
             ["jsonrpc": "2.0", "id": 1, "result": ["protocolVersion": "2024-11-05", "capabilities": [:], "serverInfo": ["name": "fake", "version": "1"]]]
@@ -106,16 +124,22 @@ final class IOSMcpClientTests: XCTestCase {
 
 private final class FakeMcpHTTPTransport: IOSMcpHTTPTransport {
     private var responses: [[String: Any]]
+    private let hangingMethods: Set<String>
     private(set) var sentMethods: [String] = []
     private(set) var disconnectedServers: [String] = []
 
-    init(responses: [[String: Any]]) {
+    init(responses: [[String: Any]], hangingMethods: Set<String> = []) {
         self.responses = responses
+        self.hangingMethods = hangingMethods
     }
 
     func sendJSONRPC(_ payload: [String: Any], to config: IOSMcpServerConfig) async throws -> [String: Any] {
         if let method = payload["method"] as? String {
             sentMethods.append(method)
+            if hangingMethods.contains(method) {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                return ["jsonrpc": "2.0", "id": payload["id"] as Any, "result": [:]]
+            }
         }
         return responses.removeFirst()
     }

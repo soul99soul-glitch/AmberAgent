@@ -1,0 +1,1251 @@
+import CryptoKit
+import Foundation
+
+struct NovelMutationContext: Codable, Equatable, Sendable {
+    let operationID: NovelOperationID
+    let expectedProjectRevision: Int64?
+    let expectedConfigRevision: Int64?
+    let expectedBranchHeadRevision: Int64?
+}
+
+struct NovelCreateProjectCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let sessionID: NovelSessionID
+    let initialStateSnapshotID: NovelStateSnapshotID
+    let initialCheckpointID: NovelCheckpointID
+    let name: String
+    let branchName: String
+    let creationMode: NovelProjectCreationMode
+    let quickStartSeed: NovelQuickStartSeed?
+}
+
+struct NovelRenameProjectCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let name: String
+}
+
+struct NovelReviseMaterialCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let materialID: NovelMaterialID
+    let revisionID: NovelMaterialRevisionID
+    let kind: NovelMaterialKind
+    let title: String
+    let content: String
+    let tags: [String]
+    let injectionMode: NovelInjectionMode
+}
+
+struct NovelDeleteMaterialCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let materialID: NovelMaterialID
+}
+
+struct NovelSetModelPolicyCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let policy: NovelProjectModelPolicy
+}
+
+enum NovelSettingProposalResolution: Codable, Equatable, Sendable {
+    case accept(
+        materialID: NovelMaterialID,
+        revisionID: NovelMaterialRevisionID,
+        kind: NovelMaterialKind,
+        tags: [String],
+        injectionMode: NovelInjectionMode
+    )
+    case reject
+}
+
+struct NovelResolveSettingProposalCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let proposalID: NovelProposalID
+    let resolution: NovelSettingProposalResolution
+}
+
+enum NovelBranchMaterialOverrideChange: Codable, Equatable, Sendable {
+    case inherit
+    case useRevision(NovelMaterialRevisionID)
+    case createRevision(
+        revisionID: NovelMaterialRevisionID,
+        title: String,
+        content: String,
+        tags: [String],
+        injectionMode: NovelInjectionMode
+    )
+}
+
+struct NovelSetBranchMaterialOverrideCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let materialID: NovelMaterialID
+    let change: NovelBranchMaterialOverrideChange
+}
+
+struct NovelSetMainBranchCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+}
+
+struct NovelSetPolishPreferenceCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let preference: String
+}
+
+struct NovelForkBranchCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let sourceBranchID: NovelBranchID
+    let checkpointID: NovelCheckpointID
+    let branchID: NovelBranchID
+    let sessionID: NovelSessionID
+    let name: String
+}
+
+struct NovelRenameBranchCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let name: String
+}
+
+struct NovelDeleteBranchCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+}
+
+struct NovelUndoBranchHeadCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let expectedWorkingRevision: Int64
+}
+
+struct NovelCloneCandidateCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let sourceCandidateID: NovelCandidateID
+    let candidateID: NovelCandidateID
+}
+
+struct NovelAdoptPolishCandidateCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let transactionID: NovelPendingOperationID
+    let candidateID: NovelCandidateID
+    let proposedChapterVersionID: NovelChapterVersionID
+    let checkpointID: NovelCheckpointID
+    let expectedWorkingRevision: Int64
+}
+
+struct NovelAbandonPolishTransactionCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let transactionID: NovelPendingOperationID
+}
+
+struct NovelRestoreChapterVersionCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let targetChapterVersionID: NovelChapterVersionID
+    let proposedChapterVersionID: NovelChapterVersionID
+    let checkpointID: NovelCheckpointID
+    let expectedWorkingRevision: Int64
+}
+
+struct NovelCancelRunCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let runID: NovelRunID
+    let reason: NovelRunInterruptionReason
+}
+
+struct NovelCollectCandidateCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let pendingID: NovelPendingOperationID
+    let candidateID: NovelCandidateID
+    let selection: NovelParagraphSelection
+    let target: NovelCollectionTarget
+    let proposedChapterVersionID: NovelChapterVersionID
+    let checkpointID: NovelCheckpointID
+    let stateSnapshotID: NovelStateSnapshotID
+    let factCompatibilityID: UUID
+}
+
+struct NovelSaveManualEditCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let chapterID: NovelChapterID
+    let versionID: NovelChapterVersionID
+    let title: String
+    let content: String
+    let factCompatibilityID: UUID
+    let expectedWorkingRevision: Int64
+}
+
+struct NovelSyncManualEditsCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let pendingID: NovelPendingOperationID
+    let checkpointID: NovelCheckpointID
+    let stateSnapshotID: NovelStateSnapshotID
+    let expectedWorkingRevision: Int64
+}
+
+struct NovelRetryPendingCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let pendingID: NovelPendingOperationID
+}
+
+struct NovelImportProjectCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let packageData: Data
+    let policy: NovelProjectImportPolicy
+}
+
+struct NovelInjectionPreviewRequest: Equatable, Sendable {
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let kind: NovelRunKind
+    let mode: NovelSessionMode
+    let granularity: NovelGenerationGranularity?
+    let userText: String
+    let sourceChapterVersionID: NovelChapterVersionID?
+    let injectionOverrides: NovelInjectionOverrides
+    let inputBudgetTokens: Int
+}
+
+struct NovelInjectionPreviewSnapshot: Equatable, Sendable {
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let projectRevision: Int64
+    let configRevision: Int64
+    let branchHeadRevision: Int64
+    let resolvedModel: NovelResolvedModel
+    let parameters: NovelModelParameters
+    let requestedInputBudgetTokens: Int
+    let effectiveInputBudgetTokens: Int
+    let plan: NovelInjectionPlan
+}
+
+struct NovelDeleteProjectCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+}
+
+struct NovelRestorePreviousProjectCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+}
+
+enum NovelAction: Equatable, Sendable {
+    case createProject(NovelCreateProjectCommand)
+    case renameProject(NovelRenameProjectCommand)
+    case reviseMaterial(NovelReviseMaterialCommand)
+    case deleteMaterial(NovelDeleteMaterialCommand)
+    case setModelPolicy(NovelSetModelPolicyCommand)
+    case resolveSettingProposal(NovelResolveSettingProposalCommand)
+    case setBranchMaterialOverride(NovelSetBranchMaterialOverrideCommand)
+    case setMainBranch(NovelSetMainBranchCommand)
+    case setPolishPreference(NovelSetPolishPreferenceCommand)
+    case forkBranch(NovelForkBranchCommand)
+    case renameBranch(NovelRenameBranchCommand)
+    case deleteBranch(NovelDeleteBranchCommand)
+    case undoBranchHead(NovelUndoBranchHeadCommand)
+    case cloneCandidate(NovelCloneCandidateCommand)
+    case adoptPolishCandidate(NovelAdoptPolishCandidateCommand)
+    case abandonPolishTransaction(NovelAbandonPolishTransactionCommand)
+    case restoreChapterVersion(NovelRestoreChapterVersionCommand)
+    case cancelRun(NovelCancelRunCommand)
+    case collectCandidate(NovelCollectCandidateCommand)
+    case saveManualEdit(NovelSaveManualEditCommand)
+    case syncManualEdits(NovelSyncManualEditsCommand)
+    case retryPending(NovelRetryPendingCommand)
+    case importProject(NovelImportProjectCommand)
+    case restorePreviousProject(NovelRestorePreviousProjectCommand)
+    case deleteProject(NovelDeleteProjectCommand)
+
+    var projectID: NovelProjectID {
+        switch self {
+        case .createProject(let command): command.projectID
+        case .renameProject(let command): command.projectID
+        case .reviseMaterial(let command): command.projectID
+        case .deleteMaterial(let command): command.projectID
+        case .setModelPolicy(let command): command.projectID
+        case .resolveSettingProposal(let command): command.projectID
+        case .setBranchMaterialOverride(let command): command.projectID
+        case .setMainBranch(let command): command.projectID
+        case .setPolishPreference(let command): command.projectID
+        case .forkBranch(let command): command.projectID
+        case .renameBranch(let command): command.projectID
+        case .deleteBranch(let command): command.projectID
+        case .undoBranchHead(let command): command.projectID
+        case .cloneCandidate(let command): command.projectID
+        case .adoptPolishCandidate(let command): command.projectID
+        case .abandonPolishTransaction(let command): command.projectID
+        case .restoreChapterVersion(let command): command.projectID
+        case .cancelRun(let command): command.projectID
+        case .collectCandidate(let command): command.projectID
+        case .saveManualEdit(let command): command.projectID
+        case .syncManualEdits(let command): command.projectID
+        case .retryPending(let command): command.projectID
+        case .importProject(let command): command.projectID
+        case .restorePreviousProject(let command): command.projectID
+        case .deleteProject(let command): command.projectID
+        }
+    }
+
+    var context: NovelMutationContext {
+        switch self {
+        case .createProject(let command): command.context
+        case .renameProject(let command): command.context
+        case .reviseMaterial(let command): command.context
+        case .deleteMaterial(let command): command.context
+        case .setModelPolicy(let command): command.context
+        case .resolveSettingProposal(let command): command.context
+        case .setBranchMaterialOverride(let command): command.context
+        case .setMainBranch(let command): command.context
+        case .setPolishPreference(let command): command.context
+        case .forkBranch(let command): command.context
+        case .renameBranch(let command): command.context
+        case .deleteBranch(let command): command.context
+        case .undoBranchHead(let command): command.context
+        case .cloneCandidate(let command): command.context
+        case .adoptPolishCandidate(let command): command.context
+        case .abandonPolishTransaction(let command): command.context
+        case .restoreChapterVersion(let command): command.context
+        case .cancelRun(let command): command.context
+        case .collectCandidate(let command): command.context
+        case .saveManualEdit(let command): command.context
+        case .syncManualEdits(let command): command.context
+        case .retryPending(let command): command.context
+        case .importProject(let command): command.context
+        case .restorePreviousProject(let command): command.context
+        case .deleteProject(let command): command.context
+        }
+    }
+
+    var operationKind: NovelOperationKind {
+        switch self {
+        case .createProject: .createProject
+        case .renameProject: .renameProject
+        case .reviseMaterial: .reviseMaterial
+        case .deleteMaterial: .deleteMaterial
+        case .setModelPolicy: .setModelPolicy
+        case .resolveSettingProposal: .resolveSettingProposal
+        case .setBranchMaterialOverride: .setBranchMaterialOverride
+        case .setMainBranch: .setMainBranch
+        case .setPolishPreference: .setPolishPreference
+        case .forkBranch: .forkBranch
+        case .renameBranch: .renameBranch
+        case .deleteBranch: .deleteBranch
+        case .undoBranchHead: .undoBranchHead
+        case .cloneCandidate: .cloneCandidate
+        case .adoptPolishCandidate: .adoptPolishCandidate
+        case .abandonPolishTransaction: .abandonPolishTransaction
+        case .restoreChapterVersion: .restoreChapterVersion
+        case .cancelRun: .cancelRun
+        case .collectCandidate: .collectCandidate
+        case .saveManualEdit: .saveManualEdit
+        case .syncManualEdits: .syncManualEdits
+        case .retryPending: .retryPending
+        case .importProject: .importProject
+        case .restorePreviousProject: .restorePreviousProject
+        case .deleteProject: .deleteProject
+        }
+    }
+
+    var isProjectCreation: Bool {
+        switch self {
+        case .createProject, .importProject: true
+        default: false
+        }
+    }
+
+    var isRunCancellation: Bool {
+        if case .cancelRun = self { return true }
+        return false
+    }
+
+    var isProjectLifecycle: Bool {
+        switch self {
+        case .importProject, .restorePreviousProject, .deleteProject: true
+        default: false
+        }
+    }
+
+    func canonicalPayloadSHA256() throws -> String {
+        let payload: NovelCanonicalActionPayload
+        switch self {
+        case .createProject(let command):
+            payload = .createProject(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                sessionID: command.sessionID,
+                initialStateSnapshotID: command.initialStateSnapshotID,
+                initialCheckpointID: command.initialCheckpointID,
+                name: command.name,
+                branchName: command.branchName,
+                creationMode: command.creationMode,
+                quickStartSeed: command.quickStartSeed
+            ))
+        case .renameProject(let command):
+            payload = .renameProject(.init(projectID: command.projectID, name: command.name))
+        case .reviseMaterial(let command):
+            payload = .reviseMaterial(.init(
+                projectID: command.projectID,
+                materialID: command.materialID,
+                revisionID: command.revisionID,
+                kind: command.kind,
+                title: command.title,
+                content: command.content,
+                tags: command.tags,
+                injectionMode: command.injectionMode
+            ))
+        case .deleteMaterial(let command):
+            payload = .deleteMaterial(.init(
+                projectID: command.projectID,
+                materialID: command.materialID
+            ))
+        case .setModelPolicy(let command):
+            payload = .setModelPolicy(.init(
+                projectID: command.projectID,
+                policy: command.policy
+            ))
+        case .resolveSettingProposal(let command):
+            payload = .resolveSettingProposal(.init(
+                projectID: command.projectID,
+                proposalID: command.proposalID,
+                resolution: command.resolution
+            ))
+        case .setBranchMaterialOverride(let command):
+            payload = .setBranchMaterialOverride(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                materialID: command.materialID,
+                change: command.change
+            ))
+        case .setMainBranch(let command):
+            payload = .setMainBranch(.init(
+                projectID: command.projectID,
+                branchID: command.branchID
+            ))
+        case .setPolishPreference(let command):
+            payload = .setPolishPreference(.init(
+                projectID: command.projectID,
+                preference: command.preference
+            ))
+        case .forkBranch(let command):
+            payload = .forkBranch(.init(
+                projectID: command.projectID,
+                sourceBranchID: command.sourceBranchID,
+                checkpointID: command.checkpointID,
+                branchID: command.branchID,
+                sessionID: command.sessionID,
+                name: command.name
+            ))
+        case .renameBranch(let command):
+            payload = .renameBranch(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                name: command.name
+            ))
+        case .deleteBranch(let command):
+            payload = .deleteBranch(.init(
+                projectID: command.projectID,
+                branchID: command.branchID
+            ))
+        case .undoBranchHead(let command):
+            payload = .undoBranchHead(.init(
+                projectID: command.projectID,
+                branchID: command.branchID
+            ))
+        case .cloneCandidate(let command):
+            payload = .cloneCandidate(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                sourceCandidateID: command.sourceCandidateID,
+                candidateID: command.candidateID
+            ))
+        case .adoptPolishCandidate(let command):
+            payload = .adoptPolishCandidate(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                transactionID: command.transactionID,
+                candidateID: command.candidateID,
+                proposedChapterVersionID: command.proposedChapterVersionID,
+                checkpointID: command.checkpointID
+            ))
+        case .abandonPolishTransaction(let command):
+            payload = .abandonPolishTransaction(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                transactionID: command.transactionID
+            ))
+        case .restoreChapterVersion(let command):
+            payload = .restoreChapterVersion(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                targetChapterVersionID: command.targetChapterVersionID,
+                proposedChapterVersionID: command.proposedChapterVersionID,
+                checkpointID: command.checkpointID
+            ))
+        case .cancelRun(let command):
+            payload = .cancelRun(.init(
+                projectID: command.projectID,
+                runID: command.runID,
+                reason: command.reason
+            ))
+        case .collectCandidate(let command):
+            payload = .collectCandidate(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                pendingID: command.pendingID,
+                candidateID: command.candidateID,
+                selection: command.selection,
+                target: command.target,
+                proposedChapterVersionID: command.proposedChapterVersionID,
+                checkpointID: command.checkpointID,
+                stateSnapshotID: command.stateSnapshotID,
+                factCompatibilityID: command.factCompatibilityID
+            ))
+        case .saveManualEdit(let command):
+            payload = .saveManualEdit(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                chapterID: command.chapterID,
+                versionID: command.versionID,
+                title: command.title,
+                content: command.content,
+                factCompatibilityID: command.factCompatibilityID
+            ))
+        case .syncManualEdits(let command):
+            payload = .syncManualEdits(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                pendingID: command.pendingID,
+                checkpointID: command.checkpointID,
+                stateSnapshotID: command.stateSnapshotID
+            ))
+        case .retryPending(let command):
+            payload = .retryPending(.init(
+                projectID: command.projectID,
+                pendingID: command.pendingID
+            ))
+        case .importProject(let command):
+            let policy: NovelCanonicalActionPayload.ImportPolicy
+            switch command.policy {
+            case .reject:
+                policy = .reject
+            case .replace:
+                policy = .replace
+            case .keepBoth(let destinationProjectID):
+                policy = .keepBoth(destinationProjectID: destinationProjectID)
+            }
+            payload = .importProject(.init(
+                projectID: command.projectID,
+                packageSHA256: NovelProjectPackageCodec.sha256(command.packageData),
+                policy: policy
+            ))
+        case .restorePreviousProject(let command):
+            payload = .restorePreviousProject(.init(projectID: command.projectID))
+        case .deleteProject(let command):
+            payload = .deleteProject(.init(projectID: command.projectID))
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(payload)
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
+extension NovelCreateProjectCommand {
+    func canonicalPayloadSHA256() throws -> String {
+        try NovelAction.createProject(self).canonicalPayloadSHA256()
+    }
+}
+
+extension NovelCollectCandidateCommand {
+    func canonicalPayloadSHA256() throws -> String {
+        try NovelAction.collectCandidate(self).canonicalPayloadSHA256()
+    }
+}
+
+extension NovelSaveManualEditCommand {
+    func canonicalPayloadSHA256() throws -> String {
+        try NovelAction.saveManualEdit(self).canonicalPayloadSHA256()
+    }
+}
+
+extension NovelSyncManualEditsCommand {
+    func canonicalPayloadSHA256() throws -> String {
+        try NovelAction.syncManualEdits(self).canonicalPayloadSHA256()
+    }
+}
+
+extension NovelRetryPendingCommand {
+    func canonicalPayloadSHA256() throws -> String {
+        try NovelAction.retryPending(self).canonicalPayloadSHA256()
+    }
+}
+
+private enum NovelCanonicalActionPayload: Codable {
+    struct CreateProject: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let sessionID: NovelSessionID
+        let initialStateSnapshotID: NovelStateSnapshotID
+        let initialCheckpointID: NovelCheckpointID
+        let name: String
+        let branchName: String
+        let creationMode: NovelProjectCreationMode
+        let quickStartSeed: NovelQuickStartSeed?
+    }
+
+    struct RenameProject: Codable {
+        let projectID: NovelProjectID
+        let name: String
+    }
+
+    struct ReviseMaterial: Codable {
+        let projectID: NovelProjectID
+        let materialID: NovelMaterialID
+        let revisionID: NovelMaterialRevisionID
+        let kind: NovelMaterialKind
+        let title: String
+        let content: String
+        let tags: [String]
+        let injectionMode: NovelInjectionMode
+    }
+
+    struct DeleteMaterial: Codable {
+        let projectID: NovelProjectID
+        let materialID: NovelMaterialID
+    }
+
+    struct SetModelPolicy: Codable {
+        let projectID: NovelProjectID
+        let policy: NovelProjectModelPolicy
+    }
+
+    struct ResolveSettingProposal: Codable {
+        let projectID: NovelProjectID
+        let proposalID: NovelProposalID
+        let resolution: NovelSettingProposalResolution
+    }
+
+    struct SetBranchMaterialOverride: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let materialID: NovelMaterialID
+        let change: NovelBranchMaterialOverrideChange
+    }
+
+    struct SetMainBranch: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+    }
+
+    struct SetPolishPreference: Codable {
+        let projectID: NovelProjectID
+        let preference: String
+    }
+
+    struct ForkBranch: Codable {
+        let projectID: NovelProjectID
+        let sourceBranchID: NovelBranchID
+        let checkpointID: NovelCheckpointID
+        let branchID: NovelBranchID
+        let sessionID: NovelSessionID
+        let name: String
+    }
+
+    struct RenameBranch: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let name: String
+    }
+
+    struct DeleteBranch: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+    }
+
+    struct UndoBranchHead: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+    }
+
+    struct CloneCandidate: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let sourceCandidateID: NovelCandidateID
+        let candidateID: NovelCandidateID
+    }
+
+    struct AdoptPolishCandidate: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let transactionID: NovelPendingOperationID
+        let candidateID: NovelCandidateID
+        let proposedChapterVersionID: NovelChapterVersionID
+        let checkpointID: NovelCheckpointID
+    }
+
+    struct AbandonPolishTransaction: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let transactionID: NovelPendingOperationID
+    }
+
+    struct RestoreChapterVersion: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let targetChapterVersionID: NovelChapterVersionID
+        let proposedChapterVersionID: NovelChapterVersionID
+        let checkpointID: NovelCheckpointID
+    }
+
+    struct CancelRun: Codable {
+        let projectID: NovelProjectID
+        let runID: NovelRunID
+        let reason: NovelRunInterruptionReason
+    }
+
+    struct CollectCandidate: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let pendingID: NovelPendingOperationID
+        let candidateID: NovelCandidateID
+        let selection: NovelParagraphSelection
+        let target: NovelCollectionTarget
+        let proposedChapterVersionID: NovelChapterVersionID
+        let checkpointID: NovelCheckpointID
+        let stateSnapshotID: NovelStateSnapshotID
+        let factCompatibilityID: UUID
+    }
+
+    struct SaveManualEdit: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let chapterID: NovelChapterID
+        let versionID: NovelChapterVersionID
+        let title: String
+        let content: String
+        let factCompatibilityID: UUID
+    }
+
+    struct SyncManualEdits: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let pendingID: NovelPendingOperationID
+        let checkpointID: NovelCheckpointID
+        let stateSnapshotID: NovelStateSnapshotID
+    }
+
+    struct RetryPending: Codable {
+        let projectID: NovelProjectID
+        let pendingID: NovelPendingOperationID
+    }
+
+    struct ImportProject: Codable {
+        let projectID: NovelProjectID
+        let packageSHA256: String
+        let policy: ImportPolicy
+    }
+
+    enum ImportPolicy: Codable {
+        case reject
+        case replace
+        case keepBoth(destinationProjectID: NovelProjectID)
+    }
+
+    struct DeleteProject: Codable {
+        let projectID: NovelProjectID
+    }
+
+    struct RestorePreviousProject: Codable {
+        let projectID: NovelProjectID
+    }
+
+    case createProject(CreateProject)
+    case renameProject(RenameProject)
+    case reviseMaterial(ReviseMaterial)
+    case deleteMaterial(DeleteMaterial)
+    case setModelPolicy(SetModelPolicy)
+    case resolveSettingProposal(ResolveSettingProposal)
+    case setBranchMaterialOverride(SetBranchMaterialOverride)
+    case setMainBranch(SetMainBranch)
+    case setPolishPreference(SetPolishPreference)
+    case forkBranch(ForkBranch)
+    case renameBranch(RenameBranch)
+    case deleteBranch(DeleteBranch)
+    case undoBranchHead(UndoBranchHead)
+    case cloneCandidate(CloneCandidate)
+    case adoptPolishCandidate(AdoptPolishCandidate)
+    case abandonPolishTransaction(AbandonPolishTransaction)
+    case restoreChapterVersion(RestoreChapterVersion)
+    case cancelRun(CancelRun)
+    case collectCandidate(CollectCandidate)
+    case saveManualEdit(SaveManualEdit)
+    case syncManualEdits(SyncManualEdits)
+    case retryPending(RetryPending)
+    case importProject(ImportProject)
+    case restorePreviousProject(RestorePreviousProject)
+    case deleteProject(DeleteProject)
+}
+
+enum NovelOutcome: Codable, Equatable, Sendable {
+    case projectCreated(projectID: NovelProjectID, branchID: NovelBranchID)
+    case projectRenamed(projectID: NovelProjectID, revision: Int64)
+    case materialRevised(
+        projectID: NovelProjectID,
+        materialID: NovelMaterialID,
+        revisionID: NovelMaterialRevisionID,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case materialDeleted(
+        projectID: NovelProjectID,
+        materialID: NovelMaterialID,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case modelPolicyChanged(
+        projectID: NovelProjectID,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case settingProposalAccepted(
+        projectID: NovelProjectID,
+        proposalID: NovelProposalID,
+        materialID: NovelMaterialID,
+        revisionID: NovelMaterialRevisionID,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case settingProposalRejected(
+        projectID: NovelProjectID,
+        proposalID: NovelProposalID,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case branchMaterialOverrideChanged(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        materialID: NovelMaterialID,
+        revisionID: NovelMaterialRevisionID?,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case mainBranchChanged(projectID: NovelProjectID, branchID: NovelBranchID, revision: Int64)
+    case polishPreferenceChanged(
+        projectID: NovelProjectID,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case branchForked(
+        projectID: NovelProjectID,
+        sourceBranchID: NovelBranchID,
+        branchID: NovelBranchID,
+        checkpointID: NovelCheckpointID,
+        revision: Int64
+    )
+    case branchRenamed(projectID: NovelProjectID, branchID: NovelBranchID, revision: Int64)
+    case branchDeleted(projectID: NovelProjectID, branchID: NovelBranchID, revision: Int64)
+    case branchHeadMoved(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        fromCheckpointID: NovelCheckpointID,
+        toCheckpointID: NovelCheckpointID,
+        headRevision: Int64,
+        revision: Int64
+    )
+    case candidateCloned(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        sourceCandidateID: NovelCandidateID,
+        candidateID: NovelCandidateID,
+        revision: Int64
+    )
+    case polishCandidateAdopted(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID,
+        checkpointID: NovelCheckpointID,
+        chapterVersionID: NovelChapterVersionID,
+        revision: Int64
+    )
+    case polishCandidateRejected(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID,
+        transactionID: NovelPendingOperationID,
+        revision: Int64
+    )
+    case polishTransactionAbandoned(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID,
+        transactionID: NovelPendingOperationID,
+        revision: Int64
+    )
+    case chapterVersionRestored(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        checkpointID: NovelCheckpointID,
+        chapterVersionID: NovelChapterVersionID,
+        revision: Int64
+    )
+    case runStarted(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        runID: NovelRunID,
+        receiptID: NovelReceiptID,
+        revision: Int64
+    )
+    case runInterrupted(
+        projectID: NovelProjectID,
+        runID: NovelRunID,
+        reason: NovelRunInterruptionReason,
+        revision: Int64
+    )
+    case candidateCollected(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID,
+        checkpointID: NovelCheckpointID,
+        chapterVersionID: NovelChapterVersionID,
+        revision: Int64
+    )
+    case manualEditSaved(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        chapterVersionID: NovelChapterVersionID,
+        workingRevision: Int64,
+        revision: Int64
+    )
+    case manualSyncCommitted(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        checkpointID: NovelCheckpointID,
+        revision: Int64
+    )
+    case projectImported(
+        sourceProjectID: NovelProjectID,
+        projectID: NovelProjectID,
+        disposition: NovelProjectImportDisposition,
+        interruptedRunCount: Int,
+        revision: Int64
+    )
+    case previousProjectRestored(projectID: NovelProjectID, revision: Int64)
+    case projectDeleted(projectID: NovelProjectID)
+}
+
+enum NovelSnapshotScope: Equatable, Sendable {
+    case projects
+    case project(NovelProjectID)
+    case branch(projectID: NovelProjectID, branchID: NovelBranchID)
+    case projectPackage(NovelProjectID)
+    case branchMarkdown(projectID: NovelProjectID, branchID: NovelBranchID)
+    case injectionPreview(NovelInjectionPreviewRequest)
+    case projectImportPreview(Data)
+}
+
+enum NovelSnapshot: Equatable, Sendable {
+    case projects([NovelProjectSummary])
+    case project(NovelProjectSnapshot)
+    case branch(NovelBranchSnapshot)
+    case package(NovelProjectPackageArtifact)
+    case markdown(NovelMarkdownExportArtifact)
+    case injectionPreview(NovelInjectionPreviewSnapshot)
+    case projectImportPreview(NovelProjectImportPreview)
+}
+
+enum NovelRunKind: String, Codable, Sendable {
+    case quickStart
+    case discussion
+    case prose
+    case polish
+}
+
+struct NovelRunRequest: Equatable, Sendable {
+    let id: NovelRunID
+    let operationID: NovelOperationID
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let kind: NovelRunKind
+    let mode: NovelSessionMode
+    let granularity: NovelGenerationGranularity?
+    let userText: String
+    let userMessageID: NovelMessageID
+    let assistantMessageID: NovelMessageID
+    let candidateID: NovelCandidateID?
+    let generationReceiptID: NovelReceiptID
+    let injectionReceiptID: NovelReceiptID
+    let sourceChapterVersionID: NovelChapterVersionID?
+    let injectionOverrides: NovelInjectionOverrides
+    let inputBudgetTokens: Int
+    let expectedProjectRevision: Int64
+    let expectedConfigRevision: Int64
+    let expectedBranchHeadRevision: Int64
+
+    init(
+        id: NovelRunID,
+        operationID: NovelOperationID,
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        kind: NovelRunKind,
+        mode: NovelSessionMode,
+        granularity: NovelGenerationGranularity?,
+        userText: String,
+        userMessageID: NovelMessageID,
+        assistantMessageID: NovelMessageID,
+        candidateID: NovelCandidateID?,
+        generationReceiptID: NovelReceiptID,
+        injectionReceiptID: NovelReceiptID,
+        sourceChapterVersionID: NovelChapterVersionID?,
+        injectionOverrides: NovelInjectionOverrides = .none,
+        inputBudgetTokens: Int = 16_000,
+        expectedProjectRevision: Int64,
+        expectedConfigRevision: Int64,
+        expectedBranchHeadRevision: Int64
+    ) {
+        self.id = id
+        self.operationID = operationID
+        self.projectID = projectID
+        self.branchID = branchID
+        self.kind = kind
+        self.mode = mode
+        self.granularity = granularity
+        self.userText = userText
+        self.userMessageID = userMessageID
+        self.assistantMessageID = assistantMessageID
+        self.candidateID = candidateID
+        self.generationReceiptID = generationReceiptID
+        self.injectionReceiptID = injectionReceiptID
+        self.sourceChapterVersionID = sourceChapterVersionID
+        self.injectionOverrides = NovelInjectionOverrides(
+            forceIncludeMaterialIDs: Array(Set(injectionOverrides.forceIncludeMaterialIDs)).sorted {
+                $0.description < $1.description
+            },
+            forceExcludeMaterialIDs: Array(Set(injectionOverrides.forceExcludeMaterialIDs)).sorted {
+                $0.description < $1.description
+            }
+        )
+        self.inputBudgetTokens = inputBudgetTokens
+        self.expectedProjectRevision = expectedProjectRevision
+        self.expectedConfigRevision = expectedConfigRevision
+        self.expectedBranchHeadRevision = expectedBranchHeadRevision
+    }
+
+    func canonicalPayloadSHA256() throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let payload = NovelCanonicalRunPayload(
+            id: id,
+            projectID: projectID,
+            branchID: branchID,
+            kind: kind,
+            mode: mode,
+            granularity: granularity,
+            userText: userText,
+            userMessageID: userMessageID,
+            assistantMessageID: assistantMessageID,
+            candidateID: candidateID,
+            generationReceiptID: generationReceiptID,
+            injectionReceiptID: injectionReceiptID,
+            sourceChapterVersionID: sourceChapterVersionID,
+            injectionOverrides: injectionOverrides,
+            inputBudgetTokens: inputBudgetTokens
+        )
+        let data = try encoder.encode(payload)
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
+private struct NovelCanonicalRunPayload: Codable {
+    let id: NovelRunID
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let kind: NovelRunKind
+    let mode: NovelSessionMode
+    let granularity: NovelGenerationGranularity?
+    let userText: String
+    let userMessageID: NovelMessageID
+    let assistantMessageID: NovelMessageID
+    let candidateID: NovelCandidateID?
+    let generationReceiptID: NovelReceiptID
+    let injectionReceiptID: NovelReceiptID
+    let sourceChapterVersionID: NovelChapterVersionID?
+    let injectionOverrides: NovelInjectionOverrides
+    let inputBudgetTokens: Int
+}
+
+struct NovelRunReceipt: Codable, Equatable, Sendable {
+    let runID: NovelRunID
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let receiptID: NovelReceiptID
+}
+
+struct NovelSessionMessageSnapshot: Codable, Equatable, Sendable {
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let message: NovelSessionMessageRecord
+}
+
+struct NovelFailure: Codable, Equatable, Sendable {
+    let code: String
+    let message: String
+    let isRetryable: Bool
+}
+
+struct NovelRun: Sendable {
+    let id: NovelRunID
+    let events: AsyncStream<NovelRunEvent>
+}
+
+enum NovelRunEvent: Sendable {
+    case started(NovelRunReceipt)
+    case delta(String)
+    case replaced(String)
+    case completed(NovelSessionMessageSnapshot)
+    case interrupted(NovelSessionMessageSnapshot?)
+    case failed(NovelFailure)
+    case persistenceBlocked(NovelFailure)
+}
+
+protocol NovelCreation: Sendable {
+    func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot
+    func perform(_ action: NovelAction) async throws -> NovelOutcome
+    func start(_ request: NovelRunRequest) async throws -> NovelRun
+    /// Closes a user-visible run across the pre-durable start and durable runtime boundary.
+    /// Success means the requested run can no longer become an active hidden run.
+    func interruptRun(_ command: NovelCancelRunCommand) async throws
+    func interruptForBackground(
+        projectID: NovelProjectID,
+        deadline: Date,
+        runID: NovelRunID?
+    ) async
+    func retryPendingTerminal(runID: NovelRunID) async throws
+}
+
+extension NovelCreation {
+    func interruptRun(_ command: NovelCancelRunCommand) async throws {
+        _ = try await perform(.cancelRun(command))
+    }
+
+    func interruptForBackground(projectID: NovelProjectID, deadline: Date) async {
+        await interruptForBackground(
+            projectID: projectID,
+            deadline: deadline,
+            runID: nil
+        )
+    }
+
+    func interruptForBackground(projectID: NovelProjectID) async {
+        await interruptForBackground(
+            projectID: projectID,
+            deadline: Date().addingTimeInterval(5),
+            runID: nil
+        )
+    }
+}
+
+enum NovelError: Error, Equatable, Sendable {
+    case invalidInput(String)
+    case projectNotFound(NovelProjectID)
+    case projectAlreadyExists(NovelProjectID)
+    case branchNotFound(NovelBranchID)
+    case sessionNotFound(NovelSessionID)
+    case stateSnapshotNotFound(NovelStateSnapshotID)
+    case checkpointNotFound(NovelCheckpointID)
+    case runNotFound(NovelRunID)
+    case staleProjectRevision(expected: Int64, actual: Int64)
+    case staleConfigRevision(expected: Int64, actual: Int64)
+    case staleBranchHeadRevision(expected: Int64, actual: Int64)
+    case idempotencyConflict(NovelOperationID)
+    case immutableRecordConflict(String)
+    case invalidDocument([String])
+    case corruptedProject(projectID: NovelProjectID, details: String)
+    case degradedReadOnly(projectID: NovelProjectID)
+    case repositoryFailure(String)
+    case storageUnavailable(String)
+    case storageIndeterminate(NovelProjectID)
+    case invalidRecovery(String)
+    case invalidPackage(String)
+    case packageTooLarge(maximumBytes: Int)
+    case packageChecksumMismatch
+    case injectionBudgetExceeded(
+        required: Int,
+        limit: Int,
+        items: [NovelInjectionBudgetItem]
+    )
+    case modelUnavailable(String)
+    case generationUnavailable
+    case unsupportedSchema(Int)
+    case projectBusy(NovelProjectID)
+}
+
+extension NovelError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .invalidInput: "输入内容或当前状态不符合要求，请检查后重试。"
+        case .projectNotFound: "找不到这个小说项目。"
+        case .projectAlreadyExists: "这个小说项目已经存在。"
+        case .branchNotFound: "找不到这个剧情分支。"
+        case .sessionNotFound: "找不到这次创作会话。"
+        case .stateSnapshotNotFound: "找不到对应的剧情状态。"
+        case .checkpointNotFound: "找不到对应的存档点。"
+        case .runNotFound: "找不到这次生成记录。"
+        case .staleProjectRevision: "项目已发生变化，请刷新后重试。"
+        case .staleConfigRevision: "项目设置已发生变化，请刷新后重试。"
+        case .staleBranchHeadRevision: "当前分支已发生变化，请刷新后重试。"
+        case .idempotencyConflict: "检测到重复但内容不同的操作，请刷新后重试。"
+        case .immutableRecordConflict: "历史记录与当前数据冲突，请重新载入项目。"
+        case .invalidDocument: "项目数据不完整或不一致，暂时无法继续编辑。"
+        case .corruptedProject: "项目文件已损坏，请尝试恢复上一个有效版本。"
+        case .degradedReadOnly: "项目已从上一个有效版本恢复，目前只能阅读。"
+        case .repositoryFailure: "项目保存失败，请稍后重试。"
+        case .storageUnavailable: "暂时无法访问项目存储。"
+        case .storageIndeterminate: "无法确认项目是否已保存，请重新载入后再继续。"
+        case .invalidRecovery: "项目恢复数据无效。"
+        case .invalidPackage: "项目包无效或不完整。"
+        case .packageTooLarge(let maximumBytes):
+            "项目包超过大小限制（最多 \(maximumBytes) 字节）。"
+        case .packageChecksumMismatch: "项目包校验失败，文件可能不完整。"
+        case .injectionBudgetExceeded(let required, let limit, _):
+            "所需上下文约为 \(required)，超过当前长度限制 \(limit)。"
+        case .modelUnavailable: "项目模型当前不可用，请在“资料 > 更多”中重新选择。"
+        case .generationUnavailable: "小说生成功能当前不可用。"
+        case .unsupportedSchema(let version): "暂不支持版本 \(version) 的小说项目。"
+        case .projectBusy: "项目正在处理其他操作。请先停止生成，或稍后再试。"
+        }
+    }
+}

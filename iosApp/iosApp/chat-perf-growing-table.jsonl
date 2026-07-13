@@ -1,0 +1,32 @@
+{"meta":{"startedAt":0,"runId":"synthetic-growing-table"}}
+{"t":0,"d":"# 长表格流式回放\n\n| 序号 | 流式阶段 | 责任边界 | 当前状态 |\n| --- | --- | --- | --- |\n"}
+{"t":300,"d":"| 1 | 接收 provider chunk | 只进入 FIFO，不创建 UI 快照 | stable |\n| 2 | claim event | 单一 consumer 保持原始顺序 | stable |\n"}
+{"t":600,"d":"| 3 | accumulator append | 只累计新 delta，不 join 历史全文 | stable |\n| 4 | flush window | 以固定节奏发布不可变 snapshot | stable |\n"}
+{"t":900,"d":"| 5 | timeline projection | 稳定历史 entry，只更新最后一行 | stable |\n| 6 | row digest | 相等历史行跳过 SwiftUI 子树重建 | stable |\n"}
+{"t":1200,"d":"| 7 | block detection | fence 与半截行状态只消费新增 UTF-8 | stable |\n| 8 | Markdown parse | 后台解析，不占用主线程滚动预算 | stable |\n"}
+{"t":1500,"d":"| 9 | render conversion | 在预渲染路径生成 attributed content | stable |\n| 10 | block publish | 复用未变化的 settled blocks | stable |\n"}
+{"t":1800,"d":"| 11 | TextKit layout | 只测量实际变化的可见段落 | active |\n| 12 | table layout | 保持列宽和真实 Markdown 语义 | active |\n"}
+{"t":2100,"d":"| 13 | viewport geometry | 只读取真实距底和可见高度 | active |\n| 14 | follow reducer | 用户查看历史时暂停自动跟随 | active |\n"}
+{"t":2400,"d":"| 15 | explicit bottom | 使用语义 bottom anchor，不写数值 offset | active |\n| 16 | live tail | 回底期间恢复实时尾行内容 | active |\n"}
+{"t":2700,"d":"| 17 | terminal settle | 承接完成后的真实高度增长或收缩 | active |\n| 18 | cold reentry | 已显示内容不重新整块淡入 | active |\n"}
+{"t":3000,"d":"| 19 | glyph animation | 只处理屏幕内新增 token | active |\n| 20 | display link | 允许系统调度到 ProMotion 刷新率 | active |\n"}
+{"t":3300,"d":"| 21 | signpost | 只记录阶段、数量与持续时间 | tracing |\n| 22 | privacy | 不记录正文、消息 ID 或工具参数 | tracing |\n"}
+{"t":3600,"d":"| 23 | SwiftUI Instrument | 检查 Update Groups 与 body causes | tracing |\n| 24 | Time Profiler | 区分 parse、TextKit 与 table cost | tracing |\n"}
+{"t":3900,"d":"| 25 | Animation Hitches | 区分 commit 与 render 阶段 | tracing |\n| 26 | fixed replay | 同一输入支持前后对账 | tracing |\n"}
+{"t":4200,"d":"| 27 | long session | 检查 projection 是否随消息数线性增长 | observing |\n| 28 | large bubble | 检查 layout 是否随 block 数线性增长 | observing |\n"}
+{"t":4500,"d":"| 29 | incremental projection | 只有 trace 命中后才替换尾 entry | pending |\n| 30 | render snapshot | settled blocks 结构共享，只有尾块变化 | pending |\n"}
+{"t":4800,"d":"| 31 | block virtualization | 只在巨大单消息成为瓶颈时启用 | pending |\n| 32 | UICollectionView | 不因理论性能重新切换正式路径 | rejected |\n"}
+{"t":5100,"d":"| 33 | 自定义 TextKit 2 | 不重做 selection、链接和无障碍 | rejected |\n| 34 | 自研 CommonMark | 不用高正确性风险换取猜测收益 | rejected |\n"}
+{"t":5400,"d":"| 35 | nested LazyVStack | 父行仍需完整高度，不能真正虚拟化 | rejected |\n| 36 | geometry compensation | 不用魔法高度掩盖坐标错误 | rejected |\n"}
+{"t":5700,"d":"| 37 | visible animation | 屏幕内效果只能保持或升级 | required |\n| 38 | offscreen work | 确认不可见后才允许降低更新频率 | required |\n"}
+{"t":6000,"d":"| 39 | gesture pause | 用户拖拽立即释放程序滚动所有权 | required |\n| 40 | resume follow | 手势或按钮回底后继续接收新 delta | required |\n"}
+{"t":6300,"d":"| 41 | partial row | 这一行故意跨 chunk，验证半截单元格不会先闪成普通文本"}
+{"t":6600,"d":"，也不会在补齐分隔符后让整张表格突然重组 | partial-complete |\n| 42 | escaped pipe | 单元格中的 A\\|B 仍属于同一列 | stable |\n"}
+{"t":6900,"d":"| 43 | long wrapped cell | 这一列包含足够长的描述，用于制造真实换行和较高行高，同时要求横向表格容器与纵向聊天列表之间不发生手势争抢 | active |\n"}
+{"t":7200,"d":"| 44 | stable column width | 追加新行时不应让已有列宽反复跳动，也不应重新播放整表淡入动画 | active |\n| 45 | final parse | EOF 后切换完成态但保持 renderer 拓扑 | settling |\n"}
+{"t":7500,"d":"| 46 | final height | 最终高度收缩时继续锚定真实内容底部 | settling |\n| 47 | follow ownership | quiet window 结束后释放临时所有权 | settling |\n"}
+{"t":7800,"d":"| 48 | history scroll | 流式期间可由用户滑入历史区阅读 | manual |\n| 49 | arrow return | 点击箭头后尾行必须立即恢复实时发布 | manual |\n"}
+{"t":8100,"d":"| 50 | continued delta | 回到底部后仍持续出现后续表格行 | manual |\n| 51 | no white flash | 冷重入保持稳定渲染身份与旧内容 | manual |\n"}
+{"t":8400,"d":"| 52 | release profile | 使用优化构建和匹配 dSYM | verified |\n| 53 | device transport | USB 稳定连接后才接受 xctrace 证据 | required |\n"}
+{"t":8700,"d":"| 54 | repeatability | 同夹具多次复现后才推进新架构 | required |\n| 55 | stopping rule | 无稳定热点时停止继续微优化 | required |\n"}
+{"t":9000,"d":"| 56 | final state | 表格结束后保持可滚动、可选择、可回底 | complete |\n"}

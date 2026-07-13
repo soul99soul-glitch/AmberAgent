@@ -6,6 +6,9 @@ struct AmberAgentApp: App {
 
     var body: some Scene {
         WindowGroup {
+#if CHAT_PERF_REPLAY
+            ChatPerfReplayView()
+#else
             AppShell(settingsStore: settingsStore)
                 .task {
                     // P5 startup recovery sweep: reclassify any run left in a
@@ -14,6 +17,7 @@ struct AmberAgentApp: App {
                     // instead of silently losing it. (truth_matrix `recover`.)
                     _ = await IOSRunRecovery.recoverInterruptedRuns()
                 }
+#endif
         }
     }
 }

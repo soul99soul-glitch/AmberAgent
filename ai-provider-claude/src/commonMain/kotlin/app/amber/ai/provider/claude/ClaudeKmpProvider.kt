@@ -391,6 +391,10 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
                         })
                     }
                 }
+                put("tool_choice", buildJsonObject {
+                    put("type", "auto")
+                    put("disable_parallel_tool_use", true)
+                })
             }
         }.mergeCustomBody(params.customBody)
     }
