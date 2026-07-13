@@ -107,6 +107,7 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
                 }
 
             } else {
+                tts?.shutdown()
                 if (continuation.isActive) continuation.resumeWithException(
                     Exception("Failed to initialize TextToSpeech engine")
                 )
@@ -116,6 +117,7 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
 
         continuation.invokeOnCancellation {
             tts?.shutdown()
+            tts = null
         }
     }
 

@@ -57,18 +57,18 @@ object ThinkTagTransformer : TailSafeOutputMessageTransformer {
         val parts = message.parts.flatMap { part ->
             if (part is UIMessagePart.Text && THINKING_REGEX.containsMatchIn(part.text)) {
                 changed = true
-                val stripped = part.text.replace(THINKING_REGEX, "")
-                val reasoning = THINKING_REGEX.find(part.text)?.groupValues?.getOrNull(1)?.trim()
-                    ?: ""
-                val hasClosingTag = CLOSING_TAG_REGEX.containsMatchIn(part.text)
-                listOf(
+                val reasoningParts = THINKING_REGEX.findAll(part.text).mapNotNull { match ->
+                    val reasoning = match.groupValues.getOrNull(1)?.trim().orEmpty()
+                    if (reasoning.isEmpty()) return@mapNotNull null
                     UIMessagePart.Reasoning(
                         reasoning = reasoning,
                         createdAt = message.createdAt.toInstant(timeZone = TimeZone.currentSystemDefault()),
-                        finishedAt = finishOpenReasoningAt ?: if (hasClosingTag) Clock.System.now() else null,
-                    ),
-                    part.copy(text = stripped),
-                )
+                        finishedAt = finishOpenReasoningAt
+                            ?: if (CLOSING_TAG_REGEX.containsMatchIn(match.value)) Clock.System.now() else null,
+                    )
+                }.toList()
+                val stripped = part.text.replace(THINKING_REGEX, "")
+                reasoningParts + listOf(part.copy(text = stripped))
             } else {
                 listOf(part)
             }

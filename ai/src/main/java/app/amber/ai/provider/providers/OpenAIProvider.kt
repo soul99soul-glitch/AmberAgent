@@ -705,18 +705,20 @@ class OpenAIProvider(
                 .build()
                 .let { client.newCall(it).await() }
         }
-        if (!response.isSuccessful) {
-            return defaultCodexOAuthModels()
-        }
+        response.use { resp ->
+            if (!resp.isSuccessful) {
+                return defaultCodexOAuthModels()
+            }
 
-        val bodyStr = response.body?.string() ?: ""
-        val root = runCatching { json.parseToJsonElement(bodyStr) }.getOrNull()
-            ?: return defaultCodexOAuthModels()
-        val data = root.findModelArray() ?: return defaultCodexOAuthModels()
-        val models = data.mapNotNull { modelJson ->
-            modelJson.toCodexModel()
-        }.filterNot { it.isCodexOAuthReviewModel() }
-        return models.ifEmpty { defaultCodexOAuthModels() }
+            val bodyStr = resp.body?.string() ?: ""
+            val root = runCatching { json.parseToJsonElement(bodyStr) }.getOrNull()
+                ?: return defaultCodexOAuthModels()
+            val data = root.findModelArray() ?: return defaultCodexOAuthModels()
+            val models = data.mapNotNull { modelJson ->
+                modelJson.toCodexModel()
+            }.filterNot { it.isCodexOAuthReviewModel() }
+            return models.ifEmpty { defaultCodexOAuthModels() }
+        }
     }
 
     private fun JsonElement.findModelArray(): JsonArray? {

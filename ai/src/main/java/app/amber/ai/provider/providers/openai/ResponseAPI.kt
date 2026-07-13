@@ -881,11 +881,12 @@ class ResponseAPI(
                 if (response != null) {
                     return parseResponseOutput(response)
                 }
+                // Fallback when nested response object is absent: usage is on the event root.
                 return MessageChunk(
                     id = jsonObject["item_id"]?.jsonPrimitive?.contentOrNull ?: "",
                     model = "",
                     choices = emptyList(),
-                    usage = parseTokenUsage(response?.get("usage")?.jsonObject)
+                    usage = parseTokenUsage(jsonObject["usage"]?.jsonObjectOrNull)
                 )
             }
         }

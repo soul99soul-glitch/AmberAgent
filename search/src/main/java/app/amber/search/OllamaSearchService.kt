@@ -83,7 +83,7 @@ object OllamaSearchService : SearchService<SearchServiceOptions.OllamaOptions> {
                     )
                 )
             } else {
-                error("Ollama search failed with code ${response.code}: ${response.message}")
+                error("Ollama search failed with code ${response.code}: ${response.message}: ${response.body?.string()}")
             }
         }
     }

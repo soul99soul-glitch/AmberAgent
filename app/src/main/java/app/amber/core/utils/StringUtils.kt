@@ -98,12 +98,12 @@ fun Double.toFixed(digits: Int = 0) = "%.${digits}f".format(this)
  */
 fun String.extractQuotedContent(): List<String> {
     val result = mutableListOf<String>()
-    // 匹配多种引号类型
+    // 匹配多种引号类型（中文全角引号必须用真正的 U+201C/U+201D 等，不能用 ASCII 伪装）
     val patterns = listOf(
-        """"([^"]*?)"""",  // 中文双引号
-        """'([^']*?)'""",  // 中文单引号
-        """"([^"]*?)"""",  // 英文双引号
-        """'([^']*?)'""",  // 英文单引号
+        "\u201C([^\u201D]*?)\u201D",  // 中文双引号 “...”
+        "\u2018([^\u2019]*?)\u2019",  // 中文单引号 ‘...’
+        "\"([^\"]*?)\"",              // 英文双引号 "..."
+        "'([^']*?)'",                 // 英文单引号 '...'
     )
     for (pattern in patterns) {
         val regex = Regex(pattern)

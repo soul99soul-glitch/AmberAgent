@@ -92,7 +92,7 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
                     )
                 )
             } else {
-                error("Metaso search request failed with code ${response.code}")
+                error("Metaso search request failed with code ${response.code}: ${response.body?.string()}")
             }
         }
     }

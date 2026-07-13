@@ -328,7 +328,10 @@ fun ChatInput(
 
     fun addImagesFromUris(uris: List<Uri>, onComplete: () -> Unit = {}) {
         scope.launch {
-            state.addImages(filesManager.createChatFilesByContents(uris))
+            val newUris = state.filterNewSourceUris(uris)
+            if (newUris.isNotEmpty()) {
+                state.addImages(filesManager.createChatFilesByContents(newUris))
+            }
             onComplete()
         }
     }
@@ -466,10 +469,13 @@ fun ChatInput(
         rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
             if (selectedUris.isNotEmpty()) {
                 scope.launch {
-                    val mimeTypes = withContext(Dispatchers.IO) {
-                        selectedUris.map { filesManager.getFileMimeType(it) }
+                    val newUris = state.filterNewSourceUris(selectedUris)
+                    if (newUris.isNotEmpty()) {
+                        val newMimes = withContext(Dispatchers.IO) {
+                            newUris.map { filesManager.getFileMimeType(it) }
+                        }
+                        state.addVideos(filesManager.createChatFilesByContents(newUris), newMimes)
                     }
-                    state.addVideos(filesManager.createChatFilesByContents(selectedUris), mimeTypes)
                     dismissExpand()
                 }
             }
@@ -483,15 +489,18 @@ fun ChatInput(
                 // into UUID-prefixed cache files; without this the chat-message Audio chip
                 // would only have the UUID to show.
                 scope.launch {
-                    val originalNames = withContext(Dispatchers.IO) {
-                        selectedUris.map {
-                            filesManager.getFileNameFromUri(it) ?: it.lastPathSegment.orEmpty()
+                    val newUris = state.filterNewSourceUris(selectedUris)
+                    if (newUris.isNotEmpty()) {
+                        val originalNames = withContext(Dispatchers.IO) {
+                            newUris.map {
+                                filesManager.getFileNameFromUri(it) ?: it.lastPathSegment.orEmpty()
+                            }
                         }
+                        val mimeTypes = withContext(Dispatchers.IO) {
+                            newUris.map { filesManager.getFileMimeType(it) }
+                        }
+                        state.addAudios(filesManager.createChatFilesByContents(newUris), originalNames, mimeTypes)
                     }
-                    val mimeTypes = withContext(Dispatchers.IO) {
-                        selectedUris.map { filesManager.getFileMimeType(it) }
-                    }
-                    state.addAudios(filesManager.createChatFilesByContents(selectedUris), originalNames, mimeTypes)
                     dismissExpand()
                 }
             }
@@ -503,7 +512,8 @@ fun ChatInput(
             if (uris.isNotEmpty()) {
                 scope.launch {
                     val failedNames = mutableListOf<String>()
-                    val documents = uris.mapNotNull { uri ->
+                    val newUris = state.filterNewSourceUris(uris)
+                    val documents = newUris.mapNotNull { uri ->
                         val fileName = withContext(Dispatchers.IO) {
                             filesManager.getFileNameFromUri(uri) ?: "file"
                         }

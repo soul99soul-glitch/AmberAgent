@@ -73,7 +73,7 @@ object SerperSearchService : SearchService<SearchServiceOptions.SerperOptions> {
 
             val response = httpClient.newCall(request).await()
             if (!response.isSuccessful) {
-                error("Serper request failed #${response.code}")
+                error("Serper request failed #${response.code}: ${response.body?.string()}")
             }
             val payload = response.body.string().let { json.decodeFromString<SerperResponse>(it) }
             val items = (payload.news ?: payload.organic ?: emptyList()).map {

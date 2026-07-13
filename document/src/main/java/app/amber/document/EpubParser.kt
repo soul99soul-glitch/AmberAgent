@@ -13,7 +13,9 @@ private data class ManifestItem(
 )
 
 object EpubParser {
-    fun parse(file: File): String {
+    private const val DEFAULT_MAX_CHARS = 512_000
+
+    fun parse(file: File, maxChars: Int = DEFAULT_MAX_CHARS): String {
         return try {
             ZipFile(file).use { zip ->
                 val opfPath = findOpfPath(zip)
@@ -35,6 +37,11 @@ object EpubParser {
                     if (content.isNotBlank()) {
                         result.append(content)
                         result.append("\n\n")
+                    }
+                    if (result.length > maxChars) {
+                        result.setLength(maxChars)
+                        result.append("\n[TRUNCATED: EPUB text exceeds $maxChars characters]")
+                        break
                     }
                 }
 

@@ -9,6 +9,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+local.properties.bak*
+*.bak
 .cursor
 .history
 .kotlin

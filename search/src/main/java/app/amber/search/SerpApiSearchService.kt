@@ -72,7 +72,7 @@ object SerpApiSearchService : SearchService<SearchServiceOptions.SerpApiOptions>
                 .build()
             val response = httpClient.newCall(Request.Builder().url(url).build()).await()
             if (!response.isSuccessful) {
-                error("SerpAPI request failed #${response.code}")
+                error("SerpAPI request failed #${response.code}: ${response.body?.string()}")
             }
             val payload = response.body.string().let { json.decodeFromString<SerpApiResponse>(it) }
             val items = (payload.newsResults ?: payload.organicResults ?: emptyList()).map {

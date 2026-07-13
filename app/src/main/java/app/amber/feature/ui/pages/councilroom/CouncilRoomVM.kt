@@ -134,9 +134,25 @@ class CouncilRoomVM(
      * Answer a host ask_user question and resume the suspended council. Called
      * from the timeline's answer card ([CouncilAskUserCard]).
      */
+    private val _answerError = MutableStateFlow<String?>(null)
+    val answerError: StateFlow<String?> = _answerError.asStateFlow()
+
+    fun consumeAnswerError() {
+        _answerError.value = null
+    }
+
     fun resumeAfterUserAnswer(answer: String) {
         viewModelScope.launch {
-            manager.resumeAfterUserAnswer(cid, answer)
+            when (val result = manager.resumeAfterUserAnswer(cid, answer)) {
+                is CouncilRoomOpResult.Err -> {
+                    android.util.Log.w(
+                        "CouncilRoomVM",
+                        "resumeAfterUserAnswer failed: ${result.code} ${result.message}",
+                    )
+                    _answerError.value = result.message
+                }
+                is CouncilRoomOpResult.Ok -> Unit
+            }
         }
     }
 

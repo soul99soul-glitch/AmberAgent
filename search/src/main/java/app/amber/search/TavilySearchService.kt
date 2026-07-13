@@ -127,7 +127,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                         }
                     ))
             } else {
-                error("response failed #${response.code}")
+                error("response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }
@@ -166,7 +166,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                     )
                 )
             } else {
-                error("response failed #${response.code}")
+                error("response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }

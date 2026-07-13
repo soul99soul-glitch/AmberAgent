@@ -499,10 +499,23 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             })
         }
 
-        is UIMessagePart.Reasoning -> buildJsonObject {
-            put("type", "thinking")
-            put("thinking", reasoning)
-            metadata?.forEach { (key, value) -> put(key, value) }
+        is UIMessagePart.Reasoning -> {
+            // Anthropic requires redacted_thinking blocks to be replayed as-is on tool rounds.
+            val redactedData = metadata?.get("redacted_thinking_data")?.jsonPrimitive?.contentOrNull
+            if (redactedData != null) {
+                buildJsonObject {
+                    put("type", "redacted_thinking")
+                    put("data", redactedData)
+                }
+            } else {
+                buildJsonObject {
+                    put("type", "thinking")
+                    put("thinking", reasoning)
+                    metadata?.forEach { (key, value) ->
+                        if (key != "redacted_thinking_data") put(key, value)
+                    }
+                }
+            }
         }
 
         else -> null
@@ -558,6 +571,19 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
                 "redacted_thinking" -> {
                     // Payload is encrypted/redacted by the provider; never log it.
+                    // Must store and replay as redacted_thinking on subsequent tool rounds.
+                    val data = block["data"]?.jsonPrimitive?.contentOrNull
+                    if (data != null) {
+                        val reasoning = UIMessagePart.Reasoning(
+                            reasoning = "",
+                            createdAt = Clock.System.now(),
+                            finishedAt = null,
+                        )
+                        reasoning.metadata = buildJsonObject {
+                            put("redacted_thinking_data", data)
+                        }
+                        parts.add(reasoning)
+                    }
                 }
 
                 "tool_use" -> {

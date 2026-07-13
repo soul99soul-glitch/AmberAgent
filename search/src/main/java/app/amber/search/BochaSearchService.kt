@@ -97,7 +97,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                     )
                 )
             } else {
-                error("Bocha response failed #${response.code}")
+                error("Bocha response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }

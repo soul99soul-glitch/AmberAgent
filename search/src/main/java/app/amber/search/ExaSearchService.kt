@@ -107,7 +107,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                         }
                     ))
             } else {
-                error("Exa response failed #${response.code}")
+                error("Exa response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }

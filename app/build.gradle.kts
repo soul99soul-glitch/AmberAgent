@@ -759,6 +759,7 @@ dependencies {
     implementation(project(":feature:task"))
     implementation(project(":feature:workspace"))
     implementation(project(":feature:icloud"))
+    implementation(project(":feature:novel"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
 

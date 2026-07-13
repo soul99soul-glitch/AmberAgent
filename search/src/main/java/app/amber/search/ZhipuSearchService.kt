@@ -91,7 +91,7 @@ object ZhipuSearchService : SearchService<SearchServiceOptions.ZhipuOptions> {
                         }
                     ))
             } else {
-                error("Zhipu response failed #${response.code}")
+                error("Zhipu response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }

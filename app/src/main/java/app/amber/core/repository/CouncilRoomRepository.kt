@@ -11,8 +11,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import app.amber.agent.data.db.dao.ConversationDAO
+import app.amber.feature.modelcouncil.CouncilMessageStatus
+import app.amber.feature.modelcouncil.CouncilParticipantStatus
 import app.amber.feature.modelcouncil.CouncilRoom
+import app.amber.feature.modelcouncil.CouncilRoomStatus
 import app.amber.feature.modelcouncil.CouncilRoomStore
+import app.amber.feature.modelcouncil.running
+import app.amber.feature.modelcouncil.terminal
 import app.amber.core.utils.JsonInstant
 import kotlin.uuid.Uuid
 
@@ -60,7 +65,7 @@ class CouncilRoomRepository(
                 val stored = runCatching { conversationDao.getCouncilState(conversationId.toString()) }
                     .getOrNull()
                 stored?.takeIf { it.isNotBlank() }?.let { json ->
-                    slot.flow.value = decodeRoom(json)
+                    slot.flow.value = repairColdLoadedRoom(decodeRoom(json))
                 }
             }
         }.flow.asStateFlow()
@@ -137,6 +142,45 @@ class CouncilRoomRepository(
     private fun decodeRoom(json: String): CouncilRoom? = runCatching {
         JsonInstant.decodeFromString<CouncilRoom>(json)
     }.getOrNull()
+
+    /**
+     * After process death, in-memory ask_user deferreds and generation jobs are gone.
+     * Project non-terminal rooms to INTERRUPTED and freeze any streaming rows so the
+     * UI has a recoverable exit instead of a permanent "进行中" zombie.
+     */
+    private fun repairColdLoadedRoom(room: CouncilRoom?): CouncilRoom? {
+        if (room == null) return null
+        val needsStatusRepair = !room.status.terminal && room.status != CouncilRoomStatus.IDLE &&
+            room.status != CouncilRoomStatus.INTERRUPTED
+        val hasRunningMessages = room.messages.any { it.status.running }
+        val hasSpeaking = room.participants.any { it.status == CouncilParticipantStatus.SPEAKING }
+        if (!needsStatusRepair && !hasRunningMessages && !hasSpeaking) return room
+        val messages = room.messages.map { m ->
+            if (m.status.running) {
+                m.copy(status = CouncilMessageStatus.FAILED, error = m.error.ifBlank { "interrupted" })
+            } else {
+                m
+            }
+        }
+        val participants = room.participants.map { p ->
+            if (p.status == CouncilParticipantStatus.SPEAKING) {
+                p.copy(status = CouncilParticipantStatus.IDLE)
+            } else {
+                p
+            }
+        }
+        val status = when {
+            needsStatusRepair -> CouncilRoomStatus.INTERRUPTED
+            room.status == CouncilRoomStatus.INTERRUPTED -> CouncilRoomStatus.INTERRUPTED
+            else -> room.status
+        }
+        return room.copy(
+            status = status,
+            messages = messages,
+            participants = participants,
+            updatedAtMs = System.currentTimeMillis(),
+        )
+    }
 
     /** Persist a room directly to SQLite, bypassing the in-memory slot. Used by [closeAndEvict] fallback. */
     private suspend fun persistRoomDirect(room: CouncilRoom) {

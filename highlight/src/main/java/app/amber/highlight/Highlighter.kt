@@ -74,8 +74,9 @@ class Highlighter(ctx: Context) {
     private suspend fun highlightJvm(code: String, language: String): List<HighlightToken> =
         suspendCancellableCoroutine { continuation ->
             executor.submit {
-                runCatching {
-                    val result = highlightFn.call(code, language)
+                var result: Any? = null
+                try {
+                    result = highlightFn.call(code, language)
                     require(result is QuickJSArray) {
                         "highlight result must be an array"
                     }
@@ -99,13 +100,14 @@ class Highlighter(ctx: Context) {
                             else -> error("Unknown type: ${element::class.java.name}")
                         }
                     }
-                    result.release()
-                    continuation.resume(tokens)
-                }.onFailure {
-                    it.printStackTrace()
+                    if (continuation.isActive) continuation.resume(tokens)
+                } catch (t: Throwable) {
+                    t.printStackTrace()
                     if (continuation.isActive) {
-                        continuation.resumeWithException(it)
+                        continuation.resumeWithException(t)
                     }
+                } finally {
+                    (result as? QuickJSArray)?.release()
                 }
             }
         }

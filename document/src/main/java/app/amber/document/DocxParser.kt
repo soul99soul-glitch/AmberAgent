@@ -18,14 +18,16 @@ private data class ParagraphProperties(
 )
 
 object DocxParser {
-    fun parse(file: File): String {
+    private const val DEFAULT_MAX_CHARS = 512_000
+
+    fun parse(file: File, maxChars: Int = DEFAULT_MAX_CHARS): String {
         return try {
             file.inputStream().use { fileInputStream ->
                 ZipInputStream(fileInputStream).use { zipStream ->
                     var entry = zipStream.nextEntry
                     while (entry != null) {
                         if (entry.name == "word/document.xml") {
-                            return parseDocumentXml(zipStream)
+                            return parseDocumentXml(zipStream, maxChars)
                         }
                         entry = zipStream.nextEntry
                     }
@@ -37,7 +39,7 @@ object DocxParser {
         }
     }
 
-    private fun parseDocumentXml(inputStream: InputStream): String {
+    private fun parseDocumentXml(inputStream: InputStream, maxChars: Int): String {
         return try {
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = true
@@ -46,6 +48,7 @@ object DocxParser {
 
             val result = StringBuilder()
             var inBody = false
+            var truncated = false
 
             while (parser.eventType != XmlPullParser.END_DOCUMENT) {
                 when (parser.eventType) {
@@ -55,6 +58,11 @@ object DocxParser {
                             "p" -> if (inBody) processParagraph(parser, result)
                             "tbl" -> if (inBody) processTable(parser, result)
                         }
+                        if (result.length > maxChars) {
+                            result.setLength(maxChars)
+                            truncated = true
+                            break
+                        }
                     }
                     XmlPullParser.END_TAG -> {
                         if (parser.name == "body") inBody = false
@@ -63,7 +71,8 @@ object DocxParser {
                 parser.next()
             }
 
-            result.toString().trim()
+            val text = result.toString().trim()
+            if (truncated) "$text\n[TRUNCATED: DOCX text exceeds $maxChars characters]" else text
         } catch (e: Exception) {
             "Error parsing document XML: ${e.message}"
         }

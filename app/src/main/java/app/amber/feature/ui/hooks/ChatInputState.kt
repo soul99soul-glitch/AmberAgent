@@ -15,6 +15,8 @@ class ChatInputState {
     var editingMessage by mutableStateOf<Uuid?>(null)
     private var editingParts: List<UIMessagePart>? = null
     private var editingAttachmentUrls: Set<String> = emptySet()
+    /** Source URIs already accepted this session (dedupe before UUID copy). */
+    private var acceptedSourceUris: MutableSet<String> = mutableSetOf()
 
     fun clearInput() {
         textContent.setTextAndPlaceCursorAtEnd("")
@@ -22,6 +24,7 @@ class ChatInputState {
         editingMessage = null
         editingParts = null
         editingAttachmentUrls = emptySet()
+        acceptedSourceUris = mutableSetOf()
     }
 
     fun isEditing() = editingMessage != null
@@ -87,12 +90,25 @@ class ChatInputState {
         return textContent.text.isEmpty()
     }
 
+    /**
+     * Filter [sourceUris] against already-accepted sources before the caller copies
+     * them into chat files (each copy gets a new UUID name, so target-url dedupe is a no-op).
+     */
+    fun filterNewSourceUris(sourceUris: List<Uri>): List<Uri> {
+        return sourceUris.filter { uri ->
+            val key = uri.toString()
+            if (key in acceptedSourceUris) false else {
+                acceptedSourceUris.add(key)
+                true
+            }
+        }
+    }
+
     fun addImages(uris: List<Uri>) {
         val newMessage = messageContent.toMutableList()
         val existingUrls = newMessage.filterIsInstance<UIMessagePart.Image>().map { it.url }.toMutableSet()
         uris.forEach { uri ->
             val url = uri.toString()
-            // 去重：避免同一张图片被多次添加（用户多次点击时）
             if (url !in existingUrls) {
                 newMessage.add(UIMessagePart.Image(url))
                 existingUrls.add(url)

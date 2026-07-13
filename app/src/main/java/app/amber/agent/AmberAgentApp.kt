@@ -30,6 +30,7 @@ import app.amber.core.di.chatModule
 import app.amber.core.di.dataSourceModule
 import app.amber.core.di.iCloudModule
 import app.amber.core.di.memoryModule
+import app.amber.core.di.novelModule
 import app.amber.core.di.repositoryModule
 import app.amber.core.di.webMountModule
 import app.amber.core.di.viewModelModule
@@ -72,8 +73,10 @@ class AmberAgentApp : Application() {
             androidLogger()
             androidContext(this@AmberAgentApp)
             workManagerFactory()
-            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, viewModelModule, dataSourceModule, repositoryModule)
+            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, novelModule, viewModelModule, dataSourceModule, repositoryModule)
         }
+        // Explicit lifecycle bridge start (not lazy page-triggered).
+        get<app.amber.feature.novel.NovelLifecycleBridge>().start()
         this.createNotificationChannel()
 
         // set cursor window size to 32MB

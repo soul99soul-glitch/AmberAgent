@@ -98,7 +98,7 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                     )
                 )
             } else {
-                error("Brave search failed with code ${response.code}: ${response.message}")
+                error("Brave search failed with code ${response.code}: ${response.message}: ${response.body?.string()}")
             }
         }
     }

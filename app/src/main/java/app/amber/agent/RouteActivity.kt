@@ -107,6 +107,8 @@ import app.amber.feature.ui.pages.imggen.ImageGenPage
 import app.amber.feature.ui.pages.live.LiveCompanionPage
 import app.amber.feature.ui.pages.log.LogPage
 import app.amber.feature.ui.pages.miniapp.MiniAppListPage
+import app.amber.feature.ui.pages.novel.NovelProjectsPage
+import app.amber.feature.ui.pages.novel.NovelWorkspacePage
 import app.amber.feature.ui.pages.miniapp.MiniAppRunnerPage
 import app.amber.feature.ui.pages.miniapp.MiniAppSettingsPage
 import app.amber.feature.ui.pages.search.SearchPage
@@ -687,6 +689,14 @@ class RouteActivity : ComponentActivity() {
                                 MiniAppListPage()
                             }
 
+                            entry<Screen.NovelProjects> {
+                                NovelProjectsPage()
+                            }
+
+                            entry<Screen.NovelWorkspace> { key ->
+                                NovelWorkspacePage(projectId = key.projectId)
+                            }
+
                             entry<Screen.MiniAppRunner> { key ->
                                 MiniAppRunnerPage(appId = key.appId)
                             }
@@ -967,6 +977,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object MiniAppList : Screen
+
+    @Serializable
+    data object NovelProjects : Screen
+
+    @Serializable
+    data class NovelWorkspace(val projectId: String) : Screen
 
     @Serializable
     data class MiniAppRunner(val appId: String) : Screen

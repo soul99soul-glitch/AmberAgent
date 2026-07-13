@@ -25,7 +25,7 @@ object HackerNewsSearchService {
                 .build()
             val response = httpClient.newCall(Request.Builder().url(url).build()).await()
             if (!response.isSuccessful) {
-                error("Hacker News request failed #${response.code}")
+                error("Hacker News request failed #${response.code}: ${response.body?.string()}")
             }
             val payload = response.body.string().let { json.decodeFromString<HackerNewsResponse>(it) }
             SearchResult(

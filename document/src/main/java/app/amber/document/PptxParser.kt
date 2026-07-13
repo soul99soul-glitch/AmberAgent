@@ -14,7 +14,9 @@ private data class SlideContent(
 )
 
 object PptxParser {
-    fun parse(file: File): String {
+    private const val DEFAULT_MAX_CHARS = 512_000
+
+    fun parse(file: File, maxChars: Int = DEFAULT_MAX_CHARS): String {
         return try {
             ZipFile(file).use { zipFile ->
                 val slides = mutableListOf<SlideContent>()
@@ -49,14 +51,14 @@ object PptxParser {
                 }
 
                 // Format output
-                formatOutput(slides)
+                formatOutput(slides, maxChars)
             }
         } catch (e: Exception) {
             "Error parsing PPTX file: ${e.message}"
         }
     }
 
-    private fun formatOutput(slides: List<SlideContent>): String {
+    private fun formatOutput(slides: List<SlideContent>, maxChars: Int): String {
         val result = StringBuilder()
 
         slides.forEach { slide ->
@@ -69,6 +71,11 @@ object PptxParser {
             }
 
             result.append("\n")
+            if (result.length > maxChars) {
+                result.setLength(maxChars)
+                result.append("\n[TRUNCATED: PPTX text exceeds $maxChars characters]")
+                return result.toString()
+            }
         }
 
         return result.toString().trim()

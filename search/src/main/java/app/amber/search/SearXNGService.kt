@@ -123,7 +123,7 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
 
                 return@withContext Result.success(SearchResult(items = items))
             } else {
-                error("SearXNG request failed with status ${response.code}")
+                error("SearXNG request failed with status ${response.code}: ${response.body?.string()}")
             }
         }
     }

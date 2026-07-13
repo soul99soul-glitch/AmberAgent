@@ -63,6 +63,7 @@ import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.DashboardSquare01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.UserGroup
+import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.Time02
@@ -545,6 +546,13 @@ private fun V3DrawerHeader(
             accent = false,
             chatTheme = chatTheme,
             onClick = { navController.navigate(Screen.MiniAppList) },
+        )
+        V3NavRow(
+            icon = HugeIcons.BookOpen01,
+            label = "小说创作",
+            accent = false,
+            chatTheme = chatTheme,
+            onClick = { navController.navigate(Screen.NovelProjects) },
         )
 
         // (4) QuickRow: 3 icon-only buttons (Workspace 文件 / 伴随智能 / 聊天热力图统计)

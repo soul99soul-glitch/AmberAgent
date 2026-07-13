@@ -905,10 +905,20 @@ class CouncilRoomManager(
         answer: String,
     ): CouncilRoomOpResult {
         val deferred = jobsLock.withLock { pendingAskUser.remove(conversationId) }
-            ?: return CouncilRoomOpResult.Err("no_pending_question", "No pending ask_user for this room.")
+        // Timeout / process death: no parked deferred. Still accept the answer as a
+        // USER message and try to wake orchestration so the reply is never silent-dropped.
         val result = mutate(conversationId) { room ->
             if (room.status.terminal) {
                 return@mutate CouncilRoomOpResult.Err("room_terminal", "Room has ended.")
+            }
+            if (deferred == null &&
+                room.status != CouncilRoomStatus.INTERRUPTED &&
+                !room.status.running
+            ) {
+                return@mutate CouncilRoomOpResult.Err(
+                    "no_pending_question",
+                    "No pending ask_user for this room.",
+                )
             }
             val now = nowMs()
             val askMessage = room.messages.lastOrNull { it.kind == CouncilMessageKind.ASK_USER }
@@ -936,7 +946,13 @@ class CouncilRoomManager(
                 updatedAtMs = now,
             ))
         }
-        deferred.complete(answer)
+        if (result is CouncilRoomOpResult.Err) return result
+        if (deferred != null) {
+            deferred.complete(answer)
+        } else {
+            // Recovery path: restart auto-run after appending the answer.
+            maybeStartAutoRun(conversationId)
+        }
         return result
     }
 
@@ -2089,8 +2105,26 @@ class CouncilRoomManager(
                     room.status == CouncilRoomStatus.FINALIZING || room.synthesis.isNotBlank() -> CouncilRoomStatus.FINALIZED
                     else -> CouncilRoomStatus.FINALIZED  // graceful close without synthesis
                 }
+                // Sweep in-flight streaming rows / SPEAKING participants so a closed room
+                // never reopens with permanent "正在发言" bubbles (isStreaming stay true).
+                val messages = room.messages.map { m ->
+                    if (m.status.running) {
+                        m.copy(status = CouncilMessageStatus.FAILED, error = m.error.ifBlank { "interrupted" })
+                    } else {
+                        m
+                    }
+                }
+                val participants = room.participants.map { p ->
+                    if (p.status == CouncilParticipantStatus.SPEAKING) {
+                        p.copy(status = CouncilParticipantStatus.IDLE)
+                    } else {
+                        p
+                    }
+                }
                 val updated = room.copy(
                     status = nextStatus,
+                    messages = messages,
+                    participants = participants,
                     finishedAtMs = now,
                     updatedAtMs = now,
                 )

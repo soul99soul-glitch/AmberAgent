@@ -22,7 +22,14 @@ class MessageStreamAccumulator(
     private var active = MutableMessage.from(initialMessages.last())
 
     fun append(chunk: MessageChunk) {
-        val choice = chunk.choices.getOrNull(0) ?: return
+        // Usage often arrives as a final empty-choices chunk (stream_options.include_usage).
+        val choice = chunk.choices.getOrNull(0)
+        if (choice == null) {
+            chunk.usage?.let { usage ->
+                active.usage = active.usage.merge(usage)
+            }
+            return
+        }
         val finalMessage = choice.message
         if (choice.delta == null && finalMessage != null) {
             replaceActive(finalMessage)

@@ -39,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -65,8 +66,10 @@ import app.amber.feature.modelcouncil.terminal
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 import app.amber.feature.ui.theme.LocalAmberTokens
+import com.dokar.sonner.ToastType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowReloadHorizontal
@@ -93,7 +96,15 @@ fun CouncilRoomPage(
     val room by vm.room.collectAsStateWithLifecycle()
     val isRestarting by vm.isRestarting.collectAsStateWithLifecycle()
     val reopenToken by vm.reopenToken.collectAsStateWithLifecycle()
+    val answerError by vm.answerError.collectAsStateWithLifecycle()
     val chatTheme = LocalChatTheme.current
+    val toaster = LocalToaster.current
+
+    LaunchedEffect(answerError) {
+        val msg = answerError ?: return@LaunchedEffect
+        toaster.show(msg, type = ToastType.Error)
+        vm.consumeAnswerError()
+    }
 
     // Only consume the status-bar inset here; the composer handles the bottom
     // (ime + nav) itself, so the keyboard lifts the input above it.
@@ -146,7 +157,15 @@ fun CouncilRoomPage(
                         // restart, so the timeline's remember'd state (entries,
                         // poppedKeys, listState, scroll position) all reset to the
                         // fresh room instead of carrying the old deliberation over.
-                        CouncilRoomBody(state.room, vm = vm, onRestart = null)
+                        // INTERRUPTED (cold recovery / ask_user pause) needs a restart
+                        // exit; terminal rooms use the Terminal branch above.
+                        val canRestart =
+                            state.room.status == app.amber.feature.modelcouncil.CouncilRoomStatus.INTERRUPTED
+                        CouncilRoomBody(
+                            state.room,
+                            vm = vm,
+                            onRestart = if (canRestart) vm::restart else null,
+                        )
                     }
                 }
             }

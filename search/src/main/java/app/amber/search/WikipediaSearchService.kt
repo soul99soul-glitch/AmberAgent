@@ -38,7 +38,7 @@ object WikipediaSearchService {
                     .build()
             ).await()
             if (!response.isSuccessful) {
-                error("Wikipedia request failed #${response.code}")
+                error("Wikipedia request failed #${response.code}: ${response.body?.string()}")
             }
             val payload = response.body.string().let { json.decodeFromString<WikipediaResponse>(it) }
             val base = "${url.scheme}://${url.host}/wiki/"

@@ -1089,8 +1089,16 @@ class ChatService(
                 val conversation = ensureFullConversationLoaded(conversationId)
 
                 if (message.role == MessageRole.USER) {
-                    // 如果是用户消息，则截止到当前消息
-                    val node = conversation.getMessageNodeByMessage(message)
+                    // 如果是用户消息，则截止到当前消息（按 id 查找，避免值相等在并发写后 miss）
+                    val node = conversation.getMessageNodeByMessageId(message.id)
+                    if (node == null) {
+                        addError(
+                            IllegalStateException("Message node not found for regenerate: ${message.id}"),
+                            conversationId,
+                            title = context.getString(R.string.error_title_regenerate_message),
+                        )
+                        return@launch
+                    }
                     val indexAt = conversation.messageNodes.indexOf(node)
                     val newConversation = conversation.copy(
                         messageNodes = conversation.messageNodes.subList(0, indexAt + 1)
@@ -1100,7 +1108,15 @@ class ChatService(
                     handleMessageComplete(conversationId)
                 } else {
                     if (regenerateAssistantMsg) {
-                        val node = conversation.getMessageNodeByMessage(message)
+                        val node = conversation.getMessageNodeByMessageId(message.id)
+                        if (node == null) {
+                            addError(
+                                IllegalStateException("Message node not found for regenerate: ${message.id}"),
+                                conversationId,
+                                title = context.getString(R.string.error_title_regenerate_message),
+                            )
+                            return@launch
+                        }
                         val nodeIndex = conversation.messageNodes.indexOf(node)
                         contextEngine.invalidateCompacts(conversationId, "message_regenerated")
                         handleMessageComplete(conversationId, messageRange = 0..<nodeIndex)

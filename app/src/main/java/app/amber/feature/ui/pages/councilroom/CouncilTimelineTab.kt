@@ -1264,6 +1264,8 @@ private fun CouncilAskUserCard(
                             val text = answer.trim()
                             if (text.isNotEmpty()) {
                                 onAnswer(text)
+                                // Clear only after submit; if VM rejects, user can
+                                // re-type — recovery path now accepts late answers.
                                 answer = ""
                             }
                         },

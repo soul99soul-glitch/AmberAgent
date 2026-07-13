@@ -15,6 +15,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.TokenUsage
+import app.amber.ai.core.merge
 import app.amber.ai.provider.Model
 import app.amber.ai.util.json
 import kotlin.time.Clock
@@ -237,7 +238,13 @@ fun List<UIMessage>.handleMessageChunk(chunk: MessageChunk, model: Model? = null
     require(this.isNotEmpty()) {
         "messages must not be empty"
     }
-    val choice = chunk.choices.getOrNull(0) ?: return this
+    // Usage often arrives as a final empty-choices chunk (stream_options.include_usage).
+    val choice = chunk.choices.getOrNull(0)
+    if (choice == null) {
+        val usage = chunk.usage ?: return this
+        val last = this.last()
+        return this.dropLast(1) + last.copy(usage = last.usage.merge(usage))
+    }
     val message = choice.delta ?: choice.message ?: return this
     if (this.last().role != message.role) {
         return this + (UIMessage(modelId = model?.id, role = message.role, parts = emptyList()) + chunk)

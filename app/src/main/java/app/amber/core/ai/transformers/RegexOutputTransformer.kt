@@ -8,12 +8,25 @@ import app.amber.core.ai.transformers.replaceRegexes
 import org.koin.core.component.KoinComponent
 
 object RegexOutputTransformer : TailSafeOutputMessageTransformer, KoinComponent {
+    // User regexes are intentionally NOT applied on the ~33ms streaming visual path
+    // (ReDoS risk: catastrophic backtracking hangs the generation coroutine permanently).
+    // Apply only once when generation finishes.
     override suspend fun visualTransform(
+        ctx: TransformerContext,
+        messages: List<UIMessage>,
+    ): List<UIMessage> = messages
+
+    override suspend fun visualTransformTail(
+        ctx: TransformerContext,
+        message: UIMessage,
+    ): UIMessage = message
+
+    override suspend fun onGenerationFinish(
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
         val assistant = ctx.assistant
-        if (assistant.regexes.isEmpty()) return messages // No regexes, return original messages
+        if (assistant.regexes.isEmpty()) return messages
         var changed = false
         val transformed = messages.map { message ->
             val next = transformMessage(ctx, message)
@@ -21,14 +34,6 @@ object RegexOutputTransformer : TailSafeOutputMessageTransformer, KoinComponent 
             next
         }
         return if (changed) transformed else messages
-    }
-
-    override suspend fun visualTransformTail(
-        ctx: TransformerContext,
-        message: UIMessage,
-    ): UIMessage {
-        if (ctx.assistant.regexes.isEmpty()) return message
-        return transformMessage(ctx, message)
     }
 
     private fun transformMessage(

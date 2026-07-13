@@ -243,8 +243,10 @@ class LoopbackOAuthCallbackServer(
             callback.isSuccess -> SUCCESS_HTML
             else -> FAILURE_HTML.replace(
                 "{ERROR}",
-                (callback.error ?: "unknown") +
-                    (callback.errorDescription?.let { " — $it" } ?: ""),
+                htmlEscape(
+                    (callback.error ?: "unknown") +
+                        (callback.errorDescription?.let { " — $it" } ?: ""),
+                ),
             )
         }
         val bodyBytes = html.toByteArray(Charsets.UTF_8)
@@ -297,5 +299,18 @@ class LoopbackOAuthCallbackServer(
                 "<title>AmberAgent OAuth</title></head><body>" +
                 "<p style='font-family:sans-serif;color:#6a6a66;padding:24px;'>" +
                 "Not found.</p></body></html>"
+
+        private fun htmlEscape(raw: String): String = buildString(raw.length) {
+            for (ch in raw) {
+                when (ch) {
+                    '&' -> append("&amp;")
+                    '<' -> append("&lt;")
+                    '>' -> append("&gt;")
+                    '"' -> append("&quot;")
+                    '\'' -> append("&#39;")
+                    else -> append(ch)
+                }
+            }
+        }
     }
 }
