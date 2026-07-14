@@ -182,6 +182,38 @@ final class NovelManualEditSyncTests: XCTestCase {
         }
     }
 
+    func testImmediateCollectionCanFollowManualEditWithoutLegacyPending() throws {
+        var document = try documentWithTwoCollectedChapters()
+        let firstChapter = document.branches[0].workingChapterSelections[0].chapterID
+        let edit = manualEditCommand(
+            document: document,
+            chapterID: firstChapter,
+            title: "Chapter One",
+            content: "Mara rewrote the first fact."
+        )
+        document = try NovelFactTransactionReducer.saveManualEdit(
+            edit,
+            payloadSHA256: edit.canonicalPayloadSHA256(),
+            in: document,
+            now: now
+        ).document
+        document = try documentWithCandidate("A third candidate.", in: document)
+        let candidate = try XCTUnwrap(document.candidates.last)
+        let collect = collectCommand(document: document, candidate: candidate)
+
+        let committed = try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
+            collect,
+            payloadSHA256: collect.canonicalPayloadSHA256(),
+            in: document,
+            now: now.addingTimeInterval(1)
+        ).document
+
+        XCTAssertTrue(committed.pendingOperations.isEmpty)
+        XCTAssertEqual(committed.branches[0].syncStatus, .needsSync)
+        XCTAssertEqual(committed.branches[0].workingChapterSelections[0].versionID, edit.versionID)
+        XCTAssertEqual(committed.chapterVersions.last?.content, candidate.content)
+    }
+
     func testWorkingRevisionGuardsDoNotChangeSemanticPayloadHashes() throws {
         let document = try documentWithTwoCollectedChapters()
         let branch = document.branches[0]

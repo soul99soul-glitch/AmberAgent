@@ -19,6 +19,7 @@ struct AppShell: View {
     @State private var conversationStore: IOSConversationStore
     @State private var chatViewModel: ChatViewModel
     @State private var novelCreationViewModel: NovelCreationViewModel?
+    @State private var novelLifecycleCoordinator: NovelWorkspaceLifecycleCoordinator
     @State private var novelCreationErrorMessage: String?
     @State private var rootRouter = RouterPath()
     @Environment(\.scenePhase) private var scenePhase
@@ -73,6 +74,9 @@ struct AppShell: View {
         self._conversationStore = State(initialValue: conversationStore)
         self._chatViewModel = State(initialValue: chatViewModel)
         self._novelCreationViewModel = State(initialValue: novelCreationViewModel)
+        self._novelLifecycleCoordinator = State(
+            initialValue: NovelWorkspaceLifecycleCoordinator()
+        )
         self._novelCreationErrorMessage = State(initialValue: novelCreationErrorMessage)
         IOSDeepReadBackgroundCoordinator.shared.configure(sharedSettings: sharedSettingsStore)
         IOSChatBackgroundGenerationCoordinator.shared.configure(
@@ -117,9 +121,7 @@ struct AppShell: View {
         .tint(AmberTheme.accent)
         .preferredColorScheme(preferredColorScheme)
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background {
-                _ = chatViewModel.handoffGenerationToBackgroundIfNeeded()
-            }
+            handleScenePhaseChange(phase)
         }
         .task {
             // 启动时引导会话存储：加载历史摘要，选最近一条或新建。
@@ -132,6 +134,28 @@ struct AppShell: View {
 
     private var preferredColorScheme: ColorScheme? {
         (IOSAppearanceMode(rawValue: appearanceMode) ?? .light).colorScheme
+    }
+
+    private func handleScenePhaseChange(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            _ = chatViewModel.handoffGenerationToBackgroundIfNeeded()
+            guard let novelCreationViewModel else { return }
+            novelLifecycleCoordinator.enterBackground(
+                waitForCompletion: {
+                    await novelCreationViewModel.waitForBackgroundGeneration()
+                },
+                interrupt: { deadline in
+                    await novelCreationViewModel.interruptSessionForBackground(deadline: deadline)
+                }
+            )
+        case .active:
+            novelLifecycleCoordinator.enterForeground()
+        case .inactive:
+            break
+        @unknown default:
+            break
+        }
     }
 
     @ViewBuilder

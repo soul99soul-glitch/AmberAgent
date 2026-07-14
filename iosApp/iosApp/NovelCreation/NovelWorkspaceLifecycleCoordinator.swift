@@ -3,6 +3,7 @@ import UIKit
 
 @MainActor
 final class NovelWorkspaceLifecycleCoordinator {
+    typealias BackgroundCompletion = @MainActor () async -> Void
     typealias BackgroundInterruption = @MainActor (Date) async -> Void
     typealias BeginBackgroundTask = @MainActor (
         _ name: String,
@@ -14,18 +15,16 @@ final class NovelWorkspaceLifecycleCoordinator {
         let id: UUID
         let backgroundTaskID: UIBackgroundTaskIdentifier
         let interruption: BackgroundInterruption
-        var interruptionStarted: Bool
-        let timeoutTask: Task<Void, Never>
+        var completionTask: Task<Void, Never>?
+        var isExpiring: Bool
     }
 
-    private let timeout: TimeInterval
     private let now: @MainActor () -> Date
     private let beginBackgroundTask: BeginBackgroundTask
     private let endBackgroundTask: EndBackgroundTask
     private var cycle: Cycle?
 
     init(
-        timeout: TimeInterval = 5,
         now: @escaping @MainActor () -> Date = Date.init,
         beginBackgroundTask: @escaping BeginBackgroundTask = { name, expirationHandler in
             UIApplication.shared.beginBackgroundTask(
@@ -37,13 +36,15 @@ final class NovelWorkspaceLifecycleCoordinator {
             UIApplication.shared.endBackgroundTask(identifier)
         }
     ) {
-        self.timeout = max(0, timeout)
         self.now = now
         self.beginBackgroundTask = beginBackgroundTask
         self.endBackgroundTask = endBackgroundTask
     }
 
-    func enterBackground(interrupt: @escaping BackgroundInterruption) {
+    func enterBackground(
+        waitForCompletion: @escaping BackgroundCompletion,
+        interrupt: @escaping BackgroundInterruption
+    ) {
         guard cycle == nil else { return }
 
         let cycleID = UUID()
@@ -53,45 +54,46 @@ final class NovelWorkspaceLifecycleCoordinator {
             }
         }
         let backgroundTaskID = beginBackgroundTask(
-            "Amber Novel Background Flush",
+            "Amber Novel Background Generation",
             expirationHandler
         )
-        let timeoutNanoseconds = UInt64(timeout * 1_000_000_000)
-        let timeoutTask = Task { @MainActor in
-            if timeoutNanoseconds > 0 {
-                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-            }
-            guard !Task.isCancelled else { return }
-            expire(cycleID: cycleID)
-        }
         cycle = Cycle(
             id: cycleID,
             backgroundTaskID: backgroundTaskID,
             interruption: interrupt,
-            interruptionStarted: false,
-            timeoutTask: timeoutTask
+            completionTask: nil,
+            isExpiring: false
         )
 
-        requestInterruption(
-            cycleID: cycleID,
-            deadline: now().addingTimeInterval(timeout)
-        )
+        guard backgroundTaskID != .invalid else {
+            expire(cycleID: cycleID)
+            return
+        }
+        let completionTask = Task { @MainActor [weak self] in
+            await waitForCompletion()
+            guard !Task.isCancelled else { return }
+            self?.finish(cycleID: cycleID)
+        }
+        cycle?.completionTask = completionTask
+    }
+
+    func enterForeground() {
+        guard let cycle else { return }
+        finish(cycleID: cycle.id)
     }
 
     private func expire(cycleID: UUID) {
-        requestInterruption(cycleID: cycleID, deadline: now())
-        finish(cycleID: cycleID)
-    }
-
-    private func requestInterruption(cycleID: UUID, deadline: Date) {
         guard var current = cycle,
               current.id == cycleID,
-              !current.interruptionStarted else { return }
-        current.interruptionStarted = true
+              !current.isExpiring else { return }
+        current.isExpiring = true
+        current.completionTask?.cancel()
+        current.completionTask = nil
         cycle = current
 
-        Task { @MainActor in
-            await current.interruption(deadline)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await current.interruption(now())
             finish(cycleID: cycleID)
         }
     }
@@ -99,7 +101,7 @@ final class NovelWorkspaceLifecycleCoordinator {
     private func finish(cycleID: UUID) {
         guard let current = cycle, current.id == cycleID else { return }
         cycle = nil
-        current.timeoutTask.cancel()
+        current.completionTask?.cancel()
         guard current.backgroundTaskID != .invalid else { return }
         endBackgroundTask(current.backgroundTaskID)
     }

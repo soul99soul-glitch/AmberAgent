@@ -402,7 +402,6 @@ final class NovelSessionViewModel {
               let candidate = candidate(id: candidateID),
               candidate.kind == .prose,
               candidate.status == .available,
-              branch.branch.syncStatus == .synchronized,
               branchPendingOperations.isEmpty,
               snapshotMatchesBinding else { return false }
         do {
@@ -672,7 +671,9 @@ private extension NovelSessionViewModel {
         switch kind {
         case .discussion:
             return true
-        case .prose, .polish:
+        case .prose:
+            return branchPendingOperations.isEmpty
+        case .polish:
             return branch.syncStatus == .synchronized && branchPendingOperations.isEmpty
         case .quickStart:
             return false
@@ -1186,6 +1187,6 @@ private extension NovelSessionViewModel {
     }
 
     func describe(_ error: Error) -> String {
-        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        NovelPresentation.operationErrorMessage(error)
     }
 }

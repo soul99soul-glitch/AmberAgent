@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct NovelChapterReaderRoute: Identifiable {
+struct NovelChapterReaderRoute: Identifiable, Hashable {
     let selection: NovelChapterSelection
     var id: NovelChapterID { selection.chapterID }
 }
@@ -31,13 +31,13 @@ struct NovelChapterReaderView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(AmberTheme.borderSoft)
-            reader
-            chapterNavigation
-        }
+        reader
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                chapterNavigation
+            }
         .background(AmberTheme.background.ignoresSafeArea())
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { readerToolbar }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .versions(let selection):
@@ -56,18 +56,9 @@ struct NovelChapterReaderView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭阅读")
-
+    @ToolbarContentBuilder
+    private var readerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(chapterOrdinalTitle)
                     .font(.caption)
@@ -76,8 +67,9 @@ struct NovelChapterReaderView: View {
                     .font(.headline)
                     .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
 
+        ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button {
                     if let selection = currentSelection {
@@ -105,13 +97,14 @@ struct NovelChapterReaderView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Circle())
+                    .modifier(ComposerDockCircleGlass(tint: nil))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("章节操作")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
     }
 
     private var reader: some View {
@@ -145,29 +138,46 @@ struct NovelChapterReaderView: View {
     }
 
     private var chapterNavigation: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 0) {
             Button {
                 moveChapter(by: -1)
             } label: {
-                Label("上一章", systemImage: "chevron.left")
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 7) {
+                    Image(systemName: "chevron.left")
+                    Text("上一章")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
             .disabled(currentIndex <= 0)
+
+            Divider()
+                .frame(height: 20)
 
             Button {
                 moveChapter(by: 1)
             } label: {
-                Label("下一章", systemImage: "chevron.right")
-                    .labelStyle(.titleAndIcon)
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 7) {
+                    Text("下一章")
+                    Image(systemName: "chevron.right")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
             .disabled(currentIndex < 0 || currentIndex >= chapterSelections.count - 1)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(AmberTheme.surface)
+        .foregroundStyle(AmberTheme.foreground2)
+        .frame(maxWidth: 360)
+        .amberGlass(cornerRadius: 24, interactive: false)
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
     }
 
     private var chapterSelections: [NovelChapterSelection] {

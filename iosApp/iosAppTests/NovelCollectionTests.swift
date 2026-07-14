@@ -168,6 +168,49 @@ final class NovelCollectionTests: XCTestCase {
         XCTAssertEqual(appended.map(\.sequence), appended.map(\.sequence).sorted())
     }
 
+    func testCollectionDerivesMissingUnresolvedAliasesFromEvidenceBackedReferences() throws {
+        let manuscript = "朱重九醒来后，朱重八让他照看伤兵。"
+        let document = try documentWithCandidate(manuscript)
+        let command = collectCommand(document: document)
+        let prepared = try NovelFactTransactionReducer.prepareCollection(
+            command,
+            payloadSHA256: command.canonicalPayloadSHA256(),
+            in: document,
+            now: now
+        )
+        let delta = NovelStateDeltaV1(
+            schemaVersion: 1,
+            stateSummary: "朱重九开始照看伤兵。",
+            events: [NovelStateEventV1(
+                id: "care-for-wounded",
+                kind: "assignment",
+                summary: "朱重八让朱重九照看伤兵。",
+                entityReferences: ["朱重八", "朱重九"],
+                evidence: manuscript
+            )],
+            characterChanges: [],
+            relationshipChanges: [],
+            foreshadowingChanges: [],
+            unresolvedEntityNames: [],
+            branchOutlinePatch: nil,
+            settingProposals: []
+        )
+
+        let committed = try NovelFactTransactionReducer.finalizeCollection(
+            pendingID: command.pendingID,
+            delta: delta,
+            artifacts: try NovelTestFixtures.factTransactionArtifacts(
+                document: prepared.document,
+                pendingID: command.pendingID
+            ),
+            in: prepared.document,
+            now: now.addingTimeInterval(1)
+        ).document
+
+        XCTAssertEqual(committed.stateSnapshots.last?.unresolvedEntityNames, ["朱重八", "朱重九"])
+        XCTAssertTrue(committed.pendingOperations.isEmpty)
+    }
+
     func testRetryKeepsDurablePayloadAndRecordsOriginalAndRetryLedgers() throws {
         let candidateDocument = try documentWithCandidate("Mara crossed the threshold.")
         let command = collectCommand(document: candidateDocument)
@@ -403,7 +446,7 @@ final class NovelCollectionTests: XCTestCase {
         ))
     }
 
-    func testSummaryOutlineAndUnresolvedChangesRequireEvidenceBackedFacts() throws {
+    func testCollectionKeepsBaseStateWhenModelReturnsNoEvidenceBackedFacts() throws {
         let document = try documentWithCandidate("A quiet paragraph with no extracted fact.")
         let command = collectCommand(document: document)
         let prepared = try NovelFactTransactionReducer.prepareCollection(
@@ -424,7 +467,7 @@ final class NovelCollectionTests: XCTestCase {
             settingProposals: []
         )
 
-        XCTAssertThrowsError(try NovelFactTransactionReducer.finalizeCollection(
+        let committed = try NovelFactTransactionReducer.finalizeCollection(
             pendingID: command.pendingID,
             delta: unsupported,
             artifacts: try NovelTestFixtures.factTransactionArtifacts(
@@ -433,12 +476,19 @@ final class NovelCollectionTests: XCTestCase {
             ),
             in: prepared.document,
             now: now.addingTimeInterval(1)
-        )) { error in
-            guard case .invalidInput(let message) = error as? NovelError else {
-                return XCTFail("Expected invalidInput, got \(error)")
-            }
-            XCTAssertTrue(message.contains("without evidence-backed facts"))
-        }
+        ).document
+
+        XCTAssertTrue(committed.pendingOperations.isEmpty)
+        XCTAssertEqual(committed.chapters.count, 1)
+        XCTAssertEqual(committed.stateSnapshots.last?.summary, prepared.document.stateSnapshots[0].summary)
+        XCTAssertEqual(
+            committed.stateSnapshots.last?.branchOutline,
+            prepared.document.stateSnapshots[0].branchOutline
+        )
+        XCTAssertEqual(
+            committed.stateSnapshots.last?.unresolvedEntityNames,
+            prepared.document.stateSnapshots[0].unresolvedEntityNames
+        )
 
         let proposalOnly = NovelStateDeltaV1(
             schemaVersion: 1,
@@ -456,7 +506,7 @@ final class NovelCollectionTests: XCTestCase {
                 evidence: "A quiet paragraph with no extracted fact."
             )]
         )
-        XCTAssertThrowsError(try NovelFactTransactionReducer.finalizeCollection(
+        let proposalCommitted = try NovelFactTransactionReducer.finalizeCollection(
             pendingID: command.pendingID,
             delta: proposalOnly,
             artifacts: try NovelTestFixtures.factTransactionArtifacts(
@@ -465,7 +515,66 @@ final class NovelCollectionTests: XCTestCase {
             ),
             in: prepared.document,
             now: now.addingTimeInterval(1)
-        ))
+        ).document
+        XCTAssertEqual(proposalCommitted.settingProposals.count, 1)
+        XCTAssertEqual(
+            proposalCommitted.stateSnapshots.last?.summary,
+            prepared.document.stateSnapshots[0].summary
+        )
+    }
+
+    func testCollectionDropsOnlyFactsWhoseEvidenceIsNotInTheManuscript() throws {
+        let manuscript = "Mara opened the sealed door. Ivo waited outside."
+        let document = try documentWithCandidate(manuscript)
+        let command = collectCommand(document: document)
+        let prepared = try NovelFactTransactionReducer.prepareCollection(
+            command,
+            payloadSHA256: command.canonicalPayloadSHA256(),
+            in: document,
+            now: now
+        )
+        let delta = NovelStateDeltaV1(
+            schemaVersion: 1,
+            stateSummary: "Mara entered while Ivo remained outside.",
+            events: [
+                NovelStateEventV1(
+                    id: "opened-door",
+                    kind: "discovery",
+                    summary: "Mara opened the sealed door.",
+                    entityReferences: ["Mara"],
+                    evidence: "Mara opened the sealed door."
+                ),
+                NovelStateEventV1(
+                    id: "invented-event",
+                    kind: "conflict",
+                    summary: "Ivo fought a guard.",
+                    entityReferences: ["Ivo"],
+                    evidence: "Ivo fought a guard."
+                )
+            ],
+            characterChanges: [],
+            relationshipChanges: [],
+            foreshadowingChanges: [],
+            unresolvedEntityNames: [],
+            branchOutlinePatch: nil,
+            settingProposals: []
+        )
+
+        let committed = try NovelFactTransactionReducer.finalizeCollection(
+            pendingID: command.pendingID,
+            delta: delta,
+            artifacts: try NovelTestFixtures.factTransactionArtifacts(
+                document: prepared.document,
+                pendingID: command.pendingID
+            ),
+            in: prepared.document,
+            now: now.addingTimeInterval(1)
+        ).document
+
+        XCTAssertEqual(committed.events.count, 1)
+        XCTAssertEqual(committed.events[0].summary, "Mara opened the sealed door.")
+        XCTAssertEqual(committed.stateSnapshots.last?.unresolvedEntityNames, ["Mara"])
+        XCTAssertTrue(committed.pendingOperations.isEmpty)
     }
 
     func testPendingCollectionSurvivesFileRepositoryRestart() async throws {

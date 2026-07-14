@@ -1,10 +1,8 @@
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct NovelProjectWorkspaceView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
 
     let viewModel: NovelCreationViewModel
     let sharedSettings: IOSSharedSettingsStore
@@ -12,7 +10,7 @@ struct NovelProjectWorkspaceView: View {
 
     @State private var sessionViewModel: NovelSessionViewModel
     @State private var section: NovelWorkspaceSection = .creation
-    @State private var compendiumSection: NovelCompendiumSection = .chapters
+    @State private var compendiumSection: NovelCompendiumSection = .characters
     @State private var activeSheet: NovelWorkspaceSheet?
     @State private var chapterReaderRoute: NovelChapterReaderRoute?
     @State private var sessionInputText = ""
@@ -27,7 +25,6 @@ struct NovelProjectWorkspaceView: View {
     @State private var isImportingPackage = false
     @State private var isConfirmingPreviousRestore = false
     @State private var branchNotice: String?
-    @State private var lifecycleCoordinator: NovelWorkspaceLifecycleCoordinator
 
     init(
         viewModel: NovelCreationViewModel,
@@ -38,23 +35,19 @@ struct NovelProjectWorkspaceView: View {
         self.sharedSettings = sharedSettings
         self.projectID = projectID
         self._sessionViewModel = State(initialValue: NovelSessionViewModel(workspace: viewModel))
-        self._lifecycleCoordinator = State(
-            initialValue: NovelWorkspaceLifecycleCoordinator()
-        )
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             sectionPicker
             accessBanner
             content
         }
         .background(AmberTheme.background.ignoresSafeArea())
-        .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { workspaceToolbar }
         .sheet(item: $activeSheet, content: sheetContent)
-        .fullScreenCover(item: $chapterReaderRoute) { route in
+        .navigationDestination(item: $chapterReaderRoute) { route in
             NovelChapterReaderView(
                 viewModel: viewModel,
                 sessionViewModel: sessionViewModel,
@@ -128,74 +121,39 @@ struct NovelProjectWorkspaceView: View {
                 await sessionViewModel.bindToCurrentSelection()
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            handleScenePhaseChange(phase)
-        }
         .onDisappear {
-            Task { @MainActor in
-                guard chapterReaderRoute == nil else { return }
-                _ = await sessionViewModel.interruptForRouteExit()
-            }
+            sessionViewModel.detachConsumer()
         }
     }
 
-    private func handleScenePhaseChange(_ phase: ScenePhase) {
-        guard phase == .background else { return }
-        lifecycleCoordinator.enterBackground { deadline in
-            await sessionViewModel.interruptForBackground(deadline: deadline)
-        }
-    }
-
-    private var header: some View {
-        AmberGlassGroup(spacing: 16) {
-            ZStack {
-                Button {
-                    activeSheet = .branchPicker
-                } label: {
-                    VStack(spacing: 2) {
-                        HStack(spacing: 4) {
-                            Text(projectName)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                                .lineLimit(1)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(AmberTheme.muted)
-                        }
-                        Text(headerSubtitle)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(AmberTheme.muted)
+    @ToolbarContentBuilder
+    private var workspaceToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Button {
+                activeSheet = .branchPicker
+            } label: {
+                VStack(spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(projectName)
+                            .font(.headline)
+                            .foregroundStyle(AmberTheme.foreground)
                             .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AmberTheme.muted)
                     }
-                    .frame(maxWidth: 220)
-                    .contentShape(Rectangle())
+                    Text(headerSubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("切换分支")
-                .disabled(isSessionTransitionBusy)
-
-                HStack(spacing: 10) {
-                    AmberGlassCircleButton(
-                        systemImage: "chevron.left",
-                        accessibilityLabel: "返回小说项目",
-                        size: 44,
-                        symbolSize: 20
-                    ) {
-                        Task { @MainActor in
-                            guard await sessionViewModel.interruptForRouteExit() else { return }
-                            dismiss()
-                        }
-                    }
-                    .disabled(isSessionTransitionBusy)
-
-                    Spacer(minLength: 0)
-
-                }
+                .frame(maxWidth: 220)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("切换分支")
+            .disabled(isSessionTransitionBusy)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
     }
 
     private var sectionPicker: some View {
@@ -283,14 +241,18 @@ struct NovelProjectWorkspaceView: View {
                 onFork: { activeSheet = .forkCheckpoint($0) },
                 onOpenSettingProposals: openSettingProposals
             )
+        case .manuscript:
+            NovelChapterManagementView(
+                viewModel: viewModel,
+                onOpenChapter: { chapter in
+                    chapterReaderRoute = NovelChapterReaderRoute(selection: chapter)
+                }
+            )
         case .compendium:
             NovelCompendiumView(
                 viewModel: viewModel,
                 sharedSettings: sharedSettings,
                 selection: $compendiumSection,
-                onOpenChapter: { chapter in
-                    chapterReaderRoute = NovelChapterReaderRoute(selection: chapter)
-                },
                 onEditMaterial: { material, suggestedKind in
                     activeSheet = .materialEditor(material, suggestedKind)
                 },
@@ -394,7 +356,7 @@ struct NovelProjectWorkspaceView: View {
                 if sessionViewModel.branchPendingOperations.contains(where: {
                     $0.candidateID == candidateID
                 }) {
-                    return .pending(message: "正文与状态更新已进入待处理队列，请返回后继续重试。")
+                    return .pending(message: "旧版收录仍有资料整理任务，请返回后重试。")
                 }
                 return .failed(
                     message: sessionViewModel.errorMessage ?? "收录没有完成，请检查项目状态后重试。"

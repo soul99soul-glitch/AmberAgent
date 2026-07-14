@@ -3,6 +3,36 @@ import XCTest
 
 @MainActor
 final class NovelCreationPresentationTests: XCTestCase {
+    func testWorkspacePromotesManuscriptToTheMiddleTopLevelTab() {
+        XCTAssertEqual(
+            NovelWorkspaceSection.allCases,
+            [.creation, .manuscript, .compendium]
+        )
+        XCTAssertEqual(
+            NovelWorkspaceSection.allCases.map(\.title),
+            ["创作", "正文", "设定"]
+        )
+        XCTAssertEqual(
+            NovelCompendiumSection.allCases.map(\.title),
+            ["角色", "世界观", "剧情", "更多"]
+        )
+    }
+
+    func testFactValidationErrorsExplainTheActualReason() {
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "Unknown entity '朱重八' must be listed as unresolved."
+            )),
+            "模型提取的人物称谓没有和资料对齐，候选正文仍然保留，可以重新同步。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "A derived fact contains evidence outside the authoritative manuscript."
+            )),
+            "模型提取的事实依据与正文不一致，候选正文仍然保留，可以重新同步。"
+        )
+    }
+
     func testCharacterEventMatcherPrefersNormalizedNameMatches() {
         XCTAssertTrue(NovelCharacterEventMatcher.matches(
             characterName: "沈 雾",

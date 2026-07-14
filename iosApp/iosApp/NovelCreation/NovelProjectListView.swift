@@ -66,7 +66,7 @@ struct NovelProjectListView: View {
             }
         }
         .navigationTitle("小说创作")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
@@ -117,7 +117,7 @@ struct NovelProjectListView: View {
         )
         .alert(item: $pendingDelete) { candidate in
             Alert(
-                title: Text("删除《\(candidate.project.name)》？"),
+                title: Text(deleteConfirmationTitle(for: candidate.project)),
                 message: Text(deleteConfirmationMessage(for: candidate.project)),
                 primaryButton: .destructive(Text(
                     hasRunningRun(for: candidate.project.id) ? "停止生成并删除" : "删除"
@@ -161,12 +161,17 @@ struct NovelProjectListView: View {
             Section {
                 ForEach(viewModel.projects, id: \.id) { project in
                     Button {
-                        onOpen(project.id)
+                        if project.loadError != nil {
+                            prepareDelete(project)
+                        } else {
+                            onOpen(project.id)
+                        }
                     } label: {
                         NovelProjectRow(project: project)
                     }
                     .buttonStyle(.plain)
-                    .listRowBackground(AmberTheme.surface)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(AmberTheme.background)
                     .listRowSeparatorTint(AmberTheme.borderSoft)
                     .contextMenu {
                         if !project.isDegraded {
@@ -207,9 +212,9 @@ struct NovelProjectListView: View {
                     .textCase(nil)
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .contentMargins(.top, 8, for: .scrollContent)
+        .contentMargins(.top, 0, for: .scrollContent)
     }
 
     private var emptyState: some View {
@@ -239,6 +244,10 @@ struct NovelProjectListView: View {
     }
 
     private func prepareDelete(_ project: NovelProjectSummary) {
+        if project.loadError != nil {
+            pendingDelete = NovelProjectDeleteCandidate(project: project)
+            return
+        }
         Task { @MainActor in
             await viewModel.selectProject(project.id)
             guard viewModel.projectSnapshot?.project.id == project.id else { return }
@@ -248,9 +257,13 @@ struct NovelProjectListView: View {
 
     private func delete(_ project: NovelProjectSummary) {
         Task { @MainActor in
-            guard viewModel.selectedProjectID == project.id else { return }
-            guard await viewModel.stopActiveRunsForProjectOperation(projectID: project.id) else { return }
-            await viewModel.deleteProject()
+            if project.loadError == nil {
+                guard viewModel.selectedProjectID == project.id else { return }
+                guard await viewModel.stopActiveRunsForProjectOperation(projectID: project.id) else {
+                    return
+                }
+            }
+            await viewModel.deleteProject(project)
         }
     }
 
@@ -261,10 +274,17 @@ struct NovelProjectListView: View {
     }
 
     private func deleteConfirmationMessage(for project: NovelProjectSummary) -> String {
+        if project.loadError != nil {
+            return "项目文件已经损坏，无法打开或导出。删除后无法从应用内恢复。"
+        }
         if hasRunningRun(for: project.id) {
             return "Agent 正在生成。将先停止生成并保存终止状态，再删除项目。项目包未导出时无法恢复。"
         }
         return "项目包未导出时无法从应用内恢复。"
+    }
+
+    private func deleteConfirmationTitle(for project: NovelProjectSummary) -> String {
+        project.loadError == nil ? "删除《\(project.name)》？" : "删除损坏的项目？"
     }
 
     private func handlePackageImport(_ result: Result<[URL], Error>) {
@@ -290,22 +310,27 @@ private struct NovelProjectRow: View {
     let project: NovelProjectSummary
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: project.isDegraded ? "exclamationmark.book.closed" : "text.book.closed")
-                .font(.system(size: 18, weight: .semibold))
+        HStack(spacing: 10) {
+            Image(systemName: project.loadError != nil
+                ? "exclamationmark.triangle"
+                : project.isDegraded ? "exclamationmark.book.closed" : "text.book.closed")
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(project.isDegraded ? AmberTheme.accentAmber : AmberTheme.accent)
-                .frame(width: 36, height: 36)
-                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8))
+                .frame(width: 32, height: 32)
+                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 7))
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(project.name)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(project.loadError == nil ? project.name : "无法读取的项目")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
                     Text(project.updatedAt, format: .relative(presentation: .named))
-                    if project.isDegraded {
+                    if project.loadError != nil {
+                        Text("项目文件损坏")
+                            .foregroundStyle(AmberTheme.accentRed)
+                    } else if project.isDegraded {
                         Text("只读恢复")
                             .foregroundStyle(AmberTheme.accentAmber)
                     }
@@ -316,12 +341,13 @@ private struct NovelProjectRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted2)
+            if project.loadError == nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
         }
-        .frame(minHeight: 58)
-        .padding(.vertical, 3)
+        .frame(minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }

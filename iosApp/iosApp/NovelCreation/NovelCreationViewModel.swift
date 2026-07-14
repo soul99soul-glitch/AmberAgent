@@ -120,6 +120,38 @@ final class NovelCreationViewModel {
         return .idle
     }
 
+    func waitForBackgroundGeneration() async {
+        while !Task.isCancelled, await hasActiveBackgroundGeneration() {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
+    func interruptSessionForBackground(deadline: Date) async {
+        let summaries = (try? await projectSummaries()) ?? []
+        var projectIDs = Set(summaries.map(\.id))
+        if let selectedProjectID { projectIDs.insert(selectedProjectID) }
+        if let quickStartStartingProjectID { projectIDs.insert(quickStartStartingProjectID) }
+        for projectID in projectIDs.sorted(by: { $0.description < $1.description }) {
+            await interruptSessionForBackground(
+                projectID: projectID,
+                runID: nil,
+                deadline: deadline
+            )
+        }
+    }
+
+    private func hasActiveBackgroundGeneration() async -> Bool {
+        if isPerforming || quickStartStartingProjectID != nil { return true }
+        guard let summaries = try? await projectSummaries() else { return false }
+        for summary in summaries where summary.loadError == nil {
+            if let snapshot = try? await project(id: summary.id),
+               snapshot.activeRuns.contains(where: { $0.status == .running }) {
+                return true
+            }
+        }
+        return false
+    }
+
     func loadProjects(selecting preferredProjectID: NovelProjectID? = nil) async {
         isLoading = true
         defer { isLoading = false }
@@ -551,13 +583,28 @@ final class NovelCreationViewModel {
 
     func deleteProject() async {
         guard let snapshot = projectSnapshot else { return }
-        let projectID = snapshot.project.id
+        await deleteProject(
+            id: snapshot.project.id,
+            expectedRevision: snapshot.project.revision
+        )
+    }
+
+    func deleteProject(_ project: NovelProjectSummary) async {
+        if project.loadError == nil {
+            guard projectSnapshot?.project.id == project.id else { return }
+            await deleteProject()
+            return
+        }
+        await deleteProject(id: project.id, expectedRevision: project.revision)
+    }
+
+    private func deleteProject(id projectID: NovelProjectID, expectedRevision: Int64) async {
         let succeeded = await perform(.deleteProject(NovelDeleteProjectCommand(
-            context: mutationContext(projectRevision: snapshot.project.revision),
+            context: mutationContext(projectRevision: expectedRevision),
             projectID: projectID
         )), reload: false)
         guard succeeded else { return }
-        clearSelection()
+        if selectedProjectID == projectID { clearSelection() }
         await loadProjects()
     }
 

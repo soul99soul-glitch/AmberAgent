@@ -484,6 +484,37 @@ final class NovelProjectRepositoryTests: XCTestCase {
         XCTAssertEqual(healthy.document.project.name, "Healthy")
     }
 
+    func testUnavailableProjectCanBeDiscardedWithoutLoadingItsDocument() async throws {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        let document = try NovelTestFixtures.document()
+        _ = try await repository.createProject(document)
+        try Data("corrupt".utf8).write(
+            to: primaryURL(root: root, id: document.project.id),
+            options: [.atomic]
+        )
+
+        let summaries = try await repository.listProjects()
+        let unavailable = try XCTUnwrap(summaries.first)
+        XCTAssertEqual(unavailable.id, document.project.id)
+        XCTAssertNotNil(unavailable.loadError)
+
+        let creation = DefaultNovelCreation(repository: repository)
+        let outcome = try await creation.perform(.deleteProject(NovelDeleteProjectCommand(
+            context: NovelTestFixtures.context(projectRevision: unavailable.revision),
+            projectID: unavailable.id
+        )))
+
+        XCTAssertEqual(outcome, .projectDeleted(projectID: document.project.id))
+        let restarted = NovelFileProjectRepository(rootDirectory: root)
+        let remainingProjects = try await restarted.listProjects()
+        XCTAssertTrue(remainingProjects.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: primaryURL(root: root, id: document.project.id).path
+        ))
+    }
+
     func testDeletionTombstonePreventsEveryStaleArtifactFromResurrectingAfterRestart() async throws {
         let root = try NovelTestFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

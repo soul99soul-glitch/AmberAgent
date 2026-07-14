@@ -5,7 +5,6 @@ struct NovelCompendiumView: View {
     let sharedSettings: IOSSharedSettingsStore
     @Binding var selection: NovelCompendiumSection
 
-    let onOpenChapter: (NovelChapterSelection) -> Void
     let onEditMaterial: (NovelMaterialRecord?, NovelMaterialKind) -> Void
     let onChooseFixedModel: () -> Void
     let onEditPolishPreference: () -> Void
@@ -18,7 +17,7 @@ struct NovelCompendiumView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("资料分类", selection: $selection) {
+            Picker("设定分类", selection: $selection) {
                 ForEach(NovelCompendiumSection.allCases) { section in
                     Text(section.title).tag(section)
                 }
@@ -35,11 +34,6 @@ struct NovelCompendiumView: View {
     @ViewBuilder
     private var content: some View {
         switch selection {
-        case .chapters:
-            NovelChapterManagementView(
-                viewModel: viewModel,
-                onOpenChapter: onOpenChapter
-            )
         case .characters:
             NovelCharacterPagesView(
                 viewModel: viewModel,

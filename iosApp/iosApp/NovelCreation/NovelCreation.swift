@@ -14,6 +14,7 @@ protocol NovelProjectPersisting: AnyObject, Sendable {
         expectedRevision: Int64
     ) async throws -> NovelLoadedProject
     func deleteProject(id: NovelProjectID, expectedRevision: Int64) async throws
+    func discardUnavailableProject(id: NovelProjectID) async throws
     func lifecycleOperation(
         projectID: NovelProjectID,
         operationID: NovelOperationID
@@ -53,6 +54,10 @@ extension NovelProjectPersisting {
 
     func deleteProject(id: NovelProjectID, expectedRevision: Int64) async throws {
         throw NovelError.repositoryFailure("This novel repository cannot delete projects.")
+    }
+
+    func discardUnavailableProject(id: NovelProjectID) async throws {
+        throw NovelError.repositoryFailure("This novel repository cannot discard unavailable projects.")
     }
 
     func lifecycleOperation(
@@ -183,6 +188,7 @@ actor DefaultNovelCreation: NovelCreation {
     let modelRunner: any NovelModelRunning
     let now: @Sendable () -> Date
     let generationPolicy: NovelGenerationPolicy
+    let factRequestTimeout: TimeInterval
     let polishAssessmentTimeout: TimeInterval
     var committedProjects: [NovelProjectID: NovelLoadedProject] = [:]
     private var inFlightByOperation: [InFlightKey: InFlightMutation] = [:]
@@ -208,12 +214,14 @@ actor DefaultNovelCreation: NovelCreation {
         repository: any NovelProjectPersisting,
         modelRunner: any NovelModelRunning = UnavailableNovelModelAdapter(),
         generationPolicy: NovelGenerationPolicy = .standard,
+        factRequestTimeout: TimeInterval = 60,
         polishAssessmentTimeout: TimeInterval = 20,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.repository = repository
         self.modelRunner = modelRunner
         self.generationPolicy = generationPolicy
+        self.factRequestTimeout = max(0.01, factRequestTimeout)
         self.polishAssessmentTimeout = max(0.01, polishAssessmentTimeout)
         self.now = now
     }

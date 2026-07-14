@@ -1242,7 +1242,7 @@ extension NovelError: LocalizedError {
         case .packageChecksumMismatch: "项目包校验失败，文件可能不完整。"
         case .injectionBudgetExceeded(let required, let limit, _):
             "所需上下文约为 \(required)，超过当前长度限制 \(limit)。"
-        case .modelUnavailable: "项目模型当前不可用，请在“资料 > 更多”中重新选择。"
+        case .modelUnavailable: "项目模型当前不可用，请在“设定 > 更多”中重新选择。"
         case .generationUnavailable: "小说生成功能当前不可用。"
         case .unsupportedSchema(let version): "暂不支持版本 \(version) 的小说项目。"
         case .projectBusy: "项目正在处理其他操作。请先停止生成，或稍后再试。"

@@ -339,7 +339,7 @@ enum NovelGenerationDocumentValidator {
                     $0.factTransaction?.kind == expectedKind
             }
             switch expectedKind {
-            case .stateDelta where matchingInjections.isEmpty || matchingInjections.contains(where: {
+            case .stateDelta where matchingInjections.contains(where: {
                 $0.factTransaction?.chunkIndex != nil
             }):
                 issues.append("A successful collection has invalid request receipts.")
@@ -404,7 +404,17 @@ enum NovelGenerationDocumentValidator {
                     $0.factTransaction?.kind == attempt.kind &&
                     $0.branchID == attempt.branchID
             })
-            if !pendingOwner && (completedOwner == nil || !hasCompletedOwnerReceipt) {
+            let appliedAttempt = document.appliedOperations.first(where: {
+                $0.operationID == attempt.attemptOperationID
+            })
+            let recoveredLegacyCollection = attempt.kind == .stateDelta &&
+                completedOwner != nil &&
+                appliedAttempt?.kind == .retryPending &&
+                appliedAttempt?.payloadSHA256 == attempt.attemptPayloadSHA256 &&
+                appliedAttempt?.outcome == completedOwner?.outcome &&
+                appliedAttempt?.appliedProjectRevision == completedOwner?.appliedProjectRevision
+            if !pendingOwner &&
+                (completedOwner == nil || (!hasCompletedOwnerReceipt && !recoveredLegacyCollection)) {
                 issues.append("A fact progress-attempt record has no pending or completed owner.")
             }
             let receiptLinks = document.injectionReceipts.compactMap(\.factTransaction).filter {
@@ -425,11 +435,9 @@ enum NovelGenerationDocumentValidator {
                firstDispatched != firstChunkIndex {
                 issues.append("A fact progress-attempt request does not begin at its reservation.")
             }
-            if let operation = document.appliedOperations.first(where: {
-                $0.operationID == attempt.attemptOperationID
-            }) {
+            if let operation = appliedAttempt {
                 guard let completedOwner,
-                      !receiptLinks.isEmpty,
+                      !receiptLinks.isEmpty || recoveredLegacyCollection,
                       operation.kind == .retryPending,
                       operation.payloadSHA256 == attempt.attemptPayloadSHA256,
                       operation.outcome == completedOwner.outcome,

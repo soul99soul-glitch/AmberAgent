@@ -347,6 +347,26 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             throw NovelError.projectBusy(id)
         }
 
+        try deleteProjectArtifacts(id: id, expectedRevision: expectedRevision)
+    }
+
+    func discardUnavailableProject(id: NovelProjectID) async throws {
+        try ensureDirectories()
+        if isDeletionTombstoned(id) {
+            finishDeletionBestEffort(projectID: id)
+            return
+        }
+        guard let summary = try scanProjectSummaries().first(where: { $0.id == id }) else {
+            throw NovelError.projectNotFound(id)
+        }
+        guard summary.loadError != nil else {
+            throw NovelError.staleProjectRevision(expected: 0, actual: summary.revision)
+        }
+
+        try deleteProjectArtifacts(id: id, expectedRevision: 0)
+    }
+
+    private func deleteProjectArtifacts(id: NovelProjectID, expectedRevision: Int64) throws {
         try failIfRequested(.beforeDeletionTombstoneWrite)
         do {
             try writeLifecycleMarker(ProjectLifecycleMarkerV1(

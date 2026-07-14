@@ -620,9 +620,6 @@ private extension NovelGenerationReducer {
                 throw NovelError.invalidInput("The discussion run shape is invalid.")
             }
         case .prose:
-            guard branch.syncStatus == .synchronized else {
-                throw NovelError.invalidInput("The branch must be synchronized before writing prose.")
-            }
             guard !document.pendingOperations.contains(where: { $0.branchID == branch.id }) else {
                 throw NovelError.invalidInput(
                     "Pending manuscript synchronization must finish before writing prose."

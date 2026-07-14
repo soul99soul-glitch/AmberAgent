@@ -430,6 +430,14 @@ extension DefaultNovelCreation {
             )
             evictProjectFromRuntime(command.projectID)
             return try await persistCompletedLifecycleOperation(absentRecord)
+        } catch {
+            return try await executeUnavailableProjectDeletion(
+                command,
+                payloadSHA256: payloadSHA256,
+                expectedRevision: expectedRevision,
+                existingRecord: record,
+                loadError: error
+            )
         }
         try guardNoRunningWork(projectID: command.projectID, document: loaded.document)
         try guardDocumentDoesNotUseLifecycleOperationID(
@@ -500,6 +508,49 @@ extension DefaultNovelCreation {
             } else {
                 try await abandonPendingLifecycleOperation(record)
                 throw error
+            }
+        }
+        evictProjectFromRuntime(command.projectID)
+        return try await persistCompletedLifecycleOperation(record)
+    }
+
+    private func executeUnavailableProjectDeletion(
+        _ command: NovelDeleteProjectCommand,
+        payloadSHA256: String,
+        expectedRevision: Int64,
+        existingRecord: NovelProjectLifecycleOperationRecord?,
+        loadError: Error
+    ) async throws -> NovelOutcome {
+        let summaries = try await repository.listProjects()
+        guard summaries.contains(where: {
+            $0.id == command.projectID && $0.loadError != nil
+        }) else {
+            throw loadError
+        }
+
+        let record = existingRecord ?? NovelProjectLifecycleOperationRecord(
+            projectID: command.projectID,
+            operationID: command.context.operationID,
+            kind: .deleteProject,
+            payloadSHA256: payloadSHA256,
+            intent: .delete(expectedRevision: expectedRevision),
+            sourceProjectSHA256: nil,
+            targetProjectSHA256: nil,
+            outcome: .projectDeleted(projectID: command.projectID)
+        )
+        do {
+            try await repository.discardUnavailableProject(id: command.projectID)
+        } catch {
+            let deletionError = error
+            if requiresRepositoryReconciliation(error),
+               let remaining = try? await repository.listProjects(),
+               !remaining.contains(where: { $0.id == command.projectID }) {
+                // The durable tombstone is already authoritative.
+            } else {
+                if existingRecord != nil {
+                    try? await abandonPendingLifecycleOperation(record)
+                }
+                throw deletionError
             }
         }
         evictProjectFromRuntime(command.projectID)

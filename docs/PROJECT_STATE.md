@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-12
+Last updated: 2026-07-14
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -9,7 +9,7 @@ Last updated: 2026-07-12
 - Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 大量 staged、unstaged、untracked 改动并存，均默认视为有效工作。
+- Worktree: 本轮小说创作导航、键盘、后台生命周期、损坏项目删除、收录简化、旧任务恢复、正文入口与发送卡死修复已纳入当前提交；提交后工作区无 staged、unstaged 或 untracked 文件。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,50 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-14 novel send watchdog layout repair
+
+- 真机复现确认“点击发送卡死”不是 provider 等待：发送后新 run 尚未写入项目文件，应用即被 `scene-update` watchdog 以 `0x8BADF00D` / `SIGKILL` 终止；崩溃栈停在 SwiftUI `LazyViewGeometry` / `ViewLayoutEngine.sizeThatFits`。最新安装包再次复现为 signal 9。
+- 小说消息区改为与普通 Chat 相同的结构：稳定历史继续留在 `LazyVStack`，正在启动或流式增长的尾气泡移到 lazy history 之外。历史 Markdown 不再通过全局 `.disabled` 注入环境失效；按钮阻塞由 presentation 的 transient-tail 状态决定，View 只关闭命中测试。
+- 新增长历史真实 `NovelSessionView` 布局回放，以及“durable run 写入前 transient tail 必须阻止历史动作”的契约测试。`NovelSessionReplayTests` 与 `NovelSessionViewModelTests` 两个完整测试类在 iPhone 17 Pro Simulator 均通过；`git diff --check` 通过。
+- Stable Debug arm64 真机包使用 Personal Team `89QRFX9548` 自动签名并明确 `BUILD SUCCEEDED`，已覆盖安装到配对的 iPhone Air。自动启动因设备锁定被系统拒绝，因此同一步骤的最终发送与 watchdog 控制台验证仍未完成；不把构建、安装和模拟器证据表述为真机修复已闭环。
+
+### 2026-07-14 instant novel collection and deferred material organization
+
+- 新收录链路不再创建 durable pending，也不再调用结构化模型后才提交正文。选中的候选正文、章节版本、collection checkpoint、候选状态和 operation ledger 现在一次本地原子提交；成功后正文立即可见，分支仅标记为 `needsSync`，没有第二段等待或“收录到一半”的中间状态。
+- `needsSync` 现在表示“正文已保存，人物与剧情资料尚未整理”，不再阻止继续讨论、续写、整章生成或再次收录。生成仍注入当前章节尾部，并明确把派生状态视为可能过期；整章润色和撤销等依赖完整状态的操作仍要求先整理。真实 legacy collection pending 仍会暂时阻止新写入，但点击重试后直接用已持久化的正文完成本地收录，不再发起旧的隐藏模型请求；历史失败 attempt 继续保留幂等占位并被收口到同一成功结果。
+- 「同步」入口改为「整理资料」。多次本地收录和手动改写可在稍后一次重建资料；整理失败不回滚已经保存的正文。Banner 区分“正文已保存，可稍后整理”和“确有旧版/手动资料任务未完成”，只在真实任务执行时显示进度。
+- 顶部工作区固定为「创作 / 正文 / 设定」，正文从设定内的二级分类提升为一级入口，设定内部保留角色、世界观、剧情和更多。章节阅读底部改为带安全区占位的 Liquid Glass 悬浮前后章控件，右上角菜单使用固定 `40x40` 圆形 Glass，不再被工具栏拉成椭圆。
+- 新增收录不启动 provider、legacy collection 无 provider 恢复、延后整理覆盖即时收录章节、顶部入口顺序和阅读器接线等回归。全部 28 个 `Novel*Tests` 加 `IOSNovelCreationWiringTests` 在 `/Users/arquiel/Library/Developer/Xcode/DerivedData/AmberAgent-bjiohjyzqxbgaocvnuyszcwtjbyd/Logs/Test/Test-iosApp-2026.07.14_00-36-38-+0800.xcresult` 为 351 passed、0 failed、0 skipped；`git diff --check` 通过。
+- 最终 Stable Debug arm64 包使用 Personal Team `89QRFX9548` 自动签名并明确 `BUILD SUCCEEDED`，已覆盖安装到配对的 iPhone Air；`devicectl` 明确返回 `Launched application with app.amber.ios bundle identifier.`。这证明最终代码已构建、安装且启动请求成功，不等同于顶部 Tab、阅读安全区和真实 provider 整理流程已经人工完成真机 E2E。
+
+### 2026-07-13 novel project list density and compatibility recovery
+
+- 项目首页保留系统 SwiftUI `List`、侧滑操作和长按菜单，但从卡片式 `.insetGrouped` 收紧为无卡片的 `.plain` 列表，标题改为 inline，行高、图标和间距同步缩小。损坏项目行尾不再常驻红色垃圾桶；正常项目只保留进入箭头，删除仍统一经过侧滑/长按与确认框。
+- 一次未兼容历史 receipt 的 Prompt 文本/版本改动曾让原本可读的「大明」被扫描成损坏项目。该 Prompt 改动已完整撤回到原有 `novel.state-delta.v1` / `novel.manual-sync.v2`，没有改写或删除真机项目文件；此前已经因旧 fixed Prompt evidence 损坏的另一个项目不据此宣称已恢复。
+- `IOSNovelCreationWiringTests` 定点测试通过，`git diff --check` 通过。Stable Debug arm64 包使用 Personal Team `89QRFX9548` 自动签名构建，`codesign --deep --strict` 校验通过，已覆盖安装并成功启动到配对的 iPhone Air。列表视觉密度和项目重新扫描结果仍需用户在真机进入「小说创作」后确认。
+
+### 2026-07-13 casual-first novel collection validation repair
+
+- 真机项目数据确认当前 retryable collection 的候选正文、章节版本、checkpoint 和 state snapshot 预留均完整，失败发生在 provider 已返回后的状态语义校验。当前正文使用人物早期称谓「朱重八 / 朱重九」，而资料标题与隐藏校验要求未写入 prompt，导致模型输出容易在别名、逐字 evidence 和 unresolved 列表之间不一致。
+- 收录现在按「正文优先、状态尽力同步」处理模型语义瑕疵：人物早期名、昵称和称号会自动进入待识别称谓；单条 evidence 不在正文中的派生事实或设定建议只丢弃该条；完全没有可靠事实时沿用上一个状态摘要、剧情走向和待识别列表，正文仍可完成收录。项目/分支 guard、候选归属、JSON 结构、provider 超时和持久化错误仍保持硬失败与可重试，不放宽正文安全边界。
+- 为避免 Prompt 版本变化破坏历史 receipt，本轮没有改变状态提取与手动同步 Prompt；别名和 evidence 的容错落在提交前的本地语义整理。残余语义错误通过中文原因呈现，不再只显示泛化的「输入内容或当前状态不符合要求」。这一步没有引入专业/休闲模式开关，也尚未把正文提交与 provider 状态请求拆成两个独立事务。
+- 新增别名补全、坏 evidence 局部丢弃、无可靠事实沿用基线和错误文案回归。全部 28 个 `Novel*Tests` 加 `IOSNovelCreationWiringTests` 在 `/tmp/amber-novel-casual-red-20260713/Logs/Test/Test-iosApp-2026.07.13_22-48-32-+0800.xcresult` 为 351 passed、0 failed；`git diff --check` 通过。最终 Stable Debug arm64 包使用 Personal Team `89QRFX9548` 自动签名构建，`codesign --deep --strict` 校验通过，已覆盖安装并成功启动到配对的 iPhone Air；真实 provider 对现存 pending 的重试结果仍需用户点击验证。
+
+### 2026-07-13 unavailable project deletion and retry timeout repair
+
+- 真机数据取证确认 `Unavailable Project` 的 primary/previous 都因旧 `fixed Prompt receipt evidence` 校验失败而无法加载。列表删除原先错误地要求先成功选中并加载项目，因此确认框和 repository 删除链路都无法到达。现在损坏项目可直接点击或侧滑进入专用删除确认；repository 删除前重新扫描并确认它仍不可读，再沿用既有 deletion tombstone 与清理路径，拒绝误删已恢复为可读状态的项目。
+- `正文状态尚未完整提交` 对应的 pending collection 已持久化为 retryable；最后一次重试已创建 durable attempt，但真实 provider stream 没有终止事件，结构化状态请求又没有 app 层 deadline，导致 UI busy 永不释放。事实同步与手动同步现在统一使用 60 秒请求上限；超时取消 provider run、把 pending 收回 retryable，并返回 `structured_request_timeout`。同步期间 Banner 显示 ProgressView 和「正在同步」，不再像无响应的灰色按钮。
+- 新增 repository、ViewModel 和 fact retry 三层回归测试。全部 28 个 `Novel*Tests` 加 `IOSNovelCreationWiringTests` 在 `/tmp/amber-novel-recovery-all-20260713-2.xcresult` 为 348 passed、0 failed；Stable 测试构建与 `iosAppExperimentalGPL` iPhone 17 Pro arm64 Simulator build 均成功，`git diff --check` 通过。
+- 最终 Stable Debug arm64 包使用 Personal Team `89QRFX9548` 自动签名构建，`codesign --deep --strict` 校验通过，已覆盖安装并成功启动到配对的 iPhone Air；`devicectl` 进程表回读到主应用和 Activity Widget。设备中的候选正文与 retryable pending 未被手工改写；损坏项目删除手势和真实 provider 超时后的 UI 回落仍需用户按原步骤做真机交互确认。
+
+### 2026-07-13 novel creation navigation, keyboard, and generation lifetime repair
+
+- 小说项目 workspace 恢复原生导航栏与系统返回按钮，章节阅读从 `fullScreenCover` 改为同一 `NavigationStack` 内的 push；项目页和阅读页均重新获得原生边缘滑动返回。编辑、分支、资料等模态 Sheet 仍保持系统下拉关闭语义，没有另造导航手势。
+- 创作输入区复用 Chat 的强制收键盘方式：点击消息区、开始拖动和发送有效内容都会同时清 SwiftUI focus 并 resign UIKit first responder；发送失败仍保留输入内容。
+- 普通离开 workspace 现在只 detach UI consumer，不再把 route exit 当作取消。共享 `DefaultNovelCreation` actor 继续生成并按既有 sidecar/terminal 路径持久化；重新进入项目后 Session 会从 durable run 重新 attach。切分支、导入/替换项目等真实所有权变化仍保留 `interruptForRouteExit()` gate。
+- 小说后台租约从 workspace 上移到 `AppShell`。进入后台先让所有项目中的活跃生成继续执行，完成后主动结束 `UIBackgroundTask`；只有系统 expiration 才调用既有 background interruption 收口并保存 partial。回到前台只释放后台租约，不取消生成。该实现闭合页面退出和系统授予后台执行时间内的持续生成，不把它表述为可跨进程重启的 `BGContinuedProcessingTask`。
+- 新增 detach 后继续完成、切到另一项目后 expiration 仍能收口原项目、后台租约 exactly-once、原生导航和键盘接线 canary。全部 28 个 `Novel*Tests` 加 `IOSNovelCreationWiringTests` 在 iPhone 17 Pro Simulator 为 345 passed、0 failed、0 skipped；Stable `iosApp` 与 `iosAppExperimentalGPL` Simulator build 均成功。最终 Stable Debug arm64 包已用 Personal Team `89QRFX9548` 自动签名构建，覆盖安装并成功启动到配对的 iPhone Air；`devicectl` 进程表回读到主应用和 Activity Widget。真实边缘手势、键盘和长生成后台时限仍需人工真机交互验证。
 
 ### 2026-07-12 iOS novel creation UX review fixes
 
@@ -373,7 +417,7 @@ Do not prioritize C7 multi-tool batching unless the user explicitly changes dire
 - Some DeepRead workspace dedup/upsert and history warning-state work remains P2.
 - Current visual/performance improvements still require real-device evidence; simulator/unit tests are necessary but insufficient.
 - `ChatViewModelSelectedFileContextTests/testCancelledApprovedSearchDoesNotReplayStaleMessages` 当前在模拟器中单独运行会卡在 XCTest async expectation；已确认不是 CPU 忙循环，本轮未改这条既有测试或 transport harness。
-- 小说创作 Phase A-F 已完成代码与首页接线，模拟器验证了入口、创建、资料和重启回显，当前 Stable 普通 Debug 包也已在真机完成构建、签名和安装；真实 provider 的完整生成流、真机交互和系统 Files picker 仍无当前运行证据，不得表述成这些外部验收已经通过。
+- 小说创作 Phase A-F 已完成代码与首页接线，模拟器验证了入口、创建、资料和重启回显，当前 Stable 普通 Debug 包也已在真机完成构建、签名、覆盖安装和启动；真实 provider 的完整生成流、真机交互和系统 Files picker 仍无当前运行证据，不得表述成这些外部验收已经通过。
 
 ## Active References
 

@@ -24,13 +24,13 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(home.contains("route: .memory"))
     }
 
-    func testBackgroundTaskEndsOnceWhenInterruptionAndExpirationRace() async {
+    func testBackgroundLeaseWaitsForExpirationBeforeInterrupting() async {
         var expirationHandler: (@Sendable () -> Void)?
         var endedTaskIDs: [UIBackgroundTaskIdentifier] = []
         var interruptionCount = 0
         let taskID = UIBackgroundTaskIdentifier(rawValue: 41)
+        let completionGate = NovelWorkspaceLifecycleTestGate()
         let coordinator = NovelWorkspaceLifecycleCoordinator(
-            timeout: 5,
             beginBackgroundTask: { _, handler in
                 expirationHandler = handler
                 return taskID
@@ -38,26 +38,31 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             endBackgroundTask: { endedTaskIDs.append($0) }
         )
 
-        coordinator.enterBackground { _ in
-            interruptionCount += 1
-        }
+        coordinator.enterBackground(
+            waitForCompletion: { await completionGate.wait() },
+            interrupt: { _ in interruptionCount += 1 }
+        )
 
+        await Task.yield()
+        XCTAssertEqual(interruptionCount, 0)
+        XCTAssertTrue(endedTaskIDs.isEmpty)
+
+        expirationHandler?()
         let didEnd = await eventually { endedTaskIDs.count == 1 }
         XCTAssertTrue(didEnd)
-        expirationHandler?()
-        await Task.yield()
 
         XCTAssertEqual(interruptionCount, 1)
         XCTAssertEqual(endedTaskIDs, [taskID])
+        await completionGate.open()
     }
 
-    func testExpirationEndsTaskOnceWhileDurableInterruptionIsStillFinishing() async {
+    func testExpirationEndsTaskAfterDurableInterruptionFinishes() async {
         var expirationHandler: (@Sendable () -> Void)?
         var endedTaskIDs: [UIBackgroundTaskIdentifier] = []
         let taskID = UIBackgroundTaskIdentifier(rawValue: 42)
         let gate = NovelWorkspaceLifecycleTestGate()
+        let completionGate = NovelWorkspaceLifecycleTestGate()
         let coordinator = NovelWorkspaceLifecycleCoordinator(
-            timeout: 5,
             beginBackgroundTask: { _, handler in
                 expirationHandler = handler
                 return taskID
@@ -65,53 +70,76 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             endBackgroundTask: { endedTaskIDs.append($0) }
         )
 
-        coordinator.enterBackground { _ in
-            await gate.wait()
-        }
+        coordinator.enterBackground(
+            waitForCompletion: { await completionGate.wait() },
+            interrupt: { _ in await gate.wait() }
+        )
+        expirationHandler?()
         let didStartWaiting = await eventually { await gate.hasWaiter }
         XCTAssertTrue(didStartWaiting)
-
-        expirationHandler?()
-        let didEnd = await eventually { endedTaskIDs.count == 1 }
-        XCTAssertTrue(didEnd)
+        XCTAssertTrue(endedTaskIDs.isEmpty)
         await gate.open()
-        await Task.yield()
+        let didEnd = await eventually { endedTaskIDs.count == 1 }
 
+        XCTAssertTrue(didEnd)
         XCTAssertEqual(endedTaskIDs, [taskID])
+        await completionGate.open()
     }
 
-    func testFiveSecondFallbackUsesSameExactlyOnceFinishGate() async {
+    func testReturningForegroundEndsLeaseWithoutInterruptingGeneration() async {
         var endedTaskIDs: [UIBackgroundTaskIdentifier] = []
+        var interruptionCount = 0
         let taskID = UIBackgroundTaskIdentifier(rawValue: 43)
-        let gate = NovelWorkspaceLifecycleTestGate()
+        let completionGate = NovelWorkspaceLifecycleTestGate()
         let coordinator = NovelWorkspaceLifecycleCoordinator(
-            timeout: 0.02,
             beginBackgroundTask: { _, _ in taskID },
             endBackgroundTask: { endedTaskIDs.append($0) }
         )
 
-        coordinator.enterBackground { _ in
-            await gate.wait()
-        }
+        coordinator.enterBackground(
+            waitForCompletion: { await completionGate.wait() },
+            interrupt: { _ in interruptionCount += 1 }
+        )
+        coordinator.enterForeground()
 
         let didEnd = await eventually { endedTaskIDs.count == 1 }
         XCTAssertTrue(didEnd)
-        await gate.open()
-        await Task.yield()
         XCTAssertEqual(endedTaskIDs, [taskID])
+        XCTAssertEqual(interruptionCount, 0)
+        await completionGate.open()
     }
 
-    func testWorkspaceWiresBackgroundAndRouteExitToSessionLifecycle() throws {
-        let source = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+    func testWorkspaceExitDetachesConsumerWhileAppOwnsBackgroundLease() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let appShell = try source("iosApp/AppShell.swift")
 
-        XCTAssertTrue(source.contains("@Environment(\\.scenePhase)"))
-        XCTAssertTrue(source.contains("phase == .background"))
-        XCTAssertTrue(source.contains("lifecycleCoordinator.enterBackground"))
-        XCTAssertTrue(source.contains("sessionViewModel.interruptForBackground"))
-        XCTAssertTrue(source.contains(".onDisappear"))
-        XCTAssertTrue(source.contains("sessionViewModel.interruptForRouteExit"))
-        XCTAssertTrue(source.contains("guard chapterReaderRoute == nil else { return }"))
-        XCTAssertTrue(source.contains("await sessionViewModel.bindToCurrentSelection()"))
+        XCTAssertTrue(workspace.contains(".onDisappear"))
+        XCTAssertTrue(workspace.contains("sessionViewModel.detachConsumer()"))
+        XCTAssertFalse(workspace.contains("@Environment(\\.scenePhase)"))
+        XCTAssertFalse(workspace.contains("guard chapterReaderRoute == nil else { return }"))
+        XCTAssertTrue(workspace.contains("await sessionViewModel.bindToCurrentSelection()"))
+        XCTAssertTrue(appShell.contains("novelLifecycleCoordinator.enterBackground"))
+        XCTAssertTrue(appShell.contains("waitForBackgroundGeneration"))
+        XCTAssertTrue(appShell.contains("interruptSessionForBackground"))
+        XCTAssertTrue(appShell.contains("novelLifecycleCoordinator.enterForeground()"))
+    }
+
+    func testNovelCreationUsesNativePushNavigationAndChatKeyboardDismissal() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        XCTAssertTrue(workspace.contains(".navigationDestination(item: $chapterReaderRoute)"))
+        XCTAssertFalse(workspace.contains(".fullScreenCover(item: $chapterReaderRoute)"))
+        XCTAssertFalse(workspace.contains(".navigationBarBackButtonHidden(true)"))
+        XCTAssertTrue(workspace.contains("case .manuscript:"))
+        XCTAssertTrue(reader.contains(".toolbar { readerToolbar }"))
+        XCTAssertTrue(reader.contains(".safeAreaInset(edge: .bottom"))
+        XCTAssertTrue(reader.contains("ComposerDockCircleGlass(tint: nil)"))
+        XCTAssertFalse(reader.contains(".navigationBarBackButtonHidden(true)"))
+        XCTAssertTrue(session.contains("private func dismissKeyboard()"))
+        XCTAssertGreaterThanOrEqual(session.components(separatedBy: "dismissKeyboard()").count - 1, 3)
+        XCTAssertTrue(session.contains("#selector(UIResponder.resignFirstResponder)"))
     }
 
     private func source(_ relativePath: String) throws -> String {

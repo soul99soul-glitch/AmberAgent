@@ -754,7 +754,9 @@ private extension NovelSessionPresentation {
             return blocker
         }
         if run.kind == .prose || run.kind == .polish {
-            if input.branch.syncStatus == .needsSync { return .branchNeedsSync }
+            if run.kind == .polish, input.branch.syncStatus == .needsSync {
+                return .branchNeedsSync
+            }
             if input.pendingOperations.contains(where: { $0.branchID == input.branch.id }) {
                 return .pendingOperation
             }
@@ -789,7 +791,9 @@ private extension NovelSessionPresentation {
             return blocker
         }
         if tail.kind == .proseCandidate || tail.kind == .polishCandidate {
-            if input.branch.syncStatus == .needsSync { return .branchNeedsSync }
+            if tail.kind == .polishCandidate, input.branch.syncStatus == .needsSync {
+                return .branchNeedsSync
+            }
             if input.pendingOperations.contains(where: { $0.branchID == input.branch.id }) {
                 return .pendingOperation
             }
@@ -805,7 +809,9 @@ private extension NovelSessionPresentation {
         if let blocker = baseMutationBlocker(input: input, includePending: true) {
             return blocker
         }
-        if input.branch.syncStatus == .needsSync { return .branchNeedsSync }
+        if candidate.kind == .polish, input.branch.syncStatus == .needsSync {
+            return .branchNeedsSync
+        }
         if requiresCurrentBase,
            (candidate.baseCheckpointID != input.branch.headCheckpointID ||
             candidate.baseHeadRevision != input.branch.headRevision) {
@@ -828,6 +834,12 @@ private extension NovelSessionPresentation {
     ) -> NovelSessionActionBlocker? {
         if input.access != .readWrite { return .projectReadOnly }
         if input.branch.lifecycle != .active { return .branchInactive }
+        if let tail = input.transientTail,
+           tail.branchID == input.branch.id,
+           tail.sessionID == input.session.id,
+           tail.phase == .waitingForFirstToken || tail.phase == .streaming {
+            return .generationRunning
+        }
         if (input.branch.activeRunID != nil && input.branch.activeRunID != excludingRunID) ||
             input.runs.contains(where: {
             $0.branchID == input.branch.id &&

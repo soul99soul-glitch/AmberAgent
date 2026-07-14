@@ -194,7 +194,7 @@ final class NovelSessionReplayTests: XCTestCase {
             session: session,
             candidates: [candidate]
         ))
-        XCTAssertEqual(needsSync.rows[1].actions.first?.blocker, .branchNeedsSync)
+        XCTAssertNil(needsSync.rows[1].actions.first?.blocker)
 
         let activeRun = makeRun(fixture: fixture, kind: .discussion)
         var runningBranch = fixture.branch
@@ -207,6 +207,24 @@ final class NovelSessionReplayTests: XCTestCase {
             runs: [activeRun]
         ))
         XCTAssertEqual(running.rows[1].actions.first?.blocker, .generationRunning)
+
+        let startingRun = makeRun(fixture: fixture, kind: .discussion)
+        let starting = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            candidates: [candidate],
+            tail: NovelSessionTransientTail(
+                run: startingRun,
+                content: "",
+                renderRevision: 0,
+                phase: .waitingForFirstToken
+            )
+        ))
+        XCTAssertEqual(
+            starting.rows[1].actions.first?.blocker,
+            .generationRunning,
+            "The pre-durable live tail must block history actions without disabling the entire Markdown row tree."
+        )
 
         let pending = makePending(fixture: fixture, candidateID: candidateID, status: .retryable)
         let retryable = NovelSessionPresentation.project(makeInput(

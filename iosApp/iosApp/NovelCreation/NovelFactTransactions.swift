@@ -68,6 +68,191 @@ enum NovelFactTransactionReducer {
         ) {
             return (document, existing)
         }
+        guard let branch = document.branches.first(where: { $0.id == command.branchID }),
+              branch.syncStatus == .synchronized else {
+            throw NovelError.invalidInput("The working manuscript must be synchronized before starting legacy collection recovery.")
+        }
+        let pending = try makeCollectionPending(
+            command,
+            payloadSHA256: payloadSHA256,
+            in: document,
+            now: now
+        )
+        var next = document
+        next.pendingOperations.append(pending)
+        advanceProjectRevision(in: &next, now: now)
+        try validateTransition(from: document, to: next)
+        return (next, pending)
+    }
+
+    static func recoverPendingCollectionWithoutStateSync(
+        _ command: NovelRetryPendingCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date = Date()
+    ) throws -> NovelFactTransactionResult {
+        let pending = try requirePending(command.pendingID, kind: .collection, in: document)
+        try validateRetry(command, for: pending, in: document)
+        return try commitPreparedCollection(
+            pending,
+            retryCommand: command,
+            in: document,
+            now: now
+        )
+    }
+
+    static func commitCollectionWithoutStateSync(
+        _ command: NovelCollectCandidateCommand,
+        payloadSHA256: String,
+        in document: NovelProjectDocumentV1,
+        now: Date = Date()
+    ) throws -> NovelFactTransactionResult {
+        try requireProject(command.projectID, in: document)
+        try requirePayloadHash(payloadSHA256)
+        let pending = try makeCollectionPending(
+            command,
+            payloadSHA256: payloadSHA256,
+            in: document,
+            now: now
+        )
+        return try commitPreparedCollection(
+            pending,
+            retryCommand: nil,
+            in: document,
+            now: now
+        )
+    }
+
+    private static func commitPreparedCollection(
+        _ pending: NovelPendingOperationRecord,
+        retryCommand: NovelRetryPendingCommand?,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> NovelFactTransactionResult {
+        var next = document
+        let branchIndex = try requireBranch(pending.branchID, in: next)
+        let branch = next.branches[branchIndex]
+        try requirePendingGuards(
+            pending,
+            branch: branch,
+            projectID: document.project.id
+        )
+        guard let candidateIndex = next.candidates.firstIndex(where: {
+            $0.id == pending.candidateID
+        }), let proposedVersion = pending.proposedChapterVersion,
+        let checkpointID = pending.proposedCheckpointID,
+        let target = pending.collectionTarget,
+        let sessionCursor = pending.sessionCursor else {
+            throw NovelError.invalidInput("The prepared collection is incomplete.")
+        }
+        let candidate = next.candidates[candidateIndex]
+        guard let sessionIndex = next.sessions.firstIndex(where: {
+            $0.id == candidate.sessionID && $0.branchID == branch.id
+        }) else {
+            throw NovelError.invalidInput("The prepared collection lost its owning Session.")
+        }
+        let baseCheckpoint = try checkpoint(pending.baseCheckpointID, in: next)
+        var chapterSelections = branch.workingChapterSelections
+        var chapterToAdd: NovelChapterRecord?
+        switch target {
+        case .appendToChapter(let chapterID):
+            guard let index = chapterSelections.firstIndex(where: { $0.chapterID == chapterID }),
+                  proposedVersion.chapterID == chapterID else {
+                throw NovelError.invalidInput("The collection append target is stale.")
+            }
+            chapterSelections[index] = NovelChapterSelection(
+                chapterID: chapterID,
+                versionID: proposedVersion.id
+            )
+        case .createNextChapter(let chapterID, _):
+            guard proposedVersion.chapterID == chapterID,
+                  !next.chapters.contains(where: { $0.id == chapterID }) else {
+                throw NovelError.immutableRecordConflict("chapter \(chapterID)")
+            }
+            chapterToAdd = NovelChapterRecord(id: chapterID, createdAt: now)
+            chapterSelections.append(NovelChapterSelection(
+                chapterID: chapterID,
+                versionID: proposedVersion.id
+            ))
+        }
+
+        let finalRevision = document.project.revision + 1
+        let outcome = NovelOutcome.candidateCollected(
+            projectID: document.project.id,
+            branchID: branch.id,
+            candidateID: candidate.id,
+            checkpointID: checkpointID,
+            chapterVersionID: proposedVersion.id,
+            revision: finalRevision
+        )
+        let checkpoint = NovelBranchCheckpointRecord(
+            id: checkpointID,
+            kind: .collection,
+            createdOnBranchID: branch.id,
+            parentCheckpointID: pending.baseCheckpointID,
+            chapterSelections: chapterSelections,
+            stateSnapshotID: baseCheckpoint.stateSnapshotID,
+            sessionCursor: sessionCursor,
+            branchOverrideRevisionIDs: branch.overrideRevisionIDs,
+            sourceCandidateID: candidate.id,
+            baseHeadRevision: pending.baseHeadRevision,
+            operationID: pending.operationID,
+            createdAt: now
+        )
+
+        if let chapterToAdd { next.chapters.append(chapterToAdd) }
+        next.chapterVersions.append(proposedVersion)
+        try appendLedger(
+            pending: pending,
+            outcome: outcome,
+            retryCommand: retryCommand,
+            appliedRevision: finalRevision,
+            to: &next,
+            now: now
+        )
+        let currentOperationIDs = Set([
+            pending.operationID,
+            retryCommand?.context.operationID
+        ].compactMap { $0 })
+        for attempt in next.factAttempts where
+            attempt.pendingID == pending.id &&
+            !currentOperationIDs.contains(attempt.attemptOperationID) &&
+            !next.appliedOperations.contains(where: {
+                $0.operationID == attempt.attemptOperationID
+            }) {
+            next.appliedOperations.append(NovelAppliedOperationRecord(
+                operationID: attempt.attemptOperationID,
+                kind: .retryPending,
+                payloadSHA256: attempt.attemptPayloadSHA256,
+                outcome: outcome,
+                appliedProjectRevision: finalRevision,
+                appliedAt: now
+            ))
+        }
+        next.candidates[candidateIndex].status = .collected
+        next.candidates[candidateIndex].collectedCheckpointID = checkpoint.id
+        next.sessions[sessionIndex].revision += 1
+        try NovelReducer.appendCheckpoint(
+            checkpoint,
+            to: &next,
+            expectedHeadRevision: pending.baseHeadRevision,
+            now: now
+        )
+        next.branches[branchIndex].syncStatus = .needsSync
+        next.pendingOperations.removeAll { $0.id == pending.id }
+        advanceProjectRevision(in: &next, now: now)
+        guard next.project.revision == finalRevision else {
+            throw NovelError.invalidInput("Collection revision accounting failed.")
+        }
+        try validateTransition(from: document, to: next)
+        return (next, outcome)
+    }
+
+    private static func makeCollectionPending(
+        _ command: NovelCollectCandidateCommand,
+        payloadSHA256: String,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> NovelPendingOperationRecord {
         try requireUnusedOperation(command.context.operationID, in: document)
         let branchIndex = try requireBranch(command.branchID, in: document)
         let branch = document.branches[branchIndex]
@@ -78,18 +263,14 @@ enum NovelFactTransactionReducer {
         guard branch.activeRunID == nil else {
             throw NovelError.projectBusy(command.projectID)
         }
-        guard branch.syncStatus == .synchronized else {
-            throw NovelError.invalidInput("Manual edits must be synchronized before collecting prose.")
-        }
         guard !document.pendingOperations.contains(where: { $0.branchID == branch.id }) else {
             throw NovelError.projectBusy(command.projectID)
         }
-        guard let candidateIndex = document.candidates.firstIndex(where: {
+        guard let candidate = document.candidates.first(where: {
             $0.id == command.candidateID
         }) else {
             throw NovelError.invalidInput("The prose candidate was not found.")
         }
-        let candidate = document.candidates[candidateIndex]
         guard candidate.branchID == branch.id,
               candidate.sessionID == branch.sessionID,
               candidate.kind == .prose,
@@ -178,7 +359,7 @@ enum NovelFactTransactionReducer {
             )
         }
 
-        let pending = NovelPendingOperationRecord(
+        return NovelPendingOperationRecord(
             id: command.pendingID,
             kind: .collection,
             status: .pending,
@@ -199,11 +380,6 @@ enum NovelFactTransactionReducer {
             createdAt: now,
             lastError: nil
         )
-        var next = document
-        next.pendingOperations.append(pending)
-        advanceProjectRevision(in: &next, now: now)
-        try validateTransition(from: document, to: next)
-        return (next, pending)
     }
 
     static func collectionExtractionInput(
@@ -231,7 +407,7 @@ enum NovelFactTransactionReducer {
         in document: NovelProjectDocumentV1,
         now: Date = Date()
     ) throws -> NovelFactTransactionResult {
-        let validatedDelta = try validate(delta)
+        var validatedDelta = try validate(delta)
         let pending = try requirePending(pendingID, kind: .collection, in: document)
         try validateRetry(retryCommand, for: pending, in: document)
         let branchIndex = try requireBranch(pending.branchID, in: document)
@@ -270,6 +446,13 @@ enum NovelFactTransactionReducer {
         }
         let baseCheckpoint = try checkpoint(pending.baseCheckpointID, in: document)
         let baseState = try stateSnapshot(baseCheckpoint.stateSnapshotID, in: document)
+        validatedDelta = try sanitizedCollectionDelta(
+            in: validatedDelta,
+            evidenceSource: pending.selectedText,
+            branch: branch,
+            baseState: baseState,
+            document: document
+        )
         try validateStateFacts(
             validatedDelta,
             evidenceSource: pending.selectedText,
@@ -545,10 +728,14 @@ enum NovelFactTransactionReducer {
                 "The working manuscript does not form a valid manual-edit suffix."
             )
         }
-        let affectedIndex = head.chapterSelections.indices.first(where: { index in
-            head.chapterSelections[index].versionID !=
-                branch.workingChapterSelections[index].versionID
-        })
+        let stateBase = try staleStateBaseCheckpoint(
+            from: head,
+            in: document
+        )
+        let affectedIndex = firstChangedChapterIndex(
+            from: stateBase.chapterSelections,
+            to: branch.workingChapterSelections
+        )
         guard let affectedIndex else {
             throw NovelError.invalidInput(
                 "The working manuscript does not form a valid manual-edit suffix."
@@ -565,7 +752,10 @@ enum NovelFactTransactionReducer {
             workingSelections: branch.workingChapterSelections,
             in: document
         )
-        let suffixStart = rebuildBase.chapterSelections.count
+        let suffixStart = firstChangedChapterIndex(
+            from: rebuildBase.chapterSelections,
+            to: branch.workingChapterSelections
+        ) ?? rebuildBase.chapterSelections.count
         guard suffixStart < branch.workingChapterSelections.count else {
             throw NovelError.invalidInput("The manual synchronization suffix is empty.")
         }
@@ -1330,6 +1520,35 @@ enum NovelFactTransactionReducer {
             }
         }
         throw NovelError.invalidInput("No valid rebuild base exists for the working manuscript.")
+    }
+
+    private static func staleStateBaseCheckpoint(
+        from head: NovelBranchCheckpointRecord,
+        in document: NovelProjectDocumentV1
+    ) throws -> NovelBranchCheckpointRecord {
+        var current = head
+        var visited: Set<NovelCheckpointID> = []
+        while current.kind == .collection,
+              let parentID = current.parentCheckpointID {
+            guard visited.insert(current.id).inserted else {
+                throw NovelError.invalidInput("The checkpoint lineage contains a cycle.")
+            }
+            let parent = try checkpoint(parentID, in: document)
+            guard parent.stateSnapshotID == current.stateSnapshotID else { break }
+            current = parent
+        }
+        return current
+    }
+
+    private static func firstChangedChapterIndex(
+        from base: [NovelChapterSelection],
+        to current: [NovelChapterSelection]
+    ) -> Int? {
+        let sharedCount = min(base.count, current.count)
+        if let changed = (0..<sharedCount).first(where: { base[$0] != current[$0] }) {
+            return changed
+        }
+        return base.count == current.count ? nil : sharedCount
     }
 
     private static func encodeManualPayload(

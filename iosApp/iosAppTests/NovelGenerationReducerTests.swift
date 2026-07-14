@@ -200,7 +200,7 @@ final class NovelGenerationReducerTests: XCTestCase {
         }
     }
 
-    func testStaleRevisionsNeedsSyncAndInvalidArtifactsLeaveInputUnchanged() throws {
+    func testStaleRevisionsFailButNeedsSyncStillAllowsProse() throws {
         let document = try NovelTestFixtures.document()
         let stale = makeRequest(
             document: document,
@@ -235,14 +235,16 @@ final class NovelGenerationReducerTests: XCTestCase {
             kind: .prose,
             granularity: .continuation
         )
-        XCTAssertThrowsError(try NovelGenerationReducer.begin(
+        let started = try NovelGenerationReducer.begin(
             prose,
-            artifacts: makeArtifacts(document: needsSync, request: prose, planningDocument: document),
+            artifacts: makeArtifacts(document: needsSync, request: prose),
             in: needsSync,
             now: startTime
-        ))
+        )
         XCTAssertTrue(needsSync.sessions[0].messages.isEmpty)
         XCTAssertTrue(needsSync.activeRuns.isEmpty)
+        XCTAssertEqual(started.document.activeRuns.map(\.id), [prose.id])
+        XCTAssertEqual(started.document.branches[0].syncStatus, .needsSync)
     }
 
     func testInterruptionPersistsOptionalDraftAndLateTerminalsAreNoOps() throws {

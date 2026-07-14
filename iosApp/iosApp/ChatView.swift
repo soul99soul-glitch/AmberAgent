@@ -1139,6 +1139,7 @@ struct ChatView: View {
             viewModel.inputText = committedText
         }
         guard sendEnabled(for: committedText) else { return }
+        dismissKeyboard()
         viewportState.followPaused = false
         viewModel.sendMessage()
     }

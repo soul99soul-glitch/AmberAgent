@@ -18,30 +18,26 @@ extension DefaultNovelCreation {
             return replay
         }
 
-        let prepared = try NovelFactTransactionReducer.prepareCollection(
+        let committed = try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
             command,
             payloadSHA256: payloadSHA256,
             in: loaded.document,
             now: now()
         )
-        guard prepared.pending.status == .pending else {
-            throw NovelError.invalidInput(
-                "This collection previously failed and must be resumed with its retry action."
-            )
+        do {
+            _ = try await commitFactDocument(committed.document, replacing: loaded)
+            return committed.outcome
+        } catch {
+            if let replay = try await reconcileFactOutcome(
+                projectID: command.projectID,
+                context: command.context,
+                kind: .collectCandidate,
+                payloadSHA256: payloadSHA256
+            ) {
+                return replay
+            }
+            throw error
         }
-        let pendingLoaded = try await commitFactDocument(
-            prepared.document,
-            replacing: loaded
-        )
-        return try await executeCollectionTransaction(
-            projectID: command.projectID,
-            pendingID: command.pendingID,
-            retryCommand: nil,
-            replayContext: command.context,
-            replayKind: .collectCandidate,
-            replayPayloadSHA256: payloadSHA256,
-            pendingDocument: pendingLoaded.document
-        )
     }
 
     func executeSyncManualEdits(
@@ -115,9 +111,29 @@ extension DefaultNovelCreation {
         guard branch.activeRunID == nil else {
             throw NovelError.projectBusy(command.projectID)
         }
+        if pending.kind == .collection {
+            let committed = try NovelFactTransactionReducer.recoverPendingCollectionWithoutStateSync(
+                command,
+                in: loaded.document,
+                now: now()
+            )
+            do {
+                _ = try await commitFactDocument(committed.document, replacing: loaded)
+                return committed.outcome
+            } catch {
+                if let replay = try await reconcileFactOutcome(
+                    projectID: command.projectID,
+                    context: command.context,
+                    kind: .retryPending,
+                    payloadSHA256: payloadSHA256
+                ) {
+                    return replay
+                }
+                throw error
+            }
+        }
         let needsProviderRequest: Bool
-        if pending.kind == .manualSync,
-           let progress = pending.manualSyncProgress {
+        if let progress = pending.manualSyncProgress {
             let input = try NovelFactTransactionReducer.manualRebuildInput(
                 pendingID: pending.id,
                 in: loaded.document
@@ -126,9 +142,7 @@ extension DefaultNovelCreation {
                 progress,
                 manuscript: input.manuscript
             )
-        } else {
-            needsProviderRequest = true
-        }
+        } else { needsProviderRequest = true }
         let reservedLoaded: NovelLoadedProject
         if needsProviderRequest {
             let reservedDocument = try NovelManualSyncProgressReducer.reserveRetryAttempt(
@@ -153,28 +167,18 @@ extension DefaultNovelCreation {
             throw NovelError.invalidInput("The retry reservation lost its pending operation.")
         }
 
-        switch reservedPending.kind {
-        case .collection:
-            return try await executeCollectionTransaction(
-                projectID: command.projectID,
-                pendingID: command.pendingID,
-                retryCommand: command,
-                replayContext: command.context,
-                replayKind: .retryPending,
-                replayPayloadSHA256: payloadSHA256,
-                pendingDocument: reservedLoaded.document
-            )
-        case .manualSync:
-            return try await executeManualSyncTransaction(
-                projectID: command.projectID,
-                pendingID: command.pendingID,
-                retryCommand: command,
-                replayContext: command.context,
-                replayKind: .retryPending,
-                replayPayloadSHA256: payloadSHA256,
-                pendingDocument: reservedLoaded.document
-            )
+        guard reservedPending.kind == .manualSync else {
+            throw NovelError.invalidInput("Only material synchronization can reach model retry.")
         }
+        return try await executeManualSyncTransaction(
+            projectID: command.projectID,
+            pendingID: command.pendingID,
+            retryCommand: command,
+            replayContext: command.context,
+            replayKind: .retryPending,
+            replayPayloadSHA256: payloadSHA256,
+            pendingDocument: reservedLoaded.document
+        )
     }
 }
 
@@ -260,7 +264,10 @@ private extension DefaultNovelCreation {
                 replacing: beforeRequest
             )
             try Task.checkCancellation()
-            let execution = try await executor.executePrepared(invocation)
+            let execution = try await executor.executePrepared(
+                invocation,
+                timeout: factRequestTimeout
+            )
             guard case .stateDelta(let delta) = execution.output else {
                 throw NovelError.invalidInput("The collection returned the wrong structured result.")
             }
@@ -432,7 +439,10 @@ private extension DefaultNovelCreation {
                     replacing: beforeRequest
                 ).document
                 try Task.checkCancellation()
-                let execution = try await executor.executePrepared(invocation)
+                let execution = try await executor.executePrepared(
+                    invocation,
+                    timeout: factRequestTimeout
+                )
                 guard case .stateRebuild(let rebuild) = execution.output else {
                     throw NovelError.invalidInput(
                         "Manual synchronization returned the wrong structured result."

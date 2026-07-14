@@ -471,7 +471,7 @@ struct NovelChapterVersionRecord: Codable, Equatable, Sendable {
     }
 }
 
-struct NovelChapterSelection: Codable, Equatable, Sendable {
+struct NovelChapterSelection: Codable, Equatable, Hashable, Sendable {
     let chapterID: NovelChapterID
     let versionID: NovelChapterVersionID
 }

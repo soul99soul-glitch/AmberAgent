@@ -3,6 +3,94 @@ import XCTest
 @testable import iosApp
 
 final class NovelFactTransactionLifecycleTests: XCTestCase {
+    func testCollectionCommitsImmediatelyWithoutStartingFactModel() async throws {
+        let fixture = try candidateDocument()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.delta(validDeltaJSON()), .complete])]
+        )
+        let command = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+
+        guard case .candidateCollected = try await harness.creation.perform(
+            .collectCandidate(command)
+        ) else {
+            return XCTFail("Expected collection outcome")
+        }
+
+        let final = try await harness.repository.document(command.projectID)
+        XCTAssertEqual(final.candidates[0].status, .collected)
+        XCTAssertEqual(final.chapterVersions.last?.content, fixture.candidate.content)
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
+        XCTAssertTrue(final.injectionReceipts.isEmpty)
+        XCTAssertTrue(final.generationReceipts.isEmpty)
+        let requests = await harness.adapter.requests
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testDeferredSyncRebuildsAnImmediatelyCollectedChapter() async throws {
+        let fixture = try candidateDocument()
+        let rebuild = """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "Mara entered the archive and heard the bell.",
+          "branchOutline": "Mara investigates the archive.",
+          "events": [{
+            "id": "event-rebuilt-archive",
+            "kind": "discovery",
+            "summary": "Mara entered the archive.",
+            "entityReferences": ["Mara"],
+            "evidence": "Mara opened the archive."
+          }],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
+          "unresolvedEntityNames": ["Mara"],
+          "settingProposals": []
+        }
+        """
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.delta(rebuild), .complete])]
+        )
+        let collect = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        _ = try await harness.creation.perform(.collectCandidate(collect))
+        let collected = try await harness.repository.document(collect.projectID)
+        let branch = collected.branches[0]
+        let sync = NovelSyncManualEditsCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: collected.project.revision,
+                expectedConfigRevision: collected.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: collected.project.id,
+            branchID: branch.id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+
+        guard case .manualSyncCommitted = try await harness.creation.perform(
+            .syncManualEdits(sync)
+        ) else {
+            return XCTFail("Expected deferred material synchronization to complete")
+        }
+
+        let final = try await harness.repository.document(collect.projectID)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        XCTAssertEqual(final.stateSnapshots.last?.summary, "Mara entered the archive and heard the bell.")
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 1)
+    }
+
     func testProjectedManualStateSizeDoesNotGrowWithAccumulatedFactArrays() throws {
         let baseState = try XCTUnwrap(NovelTestFixtures.document().stateSnapshots.first)
         func rebuild(eventCount: Int) -> NovelStateRebuildV1 {
@@ -39,134 +127,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertLessThan(many.count - one.count, 32)
     }
 
-    func testCollectionPersistsPendingBeforeProviderResume() async throws {
-        let fixture = try candidateDocument()
-        let json = validDeltaJSON()
-        let harness = try await makeHarness(
-            document: fixture.document,
-            scripts: [NovelModelScript(steps: [.pause, .delta(json), .complete])],
-            resolvedModel: NovelResolvedModel(
-                providerID: "provider-id",
-                ownerProviderID: "provider-id",
-                modelID: "model-id",
-                wireModelID: "novel-model",
-                displayName: "Novel Model",
-                contextWindowTokens: 32_000
-            )
-        )
-        let command = collectCommand(
-            document: fixture.document,
-            candidate: fixture.candidate
-        )
-        let task = Task {
-            try await harness.creation.perform(.collectCandidate(command))
-        }
-        let providerStarted = await eventually {
-            await harness.adapter.requests.count == 1
-        }
-        XCTAssertTrue(providerStarted)
-
-        let pending = try await harness.repository.document(command.projectID)
-        XCTAssertEqual(pending.pendingOperations.map(\.id), [command.pendingID])
-        XCTAssertEqual(pending.pendingOperations[0].selectedText, fixture.candidate.content)
-        XCTAssertEqual(pending.pendingOperations[0].status, .pending)
-        XCTAssertEqual(pending.chapters, fixture.document.chapters)
-        XCTAssertEqual(pending.chapterVersions, fixture.document.chapterVersions)
-        XCTAssertEqual(pending.events, fixture.document.events)
-        XCTAssertEqual(pending.stateSnapshots, fixture.document.stateSnapshots)
-        XCTAssertEqual(pending.checkpoints, fixture.document.checkpoints)
-        XCTAssertEqual(pending.injectionReceipts.count, 1)
-        XCTAssertEqual(pending.generationReceipts.count, 1)
-
-        let requestsBeforeResume = await harness.adapter.requests
-        let request = try XCTUnwrap(requestsBeforeResume.first)
-        await harness.adapter.resume(runID: request.runID)
-        guard case .candidateCollected = try await task.value else {
-            return XCTFail("Expected collection outcome")
-        }
-        let final = try await harness.repository.document(command.projectID)
-        XCTAssertTrue(final.pendingOperations.isEmpty)
-        XCTAssertEqual(final.checkpoints.count, fixture.document.checkpoints.count + 1)
-        XCTAssertEqual(final.candidates[0].status, .collected)
-        XCTAssertEqual(final.injectionReceipts.count, 1)
-        XCTAssertEqual(final.generationReceipts.count, 1)
-        let injection = final.injectionReceipts[0]
-        let generation = final.generationReceipts[0]
-        XCTAssertEqual(injection.runID, request.runID)
-        XCTAssertEqual(generation.runID, request.runID)
-        XCTAssertEqual(injection.providerID, "provider-id")
-        XCTAssertEqual(injection.modelID, "model-id")
-        XCTAssertEqual(injection.requestedInputBudgetTokens, 64_000)
-        XCTAssertEqual(injection.maxEstimatedInputTokens, 26_880)
-        XCTAssertEqual(generation.injectionReceiptID, injection.id)
-        XCTAssertEqual(generation.requestSHA256, try canonicalSHA256(request))
-        XCTAssertEqual(injection.factTransaction, NovelFactReceiptLink(
-            pendingID: command.pendingID,
-            ownerOperationID: command.context.operationID,
-            attemptOperationID: command.context.operationID,
-            attemptPayloadSHA256: try command.canonicalPayloadSHA256(),
-            kind: .stateDelta
-        ))
-        XCTAssertEqual(generation.factTransaction, injection.factTransaction)
-
-        let roundTrip = try JSONDecoder().decode(
-            NovelProjectDocumentV1.self,
-            from: JSONEncoder().encode(final)
-        )
-        XCTAssertEqual(roundTrip.injectionReceipts, final.injectionReceipts)
-        XCTAssertEqual(roundTrip.generationReceipts, final.generationReceipts)
-        XCTAssertNoThrow(try NovelDocumentValidator.validate(roundTrip))
-        let resolvedPolicies = await harness.adapter.resolvedPolicies
-        XCTAssertEqual(resolvedPolicies.count, 1)
-    }
-
-    func testCancellationAfterRequestReceiptCommitDoesNotStartProvider() async throws {
-        let fixture = try candidateDocument()
-        let harness = try await makeHarness(
-            document: fixture.document,
-            scripts: [NovelModelScript(steps: [.delta(validDeltaJSON()), .complete])]
-        )
-        await harness.repository.pauseAfterNextFactRequestReceiptCommit()
-        let command = collectCommand(
-            document: fixture.document,
-            candidate: fixture.candidate
-        )
-        let task = Task {
-            try await harness.creation.perform(.collectCandidate(command))
-        }
-        let receiptCommitted = await eventually(timeout: 3) {
-            await harness.repository.isFactRequestReceiptCommitPaused()
-        }
-        XCTAssertTrue(receiptCommitted)
-        let beforeCancel = try await harness.repository.document(command.projectID)
-        XCTAssertEqual(beforeCancel.injectionReceipts.count, 1)
-        XCTAssertEqual(beforeCancel.generationReceipts.count, 1)
-        let requestsBeforeCancel = await harness.adapter.requests
-        XCTAssertTrue(requestsBeforeCancel.isEmpty)
-
-        task.cancel()
-        await harness.repository.resumeFactRequestReceiptCommit()
-        do {
-            _ = try await task.value
-            XCTFail("Expected cancellation before provider dispatch.")
-        } catch {
-            // The durable request receipt remains, but no paid provider call starts.
-        }
-        let retryable = await eventually(timeout: 3) {
-            guard let document = try? await harness.repository.document(command.projectID) else {
-                return false
-            }
-            return document.pendingOperations.first?.status == .retryable
-        }
-        XCTAssertTrue(retryable)
-        let requestsAfterCancel = await harness.adapter.requests
-        XCTAssertTrue(requestsAfterCancel.isEmpty)
-        let durable = try await harness.repository.document(command.projectID)
-        XCTAssertEqual(durable.injectionReceipts.count, 1)
-        XCTAssertEqual(durable.generationReceipts.count, 1)
-    }
-
-    func testSmallContextWindowFailsBeforeProviderStartAndLeavesNoReceipts() async throws {
+    func testCollectionDoesNotDependOnModelContextWindow() async throws {
         let fixture = try candidateDocument()
         let harness = try await makeHarness(
             document: fixture.document,
@@ -185,19 +146,13 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             candidate: fixture.candidate
         )
 
-        do {
-            _ = try await harness.creation.perform(.collectCandidate(command))
-            XCTFail("Expected the model window guard to fail")
-        } catch let error as NovelError {
-            guard case .injectionBudgetExceeded = error else {
-                return XCTFail("Unexpected small-window error: \(error)")
-            }
-        }
+        _ = try await harness.creation.perform(.collectCandidate(command))
 
         let requests = await harness.adapter.requests
         XCTAssertTrue(requests.isEmpty)
         let durable = try await harness.repository.document(command.projectID)
-        XCTAssertEqual(durable.pendingOperations.first?.status, .retryable)
+        XCTAssertEqual(durable.candidates[0].status, .collected)
+        XCTAssertTrue(durable.pendingOperations.isEmpty)
         XCTAssertTrue(durable.injectionReceipts.isEmpty)
         XCTAssertTrue(durable.generationReceipts.isEmpty)
     }
@@ -235,9 +190,12 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             final.appliedOperations.suffix(2).map(\.kind),
             [.collectCandidate, .retryPending]
         )
+        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
+        let requests = await harness.adapter.requests
+        XCTAssertTrue(requests.isEmpty)
     }
 
-    func testFailedRetryAttemptRemainsReservedAfterAnotherRetrySucceeds() async throws {
+    func testLegacyCollectionRecoveryPreservesEarlierFailedAttempt() async throws {
         let fixture = try candidateDocument()
         let command = collectCommand(
             document: fixture.document,
@@ -253,50 +211,37 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             message: "Initial provider failed.",
             in: prepared
         )
-        let harness = try await makeHarness(
-            document: retryable,
-            scripts: [
-                NovelModelScript(steps: [.delta("{"), .complete]),
-                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete])
-            ]
-        )
         let failedRetry = retryCommand(
             document: retryable,
             pendingID: command.pendingID
         )
-        do {
-            _ = try await harness.creation.perform(.retryPending(failedRetry))
-            XCTFail("Expected the first retry to fail after recording its request.")
-        } catch let failure as NovelStructuredModelExecutionFailure {
-            XCTAssertEqual(failure.failure.code, "invalid_structured_output")
-        }
-        let afterFailure = try await harness.repository.document(command.projectID)
-        XCTAssertEqual(afterFailure.pendingOperations.first?.status, .retryable)
-        XCTAssertEqual(afterFailure.injectionReceipts.count, 1)
-        XCTAssertEqual(afterFailure.generationReceipts.count, 1)
-        XCTAssertEqual(
-            afterFailure.factAttempts.map(\.attemptOperationID),
-            [failedRetry.context.operationID]
+        let withFailedAttempt = try NovelManualSyncProgressReducer.reserveRetryAttempt(
+            failedRetry,
+            pending: try XCTUnwrap(retryable.pendingOperations.first),
+            in: retryable
         )
-
-        let successfulRetry = retryCommand(
-            document: afterFailure,
+        let harness = try await makeHarness(
+            document: withFailedAttempt,
+            scripts: [NovelModelScript(steps: [.delta(validDeltaJSON()), .complete])]
+        )
+        let recovery = retryCommand(
+            document: withFailedAttempt,
             pendingID: command.pendingID
         )
         guard case .candidateCollected = try await harness.creation.perform(
-            .retryPending(successfulRetry)
+            .retryPending(recovery)
         ) else {
-            return XCTFail("Expected the second retry to collect the candidate.")
+            return XCTFail("Expected legacy collection recovery to publish the prose.")
         }
         let final = try await harness.repository.document(command.projectID)
         XCTAssertEqual(
             final.factAttempts.map(\.attemptOperationID),
-            [failedRetry.context.operationID, successfulRetry.context.operationID]
+            [failedRetry.context.operationID]
         )
-        XCTAssertEqual(
-            final.injectionReceipts.compactMap(\.factTransaction?.attemptOperationID),
-            [failedRetry.context.operationID, successfulRetry.context.operationID]
-        )
+        XCTAssertTrue(final.appliedOperations.contains(where: {
+            $0.operationID == failedRetry.context.operationID &&
+                $0.kind == .retryPending
+        }))
         let collidingRename = NovelRenameProjectCommand(
             context: NovelMutationContext(
                 operationID: failedRetry.context.operationID,
@@ -316,7 +261,44 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             }
             XCTAssertEqual(operationID, failedRetry.context.operationID)
         }
+        let requests = await harness.adapter.requests
+        XCTAssertTrue(requests.isEmpty)
         XCTAssertNoThrow(try NovelDocumentValidator.validate(final))
+    }
+
+    func testRetryingLegacyCollectionCompletesWithoutAProviderRequest() async throws {
+        let fixture = try candidateDocument()
+        let command = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        let prepared = try NovelFactTransactionReducer.prepareCollection(
+            command,
+            payloadSHA256: command.canonicalPayloadSHA256(),
+            in: fixture.document
+        ).document
+        let retryable = try NovelFactTransactionReducer.markRetryable(
+            pendingID: command.pendingID,
+            message: "Initial provider timeout.",
+            in: prepared
+        )
+        let harness = try await makeHarness(
+            document: retryable,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let retry = retryCommand(document: retryable, pendingID: command.pendingID)
+        guard case .candidateCollected = try await harness.creation.perform(.retryPending(retry)) else {
+            return XCTFail("Expected the legacy collection to publish immediately.")
+        }
+
+        let durable = try await harness.repository.document(command.projectID)
+        XCTAssertTrue(durable.pendingOperations.isEmpty)
+        XCTAssertEqual(durable.candidates[0].status, .collected)
+        XCTAssertEqual(durable.branches[0].syncStatus, .needsSync)
+        let requests = await harness.adapter.requests
+        let cancelledRunIDs = await harness.adapter.cancelledRunIDs
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(cancelledRunIDs.isEmpty)
     }
 
     func testFileRepositoryCollectionRetrySurvivesTwoActorRestarts() async throws {
@@ -369,241 +351,44 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         }.map(\.kind), [.collectCandidate, .retryPending])
         XCTAssertEqual(Set(final.injectionReceipts.map(\.id)).count, final.injectionReceipts.count)
         XCTAssertEqual(Set(final.generationReceipts.map(\.id)).count, final.generationReceipts.count)
+        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
+        let requests = await adapter.requests
+        XCTAssertTrue(requests.isEmpty)
         XCTAssertNoThrow(try NovelDocumentValidator.validate(final))
     }
 
-    func testInvalidJSONBecomesRetryableThenRestartRetryCommitsOnce() async throws {
+    func testCollectionCommitFailureLeavesTheCandidateUnchanged() async throws {
         let fixture = try candidateDocument()
         let harness = try await makeHarness(
             document: fixture.document,
-            scripts: [
-                NovelModelScript(steps: [.delta("{"), .complete])
-            ]
+            scripts: []
         )
         let command = collectCommand(
             document: fixture.document,
             candidate: fixture.candidate
         )
+        await harness.repository.failNextCommits(1)
         do {
             _ = try await harness.creation.perform(.collectCandidate(command))
-            XCTFail("Expected invalid JSON to fail")
-        } catch let failure as NovelStructuredModelExecutionFailure {
-            XCTAssertEqual(failure.failure.code, "invalid_structured_output")
-        }
-        let retryable = try await harness.repository.document(command.projectID)
-        XCTAssertEqual(retryable.pendingOperations[0].status, .retryable)
-        XCTAssertEqual(retryable.pendingOperations[0].selectedText, fixture.candidate.content)
-        XCTAssertEqual(retryable.chapters, fixture.document.chapters)
-        XCTAssertEqual(retryable.checkpoints, fixture.document.checkpoints)
-        XCTAssertEqual(retryable.injectionReceipts.count, 1)
-        XCTAssertEqual(retryable.generationReceipts.count, 1)
-        let failedRequests = await harness.adapter.requests
-        let failedRequest = try XCTUnwrap(failedRequests.first)
-        XCTAssertEqual(retryable.injectionReceipts[0].runID, failedRequest.runID)
-        XCTAssertEqual(retryable.injectionReceipts[0].providerID, "provider-id")
-        XCTAssertEqual(retryable.injectionReceipts[0].modelID, "model-id")
-        XCTAssertEqual(
-            retryable.generationReceipts[0].requestSHA256,
-            try canonicalSHA256(failedRequest)
-        )
-        XCTAssertEqual(
-            retryable.injectionReceipts[0].factTransaction?.attemptOperationID,
-            command.context.operationID
-        )
-
-        let restarted = DefaultNovelCreation(
-            repository: harness.repository,
-            modelRunner: harness.adapter,
-            now: { Date(timeIntervalSince1970: 1_700_002_100) }
-        )
-        do {
-            _ = try await restarted.perform(.collectCandidate(command))
-            XCTFail("Expected the original action to require explicit retry")
-        } catch let error as NovelError {
-            guard case .invalidInput(let message) = error else {
-                return XCTFail("Unexpected original-action replay error: \(error)")
-            }
-            XCTAssertTrue(message.contains("retry action"))
-        }
-        let requestCountAfterOriginalReplay = await harness.adapter.requests.count
-        XCTAssertEqual(requestCountAfterOriginalReplay, 1)
-
-        let staleRetry = NovelRetryPendingCommand(
-            context: NovelMutationContext(
-                operationID: NovelOperationID(),
-                expectedProjectRevision: retryable.project.revision - 1,
-                expectedConfigRevision: retryable.project.configRevision,
-                expectedBranchHeadRevision: retryable.branches[0].headRevision
-            ),
-            projectID: retryable.project.id,
-            pendingID: command.pendingID
-        )
-        do {
-            _ = try await restarted.perform(.retryPending(staleRetry))
-            XCTFail("Expected stale retry to fail before calling the provider")
-        } catch let error as NovelError {
-            guard case .staleProjectRevision = error else {
-                return XCTFail("Unexpected stale retry error: \(error)")
-            }
-        }
-        let requestCountAfterStaleRetry = await harness.adapter.requests.count
-        XCTAssertEqual(requestCountAfterStaleRetry, 1)
-
-        let retry = retryCommand(document: retryable, pendingID: command.pendingID)
-        let retryAdapter = ScriptedNovelModelAdapter(
-            resolvedModel: NovelResolvedModel(
-                providerID: "retry-provider",
-                ownerProviderID: "retry-owner",
-                modelID: "retry-model",
-                wireModelID: "retry-wire-model",
-                displayName: "Retry Model",
-                contextWindowTokens: 128_000
-            ),
-            scripts: [NovelModelScript(steps: [.delta(validDeltaJSON()), .complete])]
-        )
-        let retryCreation = DefaultNovelCreation(
-            repository: harness.repository,
-            modelRunner: retryAdapter,
-            now: { Date(timeIntervalSince1970: 1_700_002_100) }
-        )
-        guard case .candidateCollected = try await retryCreation.perform(.retryPending(retry)) else {
-            return XCTFail("Expected retry collection outcome")
-        }
-
-        let final = try await harness.repository.document(command.projectID)
-        XCTAssertTrue(final.pendingOperations.isEmpty)
-        XCTAssertEqual(final.checkpoints.count, fixture.document.checkpoints.count + 1)
-        XCTAssertEqual(final.appliedOperations.filter {
-            $0.operationID == command.context.operationID ||
-                $0.operationID == retry.context.operationID
-        }.count, 2)
-        let originalRequests = await harness.adapter.requests
-        let retryRequests = await retryAdapter.requests
-        XCTAssertEqual(originalRequests.count, 1)
-        XCTAssertEqual(retryRequests.count, 1)
-        XCTAssertNotEqual(originalRequests[0].runID, retryRequests[0].runID)
-        let retryInjection = try XCTUnwrap(final.injectionReceipts.last)
-        XCTAssertEqual(retryInjection.runID, retryRequests[0].runID)
-        XCTAssertEqual(retryInjection.providerID, "retry-provider")
-        XCTAssertEqual(retryInjection.ownerProviderID, "retry-owner")
-        XCTAssertEqual(retryInjection.modelID, "retry-model")
-        XCTAssertEqual(retryInjection.factTransaction, NovelFactReceiptLink(
-            pendingID: command.pendingID,
-            ownerOperationID: command.context.operationID,
-            attemptOperationID: retry.context.operationID,
-            attemptPayloadSHA256: try retry.canonicalPayloadSHA256(),
-            kind: .stateDelta
-        ))
-    }
-
-    func testFinalCommitFailureKeepsOnlyRetryablePending() async throws {
-        let fixture = try candidateDocument()
-        let json = validDeltaJSON()
-        let harness = try await makeHarness(
-            document: fixture.document,
-            scripts: [NovelModelScript(steps: [.pause, .delta(json), .complete])]
-        )
-        let command = collectCommand(
-            document: fixture.document,
-            candidate: fixture.candidate
-        )
-        let task = Task {
-            try await harness.creation.perform(.collectCandidate(command))
-        }
-        let providerStarted = await eventually {
-            await harness.adapter.requests.count == 1
-        }
-        XCTAssertTrue(providerStarted)
-        await harness.repository.failNextCommits(1)
-        let requestsBeforeResume = await harness.adapter.requests
-        let request = try XCTUnwrap(requestsBeforeResume.first)
-        await harness.adapter.resume(runID: request.runID)
-        do {
-            _ = try await task.value
-            XCTFail("Expected final commit failure")
+            XCTFail("Expected collection commit failure")
         } catch let error as NovelError {
             guard case .repositoryFailure = error else {
-                return XCTFail("Unexpected final write error: \(error)")
+                return XCTFail("Unexpected collection write error: \(error)")
             }
         }
 
         let durable = try await harness.repository.document(command.projectID)
-        XCTAssertEqual(durable.pendingOperations.count, 1)
-        XCTAssertEqual(durable.pendingOperations[0].status, .retryable)
-        XCTAssertEqual(durable.pendingOperations[0].selectedText, fixture.candidate.content)
-        XCTAssertEqual(durable.chapters, fixture.document.chapters)
-        XCTAssertEqual(durable.chapterVersions, fixture.document.chapterVersions)
-        XCTAssertEqual(durable.events, fixture.document.events)
-        XCTAssertEqual(durable.stateSnapshots, fixture.document.stateSnapshots)
-        XCTAssertEqual(durable.checkpoints, fixture.document.checkpoints)
-        XCTAssertEqual(durable.candidates[0].status, .available)
-        XCTAssertEqual(durable.injectionReceipts.count, 1)
-        XCTAssertEqual(durable.generationReceipts.count, 1)
-    }
-
-    func testCallerCancellationKeepsRetryablePendingAndCancelsProvider() async throws {
-        let fixture = try candidateDocument()
-        let harness = try await makeHarness(
-            document: fixture.document,
-            scripts: [NovelModelScript(steps: [.pause])]
-        )
-        let command = collectCommand(
-            document: fixture.document,
-            candidate: fixture.candidate
-        )
-        let task = Task {
-            try await harness.creation.perform(.collectCandidate(command))
-        }
-        let providerStarted = await eventually {
-            await harness.adapter.requests.count == 1
-        }
-        XCTAssertTrue(providerStarted)
+        XCTAssertEqual(durable, fixture.document)
         let requests = await harness.adapter.requests
-        let request = try XCTUnwrap(requests.first)
-
-        task.cancel()
-        do {
-            _ = try await task.value
-            XCTFail("Expected fact extraction cancellation")
-        } catch {
-            // The structured executor exposes cancellation as a retryable failure.
-        }
-        let markedRetryable = await eventually {
-            guard let document = try? await harness.repository.document(command.projectID) else {
-                return false
-            }
-            return document.pendingOperations.first?.status == .retryable
-        }
-        XCTAssertTrue(markedRetryable)
-        let durable = try await harness.repository.document(command.projectID)
-        XCTAssertEqual(durable.pendingOperations[0].selectedText, fixture.candidate.content)
-        XCTAssertEqual(durable.chapters, fixture.document.chapters)
-        XCTAssertEqual(durable.chapterVersions, fixture.document.chapterVersions)
-        XCTAssertEqual(durable.events, fixture.document.events)
-        XCTAssertEqual(durable.checkpoints, fixture.document.checkpoints)
-        XCTAssertEqual(durable.injectionReceipts.count, 1)
-        XCTAssertEqual(durable.generationReceipts.count, 1)
-        XCTAssertEqual(durable.injectionReceipts[0].runID, request.runID)
-        XCTAssertEqual(
-            durable.generationReceipts[0].requestSHA256,
-            try canonicalSHA256(request)
-        )
-        let providerCancelled = await eventually {
-            await harness.adapter.cancelledRunIDs.contains(request.runID)
-        }
-        XCTAssertTrue(providerCancelled)
+        XCTAssertTrue(requests.isEmpty)
     }
 
     func testManualRebuildPlannerUsesRebuildBaseState() async throws {
         let fixture = try candidateDocument()
-        let collectionJSON = validDeltaJSON(summary: "STALE CURRENT STATE")
         let rebuildJSON = validRebuildJSON()
         let harness = try await makeHarness(
             document: fixture.document,
-            scripts: [
-                NovelModelScript(steps: [.delta(collectionJSON), .complete]),
-                NovelModelScript(steps: [.delta(rebuildJSON), .complete])
-            ]
+            scripts: [NovelModelScript(steps: [.delta(rebuildJSON), .complete])]
         )
         let collect = collectCommand(
             document: fixture.document,
@@ -652,18 +437,17 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         _ = try await harness.creation.perform(.syncManualEdits(sync))
 
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 2)
-        let rebuildRequest = requests[1]
+        XCTAssertEqual(requests.count, 1)
+        let rebuildRequest = requests[0]
         let system = rebuildRequest.messages.first?.content ?? ""
         let user = rebuildRequest.messages.last?.content ?? ""
-        XCTAssertFalse(system.contains("STALE CURRENT STATE"))
         XCTAssertFalse(system.contains("potentially stale"))
         XCTAssertTrue(user.contains("Mara forced open the archive door."))
         let final = try await harness.repository.document(sync.projectID)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertEqual(final.branches[0].currentStateSnapshotID, sync.stateSnapshotID)
-        XCTAssertEqual(final.injectionReceipts.count, 2)
-        XCTAssertEqual(final.generationReceipts.count, 2)
+        XCTAssertEqual(final.injectionReceipts.count, 1)
+        XCTAssertEqual(final.generationReceipts.count, 1)
         let manualInjection = try XCTUnwrap(final.injectionReceipts.last)
         XCTAssertEqual(manualInjection.runID, rebuildRequest.runID)
         XCTAssertEqual(manualInjection.factTransaction, NovelFactReceiptLink(
@@ -980,7 +764,8 @@ private extension NovelFactTransactionLifecycleTests {
     func makeHarness(
         document: NovelProjectDocumentV1,
         scripts: [NovelModelScript],
-        resolvedModel: NovelResolvedModel? = nil
+        resolvedModel: NovelResolvedModel? = nil,
+        factRequestTimeout: TimeInterval = 60
     ) async throws -> Harness {
         let repository = FactObservingRepository()
         try await repository.seed(document)
@@ -1001,6 +786,7 @@ private extension NovelFactTransactionLifecycleTests {
             creation: DefaultNovelCreation(
                 repository: repository,
                 modelRunner: adapter,
+                factRequestTimeout: factRequestTimeout,
                 now: { Date(timeIntervalSince1970: 1_700_002_000) }
             )
         )

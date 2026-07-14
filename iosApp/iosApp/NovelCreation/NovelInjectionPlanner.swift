@@ -274,7 +274,7 @@ enum NovelInjectionPlanner {
            branch.syncStatus != .synchronized {
             throw NovelInjectionPlanningError.branchRequiresSync(branch.id)
         }
-        if request.promptKind.requiresSynchronizedBranch,
+        if request.promptKind.requiresIdleBranch,
            document.pendingOperations.contains(where: { $0.branchID == branch.id }) {
             throw NovelInjectionPlanningError.branchRequiresSync(branch.id)
         }
@@ -516,6 +516,16 @@ enum NovelInjectionPlanner {
 
 private extension NovelPromptKind {
     var requiresSynchronizedBranch: Bool {
+        switch self {
+        case .wholeChapterPolish:
+            true
+        case .quickStart, .discussion, .proseContinuation, .proseWholeChapter,
+             .stateDeltaV1, .manualSyncV1, .polishDriftV1:
+            false
+        }
+    }
+
+    var requiresIdleBranch: Bool {
         switch self {
         case .proseContinuation, .proseWholeChapter, .wholeChapterPolish:
             true

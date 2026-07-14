@@ -1,8 +1,63 @@
+import SwiftUI
 import XCTest
 @testable import iosApp
 
 @MainActor
 final class NovelSessionViewModelTests: XCTestCase {
+    func testStartingRunKeepsLongSessionLayoutResponsive() async throws {
+        var document = try NovelTestFixtures.document()
+        let longMarkdown = "# 第一章\n\n" + String(repeating: "破庙里的风裹着雨气，众人压低声音商议下一步。\n\n", count: 180)
+        document.sessions[0].messages = (0..<8).map { index in
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: Int64(index),
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                mode: index.isMultiple(of: 2) ? .discussPlan : .writeProse,
+                kind: index.isMultiple(of: 2) ? .userInput : .discussion,
+                content: index.isMultiple(of: 2) ? "继续" : longMarkdown,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000 + Double(index)),
+                runID: nil,
+                candidateID: nil
+            )
+        }
+        document.sessions[0].revision = Int64(document.sessions[0].messages.count)
+        try NovelDocumentValidator.validate(document)
+
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let settings = IOSSharedSettingsStore(
+            userDefaults: UserDefaults(suiteName: "NovelSessionLayout-\(UUID().uuidString)")!
+        )
+        let host = UIHostingController(rootView: NovelSessionLayoutHarness(
+            workspace: harness.workspace,
+            session: harness.session,
+            settings: settings
+        ))
+        let window = makeWindow(rootViewController: host)
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        window.layoutIfNeeded()
+        try? await Task.sleep(for: .milliseconds(100))
+
+        let startedAt = ContinuousClock.now
+        let didStart = await harness.session.send(text: "继续写下一段")
+        window.layoutIfNeeded()
+        try? await Task.sleep(for: .milliseconds(100))
+        let elapsed = startedAt.duration(to: .now)
+
+        XCTAssertTrue(didStart)
+        XCTAssertLessThan(
+            elapsed,
+            .seconds(2),
+            "Adding the live tail must not force the long lazy history through a watchdog-scale layout pass."
+        )
+        await harness.session.stop()
+    }
+
     func testDiscussionCompletesAsOneDurableAssistantBubble() async throws {
         let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
             .delta("零散"),
@@ -57,6 +112,79 @@ final class NovelSessionViewModelTests: XCTestCase {
         let request = try XCTUnwrap(requests.first)
         XCTAssertEqual(request.purpose, .prose)
         XCTAssertEqual(request.parameters.maxOutputTokens, 8_192)
+    }
+
+    func testDetachedWorkspaceConsumerDoesNotCancelAndRunStillPersistsCompletion() async throws {
+        let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
+            .delta("离开页面前的正文"),
+            .pause,
+            .delta("，后台继续完成。"),
+            .complete,
+        ])])
+        harness.session.mode = .writeProse
+        harness.session.granularity = .continuation
+
+        let didStart = await harness.session.send(text: "开始生成后离开页面")
+        XCTAssertTrue(didStart)
+        let sawPartial = await eventually {
+            harness.session.transientTail?.content == "离开页面前的正文"
+        }
+        XCTAssertTrue(sawPartial)
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+
+        harness.session.detachConsumer()
+        let beforeResume = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(beforeResume.activeRuns.first { $0.id == runID }?.status, .running)
+        let cancellationsBeforeResume = await harness.adapter.cancelledRunIDs
+        XCTAssertFalse(cancellationsBeforeResume.contains(runID))
+
+        await harness.adapter.resume(runID: runID)
+        let persisted = await eventually {
+            let document = try? await harness.repository.loadProject(id: harness.projectID).document
+            return document?.activeRuns.first { $0.id == runID }?.status == .completed
+        }
+        XCTAssertTrue(persisted)
+
+        let final = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(final.candidates.first?.content, "离开页面前的正文，后台继续完成。")
+        let finalCancellations = await harness.adapter.cancelledRunIDs
+        XCTAssertFalse(finalCancellations.contains(runID))
+    }
+
+    func testAppBackgroundExpirationInterruptsRunAfterWorkspaceSelectsAnotherProject() async throws {
+        let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
+            .delta("应保存的后台片段"),
+            .pause,
+        ])])
+        harness.session.mode = .writeProse
+
+        let didStart = await harness.session.send(text: "离开项目后继续生成")
+        XCTAssertTrue(didStart)
+        let sawPartial = await eventually {
+            harness.session.transientTail?.content == "应保存的后台片段"
+        }
+        XCTAssertTrue(sawPartial)
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+        harness.session.detachConsumer()
+
+        let otherProject = try NovelTestFixtures.document()
+        _ = try await harness.repository.createProject(otherProject)
+        await harness.workspace.loadProjects(selecting: otherProject.project.id)
+        XCTAssertEqual(harness.workspace.selectedProjectID, otherProject.project.id)
+
+        await harness.workspace.interruptSessionForBackground(deadline: .distantPast)
+
+        let didPersistInterruption = await eventually {
+            let document = try? await harness.repository.loadProject(id: harness.projectID).document
+            return document?.activeRuns.first { $0.id == runID }?.status == .interrupted
+        }
+        XCTAssertTrue(didPersistInterruption)
+        let original = try await harness.repository.loadProject(id: harness.projectID).document
+        let run = try XCTUnwrap(original.activeRuns.first { $0.id == runID })
+        XCTAssertEqual(run.status, .interrupted)
+        XCTAssertEqual(run.interruptionReason, .expiration)
+        XCTAssertEqual(run.partialContent, "应保存的后台片段")
+        XCTAssertEqual(original.sessions[0].messages.last?.kind, .interruptedDraft)
     }
 
     func testConcurrentRebindsKeepOneConsumerAndApplyEachDeltaOnce() async throws {
@@ -936,7 +1064,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         let prose = "Mara opened the archive.\n\nShe found a map."
         let harness = try await makeHarness(scripts: [
             NovelModelScript(steps: [.delta(prose), .complete]),
-            NovelModelScript(steps: [.delta(validDeltaJSON), .complete]),
+            NovelModelScript(steps: [.delta(validRebuildJSON), .complete]),
         ])
         harness.session.mode = .writeProse
         harness.session.granularity = .continuation
@@ -960,7 +1088,15 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(final.candidates.first { $0.id == candidate.id }?.status, .collected)
         XCTAssertTrue(final.pendingOperations.isEmpty)
         XCTAssertEqual(final.checkpoints.last?.kind, .collection)
+        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
+        XCTAssertTrue(harness.session.canSend)
 
+        await harness.workspace.syncManualEdits()
+        await harness.session.bindToCurrentSelection()
+        // The deferred material sync has its own checkpoint. Undo it first,
+        // then undo the collection before cloning the original candidate.
+        await harness.workspace.undoBranchHead()
+        await harness.session.bindToCurrentSelection()
         await harness.workspace.undoBranchHead()
         await harness.session.bindToCurrentSelection()
         let clonedCandidateID = await harness.session.cloneCollectedProse(candidate.id)
@@ -1188,6 +1324,33 @@ final class NovelSessionViewModelTests: XCTestCase {
 }
 
 private extension NovelSessionViewModelTests {
+    struct NovelSessionLayoutHarness: View {
+        let workspace: NovelCreationViewModel
+        let session: NovelSessionViewModel
+        let settings: IOSSharedSettingsStore
+
+        @State private var inputText = ""
+        @State private var injectionOverrides = NovelInjectionOverrides.none
+        @State private var inputBudgetTokens = 16_000
+
+        var body: some View {
+            NovelSessionView(
+                workspace: workspace,
+                viewModel: session,
+                sharedSettings: settings,
+                inputText: $inputText,
+                injectionOverrides: $injectionOverrides,
+                inputBudgetTokens: $inputBudgetTokens,
+                onOpenContext: {},
+                onOpenModel: {},
+                onOpenCollection: { _ in },
+                onOpenManualRewrite: { _ in },
+                onFork: { _ in },
+                onOpenSettingProposals: { _ in }
+            )
+        }
+    }
+
     struct Harness {
         let repository: any NovelProjectPersisting
         let adapter: ScriptedNovelModelAdapter
@@ -1196,6 +1359,20 @@ private extension NovelSessionViewModelTests {
         let projectID: NovelProjectID
         let snapshotGate: NovelSessionSnapshotFailingCreation?
         let attachGate: NovelSessionAttachBlockingCreation?
+    }
+
+    func makeWindow(rootViewController: UIViewController) -> UIWindow {
+        let window: UIWindow
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first {
+            window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        } else {
+            window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        }
+        window.rootViewController = rootViewController
+        window.makeKeyAndVisible()
+        return window
     }
 
     func makeHarness(
@@ -1360,11 +1537,12 @@ private extension NovelSessionViewModelTests {
         """
     }
 
-    var validDeltaJSON: String {
+    var validRebuildJSON: String {
         """
         {
           "schemaVersion": 1,
           "stateSummary": "Mara entered the archive.",
+          "branchOutline": "Mara investigates the archive.",
           "events": [{
             "id": "archive-opened",
             "kind": "discovery",
@@ -1372,11 +1550,10 @@ private extension NovelSessionViewModelTests {
             "entityReferences": ["Mara"],
             "evidence": "Mara opened the archive."
           }],
-          "characterChanges": [],
-          "relationshipChanges": [],
-          "foreshadowingChanges": [],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
           "unresolvedEntityNames": ["Mara"],
-          "branchOutlinePatch": "Mara investigates the archive.",
           "settingProposals": []
         }
         """

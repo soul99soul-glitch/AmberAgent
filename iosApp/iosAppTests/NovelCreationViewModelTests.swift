@@ -186,6 +186,31 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testUnavailableProjectDeletesFromItsSummaryWithoutLoading() async throws {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        let document = try NovelTestFixtures.document()
+        _ = try await repository.createProject(document)
+        let primaryURL = root.appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent("\(document.project.id.description).json")
+        try Data("corrupt".utf8).write(to: primaryURL, options: [.atomic])
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        await viewModel.loadProjects()
+        let unavailable = try XCTUnwrap(viewModel.projects.first)
+        XCTAssertNotNil(unavailable.loadError)
+        XCTAssertNil(viewModel.projectSnapshot)
+
+        await viewModel.deleteProject(unavailable)
+
+        XCTAssertTrue(viewModel.projects.isEmpty)
+        XCTAssertNil(viewModel.errorMessage)
+        let remainingProjects = try await repository.listProjects()
+        XCTAssertTrue(remainingProjects.isEmpty)
+    }
+
     func testKeepBothImportSelectsRemappedProjectWithoutReplacingSource() async throws {
         let repository = InMemoryNovelProjectRepository()
         let source = try NovelTestFixtures.document()

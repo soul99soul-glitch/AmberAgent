@@ -2,6 +2,7 @@ import Foundation
 
 enum NovelWorkspaceSection: String, CaseIterable, Identifiable {
     case creation
+    case manuscript
     case compendium
 
     var id: String { rawValue }
@@ -9,13 +10,13 @@ enum NovelWorkspaceSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .creation: "创作"
-        case .compendium: "资料"
+        case .manuscript: "正文"
+        case .compendium: "设定"
         }
     }
 }
 
 enum NovelCompendiumSection: String, CaseIterable, Identifiable {
-    case chapters
     case characters
     case world
     case story
@@ -25,7 +26,6 @@ enum NovelCompendiumSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .chapters: "正文"
         case .characters: "角色"
         case .world: "世界观"
         case .story: "剧情"
@@ -96,7 +96,7 @@ extension NovelBranchSyncStatus {
     var displayName: String {
         switch self {
         case .synchronized: "已同步"
-        case .needsSync: "待同步"
+        case .needsSync: "资料待整理"
         }
     }
 }
@@ -150,6 +150,30 @@ extension NovelInjectionSelectionReason {
 }
 
 enum NovelPresentation {
+    static func operationErrorMessage(_ error: Error) -> String {
+        if let failure = error as? NovelStructuredModelExecutionFailure {
+            return failureMessage(failure.failure)
+        }
+        guard case .invalidInput(let detail) = error as? NovelError else {
+            return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        if detail.contains("evidence outside the authoritative manuscript") {
+            return "模型提取的事实依据与正文不一致，候选正文仍然保留，可以重新同步。"
+        }
+        if detail.contains("Unknown entity") ||
+            detail.contains("newly unresolved entity") ||
+            detail.contains("known project material") {
+            return "模型提取的人物称谓没有和资料对齐，候选正文仍然保留，可以重新同步。"
+        }
+        if detail.contains("without evidence-backed facts") {
+            return "模型更新了剧情摘要，但没有给出对应正文依据，候选正文仍然保留，可以重新同步。"
+        }
+        if detail.contains("pending novel operation changed") {
+            return "同步期间项目内容发生了变化，请重新载入后再试。"
+        }
+        return "当前操作的内容或项目状态不匹配，请重新载入后再试。"
+    }
+
     static func failureMessage(_ failure: NovelFailure) -> String {
         switch failure.code {
         case "cancelled", "polish_abandoned":
@@ -158,7 +182,7 @@ enum NovelPresentation {
              "fixed_model_missing", "effective_provider_missing", "provider_disabled",
              "model_not_chat", "model_unavailable", "grok_isolation_missing",
              "grok_isolation_unavailable", "grok_provider_invalid":
-            return "项目模型当前不可用，请在“资料 > 更多”中检查模型设置。"
+            return "项目模型当前不可用，请在“设定 > 更多”中检查模型设置。"
         case "invalid_quick_start_output":
             return "模型返回的创作建议格式不完整，请重新生成。"
         case "invalid_structured_output", "incomplete_polish_output", "invalid_polish_assessment":

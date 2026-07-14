@@ -21,6 +21,21 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(settings.contains("nativeTimelineScrollDriver = enabled"))
     }
 
+    func testChatSendDismissesTheComposerKeyboardBeforeStartingGeneration() throws {
+        let chatView = try source("iosApp/ChatView.swift")
+        let start = try XCTUnwrap(chatView.range(of: "private func sendComposerMessage()"))
+        let end = try XCTUnwrap(
+            chatView.range(of: "private func openComposerModelSheet()", range: start.upperBound..<chatView.endIndex)
+        )
+        let sendBody = chatView[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(sendBody.contains("dismissKeyboard()"))
+        XCTAssertLessThan(
+            try XCTUnwrap(sendBody.range(of: "dismissKeyboard()")?.lowerBound),
+            try XCTUnwrap(sendBody.range(of: "viewModel.sendMessage()")?.lowerBound)
+        )
+    }
+
     func testNativeTimelineRouteReadsSettingsToggleFlags() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let list = try source("iosApp/ChatCollectionMessageList.swift")

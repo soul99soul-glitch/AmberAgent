@@ -72,6 +72,39 @@ extension NovelStructuredModelExecutionFailure: LocalizedError {
     var errorDescription: String? { failure.message }
 }
 
+private enum NovelStructuredModelRaceOutcome: Sendable {
+    case succeeded(NovelStructuredModelExecutionEvidence)
+    case failed(NovelStructuredModelExecutionFailure)
+    case timedOut
+}
+
+private final class NovelStructuredModelRaceLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var outcome: NovelStructuredModelRaceOutcome?
+    private var continuation: CheckedContinuation<NovelStructuredModelRaceOutcome, Never>?
+
+    func resolve(_ proposed: NovelStructuredModelRaceOutcome) {
+        let waiting: CheckedContinuation<NovelStructuredModelRaceOutcome, Never>? = lock.withLock {
+            guard outcome == nil else { return nil }
+            outcome = proposed
+            defer { continuation = nil }
+            return continuation
+        }
+        waiting?.resume(returning: proposed)
+    }
+
+    func wait() async -> NovelStructuredModelRaceOutcome {
+        await withCheckedContinuation { waiting in
+            let resolved: NovelStructuredModelRaceOutcome? = lock.withLock {
+                if let outcome { return outcome }
+                continuation = waiting
+                return nil
+            }
+            if let resolved { waiting.resume(returning: resolved) }
+        }
+    }
+}
+
 /// Executes the module's hidden JSON-only model calls. It deliberately sits
 /// above `NovelModelRunning`, so live and scripted transports share terminal
 /// handling and strict decoding before a reducer can see model output.
@@ -239,6 +272,65 @@ struct NovelStructuredModelExecutor: Sendable {
             throw NovelStructuredModelExecutionFailure(
                 code: "invalid_structured_output",
                 message: error.localizedDescription,
+                isRetryable: true
+            )
+        }
+    }
+
+    func executePrepared(
+        _ invocation: NovelStructuredModelInvocation,
+        timeout: TimeInterval
+    ) async throws -> NovelStructuredModelExecutionEvidence {
+        let latch = NovelStructuredModelRaceLatch()
+        let providerTask = Task.detached {
+            do {
+                latch.resolve(.succeeded(try await executePrepared(invocation)))
+            } catch let failure as NovelStructuredModelExecutionFailure {
+                latch.resolve(.failed(failure))
+            } catch is CancellationError {
+                latch.resolve(.failed(NovelStructuredModelExecutionFailure(
+                    code: "cancelled",
+                    message: "状态同步已取消。",
+                    isRetryable: true
+                )))
+            } catch {
+                latch.resolve(.failed(NovelStructuredModelExecutionFailure(
+                    code: "model_stream_failed",
+                    message: error.localizedDescription,
+                    isRetryable: true
+                )))
+            }
+        }
+        let timeoutTask = Task.detached {
+            let nanoseconds = UInt64(max(0.01, timeout) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else { return }
+            latch.resolve(.timedOut)
+        }
+        let outcome = await withTaskCancellationHandler {
+            await latch.wait()
+        } onCancel: {
+            providerTask.cancel()
+            timeoutTask.cancel()
+            latch.resolve(.failed(NovelStructuredModelExecutionFailure(
+                code: "cancelled",
+                message: "状态同步已取消。",
+                isRetryable: true
+            )))
+            Task { await modelRunner.cancel(runID: invocation.executionRequest.runID) }
+        }
+        timeoutTask.cancel()
+
+        switch outcome {
+        case .succeeded(let evidence):
+            return evidence
+        case .failed(let failure):
+            throw failure
+        case .timedOut:
+            providerTask.cancel()
+            throw NovelStructuredModelExecutionFailure(
+                code: "structured_request_timeout",
+                message: "状态同步请求超时，请稍后重试。",
                 isRetryable: true
             )
         }

@@ -201,7 +201,7 @@ final class NovelInjectionPlannerTests: XCTestCase {
         XCTAssertNotEqual(wholeChapter.prompt.version, polish.prompt.version)
     }
 
-    func testNeedsSyncAllowsDiscussionButBlocksFormalProse() throws {
+    func testNeedsSyncAllowsDiscussionAndProseButStillBlocksPolish() throws {
         var document = try NovelTestFixtures.document()
         document.branches[0].syncStatus = .needsSync
         let branchID = document.branches[0].id
@@ -216,12 +216,22 @@ final class NovelInjectionPlannerTests: XCTestCase {
         )
         XCTAssertTrue(discussion.contextText.contains("potentially stale"))
 
-        XCTAssertThrowsError(try NovelInjectionPlanner.plan(
+        let prose = try NovelInjectionPlanner.plan(
             document: document,
             request: NovelInjectionPlanningRequest(
                 branchID: branchID,
                 promptKind: .proseWholeChapter,
                 userText: "Write more."
+            )
+        )
+        XCTAssertTrue(prose.contextText.contains("potentially stale"))
+
+        XCTAssertThrowsError(try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: branchID,
+                promptKind: .wholeChapterPolish,
+                userText: "Polish the chapter."
             )
         )) {
             XCTAssertEqual(

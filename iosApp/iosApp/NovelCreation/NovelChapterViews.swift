@@ -48,7 +48,7 @@ struct NovelChapterManagementView: View {
                             }
                         } label: {
                             Label(
-                                pending.status == .retryable ? "重试同步" : "继续同步",
+                                pending.status == .retryable ? "重试整理" : "继续整理",
                                 systemImage: "arrow.clockwise"
                             )
                         }
@@ -63,7 +63,7 @@ struct NovelChapterManagementView: View {
                                 await viewModel.syncManualEdits()
                             }
                         } label: {
-                            Label("同步改写", systemImage: "arrow.triangle.2.circlepath")
+                            Label("整理资料", systemImage: "arrow.triangle.2.circlepath")
                         }
                         .buttonStyle(.bordered)
                         .disabled(!viewModel.canMutate)
@@ -198,7 +198,7 @@ struct NovelChapterManagementView: View {
         if project.access != .readWrite { return "只读恢复模式" }
         if branch.branch.activeRunID != nil { return "Agent 正在生成" }
         if !project.pendingOperations.isEmpty {
-            return "有 \(project.pendingOperations.count) 项正文操作尚未完成"
+            return "有 \(project.pendingOperations.count) 项资料整理任务尚未完成"
         }
         return branch.branch.syncStatus.displayName
     }

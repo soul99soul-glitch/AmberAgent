@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum NovelComposerIntent: String, CaseIterable, Identifiable {
     case discuss
@@ -153,23 +154,30 @@ struct NovelSessionView: View {
     }
 
     private var transcript: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                if let rows = listModel?.rows, rows.isEmpty {
+        let rows = listModel?.rows ?? []
+        let tailID = listModel?.activeTailID
+        let historicalRows = rows.filter { $0.id != tailID }
+        let tailRow = tailID.flatMap { id in rows.first(where: { $0.id == id }) }
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if rows.isEmpty {
                     Text("新的创作对话")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 56)
                 } else {
-                    ForEach(listModel?.rows ?? []) { row in
-                        NovelSessionRowView(row: row, onAction: handleRowAction)
-                            .equatable()
-                            .disabled(
-                                viewModel.isBusy ||
-                                    viewModel.hasRefreshError ||
-                                    workspace.requiresReload
-                            )
+                    if !historicalRows.isEmpty {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            ForEach(historicalRows) { row in
+                                transcriptRow(row)
+                            }
+                        }
+                    }
+
+                    if let tailRow {
+                        transcriptRow(tailRow)
                     }
                 }
 
@@ -194,7 +202,7 @@ struct NovelSessionView: View {
         .contentShape(Rectangle())
         .simultaneousGesture(
             TapGesture().onEnded {
-                isInputFocused = false
+                dismissKeyboard()
             }
         )
         .onScrollPhaseChange { _, phase in
@@ -202,7 +210,7 @@ struct NovelSessionView: View {
             case .tracking, .interacting:
                 guard !userDragging else { return }
                 userDragging = true
-                isInputFocused = false
+                dismissKeyboard()
                 dispatchFollowEvent(.userDragBegan(isAtBottom: latestAtBottom))
             case .idle:
                 guard userDragging else { return }
@@ -231,6 +239,16 @@ struct NovelSessionView: View {
                 dispatchFollowEvent(.terminalLayoutChanged)
             }
         }
+    }
+
+    private func transcriptRow(_ row: NovelSessionRowModel) -> some View {
+        NovelSessionRowView(row: row, onAction: handleRowAction)
+            .equatable()
+            .allowsHitTesting(
+                !viewModel.isBusy &&
+                    !viewModel.hasRefreshError &&
+                    !workspace.requiresReload
+            )
     }
 
     private var composer: some View {
@@ -310,19 +328,27 @@ struct NovelSessionView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let pending = viewModel.branchPendingOperations.first {
-                Button(pending.status == .retryable ? "重试" : "继续") {
-                    Task { @MainActor in
-                        await viewModel.retryPending(pending.id)
+                if viewModel.isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("正在整理资料")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                } else {
+                    Button(pending.status == .retryable ? "重试" : "继续") {
+                        Task { @MainActor in
+                            await viewModel.retryPending(pending.id)
+                        }
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(
+                        viewModel.isRunning || workspace.requiresReload ||
+                            viewModel.access != .readWrite
+                    )
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(
-                    viewModel.isBusy || viewModel.isRunning ||
-                        workspace.requiresReload || viewModel.access != .readWrite
-                )
             } else if viewModel.needsSync {
-                Button("同步") {
+                Button("整理资料") {
                     Task { @MainActor in
                         await viewModel.syncManualEdits()
                     }
@@ -570,8 +596,10 @@ struct NovelSessionView: View {
     }
 
     private var syncBannerText: String {
-        if !viewModel.branchPendingOperations.isEmpty { return "正文状态尚未完整提交" }
-        return "手动改写后需要同步剧情状态"
+        if let pending = viewModel.branchPendingOperations.first {
+            return pending.kind == .collection ? "旧版收录的资料整理未完成" : "资料整理尚未完成"
+        }
+        return "正文已保存，人物与剧情资料可稍后整理"
     }
 
     private var abandonConfirmationBinding: Binding<Bool> {
@@ -588,6 +616,7 @@ struct NovelSessionView: View {
         guard !committed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let overrides = injectionOverrides
         let budget = inputBudgetTokens
+        dismissKeyboard()
         Task { @MainActor in
             let started = await viewModel.send(
                 text: committed,
@@ -598,8 +627,14 @@ struct NovelSessionView: View {
             inputText = ""
             injectionOverrides = .none
             inputBudgetTokens = 16_000
-            isInputFocused = false
         }
+    }
+
+    private func dismissKeyboard() {
+        isInputFocused = false
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+        )
     }
 
     private func stop() {
