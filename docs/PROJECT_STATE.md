@@ -6,10 +6,10 @@ Last updated: 2026-07-14
 
 ## Repository
 
-- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
+- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 本轮小说创作导航、键盘、后台生命周期、损坏项目删除、收录简化、旧任务恢复、正文入口与发送卡死修复已纳入当前提交；提交后工作区无 staged、unstaged 或 untracked 文件。
+- Worktree: 当前有未提交的小说创作输入区、项目面板、剧情状态自动同步与长会话/项目切换性能改动；另保留既有 `iosApp/vendor/SwiftStreamingMarkdown/Package.resolved` 修改和 4 份未跟踪旧 handoff，不属于本轮修改范围。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,65 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-14 novel state synchronization end-to-end closure
+
+- 真机项目「大明」的反复提示已用持久化文件定位：分支是 `needsSync`，同一条 `manualSync` 已落成 `retryable`，最近五次请求都在 60 秒内没有首个有效输出；单次估算输入 17,712 tokens，其中最近 12 条讨论约 14,195 tokens，而正式正文约 2,904 tokens。界面每次进入展示的是同一条遗留任务，不是每次新建失败。
+- 手动剧情状态重建现在只使用正式正文、现有剧情状态和项目资料，不再把最近聊天消息重复注入；durable pending 的 session cursor 仍原样保留给最终 checkpoint，未改变项目格式、提示词、结构化输出或 60 秒超时。
+- workspace 现有单飞调度器可恢复同一分支唯一的 `.pending` / `.retryable` `manualSync`，直接走既有 `retryPending`，不会制造第二条任务；项目首次真实出现、切分支和从后台回到 active 都走同一入口。每次触发最多一次 provider 请求，没有计时器、退避器或内部重试循环，legacy `collection` pending 仍不自动执行。
+- 后台 expiration 现在会同时取消润色、手动状态同步和 pending 重试；同步任务沿既有失败收口把 pending 持久化为 `retryable`。成功仍删除 pending 并发布 `synchronized`，失败保留正文和精确 `lastError`；自动执行期间隐藏无意义的重试 Banner，执行失败后再显示真实原因与手动重试。
+- `NovelFactTransactionLifecycleTests`、`NovelSessionViewModelTests`、`IOSNovelCreationWiringTests` 三组闭环回归，以及 `NovelManualEditSyncTests`、`NovelGenerationLifecycleTests`、`NovelCreationViewModelTests`、`NovelSessionReplayTests`、`NovelInjectionPlannerTests`、`NovelPolishTests` 六组扩展回归均在 iPhone 17 Pro Simulator 通过；`git diff --check`、Stable Debug generic iOS arm64 自动签名构建和 `codesign --deep --strict` 均通过。最终 `app.amber.ios` 已于 20:05 覆盖安装并由 `devicectl` 成功启动到连接的 iPhone Air。真实 provider 对设备上现存 pending 的最终成功结果仍需用户进入「大明」触发后确认，不把构建/模拟器证据冒充真机 E2E。
+
+### 2026-07-14 novel navigation and long-session projection performance
+
+- 真正的冷路径不对称已经用 160 条长会话样本复现：项目文件约 572 KiB、消息正文约 196k 字符。旧实现先在列表点击任务内读取项目和分支、发布完整 selection，再 append `NavigationStack` path；逐帧录制在系统转场刚开始后出现约 `251ms` 无画面更新，而 pop 不需要再次读取与排版，所以返回一直更顺。
+- 项目行现在立即进入原生 `NavigationStack`。目标页在真实 UIKit `viewDidAppear` 前只呈现轻量读取壳，并沿用列表 summary 显示项目名；项目/分支读取、完整 selection 发布和长 Markdown 树挂载都延后到系统 push 完成后。该 `.task(id: hasCompletedInitialNavigation)` 随页面生命周期自动取消，不使用固定延时、自定义转场或几何补偿；两页设置按钮仍共享同一 `ToolbarItem` ID 和组件身份，保留 iOS 26 原生 toolbar morph。
+- 自动剧情状态恢复不再与 push 争抢主线程：会话绑定不主动调度同步，workspace 只在真实 appearance 且 selection 完整后启动现有的单飞同步。分支变化仍走同一调度器，没有增加第二套恢复状态。
+- `NovelSessionPresentation` 的逐消息重复扫描改为一次局部索引；500 条消息/候选/pending 的 Debug 模拟器投影约 `0.004s`。`NovelSessionViewModel` 进一步按项目、分支、会话 revision 与 transient tail 建立内存投影缓存，未变状态不再重复投影；它不是持久缓存，不改变领域权威数据。
+- 冷进入默认只挂载最近 4 条历史消息（约两轮对话），更早记录由一个明确入口每次追加 24 条；用户正在阅读旧记录时保持语义锚点，不用 y 坐标补偿。该窗口只减少 SwiftUI/Markdown 首屏布局，完整会话仍保存在项目并可逐页展开。
+- 相同 160 条样本的最终冷启动录制中，原生 push 从首个画面变化起连续执行，轻量壳随转场进入，长正文在转场结束后出现；旧路径的早期 `251ms` 静止段不再出现。Simulator 的 SwiftUI/Hitches Instruments 明确不支持该运行目标，因此未把录屏时间戳伪装成真机 CPU trace；120Hz 最终手感仍以连接设备复测为准。
+- 最终 `IOSNovelCreationWiringTests`、`NovelCreationViewModelTests`、`NovelSessionViewModelTests`、`NovelSessionReplayTests` 与完整 `ChatStreamReplayTests` 在 iPhone 17 Pro Simulator 为 98 executed、1 个缺少真实录制夹具的预期 skip、0 failures；最终结果包为 `Test-iosApp-2026.07.14_18-24-55-+0800.xcresult`。Stable Debug arm64 真机包已使用 Personal Team `89QRFX9548` 完成自动签名并明确 `BUILD SUCCEEDED`；最终 `app.amber.ios` 已于 19:35 覆盖安装到连接的 iPhone Air，并由 `devicectl` 明确返回启动成功。真实 120Hz toolbar morph 手感仍需用户在当前包内操作确认。
+
+### 2026-07-14 novel settings root and native toolbar convergence
+
+- Session 快捷入口与系统「设置 > 高级功能 > 小说创作」现在都进入同一个小说项目列表，不再让高级功能入口绕过主界面直达模型设置。
+- 小说项目列表统一承担三项一级动作：右上角导入与设置，右下角带文字的原生玻璃「新建」主按钮；空列表继续直接展示新建和导入，不重复显示悬浮按钮。
+- 项目列表与项目工作区的齿轮现在都进入完全相同的 `NovelCreationSettingsView` 根页：只展示全局创作模型、剧情同步模型和「项目管理」。之前按入口切换 global/project scope 的分支已删除，不再出现同名设置页内容不一致。
+- 设置页恢复全应用一致的 `NavigationStack` 默认 push；已删除齿轮 `matchedTransitionSource`、跨页 namespace 和整页 `.navigationTransition(.zoom(...))`，不再从小齿轮突兀放大整张设置页。
+- 项目列表的导入与设置从一个 `ToolbarItemGroup` 拆成两个原生 `ToolbarItem`，中间使用 iOS 26 的 `ToolbarSpacer(.fixed)` 划分 Liquid Glass 表面；项目内齿轮保持同样的位置、图标和可用状态，让系统在列表 push 到项目时自动完成 toolbar morph，导入按钮独立退场。项目载入期间齿轮也不再短暂变灰后跳回可用态。
+- 单项目模型覆盖、重命名、分支管理和正文导出统一下沉到「项目管理 > 具体项目」二级页，复用既有模型选择器与项目编辑组件，没有新增另一套设置 Sheet。
+- XcodeGen 已为新增二级页重新生成工程。最终入口、设置、项目配置、ViewModel 和项目包 48 项回归在 iPhone 17 Pro Simulator 为 48 passed、0 failed、0 skipped；`git diff --check`、Stable Debug generic iOS arm64 自动签名构建与 `codesign --deep --strict` 均通过。最终 `app.amber.ios` 已覆盖安装并启动到连接的 iPhone Air；系统 toolbar morph 的最终弹性节奏、普通设置 push 手感和项目导出仍需用户在当前包内操作确认。
+
+### 2026-07-14 novel creation dual-model settings
+
+- 小说项目工作区右上角新增系统齿轮设置入口，项目设置集中「创作模型 / 剧情同步模型」、项目名称、当前分支和正文导出；点击顶部项目名仍只进入写作偏好与本次上下文，不再承担项目管理。
+- 系统「设置 > 高级功能」新增「小说创作」，可分别设置全局创作模型和剧情同步模型；创作模型提示优先长文与创造力，剧情同步模型提示优先稳定、便宜和结构化输出。项目内可分别覆盖，也可回退为「跟随小说默认」。
+- 领域运行时真正区分两类请求：讨论、续写、整章和润色使用创作模型；正文收录后的剧情状态重建与手动同步使用剧情同步模型。旧项目缺少同步模型字段时按全局默认读取，不迁移、不改写既有项目数据。
+- 本次相关 9 组回归在 iPhone 17 Pro Simulator 为 149 passed、0 failed、0 skipped，剧情同步补充定点为 13 passed、0 failed；Stable Debug generic iOS arm64 自动签名构建和 `git diff --check` 通过。最终 `app.amber.ios` 包已覆盖安装到连接的 iPhone Air，并由 `devicectl` 明确返回启动成功；双模型设置的真实选择与请求分流仍需用户在当前包内操作确认。扩展设置回归另发现一条既有 Markdown 渲染设置 wiring 断言失败，与本轮文件和行为无关，未在本轮顺手修改。
+
+### 2026-07-14 novel context controls and hierarchical writing sheet
+
+- 输入聚焦后的创作方式 `Menu` 移到右侧，与 `ContextRingButton` 组成紧邻控件组；按钮只显示当前「讨论 / 续写 / 整章」文字，不再添加会改变视觉重心的下箭头。模型选择仍单独留在左侧。
+- 小说 Context Ring 改为与标准 Chat 完全相同的 `ComposerContextPanel` 原生 Popover，只展示消息数、token、速度和缓存等上下文统计；不再打开小说资料注入 Sheet。
+- 点击顶部项目名改为打开「创作设置」，以「写作偏好 / 上下文注入」两个 Tab 合并原写作要求、章节风格和本次注入设置。项目名称、当前分支和导出正文不再出现在这个 Sheet。
+- 上下文注入首页只展示人物角色、世界观、剧情大纲、其他资料四个分类与数量；具体资料通过 `NavigationStack` 进入二级列表后选择「按默认 / 本次加入 / 本次排除」，避免人物和设定增多后把根 Sheet 拉成长列表。预计上下文也下钻到独立页面。
+- `IOSNovelCreationWiringTests`、`NovelSessionViewModelTests` 与 `NovelCreationViewModelTests` 在 iPhone 17 Pro Simulator 为 60 passed、0 failed、0 skipped；`git diff --check` 与 Stable Debug arm64 真机构建通过。最终包已覆盖安装并由 `devicectl` 成功启动到配对的 iPhone Air；Popover 锚点、两档 Sheet 和二级列表的真机手感仍需用户操作确认。
+
+### 2026-07-14 automatic novel state synchronization
+
+- 正文收录和手动改写仍先完成本地原子保存并立即返回；保存成功后由 workspace 自动启动同一分支的剧情状态重建，不再要求用户理解或点击「整理资料」。重新进入一个已经标记 `needsSync`、且没有真实 pending 的旧分支时，也会自动接续同步。
+- 自动任务按单一 workspace 串行并合并重复目标，先让保存后的界面刷新收口，再读取项目和分支的权威快照；已有生成、写入或 durable pending 时不制造第二个并发事务。成功后静默恢复 `synchronized`；失败不回滚正文、不弹全局错误，只保留既有 retryable pending 供一个明确的「重试」入口处理。
+- 创作输入区和章节管理删除普通 `needsSync` 的常驻提示与「整理资料」按钮；只有真实失败/遗留 pending 才显示剧情状态同步提示。现有结构化请求、checkpoint、state snapshot、重试和超时语义均复用，没有增加新的恢复层或存储格式。
+- 新增收录、手动改写、重新进入旧待同步分支三条自动调度契约，并更新失败持久化和异步刷新测试。`NovelSessionViewModelTests`、`NovelCreationViewModelTests` 与 `IOSNovelCreationWiringTests` 在 iPhone 17 Pro Simulator 为 60 passed、0 failed、0 skipped；`git diff --check` 通过。Stable Debug arm64 真机包使用 Personal Team `89QRFX9548` 构建成功，主应用/Widget 包名核对为 `app.amber.ios` / `app.amber.ios.activity`，已覆盖安装并由 `devicectl` 成功启动到配对的 iPhone Air；真实 provider 成功与失败后的真机提示仍需用户操作确认。
+
+### 2026-07-14 novel composer and project panel simplification
+
+- 创作输入区删除常驻「讨论 / 续写 / 整章」分段控件和省略号菜单。输入框聚焦、已有输入、本次上下文已定制或正在生成时，才按标准 Chat 模式显示模型、创作方式和上下文控件；生成期间控件保留位置但不可切换。创作方式使用原生 `Menu + Picker`：材质、阴影、内边距和选中 action state 全部交回系统，不再用手写 Popover 仿制原生菜单，也不在单独一行手工插入 checkmark 造成文字横移。原 `scope` 悬浮按钮已替换为普通 Chat 共用的 `ContextRingButton`，圆环只读取当前分支最近一次真实 injection receipt 的估算占用，没有记录时显示空环；点击仍进入既有的单次资料调整，不改生成参数语义。
+- 点击顶部项目名不再进入单一分支列表，而是打开项目面板；面板集中项目重命名、当前分支、写作要求、章节风格和正文导出。原分支管理继续复用现有页面，重命名继续复用统一 Sheet，未引入第二套状态。
+- 项目面板继续保留 `.medium / .large` 两档高度，但 5 个操作行显式使用统一 `AmberTheme.surface`，不再让系统在 detent 切换时把圆角分组表面改成白底列表；拖拽、系统圆角和数据状态均未改变。
+- 工作区顶部不再重复显示普通生成和资料整理状态，只保留重新载入、只读恢复等真正阻断操作的异常；已收录气泡删除第二套「正文与剧情状态已更新」详情，只保留一条轻量收录结果。
+- 「设定 > 更多」删除重复的项目名、模型、润色、注入诊断、分支和项目包入口，只保留自定义资料与待确认建议；workspace 内已失去入口的项目包、注入预览和重复正文管理 sheet 路由同步删除，领域数据和存储格式未改。
+- XcodeGen 已按当前分支重新生成工程，清除了切分支遗留的旧小说文件引用。`IOSNovelCreationWiringTests` 与 `NovelSessionReplayTests` 在 iPhone 17 Pro Simulator 均通过；两档样式、context ring 与原生创作方式菜单收口后 `IOSNovelCreationWiringTests` 再次为 9/9，`git diff --check` 通过。Stable Debug arm64 包使用 Personal Team `89QRFX9548` 自动签名并明确构建成功，已覆盖安装到配对的 iPhone Air，`devicectl` 明确返回启动成功；输入聚焦控件、context ring、原生 `Menu + Picker` 选中态、两档项目面板和发送流程的真实手感仍需用户在当前包内操作确认。
 
 ### 2026-07-14 novel send watchdog layout repair
 

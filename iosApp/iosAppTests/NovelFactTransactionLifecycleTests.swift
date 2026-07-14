@@ -32,7 +32,15 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
     }
 
     func testDeferredSyncRebuildsAnImmediatelyCollectedChapter() async throws {
-        let fixture = try candidateDocument()
+        var fixture = try candidateDocument()
+        fixture.document.project.modelPolicy = .fixed(
+            providerID: "creative-provider",
+            modelID: "creative-model"
+        )
+        fixture.document.project.stateSyncModelPolicy = .fixed(
+            providerID: "sync-provider",
+            modelID: "sync-model"
+        )
         let rebuild = """
         {
           "schemaVersion": 1,
@@ -89,6 +97,8 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(final.stateSnapshots.last?.summary, "Mara entered the archive and heard the bell.")
         let requests = await harness.adapter.requests
         XCTAssertEqual(requests.count, 1)
+        let policies = await harness.adapter.resolvedPolicies
+        XCTAssertEqual(policies, [.fixed(providerID: "sync-provider", modelID: "sync-model")])
     }
 
     func testProjectedManualStateSizeDoesNotGrowWithAccumulatedFactArrays() throws {
@@ -384,7 +394,21 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
     }
 
     func testManualRebuildPlannerUsesRebuildBaseState() async throws {
-        let fixture = try candidateDocument()
+        var fixture = try candidateDocument()
+        let recentDiscussion = "RECENT-DIALOGUE-MUST-NOT-BE-IN-STATE-SYNC"
+        fixture.document.sessions[0].messages.append(NovelSessionMessageRecord(
+            id: NovelMessageID(),
+            sequence: 1,
+            role: .user,
+            mode: .discussPlan,
+            kind: .userInput,
+            content: recentDiscussion,
+            createdAt: fixture.document.project.updatedAt,
+            runID: nil,
+            candidateID: nil
+        ))
+        fixture.document.sessions[0].revision = 2
+        try NovelDocumentValidator.validate(fixture.document)
         let rebuildJSON = validRebuildJSON()
         let harness = try await makeHarness(
             document: fixture.document,
@@ -443,12 +467,19 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let user = rebuildRequest.messages.last?.content ?? ""
         XCTAssertFalse(system.contains("potentially stale"))
         XCTAssertTrue(user.contains("Mara forced open the archive door."))
+        XCTAssertFalse(rebuildRequest.messages.contains {
+            $0.content.contains(recentDiscussion)
+        })
         let final = try await harness.repository.document(sync.projectID)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertEqual(final.branches[0].currentStateSnapshotID, sync.stateSnapshotID)
         XCTAssertEqual(final.injectionReceipts.count, 1)
         XCTAssertEqual(final.generationReceipts.count, 1)
         let manualInjection = try XCTUnwrap(final.injectionReceipts.last)
+        XCTAssertFalse(manualInjection.sections.contains {
+            if case .sessionMessage = $0.kind { return true }
+            return false
+        })
         XCTAssertEqual(manualInjection.runID, rebuildRequest.runID)
         XCTAssertEqual(manualInjection.factTransaction, NovelFactReceiptLink(
             pendingID: sync.pendingID,
@@ -670,6 +701,61 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertTrue(final.pendingOperations.isEmpty)
         XCTAssertEqual(final.checkpoints.filter { $0.kind == .manualSync }.count, 1)
         XCTAssertNoThrow(try NovelDocumentValidator.validate(final))
+    }
+
+    func testBackgroundExpirationCancelsInFlightManualSyncIntoDurableRetry() async throws {
+        let scenario = try preparedLongManualSync(repetitionCount: 4)
+        let repository = InMemoryNovelProjectRepository()
+        _ = try await repository.createProject(scenario.editedDocument)
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "background-provider",
+                ownerProviderID: "background-provider",
+                modelID: "background-model",
+                wireModelID: "background-wire-model",
+                displayName: "Background Model",
+                contextWindowTokens: 32_000
+            ),
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let creation = DefaultNovelCreation(
+            repository: repository,
+            modelRunner: adapter
+        )
+        let syncTask = Task {
+            try await creation.perform(.syncManualEdits(scenario.command))
+        }
+        let requestStarted = await eventually {
+            await adapter.requests.count == 1
+        }
+        XCTAssertTrue(requestStarted)
+        let requests = await adapter.requests
+        let request = try XCTUnwrap(requests.first)
+
+        await creation.interruptForBackground(
+            projectID: scenario.command.projectID,
+            deadline: Date().addingTimeInterval(1),
+            runID: nil
+        )
+        let providerWasCancelled = await eventually(timeout: 0.5) {
+            await adapter.cancelledRunIDs.contains(request.runID)
+        }
+        if !providerWasCancelled {
+            syncTask.cancel()
+        }
+        XCTAssertTrue(providerWasCancelled)
+        do {
+            _ = try await syncTask.value
+            XCTFail("Expected background expiration to cancel state synchronization.")
+        } catch {
+            // Cancellation is persisted as the existing retryable pending operation.
+        }
+
+        let durable = try await repository.loadProject(id: scenario.command.projectID).document
+        XCTAssertEqual(durable.pendingOperations.first?.id, scenario.command.pendingID)
+        XCTAssertEqual(durable.pendingOperations.first?.status, .retryable)
+        XCTAssertEqual(durable.branches[0].syncStatus, .needsSync)
+        XCTAssertTrue(durable.checkpoints.allSatisfy { $0.kind != .manualSync })
     }
 
     func testManualFinalCommitFailureRetriesWithoutAnotherProviderRequest() async throws {

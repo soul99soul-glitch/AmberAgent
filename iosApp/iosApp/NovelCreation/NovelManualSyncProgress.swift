@@ -342,7 +342,6 @@ enum NovelManualSyncProgressReducer {
         let expectedStart = existingProgress?.consumedCharacterCount ?? 0
         guard selection.index == expectedIndex,
               selection.startCharacterOffset == expectedStart,
-              preparation.modelPolicy == document.project.modelPolicy,
               preparation.taskKind == .stateRebuild else {
             throw NovelError.invalidInput("The manual-sync chunk does not continue durable progress.")
         }
@@ -491,7 +490,7 @@ enum NovelManualSyncProgressReducer {
                     index: nextChunkIndex
                 ),
                 stateSnapshotIDOverride: input.baseStateSnapshot.id,
-                sessionCursorLimit: input.sessionCursor,
+                sessionCursorLimit: .empty,
                 includeUnsynchronizedStateWarning: false,
                 pendingState: NovelPendingStateInjection(
                     pendingID: pending.id,
@@ -679,8 +678,13 @@ enum NovelManualSyncProgressValidator {
             return
         }
         guard let progress = pending.manualSyncProgress else { return }
+        let configuredPolicy = document.project.configuredModelPolicy(for: .stateSync)
+        let modelPolicyMatchesProject = switch configuredPolicy {
+        case .global: true
+        case .fixed: progress.modelPolicy == configuredPolicy
+        }
         guard progress.chunkingVersion == NovelManualSyncProgress.currentChunkingVersion,
-              progress.modelPolicy == document.project.modelPolicy,
+              modelPolicyMatchesProject,
               progress.requestedInputBudgetTokens > 0,
               progress.effectiveInputBudgetTokens > 0,
               progress.effectiveInputBudgetTokens <= progress.requestedInputBudgetTokens,

@@ -203,8 +203,9 @@ private extension DefaultNovelCreation {
                 in: pendingDocument
             )
             let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
+            let stateSyncPolicy = modelPolicy(for: .stateSync, in: pendingDocument)
             let preparation = try await executor.prepare(
-                modelPolicy: pendingDocument.project.modelPolicy,
+                modelPolicy: stateSyncPolicy,
                 taskKind: .stateDelta,
                 requestedInputBudgetTokens: NovelStructuredModelExecutor
                     .maximumInternalInputBudgetTokens
@@ -230,7 +231,7 @@ private extension DefaultNovelCreation {
             let invocation = try executor.prepareInvocation(
                 NovelStructuredModelExecutionRequest(
                     runID: NovelRunID(),
-                    modelPolicy: pendingDocument.project.modelPolicy,
+                    modelPolicy: stateSyncPolicy,
                     task: .stateDelta(
                         context: plan.contextText,
                         manuscript: extractionInput.manuscript
@@ -358,8 +359,9 @@ private extension DefaultNovelCreation {
                 } else if let lockedPreparation {
                     preparation = lockedPreparation
                 } else {
+                    let stateSyncPolicy = modelPolicy(for: .stateSync, in: currentDocument)
                     preparation = try await executor.prepare(
-                        modelPolicy: currentDocument.project.modelPolicy,
+                        modelPolicy: stateSyncPolicy,
                         taskKind: .stateRebuild,
                         requestedInputBudgetTokens: NovelStructuredModelExecutor
                             .maximumInternalInputBudgetTokens
@@ -386,7 +388,7 @@ private extension DefaultNovelCreation {
                             promptKind: .manualSyncV1,
                             userText: modelInput,
                             stateSnapshotIDOverride: rebuildInput.baseStateSnapshot.id,
-                            sessionCursorLimit: rebuildInput.sessionCursor,
+                            sessionCursorLimit: .empty,
                             includeUnsynchronizedStateWarning: false,
                             pendingState: NovelPendingStateInjection(
                                 pendingID: pendingID,
@@ -405,7 +407,7 @@ private extension DefaultNovelCreation {
                 let invocation = try executor.prepareInvocation(
                     NovelStructuredModelExecutionRequest(
                         runID: NovelRunID(),
-                        modelPolicy: currentDocument.project.modelPolicy,
+                        modelPolicy: preparation.modelPolicy,
                         task: .stateRebuild(
                             baseContext: selection.plan.contextText,
                             manuscript: selection.modelInput

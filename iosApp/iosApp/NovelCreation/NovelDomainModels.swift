@@ -66,6 +66,11 @@ enum NovelProjectModelPolicy: Codable, Equatable, Sendable {
     case fixed(providerID: String, modelID: String)
 }
 
+enum NovelModelRole: String, Codable, CaseIterable, Sendable {
+    case creation
+    case stateSync
+}
+
 struct NovelQuickStartSeed: Codable, Equatable, Sendable {
     let genre: String
     let coreIdea: String
@@ -185,8 +190,16 @@ struct NovelProjectRecord: Codable, Equatable, Sendable {
     var configRevision: Int64
     var mainBranchID: NovelBranchID
     var modelPolicy: NovelProjectModelPolicy
+    var stateSyncModelPolicy: NovelProjectModelPolicy?
     var lastGenerationGranularity: NovelGenerationGranularity
     var polishPreference: String
+
+    func configuredModelPolicy(for purpose: NovelModelRole) -> NovelProjectModelPolicy {
+        switch purpose {
+        case .creation: modelPolicy
+        case .stateSync: stateSyncModelPolicy ?? .global
+        }
+    }
 }
 
 struct NovelMaterialRecord: Codable, Equatable, Sendable {

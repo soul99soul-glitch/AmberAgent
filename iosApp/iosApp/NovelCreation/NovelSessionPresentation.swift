@@ -214,6 +214,19 @@ struct NovelSessionListModel: Equatable, Sendable {
     let activeTailID: NovelMessageID?
 }
 
+enum NovelSessionHistoryWindowPolicy {
+    static let initialLimit = 4
+    static let pageSize = 24
+
+    static func startIndex(totalCount: Int, limit: Int) -> Int {
+        max(0, totalCount - max(0, limit))
+    }
+
+    static func expandedLimit(currentLimit: Int, totalCount: Int) -> Int {
+        min(totalCount, max(0, currentLimit) + pageSize)
+    }
+}
+
 struct NovelSessionProjectionInput: Equatable, Sendable {
     let branch: NovelBranchRecord
     let session: NovelSessionRecord
@@ -280,6 +293,7 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
 
 enum NovelSessionPresentation {
     static func project(_ input: NovelSessionProjectionInput) -> NovelSessionListModel {
+        let index = NovelSessionProjectionIndex(input: input)
         let messages = input.session.messages.sorted { lhs, rhs in
             if lhs.sequence != rhs.sequence { return lhs.sequence < rhs.sequence }
             return lhs.id.description < rhs.id.description
@@ -302,12 +316,13 @@ enum NovelSessionPresentation {
         var rows: [NovelSessionRowModel] = []
         rows.reserveCapacity(messages.count + missingInterruptedRuns.count + 1)
         for message in messages {
-            rows.append(durableRow(message: message, input: input))
+            rows.append(durableRow(message: message, input: input, index: index))
             for run in interruptedRunsByUserMessage[message.id] ?? [] {
                 rows.append(interruptedWithoutOutputRow(
                     run: run,
                     sequence: message.sequence,
-                    input: input
+                    input: input,
+                    index: index
                 ))
                 projectedInterruptedRunIDs.insert(run.id)
             }
@@ -316,7 +331,8 @@ enum NovelSessionPresentation {
             rows.append(interruptedWithoutOutputRow(
                 run: run,
                 sequence: Int64(messages.count),
-                input: input
+                input: input,
+                index: index
             ))
         }
         var activeTailID: NovelMessageID?
@@ -328,7 +344,8 @@ enum NovelSessionPresentation {
             rows.append(transientRow(
                 tail: tail,
                 sequence: Int64(messages.count),
-                input: input
+                input: input,
+                index: index
             ))
             activeTailID = tail.messageID
         }
@@ -337,6 +354,137 @@ enum NovelSessionPresentation {
             sessionID: input.session.id,
             rows: rows,
             activeTailID: activeTailID
+        )
+    }
+}
+
+private struct NovelSessionCollectedCheckpointKey: Hashable {
+    let checkpointID: NovelCheckpointID
+    let candidateID: NovelCandidateID
+}
+
+private struct NovelSessionProjectionIndex {
+    let candidatesBySourceMessageID: [NovelMessageID: [NovelCandidateRecord]]
+    let pendingCandidateIDs: Set<NovelCandidateID>
+    let polishCandidateIDs: Set<NovelCandidateID>
+    let pendingByCandidateID: [NovelCandidateID: NovelPendingOperationRecord]
+    let polishByCandidateID: [NovelCandidateID: NovelPendingPolishTransactionRecord]
+    let runByID: [NovelRunID: NovelActiveRunRecord]
+    let unresolvedQuickStartProposalByRunID: [NovelRunID: NovelSettingProposalRecord]
+    let collectedCheckpointByKey: [NovelSessionCollectedCheckpointKey: NovelBranchCheckpointRecord]
+    let checkpointByID: [NovelCheckpointID: NovelBranchCheckpointRecord]
+    let stateByID: [NovelStateSnapshotID: NovelStateSnapshotRecord]
+    let eventByID: [NovelEventID: NovelStoryEventRecord]
+    let workingChapterVersionIDs: Set<NovelChapterVersionID>
+    let runningRunIDs: Set<NovelRunID>
+    let branchPendingOperationIDs: Set<NovelPendingOperationID>
+    let branchBlockingPolishTransactionIDs: Set<NovelPendingOperationID>
+
+    init(input: NovelSessionProjectionInput) {
+        var candidatesBySourceMessageID: [NovelMessageID: [NovelCandidateRecord]] = [:]
+        for candidate in input.candidates
+        where candidate.branchID == input.branch.id && candidate.sessionID == input.session.id {
+            candidatesBySourceMessageID[candidate.sourceMessageID, default: []].append(candidate)
+        }
+        self.candidatesBySourceMessageID = candidatesBySourceMessageID
+
+        var pendingCandidateIDs: Set<NovelCandidateID> = []
+        var pendingByCandidateID: [NovelCandidateID: NovelPendingOperationRecord] = [:]
+        var branchPendingOperationIDs: Set<NovelPendingOperationID> = []
+        for pending in input.pendingOperations {
+            if let candidateID = pending.candidateID {
+                pendingCandidateIDs.insert(candidateID)
+                if pending.branchID == input.branch.id, pendingByCandidateID[candidateID] == nil {
+                    pendingByCandidateID[candidateID] = pending
+                }
+            }
+            if pending.branchID == input.branch.id {
+                branchPendingOperationIDs.insert(pending.id)
+            }
+        }
+        self.pendingCandidateIDs = pendingCandidateIDs
+        self.pendingByCandidateID = pendingByCandidateID
+        self.branchPendingOperationIDs = branchPendingOperationIDs
+
+        var polishCandidateIDs: Set<NovelCandidateID> = []
+        var polishByCandidateID: [NovelCandidateID: NovelPendingPolishTransactionRecord] = [:]
+        var branchBlockingPolishTransactionIDs: Set<NovelPendingOperationID> = []
+        for transaction in input.polishTransactions {
+            polishCandidateIDs.insert(transaction.candidateID)
+            if transaction.branchID == input.branch.id, polishByCandidateID[transaction.candidateID] == nil {
+                polishByCandidateID[transaction.candidateID] = transaction
+            }
+            if transaction.branchID == input.branch.id,
+               transaction.status == .pending || transaction.status == .retryable || transaction.status == .blocked {
+                branchBlockingPolishTransactionIDs.insert(transaction.id)
+            }
+        }
+        self.polishCandidateIDs = polishCandidateIDs
+        self.polishByCandidateID = polishByCandidateID
+        self.branchBlockingPolishTransactionIDs = branchBlockingPolishTransactionIDs
+
+        var runByID: [NovelRunID: NovelActiveRunRecord] = [:]
+        var runningRunIDs: Set<NovelRunID> = []
+        for run in input.runs {
+            if runByID[run.id] == nil { runByID[run.id] = run }
+            if run.branchID == input.branch.id, run.status == .running {
+                runningRunIDs.insert(run.id)
+            }
+        }
+        self.runByID = runByID
+        self.runningRunIDs = runningRunIDs
+
+        var unresolvedQuickStartProposalByRunID: [NovelRunID: NovelSettingProposalRecord] = [:]
+        for proposal in input.settingProposals where !proposal.isResolved {
+            guard case .some(.quickStart(let runID, _)) = proposal.origin else { continue }
+            if unresolvedQuickStartProposalByRunID[runID] == nil {
+                unresolvedQuickStartProposalByRunID[runID] = proposal
+            }
+        }
+        self.unresolvedQuickStartProposalByRunID = unresolvedQuickStartProposalByRunID
+
+        var collectedCheckpointByKey: [
+            NovelSessionCollectedCheckpointKey: NovelBranchCheckpointRecord
+        ] = [:]
+        var checkpointByID: [NovelCheckpointID: NovelBranchCheckpointRecord] = [:]
+        for checkpoint in input.checkpoints {
+            if checkpointByID[checkpoint.id] == nil { checkpointByID[checkpoint.id] = checkpoint }
+            if let candidateID = checkpoint.sourceCandidateID {
+                let key = NovelSessionCollectedCheckpointKey(
+                    checkpointID: checkpoint.id,
+                    candidateID: candidateID
+                )
+                if collectedCheckpointByKey[key] == nil { collectedCheckpointByKey[key] = checkpoint }
+            }
+        }
+        self.collectedCheckpointByKey = collectedCheckpointByKey
+        self.checkpointByID = checkpointByID
+
+        var stateByID: [NovelStateSnapshotID: NovelStateSnapshotRecord] = [:]
+        for state in input.stateSnapshots where stateByID[state.id] == nil {
+            stateByID[state.id] = state
+        }
+        self.stateByID = stateByID
+
+        var eventByID: [NovelEventID: NovelStoryEventRecord] = [:]
+        for event in input.events where eventByID[event.id] == nil {
+            eventByID[event.id] = event
+        }
+        self.eventByID = eventByID
+        self.workingChapterVersionIDs = Set(input.branch.workingChapterSelections.map(\.versionID))
+    }
+
+    func hasRunningRun(excluding runID: NovelRunID?) -> Bool {
+        runningRunIDs.count > (runID.map(runningRunIDs.contains) == true ? 1 : 0)
+    }
+
+    func hasPendingOperation(excluding pendingID: NovelPendingOperationID?) -> Bool {
+        branchPendingOperationIDs.count > (pendingID.map(branchPendingOperationIDs.contains) == true ? 1 : 0)
+    }
+
+    func hasBlockingPolishTransaction(excluding transactionID: NovelPendingOperationID?) -> Bool {
+        branchBlockingPolishTransactionIDs.count > (
+            transactionID.map(branchBlockingPolishTransactionIDs.contains) == true ? 1 : 0
         )
     }
 }
@@ -350,7 +498,8 @@ private extension NovelSessionPresentation {
     static func interruptedWithoutOutputRow(
         run: NovelActiveRunRecord,
         sequence: Int64,
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionRowModel {
         durableRow(
             message: NovelSessionMessageRecord(
@@ -364,20 +513,22 @@ private extension NovelSessionPresentation {
                 runID: run.id,
                 candidateID: nil
             ),
-            input: input
+            input: input,
+            index: index
         )
     }
 
     static func durableRow(
         message: NovelSessionMessageRecord,
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionRowModel {
-        let candidate = presentedCandidate(for: message, input: input)
+        let candidate = presentedCandidate(for: message, index: index)
         let presentedCandidate: NovelSessionCandidatePresentation?
         let changeSummary: NovelSessionCommittedChangeSummary?
         if let candidate {
-            presentedCandidate = candidatePresentation(for: candidate, input: input)
-            changeSummary = committedChange(for: candidate, input: input)
+            presentedCandidate = candidatePresentation(for: candidate, index: index)
+            changeSummary = committedChange(for: candidate, index: index)
         } else {
             presentedCandidate = nil
             changeSummary = nil
@@ -385,10 +536,11 @@ private extension NovelSessionPresentation {
         let actions = actions(
             for: message,
             candidate: candidate,
-            input: input
+            input: input,
+            index: index
         )
         let run = message.runID.flatMap { runID in
-            input.runs.first(where: { $0.id == runID })
+            index.runByID[runID]
         }
         let runStatus = run?.status
         let presentedContent: String
@@ -431,7 +583,8 @@ private extension NovelSessionPresentation {
     static func transientRow(
         tail: NovelSessionTransientTail,
         sequence: Int64,
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionRowModel {
         let actions: [NovelSessionRowActionAvailability]
         switch tail.phase {
@@ -440,6 +593,7 @@ private extension NovelSessionPresentation {
                 .retryTerminalPersistence(tail.runID),
                 blocker: baseMutationBlocker(
                     input: input,
+                    index: index,
                     includePending: false,
                     excludingRunID: tail.runID
                 )
@@ -447,13 +601,13 @@ private extension NovelSessionPresentation {
         case .interrupted:
             actions = [availability(
                 .retryGeneration(tail.runID),
-                blocker: transientRetryBlocker(tail: tail, input: input)
+                blocker: transientRetryBlocker(tail: tail, input: input, index: index)
             )]
         case .failed(let failure):
             actions = [availability(
                 .retryGeneration(tail.runID),
                 blocker: failure.isRetryable
-                    ? transientRetryBlocker(tail: tail, input: input)
+                    ? transientRetryBlocker(tail: tail, input: input, index: index)
                     : .failureNotRetryable
             )]
         case .waitingForFirstToken, .streaming, .terminalAwaitingRefresh:
@@ -502,21 +656,14 @@ private extension NovelSessionPresentation {
 
     static func presentedCandidate(
         for message: NovelSessionMessageRecord,
-        input: NovelSessionProjectionInput
+        index: NovelSessionProjectionIndex
     ) -> NovelCandidateRecord? {
-        let matches = input.candidates.filter {
-            $0.branchID == input.branch.id &&
-                $0.sessionID == input.session.id &&
-                $0.sourceMessageID == message.id
-        }
-        guard !matches.isEmpty else { return nil }
+        guard let matches = index.candidatesBySourceMessageID[message.id] else { return nil }
 
-        let pendingCandidateIDs = Set(input.pendingOperations.compactMap(\.candidateID))
-        if let pending = matches.first(where: { pendingCandidateIDs.contains($0.id) }) {
+        if let pending = matches.first(where: { index.pendingCandidateIDs.contains($0.id) }) {
             return pending
         }
-        let transactionCandidateIDs = Set(input.polishTransactions.map(\.candidateID))
-        if let transaction = matches.first(where: { transactionCandidateIDs.contains($0.id) }) {
+        if let transaction = matches.first(where: { index.polishCandidateIDs.contains($0.id) }) {
             return transaction
         }
         if let available = matches
@@ -541,52 +688,41 @@ private extension NovelSessionPresentation {
 
     static func candidatePresentation(
         for candidate: NovelCandidateRecord,
-        input: NovelSessionProjectionInput
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionCandidatePresentation {
         NovelSessionCandidatePresentation(
             id: candidate.id,
             kind: candidate.kind,
             status: candidate.status,
             sourceChapterVersionID: candidate.sourceChapterVersionID,
-            pendingStatus: input.pendingOperations.first(where: {
-                $0.candidateID == candidate.id && $0.branchID == input.branch.id
-            })?.status,
-            polishTransactionStatus: input.polishTransactions.first(where: {
-                $0.candidateID == candidate.id && $0.branchID == input.branch.id
-            })?.status
+            pendingStatus: index.pendingByCandidateID[candidate.id]?.status,
+            polishTransactionStatus: index.polishByCandidateID[candidate.id]?.status
         )
     }
 
     static func committedChange(
         for candidate: NovelCandidateRecord,
-        input: NovelSessionProjectionInput
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionCommittedChangeSummary? {
         guard let checkpointID = candidate.collectedCheckpointID,
-              let checkpoint = input.checkpoints.first(where: {
-                  $0.id == checkpointID && $0.sourceCandidateID == candidate.id
-              }),
-              let state = input.stateSnapshots.first(where: {
-                  $0.id == checkpoint.stateSnapshotID
-              }) else {
+              let checkpoint = index.collectedCheckpointByKey[NovelSessionCollectedCheckpointKey(
+                  checkpointID: checkpointID,
+                  candidateID: candidate.id
+              )],
+              let state = index.stateByID[checkpoint.stateSnapshotID] else {
             return nil
         }
         let parentEventIDs: Set<NovelEventID>
         if let parentID = checkpoint.parentCheckpointID,
-           let parent = input.checkpoints.first(where: { $0.id == parentID }),
-           let parentState = input.stateSnapshots.first(where: {
-               $0.id == parent.stateSnapshotID
-           }) {
+           let parent = index.checkpointByID[parentID],
+           let parentState = index.stateByID[parent.stateSnapshotID] {
             parentEventIDs = Set(parentState.eventIDs)
         } else {
             parentEventIDs = []
         }
-        let eventByID = Dictionary(
-            input.events.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
         let eventSummaries = state.eventIDs.compactMap { id -> String? in
             guard !parentEventIDs.contains(id) else { return nil }
-            return eventByID[id]?.summary
+            return index.eventByID[id]?.summary
         }
         return NovelSessionCommittedChangeSummary(
             checkpointID: checkpoint.id,
@@ -599,21 +735,16 @@ private extension NovelSessionPresentation {
     static func actions(
         for message: NovelSessionMessageRecord,
         candidate: NovelCandidateRecord?,
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> [NovelSessionRowActionAvailability] {
         guard message.role == .assistant else { return [] }
         if let candidate {
-            return candidateActions(candidate, input: input)
+            return candidateActions(candidate, input: input, index: index)
         }
         if let runID = message.runID,
-           input.runs.first(where: { $0.id == runID })?.kind == .quickStart,
-           let proposal = input.settingProposals.first(where: { proposal in
-               guard !proposal.isResolved else { return false }
-               guard case .some(.quickStart(let originRunID, _)) = proposal.origin else {
-                   return false
-               }
-               return originRunID == runID
-           }) {
+           index.runByID[runID]?.kind == .quickStart,
+           let proposal = index.unresolvedQuickStartProposalByRunID[runID] {
             return [availability(
                 .viewSettingProposals(NovelSettingProposalRoute(kind: proposal.suggestedMaterialKind)),
                 blocker: nil
@@ -621,7 +752,7 @@ private extension NovelSessionPresentation {
         }
         guard message.kind == .interruptedDraft || message.kind == .error,
               let runID = message.runID,
-              let run = input.runs.first(where: { $0.id == runID }) else {
+              let run = index.runByID[runID] else {
             return []
         }
         if run.status == .failed, run.terminalFailure?.isRetryable != true {
@@ -629,34 +760,33 @@ private extension NovelSessionPresentation {
         }
         return [availability(
             .retryGeneration(runID),
-            blocker: retryBlocker(for: run, input: input)
+            blocker: retryBlocker(for: run, input: input, index: index)
         )]
     }
 
     static func candidateActions(
         _ candidate: NovelCandidateRecord,
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> [NovelSessionRowActionAvailability] {
-        if let pending = input.pendingOperations.first(where: {
-            $0.branchID == input.branch.id && $0.candidateID == candidate.id
-        }) {
+        if let pending = index.pendingByCandidateID[candidate.id] {
             return [availability(
                 .retryPending(pending.id),
                 blocker: baseMutationBlocker(
                     input: input,
+                    index: index,
                     includePending: true,
                     excludingPendingID: pending.id
                 )
             )]
         }
 
-        if let transaction = input.polishTransactions.first(where: {
-            $0.branchID == input.branch.id && $0.candidateID == candidate.id
-        }) {
+        if let transaction = index.polishByCandidateID[candidate.id] {
             switch transaction.status {
             case .pending:
                 let blocker = baseMutationBlocker(
                     input: input,
+                    index: index,
                     includePending: true,
                     excludingPolishTransactionID: transaction.id
                 ) ?? staleBlocker(candidate, input: input)
@@ -667,6 +797,7 @@ private extension NovelSessionPresentation {
             case .retryable:
                 let blocker = baseMutationBlocker(
                     input: input,
+                    index: index,
                     includePending: true,
                     excludingPolishTransactionID: transaction.id
                 ) ??
@@ -680,6 +811,7 @@ private extension NovelSessionPresentation {
                     .abandonPolish(transaction.id),
                     blocker: baseMutationBlocker(
                         input: input,
+                        index: index,
                         includePending: true,
                         excludingPolishTransactionID: transaction.id
                     )
@@ -693,7 +825,8 @@ private extension NovelSessionPresentation {
                     ),
                     blocker: manualRewriteBlocker(
                         sourceChapterVersionID: sourceID,
-                        input: input
+                        input: input,
+                        index: index
                     )
                 )]
             case .completed, .abandoned:
@@ -703,7 +836,7 @@ private extension NovelSessionPresentation {
 
         switch candidate.status {
         case .available:
-            let blocker = candidateMutationBlocker(candidate, input: input)
+            let blocker = candidateMutationBlocker(candidate, input: input, index: index)
             switch candidate.kind {
             case .prose:
                 return [availability(.collectProse(candidate.id), blocker: blocker)]
@@ -718,13 +851,13 @@ private extension NovelSessionPresentation {
                         checkpointID: input.branch.headCheckpointID,
                         kind: candidate.kind
                     ),
-                    blocker: undoBlocker(input: input)
+                    blocker: undoBlocker(input: input, index: index)
                 ))
             }
             if let checkpointID = candidate.collectedCheckpointID {
                 result.append(availability(
                     .forkFromCheckpoint(checkpointID),
-                    blocker: forkBlocker(input: input)
+                    blocker: forkBlocker(input: input, index: index)
                 ))
             }
             if candidate.kind == .prose,
@@ -732,7 +865,12 @@ private extension NovelSessionPresentation {
                input.branch.headCheckpointID == candidate.baseCheckpointID {
                 result.append(availability(
                     .cloneCollectedProse(candidate.id),
-                    blocker: candidateMutationBlocker(candidate, input: input, requiresCurrentBase: false)
+                    blocker: candidateMutationBlocker(
+                        candidate,
+                        input: input,
+                        index: index,
+                        requiresCurrentBase: false
+                    )
                 ))
             }
             return result
@@ -744,10 +882,12 @@ private extension NovelSessionPresentation {
     static func retryBlocker(
         for run: NovelActiveRunRecord,
         input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex,
         excludingRunID: NovelRunID? = nil
     ) -> NovelSessionActionBlocker? {
         if let blocker = baseMutationBlocker(
             input: input,
+            index: index,
             includePending: false,
             excludingRunID: excludingRunID
         ) {
@@ -757,7 +897,7 @@ private extension NovelSessionPresentation {
             if run.kind == .polish, input.branch.syncStatus == .needsSync {
                 return .branchNeedsSync
             }
-            if input.pendingOperations.contains(where: { $0.branchID == input.branch.id }) {
+            if !index.branchPendingOperationIDs.isEmpty {
                 return .pendingOperation
             }
             if input.branch.headCheckpointID != run.baseCheckpointID ||
@@ -766,9 +906,7 @@ private extension NovelSessionPresentation {
             }
             if run.kind == .polish {
                 guard let sourceVersionID = run.sourceChapterVersionID,
-                      input.branch.workingChapterSelections.contains(where: {
-                          $0.versionID == sourceVersionID
-                      }) else {
+                      index.workingChapterVersionIDs.contains(sourceVersionID) else {
                     return .sourceChapterChanged
                 }
             }
@@ -778,13 +916,20 @@ private extension NovelSessionPresentation {
 
     static func transientRetryBlocker(
         tail: NovelSessionTransientTail,
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionActionBlocker? {
-        if let run = input.runs.first(where: { $0.id == tail.runID }) {
-            return retryBlocker(for: run, input: input, excludingRunID: tail.runID)
+        if let run = index.runByID[tail.runID] {
+            return retryBlocker(
+                for: run,
+                input: input,
+                index: index,
+                excludingRunID: tail.runID
+            )
         }
         if let blocker = baseMutationBlocker(
             input: input,
+            index: index,
             includePending: false,
             excludingRunID: tail.runID
         ) {
@@ -794,7 +939,7 @@ private extension NovelSessionPresentation {
             if tail.kind == .polishCandidate, input.branch.syncStatus == .needsSync {
                 return .branchNeedsSync
             }
-            if input.pendingOperations.contains(where: { $0.branchID == input.branch.id }) {
+            if !index.branchPendingOperationIDs.isEmpty {
                 return .pendingOperation
             }
         }
@@ -804,9 +949,10 @@ private extension NovelSessionPresentation {
     static func candidateMutationBlocker(
         _ candidate: NovelCandidateRecord,
         input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex,
         requiresCurrentBase: Bool = true
     ) -> NovelSessionActionBlocker? {
-        if let blocker = baseMutationBlocker(input: input, includePending: true) {
+        if let blocker = baseMutationBlocker(input: input, index: index, includePending: true) {
             return blocker
         }
         if candidate.kind == .polish, input.branch.syncStatus == .needsSync {
@@ -819,7 +965,7 @@ private extension NovelSessionPresentation {
         }
         if candidate.kind == .polish,
            let sourceID = candidate.sourceChapterVersionID,
-           !input.branch.workingChapterSelections.contains(where: { $0.versionID == sourceID }) {
+           !index.workingChapterVersionIDs.contains(sourceID) {
             return .sourceChapterChanged
         }
         return nil
@@ -827,6 +973,7 @@ private extension NovelSessionPresentation {
 
     static func baseMutationBlocker(
         input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex,
         includePending: Bool,
         excludingPendingID: NovelPendingOperationID? = nil,
         excludingPolishTransactionID: NovelPendingOperationID? = nil,
@@ -841,22 +988,12 @@ private extension NovelSessionPresentation {
             return .generationRunning
         }
         if (input.branch.activeRunID != nil && input.branch.activeRunID != excludingRunID) ||
-            input.runs.contains(where: {
-            $0.branchID == input.branch.id &&
-                $0.status == .running &&
-                $0.id != excludingRunID
-        }) {
+            index.hasRunningRun(excluding: excludingRunID) {
             return .generationRunning
         }
         if includePending,
-           (input.pendingOperations.contains(where: {
-               $0.branchID == input.branch.id && $0.id != excludingPendingID
-           }) ||
-            input.polishTransactions.contains(where: {
-                $0.branchID == input.branch.id &&
-                    $0.id != excludingPolishTransactionID &&
-                    ($0.status == .pending || $0.status == .retryable || $0.status == .blocked)
-            })) {
+           (index.hasPendingOperation(excluding: excludingPendingID) ||
+            index.hasBlockingPolishTransaction(excluding: excludingPolishTransactionID)) {
             return .pendingOperation
         }
         return nil
@@ -864,14 +1001,13 @@ private extension NovelSessionPresentation {
 
     static func manualRewriteBlocker(
         sourceChapterVersionID: NovelChapterVersionID,
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionActionBlocker? {
-        if let blocker = baseMutationBlocker(input: input, includePending: true) {
+        if let blocker = baseMutationBlocker(input: input, index: index, includePending: true) {
             return blocker
         }
-        guard input.branch.workingChapterSelections.contains(where: {
-            $0.versionID == sourceChapterVersionID
-        }) else {
+        guard index.workingChapterVersionIDs.contains(sourceChapterVersionID) else {
             return .sourceChapterChanged
         }
         return nil
@@ -888,15 +1024,17 @@ private extension NovelSessionPresentation {
     }
 
     static func forkBlocker(
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionActionBlocker? {
-        baseMutationBlocker(input: input, includePending: false)
+        baseMutationBlocker(input: input, index: index, includePending: false)
     }
 
     static func undoBlocker(
-        input: NovelSessionProjectionInput
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
     ) -> NovelSessionActionBlocker? {
-        if let blocker = baseMutationBlocker(input: input, includePending: true) {
+        if let blocker = baseMutationBlocker(input: input, index: index, includePending: true) {
             return blocker
         }
         return input.branch.syncStatus == .needsSync ? .branchNeedsSync : nil

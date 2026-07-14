@@ -111,13 +111,19 @@ final class IOSNovelCreationWiringTests: XCTestCase {
 
     func testWorkspaceExitDetachesConsumerWhileAppOwnsBackgroundLease() throws {
         let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
         let appShell = try source("iosApp/AppShell.swift")
 
         XCTAssertTrue(workspace.contains(".onDisappear"))
         XCTAssertTrue(workspace.contains("sessionViewModel.detachConsumer()"))
-        XCTAssertFalse(workspace.contains("@Environment(\\.scenePhase)"))
+        XCTAssertTrue(workspace.contains("@Environment(\\.scenePhase)"))
+        XCTAssertTrue(workspace.contains(".onChange(of: scenePhase)"))
+        XCTAssertTrue(workspace.contains("phase == .active"))
+        XCTAssertTrue(workspace.contains("scheduleAutomaticStateSyncIfNeeded()"))
         XCTAssertFalse(workspace.contains("guard chapterReaderRoute == nil else { return }"))
-        XCTAssertTrue(workspace.contains("await sessionViewModel.bindToCurrentSelection()"))
+        XCTAssertFalse(workspace.contains("sessionViewModel.bindToCurrentSelection()"))
+        XCTAssertTrue(session.contains(".task(id: bindingTaskID)"))
+        XCTAssertTrue(session.contains("await viewModel.bindToCurrentSelection()"))
         XCTAssertTrue(appShell.contains("novelLifecycleCoordinator.enterBackground"))
         XCTAssertTrue(appShell.contains("waitForBackgroundGeneration"))
         XCTAssertTrue(appShell.contains("interruptSessionForBackground"))
@@ -140,6 +146,183 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("private func dismissKeyboard()"))
         XCTAssertGreaterThanOrEqual(session.components(separatedBy: "dismissKeyboard()").count - 1, 3)
         XCTAssertTrue(session.contains("#selector(UIResponder.resignFirstResponder)"))
+    }
+
+    func testNovelComposerRevealsFocusedControlsWithoutPermanentSegmentedChrome() throws {
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        XCTAssertTrue(session.contains("if showsComposerMeta"))
+        XCTAssertTrue(session.contains("private var composerMetaControls"))
+        XCTAssertTrue(session.contains("currentComposerIntent.title"))
+        XCTAssertTrue(session.contains("onOpenModel"))
+        XCTAssertTrue(session.contains("ContextRingButton("))
+        XCTAssertTrue(session.contains("ComposerContextPanel(snapshot: contextRingSnapshot)"))
+        XCTAssertTrue(session.contains(".presentationCompactAdaptation(.popover)"))
+        XCTAssertTrue(session.contains("private var contextRingSnapshot: ChatContextSnapshot"))
+        XCTAssertFalse(session.contains("Image(systemName: \"scope\")"))
+        XCTAssertFalse(session.contains("Image(systemName: \"chevron.down\")"))
+        XCTAssertTrue(session.contains("Picker(\"创作方式\", selection: composerIntentBinding)"))
+        XCTAssertTrue(session.contains("Text(intent.title).tag(intent)"))
+        XCTAssertTrue(session.contains("Menu {"))
+        XCTAssertFalse(session.contains("NovelComposerIntentPanel"))
+        XCTAssertFalse(session.contains("Label(intent.title, systemImage: \"checkmark\")"))
+        XCTAssertFalse(session.contains("private var sessionControls"))
+        XCTAssertFalse(session.contains("Image(systemName: \"ellipsis\")"))
+        XCTAssertFalse(session.contains(".pickerStyle(.segmented)"))
+
+        let spacer = try XCTUnwrap(session.range(of: "Spacer(minLength: 0)"))
+        let intent = try XCTUnwrap(session.range(of: "Picker(\"创作方式\", selection: composerIntentBinding)"))
+        let ring = try XCTUnwrap(session.range(of: "ContextRingButton("))
+        XCTAssertLessThan(spacer.lowerBound, intent.lowerBound)
+        XCTAssertLessThan(intent.lowerBound, ring.lowerBound)
+    }
+
+    func testProjectTitleOpensWritingAndHierarchicalContextSheet() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let sheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
+
+        XCTAssertTrue(workspace.contains("activeSheet = .writingContext"))
+        XCTAssertTrue(workspace.contains("NovelWritingContextSheet("))
+        XCTAssertFalse(workspace.contains("NovelProjectPanelSheet("))
+        XCTAssertTrue(workspace.contains("ToolbarItem(id: NovelCreationToolbarID.settings"))
+        XCTAssertTrue(workspace.contains("NovelCreationSettingsToolbarButton"))
+        XCTAssertTrue(workspace.contains(".novelCreationSettings"))
+        XCTAssertFalse(workspace.contains(".matchedTransitionSource("))
+        XCTAssertFalse(workspace.contains(".disabled(viewModel.projectSnapshot == nil"))
+        XCTAssertFalse(workspace.contains("activeSheet = .projectSettings"))
+        XCTAssertFalse(workspace.contains("NovelProjectSettingsSheet("))
+        XCTAssertFalse(sheets.contains("struct NovelProjectSettingsSheet"))
+        XCTAssertTrue(sheets.contains("Picker(\"创作设置\", selection: $selectedTab)"))
+        XCTAssertTrue(sheets.contains("case .preferences: \"写作偏好\""))
+        XCTAssertTrue(sheets.contains("case .context: \"上下文注入\""))
+        XCTAssertTrue(sheets.contains("NavigationLink(value: ContextRoute.materials(category))"))
+        XCTAssertTrue(sheets.contains("case .characters: \"人物角色\""))
+        XCTAssertTrue(sheets.contains("case .world: \"世界观\""))
+        XCTAssertTrue(sheets.contains("case .story: \"剧情大纲\""))
+        XCTAssertFalse(workspace.contains("case .branchPicker:"))
+        XCTAssertFalse(workspace.contains("NovelBranchPickerSheet"))
+        XCTAssertFalse(compendium.contains("Section(\"项目\")"))
+        XCTAssertFalse(compendium.contains("Section(\"模型与写作\")"))
+        XCTAssertFalse(compendium.contains("Text(\"导入与导出\")"))
+    }
+
+    func testProjectSettingsExposeIndependentCreationAndSyncModels() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let settings = try source("iosApp/NovelCreation/NovelCreationSettingsView.swift")
+        let projectSettings = try source("iosApp/NovelCreation/NovelProjectSettingsDetailView.swift")
+
+        XCTAssertTrue(workspace.contains("case .modelPicker(let purpose):"))
+        XCTAssertTrue(workspace.contains("await viewModel.setModelPolicy(policy, for: purpose)"))
+        XCTAssertFalse(settings.contains("NovelCreationSettingsScope"))
+        XCTAssertTrue(settings.contains("modelRow(for: .creation)"))
+        XCTAssertTrue(settings.contains("modelRow(for: .stateSync)"))
+        XCTAssertTrue(settings.contains("NovelProjectManagementView("))
+        XCTAssertTrue(settings.contains("优先选择擅长长文与创意写作的模型"))
+        XCTAssertTrue(settings.contains("优先选择稳定、便宜、结构化输出可靠的模型"))
+        XCTAssertTrue(projectSettings.contains("viewModel.setModelPolicy(policy, for: purpose)"))
+        XCTAssertTrue(projectSettings.contains("Label(\"导出正文\", systemImage: \"square.and.arrow.up\")"))
+    }
+
+    func testNovelProjectListOwnsImportCreateAndSettingsActions() throws {
+        let shell = try source("iosApp/AppShell.swift")
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+
+        XCTAssertTrue(shell.contains("onOpenSettings:"))
+        XCTAssertTrue(shell.contains("router.navigate(to: .novelCreationSettings)"))
+        XCTAssertFalse(shell.contains(".navigationTransition(.zoom("))
+        XCTAssertFalse(shell.contains("NovelSettingsTransitionSource"))
+        XCTAssertTrue(list.contains("accessibilityLabel(\"导入小说项目\")"))
+        XCTAssertTrue(list.contains("accessibilityLabel(\"小说创作设置\")"))
+        XCTAssertTrue(list.contains("ToolbarItem(id: NovelCreationToolbarID.settings"))
+        XCTAssertTrue(list.contains("NovelCreationSettingsToolbarButton("))
+        XCTAssertTrue(list.contains("ToolbarSpacer(.fixed, placement: .topBarTrailing)"))
+        XCTAssertFalse(list.contains("ToolbarItemGroup(placement: .topBarTrailing)"))
+        XCTAssertFalse(list.contains(".matchedTransitionSource("))
+        XCTAssertTrue(list.contains("private var createProjectAction"))
+        XCTAssertTrue(list.contains("Label(\"新建\", systemImage: \"plus\")"))
+        XCTAssertTrue(list.contains(".buttonStyle(.glassProminent)"))
+    }
+
+    func testProjectListStartsNativePushBeforeLoadingTheWorkspace() throws {
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+
+        XCTAssertTrue(list.contains("onOpen(project.id)"))
+        XCTAssertFalse(list.contains("NovelProjectOpenCoordinator"))
+        XCTAssertFalse(list.contains("await viewModel.selectProject(projectID)"))
+        XCTAssertFalse(list.contains("pendingOpenProjectID"))
+        XCTAssertFalse(list.contains(".task(id: pendingOpenProjectID)"))
+        XCTAssertTrue(workspace.contains("hasCompletedInitialNavigation && hasLoadedRoutedProject"))
+        let appearance = try XCTUnwrap(workspace.range(of: "NovelNavigationDidAppearObserver"))
+        let deferredTask = try XCTUnwrap(workspace.range(of: ".task(id: hasCompletedInitialNavigation)"))
+        let selection = try XCTUnwrap(workspace.range(
+            of: "await viewModel.selectProject(projectID)",
+            range: deferredTask.upperBound..<workspace.endIndex
+        ))
+        XCTAssertLessThan(appearance.lowerBound, deferredTask.lowerBound)
+        XCTAssertLessThan(deferredTask.lowerBound, selection.lowerBound)
+        XCTAssertFalse(workspace.contains(".task(id: projectID)"))
+    }
+
+    func testSessionBodyBuildsOneProjectionAndPassesItDown() throws {
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+        let bodyStart = try XCTUnwrap(session.range(of: "var body: some View"))
+        let bindingTaskStart = try XCTUnwrap(session.range(
+            of: ".task(id: bindingTaskID)",
+            range: bodyStart.upperBound..<session.endIndex
+        ))
+        let body = String(session[bodyStart.lowerBound..<bindingTaskStart.lowerBound])
+
+        XCTAssertEqual(body.components(separatedBy: "projectedListModel()").count - 1, 1)
+        XCTAssertTrue(body.contains("transcript(listModel: listModel, listSignal: listSignal)"))
+        XCTAssertTrue(body.contains("composer(listModel: listModel)"))
+        XCTAssertEqual(session.components(separatedBy: ".task(id: bindingTaskID)").count - 1, 1)
+        XCTAssertFalse(session.contains("selectionTaskID"))
+        XCTAssertFalse(session.contains("runningRunTaskID"))
+        XCTAssertTrue(session.contains(
+            "@State private var followState = NovelSessionBottomFollowState(mode: .followingBottom)"
+        ))
+        let bindingTaskEnd = try XCTUnwrap(session.range(
+            of: ".onChange(of: listSignal)",
+            range: bindingTaskStart.upperBound..<session.endIndex
+        ))
+        let bindingTask = String(session[bindingTaskStart.lowerBound..<bindingTaskEnd.lowerBound])
+        XCTAssertFalse(bindingTask.contains("dispatchFollowEvent"))
+        XCTAssertFalse(session.contains("private var listModel:"))
+    }
+
+    func testColdProjectPushDefersRecoverySyncAndBoundsHistoryWork() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+        let sessionViewModel = try source("iosApp/NovelCreation/NovelSessionViewModel.swift")
+
+        XCTAssertTrue(workspace.contains("NovelNavigationDidAppearObserver"))
+        XCTAssertTrue(workspace.contains("hasCompletedInitialNavigation && hasLoadedRoutedProject"))
+        XCTAssertTrue(workspace.contains(".task(id: hasCompletedInitialNavigation)"))
+        XCTAssertTrue(workspace.contains("await viewModel.selectProject(projectID)"))
+        XCTAssertFalse(workspace.contains(".task(id: projectID)"))
+        XCTAssertFalse(workspace.contains("sessionViewModel.bindToCurrentSelection()"))
+        XCTAssertTrue(workspace.contains("viewModel.scheduleAutomaticStateSyncIfNeeded()"))
+        XCTAssertFalse(sessionViewModel.contains("workspace.scheduleAutomaticStateSyncIfNeeded()"))
+        XCTAssertTrue(session.contains("NovelSessionHistoryWindowPolicy.initialLimit"))
+        XCTAssertTrue(session.contains("visibleHistoricalRows"))
+        XCTAssertTrue(session.contains("更早的创作记录"))
+        XCTAssertTrue(sessionViewModel.contains("projectionCache?.key == key"))
+        XCTAssertTrue(sessionViewModel.contains("func projectedListModel("))
+    }
+
+    func testNovelWorkspaceDoesNotRepeatRoutineStatusAboveAndInsideConversation() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let bubble = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        XCTAssertFalse(workspace.contains("pendingDescription("))
+        XCTAssertTrue(bubble.contains("已收录为正式正文"))
+        XCTAssertFalse(bubble.contains("正文与剧情状态已更新"))
+        XCTAssertFalse(bubble.contains("committedChangeView("))
+        XCTAssertTrue(session.contains("pending.lastError"))
+        XCTAssertTrue(session.contains("!viewModel.isBusy"))
     }
 
     private func source(_ relativePath: String) throws -> String {

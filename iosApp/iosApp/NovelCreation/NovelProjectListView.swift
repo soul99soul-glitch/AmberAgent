@@ -1,6 +1,22 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum NovelCreationToolbarID {
+    static let importProject = "novel-creation.import"
+    static let settings = "novel-creation.settings"
+}
+
+struct NovelCreationSettingsToolbarButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "gearshape")
+        }
+        .accessibilityLabel("小说创作设置")
+    }
+}
+
 extension View {
     func novelCreationErrorAlert(viewModel: NovelCreationViewModel) -> some View {
         modifier(NovelCreationErrorAlertModifier(viewModel: viewModel))
@@ -46,6 +62,7 @@ struct NovelProjectListView: View {
     let viewModel: NovelCreationViewModel
     var loadsOnAppear = true
     let onOpen: (NovelProjectID) -> Void
+    let onOpenSettings: () -> Void
 
     @State private var activeSheet: NovelProjectListSheet?
     @State private var pendingDelete: NovelProjectDeleteCandidate?
@@ -65,27 +82,31 @@ struct NovelProjectListView: View {
                 reloadRequirementBanner
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !viewModel.projects.isEmpty {
+                createProjectAction
+            }
+        }
         .navigationTitle("小说创作")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItem(id: NovelCreationToolbarID.importProject, placement: .topBarTrailing) {
                 Button {
                     isImportingPackage = true
                 } label: {
                     Image(systemName: "square.and.arrow.down")
                 }
                 .accessibilityLabel("导入小说项目")
+            }
 
-                Button {
-                    activeSheet = .create
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("新建小说项目")
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+            ToolbarItem(id: NovelCreationToolbarID.settings, placement: .topBarTrailing) {
+                NovelCreationSettingsToolbarButton(action: onOpenSettings)
             }
         }
         .overlay {
-            if viewModel.isLoading && viewModel.projects.isEmpty {
+            if viewModel.projects.isEmpty && viewModel.isLoading {
                 ProgressView("正在读取项目")
                     .padding(18)
                     .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
@@ -154,6 +175,26 @@ struct NovelProjectListView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
         .background(AmberTheme.surface)
+    }
+
+    private var createProjectAction: some View {
+        HStack {
+            Spacer()
+
+            Button {
+                activeSheet = .create
+            } label: {
+                Label("新建", systemImage: "plus")
+                    .font(.body.weight(.semibold))
+                    .padding(.horizontal, 6)
+            }
+            .buttonStyle(.glassProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
+            .accessibilityLabel("新建小说项目")
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
     }
 
     private var projectList: some View {
@@ -464,17 +505,26 @@ private struct NovelProjectCreateSheet: View {
     }
 }
 
-private struct NovelProjectRenameSheet: View {
+struct NovelProjectRenameSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let viewModel: NovelCreationViewModel
-    let project: NovelProjectSummary
+    let currentName: String
+    let canRename: Bool
     @State private var name: String
 
     init(viewModel: NovelCreationViewModel, project: NovelProjectSummary) {
         self.viewModel = viewModel
-        self.project = project
+        self.currentName = project.name
+        self.canRename = !project.isDegraded
         self._name = State(initialValue: project.name)
+    }
+
+    init(viewModel: NovelCreationViewModel, currentName: String, canRename: Bool) {
+        self.viewModel = viewModel
+        self.currentName = currentName
+        self.canRename = canRename
+        self._name = State(initialValue: currentName)
     }
 
     var body: some View {
@@ -493,8 +543,9 @@ private struct NovelProjectRenameSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
                         .disabled(
-                            project.isDegraded ||
-                                name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            !canRename ||
+                                name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                name.trimmingCharacters(in: .whitespacesAndNewlines) == currentName
                         )
                 }
             }
@@ -711,7 +762,8 @@ private struct NovelProjectListPreviewScreen: View {
             NovelProjectListView(
                 viewModel: viewModel,
                 loadsOnAppear: false,
-                onOpen: { _ in }
+                onOpen: { _ in },
+                onOpenSettings: {}
             )
         }
         .tint(AmberTheme.accent)

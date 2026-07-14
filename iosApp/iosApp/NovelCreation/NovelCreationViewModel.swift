@@ -21,6 +21,11 @@ enum NovelQuickStartStatus: Equatable, Sendable {
     case refreshFailed(message: String)
 }
 
+private struct NovelAutomaticStateSyncTarget: Equatable, Sendable {
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+}
+
 @MainActor
 @Observable
 final class NovelCreationViewModel {
@@ -47,6 +52,9 @@ final class NovelCreationViewModel {
     @ObservationIgnored private var quickStartCreationStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var cancelledQuickStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var operationOwnerID: UUID?
+    @ObservationIgnored private var automaticStateSyncTask: Task<Void, Never>?
+    @ObservationIgnored private var automaticStateSyncTarget: NovelAutomaticStateSyncTarget?
+    @ObservationIgnored private var queuedAutomaticStateSyncTarget: NovelAutomaticStateSyncTarget?
 
     init(creation: any NovelCreation) {
         self.creation = creation
@@ -175,40 +183,43 @@ final class NovelCreationViewModel {
         }
     }
 
-    func selectProject(_ projectID: NovelProjectID) async {
+    @discardableResult
+    func selectProject(_ projectID: NovelProjectID) async -> Bool {
         let token = UUID()
         selectionToken = token
-        selectedProjectID = projectID
-        selectedBranchID = nil
-        projectSnapshot = nil
-        branchSnapshot = nil
-        injectionPreview = nil
         isLoading = true
         defer {
             if selectionToken == token { isLoading = false }
         }
         do {
             let project = try await project(id: projectID)
-            guard selectionToken == token, selectedProjectID == projectID else { return }
-            projectSnapshot = project
             let branchID = project.branches.first(where: {
                 $0.id == project.project.mainBranchID && $0.lifecycle == .active
             })?.id ?? project.branches.first(where: { $0.lifecycle == .active })?.id
-            selectedBranchID = branchID
+            let loadedBranch: NovelBranchSnapshot?
             if let branchID {
-                let branch = try await branch(projectID: projectID, branchID: branchID)
-                guard selectionToken == token,
-                      selectedProjectID == projectID,
-                      selectedBranchID == branchID else { return }
-                branchSnapshot = branch
+                loadedBranch = try await branch(projectID: projectID, branchID: branchID)
+            } else {
+                loadedBranch = nil
             }
+            try Task.checkCancellation()
+            guard selectionToken == token else { return false }
+            selectedProjectID = projectID
+            projectSnapshot = project
+            selectedBranchID = branchID
+            branchSnapshot = loadedBranch
+            injectionPreview = nil
             errorMessage = nil
             if reloadNoticeProjectID == projectID {
                 clearReloadRequirement()
             }
+            return true
+        } catch is CancellationError {
+            return false
         } catch {
-            guard selectionToken == token else { return }
+            guard selectionToken == token else { return false }
             report(error)
+            return false
         }
     }
 
@@ -648,11 +659,15 @@ final class NovelCreationViewModel {
         )))
     }
 
-    func setModelPolicy(_ policy: NovelProjectModelPolicy) async {
+    func setModelPolicy(
+        _ policy: NovelProjectModelPolicy,
+        for purpose: NovelModelRole = .creation
+    ) async {
         guard let snapshot = projectSnapshot else { return }
         _ = await perform(.setModelPolicy(NovelSetModelPolicyCommand(
             context: mutationContext(configRevision: snapshot.project.configRevision),
             projectID: snapshot.project.id,
+            purpose: purpose,
             policy: policy
         )))
     }
@@ -823,7 +838,7 @@ final class NovelCreationViewModel {
               branch.chapterSelections.contains(where: { $0.chapterID == chapterID }) else {
             return false
         }
-        return await perform(.saveManualEdit(NovelSaveManualEditCommand(
+        let saved = await perform(.saveManualEdit(NovelSaveManualEditCommand(
             context: mutationContext(
                 projectRevision: project.project.revision,
                 configRevision: project.project.configRevision,
@@ -838,6 +853,13 @@ final class NovelCreationViewModel {
             factCompatibilityID: UUID(),
             expectedWorkingRevision: branch.branch.workingRevision
         )))
+        if saved {
+            scheduleAutomaticStateSync(
+                projectID: project.project.id,
+                branchID: branch.branch.id
+            )
+        }
+        return saved
     }
 
     func startSessionRun(_ request: NovelRunRequest) async throws -> NovelRun {
@@ -989,6 +1011,40 @@ final class NovelCreationViewModel {
             stateSnapshotID: NovelStateSnapshotID(),
             expectedWorkingRevision: branch.branch.workingRevision
         )))
+    }
+
+    func scheduleAutomaticStateSyncIfNeeded() {
+        guard let project = projectSnapshot,
+              let branch = branchSnapshot,
+              branch.branch.syncStatus == .needsSync else { return }
+        let branchPending = project.pendingOperations.filter {
+            $0.branchID == branch.branch.id
+        }
+        guard branchPending.isEmpty ||
+                (branchPending.count == 1 && branchPending[0].kind == .manualSync) else {
+            return
+        }
+        scheduleAutomaticStateSync(
+            projectID: project.project.id,
+            branchID: branch.branch.id
+        )
+    }
+
+    func scheduleAutomaticStateSync(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) {
+        let target = NovelAutomaticStateSyncTarget(
+            projectID: projectID,
+            branchID: branchID
+        )
+        guard target != automaticStateSyncTarget,
+              target != queuedAutomaticStateSyncTarget else { return }
+        guard automaticStateSyncTask == nil else {
+            queuedAutomaticStateSyncTarget = target
+            return
+        }
+        startAutomaticStateSync(target)
     }
 
     func retryPending(_ pendingID: NovelPendingOperationID) async {
@@ -1167,7 +1223,8 @@ final class NovelCreationViewModel {
         _ action: NovelAction,
         selecting projectID: NovelProjectID? = nil,
         selectingBranch branchID: NovelBranchID? = nil,
-        reload: Bool = true
+        reload: Bool = true,
+        reportsError: Bool = true
     ) async -> Bool {
         let ownerID = UUID()
         guard reloadNoticeProjectID != action.projectID,
@@ -1194,11 +1251,11 @@ final class NovelCreationViewModel {
             } else if !reload {
                 await loadProjects()
             }
-            report(operationError)
+            if reportsError { report(operationError) }
             return false
         }
 
-        errorMessage = nil
+        if reportsError { errorMessage = nil }
         guard reload else { return true }
 
         let targetProjectID = projectID ?? selectedProjectID ?? action.projectID
@@ -1225,6 +1282,76 @@ final class NovelCreationViewModel {
         reloadNoticeMessage = nil
         reloadNoticeProjectID = nil
         reloadNoticeBranchID = nil
+    }
+
+    private func startAutomaticStateSync(_ target: NovelAutomaticStateSyncTarget) {
+        automaticStateSyncTarget = target
+        automaticStateSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.runAutomaticStateSync(target)
+            self.automaticStateSyncTask = nil
+            self.automaticStateSyncTarget = nil
+            if let queued = self.queuedAutomaticStateSyncTarget {
+                self.queuedAutomaticStateSyncTarget = nil
+                self.startAutomaticStateSync(queued)
+            }
+        }
+    }
+
+    private func runAutomaticStateSync(_ target: NovelAutomaticStateSyncTarget) async {
+        // Let the saving caller finish its immediate refresh before the background
+        // transaction begins reading the same branch.
+        try? await Task.sleep(for: .milliseconds(250))
+        while !Task.isCancelled {
+            let projectSnapshot: NovelProjectSnapshot
+            let branchSnapshot: NovelBranchSnapshot
+            do {
+                projectSnapshot = try await project(id: target.projectID)
+                branchSnapshot = try await branch(
+                    projectID: target.projectID,
+                    branchID: target.branchID
+                )
+            } catch {
+                return
+            }
+            guard branchSnapshot.branch.syncStatus == .needsSync else { return }
+            let branchPending = projectSnapshot.pendingOperations.filter {
+                $0.branchID == target.branchID
+            }
+            guard branchPending.isEmpty ||
+                    (branchPending.count == 1 && branchPending[0].kind == .manualSync) else {
+                return
+            }
+            if isPerforming || branchSnapshot.branch.activeRunID != nil {
+                try? await Task.sleep(for: .milliseconds(250))
+                continue
+            }
+
+            if let pending = branchPending.first {
+                _ = await perform(.retryPending(NovelRetryPendingCommand(
+                    context: mutationContext(
+                        projectRevision: projectSnapshot.project.revision
+                    ),
+                    projectID: target.projectID,
+                    pendingID: pending.id
+                )), reportsError: false)
+            } else {
+                _ = await perform(.syncManualEdits(NovelSyncManualEditsCommand(
+                    context: mutationContext(
+                        projectRevision: projectSnapshot.project.revision,
+                        configRevision: projectSnapshot.project.configRevision,
+                        branchHeadRevision: branchSnapshot.branch.headRevision
+                    ),
+                    projectID: target.projectID,
+                    branchID: target.branchID,
+                    pendingID: NovelPendingOperationID(),
+                    checkpointID: NovelCheckpointID(),
+                    stateSnapshotID: NovelStateSnapshotID(),
+                    expectedWorkingRevision: branchSnapshot.branch.workingRevision
+                )), reportsError: false)
+            }
+            return
+        }
     }
 
     private func reloadSelection(

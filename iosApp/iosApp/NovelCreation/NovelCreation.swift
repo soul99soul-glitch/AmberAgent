@@ -190,6 +190,7 @@ actor DefaultNovelCreation: NovelCreation {
     let generationPolicy: NovelGenerationPolicy
     let factRequestTimeout: TimeInterval
     let polishAssessmentTimeout: TimeInterval
+    let defaultModelPolicy: @Sendable (NovelModelRole) -> NovelProjectModelPolicy
     var committedProjects: [NovelProjectID: NovelLoadedProject] = [:]
     private var inFlightByOperation: [InFlightKey: InFlightMutation] = [:]
     private var inFlightProjectIDs: Set<NovelProjectID> = []
@@ -216,6 +217,7 @@ actor DefaultNovelCreation: NovelCreation {
         generationPolicy: NovelGenerationPolicy = .standard,
         factRequestTimeout: TimeInterval = 60,
         polishAssessmentTimeout: TimeInterval = 20,
+        defaultModelPolicy: @escaping @Sendable (NovelModelRole) -> NovelProjectModelPolicy = { _ in .global },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.repository = repository
@@ -223,7 +225,17 @@ actor DefaultNovelCreation: NovelCreation {
         self.generationPolicy = generationPolicy
         self.factRequestTimeout = max(0.01, factRequestTimeout)
         self.polishAssessmentTimeout = max(0.01, polishAssessmentTimeout)
+        self.defaultModelPolicy = defaultModelPolicy
         self.now = now
+    }
+
+    func modelPolicy(
+        for purpose: NovelModelRole,
+        in document: NovelProjectDocumentV1
+    ) -> NovelProjectModelPolicy {
+        let configured = document.project.configuredModelPolicy(for: purpose)
+        guard case .global = configured else { return configured }
+        return defaultModelPolicy(purpose)
     }
 
     func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
@@ -424,13 +436,16 @@ actor DefaultNovelCreation: NovelCreation {
         }
     }
 
-    func cancelInFlightPolishMutations(
+    func cancelInFlightBackgroundMutations(
         projectID: NovelProjectID
     ) -> [Task<NovelOutcome, Error>] {
         let tasks: [Task<NovelOutcome, Error>] = inFlightByOperation.values.compactMap {
             mutation -> Task<NovelOutcome, Error>? in
-            guard mutation.projectID == projectID,
-                  mutation.kind == .adoptPolishCandidate else {
+            guard mutation.projectID == projectID else { return nil }
+            switch mutation.kind {
+            case .adoptPolishCandidate, .syncManualEdits, .retryPending:
+                break
+            default:
                 return nil
             }
             mutation.finalCommitAuthorization?.revoke()

@@ -36,7 +36,10 @@ enum NovelCreationComposition {
         let modelAdapter = NovelLiveModelAdapter(sharedSettings: sharedSettings)
         return DefaultNovelCreation(
             repository: repository,
-            modelRunner: modelAdapter
+            modelRunner: modelAdapter,
+            defaultModelPolicy: { purpose in
+                NovelCreationModelPreferences.shared.policy(for: purpose)
+            }
         )
     }
 }

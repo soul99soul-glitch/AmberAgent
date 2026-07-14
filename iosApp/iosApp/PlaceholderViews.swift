@@ -1628,6 +1628,7 @@ struct SettingsHomeView: View {
             .init(title: "子代理", subtitle: nil, value: nil, systemImage: "person.2", color: AmberTheme.accentRed, route: .subagents),
             .init(title: "模型议会", subtitle: nil, value: nil, systemImage: "bubble.left.and.bubble.right", color: AmberTheme.accent, route: .council),
             .init(title: "小应用", subtitle: nil, value: nil, systemImage: "square.grid.2x2", color: AmberTheme.accentCyan, route: .miniApps),
+            .init(title: "小说创作", subtitle: nil, value: nil, systemImage: "text.book.closed", color: AmberTheme.accentIndigo, route: .novelCreation),
             .init(title: "深度阅读", subtitle: nil, value: nil, systemImage: "book.pages", color: AmberTheme.accentAmber, route: .board)
         ]
     }

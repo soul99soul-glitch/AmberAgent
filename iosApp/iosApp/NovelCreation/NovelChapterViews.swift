@@ -40,7 +40,9 @@ struct NovelChapterManagementView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     if let pending = project.pendingOperations.first(where: {
-                        $0.branchID == branch.branch.id && $0.kind == .manualSync
+                        $0.branchID == branch.branch.id &&
+                            $0.kind == .manualSync &&
+                            $0.status == .retryable
                     }) {
                         Button {
                             Task { @MainActor in
@@ -48,22 +50,9 @@ struct NovelChapterManagementView: View {
                             }
                         } label: {
                             Label(
-                                pending.status == .retryable ? "重试整理" : "继续整理",
+                                "重试同步",
                                 systemImage: "arrow.clockwise"
                             )
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!viewModel.canMutate)
-                    } else if branch.branch.syncStatus == .needsSync,
-                              !project.pendingOperations.contains(where: {
-                                  $0.branchID == branch.branch.id
-                              }) {
-                        Button {
-                            Task { @MainActor in
-                                await viewModel.syncManualEdits()
-                            }
-                        } label: {
-                            Label("整理资料", systemImage: "arrow.triangle.2.circlepath")
                         }
                         .buttonStyle(.bordered)
                         .disabled(!viewModel.canMutate)
@@ -197,9 +186,11 @@ struct NovelChapterManagementView: View {
     ) -> String {
         if project.access != .readWrite { return "只读恢复模式" }
         if branch.branch.activeRunID != nil { return "Agent 正在生成" }
-        if !project.pendingOperations.isEmpty {
-            return "有 \(project.pendingOperations.count) 项资料整理任务尚未完成"
+        let retryableCount = project.pendingOperations.filter { $0.status == .retryable }.count
+        if retryableCount > 0 {
+            return "有 \(retryableCount) 项剧情状态同步失败"
         }
+        if branch.branch.syncStatus == .needsSync { return "正在后台同步剧情状态" }
         return branch.branch.syncStatus.displayName
     }
 }

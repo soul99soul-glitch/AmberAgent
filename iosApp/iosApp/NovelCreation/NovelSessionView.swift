@@ -42,7 +42,6 @@ struct NovelSessionView: View {
     @Binding var injectionOverrides: NovelInjectionOverrides
     @Binding var inputBudgetTokens: Int
 
-    let onOpenContext: () -> Void
     let onOpenModel: () -> Void
     let onOpenCollection: (NovelCandidateID) -> Void
     let onOpenManualRewrite: (NovelCandidateID) -> Void
@@ -50,7 +49,7 @@ struct NovelSessionView: View {
     let onOpenSettingProposals: (NovelSettingProposalRoute) -> Void
 
     @State private var scrollPosition = ScrollPosition()
-    @State private var followState = NovelSessionBottomFollowState()
+    @State private var followState = NovelSessionBottomFollowState(mode: .followingBottom)
     @State private var latestAtBottom = true
     @State private var userDragging = false
     @State private var terminalSettleTask: Task<Void, Never>?
@@ -58,13 +57,18 @@ struct NovelSessionView: View {
     @State private var composerBarHeight: CGFloat = 0
     @State private var composerInputController = ComposerInputController()
     @State private var isInputFocused = false
+    @State private var isContextPanelPresented = false
     @State private var pendingAbandonTransactionID: NovelPendingOperationID?
     @State private var pendingUndo: NovelPendingCommittedUndo?
+    @State private var historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
 
     var body: some View {
+        let listModel = projectedListModel()
+        let listSignal = makeListSignal(from: listModel)
+
         ZStack {
             AmberTheme.background.ignoresSafeArea()
-            transcript
+            transcript(listModel: listModel, listSignal: listSignal)
 
             if followState.showsBottomButton, !(listModel?.rows.isEmpty ?? true) {
                 VStack {
@@ -80,7 +84,7 @@ struct NovelSessionView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composer
+            composer(listModel: listModel)
                 .background {
                     GeometryReader { proxy in
                         Color.clear.preference(
@@ -94,12 +98,7 @@ struct NovelSessionView: View {
             guard abs(composerBarHeight - height) > 0.5 else { return }
             composerBarHeight = height
         }
-        .task(id: selectionTaskID) {
-            await viewModel.bindToCurrentSelection()
-            dispatchFollowEvent(.reset)
-            dispatchFollowEvent(.initialRowsPresented(hasRows: !(listModel?.rows.isEmpty ?? true)))
-        }
-        .task(id: runningRunTaskID) {
+        .task(id: bindingTaskID) {
             await viewModel.bindToCurrentSelection()
         }
         .onChange(of: listSignal) { oldValue, newValue in
@@ -153,11 +152,20 @@ struct NovelSessionView: View {
         }
     }
 
-    private var transcript: some View {
+    private func transcript(
+        listModel: NovelSessionListModel?,
+        listSignal: NovelSessionListSignal
+    ) -> some View {
         let rows = listModel?.rows ?? []
         let tailID = listModel?.activeTailID
-        let historicalRows = rows.filter { $0.id != tailID }
+        let historicalRows = tailID == nil ? rows : rows.filter { $0.id != tailID }
         let tailRow = tailID.flatMap { id in rows.first(where: { $0.id == id }) }
+        let historyStartIndex = NovelSessionHistoryWindowPolicy.startIndex(
+            totalCount: historicalRows.count,
+            limit: historyWindowLimit
+        )
+        let visibleHistoricalRows = historicalRows.dropFirst(historyStartIndex)
+        let hiddenHistoryCount = historyStartIndex
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -168,9 +176,28 @@ struct NovelSessionView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 56)
                 } else {
-                    if !historicalRows.isEmpty {
+                    if hiddenHistoryCount > 0 {
+                        Button {
+                            revealEarlierHistory(
+                                totalCount: historicalRows.count,
+                                preserving: visibleHistoricalRows.first?.id
+                            )
+                        } label: {
+                            Label(
+                                "更早的创作记录（\(hiddenHistoryCount)）",
+                                systemImage: "clock.arrow.circlepath"
+                            )
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(AmberTheme.muted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if !visibleHistoricalRows.isEmpty {
                         LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(historicalRows) { row in
+                            ForEach(visibleHistoricalRows) { row in
                                 transcriptRow(row)
                             }
                         }
@@ -251,21 +278,19 @@ struct NovelSessionView: View {
             )
     }
 
-    private var composer: some View {
+    private func composer(listModel: NovelSessionListModel?) -> some View {
         VStack(spacing: 8) {
-            if viewModel.needsSync || !viewModel.branchPendingOperations.isEmpty {
+            if !viewModel.retryableBranchPendingOperations.isEmpty && !viewModel.isBusy {
                 synchronizationBanner
             }
 
-            if let recovery = quickStartRecovery {
+            if let recovery = quickStartRecovery(listModel: listModel) {
                 quickStartRecoveryBanner(recovery)
             }
 
             if let error = viewModel.errorMessage {
                 errorBanner(error)
             }
-
-            sessionControls
 
             HStack(alignment: .bottom, spacing: 8) {
                 HStack(alignment: .center, spacing: 6) {
@@ -303,6 +328,11 @@ struct NovelSessionView: View {
                     onStop: stop
                 )
             }
+
+            if showsComposerMeta {
+                composerMetaControls
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -315,6 +345,7 @@ struct NovelSessionView: View {
             )
             .ignoresSafeArea()
         }
+        .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showsComposerMeta)
     }
 
     private var synchronizationBanner: some View {
@@ -327,37 +358,17 @@ struct NovelSessionView: View {
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let pending = viewModel.branchPendingOperations.first {
-                if viewModel.isBusy {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("正在整理资料")
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                } else {
-                    Button(pending.status == .retryable ? "重试" : "继续") {
-                        Task { @MainActor in
-                            await viewModel.retryPending(pending.id)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(
-                        viewModel.isRunning || workspace.requiresReload ||
-                            viewModel.access != .readWrite
-                    )
-                }
-            } else if viewModel.needsSync {
-                Button("整理资料") {
+            if let pending = viewModel.retryableBranchPendingOperations.first {
+                Button("重试") {
                     Task { @MainActor in
-                        await viewModel.syncManualEdits()
+                        await viewModel.retryPending(pending.id)
                     }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(
-                    viewModel.isBusy || viewModel.isRunning ||
-                        workspace.requiresReload || viewModel.access != .readWrite
+                    viewModel.isRunning || viewModel.isBusy || workspace.requiresReload ||
+                        viewModel.access != .readWrite
                 )
             }
         }
@@ -405,7 +416,9 @@ struct NovelSessionView: View {
         .padding(.horizontal, 4)
     }
 
-    private var quickStartRecovery: NovelSessionQuickStartRecovery? {
+    private func quickStartRecovery(
+        listModel: NovelSessionListModel?
+    ) -> NovelSessionQuickStartRecovery? {
         guard workspace.projectSnapshot?.project.creationMode == .quickStart else { return nil }
         switch workspace.quickStartStatus {
         case .failed(let message):
@@ -460,47 +473,54 @@ struct NovelSessionView: View {
         .padding(.horizontal, 4)
     }
 
-    private var sessionControls: some View {
+    private var composerMetaControls: some View {
         HStack(spacing: 8) {
-            Picker("创作方式", selection: composerIntentBinding) {
-                ForEach(NovelComposerIntent.allCases) { intent in
-                    Text(intent.title).tag(intent)
-                }
+            Button(action: onOpenModel) {
+                Text(composerModelLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .lineLimit(1)
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .composerDockGlass(cornerRadius: 15)
             }
-            .pickerStyle(.segmented)
+            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
             .disabled(controlsDisabled)
+            .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
+
+            Spacer(minLength: 0)
 
             Menu {
-                Button(action: onOpenContext) {
-                    Label("本次上下文…", systemImage: "shippingbox")
-                }
-
-                Menu {
-                    Button {
-                        Task { await workspace.setModelPolicy(.global) }
-                    } label: {
-                        Label("跟随全局模型", systemImage: "arrow.triangle.2.circlepath")
+                Picker("创作方式", selection: composerIntentBinding) {
+                    ForEach(NovelComposerIntent.allCases) { intent in
+                        Text(intent.title).tag(intent)
                     }
-                    Button(action: onOpenModel) {
-                        Label("选择固定模型…", systemImage: "cpu")
-                    }
-                } label: {
-                    Label("项目模型…", systemImage: "cpu")
                 }
             } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(injectionOverrides == .none ? AmberTheme.foreground2 : Color.white)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Circle())
-                    .modifier(ComposerDockCircleGlass(
-                        tint: injectionOverrides == .none ? nil : AmberTheme.accent
-                    ))
+                Text(currentComposerIntent.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .composerDockGlass(cornerRadius: 15)
             }
+            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
             .disabled(controlsDisabled)
-            .accessibilityLabel("更多创作选项")
+            .accessibilityLabel("创作方式，当前 \(currentComposerIntent.title)")
 
+            ContextRingButton(
+                snapshot: contextRingSnapshot,
+                compactState: .idle,
+                action: { isContextPanelPresented.toggle() }
+            )
+            .disabled(controlsDisabled)
+            .popover(isPresented: $isContextPanelPresented, arrowEdge: .bottom) {
+                ComposerContextPanel(snapshot: contextRingSnapshot)
+                    .presentationCompactAdaptation(.popover)
+            }
         }
+        .padding(.horizontal, 2)
+        .padding(.top, 2)
     }
 
     private var controlsDisabled: Bool {
@@ -510,20 +530,15 @@ struct NovelSessionView: View {
             viewModel.isBusy
     }
 
-    private var listModel: NovelSessionListModel? {
+    private func projectedListModel() -> NovelSessionListModel? {
         guard let project = workspace.projectSnapshot,
-              let branch = workspace.branchSnapshot,
-              viewModel.binding?.projectID == project.project.id,
-              viewModel.binding?.branchID == branch.branch.id else { return nil }
-        return NovelSessionPresentation.project(NovelSessionProjectionInput(
-            project: project,
-            branch: branch,
-            transientTail: viewModel.transientTail
-        ))
+              let branch = workspace.branchSnapshot else { return nil }
+        return viewModel.projectedListModel(project: project, branch: branch)
     }
 
-    private var listSignal: NovelSessionListSignal {
-        let model = listModel
+    private func makeListSignal(
+        from model: NovelSessionListModel?
+    ) -> NovelSessionListSignal {
         let tail = model?.activeTailID.flatMap { tailID in
             model?.rows.first(where: { $0.id == tailID })
         }
@@ -537,13 +552,7 @@ struct NovelSessionView: View {
         )
     }
 
-    private var selectionTaskID: String {
-        let branchID = workspace.selectedBranchID
-        return "\(workspace.selectedProjectID?.description ?? "none"):" +
-            "\(branchID?.description ?? "none")"
-    }
-
-    private var runningRunTaskID: String {
+    private var bindingTaskID: String {
         let branchID = workspace.selectedBranchID
         let phase: String
         if let running = workspace.projectSnapshot?.activeRuns.first(where: {
@@ -577,6 +586,58 @@ struct NovelSessionView: View {
         )
     }
 
+    private var currentComposerIntent: NovelComposerIntent {
+        composerIntentBinding.wrappedValue
+    }
+
+    private var showsComposerMeta: Bool {
+        isInputFocused ||
+            isContextPanelPresented ||
+            !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            injectionOverrides != .none ||
+            viewModel.isRunning
+    }
+
+    private var composerModelLabel: String {
+        guard let project = workspace.projectSnapshot?.project else { return "选择模型" }
+        _ = sharedSettings.revision
+        let configured = project.configuredModelPolicy(for: .creation)
+        let policy: NovelProjectModelPolicy
+        if case .global = configured {
+            policy = NovelCreationModelPreferences.shared.policy(for: .creation)
+        } else {
+            policy = configured
+        }
+        return NovelPresentation.modelDisplayName(for: policy, sharedSettings: sharedSettings)
+    }
+
+    private var contextRingSnapshot: ChatContextSnapshot {
+        let receipt = latestContextReceipt
+        let estimatedTokens = receipt?.estimatedInputTokens ?? 0
+        return ChatContextSnapshot(
+            messageCount: viewModel.durableMessages.count,
+            modelId: receipt?.modelID ?? composerModelLabel,
+            supportsReasoning: false,
+            pendingSelectedFileName: nil,
+            pendingSelectedFileBytesText: nil,
+            promptTokens: estimatedTokens,
+            completionTokens: 0,
+            totalTokens: estimatedTokens,
+            cachedTokens: 0,
+            tokensPerSecond: nil,
+            contextWindowTokens: receipt?.maxEstimatedInputTokens,
+            currentContextTokens: estimatedTokens
+        )
+    }
+
+    private var latestContextReceipt: NovelInjectionReceiptRecord? {
+        guard let project = workspace.projectSnapshot,
+              let branchID = viewModel.binding?.branchID ?? workspace.selectedBranchID else { return nil }
+        return project.injectionReceipts
+            .filter { $0.branchID == branchID && $0.factTransaction == nil }
+            .max { $0.createdAt < $1.createdAt }
+    }
+
     private var inputFocusBinding: Binding<Bool> {
         Binding(get: { isInputFocused }, set: { isInputFocused = $0 })
     }
@@ -596,10 +657,14 @@ struct NovelSessionView: View {
     }
 
     private var syncBannerText: String {
-        if let pending = viewModel.branchPendingOperations.first {
-            return pending.kind == .collection ? "旧版收录的资料整理未完成" : "资料整理尚未完成"
+        if let pending = viewModel.retryableBranchPendingOperations.first {
+            let failure = pending.lastError?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let failure, !failure.isEmpty {
+                return failure
+            }
+            return pending.kind == .collection ? "旧版收录的剧情状态同步未完成" : "剧情状态同步尚未完成"
         }
-        return "正文已保存，人物与剧情资料可稍后整理"
+        return "剧情状态同步尚未完成"
     }
 
     private var abandonConfirmationBinding: Binding<Bool> {
@@ -681,9 +746,16 @@ struct NovelSessionView: View {
         to newValue: NovelSessionListSignal
     ) {
         guard oldValue.sessionID == newValue.sessionID else {
+            historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
             dispatchFollowEvent(.reset)
             dispatchFollowEvent(.initialRowsPresented(hasRows: newValue.rowCount > 0))
             return
+        }
+        if newValue.rowCount > oldValue.rowCount, !latestAtBottom {
+            historyWindowLimit = min(
+                newValue.rowCount,
+                historyWindowLimit + newValue.rowCount - oldValue.rowCount
+            )
         }
         if oldValue.activeTailID == nil, newValue.activeTailID != nil {
             dispatchFollowEvent(.streamStarted)
@@ -707,6 +779,25 @@ struct NovelSessionView: View {
 
     private func isLiveTailPhase(_ phase: NovelSessionTransientTailPhase?) -> Bool {
         phase == .waitingForFirstToken || phase == .streaming
+    }
+
+    private func revealEarlierHistory(
+        totalCount: Int,
+        preserving anchorID: NovelMessageID?
+    ) {
+        historyWindowLimit = NovelSessionHistoryWindowPolicy.expandedLimit(
+            currentLimit: historyWindowLimit,
+            totalCount: totalCount
+        )
+        guard let anchorID else { return }
+        Task { @MainActor in
+            await Task.yield()
+            var transaction = Transaction()
+            transaction.animation = nil
+            withTransaction(transaction) {
+                scrollPosition.scrollTo(id: anchorID, anchor: .top)
+            }
+        }
     }
 
     private func dispatchFollowEvent(_ event: NovelSessionBottomFollowEvent) {

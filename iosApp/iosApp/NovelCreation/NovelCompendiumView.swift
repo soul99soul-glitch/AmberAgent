@@ -2,18 +2,10 @@ import SwiftUI
 
 struct NovelCompendiumView: View {
     let viewModel: NovelCreationViewModel
-    let sharedSettings: IOSSharedSettingsStore
     @Binding var selection: NovelCompendiumSection
 
     let onEditMaterial: (NovelMaterialRecord?, NovelMaterialKind) -> Void
-    let onChooseFixedModel: () -> Void
-    let onEditPolishPreference: () -> Void
-    let onPreviewInjectionRules: () -> Void
     let onAcceptProposal: (NovelSettingProposalRecord) -> Void
-    let onManageBranches: () -> Void
-    let onImportPackage: () -> Void
-    let onExportPackage: () -> Void
-    let onExportMarkdown: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,16 +50,8 @@ struct NovelCompendiumView: View {
         case .more:
             NovelCompendiumMoreView(
                 viewModel: viewModel,
-                sharedSettings: sharedSettings,
                 onEditMaterial: onEditMaterial,
-                onChooseFixedModel: onChooseFixedModel,
-                onEditPolishPreference: onEditPolishPreference,
-                onPreviewInjectionRules: onPreviewInjectionRules,
-                onAcceptProposal: onAcceptProposal,
-                onManageBranches: onManageBranches,
-                onImportPackage: onImportPackage,
-                onExportPackage: onExportPackage,
-                onExportMarkdown: onExportMarkdown
+                onAcceptProposal: onAcceptProposal
             )
         }
     }
@@ -296,18 +280,9 @@ private struct NovelStoryCompendiumView: View {
 
 private struct NovelCompendiumMoreView: View {
     let viewModel: NovelCreationViewModel
-    let sharedSettings: IOSSharedSettingsStore
     let onEditMaterial: (NovelMaterialRecord?, NovelMaterialKind) -> Void
-    let onChooseFixedModel: () -> Void
-    let onEditPolishPreference: () -> Void
-    let onPreviewInjectionRules: () -> Void
     let onAcceptProposal: (NovelSettingProposalRecord) -> Void
-    let onManageBranches: () -> Void
-    let onImportPackage: () -> Void
-    let onExportPackage: () -> Void
-    let onExportMarkdown: () -> Void
 
-    @State private var projectName = ""
     @State private var pendingDelete: NovelCompendiumMaterialDeleteCandidate?
 
     var body: some View {
@@ -322,58 +297,6 @@ private struct NovelCompendiumMoreView: View {
                         )
                     }
                 }
-            }
-
-            Section("项目") {
-                TextField("小说名称", text: $projectName)
-                    .disabled(!viewModel.canMutate)
-                Button("保存名称") {
-                    Task { await viewModel.renameProject(projectName) }
-                }
-                .disabled(!canSaveName)
-            }
-
-            Section("模型与写作") {
-                Menu {
-                    Button {
-                        Task { await viewModel.setModelPolicy(.global) }
-                    } label: {
-                        Label("跟随全局模型", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    Button(action: onChooseFixedModel) {
-                        Label("选择固定模型", systemImage: "cpu")
-                    }
-                } label: {
-                    NovelSettingsRow(
-                        systemImage: "cpu",
-                        title: "项目模型",
-                        value: modelName,
-                        showsChevron: true
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canMutate)
-
-                Button(action: onEditPolishPreference) {
-                    NovelSettingsRow(
-                        systemImage: "wand.and.sparkles",
-                        title: "整章润色偏好",
-                        value: polishPreferenceLabel,
-                        showsChevron: true
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canMutate)
-
-                Button(action: onPreviewInjectionRules) {
-                    NovelSettingsRow(
-                        systemImage: "scope",
-                        title: "注入规则预览",
-                        value: "仅用于诊断",
-                        showsChevron: true
-                    )
-                }
-                .buttonStyle(.plain)
             }
 
             Section("其他资料") {
@@ -401,7 +324,6 @@ private struct NovelCompendiumMoreView: View {
                 }
 
                 Menu {
-                    Button("写作要求") { onEditMaterial(nil, .writingRequirements) }
                     Button("自定义资料") { onEditMaterial(nil, .custom("自定义")) }
                 } label: {
                     Label("新增资料", systemImage: "plus")
@@ -410,40 +332,11 @@ private struct NovelCompendiumMoreView: View {
                 .disabled(!viewModel.canMutate)
             }
 
-            Section("管理") {
-                Button(action: onManageBranches) {
-                    Label("分支管理", systemImage: "arrow.triangle.branch")
-                }
-            }
-
-            Section {
-                Button(action: onImportPackage) {
-                    Label("导入项目包", systemImage: "square.and.arrow.down")
-                }
-                .disabled(viewModel.isPerforming)
-                Button(action: onExportPackage) {
-                    Label("导出完整项目包", systemImage: "shippingbox")
-                }
-                .disabled(viewModel.isPerforming)
-                Button(action: onExportMarkdown) {
-                    Label("导出当前分支正文", systemImage: "doc.plaintext")
-                }
-                .disabled(viewModel.isPerforming)
-            } header: {
-                Text("导入与导出")
-            } footer: {
-                if viewModel.isPerforming {
-                    Text("项目正在处理其他操作，完成后可导入或导出。")
-                }
-            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 4, for: .scrollContent)
         .background(AmberTheme.background)
-        .task(id: viewModel.projectSnapshot?.project.id) {
-            projectName = viewModel.projectSnapshot?.project.name ?? ""
-        }
         .alert(item: $pendingDelete) { candidate in
             Alert(
                 title: Text("删除“\(candidate.title)”？"),
@@ -456,26 +349,11 @@ private struct NovelCompendiumMoreView: View {
         }
     }
 
-    private var canSaveName: Bool {
-        let value = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return viewModel.canMutate && !value.isEmpty && value != viewModel.projectSnapshot?.project.name
-    }
-
-    private var modelName: String {
-        guard let policy = viewModel.projectSnapshot?.project.modelPolicy else { return "读取中" }
-        _ = sharedSettings.revision
-        return NovelPresentation.modelDisplayName(for: policy, sharedSettings: sharedSettings)
-    }
-
-    private var polishPreferenceLabel: String {
-        viewModel.projectSnapshot?.project.polishPreference.isEmpty == false ? "已设置" : "未设置"
-    }
-
     private var otherMaterials: [NovelMaterialRecord] {
         viewModel.activeMaterials.filter {
             switch $0.kind {
-            case .writingRequirements, .custom: return true
-            case .world, .character, .masterOutline: return false
+            case .custom: return true
+            case .world, .character, .masterOutline, .writingRequirements: return false
             }
         }
     }

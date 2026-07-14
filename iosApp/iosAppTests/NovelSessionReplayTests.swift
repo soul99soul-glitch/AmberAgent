@@ -3,6 +3,28 @@ import XCTest
 @testable import iosApp
 
 final class NovelSessionReplayTests: XCTestCase {
+    func testLongHistoryWindowStartsAtRecentRowsAndExpandsInBoundedPages() {
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.startIndex(
+                totalCount: 160,
+                limit: NovelSessionHistoryWindowPolicy.initialLimit
+            ),
+            156
+        )
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.expandedLimit(currentLimit: 4, totalCount: 160),
+            28
+        )
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.expandedLimit(currentLimit: 4, totalCount: 20),
+            20
+        )
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.startIndex(totalCount: 4, limit: 4),
+            0
+        )
+    }
+
     func testProjectionUsesOneStableAssistantRowFromStreamingThroughDurableTerminal() throws {
         let fixture = try makeFixture()
         let run = makeRun(fixture: fixture, kind: .discussion)
@@ -137,6 +159,57 @@ final class NovelSessionReplayTests: XCTestCase {
 
         XCTAssertGreaterThan(baseline.rows.last?.content.count ?? 0, 4_000)
         XCTAssertEqual(follow.mode, .followingBottom)
+    }
+
+    func testLargeSessionProjectionPerformance() throws {
+        let fixture = try makeFixture()
+        var session = fixture.session
+        var messages: [NovelSessionMessageRecord] = []
+        var candidates: [NovelCandidateRecord] = []
+        var pendingOperations: [NovelPendingOperationRecord] = []
+        messages.reserveCapacity(500)
+        candidates.reserveCapacity(500)
+        pendingOperations.reserveCapacity(500)
+
+        for index in 0..<500 {
+            let candidateID = NovelCandidateID()
+            let message = makeMessage(
+                sequence: Int64(index),
+                role: .assistant,
+                mode: .writeProse,
+                kind: .proseCandidate,
+                content: "长会话候选正文 \(index)",
+                candidateID: candidateID
+            )
+            messages.append(message)
+            candidates.append(makeCandidate(
+                fixture: fixture,
+                id: candidateID,
+                sourceMessageID: message.id,
+                kind: .prose,
+                status: .available,
+                content: message.content
+            ))
+            pendingOperations.append(makePending(
+                fixture: fixture,
+                candidateID: candidateID,
+                status: .retryable
+            ))
+        }
+        session.messages = messages
+        let input = makeInput(
+            fixture: fixture,
+            session: session,
+            candidates: candidates,
+            pending: pendingOperations
+        )
+        XCTAssertEqual(NovelSessionPresentation.project(input).rows.count, messages.count)
+
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+        measure(metrics: [XCTClockMetric()], options: options) {
+            _ = NovelSessionPresentation.project(input)
+        }
     }
 
     func testCandidateActionGatesAndOnlyCandidateActionDigestChanges() throws {
@@ -872,7 +945,7 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertTrue(source.contains("contentHeight: geometry.contentSize.height"))
         XCTAssertTrue(source.contains("abs(oldValue.contentHeight - newValue.contentHeight) > 0.5"))
         XCTAssertTrue(source.contains("dispatchFollowEvent(.terminalLayoutChanged)"))
-        XCTAssertTrue(source.contains("!viewModel.branchPendingOperations.isEmpty"))
+        XCTAssertTrue(source.contains("!viewModel.retryableBranchPendingOperations.isEmpty"))
     }
 
 }

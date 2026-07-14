@@ -2,6 +2,24 @@ import XCTest
 @testable import iosApp
 
 final class NovelGenerationLifecycleTests: XCTestCase {
+    func testGenerationUsesCreativeModelInsteadOfStateSyncModel() async throws {
+        var document = try NovelTestFixtures.document()
+        document.project.modelPolicy = .fixed(providerID: "creative-provider", modelID: "creative-model")
+        document.project.stateSyncModelPolicy = .fixed(providerID: "sync-provider", modelID: "sync-model")
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.delta("A scene."), .complete])]
+        )
+
+        _ = await capturedEvents(try await harness.creation.start(
+            makeRequest(document: document, kind: .prose, granularity: .continuation)
+        ).events)
+
+        let policies = await harness.adapter.resolvedPolicies
+        XCTAssertEqual(policies.first, .fixed(providerID: "creative-provider", modelID: "creative-model"))
+        XCTAssertFalse(policies.contains(.fixed(providerID: "sync-provider", modelID: "sync-model")))
+    }
+
     func testMarkerUserMessageAndReceiptsAreDurableBeforeProviderResume() async throws {
         let document = try NovelTestFixtures.document()
         let harness = try await makeHarness(

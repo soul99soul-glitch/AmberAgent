@@ -48,7 +48,12 @@ enum NovelProjectConfigurationReducer {
         let policy = try normalizedModelPolicy(command.policy)
 
         var next = document
-        next.project.modelPolicy = policy
+        switch command.purpose {
+        case .creation:
+            next.project.modelPolicy = policy
+        case .stateSync:
+            next.project.stateSyncModelPolicy = policy
+        }
         advanceConfigurationRevision(in: &next, now: now)
         let outcome = NovelOutcome.modelPolicyChanged(
             projectID: command.projectID,

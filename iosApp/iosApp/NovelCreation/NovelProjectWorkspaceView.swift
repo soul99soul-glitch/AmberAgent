@@ -1,8 +1,9 @@
 import SwiftUI
-import UniformTypeIdentifiers
+import UIKit
 
 struct NovelProjectWorkspaceView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(RouterPath.self) private var router
+    @Environment(\.scenePhase) private var scenePhase
 
     let viewModel: NovelCreationViewModel
     let sharedSettings: IOSSharedSettingsStore
@@ -16,15 +17,9 @@ struct NovelProjectWorkspaceView: View {
     @State private var sessionInputText = ""
     @State private var sessionInjectionOverrides = NovelInjectionOverrides.none
     @State private var sessionInputBudgetTokens = 16_000
-    @State private var packageDocument: NovelProjectFileDocument?
-    @State private var packageFileName = "Novel.ambernovel"
-    @State private var isExportingPackage = false
-    @State private var markdownDocument: NovelMarkdownFileDocument?
-    @State private var markdownFileName = "Novel.md"
-    @State private var isExportingMarkdown = false
-    @State private var isImportingPackage = false
     @State private var isConfirmingPreviousRestore = false
     @State private var branchNotice: String?
+    @State private var hasCompletedInitialNavigation = false
 
     init(
         viewModel: NovelCreationViewModel,
@@ -39,11 +34,24 @@ struct NovelProjectWorkspaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            sectionPicker
-            accessBanner
-            content
+            if hasCompletedInitialNavigation && hasLoadedRoutedProject {
+                sectionPicker
+                accessBanner
+                content
+            } else {
+                ProgressView("正在读取小说项目")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .background(AmberTheme.background.ignoresSafeArea())
+        .background {
+            NovelNavigationDidAppearObserver {
+                guard !hasCompletedInitialNavigation else { return }
+                hasCompletedInitialNavigation = true
+            }
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { workspaceToolbar }
         .sheet(item: $activeSheet, content: sheetContent)
@@ -56,19 +64,6 @@ struct NovelProjectWorkspaceView: View {
                 section = .creation
             }
         }
-        .fileExporter(
-            isPresented: $isExportingPackage,
-            document: packageDocument,
-            contentType: .amberNovelProject,
-            defaultFilename: packageFileName,
-            onCompletion: handleExportResult
-        )
-        .fileImporter(
-            isPresented: $isImportingPackage,
-            allowedContentTypes: [.amberNovelProject],
-            allowsMultipleSelection: false,
-            onCompletion: handlePackageImport
-        )
         .confirmationDialog(
             "恢复上一个有效版本？",
             isPresented: $isConfirmingPreviousRestore,
@@ -83,19 +78,12 @@ struct NovelProjectWorkspaceView: View {
         } message: {
             Text("当前损坏的主文件会被保留用于排查，上一个有效版本将成为新的可写版本。")
         }
-        .fileExporter(
-            isPresented: $isExportingMarkdown,
-            document: markdownDocument,
-            contentType: .amberMarkdown,
-            defaultFilename: markdownFileName,
-            onCompletion: handleExportResult
-        )
-        .overlay {
-            if viewModel.isLoading && viewModel.projectSnapshot == nil {
-                ProgressView("正在读取小说项目")
-                    .padding(18)
-                    .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
+        .task(id: hasCompletedInitialNavigation) {
+            guard hasCompletedInitialNavigation else { return }
+            if !hasLoadedRoutedProject {
+                guard await viewModel.selectProject(projectID) else { return }
             }
+            viewModel.scheduleAutomaticStateSyncIfNeeded()
         }
         .overlay(alignment: .top) {
             if let branchNotice {
@@ -109,17 +97,19 @@ struct NovelProjectWorkspaceView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .task(id: projectID) {
-            guard viewModel.selectedProjectID != projectID || viewModel.projectSnapshot == nil else { return }
-            await viewModel.selectProject(projectID)
-        }
         .onChange(of: viewModel.branchSnapshot?.branch.id) { _, _ in
             sessionInputText = ""
             sessionInjectionOverrides = .none
             sessionInputBudgetTokens = 16_000
-            Task { @MainActor in
-                await sessionViewModel.bindToCurrentSelection()
+            if hasCompletedInitialNavigation {
+                viewModel.scheduleAutomaticStateSyncIfNeeded()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active,
+                  hasCompletedInitialNavigation,
+                  hasLoadedRoutedProject else { return }
+            viewModel.scheduleAutomaticStateSyncIfNeeded()
         }
         .onDisappear {
             sessionViewModel.detachConsumer()
@@ -130,7 +120,7 @@ struct NovelProjectWorkspaceView: View {
     private var workspaceToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             Button {
-                activeSheet = .branchPicker
+                activeSheet = .writingContext
             } label: {
                 VStack(spacing: 1) {
                     HStack(spacing: 4) {
@@ -151,8 +141,14 @@ struct NovelProjectWorkspaceView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("切换分支")
-            .disabled(isSessionTransitionBusy)
+            .accessibilityLabel("写作偏好与上下文")
+            .disabled(!hasLoadedRoutedProject || isSessionTransitionBusy)
+        }
+
+        ToolbarItem(id: NovelCreationToolbarID.settings, placement: .topBarTrailing) {
+            NovelCreationSettingsToolbarButton {
+                router.navigate(to: .novelCreationSettings)
+            }
         }
     }
 
@@ -210,16 +206,6 @@ struct NovelProjectWorkspaceView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 9)
                 .background(AmberTheme.accentAmber.opacity(0.10))
-        } else if let project = viewModel.projectSnapshot,
-                  !project.pendingOperations.isEmpty ||
-                    project.activeRuns.contains(where: { $0.status == .running }) {
-            Label(pendingDescription(project), systemImage: "clock.arrow.circlepath")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AmberTheme.accent)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .background(AmberTheme.accentTint)
         }
     }
 
@@ -234,8 +220,7 @@ struct NovelProjectWorkspaceView: View {
                 inputText: $sessionInputText,
                 injectionOverrides: $sessionInjectionOverrides,
                 inputBudgetTokens: $sessionInputBudgetTokens,
-                onOpenContext: { activeSheet = .sessionContext },
-                onOpenModel: { activeSheet = .modelPicker },
+                onOpenModel: { activeSheet = .modelPicker(.creation) },
                 onOpenCollection: { activeSheet = .collectCandidate($0) },
                 onOpenManualRewrite: { activeSheet = .manualRewrite($0) },
                 onFork: { activeSheet = .forkCheckpoint($0) },
@@ -251,64 +236,51 @@ struct NovelProjectWorkspaceView: View {
         case .compendium:
             NovelCompendiumView(
                 viewModel: viewModel,
-                sharedSettings: sharedSettings,
                 selection: $compendiumSection,
                 onEditMaterial: { material, suggestedKind in
                     activeSheet = .materialEditor(material, suggestedKind)
                 },
-                onChooseFixedModel: {
-                    activeSheet = .modelPicker
-                },
-                onEditPolishPreference: {
-                    activeSheet = .polishPreference
-                },
-                onPreviewInjectionRules: {
-                    activeSheet = .injectionPreview
-                },
                 onAcceptProposal: { proposal in
                     activeSheet = .proposal(proposal)
-                },
-                onManageBranches: { activeSheet = .branchManager },
-                onImportPackage: importPackage,
-                onExportPackage: exportPackage,
-                onExportMarkdown: exportMarkdown
+                }
             )
-        }
-    }
-
-    private func selectBranchFromWorkspace(_ branchID: NovelBranchID) {
-        Task { @MainActor in
-            if branchID == viewModel.selectedBranchID,
-               viewModel.branchSnapshot?.branch.id == branchID {
-                return
-            }
-            guard await sessionViewModel.interruptForRouteExit() else { return }
-            await viewModel.selectBranch(branchID)
-            guard viewModel.errorMessage == nil,
-                  viewModel.branchSnapshot?.branch.id == branchID else {
-                await sessionViewModel.bindToCurrentSelection()
-                return
-            }
-            await sessionViewModel.bindToCurrentSelection()
         }
     }
 
     @ViewBuilder
     private func sheetContent(_ sheet: NovelWorkspaceSheet) -> some View {
         switch sheet {
-        case .branchPicker:
-            NovelBranchPickerSheet(viewModel: viewModel, sessionViewModel: sessionViewModel) {
-                activeSheet = nil
-            }
+        case .writingContext:
+            NovelWritingContextSheet(
+                workspace: viewModel,
+                mode: sessionViewModel.mode,
+                granularity: sessionViewModel.granularity,
+                userText: sessionInputText,
+                overrides: sessionInjectionOverrides,
+                budgetTokens: sessionInputBudgetTokens,
+                onEditWritingRequirements: {
+                    transition(to: .materialEditor(writingRequirementsMaterial, .writingRequirements))
+                },
+                onEditPolishPreference: { transition(to: .polishPreference) },
+                onApply: { overrides, budget in
+                    sessionInjectionOverrides = overrides
+                    sessionInputBudgetTokens = budget
+                }
+            )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
 
-        case .modelPicker:
+        case .modelPicker(let purpose):
             ComposerModelSheet(
                 sharedSettings: sharedSettings,
-                currentModel: selectedModelID
+                currentModel: selectedModelID(for: purpose),
+                title: purpose.pickerTitle,
+                fallbackTitle: "跟随小说默认",
+                onFallback: {
+                    selectModelPolicy(.global, for: purpose)
+                }
             ) { option in
-                selectFixedModel(option)
+                selectFixedModel(option, for: purpose)
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
@@ -322,22 +294,6 @@ struct NovelProjectWorkspaceView: View {
 
         case .polishPreference:
             NovelPolishPreferenceSheet(viewModel: viewModel)
-
-        case .injectionPreview:
-            NovelInjectionPreviewSheet(viewModel: viewModel)
-
-        case .sessionContext:
-            NovelSessionContextSheet(
-                workspace: viewModel,
-                mode: sessionViewModel.mode,
-                granularity: sessionViewModel.granularity,
-                userText: sessionInputText,
-                overrides: sessionInjectionOverrides,
-                budgetTokens: sessionInputBudgetTokens
-            ) { overrides, budget in
-                sessionInjectionOverrides = overrides
-                sessionInputBudgetTokens = budget
-            }
 
         case .collectCandidate(let candidateID):
             NovelCollectCandidateSheet(
@@ -356,7 +312,7 @@ struct NovelProjectWorkspaceView: View {
                 if sessionViewModel.branchPendingOperations.contains(where: {
                     $0.candidateID == candidateID
                 }) {
-                    return .pending(message: "旧版收录仍有资料整理任务，请返回后重试。")
+                    return .pending(message: "旧版收录仍有剧情状态同步任务，请返回后重试。")
                 }
                 return .failed(
                     message: sessionViewModel.errorMessage ?? "收录没有完成，请检查项目状态后重试。"
@@ -376,39 +332,6 @@ struct NovelProjectWorkspaceView: View {
                     )
             }
 
-        case .chapterManager:
-            NavigationStack {
-                NovelChapterManagementView(viewModel: viewModel) { selection in
-                    transition(to: .chapterVersions(selection))
-                }
-                .navigationTitle("正文与版本")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") { activeSheet = nil }
-                    }
-                }
-            }
-
-        case .branchManager:
-            NavigationStack {
-                NovelBranchesView(
-                    viewModel: viewModel,
-                    isSelectionDisabled: isSessionTransitionBusy,
-                    onSelect: selectBranchFromWorkspace,
-                    onRename: { transition(to: .renameBranch($0)) },
-                    onFork: { transition(to: .forkBranch($0)) },
-                    onEditOverride: { transition(to: .branchOverride($0)) }
-                )
-                .navigationTitle("分支管理")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") { activeSheet = nil }
-                    }
-                }
-            }
-
         case .forkCheckpoint(let checkpointID):
             if let branch = viewModel.branchSnapshot?.branch {
                 NovelSessionForkSheet(
@@ -422,34 +345,28 @@ struct NovelProjectWorkspaceView: View {
         case .proposal(let proposal):
             NovelProposalAcceptanceSheet(viewModel: viewModel, proposal: proposal)
 
-        case .renameBranch(let branch):
-            NovelBranchRenameSheet(viewModel: viewModel, branch: branch)
-
-        case .forkBranch(let branch):
-            NovelBranchForkSheet(
-                viewModel: viewModel,
-                branch: branch,
-                onCreated: showBranchNotice
-            )
-
-        case .branchOverride(let material):
-            NovelBranchOverrideEditorSheet(viewModel: viewModel, material: material)
-
-        case .chapterVersions(let selection):
-            NovelChapterVersionsSheet(viewModel: viewModel, selection: selection)
-
-        case .importPackage(let data, let preview):
-            NovelProjectImportSheet(
-                viewModel: viewModel,
-                packageData: data,
-                preview: preview,
-                onImported: finishImport
-            )
         }
     }
 
     private var projectName: String {
-        viewModel.projectSnapshot?.project.name ?? "小说创作"
+        if viewModel.projectSnapshot?.project.id == projectID,
+           let name = viewModel.projectSnapshot?.project.name {
+            return name
+        }
+        return viewModel.projects.first(where: { $0.id == projectID })?.name ?? "小说创作"
+    }
+
+    private var hasLoadedRoutedProject: Bool {
+        viewModel.selectedProjectID == projectID &&
+            viewModel.projectSnapshot?.project.id == projectID &&
+            viewModel.branchSnapshot?.projectID == projectID
+    }
+
+    private var writingRequirementsMaterial: NovelMaterialRecord? {
+        viewModel.activeMaterials.first {
+            if case .writingRequirements = $0.kind { return true }
+            return false
+        }
     }
 
     private func openSettingProposals(_ route: NovelSettingProposalRoute) {
@@ -499,27 +416,39 @@ struct NovelProjectWorkspaceView: View {
     }
 
     private var headerSubtitle: String {
+        guard hasLoadedRoutedProject else { return "读取项目" }
         let branch = viewModel.branchSnapshot?.branch.name ?? "读取分支"
-        guard let policy = viewModel.projectSnapshot?.project.modelPolicy else { return branch }
-        _ = sharedSettings.revision
-        let model = NovelPresentation.modelDisplayName(for: policy, sharedSettings: sharedSettings)
+        let model = modelDisplayName(for: .creation)
         return "\(branch) · \(model)"
     }
 
-    private var selectedModelID: String {
-        guard let policy = viewModel.projectSnapshot?.project.modelPolicy else { return "" }
+    private func selectedModelID(for purpose: NovelModelRole) -> String {
+        guard let project = viewModel.projectSnapshot?.project else { return "" }
         _ = sharedSettings.revision
-        return NovelPresentation.selectedModelID(for: policy, sharedSettings: sharedSettings)
+        return NovelPresentation.selectedModelID(
+            for: effectivePolicy(project.configuredModelPolicy(for: purpose), purpose: purpose),
+            sharedSettings: sharedSettings
+        )
     }
 
-    private func pendingDescription(_ project: NovelProjectSnapshot) -> String {
-        if project.activeRuns.contains(where: { $0.status == .running }) {
-            return "Agent 正在生成，部分写操作暂不可用"
-        }
-        return "有 \(project.pendingOperations.count) 项正文状态等待同步或重试"
+    private func modelDisplayName(for purpose: NovelModelRole) -> String {
+        guard let project = viewModel.projectSnapshot?.project else { return "选择模型" }
+        _ = sharedSettings.revision
+        let configured = project.configuredModelPolicy(for: purpose)
+        let effective = effectivePolicy(configured, purpose: purpose)
+        let name = NovelPresentation.modelDisplayName(for: effective, sharedSettings: sharedSettings)
+        return configured == .global ? "默认 · \(name)" : name
     }
 
-    private func selectFixedModel(_ option: ComposerModelOption) {
+    private func effectivePolicy(
+        _ configured: NovelProjectModelPolicy,
+        purpose: NovelModelRole
+    ) -> NovelProjectModelPolicy {
+        guard case .global = configured else { return configured }
+        return NovelCreationModelPreferences.shared.policy(for: purpose)
+    }
+
+    private func selectFixedModel(_ option: ComposerModelOption, for purpose: NovelModelRole) {
         guard let providerID = NovelPresentation.providerID(
             forModelID: option.id,
             sharedSettings: sharedSettings
@@ -527,9 +456,13 @@ struct NovelProjectWorkspaceView: View {
             viewModel.presentError(NovelError.invalidInput("所选模型的服务商已不存在。"))
             return
         }
+        selectModelPolicy(.fixed(providerID: providerID, modelID: option.id), for: purpose)
+    }
+
+    private func selectModelPolicy(_ policy: NovelProjectModelPolicy, for purpose: NovelModelRole) {
         activeSheet = nil
         Task { @MainActor in
-            await viewModel.setModelPolicy(.fixed(providerID: providerID, modelID: option.id))
+            await viewModel.setModelPolicy(policy, for: purpose)
         }
     }
 
@@ -541,223 +474,69 @@ struct NovelProjectWorkspaceView: View {
         }
     }
 
-    private func importPackage() {
-        Task { @MainActor in
-            if sessionViewModel.isRunning {
-                guard await sessionViewModel.interruptForRouteExit() else {
-                    viewModel.presentError(NovelError.projectBusy(projectID))
-                    return
-                }
-                await sessionViewModel.bindToCurrentSelection()
-            }
-            guard await viewModel.stopActiveRunsForProjectOperation(projectID: projectID) else { return }
-            isImportingPackage = true
-        }
+}
+
+private struct NovelNavigationDidAppearObserver: UIViewControllerRepresentable {
+    let action: () -> Void
+
+    func makeUIViewController(context: Context) -> ObserverViewController {
+        ObserverViewController(action: action)
     }
 
-    private func exportPackage() {
-        activeSheet = nil
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
-            if sessionViewModel.isRunning {
-                guard await sessionViewModel.interruptForRouteExit() else {
-                    viewModel.presentError(NovelError.projectBusy(projectID))
-                    return
-                }
-                await sessionViewModel.bindToCurrentSelection()
-            }
-            guard await viewModel.stopActiveRunsForProjectOperation(projectID: projectID) else { return }
-            guard let artifact = await viewModel.exportProjectPackage() else { return }
-            packageDocument = NovelProjectFileDocument(data: artifact.data)
-            packageFileName = NovelPresentation.fileName(
-                artifact.projectName,
-                fallback: artifact.projectID.description
-            ) + ".ambernovel"
-            isExportingPackage = true
-        }
+    func updateUIViewController(_ controller: ObserverViewController, context: Context) {
+        controller.action = action
     }
 
-    private func exportMarkdown() {
-        activeSheet = nil
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
-            if sessionViewModel.isRunning {
-                guard await sessionViewModel.interruptForRouteExit() else {
-                    viewModel.presentError(NovelError.projectBusy(projectID))
-                    return
-                }
-                await sessionViewModel.bindToCurrentSelection()
-            }
-            guard await viewModel.stopActiveRunsForProjectOperation(projectID: projectID) else { return }
-            guard let artifact = await viewModel.exportBranchMarkdown() else { return }
-            markdownDocument = NovelMarkdownFileDocument(markdown: artifact.markdown)
-            markdownFileName = artifact.fileName
-            isExportingMarkdown = true
-        }
-    }
+    final class ObserverViewController: UIViewController {
+        var action: () -> Void
+        private var hasReportedAppearance = false
 
-    private func handleExportResult(_ result: Result<URL, Error>) {
-        if case .failure(let error) = result {
-            viewModel.presentError(error)
+        init(action: @escaping () -> Void) {
+            self.action = action
+            super.init(nibName: nil, bundle: nil)
         }
-    }
 
-    private func handlePackageImport(_ result: Result<[URL], Error>) {
-        guard case .success(let urls) = result, let url = urls.first else {
-            if case .failure(let error) = result { viewModel.presentError(error) }
-            return
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
         }
-        Task { @MainActor in
-            do {
-                let data = try await Task.detached(priority: .userInitiated) {
-                    try NovelProjectFileReader.readPackage(from: url)
-                }.value
-                guard let preview = await viewModel.previewImport(data) else { return }
-                activeSheet = .importPackage(data: data, preview: preview)
-            } catch {
-                viewModel.presentError(error)
-            }
-        }
-    }
 
-    private func finishImport(_ importedProjectID: NovelProjectID) {
-        guard importedProjectID != projectID else {
-            Task { @MainActor in await sessionViewModel.bindToCurrentSelection() }
-            return
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.backgroundColor = .clear
+            view.isUserInteractionEnabled = false
         }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(250))
-            dismiss()
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            guard !hasReportedAppearance else { return }
+            hasReportedAppearance = true
+            action()
         }
     }
 }
 
 private enum NovelWorkspaceSheet: Identifiable {
-    case branchPicker
-    case modelPicker
+    case writingContext
+    case modelPicker(NovelModelRole)
     case materialEditor(NovelMaterialRecord?, NovelMaterialKind)
     case polishPreference
-    case injectionPreview
-    case sessionContext
     case collectCandidate(NovelCandidateID)
     case manualRewrite(NovelCandidateID)
-    case chapterManager
-    case branchManager
     case forkCheckpoint(NovelCheckpointID)
     case proposal(NovelSettingProposalRecord)
-    case renameBranch(NovelBranchRecord)
-    case forkBranch(NovelBranchRecord)
-    case branchOverride(NovelMaterialRecord)
-    case chapterVersions(NovelChapterSelection)
-    case importPackage(data: Data, preview: NovelProjectImportPreview)
 
     var id: String {
         switch self {
-        case .branchPicker: "branch-picker"
-        case .modelPicker: "model-picker"
+        case .writingContext: "writing-context"
+        case .modelPicker(let purpose): "model-picker-\(purpose.rawValue)"
         case .materialEditor(let material, let suggestedKind):
             "material-\(material?.id.description ?? suggestedKind.displayName)"
         case .polishPreference: "polish-preference"
-        case .injectionPreview: "injection-preview"
-        case .sessionContext: "session-context"
         case .collectCandidate(let candidateID): "collect-\(candidateID)"
         case .manualRewrite(let candidateID): "manual-rewrite-\(candidateID)"
-        case .chapterManager: "chapter-manager"
-        case .branchManager: "branch-manager"
         case .forkCheckpoint(let checkpointID): "fork-checkpoint-\(checkpointID)"
         case .proposal(let proposal): "proposal-\(proposal.id)"
-        case .renameBranch(let branch): "rename-branch-\(branch.id)"
-        case .forkBranch(let branch): "fork-branch-\(branch.id)"
-        case .branchOverride(let material): "branch-override-\(material.id)"
-        case .chapterVersions(let selection): "chapter-\(selection.chapterID)"
-        case .importPackage(_, let preview):
-            "import-\(preview.sourceProjectID)-\(preview.projectSHA256)"
         }
-    }
-}
-
-private struct NovelBranchPickerSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let viewModel: NovelCreationViewModel
-    let sessionViewModel: NovelSessionViewModel
-    let onSelected: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(viewModel.activeBranches, id: \.id) { branch in
-                    Button {
-                        select(branch.id)
-                    } label: {
-                        NovelBranchPickerRow(
-                            branch: branch,
-                            isSelected: branch.id == viewModel.selectedBranchID,
-                            isMain: branch.id == viewModel.projectSnapshot?.project.mainBranchID
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(AmberTheme.background)
-            .navigationTitle("切换分支")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
-                }
-            }
-        }
-    }
-
-    private func select(_ branchID: NovelBranchID) {
-        Task { @MainActor in
-            if branchID == viewModel.selectedBranchID,
-               viewModel.branchSnapshot?.branch.id == branchID {
-                dismiss()
-                onSelected()
-                return
-            }
-            guard await sessionViewModel.interruptForRouteExit() else { return }
-            await viewModel.selectBranch(branchID)
-            guard viewModel.errorMessage == nil,
-                  viewModel.branchSnapshot?.branch.id == branchID else {
-                await sessionViewModel.bindToCurrentSelection()
-                return
-            }
-            await sessionViewModel.bindToCurrentSelection()
-            dismiss()
-            onSelected()
-        }
-    }
-}
-
-private struct NovelBranchPickerRow: View {
-    let branch: NovelBranchRecord
-    let isSelected: Bool
-    let isMain: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: isMain ? "star.fill" : "arrow.triangle.branch")
-                .foregroundStyle(isMain ? AmberTheme.accentAmber : AmberTheme.accent)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(branch.name)
-                    .foregroundStyle(AmberTheme.foreground)
-                Text(branch.syncStatus.displayName)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-            }
-            Spacer()
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .foregroundStyle(AmberTheme.accent)
-            }
-        }
-        .frame(minHeight: 48)
-        .contentShape(Rectangle())
     }
 }

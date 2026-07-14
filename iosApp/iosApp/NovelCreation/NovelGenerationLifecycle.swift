@@ -181,7 +181,7 @@ extension DefaultNovelCreation {
             throw NovelError.degradedReadOnly(projectID: request.projectID)
         }
 
-        let model = try await resolveModel(for: loaded.document.project.modelPolicy)
+        let model = try await resolveModel(for: modelPolicy(for: .creation, in: loaded.document))
         let parameters = modelParameters(for: request)
         let effectiveInputBudget = try effectiveInputBudget(
             request,
@@ -517,7 +517,7 @@ extension DefaultNovelCreation {
             }
         }
         var claimedRunIDs: [NovelRunID] = []
-        let polishTasks = cancelInFlightPolishMutations(projectID: projectID)
+        let mutationTasks = cancelInFlightBackgroundMutations(projectID: projectID)
         for runID in generationRuntimes.keys.sorted(by: {
             $0.description < $1.description
         }) {
@@ -551,7 +551,7 @@ extension DefaultNovelCreation {
             }
         }
 
-        guard !claimedRunIDs.isEmpty || !polishTasks.isEmpty || !startTasks.isEmpty else {
+        guard !claimedRunIDs.isEmpty || !mutationTasks.isEmpty || !startTasks.isEmpty else {
             return
         }
         let gate = NovelBackgroundDeadlineGate()
@@ -562,7 +562,7 @@ extension DefaultNovelCreation {
             for runID in claimedRunIDs {
                 _ = try? await self?.persistTerminalClaim(runID)
             }
-            for task in polishTasks {
+            for task in mutationTasks {
                 _ = try? await task.value
             }
             gate.signal()
@@ -713,11 +713,12 @@ extension DefaultNovelCreation {
             throw NovelError.projectBusy(request.projectID)
         }
 
-        let model = try await resolveModel(for: first.document.project.modelPolicy)
+        let firstModelPolicy = modelPolicy(for: .creation, in: first.document)
+        let model = try await resolveModel(for: firstModelPolicy)
         let current = try await loadCommittedProject(id: request.projectID)
         guard current.document.project.revision == first.document.project.revision,
               current.document.project.configRevision == first.document.project.configRevision,
-              current.document.project.modelPolicy == first.document.project.modelPolicy,
+              modelPolicy(for: .creation, in: current.document) == firstModelPolicy,
               let branch = current.document.branches.first(where: {
                   $0.id == request.branchID && $0.lifecycle == .active
               }),

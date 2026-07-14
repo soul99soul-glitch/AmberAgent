@@ -11,6 +11,7 @@ final class NovelProjectConfigurationTests: XCTestCase {
                 configRevision: document.project.configRevision
             ),
             projectID: document.project.id,
+            purpose: .creation,
             policy: .fixed(providerID: " provider-uuid ", modelID: " model-uuid ")
         ))
 
@@ -35,6 +36,7 @@ final class NovelProjectConfigurationTests: XCTestCase {
         let action = NovelAction.setModelPolicy(NovelSetModelPolicyCommand(
             context: NovelTestFixtures.context(configRevision: document.project.configRevision),
             projectID: document.project.id,
+            purpose: .creation,
             policy: .fixed(providerID: " ", modelID: "model")
         ))
 
@@ -43,6 +45,66 @@ final class NovelProjectConfigurationTests: XCTestCase {
                 return XCTFail("Expected invalid fixed policy, got \(error)")
             }
         }
+    }
+
+    func testStateSyncModelPolicyPersistsIndependentlyFromCreationModel() throws {
+        let document = try NovelTestFixtures.document()
+        let action = NovelAction.setModelPolicy(NovelSetModelPolicyCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            purpose: .stateSync,
+            policy: .fixed(providerID: "sync-provider", modelID: "sync-model")
+        ))
+
+        let result = try NovelReducer.apply(action, to: document).document
+
+        XCTAssertEqual(result.project.modelPolicy, document.project.modelPolicy)
+        XCTAssertEqual(
+            result.project.stateSyncModelPolicy,
+            .fixed(providerID: "sync-provider", modelID: "sync-model")
+        )
+        XCTAssertEqual(result.project.configRevision, document.project.configRevision + 1)
+    }
+
+    func testOlderProjectPayloadDefaultsMissingStateSyncModelToGlobal() throws {
+        let document = try NovelTestFixtures.document()
+        let data = try JSONEncoder().encode(document)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var project = try XCTUnwrap(object["project"] as? [String: Any])
+        project.removeValue(forKey: "stateSyncModelPolicy")
+        object["project"] = project
+
+        let legacyData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let decoded = try JSONDecoder().decode(NovelProjectDocumentV1.self, from: legacyData)
+
+        XCTAssertNil(decoded.project.stateSyncModelPolicy)
+        XCTAssertEqual(decoded.project.configuredModelPolicy(for: .stateSync), .global)
+    }
+
+    func testNovelModelPreferencesPersistBothRoleDefaults() {
+        let suite = "NovelModelPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = NovelCreationModelPreferences(userDefaults: defaults)
+
+        preferences.set(
+            .fixed(providerID: "creative-provider", modelID: "creative-model"),
+            for: .creation
+        )
+        preferences.set(
+            .fixed(providerID: "sync-provider", modelID: "sync-model"),
+            for: .stateSync
+        )
+
+        let reloaded = NovelCreationModelPreferences(userDefaults: defaults)
+        XCTAssertEqual(
+            reloaded.policy(for: .creation),
+            .fixed(providerID: "creative-provider", modelID: "creative-model")
+        )
+        XCTAssertEqual(
+            reloaded.policy(for: .stateSync),
+            .fixed(providerID: "sync-provider", modelID: "sync-model")
+        )
     }
 
     func testDeleteMaterialKeepsImmutableHistoryAndExcludesFutureInjection() throws {

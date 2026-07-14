@@ -127,8 +127,9 @@ private extension DefaultNovelCreation {
         let preparation: NovelStructuredModelPreparation
         let invocation: NovelStructuredModelInvocation
         do {
+            let creativeModelPolicy = modelPolicy(for: .creation, in: currentDocument)
             preparation = try await executor.prepare(
-                modelPolicy: currentDocument.project.modelPolicy,
+                modelPolicy: creativeModelPolicy,
                 taskKind: .polishDrift,
                 requestedInputBudgetTokens: NovelStructuredModelExecutor
                     .maximumInternalInputBudgetTokens
@@ -140,7 +141,7 @@ private extension DefaultNovelCreation {
                         transactionID: transaction.id,
                         attemptIndex: transaction.attemptCount
                     ),
-                    modelPolicy: currentDocument.project.modelPolicy,
+                    modelPolicy: creativeModelPolicy,
                     task: .polishDrift(
                         sourceChapter: source.content,
                         candidate: candidate.content

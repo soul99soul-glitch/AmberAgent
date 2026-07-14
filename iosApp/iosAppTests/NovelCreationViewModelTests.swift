@@ -20,6 +20,69 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isPerforming)
     }
 
+    func testProjectSelectionPublishesProjectAndBranchAsOneSnapshot() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let firstDocument = try NovelTestFixtures.document()
+        let secondDocument = try NovelTestFixtures.document()
+        _ = try await repository.createProject(firstDocument)
+        _ = try await repository.createProject(secondDocument)
+        let blockingCreation = BranchSnapshotBlockingNovelCreation(
+            base: DefaultNovelCreation(repository: repository),
+            blockedBranchID: try XCTUnwrap(secondDocument.branches.first?.id)
+        )
+        let viewModel = NovelCreationViewModel(creation: blockingCreation)
+        let didSelectFirstProject = await viewModel.selectProject(firstDocument.project.id)
+        XCTAssertTrue(didSelectFirstProject)
+
+        let selection = Task { @MainActor in
+            _ = await viewModel.selectProject(secondDocument.project.id)
+        }
+        await blockingCreation.waitUntilBranchSnapshotRequested()
+
+        XCTAssertEqual(viewModel.selectedProjectID, firstDocument.project.id)
+        XCTAssertEqual(viewModel.selectedBranchID, firstDocument.branches.first?.id)
+        XCTAssertEqual(viewModel.projectSnapshot?.project.id, firstDocument.project.id)
+        XCTAssertEqual(viewModel.branchSnapshot?.projectID, firstDocument.project.id)
+
+        await blockingCreation.resumeBranchSnapshot()
+        await selection.value
+
+        XCTAssertEqual(viewModel.selectedProjectID, secondDocument.project.id)
+        XCTAssertEqual(viewModel.selectedBranchID, secondDocument.branches.first?.id)
+        XCTAssertEqual(viewModel.projectSnapshot?.project.id, secondDocument.project.id)
+        XCTAssertEqual(viewModel.branchSnapshot?.projectID, secondDocument.project.id)
+    }
+
+    func testCancelledProjectSelectionKeepsTheCurrentCompleteSnapshot() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let firstDocument = try NovelTestFixtures.document()
+        let secondDocument = try NovelTestFixtures.document()
+        _ = try await repository.createProject(firstDocument)
+        _ = try await repository.createProject(secondDocument)
+        let blockingCreation = BranchSnapshotBlockingNovelCreation(
+            base: DefaultNovelCreation(repository: repository),
+            blockedBranchID: try XCTUnwrap(secondDocument.branches.first?.id)
+        )
+        let viewModel = NovelCreationViewModel(creation: blockingCreation)
+        let didSelectFirstProject = await viewModel.selectProject(firstDocument.project.id)
+        XCTAssertTrue(didSelectFirstProject)
+
+        let selection = Task { @MainActor in
+            await viewModel.selectProject(secondDocument.project.id)
+        }
+        await blockingCreation.waitUntilBranchSnapshotRequested()
+        selection.cancel()
+        await blockingCreation.resumeBranchSnapshot()
+
+        let didSelectSecondProject = await selection.value
+        XCTAssertFalse(didSelectSecondProject)
+        XCTAssertEqual(viewModel.selectedProjectID, firstDocument.project.id)
+        XCTAssertEqual(viewModel.selectedBranchID, firstDocument.branches.first?.id)
+        XCTAssertEqual(viewModel.projectSnapshot?.project.id, firstDocument.project.id)
+        XCTAssertEqual(viewModel.branchSnapshot?.projectID, firstDocument.project.id)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testCreateMaterialAndReloadThroughDeepInterface() async throws {
         let repository = InMemoryNovelProjectRepository()
         let viewModel = NovelCreationViewModel(
@@ -410,9 +473,11 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertEqual(edited.stateSnapshots, fixture.document.stateSnapshots)
         XCTAssertNil(viewModel.errorMessage)
 
-        await viewModel.syncManualEdits()
-
-        XCTAssertNotNil(viewModel.errorMessage)
+        let failurePersisted = await eventually {
+            viewModel.projectSnapshot?.pendingOperations.first?.status == .retryable
+        }
+        XCTAssertTrue(failurePersisted)
+        XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.count, 1)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.first?.kind, .manualSync)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.first?.status, .retryable)
@@ -489,5 +554,78 @@ final class NovelCreationViewModelTests: XCTestCase {
           }
         }
         """
+    }
+
+    private func eventually(
+        timeout: TimeInterval = 2,
+        condition: @MainActor () async -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return await condition()
+    }
+}
+
+private actor BranchSnapshotBlockingNovelCreation: NovelCreation {
+    private let base: any NovelCreation
+    private let blockedBranchID: NovelBranchID
+    private var didRequestBranchSnapshot = false
+    private var requestWaiter: CheckedContinuation<Void, Never>?
+    private var branchWaiter: CheckedContinuation<Void, Never>?
+
+    init(base: any NovelCreation, blockedBranchID: NovelBranchID) {
+        self.base = base
+        self.blockedBranchID = blockedBranchID
+    }
+
+    func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
+        if case .branch(_, let branchID) = scope, branchID == blockedBranchID {
+            didRequestBranchSnapshot = true
+            requestWaiter?.resume()
+            requestWaiter = nil
+            await withCheckedContinuation { continuation in
+                branchWaiter = continuation
+            }
+        }
+        return try await base.snapshot(scope)
+    }
+
+    func waitUntilBranchSnapshotRequested() async {
+        if didRequestBranchSnapshot { return }
+        await withCheckedContinuation { continuation in
+            requestWaiter = continuation
+        }
+    }
+
+    func resumeBranchSnapshot() {
+        branchWaiter?.resume()
+        branchWaiter = nil
+    }
+
+    func perform(_ action: NovelAction) async throws -> NovelOutcome {
+        try await base.perform(action)
+    }
+
+    func start(_ request: NovelRunRequest) async throws -> NovelRun {
+        try await base.start(request)
+    }
+
+    func interruptForBackground(
+        projectID: NovelProjectID,
+        deadline: Date,
+        runID: NovelRunID?
+    ) async {
+        await base.interruptForBackground(
+            projectID: projectID,
+            deadline: deadline,
+            runID: runID
+        )
+    }
+
+    func retryPendingTerminal(runID: NovelRunID) async throws {
+        try await base.retryPendingTerminal(runID: runID)
     }
 }

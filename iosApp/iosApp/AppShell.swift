@@ -326,6 +326,7 @@ enum Route: Hashable {
     case miniAppSettings
     case miniAppRunner(appId: String)
     case novelCreation
+    case novelCreationSettings
     case novelProject(id: NovelProjectID)
     case webMount
     case webMountSite(site: WebMountSiteRoute)
@@ -498,6 +499,9 @@ private extension View {
                         viewModel: novelCreationViewModel,
                         onOpen: { projectID in
                             router.navigate(to: .novelProject(id: projectID))
+                        },
+                        onOpenSettings: {
+                            router.navigate(to: .novelCreationSettings)
                         }
                     )
                     .novelCreationErrorAlert(viewModel: novelCreationViewModel)
@@ -506,6 +510,19 @@ private extension View {
                         "小说创作暂不可用",
                         systemImage: "exclamationmark.triangle",
                         description: Text(novelCreationErrorMessage ?? "无法打开项目存储。")
+                    )
+                }
+            case .novelCreationSettings:
+                if let novelCreationViewModel {
+                    NovelCreationSettingsView(
+                        sharedSettings: sharedSettings,
+                        viewModel: novelCreationViewModel
+                    )
+                    .novelCreationErrorAlert(viewModel: novelCreationViewModel)
+                } else {
+                    NovelCreationSettingsView(
+                        sharedSettings: sharedSettings,
+                        viewModel: nil
                     )
                 }
             case .novelProject(let projectID):

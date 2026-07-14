@@ -16,6 +16,65 @@ private struct NovelSessionRunDraft: Equatable, Sendable {
     let inputBudgetTokens: Int
 }
 
+private struct NovelSessionProjectionTailKey: Equatable {
+    let branchID: NovelBranchID
+    let sessionID: NovelSessionID
+    let runID: NovelRunID
+    let messageID: NovelMessageID
+    let renderRevision: UInt64
+    let phase: NovelSessionTransientTailPhase
+}
+
+private struct NovelSessionProjectionCacheKey: Equatable {
+    let projectID: NovelProjectID
+    let projectRevision: Int64
+    let configRevision: Int64
+    let projectAccess: NovelProjectLoadAccess
+    let branchID: NovelBranchID
+    let branchHeadRevision: Int64
+    let branchWorkingRevision: Int64
+    let branchSyncStatus: NovelBranchSyncStatus
+    let branchLifecycle: NovelBranchLifecycle
+    let activeRunID: NovelRunID?
+    let sessionID: NovelSessionID
+    let sessionRevision: Int64
+    let transientTail: NovelSessionProjectionTailKey?
+
+    init(
+        project: NovelProjectSnapshot,
+        branch: NovelBranchSnapshot,
+        transientTail: NovelSessionTransientTail?
+    ) {
+        projectID = project.project.id
+        projectRevision = project.project.revision
+        configRevision = project.project.configRevision
+        projectAccess = project.access
+        branchID = branch.branch.id
+        branchHeadRevision = branch.branch.headRevision
+        branchWorkingRevision = branch.branch.workingRevision
+        branchSyncStatus = branch.branch.syncStatus
+        branchLifecycle = branch.branch.lifecycle
+        activeRunID = branch.branch.activeRunID
+        sessionID = branch.session.id
+        sessionRevision = branch.session.revision
+        self.transientTail = transientTail.map {
+            NovelSessionProjectionTailKey(
+                branchID: $0.branchID,
+                sessionID: $0.sessionID,
+                runID: $0.runID,
+                messageID: $0.messageID,
+                renderRevision: $0.renderRevision,
+                phase: $0.phase
+            )
+        }
+    }
+}
+
+private struct NovelSessionProjectionCacheEntry {
+    let key: NovelSessionProjectionCacheKey
+    let model: NovelSessionListModel
+}
+
 @MainActor
 @Observable
 final class NovelSessionViewModel {
@@ -43,15 +102,50 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var terminalAwaitingRefresh = false
     @ObservationIgnored private var cancelledStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var sessionActionOwnerID: UUID?
+    @ObservationIgnored private var projectionCache: NovelSessionProjectionCacheEntry?
 
     init(workspace: NovelCreationViewModel) {
         self.workspace = workspace
-        granularity = workspace.projectSnapshot?.project.lastGenerationGranularity ?? .wholeChapter
+        guard let project = workspace.projectSnapshot,
+              let branch = workspace.branchSnapshot,
+              workspace.selectedProjectID == project.project.id,
+              workspace.selectedBranchID == branch.branch.id else {
+            return
+        }
+        binding = NovelSessionBinding(
+            projectID: project.project.id,
+            branchID: branch.branch.id
+        )
+        granularity = project.project.lastGenerationGranularity
+        hydrateTerminalState()
     }
 
     var durableMessages: [NovelSessionMessageRecord] {
         guard snapshotMatchesBinding else { return [] }
         return workspace.branchSnapshot?.session.messages ?? []
+    }
+
+    func projectedListModel(
+        project: NovelProjectSnapshot,
+        branch: NovelBranchSnapshot
+    ) -> NovelSessionListModel? {
+        guard binding?.projectID == project.project.id,
+              binding?.branchID == branch.branch.id else { return nil }
+        let key = NovelSessionProjectionCacheKey(
+            project: project,
+            branch: branch,
+            transientTail: transientTail
+        )
+        if projectionCache?.key == key {
+            return projectionCache?.model
+        }
+        let model = NovelSessionPresentation.project(NovelSessionProjectionInput(
+            project: project,
+            branch: branch,
+            transientTail: transientTail
+        ))
+        projectionCache = NovelSessionProjectionCacheEntry(key: key, model: model)
+        return model
     }
 
     var currentChapterVersions: [NovelChapterVersionRecord] {
@@ -73,6 +167,10 @@ final class NovelSessionViewModel {
     var branchPendingOperations: [NovelPendingOperationRecord] {
         guard let branchID = binding?.branchID else { return [] }
         return workspace.projectSnapshot?.pendingOperations.filter { $0.branchID == branchID } ?? []
+    }
+
+    var retryableBranchPendingOperations: [NovelPendingOperationRecord] {
+        branchPendingOperations.filter { $0.status == .retryable }
     }
 
     var branchPolishTransactions: [NovelPendingPolishTransactionRecord] {
@@ -423,7 +521,12 @@ final class NovelSessionViewModel {
             stateSnapshotID: NovelStateSnapshotID(),
             factCompatibilityID: UUID()
         ))
-        return await perform(action) != nil
+        guard await perform(action) != nil else { return false }
+        workspace.scheduleAutomaticStateSync(
+            projectID: project.project.id,
+            branchID: branch.branch.id
+        )
+        return true
     }
 
     func cloneCollectedProse(_ candidateID: NovelCandidateID) async -> NovelCandidateID? {
@@ -984,23 +1087,37 @@ private extension NovelSessionViewModel {
             return
         }
         guard let latest = runs.max(by: { $0.startedAt < $1.startedAt }) else {
-            lastRetryDraft = nil
-            lastRetryRunID = nil
-            lastFailure = nil
+            updateTerminalState(draft: nil, runID: nil, failure: nil)
             return
         }
-        lastFailure = latest.terminalFailure
         switch latest.status {
         case .failed:
-            lastRetryDraft = latest.terminalFailure?.isRetryable == true ? draft(for: latest) : nil
-            lastRetryRunID = lastRetryDraft == nil ? nil : latest.id
+            let retryDraft = latest.terminalFailure?.isRetryable == true ? draft(for: latest) : nil
+            updateTerminalState(
+                draft: retryDraft,
+                runID: retryDraft == nil ? nil : latest.id,
+                failure: latest.terminalFailure
+            )
         case .interrupted:
-            lastRetryDraft = draft(for: latest)
-            lastRetryRunID = lastRetryDraft == nil ? nil : latest.id
+            let retryDraft = draft(for: latest)
+            updateTerminalState(
+                draft: retryDraft,
+                runID: retryDraft == nil ? nil : latest.id,
+                failure: latest.terminalFailure
+            )
         case .running, .completed:
-            lastRetryDraft = nil
-            lastRetryRunID = nil
+            updateTerminalState(draft: nil, runID: nil, failure: latest.terminalFailure)
         }
+    }
+
+    private func updateTerminalState(
+        draft: NovelSessionRunDraft?,
+        runID: NovelRunID?,
+        failure: NovelFailure?
+    ) {
+        if lastRetryDraft != draft { lastRetryDraft = draft }
+        if lastRetryRunID != runID { lastRetryRunID = runID }
+        if lastFailure != failure { lastFailure = failure }
     }
 
     func applyPolishAdoption(_ command: NovelAdoptPolishCandidateCommand) async {

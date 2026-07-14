@@ -280,6 +280,7 @@ enum NovelProjectIdentityRemapper {
             configRevision: project.configRevision,
             mainBranchID: project.mainBranchID,
             modelPolicy: project.modelPolicy,
+            stateSyncModelPolicy: project.stateSyncModelPolicy,
             lastGenerationGranularity: project.lastGenerationGranularity,
             polishPreference: project.polishPreference
         )

@@ -357,6 +357,9 @@ struct ComposerModelSheet: View {
 
     let sharedSettings: IOSSharedSettingsStore
     let currentModel: String
+    let title: String
+    let fallbackTitle: String?
+    let onFallback: (() -> Void)?
     let onPick: (ComposerModelOption) -> Void
 
     @State private var expandedProviderIDs: Set<String>
@@ -366,9 +369,19 @@ struct ComposerModelSheet: View {
         return ComposerProviderGroup.currentConfiguration(sharedSettings: sharedSettings, currentModel: currentModel)
     }
 
-    init(sharedSettings: IOSSharedSettingsStore, currentModel: String, onPick: @escaping (ComposerModelOption) -> Void) {
+    init(
+        sharedSettings: IOSSharedSettingsStore,
+        currentModel: String,
+        title: String = "选择模型",
+        fallbackTitle: String? = nil,
+        onFallback: (() -> Void)? = nil,
+        onPick: @escaping (ComposerModelOption) -> Void
+    ) {
         self.sharedSettings = sharedSettings
         self.currentModel = currentModel
+        self.title = title
+        self.fallbackTitle = fallbackTitle
+        self.onFallback = onFallback
         self.onPick = onPick
         let selectedProviderID = Self.selectedProviderID(
             for: currentModel,
@@ -380,7 +393,7 @@ struct ComposerModelSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("选择模型")
+                Text(title)
                     .font(.headline)
                     .foregroundStyle(AmberTheme.foreground)
 
@@ -407,6 +420,24 @@ struct ComposerModelSheet: View {
                 .overlay(AmberTheme.borderSoft)
 
             ScrollView {
+                if let fallbackTitle, let onFallback {
+                    Button {
+                        onFallback()
+                        dismiss()
+                    } label: {
+                        Label(fallbackTitle, systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AmberTheme.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                }
+
                 if providers.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "cpu")

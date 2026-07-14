@@ -433,7 +433,7 @@ final class NovelCreationPresentationTests: XCTestCase {
         let viewModel = NovelCreationViewModel(creation: delayed)
 
         let firstSelection = Task { @MainActor in
-            await viewModel.selectProject(firstDocument.project.id)
+            _ = await viewModel.selectProject(firstDocument.project.id)
         }
         try await Task.sleep(for: .milliseconds(30))
         await viewModel.selectProject(secondDocument.project.id)

@@ -229,6 +229,11 @@ enum NovelDocumentValidator {
             modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append("Fixed project model policy has an empty stable ID.")
         }
+        if case .fixed(let providerID, let modelID) = project.stateSyncModelPolicy,
+           providerID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append("Fixed state-sync model policy has an empty stable ID.")
+        }
 
         appendDuplicateIssue(document.branches, key: \.id, label: "branch", issues: &issues)
         appendDuplicateIssue(document.sessions, key: \.id, label: "Session", issues: &issues)

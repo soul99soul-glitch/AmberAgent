@@ -21,6 +21,24 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(settings.contains("nativeTimelineScrollDriver = enabled"))
     }
 
+    func testNovelCreationAdvancedEntryOpensFeatureAndSharedSettingsPersistRoleDefaults() throws {
+        let home = try source("iosApp/PlaceholderViews.swift")
+        let shell = try source("iosApp/AppShell.swift")
+        let settings = try source("iosApp/NovelCreation/NovelCreationSettingsView.swift")
+
+        XCTAssertTrue(home.contains("title: \"小说创作\""))
+        XCTAssertTrue(home.contains("color: AmberTheme.accentIndigo, route: .novelCreation)"))
+        XCTAssertFalse(home.contains("route: .novelCreationSettings"))
+        XCTAssertTrue(shell.contains("case novelCreationSettings"))
+        XCTAssertFalse(shell.contains("NovelSettingsTransitionSource"))
+        XCTAssertTrue(shell.contains("NovelCreationSettingsView("))
+        XCTAssertTrue(settings.contains("创作模型"))
+        XCTAssertTrue(settings.contains("剧情同步模型"))
+        XCTAssertTrue(settings.contains("preferences.set(policy, for: purpose)"))
+        XCTAssertTrue(settings.contains("NovelProjectManagementView("))
+        XCTAssertFalse(settings.contains("projectID:"))
+    }
+
     func testChatSendDismissesTheComposerKeyboardBeforeStartingGeneration() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let start = try XCTUnwrap(chatView.range(of: "private func sendComposerMessage()"))

@@ -62,10 +62,6 @@ struct NovelSessionBubble: View {
                 statusLine
                     .font(.caption)
 
-                if let committedChange {
-                    committedChangeView(committedChange)
-                }
-
                 if !actions.isEmpty {
                     actionBar
                 }
@@ -243,39 +239,6 @@ struct NovelSessionBubble: View {
         .controlSize(.small)
         .disabled(!item.isEnabled)
         .accessibilityHint(item.blocker?.displayName ?? "")
-    }
-
-    private func committedChangeView(
-        _ change: NovelSessionCommittedChangeSummary
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if kind == .polishCandidate {
-                Label("润色版已采用 · 剧情状态未改变", systemImage: "checkmark.seal.fill")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(AmberTheme.accentGreen)
-            } else {
-                Label("正文与剧情状态已更新", systemImage: "checkmark.circle.fill")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(AmberTheme.accentGreen)
-
-                if !change.stateSummary.isEmpty {
-                    Text(change.stateSummary)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.foreground2)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if !change.eventSummaries.isEmpty {
-                    Text(change.eventSummaries.prefix(3).joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .padding(.vertical, 4)
     }
 
     private var systemMessage: some View {

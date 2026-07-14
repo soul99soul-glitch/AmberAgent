@@ -69,6 +69,7 @@ enum NovelReducer {
             configRevision: 1,
             mainBranchID: command.branchID,
             modelPolicy: .global,
+            stateSyncModelPolicy: nil,
             lastGenerationGranularity: .wholeChapter,
             polishPreference: ""
         )

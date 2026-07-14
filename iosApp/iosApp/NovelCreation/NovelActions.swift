@@ -48,7 +48,20 @@ struct NovelDeleteMaterialCommand: Equatable, Sendable {
 struct NovelSetModelPolicyCommand: Equatable, Sendable {
     let context: NovelMutationContext
     let projectID: NovelProjectID
+    let purpose: NovelModelRole
     let policy: NovelProjectModelPolicy
+
+    init(
+        context: NovelMutationContext,
+        projectID: NovelProjectID,
+        purpose: NovelModelRole = .creation,
+        policy: NovelProjectModelPolicy
+    ) {
+        self.context = context
+        self.projectID = projectID
+        self.purpose = purpose
+        self.policy = policy
+    }
 }
 
 enum NovelSettingProposalResolution: Codable, Equatable, Sendable {
@@ -430,6 +443,7 @@ enum NovelAction: Equatable, Sendable {
         case .setModelPolicy(let command):
             payload = .setModelPolicy(.init(
                 projectID: command.projectID,
+                purpose: command.purpose,
                 policy: command.policy
             ))
         case .resolveSettingProposal(let command):
@@ -648,6 +662,7 @@ private enum NovelCanonicalActionPayload: Codable {
 
     struct SetModelPolicy: Codable {
         let projectID: NovelProjectID
+        let purpose: NovelModelRole
         let policy: NovelProjectModelPolicy
     }
 

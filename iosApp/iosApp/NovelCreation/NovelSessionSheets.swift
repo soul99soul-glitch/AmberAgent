@@ -404,15 +404,18 @@ struct NovelSessionForkSheet: View {
     }
 }
 
-struct NovelSessionContextSheet: View {
+struct NovelWritingContextSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let workspace: NovelCreationViewModel
     let mode: NovelSessionMode
     let granularity: NovelGenerationGranularity
     let userText: String
+    let onEditWritingRequirements: () -> Void
+    let onEditPolishPreference: () -> Void
     let onApply: (NovelInjectionOverrides, Int) -> Void
 
+    @State private var selectedTab = SheetTab.preferences
     @State private var budgetTokens: Int
     @State private var materialChoices: [NovelMaterialID: MaterialChoice]
     @State private var previewSignature: String?
@@ -424,12 +427,16 @@ struct NovelSessionContextSheet: View {
         userText: String,
         overrides: NovelInjectionOverrides,
         budgetTokens: Int,
+        onEditWritingRequirements: @escaping () -> Void,
+        onEditPolishPreference: @escaping () -> Void,
         onApply: @escaping (NovelInjectionOverrides, Int) -> Void
     ) {
         self.workspace = workspace
         self.mode = mode
         self.granularity = granularity
         self.userText = userText
+        self.onEditWritingRequirements = onEditWritingRequirements
+        self.onEditPolishPreference = onEditPolishPreference
         self.onApply = onApply
         self._budgetTokens = State(initialValue: budgetTokens)
         var choices: [NovelMaterialID: MaterialChoice] = [:]
@@ -445,76 +452,43 @@ struct NovelSessionContextSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("本次生成") {
-                    LabeledContent("模式", value: mode == .writeProse ? "写正文" : "讨论规划")
-                    if mode == .writeProse {
-                        LabeledContent(
-                            "粒度",
-                            value: granularity == .wholeChapter ? "生成整章" : "续写片段"
-                        )
-                    }
-                    DisclosureGroup("高级") {
-                        Stepper(value: $budgetTokens, in: 2_000...64_000, step: 2_000) {
-                            LabeledContent(
-                                "上下文长度",
-                                value: "约 \(budgetTokens.formatted()) 上下文单位"
-                            )
-                        }
+            VStack(spacing: 0) {
+                Picker("创作设置", selection: $selectedTab) {
+                    ForEach(SheetTab.allCases) { tab in
+                        Text(tab.title).tag(tab)
                     }
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
 
-                Section {
-                    if workspace.activeMaterials.isEmpty {
-                        Text("当前项目没有可调整的资料。")
-                            .foregroundStyle(AmberTheme.muted)
-                    } else {
-                        ForEach(workspace.activeMaterials, id: \.id) { material in
-                            Picker(materialTitle(material), selection: choiceBinding(material.id)) {
-                                ForEach(MaterialChoice.allCases) { choice in
-                                    Text(choice.title).tag(choice)
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("临时资料")
-                } footer: {
-                    Text("本次加入或排除只用于下一条消息，不会修改项目默认注入方式。")
-                }
-
-                if let preview = matchingPreview {
-                    Section("预计上下文") {
-                        LabeledContent("模型", value: preview.resolvedModel.displayName)
-                        LabeledContent(
-                            "预计输入",
-                            value: "\(preview.plan.estimatedInputTokens.formatted()) / \(preview.effectiveInputBudgetTokens.formatted())"
-                        )
-                        ForEach(Array(preview.plan.sections.enumerated()), id: \.offset) { _, section in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(section.label)
-                                    .font(.subheadline.weight(.medium))
-                                Text("\(section.reason.displayName) · 约 \(section.estimatedTokens) 上下文单位")
-                                    .font(.caption)
-                                    .foregroundStyle(AmberTheme.muted)
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
+                switch selectedTab {
+                case .preferences:
+                    preferencesList
+                case .context:
+                    contextList
                 }
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
-            .navigationTitle("本次上下文")
+            .navigationTitle("创作设置")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: ContextRoute.self) { route in
+                switch route {
+                case .materials(let category):
+                    materialChoicesList(category)
+                case .preview:
+                    contextPreview
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItemGroup(placement: .confirmationAction) {
-                    Button("预览") { preview() }
-                        .disabled(!canPreview || workspace.isPerforming)
+                    if selectedTab == .context {
+                        Button("预览") { preview() }
+                            .disabled(!canPreview || workspace.isPerforming)
+                    }
                     Button("应用") {
                         onApply(overrides, budgetTokens)
                         dismiss()
@@ -527,6 +501,150 @@ struct NovelSessionContextSheet: View {
             }
         }
         .interactiveDismissDisabled(workspace.isPerforming)
+    }
+
+    private var preferencesList: some View {
+        List {
+            Section("写作偏好") {
+                Button(action: onEditWritingRequirements) {
+                    NovelSettingsRow(
+                        systemImage: "text.badge.checkmark",
+                        title: "写作要求",
+                        value: hasWritingRequirements ? "已设置" : "未设置",
+                        showsChevron: true
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!workspace.canMutate)
+
+                Button(action: onEditPolishPreference) {
+                    NovelSettingsRow(
+                        systemImage: "wand.and.sparkles",
+                        title: "章节风格",
+                        value: hasPolishPreference ? "已设置" : "未设置",
+                        showsChevron: true
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!workspace.canMutate)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AmberTheme.background)
+    }
+
+    private var contextList: some View {
+        List {
+            Section("本次生成") {
+                LabeledContent("模式", value: mode == .writeProse ? "写正文" : "讨论规划")
+                if mode == .writeProse {
+                    LabeledContent(
+                        "粒度",
+                        value: granularity == .wholeChapter ? "生成整章" : "续写片段"
+                    )
+                }
+            }
+
+            Section {
+                ForEach(MaterialCategory.allCases) { category in
+                    NavigationLink(value: ContextRoute.materials(category)) {
+                        Label {
+                            LabeledContent(category.title, value: categorySummary(category))
+                        } icon: {
+                            Image(systemName: category.systemImage)
+                                .foregroundStyle(AmberTheme.accent)
+                        }
+                    }
+                }
+            } header: {
+                Text("资料注入")
+            } footer: {
+                Text("进入分类后选择本次加入或排除；不会修改资料的默认注入方式。")
+            }
+
+            Section("高级") {
+                Stepper(value: $budgetTokens, in: 2_000...64_000, step: 2_000) {
+                    LabeledContent(
+                        "上下文长度",
+                        value: "约 \(budgetTokens.formatted()) 上下文单位"
+                    )
+                }
+            }
+
+            if matchingPreview != nil {
+                Section {
+                    NavigationLink("查看预计上下文", value: ContextRoute.preview)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AmberTheme.background)
+    }
+
+    private func materialChoicesList(_ category: MaterialCategory) -> some View {
+        List {
+            Section {
+                if materials(in: category).isEmpty {
+                    ContentUnavailableView(
+                        "没有\(category.title)资料",
+                        systemImage: category.systemImage
+                    )
+                } else {
+                    ForEach(materials(in: category), id: \.id) { material in
+                        Picker(materialTitle(material), selection: choiceBinding(material.id)) {
+                            ForEach(MaterialChoice.allCases) { choice in
+                                Text(choice.title).tag(choice)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+            } footer: {
+                Text("按默认会沿用每条资料自己的注入设置。")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AmberTheme.background)
+        .navigationTitle(category.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private var contextPreview: some View {
+        if let preview = matchingPreview {
+            List {
+                Section("预计上下文") {
+                    LabeledContent("模型", value: preview.resolvedModel.displayName)
+                    LabeledContent(
+                        "预计输入",
+                        value: "\(preview.plan.estimatedInputTokens.formatted()) / \(preview.effectiveInputBudgetTokens.formatted())"
+                    )
+                }
+                Section("注入内容") {
+                    ForEach(Array(preview.plan.sections.enumerated()), id: \.offset) { _, section in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(section.label)
+                                .font(.subheadline.weight(.medium))
+                            Text("\(section.reason.displayName) · 约 \(section.estimatedTokens) 上下文单位")
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(AmberTheme.background)
+            .navigationTitle("预计上下文")
+            .navigationBarTitleDisplayMode(.inline)
+        } else {
+            ContentUnavailableView("预览已失效", systemImage: "arrow.clockwise")
+                .navigationTitle("预计上下文")
+        }
     }
 
     private var overrides: NovelInjectionOverrides {
@@ -556,6 +674,30 @@ struct NovelSessionContextSheet: View {
 
     private var canPreview: Bool {
         workspace.canMutate && !userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasWritingRequirements: Bool {
+        workspace.activeMaterials.contains {
+            if case .writingRequirements = $0.kind { return true }
+            return false
+        }
+    }
+
+    private var hasPolishPreference: Bool {
+        workspace.projectSnapshot?.project.polishPreference.isEmpty == false
+    }
+
+    private func materials(in category: MaterialCategory) -> [NovelMaterialRecord] {
+        workspace.activeMaterials.filter { category.contains($0.kind) }
+    }
+
+    private func categorySummary(_ category: MaterialCategory) -> String {
+        let categoryMaterials = materials(in: category)
+        let adjusted = categoryMaterials.filter {
+            (materialChoices[$0.id] ?? .automatic) != .automatic
+        }.count
+        guard adjusted > 0 else { return "\(categoryMaterials.count) 条" }
+        return "\(categoryMaterials.count) 条 · 已调整 \(adjusted)"
     }
 
     private func choiceBinding(_ materialID: NovelMaterialID) -> Binding<MaterialChoice> {
@@ -634,6 +776,63 @@ struct NovelSessionContextSheet: View {
             case .automatic: "按默认"
             case .include: "本次加入"
             case .exclude: "本次排除"
+            }
+        }
+    }
+
+    private enum SheetTab: String, CaseIterable, Identifiable {
+        case preferences
+        case context
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .preferences: "写作偏好"
+            case .context: "上下文注入"
+            }
+        }
+    }
+
+    private enum ContextRoute: Hashable {
+        case materials(MaterialCategory)
+        case preview
+    }
+
+    private enum MaterialCategory: String, CaseIterable, Identifiable, Hashable {
+        case characters
+        case world
+        case story
+        case other
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .characters: "人物角色"
+            case .world: "世界观"
+            case .story: "剧情大纲"
+            case .other: "其他资料"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .characters: "person.2"
+            case .world: "globe.asia.australia"
+            case .story: "point.3.connected.trianglepath.dotted"
+            case .other: "doc.text"
+            }
+        }
+
+        func contains(_ kind: NovelMaterialKind) -> Bool {
+            switch (self, kind) {
+            case (.characters, .character), (.world, .world), (.story, .masterOutline):
+                true
+            case (.other, .writingRequirements), (.other, .custom):
+                true
+            default:
+                false
             }
         }
     }
