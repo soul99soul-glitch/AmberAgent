@@ -200,8 +200,10 @@ object NovelGenerationReducer {
             NovelRunKind.Prose -> NovelSessionMessageKind.ProseCandidate
             NovelRunKind.Polish -> NovelSessionMessageKind.PolishCandidate
         }
+        // QuickStart expects strict JSON; if the model returns free text, keep the message
+        // as discussion content instead of failing the entire run.
         val quickStart = if (run.kind == NovelRunKind.QuickStart) {
-            NovelStructuredOutputDecoder.decodeQuickStartSuggestions(content)
+            runCatching { NovelStructuredOutputDecoder.decodeQuickStartSuggestions(content) }.getOrNull()
         } else null
         val messageContent = quickStart?.let { toQuickStartMarkdown(it) } ?: content
         val message = NovelSessionMessageRecord(

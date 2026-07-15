@@ -105,9 +105,15 @@ import app.amber.feature.ui.pages.favorite.FavoritePage
 import app.amber.feature.ui.pages.history.HistoryPage
 import app.amber.feature.ui.pages.imggen.ImageGenPage
 import app.amber.feature.ui.pages.live.LiveCompanionPage
+import app.amber.feature.ui.pages.synara.SynaraConnectPage
+import app.amber.feature.ui.pages.synara.SynaraConnection
+import app.amber.feature.ui.pages.synara.SynaraWorkspacePage
+import app.amber.feature.ui.pages.zcode.ZCodePage
+import app.amber.feature.ui.pages.zcode.ZCodeSessionPage
 import app.amber.feature.ui.pages.log.LogPage
 import app.amber.feature.ui.pages.miniapp.MiniAppListPage
 import app.amber.feature.ui.pages.novel.NovelProjectsPage
+import app.amber.feature.ui.pages.novel.NovelSettingsPage
 import app.amber.feature.ui.pages.novel.NovelWorkspacePage
 import app.amber.feature.ui.pages.miniapp.MiniAppRunnerPage
 import app.amber.feature.ui.pages.miniapp.MiniAppSettingsPage
@@ -191,17 +197,15 @@ class RouteActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Pass explicit transparent SystemBarStyles instead of the default
-        // SystemBarStyle.auto(): the default re-derives icon light/dark appearance
-        // from the window background luminance and RE-APPLIES that derived value on
-        // configuration / window-insets updates, racing (and on ColorOS, winning
-        // against) the WindowInsetsControllerCompat calls issued from the Compose
-        // SideEffect in AmberAgentTheme. Transparent placeholders here mean "don't
-        // introduce a scrim and don't guess icon appearance" — the running theme's
-        // SideEffect owns icon light/dark for every theme (LIGHT/DARK/SYSTEM/AMOLED).
+        // Do NOT use SystemBarStyle.auto(): it follows *system* night mode and
+        // re-applies on config/insets updates. On ColorOS that race wins over the
+        // Compose SideEffect, so a light app under a dark system theme keeps
+        // white status-bar icons on a pale canvas. AmberAgentTheme re-applies
+        // light()/dark() from the *app* theme on every recomposition; start with
+        // light icons-on-dark-icons style as the cold-start default.
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
         )
         disableNavigationBarContrast()
         super.onCreate(savedInstanceState)
@@ -530,6 +534,29 @@ class RouteActivity : ComponentActivity() {
                                 LiveCompanionPage()
                             }
 
+                            entry<Screen.SynaraCompanion> {
+                                SynaraConnectPage()
+                            }
+
+                            entry<Screen.SynaraWorkspace> { key ->
+                                SynaraWorkspacePage(
+                                    connection = SynaraConnection(
+                                        host = key.host,
+                                        port = key.port,
+                                        token = key.token,
+                                        useHttps = key.useHttps,
+                                    ),
+                                )
+                            }
+
+                            entry<Screen.ZCode> {
+                                ZCodePage()
+                            }
+
+                            entry<Screen.ZCodeSession> { key ->
+                                ZCodeSessionPage(url = key.url)
+                            }
+
                             entry<Screen.Setting> {
                                 SettingPage()
                             }
@@ -697,6 +724,10 @@ class RouteActivity : ComponentActivity() {
                                 NovelWorkspacePage(projectId = key.projectId)
                             }
 
+                            entry<Screen.NovelSettings> { key ->
+                                NovelSettingsPage(projectId = key.projectId)
+                            }
+
                             entry<Screen.MiniAppRunner> { key ->
                                 MiniAppRunnerPage(appId = key.appId)
                             }
@@ -846,6 +877,30 @@ sealed interface Screen : NavKey {
     @Serializable
     data object LiveCompanion : Screen
 
+    /** Configure LAN connection to a Mac-hosted Synara workbench. */
+    @Serializable
+    data object SynaraCompanion : Screen
+
+    /**
+     * Full-screen WebView of the remote Synara workbench.
+     * Connection is passed on the route so open does not race DataStore / ViewModel init.
+     */
+    @Serializable
+    data class SynaraWorkspace(
+        val host: String,
+        val port: Int = 3773,
+        val token: String = "",
+        val useHttps: Boolean = false,
+    ) : Screen
+
+    /** Paste a 智谱 ZCode share URL and open its mobile web UI. */
+    @Serializable
+    data object ZCode : Screen
+
+    /** Full-screen ZCode WebView (no Amber chrome). */
+    @Serializable
+    data class ZCodeSession(val url: String) : Screen
+
     @Serializable
     data object Setting : Screen
 
@@ -983,6 +1038,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class NovelWorkspace(val projectId: String) : Screen
+
+    @Serializable
+    data class NovelSettings(val projectId: String) : Screen
 
     @Serializable
     data class MiniAppRunner(val appId: String) : Screen

@@ -21,6 +21,10 @@ import app.amber.feature.ui.pages.live.LiveCompanionVM
 import app.amber.feature.ui.pages.setting.SettingAgentMemoryVM
 import app.amber.feature.ui.pages.setting.SettingVM
 import app.amber.feature.ui.pages.share.handler.ShareHandlerVM
+import app.amber.feature.ui.pages.synara.SynaraConnectionStore
+import app.amber.feature.ui.pages.synara.SynaraVM
+import app.amber.feature.ui.pages.zcode.ZCodeUrlStore
+import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
@@ -65,6 +69,9 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::LiveCompanionVM)
+    single { SynaraConnectionStore(androidContext()) }
+    viewModel { SynaraVM(store = get()) }
+    single { ZCodeUrlStore(androidContext()) }
     viewModel<ShareHandlerVM> {
         ShareHandlerVM(
             text = it.get(),

@@ -69,8 +69,8 @@ import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.Time02
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Search01
+import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.TransactionHistory
 import app.amber.agent.R
 import app.amber.agent.Screen
@@ -103,7 +103,6 @@ fun ChatDrawerContent(
     drawerState: DrawerState,
     drawerWidth: Dp = 336.dp,
     onOpenWorkspace: () -> Unit = {},
-    onOpenFavoritesLive: () -> Unit = {},
 ) {
     val context = LocalContext.current
 
@@ -161,8 +160,8 @@ fun ChatDrawerContent(
         drawerTonalElevation = 0.dp,
     ) {
         // V3 convo-history.jsx 全量重构：
-        //   Amber wordmark → SearchBar → Primary nav (新聊天/今日看板/小应用)
-        //   → QuickRow (Workspace 文件/伴随智能/聊天热力图统计 icon-only)
+        //   Amber wordmark → SearchBar → Primary nav (新聊天/今日看板/小应用/小说)
+        //   → QuickRow (Workspace / 统计 / 议会 / Synara)
         //   → divider → 最近 label → ConversationList → Footer (avatar + name + settings gear)
         val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
         Column(
@@ -234,7 +233,6 @@ fun ChatDrawerContent(
                             drawerState = drawerState,
                             chatTheme = chatTheme,
                             onOpenWorkspace = onOpenWorkspace,
-                            onOpenFavoritesLive = onOpenFavoritesLive,
                             onOpenCouncilRoom = {
                                 scope.launch {
                                     // If this conversation already has a council (running OR
@@ -515,7 +513,6 @@ private fun V3DrawerHeader(
     drawerState: DrawerState,
     chatTheme: ChatTheme,
     onOpenWorkspace: () -> Unit,
-    onOpenFavoritesLive: () -> Unit,
     onOpenCouncilRoom: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -552,10 +549,14 @@ private fun V3DrawerHeader(
             label = "小说创作",
             accent = false,
             chatTheme = chatTheme,
-            onClick = { navController.navigate(Screen.NovelProjects) },
+            onClick = {
+                scope.launch { drawerState.close() }
+                navController.navigate(Screen.NovelProjects)
+            },
         )
 
-        // (4) QuickRow: 3 icon-only buttons (Workspace 文件 / 伴随智能 / 聊天热力图统计)
+        // (4) QuickRow: Workspace / 统计 / 议会 / Synara
+        // Live 伴随入口暂时隐藏（功能未达预期）；原 Sparkles 位由 Synara 占用。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -569,12 +570,6 @@ private fun V3DrawerHeader(
                 onClick = onOpenWorkspace,
             )
             V3QuickBtn(
-                icon = HugeIcons.Sparkles,
-                contentDescription = "伴随智能",
-                chatTheme = chatTheme,
-                onClick = onOpenFavoritesLive,
-            )
-            V3QuickBtn(
                 icon = HugeIcons.ChartColumn,
                 contentDescription = "聊天热力图统计",
                 chatTheme = chatTheme,
@@ -585,6 +580,15 @@ private fun V3DrawerHeader(
                 contentDescription = "模型会议 Council Room",
                 chatTheme = chatTheme,
                 onClick = onOpenCouncilRoom,
+            )
+            V3QuickBtn(
+                icon = HugeIcons.ServerStack01,
+                contentDescription = "Synara 工作台",
+                chatTheme = chatTheme,
+                onClick = {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(Screen.SynaraCompanion)
+                },
             )
         }
 
@@ -681,24 +685,3 @@ private fun V3QuickBtn(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun FavoritesLiveSheet(
-    navController: Navigator,
-    onDismiss: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(),
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Live 伴随", style = MaterialTheme.typography.titleMedium)
-            Text("实时监听屏幕内容，让 Amber 边看边帮你。", style = MaterialTheme.typography.bodyMedium, color = workspaceColors().muted)
-            TextButton(onClick = { onDismiss(); navController.navigate(Screen.LiveCompanion) }) {
-                Text("打开 Live 伴随")
-            }
-        }
-    }
-}

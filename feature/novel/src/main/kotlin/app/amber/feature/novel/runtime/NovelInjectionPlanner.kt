@@ -95,8 +95,8 @@ object NovelInjectionPlanner {
             if (promptKind == NovelPromptKind.QuickStart) {
                 add(
                     NovelInjectionSectionKind.QuickStartSeed,
-                    "Quick start seed",
-                    "Genre: ${seed.genre}\nCore idea: ${seed.coreIdea}",
+                    "快速开始种子",
+                    "题材：${seed.genre}\n核心想法：${seed.coreIdea}",
                     NovelInjectionSelectionReason.RequiredQuickStartSeed,
                 )
             }

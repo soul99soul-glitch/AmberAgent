@@ -9,7 +9,9 @@ import app.amber.feature.novel.persistence.NovelProjectPersisting
 import app.amber.feature.novel.persistence.NovelRecoveryStore
 import app.amber.feature.novel.runtime.AndroidNovelModelAdapter
 import app.amber.feature.novel.runtime.NovelModelRunning
+import app.amber.feature.ui.pages.novel.NovelProjectUiSession
 import app.amber.feature.ui.pages.novel.NovelProjectsViewModel
+import app.amber.feature.ui.pages.novel.NovelSettingsViewModel
 import app.amber.feature.ui.pages.novel.NovelWorkspaceViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +66,8 @@ val novelModule = module {
         )
     }
 
+    single { NovelProjectUiSession() }
+
     viewModel {
         NovelProjectsViewModel(novelCreation = get())
     }
@@ -72,6 +76,15 @@ val novelModule = module {
         NovelWorkspaceViewModel(
             projectId = parameters.get(),
             novelCreation = get(),
+            uiSession = get(),
+        )
+    }
+
+    viewModel { parameters ->
+        NovelSettingsViewModel(
+            projectId = parameters.get(),
+            novelCreation = get(),
+            uiSession = get(),
         )
     }
 }

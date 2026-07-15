@@ -168,7 +168,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
     var showWorkspaceSheet by remember { mutableStateOf(false) }
-    var showFavoritesLiveSheet by remember { mutableStateOf(false) }
     var previewFilePath by remember { mutableStateOf<String?>(null) }
     val workspaceManager: WorkspaceManager = koinInject()
 
@@ -351,7 +350,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         drawerState = drawerState,
                         drawerWidth = drawerWidth,
                         onOpenWorkspace = { showWorkspaceSheet = true },
-                        onOpenFavoritesLive = { showFavoritesLiveSheet = true },
                     )
                 }
             ) {
@@ -396,7 +394,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         drawerState = drawerState,
                         drawerWidth = drawerWidth,
                         onOpenWorkspace = { showWorkspaceSheet = true },
-                        onOpenFavoritesLive = { showFavoritesLiveSheet = true },
                     )
                 }
             ) {
@@ -444,12 +441,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             vm = workspaceVm,
             onDismiss = { showWorkspaceSheet = false },
             onOpenFile = { path -> previewFilePath = path },
-        )
-    }
-    if (showFavoritesLiveSheet) {
-        FavoritesLiveSheet(
-            navController = navController,
-            onDismiss = { showFavoritesLiveSheet = false },
         )
     }
     previewFilePath?.let { path ->

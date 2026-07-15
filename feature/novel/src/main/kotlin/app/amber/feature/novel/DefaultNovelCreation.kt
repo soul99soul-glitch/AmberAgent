@@ -256,8 +256,8 @@ class DefaultNovelCreation(
                 }
             }
             if (runId.rawValue in interruptTombstones) {
+                // finalizeInterrupt already emits Interrupted — do not double-emit.
                 finalizeInterrupt(liveRuns[runId.rawValue] ?: return, NovelRunInterruptionReason.User)
-                events.tryEmit(NovelRunEvent.Interrupted(accumulated.toString()))
                 return
             }
             var didComplete = false
@@ -462,27 +462,33 @@ class DefaultNovelCreation(
 
     private suspend fun finalizeInterrupt(live: LiveRun?, reason: NovelRunInterruptionReason) {
         if (live == null || live.terminal) return
-        var didInterrupt = false
+        var shouldEmit = false
         writeMutex.withLock {
             if (live.terminal) return
-            val loaded = runCatching { repository.loadProject(live.projectId) }.getOrNull() ?: return
+            val loaded = runCatching { repository.loadProject(live.projectId) }.getOrNull()
+            if (loaded == null) {
+                // Still unblock UI collectors waiting on the SharedFlow.
+                live.terminal = true
+                shouldEmit = true
+                return@withLock
+            }
             val running = loaded.document.activeRuns.any {
                 it.id == live.runId && it.status == NovelRunStatus.Running
             }
-            if (!running) {
-                live.terminal = true
-                return
+            if (running) {
+                val (next, _) = NovelGenerationReducer.interrupt(
+                    live.runId, reason, live.partial, loaded.document,
+                )
+                if (next.project.revision != loaded.document.project.revision) {
+                    repository.commitProject(next, expectedRevision = loaded.document.project.revision)
+                }
             }
-            val (next, _) = NovelGenerationReducer.interrupt(
-                live.runId, reason, live.partial, loaded.document,
-            )
-            if (next.project.revision != loaded.document.project.revision) {
-                repository.commitProject(next, expectedRevision = loaded.document.project.revision)
-            }
+            // Always mark terminal + emit, even if reserve never landed a Running row
+            // (stop during reserve window) so UI collectors do not hang forever.
             live.terminal = true
-            didInterrupt = true
+            shouldEmit = true
         }
-        if (didInterrupt) {
+        if (shouldEmit) {
             live.events.tryEmit(NovelRunEvent.Interrupted(live.partial))
         }
     }

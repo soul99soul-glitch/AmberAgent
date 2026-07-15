@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.amber.ai.provider.Model
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.DashboardSquare01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Globe02
@@ -106,6 +107,20 @@ fun SettingExperimentalPage() {
                         icon = { Icon(HugeIcons.DashboardSquare01, contentDescription = null) },
                         title = "小应用",
                         description = "让 Amber 生成、保存并运行轻量 HTML 工具",
+                    )
+                    ExperimentDivider()
+                    ExperimentFeatureRow(
+                        onClick = { navController.navigate(Screen.SynaraCompanion) },
+                        icon = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        title = "Synara",
+                        description = "局域网遥控 Mac 上的 Synara 工作台",
+                    )
+                    ExperimentDivider()
+                    ExperimentFeatureRow(
+                        onClick = { navController.navigate(Screen.ZCode) },
+                        icon = { Icon(HugeIcons.Code, contentDescription = null) },
+                        title = "ZCode",
+                        description = "粘贴智谱 ZCode 链接，用内置浏览器打开移动页",
                     )
                     // Model Council top-level entry removed — it's now reachable from inside the
                     // SubAgent settings page as an "advanced" section (it's effectively a

@@ -15,6 +15,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -105,6 +107,34 @@ object NovelMotion {
 
     fun horizontalByIndex(initialIndex: Int, targetIndex: Int): ContentTransform =
         horizontalPage(forward = targetIndex >= initialIndex)
+
+    /** List → detail (push from trailing edge). */
+    fun pushDetail(): ContentTransform =
+        (
+            slideInHorizontally(
+                animationSpec = tween(MediumMs, easing = FastOutSlowInEasing),
+                initialOffsetX = { it / 6 },
+            ) + fadeIn(tween(MediumMs))
+            ) togetherWith (
+            slideOutHorizontally(
+                animationSpec = tween(FastMs, easing = FastOutSlowInEasing),
+                targetOffsetX = { -it / 14 },
+            ) + fadeOut(tween(FastMs))
+            )
+
+    /** Detail → list (pop toward trailing edge). */
+    fun popDetail(): ContentTransform =
+        (
+            slideInHorizontally(
+                animationSpec = tween(MediumMs, easing = FastOutSlowInEasing),
+                initialOffsetX = { -it / 14 },
+            ) + fadeIn(tween(MediumMs))
+            ) togetherWith (
+            slideOutHorizontally(
+                animationSpec = tween(MediumMs, easing = FastOutSlowInEasing),
+                targetOffsetX = { it / 6 },
+            ) + fadeOut(tween(FastMs))
+            )
 }
 
 /** Shared empty-state used by project list / workspace tabs. */
@@ -332,51 +362,50 @@ fun NovelSegmentedTabs(
     val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
+    // No pressable(scale) here: scaling one segment makes neighbors look pressed.
+    // Selection is discrete fill only — no color animation bleed across tabs.
+    // Compact strip: keep labels readable, reclaim vertical space for content.
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        shape = RoundedCornerShape(12.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(10.dp),
         color = workspace.row,
         border = workspaceBorder(),
     ) {
         Row(
-            Modifier.padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            Modifier.padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             labels.forEachIndexed { index, label ->
                 val selected = index == selectedIndex
-                val bg by animateColorAsState(
-                    targetValue = if (selected) workspace.paper else Color.Transparent,
-                    animationSpec = tween(NovelMotion.MediumMs, easing = FastOutSlowInEasing),
-                    label = "novelSegBg$index",
-                )
-                val border by animateColorAsState(
-                    targetValue = if (selected) workspace.hairline else Color.Transparent,
-                    animationSpec = tween(NovelMotion.MediumMs, easing = FastOutSlowInEasing),
-                    label = "novelSegBorder$index",
-                )
-                val fg by animateColorAsState(
-                    targetValue = if (selected) tokens.ink else workspace.muted,
-                    animationSpec = tween(NovelMotion.FastMs, easing = FastOutSlowInEasing),
-                    label = "novelSegFg$index",
-                )
+                val shape = RoundedCornerShape(8.dp)
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(bg)
-                        .border(1.dp, border, RoundedCornerShape(9.dp))
-                        .pressable(onClick = { onSelect(index) })
-                        .padding(vertical = 10.dp),
+                        .clip(shape)
+                        .background(if (selected) workspace.paper else Color.Transparent)
+                        .then(
+                            if (selected) {
+                                Modifier.border(1.dp, workspace.hairline, shape)
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onSelect(index) },
+                        )
+                        .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = label,
-                        style = type.body.copy(
+                        style = type.meta.copy(
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         ),
-                        color = fg,
+                        color = if (selected) tokens.ink else workspace.muted,
                     )
                 }
             }
@@ -395,6 +424,7 @@ fun NovelGhostButton(
     val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
+    // Compact secondary — same footprint as compact primary (e.g. 确认 / 忽略 pair).
     val shape = RoundedCornerShape(12.dp)
     val fg = when {
         !enabled -> workspace.faint
@@ -407,7 +437,7 @@ fun NovelGhostButton(
             .border(1.dp, if (danger) workspace.red.copy(alpha = 0.35f) else workspace.hairline, shape)
             .background(if (danger) workspace.redContainer else workspace.paper)
             .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -425,10 +455,41 @@ fun NovelPrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     accent: Boolean = false,
+    /** Smaller chip used next to [NovelGhostButton] (设定确认 / 收录次级操作). */
+    compact: Boolean = false,
 ) {
+    val tokens = LocalAmberTokens.current
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    if (compact) {
+        val shape = RoundedCornerShape(12.dp)
+        val bg = when {
+            !enabled -> workspace.row
+            accent -> tokens.accent
+            else -> tokens.ink
+        }
+        val fg = when {
+            !enabled -> workspace.faint
+            accent -> tokens.accentInk
+            else -> tokens.bg
+        }
+        Box(
+            modifier = modifier
+                .clip(shape)
+                .background(bg)
+                .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                color = fg,
+                style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+            )
+        }
+        return
+    }
     if (!enabled) {
-        val workspace = workspaceColors()
-        val type = LocalAmberType.current
         Box(
             modifier = modifier
                 .clip(RoundedCornerShape(15.dp))

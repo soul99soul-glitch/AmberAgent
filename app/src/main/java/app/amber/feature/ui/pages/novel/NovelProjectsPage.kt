@@ -1,8 +1,5 @@
 package app.amber.feature.ui.pages.novel
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -43,18 +40,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.Screen
 import app.amber.feature.novel.model.NovelProjectSummary
-import app.amber.feature.novel.serialization.NovelSwiftWireContract
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
@@ -65,16 +59,11 @@ import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Delete02
-import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.Edit02
-import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.MoreVertical
 import org.koin.androidx.compose.koinViewModel
 import java.time.ZoneId
@@ -86,8 +75,6 @@ fun NovelProjectsPage(
     viewModel: NovelProjectsViewModel = koinViewModel(),
 ) {
     val navController = LocalNavController.current
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
@@ -96,47 +83,6 @@ fun NovelProjectsPage(
     var showCreate by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<NovelProjectSummary?>(null) }
     var deleteTarget by remember { mutableStateOf<NovelProjectSummary?>(null) }
-    var pendingExport by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
-
-    val openImport = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val bytes = withContext(Dispatchers.IO) {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    val limit = NovelSwiftWireContract.MAX_ENVELOPE_BYTES + 1
-                    val buffer = ByteArray(limit)
-                    var read = 0
-                    while (read < limit) {
-                        val n = input.read(buffer, read, limit - read)
-                        if (n < 0) break
-                        read += n
-                    }
-                    if (read > NovelSwiftWireContract.MAX_ENVELOPE_BYTES) {
-                        ByteArray(0)
-                    } else {
-                        buffer.copyOf(read)
-                    }
-                }
-            }
-            when {
-                bytes == null -> Unit
-                bytes.isEmpty() -> viewModel.reportError("导入包过大或无法读取")
-                else -> viewModel.importPackage(bytes)
-            }
-        }
-    }
-    val createExport = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument(NovelSwiftWireContract.PACKAGE_MIME),
-    ) { uri: Uri? ->
-        val payload = pendingExport
-        pendingExport = null
-        if (uri == null || payload == null) return@rememberLauncherForActivityResult
-        scope.launch(Dispatchers.IO) {
-            context.contentResolver.openOutputStream(uri)?.use { it.write(payload.second) }
-        }
-    }
 
     LaunchedEffect(viewModel) {
         viewModel.openProjectId.collect { projectId ->
@@ -161,26 +107,6 @@ fun NovelProjectsPage(
                 },
                 navigationIcon = { BackButton() },
                 colors = CustomColors.topBarColors,
-                actions = {
-                    IconButton(
-                        onClick = {
-                            openImport.launch(
-                                arrayOf(
-                                    NovelSwiftWireContract.PACKAGE_MIME,
-                                    "application/json",
-                                    "application/octet-stream",
-                                    "*/*",
-                                ),
-                            )
-                        },
-                    ) {
-                        Icon(
-                            HugeIcons.FileImport,
-                            contentDescription = "导入项目包",
-                            tint = workspace.ink,
-                        )
-                    }
-                },
             )
         },
         floatingActionButton = {
@@ -261,15 +187,6 @@ fun NovelProjectsPage(
                                     },
                                     onRename = { renameTarget = project },
                                     onDelete = { deleteTarget = project },
-                                    onExport = {
-                                        scope.launch {
-                                            val exported = viewModel.exportPackage(project.id)
-                                            if (exported != null) {
-                                                pendingExport = exported
-                                                createExport.launch(exported.first)
-                                            }
-                                        }
-                                    },
                                     modifier = Modifier.animateItem(
                                         fadeInSpec = tween(NovelMotion.MediumMs),
                                         fadeOutSpec = tween(NovelMotion.FastMs),
@@ -343,7 +260,6 @@ private fun NovelProjectCard(
     onOpen: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
-    onExport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
@@ -402,16 +318,6 @@ private fun NovelProjectCard(
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("导出项目包") },
-                        onClick = {
-                            menuExpanded = false
-                            onExport()
-                        },
-                        leadingIcon = {
-                            Icon(HugeIcons.Download01, contentDescription = null, modifier = Modifier.size(18.dp))
-                        },
-                    )
-                    DropdownMenuItem(
                         text = { Text("重命名") },
                         onClick = {
                             menuExpanded = false
@@ -453,7 +359,8 @@ private fun NovelCreateProjectDialog(
     var name by remember { mutableStateOf("") }
     var genre by remember { mutableStateOf("") }
     var idea by remember { mutableStateOf("") }
-    var quickStart by remember { mutableStateOf(false) }
+    // Default to 快速开始 — matches the product path users expect (auto-generate settings).
+    var quickStart by remember { mutableStateOf(true) }
     val workspace = workspaceColors()
     val type = LocalAmberType.current
     val fieldColors = OutlinedTextFieldDefaults.colors(

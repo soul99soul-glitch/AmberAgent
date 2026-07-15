@@ -1,6 +1,10 @@
 package app.amber.feature.ui.theme
 
 import android.app.Activity
+import android.graphics.Color as AndroidColor
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.LocalContentColor
@@ -173,25 +177,31 @@ fun AmberAgentTheme(
     }
     val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
 
-    // 更新状态栏图标颜色
+    // Status / nav bar icon contrast follows the *app* theme (not system night mode).
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            // 非 Activity 宿主（如无障碍气泡窗口）跳过窗口样式设置
-            val window = (view.context as? Activity)?.window
+            // Skip non-Activity hosts (e.g. accessibility bubble windows).
+            val activity = view.context as? ComponentActivity
+            val window = activity?.window ?: (view.context as? Activity)?.window
             if (window != null) {
-                WindowCompat.getInsetsController(window, view).apply {
-                    // Light icons on dark theme, dark icons on light theme. With the
-                    // explicit transparent SystemBarStyle passed to enableEdgeToEdge
-                    // in RouteActivity, the system no longer re-derives appearance
-                    // from window background luminance, so this call is the single
-                    // authority for icon light/dark across every theme switch.
+                // Re-apply edge-to-edge with an explicit light/dark style. Using
+                // SystemBarStyle.auto() keys off system night mode and re-fires on
+                // insets/config updates — on ColorOS that races and restores white
+                // icons on a light app canvas. light()/dark() pin icon polarity.
+                val barStyle = if (darkTheme) {
+                    SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+                }
+                activity?.enableEdgeToEdge(
+                    statusBarStyle = barStyle,
+                    navigationBarStyle = barStyle,
+                )
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    // true → dark icons (for light backgrounds)
                     isAppearanceLightStatusBars = !darkTheme
                     isAppearanceLightNavigationBars = !darkTheme
-                    // Keep the controller in an active, writable state (matches the
-                    // immersive pages DeepReadScreen / MiniAppRunnerPage). ColorOS is
-                    // sensitive to controller readiness timing; asserting behavior
-                    // here ensures the appearance calls above are honoured.
                     systemBarsBehavior =
                         WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
