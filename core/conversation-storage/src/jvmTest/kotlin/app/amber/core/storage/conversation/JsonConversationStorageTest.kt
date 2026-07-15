@@ -285,6 +285,16 @@ class JsonConversationStorageTest {
     }
 
     @Test
+    fun staleIndexEntryWithoutConversationFileIsFilteredAndRepaired() = runTest {
+        val id = Uuid.parse("00000000-0000-0000-0000-000000000052")
+        storage.saveConversation(sampleConversation(id = id, title = "deleted"))
+        assertTrue(tempDir.child("${id}.json").delete())
+
+        assertTrue(storage.listSummaries().none { it.id == id })
+        assertFalse(tempDir.child("index.json").readText()?.contains(id.toString()) == true)
+    }
+
+    @Test
     fun loadSkipsCorruptConversationFileGracefully() = runTest {
         val id = Uuid.parse("00000000-0000-0000-0000-000000000060")
         storage.saveConversation(sampleConversation(id = id, title = "real"))

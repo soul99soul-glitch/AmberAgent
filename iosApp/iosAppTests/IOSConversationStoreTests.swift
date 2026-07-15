@@ -88,6 +88,23 @@ final class IOSConversationStoreTests: XCTestCase {
         XCTAssertTrue(store.currentMessages.isEmpty)
     }
 
+    func testSelectingMissingConversationFailsWithoutChangingCurrentConversation() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreMissingSelection-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let originalId = try XCTUnwrap(store.currentConversation?.id)
+
+        let didSelect = await store.selectConversationIfAvailable(id: KotlinUuid.companion.random())
+
+        XCTAssertFalse(didSelect)
+        XCTAssertEqual(store.currentConversation?.id, originalId)
+    }
+
     func testSaveMessagesToExplicitConversationDoesNotOverwriteCurrentConversation() async throws {
         let baseDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("IOSConversationStoreTests-")
@@ -461,6 +478,31 @@ final class IOSConversationStoreTests: XCTestCase {
 
         XCTAssertFalse(completionSaved)
         XCTAssertFalse(toolSaved)
+    }
+
+    func testDeleteFailureDoesNotCommitOwnerCleanupOrSwitchConversation() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreDeleteFailure-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        store.beforeDeleteForTesting = {
+            throw NSError(domain: "IOSConversationStoreTests", code: 1)
+        }
+        var didCommitOwnerCleanup = false
+
+        let didDelete = await store.deleteConversation(id: conversationId) {
+            didCommitOwnerCleanup = true
+        }
+
+        XCTAssertFalse(didDelete)
+        XCTAssertFalse(didCommitOwnerCleanup)
+        XCTAssertEqual(store.currentConversation?.id, conversationId)
+        XCTAssertTrue(store.summaries.contains(where: { $0.id == conversationId }))
     }
 
     /// 观察合并丢通知防线:两会话在同一 tick 先后落盘时,单值信号会被后落盘的覆盖,

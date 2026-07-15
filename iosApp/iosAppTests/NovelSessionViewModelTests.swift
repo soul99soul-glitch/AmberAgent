@@ -131,6 +131,60 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(request.parameters.maxOutputTokens, 8_192)
     }
 
+    func testWholeChapterBurstCoalescesUIPublicationsWithoutChangingDurableFinalText() async throws {
+        let deltaCount = 240
+        let fragment = "雾"
+        let expected = String(repeating: fragment, count: deltaCount)
+        let harness = try await makeHarness(scripts: [NovelModelScript(
+            steps: Array(repeating: .delta(fragment), count: deltaCount) + [.pause, .complete]
+        )])
+        harness.session.mode = .writeProse
+        harness.session.granularity = .wholeChapter
+
+        let didStart = await harness.session.send(text: "生成一段连续的雾景")
+        XCTAssertTrue(didStart)
+        let caughtUp = await eventually {
+            harness.session.transientTail?.content == expected
+        }
+        XCTAssertTrue(caughtUp)
+        let presentationRevision = try XCTUnwrap(harness.session.transientTail?.renderRevision)
+        XCTAssertLessThan(
+            presentationRevision,
+            UInt64(deltaCount / 2),
+            "Provider chunk count must not directly determine SwiftUI publication count."
+        )
+
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+        await harness.adapter.resume(runID: runID)
+        let didFinish = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(didFinish)
+        XCTAssertEqual(harness.session.durableMessages.last?.content, expected)
+    }
+
+    func testBufferedReplacementSupersedesUnpublishedDeltasAndKeepsFollowingText() async throws {
+        let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
+            .delta("应被替换"),
+            .replacement("最终前缀"),
+            .delta("与结尾"),
+            .pause,
+            .complete,
+        ])])
+        harness.session.mode = .discussPlan
+
+        let didStart = await harness.session.send(text: "测试替换式输出")
+        XCTAssertTrue(didStart)
+        let sawReplacement = await eventually {
+            harness.session.transientTail?.content == "最终前缀与结尾"
+        }
+        XCTAssertTrue(sawReplacement)
+
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+        await harness.adapter.resume(runID: runID)
+        let didFinish = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(didFinish)
+        XCTAssertEqual(harness.session.durableMessages.last?.content, "最终前缀与结尾")
+    }
+
     func testDetachedWorkspaceConsumerDoesNotCancelAndRunStillPersistsCompletion() async throws {
         let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
             .delta("离开页面前的正文"),
@@ -361,7 +415,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertTrue(cancelledRunIDs.contains(runID))
     }
 
-    func testBranchSwitchGatewayTerminatesOldRunBeforeRebinding() async throws {
+    func testSelectBranchTerminatesOldDurableRunBeforeRebinding() async throws {
         let document = try NovelTestFixtures.documentWithForkableCheckpoint()
         let sourceBranchID = document.branches[0].id
         let checkpointID = try XCTUnwrap(document.checkpoints.last?.id)
@@ -385,9 +439,13 @@ final class NovelSessionViewModelTests: XCTestCase {
         let sawPartial = await eventually { harness.session.transientTail?.content == "旧分支内容" }
         XCTAssertTrue(sawPartial)
         let oldRunID = try XCTUnwrap(harness.session.activeRunID)
+        let becameDurable = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.contains(where: {
+                $0.id == oldRunID && $0.status == .running
+            }) == true
+        }
+        XCTAssertTrue(becameDurable)
 
-        let maySwitch = await harness.session.interruptForRouteExit()
-        XCTAssertTrue(maySwitch)
         await harness.workspace.selectBranch(destinationBranchID)
         await harness.session.bindToCurrentSelection()
 
@@ -398,7 +456,56 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(oldRun.interruptionReason, .routeExit)
     }
 
-    func testFailedBranchSnapshotKeepsLoadedSelectionAndCanRebindAfterRunStops() async throws {
+    func testSelectBranchPreflightFailureLeavesOldDurableRunRunning() async throws {
+        let document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let sourceBranchID = document.branches[0].id
+        let checkpointID = try XCTUnwrap(document.checkpoints.last?.id)
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.delta("继续生成"), .pause])],
+            usesSnapshotGate: true
+        )
+        await harness.workspace.forkBranch(
+            from: sourceBranchID,
+            checkpointID: checkpointID,
+            name: "读取失败目标"
+        )
+        let destinationBranchID = try XCTUnwrap(harness.workspace.selectedBranchID)
+        await harness.workspace.selectBranch(sourceBranchID)
+        await harness.session.bindToCurrentSelection()
+        harness.session.mode = .discussPlan
+
+        let didStart = await harness.session.send(text: "不要误停旧分支")
+        XCTAssertTrue(didStart)
+        let receivedPartial = await eventually {
+            harness.session.transientTail?.content == "继续生成"
+        }
+        XCTAssertTrue(receivedPartial)
+        let oldRunID = try XCTUnwrap(harness.session.activeRunID)
+        let becameDurable = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.contains(where: {
+                $0.id == oldRunID && $0.status == .running
+            }) == true
+        }
+        XCTAssertTrue(becameDurable)
+
+        await harness.snapshotGate?.failNextBranchSnapshots(1)
+        await harness.workspace.selectBranch(destinationBranchID)
+
+        XCTAssertEqual(harness.workspace.selectedBranchID, sourceBranchID)
+        XCTAssertEqual(harness.workspace.branchSnapshot?.branch.id, sourceBranchID)
+        XCTAssertNotNil(harness.workspace.errorMessage)
+        XCTAssertFalse(harness.workspace.isPerforming)
+        let unchanged = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(unchanged.activeRuns.first(where: { $0.id == oldRunID })?.status, .running)
+        let cancelledRunIDs = await harness.adapter.cancelledRunIDs
+        XCTAssertFalse(cancelledRunIDs.contains(oldRunID))
+
+        let interrupted = await harness.session.interruptForRouteExit()
+        XCTAssertTrue(interrupted)
+    }
+
+    func testPostInterruptRefreshFailureRestoresCoherentSourceSelection() async throws {
         let document = try NovelTestFixtures.documentWithForkableCheckpoint()
         let sourceBranchID = document.branches[0].id
         let checkpointID = try XCTUnwrap(document.checkpoints.last?.id)
@@ -420,20 +527,167 @@ final class NovelSessionViewModelTests: XCTestCase {
         let didStart = await harness.session.send(text: "先停下再切分支")
         XCTAssertTrue(didStart)
         let oldRunID = try XCTUnwrap(harness.session.activeRunID)
-        let maySwitch = await harness.session.interruptForRouteExit()
-        XCTAssertTrue(maySwitch)
-        await harness.snapshotGate?.failNextSnapshots(1)
-        await harness.workspace.selectBranch(destinationBranchID)
-        await harness.session.bindToCurrentSelection()
+        let becameDurable = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.contains(where: {
+                $0.id == oldRunID && $0.status == .running
+            }) == true
+        }
+        XCTAssertTrue(becameDurable)
+        harness.session.detachConsumer()
+        let gate = try XCTUnwrap(harness.snapshotGate)
+        await gate.blockInterruptReturn()
+        let switchTask = Task { @MainActor in
+            await harness.workspace.selectBranch(destinationBranchID)
+        }
+        let interruptBlocked = await eventually {
+            await gate.interruptReturnIsBlocked()
+        }
+        XCTAssertTrue(interruptBlocked)
+        await gate.failNextProjectSnapshots(1)
+        await gate.resumeBlockedInterruptReturn()
+        await switchTask.value
 
         XCTAssertEqual(harness.workspace.selectedBranchID, sourceBranchID)
         XCTAssertEqual(harness.workspace.branchSnapshot?.branch.id, sourceBranchID)
+        XCTAssertNil(harness.workspace.branchSnapshot?.branch.activeRunID)
+        XCTAssertEqual(
+            harness.workspace.projectSnapshot?.activeRuns.first(where: { $0.id == oldRunID })?.status,
+            .interrupted
+        )
         XCTAssertNotNil(harness.workspace.errorMessage)
+        XCTAssertFalse(harness.workspace.isPerforming)
+        await harness.session.bindToCurrentSelection()
         XCTAssertEqual(harness.session.binding?.branchID, sourceBranchID)
         let final = try await harness.repository.loadProject(id: harness.projectID).document
         let oldRun = try XCTUnwrap(final.activeRuns.first { $0.id == oldRunID })
         XCTAssertEqual(oldRun.status, .interrupted)
         XCTAssertEqual(oldRun.interruptionReason, .routeExit)
+    }
+
+    func testSelectBranchDoesNotReReadValidatedTargetAfterInterrupt() async throws {
+        let document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let sourceBranchID = document.branches[0].id
+        let checkpointID = try XCTUnwrap(document.checkpoints.last?.id)
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.pause])],
+            usesSnapshotGate: true
+        )
+        await harness.workspace.forkBranch(
+            from: sourceBranchID,
+            checkpointID: checkpointID,
+            name: "已预检目标"
+        )
+        let destinationBranchID = try XCTUnwrap(harness.workspace.selectedBranchID)
+        await harness.workspace.selectBranch(sourceBranchID)
+        await harness.session.bindToCurrentSelection()
+        harness.session.mode = .discussPlan
+
+        let didStart = await harness.session.send(text: "预检后切换")
+        XCTAssertTrue(didStart)
+        let oldRunID = try XCTUnwrap(harness.session.activeRunID)
+        let becameDurable = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.contains(where: {
+                $0.id == oldRunID && $0.status == .running
+            }) == true
+        }
+        XCTAssertTrue(becameDurable)
+        harness.session.detachConsumer()
+
+        let gate = try XCTUnwrap(harness.snapshotGate)
+        await gate.blockInterruptReturn()
+        let switchTask = Task { @MainActor in
+            await harness.workspace.selectBranch(destinationBranchID)
+        }
+        let interruptBlocked = await eventually {
+            await gate.interruptReturnIsBlocked()
+        }
+        XCTAssertTrue(interruptBlocked)
+        await gate.failNextBranchSnapshots(1)
+        await gate.resumeBlockedInterruptReturn()
+        await switchTask.value
+
+        XCTAssertEqual(harness.workspace.selectedBranchID, destinationBranchID)
+        XCTAssertEqual(harness.workspace.branchSnapshot?.branch.id, destinationBranchID)
+        XCTAssertNil(harness.workspace.errorMessage)
+        XCTAssertFalse(harness.workspace.isPerforming)
+        let final = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(final.activeRuns.first(where: { $0.id == oldRunID })?.status, .interrupted)
+    }
+
+    func testSelectBranchRevalidatesSelectionOwnershipBeforeInterrupt() async throws {
+        let document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let sourceBranchID = document.branches[0].id
+        let checkpointID = try XCTUnwrap(document.checkpoints.last?.id)
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.pause])],
+            usesSnapshotGate: true
+        )
+        await harness.workspace.forkBranch(
+            from: sourceBranchID,
+            checkpointID: checkpointID,
+            name: "被并发切换的目标"
+        )
+        let destinationBranchID = try XCTUnwrap(harness.workspace.selectedBranchID)
+        await harness.workspace.selectBranch(sourceBranchID)
+        await harness.session.bindToCurrentSelection()
+        harness.session.mode = .discussPlan
+
+        let didStart = await harness.session.send(text: "保持旧项目生成")
+        XCTAssertTrue(didStart)
+        let oldRunID = try XCTUnwrap(harness.session.activeRunID)
+        let becameDurable = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.contains(where: {
+                $0.id == oldRunID && $0.status == .running
+            }) == true
+        }
+        XCTAssertTrue(becameDurable)
+        harness.session.detachConsumer()
+
+        let otherProject = try NovelTestFixtures.document()
+        _ = try await harness.repository.createProject(otherProject)
+        let gate = try XCTUnwrap(harness.snapshotGate)
+        await gate.blockNextSnapshot()
+        let switchTask = Task { @MainActor in
+            await harness.workspace.selectBranch(destinationBranchID)
+        }
+        let preflightBlocked = await eventually {
+            await gate.snapshotIsBlocked()
+        }
+        XCTAssertTrue(preflightBlocked)
+        await gate.blockNextProjectSnapshot()
+        let projectSelectionTask = Task { @MainActor in
+            await harness.workspace.selectProject(otherProject.project.id)
+        }
+        let projectSelectionBlocked = await eventually {
+            await gate.projectSnapshotIsBlocked()
+        }
+        XCTAssertTrue(projectSelectionBlocked)
+        await gate.resumeBlockedSnapshot()
+        await switchTask.value
+        await gate.resumeBlockedProjectSnapshot()
+        let didSelectProject = await projectSelectionTask.value
+
+        XCTAssertTrue(didSelectProject)
+        XCTAssertEqual(harness.workspace.selectedProjectID, otherProject.project.id)
+        XCTAssertFalse(harness.workspace.isPerforming)
+        let unchanged = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(unchanged.activeRuns.first(where: { $0.id == oldRunID })?.status, .running)
+        let cancelledRunIDs = await harness.adapter.cancelledRunIDs
+        XCTAssertFalse(cancelledRunIDs.contains(oldRunID))
+
+        try? await harness.workspace.interruptSessionRun(NovelCancelRunCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: nil,
+                expectedConfigRevision: nil,
+                expectedBranchHeadRevision: nil
+            ),
+            projectID: harness.projectID,
+            runID: oldRunID,
+            reason: .user
+        ))
     }
 
     func testCommittedForkWithRefreshFailureKeepsCoherentSelectionWithoutOfferingReplay() async throws {
@@ -776,7 +1030,7 @@ final class NovelSessionViewModelTests: XCTestCase {
                 $0.id == runID && $0.status == .running
             }) == true && harness.workspace.quickStartStartingRun == nil
         }
-        XCTAssertTrue(becameDurable)
+        XCTAssertTrue(becameDurable, "Quick Start must cross the durable start boundary before replaying deltas.")
         harness.session.detachConsumer()
         let firstBind = Task { @MainActor in
             await harness.session.bindToCurrentSelection()
@@ -793,6 +1047,41 @@ final class NovelSessionViewModelTests: XCTestCase {
         }
         XCTAssertTrue(receivedDelta)
         XCTAssertEqual(harness.session.transientTail?.content, "")
+        await harness.session.stop()
+    }
+
+    func testQuickStartHiddenDeltasPublishStreamingPhaseOnlyOnce() async throws {
+        let hiddenDeltas = quickStartSuggestionsJSON
+            .components(separatedBy: "\n")
+            .map { NovelModelScriptStep.delta($0 + "\n") }
+        let harness = try await makeHarness(
+            document: try quickStartDocument(),
+            scripts: [NovelModelScript(steps: [.pause] + hiddenDeltas + [.pause, .complete])]
+        )
+
+        let startedRunID = await harness.workspace.startQuickStartSuggestions()
+        let runID = try XCTUnwrap(startedRunID)
+        await harness.session.bindToCurrentSelection()
+        let becameDurable = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.contains(where: {
+                $0.id == runID && $0.status == .running
+            }) == true && harness.workspace.quickStartStartingRun == nil
+        }
+        XCTAssertTrue(becameDurable)
+        await harness.session.bindToCurrentSelection()
+
+        await harness.adapter.resume(runID: runID)
+        let receivedHiddenOutput = await eventually {
+            harness.session.transientTail?.phase == .streaming
+        }
+        XCTAssertTrue(receivedHiddenOutput, "The first hidden delta must publish the streaming phase.")
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(harness.session.transientTail?.content, "")
+        XCTAssertEqual(
+            harness.session.transientTail?.renderRevision,
+            1,
+            "Hidden structured output should not invalidate the empty Quick Start bubble per chunk."
+        )
         await harness.session.stop()
     }
 
@@ -1839,6 +2128,8 @@ private actor NovelSessionSnapshotFailingCreation: NovelCreation {
     private var remainingProjectSnapshotFailures = 0
     private var shouldBlockNextSnapshot = false
     private var blockedSnapshotContinuation: CheckedContinuation<Void, Never>?
+    private var shouldBlockNextProjectSnapshot = false
+    private var blockedProjectSnapshotContinuation: CheckedContinuation<Void, Never>?
     private var shouldBlockNextPerform = false
     private var blockedPerformContinuation: CheckedContinuation<Void, Never>?
     private var shouldBlockInterruptReturn = false
@@ -1871,6 +2162,20 @@ private actor NovelSessionSnapshotFailingCreation: NovelCreation {
     func resumeBlockedSnapshot() {
         let continuation = blockedSnapshotContinuation
         blockedSnapshotContinuation = nil
+        continuation?.resume()
+    }
+
+    func blockNextProjectSnapshot() {
+        shouldBlockNextProjectSnapshot = true
+    }
+
+    func projectSnapshotIsBlocked() -> Bool {
+        blockedProjectSnapshotContinuation != nil
+    }
+
+    func resumeBlockedProjectSnapshot() {
+        let continuation = blockedProjectSnapshotContinuation
+        blockedProjectSnapshotContinuation = nil
         continuation?.resume()
     }
 
@@ -1907,6 +2212,12 @@ private actor NovelSessionSnapshotFailingCreation: NovelCreation {
             shouldBlockNextSnapshot = false
             await withCheckedContinuation { continuation in
                 blockedSnapshotContinuation = continuation
+            }
+        }
+        if case .project = scope, shouldBlockNextProjectSnapshot {
+            shouldBlockNextProjectSnapshot = false
+            await withCheckedContinuation { continuation in
+                blockedProjectSnapshotContinuation = continuation
             }
         }
         if case .branch = scope, remainingBranchSnapshotFailures > 0 {

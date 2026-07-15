@@ -16,6 +16,47 @@ private struct NovelSessionRunDraft: Equatable, Sendable {
     let inputBudgetTokens: Int
 }
 
+struct NovelSessionPresentationBuffer {
+    let runID: NovelRunID
+    let messageID: NovelMessageID
+    let bindingToken: UUID
+    private var replacement: String?
+    private var appendedText = ""
+
+    init(
+        runID: NovelRunID,
+        messageID: NovelMessageID,
+        bindingToken: UUID
+    ) {
+        self.runID = runID
+        self.messageID = messageID
+        self.bindingToken = bindingToken
+    }
+
+    mutating func append(_ text: String) {
+        appendedText += text
+    }
+
+    mutating func replace(with text: String) {
+        replacement = text
+        appendedText.removeAll(keepingCapacity: true)
+    }
+
+    func mergedContent(displayedContent: String) -> String {
+        (replacement ?? displayedContent) + appendedText
+    }
+
+    func matches(
+        runID: NovelRunID,
+        messageID: NovelMessageID,
+        bindingToken: UUID
+    ) -> Bool {
+        self.runID == runID &&
+            self.messageID == messageID &&
+            self.bindingToken == bindingToken
+    }
+}
+
 private struct NovelSessionProjectionTailKey: Equatable {
     let branchID: NovelBranchID
     let sessionID: NovelSessionID
@@ -103,6 +144,10 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var cancelledStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var sessionActionOwnerID: UUID?
     @ObservationIgnored private var projectionCache: NovelSessionProjectionCacheEntry?
+    @ObservationIgnored private var presentationBuffer: NovelSessionPresentationBuffer?
+    @ObservationIgnored private var presentationFlushTask: Task<Void, Never>?
+
+    private static let presentationFlushDelayNanos: UInt64 = 48_000_000
 
     init(workspace: NovelCreationViewModel) {
         self.workspace = workspace
@@ -320,6 +365,7 @@ final class NovelSessionViewModel {
         attachAttemptID = nil
         attachingRunID = nil
         attachingBindingToken = nil
+        cancelPendingPresentation()
     }
 
     func clearError() {
@@ -905,14 +951,23 @@ private extension NovelSessionViewModel {
             adoptDurableRunRecord(runID: runID)
         case .delta(let text):
             if draft.kind == .quickStart {
-                updateTail(content: "", phase: .streaming)
+                publishQuickStartStreamingPhaseIfNeeded(runID: runID, token: token)
             } else {
-                updateTail(content: (transientTail?.content ?? "") + text, phase: .streaming)
+                enqueuePresentationDelta(text, runID: runID, token: token)
             }
         case .replaced(let text):
-            updateTail(content: draft.kind == .quickStart ? "" : text, phase: .streaming)
+            if draft.kind == .quickStart {
+                publishQuickStartStreamingPhaseIfNeeded(runID: runID, token: token)
+            } else {
+                enqueuePresentationReplacement(text, runID: runID, token: token)
+            }
         case .completed(let snapshot):
-            updateTail(content: snapshot.message.content, phase: .terminalAwaitingRefresh)
+            publishTerminalPresentation(
+                runID: runID,
+                token: token,
+                authoritativeContent: snapshot.message.content,
+                phase: .terminalAwaitingRefresh
+            )
             terminalAwaitingRefresh = true
             lastRetryDraft = nil
             lastRetryRunID = nil
@@ -920,10 +975,10 @@ private extension NovelSessionViewModel {
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { clearTransientTail() }
         case .interrupted(let snapshot):
-            updateTail(
-                content: draft.kind == .quickStart
-                    ? ""
-                    : snapshot?.message.content ?? transientTail?.content ?? "",
+            publishTerminalPresentation(
+                runID: runID,
+                token: token,
+                authoritativeContent: draft.kind == .quickStart ? "" : snapshot?.message.content,
                 phase: .interrupted
             )
             terminalAwaitingRefresh = true
@@ -933,7 +988,12 @@ private extension NovelSessionViewModel {
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { clearTransientTail() }
         case .failed(let failure):
-            updateTail(phase: .failed(failure))
+            publishTerminalPresentation(
+                runID: runID,
+                token: token,
+                authoritativeContent: draft.kind == .quickStart ? "" : nil,
+                phase: .failed(failure)
+            )
             terminalAwaitingRefresh = true
             lastFailure = failure
             operationErrorMessage = NovelPresentation.failureMessage(failure)
@@ -943,7 +1003,12 @@ private extension NovelSessionViewModel {
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { clearTransientTail() }
         case .persistenceBlocked(let failure):
-            updateTail(phase: .persistenceBlocked(failure))
+            publishTerminalPresentation(
+                runID: runID,
+                token: token,
+                authoritativeContent: draft.kind == .quickStart ? "" : nil,
+                phase: .persistenceBlocked(failure)
+            )
             lastFailure = failure
             operationErrorMessage = NovelPresentation.failureMessage(failure)
         }
@@ -990,8 +1055,7 @@ private extension NovelSessionViewModel {
                   binding == expectedBinding,
                   bindingToken == expectedToken,
                   transientTail?.runID == run.id else { return }
-            transientTail = nil
-            transientRunRecord = nil
+            clearTransientTail()
             refreshErrorMessage = describe(error)
         }
     }
@@ -1170,12 +1234,159 @@ private extension NovelSessionViewModel {
         )
     }
 
+    func enqueuePresentationDelta(
+        _ text: String,
+        runID: NovelRunID,
+        token: UUID
+    ) {
+        guard !text.isEmpty,
+              let current = transientTail,
+              current.runID == runID,
+              bindingToken == token else { return }
+        preparePresentationBuffer(for: current, token: token)
+        presentationBuffer?.append(text)
+        schedulePresentationFlush(
+            runID: runID,
+            messageID: current.messageID,
+            token: token
+        )
+    }
+
+    func enqueuePresentationReplacement(
+        _ text: String,
+        runID: NovelRunID,
+        token: UUID
+    ) {
+        guard let current = transientTail,
+              current.runID == runID,
+              bindingToken == token else { return }
+        preparePresentationBuffer(for: current, token: token)
+        presentationBuffer?.replace(with: text)
+        schedulePresentationFlush(
+            runID: runID,
+            messageID: current.messageID,
+            token: token
+        )
+    }
+
+    func preparePresentationBuffer(
+        for tail: NovelSessionTransientTail,
+        token: UUID
+    ) {
+        guard presentationBuffer?.matches(
+            runID: tail.runID,
+            messageID: tail.messageID,
+            bindingToken: token
+        ) != true else { return }
+        cancelPendingPresentation()
+        presentationBuffer = NovelSessionPresentationBuffer(
+            runID: tail.runID,
+            messageID: tail.messageID,
+            bindingToken: token
+        )
+    }
+
+    func schedulePresentationFlush(
+        runID: NovelRunID,
+        messageID: NovelMessageID,
+        token: UUID
+    ) {
+        guard presentationFlushTask == nil else { return }
+        presentationFlushTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.presentationFlushDelayNanos)
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.presentationFlushTask = nil
+            self.flushPendingPresentation(
+                runID: runID,
+                messageID: messageID,
+                token: token
+            )
+        }
+    }
+
+    func flushPendingPresentation(
+        runID: NovelRunID,
+        messageID: NovelMessageID,
+        token: UUID
+    ) {
+        guard bindingToken == token,
+              let current = transientTail,
+              current.runID == runID,
+              current.messageID == messageID,
+              let buffer = presentationBuffer,
+              buffer.matches(
+                  runID: runID,
+                  messageID: messageID,
+                  bindingToken: token
+              ) else {
+            cancelPendingPresentation()
+            return
+        }
+        presentationBuffer = nil
+        let content = buffer.mergedContent(displayedContent: current.content)
+        guard content != current.content || current.phase != .streaming else { return }
+        updateTail(content: content, phase: .streaming)
+    }
+
+    func publishQuickStartStreamingPhaseIfNeeded(
+        runID: NovelRunID,
+        token: UUID
+    ) {
+        guard bindingToken == token,
+              let current = transientTail,
+              current.runID == runID,
+              current.phase != .streaming || !current.content.isEmpty else { return }
+        updateTail(content: "", phase: .streaming)
+    }
+
+    func publishTerminalPresentation(
+        runID: NovelRunID,
+        token: UUID,
+        authoritativeContent: String?,
+        phase: NovelSessionTransientTailPhase
+    ) {
+        presentationFlushTask?.cancel()
+        presentationFlushTask = nil
+        guard bindingToken == token,
+              let current = transientTail,
+              current.runID == runID else {
+            presentationBuffer = nil
+            return
+        }
+        let bufferedContent: String?
+        if let buffer = presentationBuffer,
+           buffer.matches(
+               runID: runID,
+               messageID: current.messageID,
+               bindingToken: token
+           ) {
+            bufferedContent = buffer.mergedContent(displayedContent: current.content)
+        } else {
+            bufferedContent = nil
+        }
+        presentationBuffer = nil
+        let content = authoritativeContent ?? bufferedContent ?? current.content
+        guard content != current.content || current.phase != phase else { return }
+        updateTail(content: content, phase: phase)
+    }
+
+    func cancelPendingPresentation() {
+        presentationFlushTask?.cancel()
+        presentationFlushTask = nil
+        presentationBuffer = nil
+    }
+
     func installTail(
         run: NovelActiveRunRecord,
         content: String,
         renderRevision: UInt64 = 0,
         phase: NovelSessionTransientTailPhase
     ) {
+        cancelPendingPresentation()
         transientRunRecord = run
         transientTail = NovelSessionTransientTail(
             run: run,
@@ -1210,6 +1421,7 @@ private extension NovelSessionViewModel {
     }
 
     func clearTransientTail() {
+        cancelPendingPresentation()
         transientTail = nil
         transientRunRecord = nil
         terminalAwaitingRefresh = false

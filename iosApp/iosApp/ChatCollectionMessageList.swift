@@ -1029,6 +1029,19 @@ enum FollowMode: Equatable {
     case pausedForUser
 }
 
+enum ChatSwiftUINearBottomResumePolicy {
+    static func shouldResume(
+        followPaused: Bool,
+        userScrollActive: Bool,
+        userScrollJustEnded: Bool,
+        distanceToBottom: CGFloat
+    ) -> Bool {
+        guard followPaused,
+              userScrollActive || userScrollJustEnded else { return false }
+        return distanceToBottom <= ChatLayout.nearBottomResumeThreshold
+    }
+}
+
 struct ChatSwiftUIExplicitBottomPlan: Equatable {
     let viewportState: ChatViewportState
     let animated: Bool
@@ -1536,6 +1549,18 @@ struct ChatSwiftUIMessageList: View {
                     generationActive: isGenerationActive || isLoading
                 )
             )
+            if ChatSwiftUINearBottomResumePolicy.shouldResume(
+                followPaused: next.followPaused,
+                userScrollActive: runtime.userScrollActive,
+                userScrollJustEnded: false,
+                distanceToBottom: distanceToBottom
+            ) {
+                // 96pt 只表达「真实用户已回到底部附近」的恢复意图；物理
+                // true-bottom 仍由 40pt geometry 判定，不能在这里伪造 isAtBottom。
+                next.followPaused = false
+                next.showScrollToBottom = false
+                next.liveRenderingFarFromBottom = false
+            }
             syncFollowMode(from: next)
             let reachedExplicitBottom = runtime.explicitBottomAnimationActive && next.isAtBottom
             if previousFollowMode != runtime.followMode {
@@ -2175,7 +2200,7 @@ struct ChatSwiftUIMessageList: View {
 
     private var bottomFollowResumeThreshold: CGFloat {
         // 用户滑回底部附近(≤此阈值)才从 pausedForUser 恢复跟随。
-        ChatLayout.followBottomGap
+        ChatLayout.nearBottomResumeThreshold
     }
 
     private var currentBottomDistance: CGFloat {
@@ -2215,17 +2240,22 @@ struct ChatSwiftUIMessageList: View {
     }
 
     private func resumeFollowAfterUserScrollEndedIfNeeded() {
-        guard followGeneration,
-              viewportState.followPaused,
-              runtime.latestScrollGeometry.distanceToBottom <= ChatLayout.bottomStickThreshold else { return }
+        let shouldResume = followGeneration && ChatSwiftUINearBottomResumePolicy.shouldResume(
+            followPaused: viewportState.followPaused,
+            userScrollActive: false,
+            userScrollJustEnded: true,
+            distanceToBottom: runtime.latestScrollGeometry.distanceToBottom
+        )
         var next = viewportState
-        next.followPaused = false
         next.userDragging = false
-        next.isAtBottom = true
-        next.showScrollToBottom = false
-        next.liveRenderingFarFromBottom = false
+        if shouldResume {
+            next.followPaused = false
+            next.showScrollToBottom = false
+            next.liveRenderingFarFromBottom = false
+        }
         syncFollowMode(from: next)
         publish(next)
+        guard followGeneration, !next.followPaused else { return }
         ChatPerfTrace.event("BottomResumeUser")
         if isGenerationActive || isLoading {
             scheduleStreamBottomFollow()

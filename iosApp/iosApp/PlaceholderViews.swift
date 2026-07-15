@@ -855,13 +855,9 @@ struct ConversationsView: View {
             Button("删除", role: .destructive) {
                 if let id = deletingConversationId {
                     Task { @MainActor in
-                        if chatViewModel.isGenerationActive(conversationId: id) {
-                            if conversationStore.currentConversation?.id == id {
-                                chatViewModel.cancelGeneration()
-                            }
-                            IOSChatBackgroundGenerationCoordinator.shared.cancelJobs(conversationId: id)
+                        await conversationStore.deleteConversation(id: id) {
+                            chatViewModel.prepareForConversationDeletion(id)
                         }
-                        await conversationStore.deleteConversation(id: id)
                     }
                 }
                 deletingConversationId = nil

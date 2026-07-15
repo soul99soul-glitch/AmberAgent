@@ -1188,6 +1188,7 @@ enum NovelSessionBottomFollowPolicy {
             if isAtBottom {
                 next.mode = .followingBottom
                 setBottomButton(false, state: &next, commands: &commands)
+                commands.append(.followBottom(animated: false))
             } else {
                 next.mode = .browsingHistory
                 setBottomButton(true, state: &next, commands: &commands)

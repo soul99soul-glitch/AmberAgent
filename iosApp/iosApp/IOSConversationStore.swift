@@ -156,6 +156,7 @@ final class IOSConversationStore {
 
 #if DEBUG
     var beforePersistForTesting: ((Conversation) async -> Void)?
+    var beforeDeleteForTesting: (() async throws -> Void)?
 #endif
 
     // MARK: - Init
@@ -239,7 +240,12 @@ final class IOSConversationStore {
 
     /// 切换到指定会话：从磁盘 load 完整对象，设为 current。
     func selectConversation(id: KotlinUuid) async {
-        guard !isDeletedConversation(id) else { return }
+        _ = await selectConversationIfAvailable(id: id)
+    }
+
+    @discardableResult
+    func selectConversationIfAvailable(id: KotlinUuid) async -> Bool {
+        guard !isDeletedConversation(id) else { return false }
         let loaded: Conversation?
         do {
             loaded = try await storage.loadConversation(id: id)
@@ -249,8 +255,10 @@ final class IOSConversationStore {
         }
         if let loaded {
             setCurrentAsSwitch(loaded)
+            return true
         }
         // load 失败时不切换 current，保留上一个；UI 层可提示。
+        return false
     }
 
     /// 把当前内存里的 [messages] 回填进 currentConversation（节点合并），落盘，刷新 index。
@@ -422,15 +430,37 @@ final class IOSConversationStore {
         return KotlinInstant.companion.fromEpochMilliseconds(epochMilliseconds: epochMs)
     }
 
-    /// 删除会话：磁盘删除 + 刷新 summaries。若删的是 current，自动切到下一条或新建。
-    func deleteConversation(id: KotlinUuid) async {
+    /// 删除会话：只有磁盘删除确认后才执行 owner 清理并切换 current。
+    @discardableResult
+    func deleteConversation(
+        id: KotlinUuid,
+        onDeletionCommitted: () -> Void = {}
+    ) async -> Bool {
         markDeletedConversation(id)
-        pendingBackgroundContentConversationIds.remove(String(describing: id))
         do {
+#if DEBUG
+            if let beforeDeleteForTesting {
+                try await beforeDeleteForTesting()
+            }
+#endif
             try await storage.deleteConversation(id: id)
         } catch {
+            let conversationStillExists: Bool
+            do {
+                conversationStillExists = try await storage.loadConversation(id: id) != nil
+            } catch {
+                conversationStillExists = true
+            }
+            guard !conversationStillExists else {
+                unmarkDeletedConversation(id)
+                publishIOError(operation: "删除会话", detail: "\(id): \(error)")
+                return false
+            }
             publishIOError(operation: "删除会话", detail: "\(id): \(error)")
         }
+
+        onDeletionCommitted()
+        pendingBackgroundContentConversationIds.remove(String(describing: id))
         await refreshSummaries()
 
         if currentConversation?.id == id {
@@ -440,6 +470,7 @@ final class IOSConversationStore {
                 await newConversation()
             }
         }
+        return true
     }
 
     /// 重命名：partial update，不改 messages。
@@ -969,6 +1000,10 @@ final class IOSConversationStore {
 
     private func markDeletedConversation(_ id: KotlinUuid) {
         deletedConversationIds.insert(String(describing: id))
+    }
+
+    private func unmarkDeletedConversation(_ id: KotlinUuid) {
+        deletedConversationIds.remove(String(describing: id))
     }
 
     private func isDeletedConversation(_ id: KotlinUuid) -> Bool {

@@ -554,11 +554,125 @@ protocol IOSCouncilTextStreaming: AnyObject {
     func cancel()
 }
 
+/// A presentation-only gate for council text streams. Provider chunks continue to
+/// accumulate losslessly; the expensive full snapshot is deferred until the one
+/// scheduled UI flush (or an exact terminal/cancel flush).
+@MainActor
+final class IOSCouncilTextPresentationSession {
+    private let flushDelayNanoseconds: UInt64
+    private let snapshotProvider: @MainActor () -> String
+    private let onUpdate: @MainActor (String) -> Void
+    private var flushTask: Task<Void, Never>?
+    private var lastPublishedText: String?
+    private(set) var isClosed = false
+    private(set) var finalText = ""
+
+    init(
+        flushDelayNanoseconds: UInt64 = 48_000_000,
+        snapshotProvider: @escaping @MainActor () -> String,
+        onUpdate: @escaping @MainActor (String) -> Void
+    ) {
+        self.flushDelayNanoseconds = flushDelayNanoseconds
+        self.snapshotProvider = snapshotProvider
+        self.onUpdate = onUpdate
+    }
+
+    func scheduleFlush() {
+        guard !isClosed, flushTask == nil else { return }
+        flushTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(nanoseconds: self.flushDelayNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, !self.isClosed else { return }
+            self.flushTask = nil
+            self.publish(self.snapshotProvider())
+        }
+    }
+
+    /// Cancels any delayed publication and synchronously exposes the exact latest
+    /// authoritative text before the caller publishes completed/failed/cancelled state.
+    @discardableResult
+    func flushAndClose() -> String {
+        guard !isClosed else { return finalText }
+        isClosed = true
+        flushTask?.cancel()
+        flushTask = nil
+        let text = snapshotProvider()
+        finalText = text
+        publish(text)
+        return text
+    }
+
+    private func publish(_ text: String) {
+        guard lastPublishedText != text else { return }
+        lastPublishedText = text
+        onUpdate(text)
+    }
+}
+
+enum IOSCouncilGeneratedTextSnapshot {
+    static func text(from messages: [UIMessage]) -> String {
+        guard let message = messages.last,
+              message.role == MessageRole.assistant else {
+            return ""
+        }
+        return message.toText()
+    }
+}
+
+@MainActor
+private final class IOSCouncilActiveTextStream {
+    let accumulator: MessageStreamAccumulator
+    let eventSink: ChatStreamEventSink
+    let presentation: IOSCouncilTextPresentationSession
+
+    init(
+        accumulator: MessageStreamAccumulator,
+        eventSink: ChatStreamEventSink,
+        onUpdate: @escaping @MainActor (String) -> Void
+    ) {
+        self.accumulator = accumulator
+        self.eventSink = eventSink
+        self.presentation = IOSCouncilTextPresentationSession(
+            snapshotProvider: {
+                IOSCouncilGeneratedTextSnapshot.text(from: accumulator.snapshot())
+            },
+            onUpdate: onUpdate
+        )
+    }
+
+    func accept(_ chunk: MessageChunk) {
+        guard !presentation.isClosed else { return }
+        accumulator.append(chunk: chunk)
+        presentation.scheduleFlush()
+    }
+
+    @discardableResult
+    func flushAndClose(drainingQueuedChunks: Bool) -> String {
+        if drainingQueuedChunks, !presentation.isClosed {
+            // Close the sink first so the drained prefix has an exact acceptance
+            // boundary: callbacks racing cancellation are either already queued or
+            // rejected, never admitted between drain and snapshot.
+            eventSink.finish()
+            for chunk in eventSink.takePendingChunks() {
+                accumulator.append(chunk: chunk)
+            }
+        }
+        let text = presentation.flushAndClose()
+        eventSink.finish()
+        return text
+    }
+}
+
 @MainActor
 final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
     private let openAIProvider: OpenAIKmpProvider
     private let claudeProvider: ClaudeKmpProvider
     private var job: Kotlinx_coroutines_coreJob?
+    private var activeStream: IOSCouncilActiveTextStream?
 
     init(
         provider: OpenAIKmpProvider = OpenAIKmpProvider(),
@@ -575,34 +689,56 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
         onUpdate: @escaping @MainActor (String) -> Void
     ) async throws -> String {
         let accumulator = MessageStreamAccumulator(initialMessages: messages, model: params.model)
-        return await withCheckedContinuation { continuation in
-            var didResume = false
-            func resumeOnce(_ value: String) {
-                guard !didResume else { return }
-                didResume = true
-                continuation.resume(returning: value)
-            }
-
-            job = dispatchCouncilStream(
-                providerSetting: providerSetting,
-                messages: messages,
-                params: params,
-                onChunk: { chunk in
-                    accumulator.append(chunk: chunk)
-                    let text = accumulator.snapshot().last?.toText() ?? ""
-                    Task { @MainActor in onUpdate(text) }
-                },
-                onComplete: {
-                    let text = accumulator.snapshot().last?.toText() ?? ""
-                    Task { @MainActor in resumeOnce(text) }
-                },
-                onError: { error in
-                    Task { @MainActor in
-                        resumeOnce("Error: \(error.message ?? String(describing: error))")
-                    }
-                }
-            )
+        let eventSink = ChatStreamEventSink()
+        let eventStream = AsyncStream<ChatStreamEvent>(bufferingPolicy: .unbounded) { continuation in
+            eventSink.bind(continuation)
         }
+        let stream = IOSCouncilActiveTextStream(
+            accumulator: accumulator,
+            eventSink: eventSink,
+            onUpdate: onUpdate
+        )
+        activeStream = stream
+
+        job = dispatchCouncilStream(
+            providerSetting: providerSetting,
+            messages: messages,
+            params: params,
+            onChunk: { chunk in
+                eventSink.yield(.chunk(chunk))
+            },
+            onComplete: {
+                eventSink.yield(.complete())
+                eventSink.finish()
+            },
+            onError: { error in
+                eventSink.yield(.error(error))
+                eventSink.finish()
+            }
+        )
+
+        for await event in eventStream {
+            guard eventSink.claim(event) else { continue }
+            switch event.payload {
+            case .chunk(let chunk):
+                stream.accept(chunk)
+            case .complete:
+                let text = stream.flushAndClose(drainingQueuedChunks: false)
+                clearActiveStreamIfNeeded(stream)
+                return text
+            case .error(let error):
+                _ = stream.flushAndClose(drainingQueuedChunks: false)
+                clearActiveStreamIfNeeded(stream)
+                return "Error: \(error.message ?? String(describing: error))"
+            }
+        }
+
+        let text = stream.flushAndClose(drainingQueuedChunks: true)
+        if Task.isCancelled, activeStream === stream {
+            job?.cancel(cause: nil)
+        }
+        clearActiveStreamIfNeeded(stream)
+        return text
     }
 
     /// Dispatch a council seat stream to the OpenAI or Claude executor based on
@@ -632,13 +768,28 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
     }
 
     func cancel() {
+        if let activeStream {
+            _ = activeStream.flushAndClose(drainingQueuedChunks: true)
+            self.activeStream = nil
+        }
         job?.cancel(cause: nil)
+        job = nil
+    }
+
+    private func clearActiveStreamIfNeeded(_ stream: IOSCouncilActiveTextStream) {
+        guard activeStream === stream else { return }
+        activeStream = nil
         job = nil
     }
 
     deinit {
         job?.cancel(cause: nil)
     }
+}
+
+@MainActor
+private final class IOSCouncilStreamTail {
+    var body = ""
 }
 
 enum IOSCouncilRoomRunnerError: LocalizedError, Equatable {
@@ -665,7 +816,8 @@ final class IOSCouncilRoomRunner {
     private let researcher: any IOSCouncilResearching
     private let taskStore: IOSAdvancedTaskStore
     private let permissionStore: IOSPermissionStore?
-    private var isCancelled = false
+    private var runGeneration: UInt64 = 0
+    private var activeRunGeneration: UInt64?
 
     init(
         streamer: any IOSCouncilTextStreaming = IOSCouncilTextStreamer(),
@@ -680,7 +832,8 @@ final class IOSCouncilRoomRunner {
     }
 
     func cancel() {
-        isCancelled = true
+        runGeneration &+= 1
+        activeRunGeneration = nil
         streamer.cancel()
     }
 
@@ -689,7 +842,17 @@ final class IOSCouncilRoomRunner {
         onEvent: @escaping @MainActor (IOSCouncilRoomEvent) -> Void = { _ in },
         onAskUser: ((String) async -> String?)? = nil
     ) async -> IOSCouncilRoomRunSummary {
-        isCancelled = false
+        runGeneration &+= 1
+        let currentRunGeneration = runGeneration
+        if activeRunGeneration != nil {
+            streamer.cancel()
+        }
+        activeRunGeneration = currentRunGeneration
+        defer {
+            if activeRunGeneration == currentRunGeneration {
+                activeRunGeneration = nil
+            }
+        }
         let objective = request.objective.trimmingCharacters(in: .whitespacesAndNewlines)
         let settings = request.settings.normalized(currentModelId: request.currentModelId)
         let limits = settings.limits.normalized()
@@ -828,6 +991,7 @@ final class IOSCouncilRoomRunner {
             )))
             onEvent(.roster([host] + activeSeats, activeSpeakerId: host.id, failedSpeakerIds: failedSeatIds))
             let finalTopic = try await stream(
+                runGeneration: currentRunGeneration,
                 speaker: host,
                 systemPrompt: hostSystemPrompt(settings: settings),
                 userPrompt: finalTopicPrompt(objective: objective, research: research, limits: limits, defaultSeats: activeSeats),
@@ -837,7 +1001,7 @@ final class IOSCouncilRoomRunner {
                     onEvent(.updateMessage(id: topicMessageId, body: text.isEmpty ? "调研和完善议题中..." : text, status: .speaking))
                 }
             )
-            try checkCancelled()
+            try checkCancelled(runGeneration: currentRunGeneration)
             onEvent(.updateMessage(id: topicMessageId, body: finalTopic.trimmedOr("主持人未返回议题。"), status: .completed))
             transcript.append("[\(host.name)] \(finalTopic)")
             taskStore.appendLog(id: task.id, chunk: "[\(host.name)] \(finalTopic)\n\n")
@@ -847,6 +1011,7 @@ final class IOSCouncilRoomRunner {
             if request.dynamicSeatGeneration {
                 onEvent(.state("组建议员席位中"))
                 let seatPlanRaw = (try? await stream(
+                    runGeneration: currentRunGeneration,
                     speaker: host,
                     systemPrompt: seatPlanSystemPrompt(),
                     userPrompt: seatPlanPrompt(objective: objective, finalTopic: finalTopic, research: research, limits: limits),
@@ -854,7 +1019,7 @@ final class IOSCouncilRoomRunner {
                     temperature: 0.3,
                     onUpdate: { _ in }
                 )) ?? ""
-                try checkCancelled()
+                try checkCancelled(runGeneration: currentRunGeneration)
                 let dynamicSeats = Self.plannedSeatsFromJSON(
                     seatPlanRaw,
                     maxSeats: limits.maxSeats,
@@ -873,10 +1038,10 @@ final class IOSCouncilRoomRunner {
             // 跑席位导致消息翻倍。
             let rounds = request.mode == .freeChat ? 1 : limits.defaultRounds
             for round in 1...rounds {
-                try checkCancelled()
+                try checkCancelled(runGeneration: currentRunGeneration)
                 onEvent(.append(dividerMessage("第 \(round) 轮")))
                 for seat in activeSeats where !failedSeatIds.contains(seat.id) {
-                    try checkCancelled()
+                    try checkCancelled(runGeneration: currentRunGeneration)
                     onEvent(.state("\(seat.name) 发言中"))
                     onEvent(.roster([host] + activeSeats, activeSpeakerId: seat.id, failedSpeakerIds: failedSeatIds))
                     let messageId = UUID()
@@ -889,13 +1054,16 @@ final class IOSCouncilRoomRunner {
                         subtitle: "\(seat.modelId) · \(seat.reasoning.title)",
                         status: .speaking
                     )))
+                    let latestMessage = IOSCouncilStreamTail()
                     do {
                         let transcriptSnapshot = transcript
                         let output = try await streamWithTimeout(
+                            runGeneration: currentRunGeneration,
                             seconds: limits.seatTimeoutSeconds,
                             timeoutLabel: seat.name
                         ) {
                             try await self.stream(
+                                runGeneration: currentRunGeneration,
                                 speaker: seat,
                                 systemPrompt: self.seatSystemPrompt(seat: seat),
                                 userPrompt: self.seatPrompt(
@@ -910,7 +1078,11 @@ final class IOSCouncilRoomRunner {
                                 request: request,
                                 temperature: request.mode == .debate ? 0.55 : 0.75,
                                 onUpdate: { text in
-                                    onEvent(.updateMessage(id: messageId, body: text.isEmpty ? "思考中..." : text, status: .speaking))
+                                    let body = text.isEmpty ? "思考中..." : text
+                                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        latestMessage.body = text
+                                    }
+                                    onEvent(.updateMessage(id: messageId, body: body, status: .speaking))
                                 }
                             )
                         }
@@ -918,9 +1090,17 @@ final class IOSCouncilRoomRunner {
                         transcript.append("[\(seat.name)] \(output)")
                         taskStore.appendLog(id: task.id, chunk: "[\(seat.name)] \(output)\n\n")
                     } catch {
+                        if activeRunGeneration != currentRunGeneration
+                            || error is CancellationError
+                            || (error as? IOSCouncilRoomRunnerError) == .cancelled {
+                            throw error
+                        }
                         let reason = error.localizedDescription
                         failedSeatIds.insert(seat.id)
-                        onEvent(.updateMessage(id: messageId, body: "席位失败：\(reason)", status: .failed))
+                        let failedBody = latestMessage.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? "席位失败：\(reason)"
+                            : latestMessage.body
+                        onEvent(.updateMessage(id: messageId, body: failedBody, status: .failed))
                         onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
                         taskStore.appendLog(id: task.id, chunk: "[\(seat.name)] failed: \(reason)\n\n")
                     }
@@ -929,7 +1109,7 @@ final class IOSCouncilRoomRunner {
                 // 主持人轮末点评：非最后一轮时，主持人对本轮发言做点评
                 // （指出矛盾 / 下轮重点），让下一轮有递进方向。
                 if round < rounds {
-                    try checkCancelled()
+                    try checkCancelled(runGeneration: currentRunGeneration)
                     onEvent(.state("主持人轮末点评"))
                     onEvent(.append(dividerMessage("主持人轮末点评")))
                     let commentaryId = UUID()
@@ -943,13 +1123,16 @@ final class IOSCouncilRoomRunner {
                         status: .speaking
                     )))
                     onEvent(.roster([host] + activeSeats, activeSpeakerId: host.id, failedSpeakerIds: failedSeatIds))
+                    let latestCommentary = IOSCouncilStreamTail()
                     let roundTranscript = transcript.suffix(8).joined(separator: "\n\n")
                     do {
                         let commentary = try await streamWithTimeout(
+                            runGeneration: currentRunGeneration,
                             seconds: limits.seatTimeoutSeconds,
                             timeoutLabel: "主持人点评"
                         ) {
                             try await self.stream(
+                                runGeneration: currentRunGeneration,
                                 speaker: host,
                                 systemPrompt: self.hostSystemPrompt(settings: settings),
                                 userPrompt: Self.roundEndCommentaryPrompt(
@@ -961,7 +1144,11 @@ final class IOSCouncilRoomRunner {
                                 request: request,
                                 temperature: 0.45,
                                 onUpdate: { text in
-                                    onEvent(.updateMessage(id: commentaryId, body: text.isEmpty ? "点评中..." : text, status: .speaking))
+                                    let body = text.isEmpty ? "点评中..." : text
+                                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        latestCommentary.body = text
+                                    }
+                                    onEvent(.updateMessage(id: commentaryId, body: body, status: .speaking))
                                 }
                             )
                         }
@@ -969,7 +1156,15 @@ final class IOSCouncilRoomRunner {
                         transcript.append("[\(host.name) · 第\(round)轮点评] \(commentary)")
                         taskStore.appendLog(id: task.id, chunk: "[\(host.name) · 第\(round)轮点评] \(commentary)\n\n")
                     } catch {
-                        onEvent(.updateMessage(id: commentaryId, body: "点评失败：\(error.localizedDescription)", status: .failed))
+                        if activeRunGeneration != currentRunGeneration
+                            || error is CancellationError
+                            || (error as? IOSCouncilRoomRunnerError) == .cancelled {
+                            throw error
+                        }
+                        let failedBody = latestCommentary.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? "点评失败：\(error.localizedDescription)"
+                            : latestCommentary.body
+                        onEvent(.updateMessage(id: commentaryId, body: failedBody, status: .failed))
                     }
                     onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
                 }
@@ -986,7 +1181,7 @@ final class IOSCouncilRoomRunner {
                 // 最后一轮不点评，直接进综合（阶段 6）。
             }
 
-            try checkCancelled()
+            try checkCancelled(runGeneration: currentRunGeneration)
             onEvent(.state("主持总结中"))
             onEvent(.append(dividerMessage("主持总结")))
             let summaryId = UUID()
@@ -1001,6 +1196,7 @@ final class IOSCouncilRoomRunner {
             )))
             onEvent(.roster([host] + activeSeats, activeSpeakerId: host.id, failedSpeakerIds: failedSeatIds))
             let summary = try await stream(
+                runGeneration: currentRunGeneration,
                 speaker: host,
                 systemPrompt: hostSystemPrompt(settings: settings),
                 userPrompt: synthesisPrompt(
@@ -1045,7 +1241,9 @@ final class IOSCouncilRoomRunner {
                 transcript: finalTranscript
             )
         } catch {
-            let isCancel = isCancelled || error is CancellationError || (error as? IOSCouncilRoomRunnerError) == .cancelled
+            let isCancel = activeRunGeneration != currentRunGeneration
+                || error is CancellationError
+                || (error as? IOSCouncilRoomRunnerError) == .cancelled
             let status: IOSAdvancedTaskStatus = isCancel ? .cancelled : .failed
             let message = isCancel ? "模型议会已取消。" : error.localizedDescription
             onEvent(.state(isCancel ? "已取消" : "失败"))
@@ -1178,6 +1376,7 @@ final class IOSCouncilRoomRunner {
     }
 
     private func stream(
+        runGeneration: UInt64,
         speaker: IOSCouncilRoomSpeaker,
         systemPrompt: String,
         userPrompt: String,
@@ -1185,7 +1384,7 @@ final class IOSCouncilRoomRunner {
         temperature: Float,
         onUpdate: @escaping @MainActor (String) -> Void
     ) async throws -> String {
-        try checkCancelled()
+        try checkCancelled(runGeneration: runGeneration)
         let params = makeTextGenerationParams(
             modelId: speaker.modelId,
             reasoning: speaker.reasoning,
@@ -1202,7 +1401,7 @@ final class IOSCouncilRoomRunner {
             params: params,
             onUpdate: onUpdate
         )
-        try checkCancelled()
+        try checkCancelled(runGeneration: runGeneration)
         if text.lowercased().hasPrefix("error:") {
             throw IOSCouncilRoomRunnerError.hostFailed(text)
         }
@@ -1210,6 +1409,7 @@ final class IOSCouncilRoomRunner {
     }
 
     private func streamWithTimeout(
+        runGeneration: UInt64,
         seconds: Int,
         timeoutLabel: String,
         operation: @escaping @Sendable () async throws -> String
@@ -1230,7 +1430,9 @@ final class IOSCouncilRoomRunner {
                 return result
             } catch {
                 group.cancelAll()
-                streamer.cancel()
+                if activeRunGeneration == runGeneration {
+                    streamer.cancel()
+                }
                 throw error
             }
         }
@@ -1434,9 +1636,11 @@ final class IOSCouncilRoomRunner {
         }
     }
 
-    private func checkCancelled() throws {
-        if isCancelled || Task.isCancelled {
-            streamer.cancel()
+    private func checkCancelled(runGeneration: UInt64) throws {
+        if activeRunGeneration != runGeneration || Task.isCancelled {
+            if activeRunGeneration == runGeneration {
+                streamer.cancel()
+            }
             throw IOSCouncilRoomRunnerError.cancelled
         }
     }

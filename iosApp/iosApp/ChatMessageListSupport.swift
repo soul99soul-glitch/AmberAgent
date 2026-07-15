@@ -6,6 +6,9 @@ enum ChatLayout {
     static let userMaxWidth: CGFloat = 300
     static let userMessageRowVerticalPadding: CGFloat = 10
     static let followBottomGap: CGFloat = 96
+    /// 用户真实拖拽/惯性结束在底部附近时恢复自动跟随的意图阈值。
+    /// 它必须大于 `bottomStickThreshold`：后者只描述物理 true-bottom，不能混用。
+    static let nearBottomResumeThreshold = followBottomGap
     static let bottomStickThreshold: CGFloat = 40
     /// 内容底部的静止留白:进入会话定位、回到底部时最后一条与输入框之间留出的小距离,
     /// 和「手动上推→回弹」的自然停靠位一致(不贴死输入框)。

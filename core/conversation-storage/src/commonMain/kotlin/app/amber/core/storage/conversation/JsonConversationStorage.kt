@@ -50,7 +50,12 @@ class JsonConversationStorage(
         ensureBaseDir()
         val cached = readIndex()
         if (cached != null) {
-            return@withLock orderSummaries(cached)
+            // index.json is a derived cache. A delete can remove the conversation
+            // file before an index write fails, so never surface entries without
+            // a backing file and repair that stale cache opportunistically.
+            val existing = cached.filter { conversationFile(it.id).exists() }
+            if (existing.size != cached.size) runCatching { writeIndex(existing) }
+            return@withLock orderSummaries(existing)
         }
         // index 损坏或缺失：从 {id}.json 扫描重建。
         val rebuilt = rebuildIndex()

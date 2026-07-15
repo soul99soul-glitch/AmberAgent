@@ -3,6 +3,61 @@ import XCTest
 @testable import iosApp
 
 final class NovelSessionReplayTests: XCTestCase {
+    func testPresentationBufferPreservesFIFOReplacementAndRunIdentity() {
+        let runID = NovelRunID()
+        let messageID = NovelMessageID()
+        let bindingToken = UUID()
+        var buffer = NovelSessionPresentationBuffer(
+            runID: runID,
+            messageID: messageID,
+            bindingToken: bindingToken
+        )
+
+        buffer.append("旧前缀")
+        buffer.replace(with: "完整替换")
+        buffer.append("与后续")
+
+        XCTAssertEqual(buffer.mergedContent(displayedContent: "已显示"), "完整替换与后续")
+        XCTAssertTrue(buffer.matches(
+            runID: runID,
+            messageID: messageID,
+            bindingToken: bindingToken
+        ))
+        XCTAssertFalse(buffer.matches(
+            runID: NovelRunID(),
+            messageID: messageID,
+            bindingToken: bindingToken
+        ))
+    }
+
+    func testStreamingFollowAnimationHonorsReduceMotionAndLiveState() {
+        XCTAssertTrue(NovelSessionFollowAnimationPolicy.shouldAnimate(
+            isStreaming: true,
+            reduceMotion: false
+        ))
+        XCTAssertFalse(NovelSessionFollowAnimationPolicy.shouldAnimate(
+            isStreaming: false,
+            reduceMotion: false
+        ))
+        XCTAssertFalse(NovelSessionFollowAnimationPolicy.shouldAnimate(
+            isStreaming: true,
+            reduceMotion: true
+        ))
+    }
+
+    func testDragResumeUsesSharedNearBottomThreshold() {
+        let threshold = ChatLayout.nearBottomResumeThreshold
+
+        XCTAssertEqual(threshold, 96)
+        XCTAssertGreaterThan(threshold, ChatLayout.bottomStickThreshold)
+        XCTAssertTrue(NovelSessionBottomProximityPolicy.isNearBottom(
+            distanceToBottom: threshold
+        ))
+        XCTAssertFalse(NovelSessionBottomProximityPolicy.isNearBottom(
+            distanceToBottom: threshold + 0.5
+        ))
+    }
+
     func testLongHistoryWindowStartsAtRecentRowsAndExpandsInBoundedPages() {
         XCTAssertEqual(
             NovelSessionHistoryWindowPolicy.startIndex(
@@ -933,6 +988,22 @@ final class NovelSessionReplayTests: XCTestCase {
         ))
     }
 
+    func testUserDragEndingNearBottomCommitsSemanticBottomFollow() {
+        let state = NovelSessionBottomFollowState(
+            mode: .browsingHistory,
+            showsBottomButton: true
+        )
+
+        let transition = NovelSessionBottomFollowPolicy.reduce(
+            state: state,
+            event: .userDragEnded(isAtBottom: true)
+        )
+
+        XCTAssertEqual(transition.state.mode, .followingBottom)
+        XCTAssertFalse(transition.state.showsBottomButton)
+        XCTAssertTrue(transition.commands.contains(.followBottom(animated: false)))
+    }
+
     func testSessionViewFeedsMeasuredTerminalContentGrowthIntoFollowPolicy() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -943,9 +1014,48 @@ final class NovelSessionReplayTests: XCTestCase {
         )
 
         XCTAssertTrue(source.contains("contentHeight: geometry.contentSize.height"))
-        XCTAssertTrue(source.contains("abs(oldValue.contentHeight - newValue.contentHeight) > 0.5"))
-        XCTAssertTrue(source.contains("dispatchFollowEvent(.terminalLayoutChanged)"))
+        XCTAssertTrue(source.contains("NovelSessionMeasuredGrowthPolicy.event("))
+        XCTAssertTrue(source.contains("dispatchFollowEvent(event)"))
         XCTAssertTrue(source.contains("!viewModel.retryableBranchPendingOperations.isEmpty"))
+        XCTAssertTrue(source.contains("dispatchFollowEvent(.userDragEnded(isAtBottom: latestNearBottom))"))
+        XCTAssertTrue(source.contains("ChatLayout.nearBottomResumeThreshold"))
+    }
+
+    func testMeasuredContentGrowthUsesLiveOrTerminalFollowEvent() {
+        XCTAssertEqual(
+            NovelSessionMeasuredGrowthPolicy.event(
+                previousContentHeight: 120,
+                currentContentHeight: 132,
+                userDragging: false,
+                isLiveTail: true
+            ),
+            .streamDelta
+        )
+        XCTAssertEqual(
+            NovelSessionMeasuredGrowthPolicy.event(
+                previousContentHeight: 132,
+                currentContentHeight: 148,
+                userDragging: false,
+                isLiveTail: false
+            ),
+            .terminalLayoutChanged
+        )
+        XCTAssertNil(
+            NovelSessionMeasuredGrowthPolicy.event(
+                previousContentHeight: 148,
+                currentContentHeight: 164,
+                userDragging: true,
+                isLiveTail: true
+            )
+        )
+        XCTAssertNil(
+            NovelSessionMeasuredGrowthPolicy.event(
+                previousContentHeight: 164,
+                currentContentHeight: 152,
+                userDragging: false,
+                isLiveTail: true
+            )
+        )
     }
 
 }

@@ -1,108 +1,184 @@
 import XCTest
+import ActivityKit
 @testable import iosApp
 
 final class AgentActivityPresentationTests: XCTestCase {
-    func testDefaultRunningPresentationMatchesAcceptedStructure() {
-        let presentation = AgentActivityPresentation.defaultRunning
+    func testIndeterminateAgentWorkHasNoProgress() {
+        let presentation = AgentActivityPresentation.generatingResponse(
+            modelName: "private-model-name"
+        )
 
-        XCTAssertEqual(presentation.statusText, "Amber 正在阅读 Apple 文档")
-        XCTAssertEqual(presentation.toolTitle, "网页搜索")
+        XCTAssertEqual(presentation.kind, .response)
         XCTAssertEqual(presentation.phase, .running)
-        XCTAssertEqual(presentation.steps.map(\.state), [.done, .current, .pending])
-        XCTAssertEqual(presentation.steps.map(\.title), [
-            "搜索 ActivityKit",
-            "阅读 Apple 文档",
-            "生成适配方案"
-        ])
+        XCTAssertEqual(presentation.stage, .generating)
+        XCTAssertEqual(presentation.metric, .none)
+        XCTAssertNil(presentation.progressFraction)
+        XCTAssertFalse(presentation.showsProgressRing)
+        XCTAssertFalse(String(describing: presentation).contains("private-model-name"))
     }
 
-    func testPresentationKeepsAtMostThreeSteps() {
-        let presentation = AgentActivityPresentation(
-            statusText: "Amber 正在处理",
-            toolTitle: "网页搜索",
-            phase: .running,
-            steps: [
-                AgentActivityStep(id: "1", title: "搜索资料", state: .done),
-                AgentActivityStep(id: "2", title: "阅读文档", state: .current),
-                AgentActivityStep(id: "3", title: "生成方案", state: .pending),
-                AgentActivityStep(id: "4", title: "整理结果", state: .pending)
-            ]
+    func testMeasurableWorkUsesOnlyRealNumeratorAndDenominator() throws {
+        let presentation = AgentActivityPresentation.measurablePreview(
+            kind: .document,
+            completed: 12,
+            total: 30,
+            unit: .item
         )
 
-        XCTAssertEqual(presentation.steps.map(\.id), ["1", "2", "3"])
+        XCTAssertEqual(
+            presentation.metric,
+            .progress(completed: 12, total: 30, unit: .item)
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(presentation.progressFraction),
+            0.4,
+            accuracy: 0.000_001
+        )
+        XCTAssertTrue(presentation.showsProgressRing)
+        XCTAssertEqual(presentation.percentValue, 40)
     }
 
-    func testSensitiveRawDetailsDegradeToGenericPublicSummaries() {
-        let presentation = AgentActivityPresentation(
-            statusText: "https://developer.apple.com/documentation/activitykit?token=abc",
-            toolTitle: "/Users/example/project/secrets.env",
-            phase: .running,
-            steps: [
-                AgentActivityStep(title: "curl https://internal.example.com?token=abc", state: .current),
-                AgentActivityStep(title: "read /private/var/mobile/file.txt", state: .pending),
-                AgentActivityStep(title: "Authorization: Bearer secret", state: .pending)
-            ]
+    func testInvalidMetricsDegradeToNoMetric() {
+        XCTAssertEqual(
+            AgentActivityMetric.validatedProgress(completed: -1, total: 0, unit: .item),
+            .none
+        )
+        XCTAssertEqual(
+            AgentActivityMetric.validatedProgress(completed: 31, total: 30, unit: .item),
+            .none
+        )
+        XCTAssertEqual(
+            AgentActivityMetric.count(completed: -1, unit: .source).validated,
+            .none
+        )
+    }
+
+    func testToolFactoryMapsRawNamesToFinitePublicSemantics() {
+        XCTAssertEqual(
+            AgentActivityPresentation.runningTool(toolName: "search_web").kind,
+            .research
+        )
+        XCTAssertEqual(
+            AgentActivityPresentation.runningTool(toolName: "scrape_web").stage,
+            .readingWeb
+        )
+        XCTAssertEqual(
+            AgentActivityPresentation.runningTool(toolName: "generate_image").kind,
+            .imageGeneration
         )
 
-        XCTAssertEqual(presentation.statusText, "处理敏感配置")
-        XCTAssertEqual(presentation.toolTitle, "读取文件")
-        XCTAssertEqual(presentation.steps.map(\.title), [
-            "处理敏感配置",
-            "读取文件",
-            "处理敏感配置"
-        ])
-    }
-
-    func testAdditionalSensitivePatternsAreNotDisplayedVerbatim() {
-        let presentation = AgentActivityPresentation(
-            statusText: "Bearer abc.def.ghi",
-            toolTitle: "contact user@example.com",
-            phase: .waitingForUser,
-            steps: [
-                AgentActivityStep(title: "connect 192.168.0.12", state: .current),
-                AgentActivityStep(title: "open ~/.ssh/id_rsa", state: .pending),
-                AgentActivityStep(title: "sk-test-123", state: .pending)
-            ]
+        let privateTool = AgentActivityPresentation.runningTool(
+            toolName: "curl https://internal.example.com?token=secret"
         )
-
-        XCTAssertEqual(presentation.statusText, "处理敏感配置")
-        XCTAssertEqual(presentation.toolTitle, "处理私密信息")
-        XCTAssertEqual(presentation.steps.map(\.title), [
-            "处理私密信息",
-            "读取文件",
-            "处理敏感配置"
-        ])
+        XCTAssertEqual(privateTool.kind, .workflow)
+        XCTAssertEqual(privateTool.stage, .runningTool)
+        XCTAssertFalse(String(describing: privateTool).contains("internal.example.com"))
+        XCTAssertFalse(String(describing: privateTool).contains("secret"))
     }
 
-    func testRawPromptLikeTextFallsBackInsteadOfTruncating() {
-        let presentation = AgentActivityPresentation(
-            statusText: "where did I put my apartment door code",
-            toolTitle: "internal.company.example",
-            phase: .running,
-            steps: [
-                AgentActivityStep(title: "python script.py --password hunter2", state: .current),
-                AgentActivityStep(title: "cat secrets.txt", state: .pending),
-                AgentActivityStep(title: "summarize private legal notes", state: .pending)
-            ]
+    func testStateFactoriesSelectOnlySafeActions() {
+        XCTAssertEqual(AgentActivityPresentation.waitingForUser().action, .openConfirmation)
+        XCTAssertEqual(AgentActivityPresentation.waitingForUser(kind: .memory).kind, .memory)
+        XCTAssertEqual(AgentActivityPresentation.waitingForUser(kind: .research).kind, .research)
+        XCTAssertEqual(AgentActivityPresentation.waitingForUser(kind: .document).kind, .document)
+        XCTAssertEqual(AgentActivityPresentation.completed().action, .viewResult)
+        XCTAssertEqual(AgentActivityPresentation.failed().action, .openTask)
+        XCTAssertEqual(AgentActivityPresentation.selectedFileReadFailed.action, .openTask)
+        XCTAssertNil(AgentActivityPresentation.cancelled().action)
+    }
+
+    func testTerminalPresentationPreservesTheRunKind() {
+        let running = AgentActivityPresentation.runningTool(toolName: "generate_image")
+
+        XCTAssertEqual(
+            AgentActivityPresentation.failed().preservingKind(from: running).kind,
+            .imageGeneration
         )
-
-        XCTAssertEqual(presentation.statusText, "Amber 正在处理")
-        XCTAssertEqual(presentation.toolTitle, "工具执行")
-        XCTAssertEqual(presentation.steps.map(\.title), [
-            "处理敏感配置",
-            "处理敏感配置",
-            "处理任务"
-        ])
+        XCTAssertEqual(
+            AgentActivityPresentation.cancelled().preservingKind(from: running).kind,
+            .imageGeneration
+        )
     }
 
-    func testStateFactoriesCoverWaitingCompletedFailedAndCancelled() {
-        XCTAssertEqual(AgentActivityPresentation.waitingForUser().phase, .waitingForUser)
-        XCTAssertEqual(AgentActivityPresentation.completed().phase, .completed)
-        XCTAssertEqual(AgentActivityPresentation.failed().phase, .failed)
-        XCTAssertEqual(AgentActivityPresentation.cancelled().phase, .cancelled)
-        XCTAssertEqual(AgentActivityPresentation.readingSelectedFile.phase, .running)
-        XCTAssertEqual(AgentActivityPresentation.selectedFileReadCompleted.phase, .completed)
-        XCTAssertEqual(AgentActivityPresentation.selectedFileReadFailed.phase, .failed)
-        XCTAssertEqual(AgentActivityPresentation.selectedFileReadWaitingForUser.phase, .waitingForUser)
+    func testStaleDisplayOverridesOnlyActivePhases() {
+        XCTAssertEqual(
+            AgentActivityPresentation.defaultRunning.displayPhase(isStale: true),
+            .stale
+        )
+        XCTAssertEqual(
+            AgentActivityPresentation.reconnecting().displayPhase(isStale: true),
+            .stale
+        )
+        XCTAssertEqual(
+            AgentActivityPresentation.completed().displayPhase(isStale: true),
+            .completed
+        )
+    }
+
+    func testLifecyclePolicyMakesOnlyActiveWorkStale() {
+        let now = Date(timeIntervalSince1970: 1_000)
+
+        XCTAssertEqual(
+            AgentActivityLifecyclePolicy.staleDate(for: .running, now: now),
+            now.addingTimeInterval(180)
+        )
+        XCTAssertEqual(
+            AgentActivityLifecyclePolicy.staleDate(for: .reconnecting, now: now),
+            now.addingTimeInterval(60)
+        )
+        XCTAssertNil(AgentActivityLifecyclePolicy.staleDate(for: .waitingForUser, now: now))
+        XCTAssertGreaterThan(
+            AgentActivityLifecyclePolicy.relevanceScore(for: .waitingForUser),
+            AgentActivityLifecyclePolicy.relevanceScore(for: .running)
+        )
+    }
+
+    func testRestoreRequiresBothDurableOwnershipAndUpdatableActivityState() {
+        let ownedRunIds: Set<String> = ["background-run"]
+
+        XCTAssertTrue(AgentActivityLifecyclePolicy.shouldRestore(
+            runId: "background-run",
+            ownedRunIds: ownedRunIds,
+            activityState: .active
+        ))
+        XCTAssertTrue(AgentActivityLifecyclePolicy.shouldRestore(
+            runId: "background-run",
+            ownedRunIds: ownedRunIds,
+            activityState: .stale
+        ))
+        XCTAssertFalse(AgentActivityLifecyclePolicy.shouldRestore(
+            runId: "orphan-run",
+            ownedRunIds: ownedRunIds,
+            activityState: .active
+        ))
+        XCTAssertFalse(AgentActivityLifecyclePolicy.shouldRestore(
+            runId: "background-run",
+            ownedRunIds: ownedRunIds,
+            activityState: .ended
+        ))
+    }
+
+    func testTerminalDismissalKeepsFailuresLongerThanCompletions() {
+        XCTAssertEqual(
+            AgentActivityLifecyclePolicy.lockScreenDismissalDelay(for: .completed),
+            20
+        )
+        XCTAssertEqual(
+            AgentActivityLifecyclePolicy.lockScreenDismissalDelay(for: .failed),
+            60
+        )
+        XCTAssertEqual(
+            AgentActivityLifecyclePolicy.lockScreenDismissalDelay(for: .cancelled),
+            6
+        )
+    }
+
+    func testNewPayloadDoesNotEncodeLegacyTextFields() throws {
+        let data = try JSONEncoder().encode(AgentActivityPresentation.defaultRunning)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertFalse(json.contains("statusText"))
+        XCTAssertFalse(json.contains("toolTitle"))
+        XCTAssertFalse(json.contains("steps"))
     }
 }

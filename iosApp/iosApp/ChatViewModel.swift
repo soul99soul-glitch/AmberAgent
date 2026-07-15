@@ -221,13 +221,77 @@ final class ChatViewModel {
 
     @discardableResult
     func prepareForConversationChange(to targetConversationId: KotlinUuid?) -> Bool {
-        guard generationCoordinator.isRunning else { return true }
-        if let targetConversationId,
-           let activeConversationId = generationCoordinator.activeConversationId,
-           String(describing: targetConversationId) == String(describing: activeConversationId) {
-            return true
+        let canChangeConversation: Bool
+        if !generationCoordinator.isRunning {
+            canChangeConversation = true
+        } else if let targetConversationId,
+                  let activeConversationId = generationCoordinator.activeConversationId,
+                  String(describing: targetConversationId) == String(describing: activeConversationId) {
+            canChangeConversation = true
+        } else {
+            canChangeConversation = handoffGenerationToBackgroundIfNeeded()
         }
-        return handoffGenerationToBackgroundIfNeeded()
+        guard canChangeConversation else { return false }
+
+        let changesConversation: Bool
+        if let targetConversationId {
+            changesConversation = currentConversationId.map {
+                String(describing: $0) != String(describing: targetConversationId)
+            } ?? true
+        } else {
+            changesConversation = true
+        }
+        if changesConversation {
+            discardSelectedFileContextForConversationChange()
+        }
+        return true
+    }
+
+    func recordedAgentRunBelongsToConversation(
+        runId: String,
+        conversationId: String
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            db.agentRuntimeDao().getRun(id: runId) { result, _ in
+                let belongs = result?.conversationId?.caseInsensitiveCompare(conversationId) == .orderedSame
+                continuation.resume(returning: belongs)
+            }
+        }
+    }
+
+    func canOpenActivityConfirmation(runId: String) -> Bool {
+        generationCoordinator.hasPendingApproval(runId: runId)
+    }
+
+    func prepareForConversationDeletion(_ conversationId: KotlinUuid) {
+        if currentConversationId.map({ String(describing: $0) }) == String(describing: conversationId) {
+            discardSelectedFileContextForConversationChange()
+            if generationCoordinator.activeConversationId.map({ String(describing: $0) })
+                == String(describing: conversationId) {
+                cancelGeneration()
+            }
+        }
+        IOSChatBackgroundGenerationCoordinator.shared.cancelJobs(conversationId: conversationId)
+    }
+
+    private func discardSelectedFileContextForConversationChange() {
+        pendingSelectedFilePreview = nil
+        selectedFileContextError = nil
+        guard let requestId = attachRequestId else {
+            isAttachingSelectedFile = false
+            return
+        }
+
+        attachRequestId = nil
+        isAttachingSelectedFile = false
+        let activityRunId = "tool-\(requestId.uuidString)"
+        Task { @MainActor [liveActivityController] in
+            await liveActivityController.end(
+                runId: activityRunId,
+                presentation: .cancelled(toolTitle: "文档读取"),
+                dismissalDelay: 1
+            )
+        }
     }
 
     var configurationIssue: ChatConfigurationIssue? {
@@ -397,8 +461,12 @@ final class ChatViewModel {
                         conversationId: conversationId
                     )
                 },
-                startLiveActivity: { [weak self] runId, presentation in
-                    self?.startLiveActivity(runId: runId, presentation: presentation)
+                startLiveActivity: { [weak self] runId, conversationId, presentation in
+                    self?.startLiveActivity(
+                        runId: runId,
+                        conversationId: conversationId,
+                        presentation: presentation
+                    )
                 },
                 saveMiniAppIfPresent: { [weak self] messages, conversationId in
                     self?.saveMiniAppIfPresent(in: messages, conversationId: conversationId)
@@ -1006,7 +1074,11 @@ final class ChatViewModel {
         attachRequestId = requestId
         isAttachingSelectedFile = true
         let activityRunId = "tool-\(requestId.uuidString)"
-        startLiveActivity(runId: activityRunId, presentation: .readingSelectedFile)
+        startLiveActivity(
+            runId: activityRunId,
+            conversationId: currentConversationId,
+            presentation: .readingSelectedFile
+        )
         defer {
             if attachRequestId == requestId {
                 isAttachingSelectedFile = false
@@ -1030,7 +1102,7 @@ final class ChatViewModel {
             selectedFileContextError = reason
             await liveActivityController.end(
                 runId: activityRunId,
-                presentation: .selectedFileReadWaitingForUser,
+                presentation: .selectedFileReadFailed,
                 dismissalDelay: 6
             )
         case .denied(let reason):
@@ -1687,9 +1759,17 @@ final class ChatViewModel {
     }
 #endif
 
-    private func startLiveActivity(runId: String, presentation: AgentActivityPresentation) {
+    private func startLiveActivity(
+        runId: String,
+        conversationId: KotlinUuid?,
+        presentation: AgentActivityPresentation
+    ) {
         guard liveActivityPreferenceEnabled else { return }
-        liveActivityController.start(runId: runId, presentation: presentation)
+        liveActivityController.start(
+            runId: runId,
+            conversationId: conversationId?.toHexDashString(),
+            presentation: presentation
+        )
     }
 
     static func promptText(

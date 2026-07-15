@@ -16,14 +16,20 @@ enum IOSRunRecovery {
     /// launch (after the database is available). Returns the count reclassified.
     /// Reason is recorded for the UI to display.
     @discardableResult
-    static func recoverInterruptedRuns(reason: String = "process_killed", now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) async -> Int {
+    static func recoverInterruptedRuns(
+        excludingRunIds: Set<String> = [],
+        reason: String = "process_killed",
+        now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+    ) async -> Int {
         let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
         // listUnfinished returns rows with status IN ('running','awaiting_permission').
         // Extract only the Sendable runId strings inside the callback to avoid
         // crossing isolation with the non-Sendable KMP [AgentRunEntity].
         let runIds: [String] = await withCheckedContinuation { (cont: CheckedContinuation<[String], Never>) in
             dao.listUnfinished { result, _ in
-                let ids = (result ?? []).map { $0.runId }
+                let ids = (result ?? []).map { $0.runId }.filter {
+                    !excludingRunIds.contains($0)
+                }
                 cont.resume(returning: ids)
             }
         }

@@ -33,6 +33,31 @@ enum NovelComposerIntent: String, CaseIterable, Identifiable {
     }
 }
 
+enum NovelSessionFollowAnimationPolicy {
+    static func shouldAnimate(isStreaming: Bool, reduceMotion: Bool) -> Bool {
+        isStreaming && !reduceMotion
+    }
+}
+
+enum NovelSessionBottomProximityPolicy {
+    static func isNearBottom(distanceToBottom: CGFloat) -> Bool {
+        distanceToBottom <= ChatLayout.nearBottomResumeThreshold
+    }
+}
+
+enum NovelSessionMeasuredGrowthPolicy {
+    static func event(
+        previousContentHeight: CGFloat,
+        currentContentHeight: CGFloat,
+        userDragging: Bool,
+        isLiveTail: Bool
+    ) -> NovelSessionBottomFollowEvent? {
+        guard currentContentHeight - previousContentHeight > 0.5,
+              !userDragging else { return nil }
+        return isLiveTail ? .streamDelta : .terminalLayoutChanged
+    }
+}
+
 struct NovelSessionView: View {
     let workspace: NovelCreationViewModel
     let viewModel: NovelSessionViewModel
@@ -48,9 +73,11 @@ struct NovelSessionView: View {
     let onFork: (NovelCheckpointID) -> Void
     let onOpenSettingProposals: (NovelSettingProposalRoute) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var scrollPosition = ScrollPosition()
     @State private var followState = NovelSessionBottomFollowState(mode: .followingBottom)
     @State private var latestAtBottom = true
+    @State private var latestNearBottom = true
     @State private var userDragging = false
     @State private var terminalSettleTask: Task<Void, Never>?
     @State private var composerInputHeight: CGFloat = 40
@@ -242,7 +269,7 @@ struct NovelSessionView: View {
             case .idle:
                 guard userDragging else { return }
                 userDragging = false
-                dispatchFollowEvent(.userDragEnded(isAtBottom: latestAtBottom))
+                dispatchFollowEvent(.userDragEnded(isAtBottom: latestNearBottom))
             case .animating, .decelerating:
                 break
             @unknown default:
@@ -250,20 +277,27 @@ struct NovelSessionView: View {
             }
         }
         .onScrollGeometryChange(for: NovelSessionScrollGeometrySignal.self) { geometry in
-            NovelSessionScrollGeometrySignal(
+            let distanceToBottom = geometry.contentSize.height - geometry.visibleRect.maxY
+            return NovelSessionScrollGeometrySignal(
                 contentHeight: geometry.contentSize.height,
-                isAtBottom: geometry.contentSize.height - geometry.visibleRect.maxY <=
-                    ChatLayout.bottomStickThreshold
+                isAtBottom: distanceToBottom <= ChatLayout.bottomStickThreshold,
+                isNearBottom: NovelSessionBottomProximityPolicy.isNearBottom(
+                    distanceToBottom: distanceToBottom
+                )
             )
         } action: { oldValue, newValue in
             latestAtBottom = newValue.isAtBottom
+            latestNearBottom = newValue.isNearBottom
             if oldValue.isAtBottom != newValue.isAtBottom {
                 dispatchFollowEvent(.viewportChanged(isAtBottom: newValue.isAtBottom))
             }
-            if abs(oldValue.contentHeight - newValue.contentHeight) > 0.5,
-               !userDragging,
-               !isLiveTailPhase(listSignal.activeTailPhase) {
-                dispatchFollowEvent(.terminalLayoutChanged)
+            if let event = NovelSessionMeasuredGrowthPolicy.event(
+                previousContentHeight: oldValue.contentHeight,
+                currentContentHeight: newValue.contentHeight,
+                userDragging: userDragging,
+                isLiveTail: isLiveTailPhase(listSignal.activeTailPhase)
+            ) {
+                dispatchFollowEvent(event)
             }
         }
     }
@@ -821,6 +855,13 @@ struct NovelSessionView: View {
                 withAnimation(.easeOut(duration: 0.2)) {
                     scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
                 }
+            } else if NovelSessionFollowAnimationPolicy.shouldAnimate(
+                isStreaming: viewModel.isStreaming,
+                reduceMotion: accessibilityReduceMotion
+            ) {
+                withAnimation(.linear(duration: 0.08)) {
+                    scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
+                }
             } else {
                 var transaction = Transaction()
                 transaction.animation = nil
@@ -860,6 +901,7 @@ private struct NovelSessionListSignal: Equatable {
 private struct NovelSessionScrollGeometrySignal: Equatable {
     let contentHeight: CGFloat
     let isAtBottom: Bool
+    let isNearBottom: Bool
 }
 
 private enum NovelSessionQuickStartRecovery {

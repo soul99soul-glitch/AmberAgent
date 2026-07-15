@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -9,7 +9,7 @@ Last updated: 2026-07-14
 - Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 当前有未提交的小说创作输入区、项目面板、剧情状态自动同步与长会话/项目切换性能改动；另保留既有 `iosApp/vendor/SwiftStreamingMarkdown/Package.resolved` 修改和 4 份未跟踪旧 handoff，不属于本轮修改范围。
+- Worktree: 当前同时包含本轮 iOS 流式展示/滚动收敛改动与并行的 Live Activity / Dynamic Island 未提交改动；另保留既有 `iosApp/vendor/SwiftStreamingMarkdown/Package.resolved` 修改和 4 份未跟踪旧 handoff。各自范围不要互相覆盖。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,21 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-15 iOS Live Activity / Dynamic Island task beacon
+
+- Live Activity payload 已从原始状态文案、工具名、三步轨道和推测权重收敛为有限语义：任务类型、phase、stage、可选真实 metric、可选安全 action 与 run/conversation 归属。不可测任务不再显示百分比或进度环，Activity payload 不携带 prompt、模型名、URL、文件路径或工具参数。
+- Minimal、Compact、Expanded 与 Lock Screen 已按各自信息容量独立重组：Compact 只保留身份与一个最高优先级事实；Expanded/Lock Screen 最多一个导航链接；等待、重连、过期、完成、失败、取消均有非动画、非仅颜色的明确状态。中英文资源、VoiceOver 摘要和 4×8 Preview 状态矩阵已加入，两套 Widget target 编译通过。
+- Activity 深链限定为 `amber://activity/<run-id>?conversation=<id>&focus=<task|confirmation|result>`。URL 只会选择本地存在的 run-owned conversation 并进入现有 Chat，不批准或执行操作；缺失归属、未知会话、额外参数与非法 focus 均 fail closed。控制器统一 staleDate、relevance、相同更新节流、启动恢复、重复 Activity 收口和终态锁屏保留策略。
+- 运行所有权已经闭环：启动恢复每个 AppShell 只执行一次，只保留具有持久后台任务 owner 的 Activity；普通结束在 await 前进入 ending 集合，后台任务冷启动可从 payload 恢复并 adopt。success、provider/save failure、expiration、cancel 与 missing-payload 共享排他的 terminal owner；系统过期先释放 task map/active owner 并完成 BGTask，若保存已在途则以真实落盘结果决定 run/Activity 终态，不再出现“答案已保存但灵动岛失败”的双终态。删除会话只在磁盘提交后清理 owner；派生 index 会过滤并尽力修复已无实体文件的摘要。
+- Activity/deep-link/selected-file/recovery 的 24 项闭环套件通过；最终 expiration、save-failure ownership、BGTask 单次完成与删除失败 6 项定点通过，`JsonConversationStorageTest` 全类通过。Stable 测试目标和 Experimental GPL generic Simulator arm64 构建通过；`git diff --check` 通过。更宽聚合曾出现一个测试 worker 被系统终止，以及一条与本轮无关的既有后台 completion/前台消息合并断言失败，未伪装为全量绿。当前 Debug 包已于 19:30 覆盖安装并成功启动到连接的 iPhone Air；这只证明签名、装机和启动，32 组预览视觉检查、真机 Dynamic Island、Always-On、VoiceOver、Reduce Motion 与跨进程点击仍需设备证据。服务端 push-to-start 仍是需要独立 ActivityKit token 协议的后续项目。
+
+### 2026-07-15 iOS streaming presentation and scroll convergence
+
+- 标准 Chat 只补齐一条缺失契约：用户主动拖动后，距底部 `96pt` 内恢复跟随；真实“已到底”仍使用既有 `40pt` 阈值。现有 `48ms / 12 Character` 展示节拍、Markdown 增量渲染、逐字淡入和 measured-growth 滚动调度未改。曾对几何任务做合并实验，但长表格回放出现可重复性能回退，已撤销该实验，避免用新调度层掩盖问题。
+- 模型会议改为 FIFO `AsyncStream` 事件入口与单一 `48ms` 主线程展示会话，完成、失败、取消都以权威快照精确收尾；首个 assistant chunk 前不再把内部 user prompt 当成生成文本。每轮使用独立 generation；离页会解除既有/未来的提问 continuation，后台讨论仍可正常完成归档。消息区继续使用原生 `ScrollView`、永久底部 sentinel 和 `80ms` 线性跟随；异步 Markdown 增高、键盘导致的 viewport 缩小、用户近底松手及 canceled single-flight owner 的 pending 接力都走同一个语义底锚，不新增滚动协调器。活动讨论被归档或重置前会按 drain → terminalize → persist/archive → replace 收口。
+- 小说 Session 增加 keyed `48ms` 展示缓冲，delta、replacement、Quick Start 隐藏 JSON 与 terminal snapshot 共用同一所有权边界；终态始终回到领域层权威文本。实时与终态 Markdown 的异步正向增高分别进入既有 live/terminal 跟随事件；用户在 `96pt` 近底区松手会立即提交一次语义到底。跨分支时先只读验证目标，再线性化检查 project/source/run ownership 后中断旧 durable run；目标快照只读一次，中断后只刷新 project metadata，刷新失败则一次性恢复源分支权威快照。独立的 selection intent token 保证后发项目选择不会被内部 terminal refresh 或旧 branch 请求覆盖。
+- 最终绿色门禁拆为两个分片：其余 6 个受影响套件 161 passed、0 failed（`Test-iosApp-2026.07.15_19-18-09-+0800.xcresult`），强制 `ChatStreamReplayTests` 16 passed、1 expected skip、0 failed（`Test-iosApp-2026.07.15_19-16-06-+0800.xcresult`），合计 177 passed、1 expected skip。一次 178 项长进程在 176 passed 后由系统 signal kill 单个 Chat 回放，独立完整重跑已通过，未改 Chat 或放宽断言。三路最终只读审查均为 PASS、无剩余 P0-P2；Stable Debug generic iOS Simulator arm64 构建和 `git diff --check` 通过。当前 Debug 包已使用 Personal Team `89QRFX9548` 完成真机签名、覆盖安装并由 `devicectl` 成功启动到 iPhone Air；120Hz 长流手感、键盘/安全区、复杂 Markdown 异步增高、横向代码/表格手势与真实 provider 长输出仍需实际操作验证。
 
 ### 2026-07-14 novel state synchronization end-to-end closure
 

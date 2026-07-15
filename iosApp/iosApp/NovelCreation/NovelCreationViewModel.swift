@@ -47,6 +47,7 @@ final class NovelCreationViewModel {
 
     @ObservationIgnored private let creation: any NovelCreation
     @ObservationIgnored private var selectionToken = UUID()
+    @ObservationIgnored private var selectionIntentToken = UUID()
     @ObservationIgnored private var quickStartTasks: [NovelProjectID: Task<Void, Never>] = [:]
     @ObservationIgnored private var quickStartTaskRunIDs: [NovelProjectID: NovelRunID] = [:]
     @ObservationIgnored private var quickStartCreationStartRunIDs: Set<NovelRunID> = []
@@ -185,6 +186,8 @@ final class NovelCreationViewModel {
 
     @discardableResult
     func selectProject(_ projectID: NovelProjectID) async -> Bool {
+        let intentToken = UUID()
+        selectionIntentToken = intentToken
         let token = UUID()
         selectionToken = token
         isLoading = true
@@ -203,7 +206,8 @@ final class NovelCreationViewModel {
                 loadedBranch = nil
             }
             try Task.checkCancellation()
-            guard selectionToken == token else { return false }
+            guard selectionIntentToken == intentToken,
+                  selectionToken == token else { return false }
             selectedProjectID = projectID
             projectSnapshot = project
             selectedBranchID = branchID
@@ -217,7 +221,8 @@ final class NovelCreationViewModel {
         } catch is CancellationError {
             return false
         } catch {
-            guard selectionToken == token else { return false }
+            guard selectionIntentToken == intentToken,
+                  selectionToken == token else { return false }
             report(error)
             return false
         }
@@ -225,22 +230,89 @@ final class NovelCreationViewModel {
 
     func selectBranch(_ branchID: NovelBranchID) async {
         guard let projectID = selectedProjectID else { return }
-        let token = UUID()
-        selectionToken = token
+        let operationOwnerID = UUID()
+        guard acquireOperation(ownerID: operationOwnerID) else { return }
+        let intentToken = UUID()
+        selectionIntentToken = intentToken
+        selectionToken = UUID()
         isLoading = true
         defer {
-            if selectionToken == token { isLoading = false }
+            if self.operationOwnerID == operationOwnerID,
+               selectionIntentToken == intentToken {
+                isLoading = false
+            }
+            releaseOperation(ownerID: operationOwnerID)
         }
+        var interruptedSourceBranchID: NovelBranchID?
         do {
-            let snapshot = try await branch(projectID: projectID, branchID: branchID)
-            guard selectionToken == token,
+            let refreshedProject: NovelProjectSnapshot?
+            let snapshot: NovelBranchSnapshot
+            if selectedBranchID != branchID,
+               let sourceBranchID = selectedBranchID,
+               let activeRunID = branchSnapshot?.branch.activeRunID,
+               projectSnapshot?.activeRuns.contains(where: {
+                   $0.id == activeRunID &&
+                       $0.branchID == sourceBranchID &&
+                       $0.status == .running
+               }) == true {
+                let validatedTarget = try await branch(
+                    projectID: projectID,
+                    branchID: branchID
+                )
+                guard selectionIntentToken == intentToken,
+                      self.operationOwnerID == operationOwnerID,
+                      selectedProjectID == projectID,
+                      selectedBranchID == sourceBranchID,
+                      branchSnapshot?.branch.activeRunID == activeRunID,
+                      projectSnapshot?.activeRuns.contains(where: {
+                          $0.id == activeRunID &&
+                              $0.branchID == sourceBranchID &&
+                              $0.status == .running
+                      }) == true else { return }
+                try await interruptSessionRun(NovelCancelRunCommand(
+                    context: mutationContext(),
+                    projectID: projectID,
+                    runID: activeRunID,
+                    reason: .routeExit
+                ))
+                interruptedSourceBranchID = sourceBranchID
+                let project = try await project(id: projectID)
+                refreshedProject = project
+                snapshot = rebasedBranchSnapshot(validatedTarget, onto: project)
+            } else {
+                refreshedProject = nil
+                snapshot = try await branch(projectID: projectID, branchID: branchID)
+            }
+            guard selectionIntentToken == intentToken,
+                  self.operationOwnerID == operationOwnerID,
                   selectedProjectID == projectID else { return }
+            selectionToken = UUID()
+            if let refreshedProject {
+                projectSnapshot = refreshedProject
+            }
             selectedBranchID = branchID
             branchSnapshot = snapshot
             injectionPreview = nil
             errorMessage = nil
         } catch {
-            guard selectionToken == token else { return }
+            if let interruptedSourceBranchID,
+               let refreshedProject = try? await project(id: projectID),
+               let refreshedBranch = try? await branch(
+                   projectID: projectID,
+                   branchID: interruptedSourceBranchID
+               ),
+               selectionIntentToken == intentToken,
+               self.operationOwnerID == operationOwnerID,
+               selectedProjectID == projectID {
+                selectionToken = UUID()
+                projectSnapshot = refreshedProject
+                selectedBranchID = interruptedSourceBranchID
+                branchSnapshot = refreshedBranch
+                injectionPreview = nil
+            }
+            guard selectionIntentToken == intentToken,
+                  self.operationOwnerID == operationOwnerID,
+                  selectedProjectID == projectID else { return }
             report(error)
         }
     }
@@ -1406,6 +1478,24 @@ final class NovelCreationViewModel {
             throw NovelError.invalidInput("The branch returned an unexpected snapshot.")
         }
         return snapshot
+    }
+
+    private func rebasedBranchSnapshot(
+        _ snapshot: NovelBranchSnapshot,
+        onto project: NovelProjectSnapshot
+    ) -> NovelBranchSnapshot {
+        NovelBranchSnapshot(
+            projectID: project.project.id,
+            projectRevision: project.project.revision,
+            configRevision: project.project.configRevision,
+            branch: snapshot.branch,
+            session: snapshot.session,
+            headCheckpoint: snapshot.headCheckpoint,
+            currentState: snapshot.currentState,
+            chapterSelections: snapshot.chapterSelections,
+            activeSettingProposals: snapshot.activeSettingProposals,
+            access: project.access
+        )
     }
 
     private func clearSelection() {

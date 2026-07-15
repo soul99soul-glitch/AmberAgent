@@ -69,6 +69,23 @@ enum ChatToolApprovalPrompt {
             "MCP 工具"
         }
     }
+
+    var activityKind: AgentActivityKind {
+        switch self {
+        case .memory:
+            .memory
+        case .search(let request):
+            request.toolName == "scrape_web" ? .web : .research
+        case .webMount:
+            .web
+        case .workspace:
+            .document
+        case .ish:
+            .command
+        case .mcp:
+            .workflow
+        }
+    }
 }
 
 enum ChatToolRuntimeResult {

@@ -12,6 +12,7 @@ struct ConversationStorageView: View {
     //   - 用量统计 → 扫描 Documents/conversations/ 求和
     //   - 清除缓存 → v1 无附件缓存，诚实说明（不再有假动作）
     @Environment(IOSConversationStore.self) private var conversationStore
+    @Environment(ChatViewModel.self) private var chatViewModel
 
     @Environment(\.dismiss) private var dismiss
 
@@ -247,12 +248,19 @@ struct ConversationStorageView: View {
         Task { @MainActor in
             var deleted = 0
             for id in ids {
-                await conversationStore.deleteConversation(id: id)
-                deleted += 1
+                let didDelete = await conversationStore.deleteConversation(id: id) {
+                    chatViewModel.prepareForConversationDeletion(id)
+                }
+                if didDelete {
+                    deleted += 1
+                }
             }
             isProcessing = false
             refreshUsageStats()
-            lastResultMessage = "已删除 \(deleted) 个会话。"
+            let failed = ids.count - deleted
+            lastResultMessage = failed == 0
+                ? "已删除 \(deleted) 个会话。"
+                : "已删除 \(deleted) 个，\(failed) 个删除失败。"
         }
     }
 

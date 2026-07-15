@@ -312,6 +312,79 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertNil(viewModel.pendingSelectedFilePreview)
     }
 
+    func testConversationChangeDiscardsSelectedFileContext() async throws {
+        let documentStore = DocumentAccessStore()
+        _ = documentStore.registerPickedFile(try makeTempFile(text: "Conversation-owned file"))
+        let executor = IOSLocalToolExecutor(
+            permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+            documentStore: documentStore
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            localToolExecutor: executor,
+            autoGenerateResponses: false
+        )
+
+        await viewModel.attachSelectedFilePreviewToNextMessage()
+        XCTAssertNotNil(viewModel.pendingSelectedFilePreview)
+
+        XCTAssertTrue(viewModel.prepareForConversationChange())
+        XCTAssertNil(viewModel.pendingSelectedFilePreview)
+        XCTAssertNil(viewModel.selectedFileContextError)
+    }
+
+    func testConversationChangeClearsInFlightSelectedFileState() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.isAttachingSelectedFile = true
+
+        XCTAssertTrue(viewModel.prepareForConversationChange())
+        XCTAssertFalse(viewModel.isAttachingSelectedFile)
+    }
+
+    func testDeletingCurrentConversationDiscardsSelectedFileContext() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatViewModelDeleteConversationContext-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.isAttachingSelectedFile = true
+        viewModel.selectedFileContextError = "reading"
+
+        viewModel.prepareForConversationDeletion(conversationId)
+
+        XCTAssertFalse(viewModel.isAttachingSelectedFile)
+        XCTAssertNil(viewModel.selectedFileContextError)
+    }
+
+    func testDeletingAnotherConversationKeepsCurrentSelectedFileContext() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatViewModelDeleteOtherConversationContext-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.isAttachingSelectedFile = true
+        viewModel.selectedFileContextError = "reading"
+
+        viewModel.prepareForConversationDeletion(KotlinUuid.companion.random())
+
+        XCTAssertTrue(viewModel.isAttachingSelectedFile)
+        XCTAssertEqual(viewModel.selectedFileContextError, "reading")
+    }
+
     func testPendingPreviewIsNotAutomaticallyReused() async throws {
         let documentStore = DocumentAccessStore()
         _ = documentStore.registerPickedFile(try makeTempFile(text: "One shot"))
@@ -1429,7 +1502,7 @@ private final class ChatGenerationBindingState {
                     self?.onRecordRun?()
                 }
             },
-            startLiveActivity: { _, _ in },
+            startLiveActivity: { _, _, _ in },
             saveMiniAppIfPresent: { _, _ in nil },
             messagesByInjectingRuntimeContext: { [weak self] messages in
                 self?.messagesByInjectingRuntimeContext(messages) ?? messages

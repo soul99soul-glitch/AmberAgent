@@ -3,6 +3,48 @@ import Observation
 import SwiftStreamingMarkdown
 @preconcurrency import Shared
 
+struct CouncilTranscriptScrollGeometry: Equatable {
+    let contentHeight: CGFloat
+    let visibleHeight: CGFloat
+    let isNearBottom: Bool
+}
+
+enum CouncilTranscriptFollowPolicy {
+    static let bottomAnchorID = "council-transcript-bottom-anchor"
+    static let liveGrowthAnimationDuration = 0.08
+    private static let minimumMeasuredGrowth: CGFloat = 0.5
+
+    static func shouldResumeFollowing(distanceToBottom: CGFloat) -> Bool {
+        distanceToBottom <= ChatLayout.nearBottomResumeThreshold
+    }
+
+    static func shouldFollowMeasuredGrowth(
+        previousContentHeight: CGFloat,
+        currentContentHeight: CGFloat,
+        followEnabled: Bool,
+        followPaused: Bool,
+        userDragging: Bool
+    ) -> Bool {
+        followEnabled &&
+            !followPaused &&
+            !userDragging &&
+            currentContentHeight > previousContentHeight + minimumMeasuredGrowth
+    }
+
+    static func shouldFollowViewportShrink(
+        previousVisibleHeight: CGFloat,
+        currentVisibleHeight: CGFloat,
+        followEnabled: Bool,
+        followPaused: Bool,
+        userDragging: Bool
+    ) -> Bool {
+        followEnabled &&
+            !followPaused &&
+            !userDragging &&
+            currentVisibleHeight < previousVisibleHeight - minimumMeasuredGrowth
+    }
+}
+
 struct CouncilChatRuntimeView: View {
     let settingsStore: SettingsStore
     let sharedSettings: IOSSharedSettingsStore
@@ -10,6 +52,7 @@ struct CouncilChatRuntimeView: View {
     let permissionStore: IOSPermissionStore
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewModel: CouncilChatViewModel
     @FocusState private var isComposerFocused: Bool
     // 底部跟随状态(与 Chat 页同款):`userDragging` 只在用户「主动拖动」时为真,
@@ -17,6 +60,11 @@ struct CouncilChatRuntimeView: View {
     // 不会误暂停跟随。跟随本身遵循全局「跟随生成」偏好,与聊天页一致。
     @State private var userDragging = false
     @State private var followPaused = false
+    @State private var transcriptNearBottom = true
+    @State private var scrollPosition = ScrollPosition()
+    @State private var measuredGrowthFollowTask: Task<Void, Never>?
+    @State private var measuredGrowthFollowPending = false
+    @State private var terminalSettleTask: Task<Void, Never>?
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
 
     init(
@@ -46,9 +94,17 @@ struct CouncilChatRuntimeView: View {
                 transcript
             }
         }
+        .onAppear {
+            viewModel.runtimeDidAppear()
+        }
         // 离开页面(返回/切走)时立即存一份当前 transcript,避免运行中退出导致刚流式出的内容
         // 在下次进入前丢失(运行任务仍会在后台跑完并再存一次,以更完整的为准)。
-        .onDisappear { viewModel.persistTranscript() }
+        .onDisappear {
+            cancelPendingMeasuredGrowthFollow()
+            terminalSettleTask?.cancel()
+            viewModel.runtimeDidDisappear()
+            viewModel.persistTranscript()
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
         }
@@ -197,83 +253,181 @@ struct CouncilChatRuntimeView: View {
     }
 
     private var transcript: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                // 用非 lazy 的 VStack:议会转录是有界的(轮数 1-5 × 席位数),一次性渲染可接受,
-                // 也避免 LazyVStack 回收行导致的重解析/高度跳变。
-                VStack(spacing: 12) {
-                    ForEach(viewModel.messages) { message in
-                        let isLastWhileRunning = viewModel.isRunning && message.id == viewModel.messages.last?.id
+        ScrollView {
+            // 用非 lazy 的 VStack:议会转录是有界的(轮数 1-5 × 席位数),一次性渲染可接受,
+            // 也避免 LazyVStack 回收行导致的重解析/高度跳变。
+            VStack(spacing: 12) {
+                ForEach(viewModel.messages) { message in
+                    CouncilMessageRow(
+                        message: message,
+                        onTapDetail: { viewModel.showCurrentDetail() },
+                        onRestart: { viewModel.restart(withObjective: $0) }
+                    )
+                    // Equatable:流式逐 token 改的是最后一条,只让那一行重渲染,
+                    // 其余已完成气泡不再随整个 messages 数组变化而重算 body。
+                    .equatable()
+                    .id(message.id)
+                }
 
-                        VStack(spacing: 0) {
-                            CouncilMessageRow(
-                                message: message,
-                                onTapDetail: { viewModel.showCurrentDetail() },
-                                onRestart: { viewModel.restart(withObjective: $0) }
-                            )
-                            // Equatable:流式逐 token 改的是最后一条,只让那一行重渲染,
-                            // 其余已完成气泡不再随整个 messages 数组变化而重算 body。
-                            .equatable()
-
-                            // 跟随留白:仅在「最后一条 + 运行中」时垫一段恒定高度的透明块。
-                            // ① 跟随时让最后一条气泡停在离输入框一段距离处(不贴底边);
-                            // ② 高度恒定 → scrollTo 钉住的是这段空白的底边,而非「正在增长的气泡」,
-                            //    所以气泡顺势往上长、不再上下抖。
-                            if isLastWhileRunning {
-                                Color.clear
-                                    .frame(height: ChatLayout.followBottomGap)
-                                    .allowsHitTesting(false)
-                                    .accessibilityHidden(true)
-                            }
-                        }
-                        .id(message.id)
+                // 永久存在的物理底锚。留白只改变自身高度,不会在消息切换时从旧行
+                // 删除再插到新行；异步 Markdown 二次增高也始终以同一个内容尾部为目标。
+                Color.clear
+                    .frame(height: viewModel.isRunning
+                        ? ChatLayout.followBottomGap
+                        : ChatLayout.bottomRestGap)
+                    .id(CouncilTranscriptFollowPolicy.bottomAnchorID)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 18)
+            .frame(maxWidth: .infinity, minHeight: 0)
+            .scrollTargetLayout()
+        }
+        .scrollPosition($scrollPosition)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.top, for: .alignment)
+        .scrollIndicators(.hidden)
+        // 区分「用户主动拖动」与「程序/内容增长引起的滚动」:只有前者才允许改 followPaused。
+        .onScrollPhaseChange { _, phase in
+            switch phase {
+            case .tracking, .interacting:
+                userDragging = true
+                cancelPendingMeasuredGrowthFollow()
+                terminalSettleTask?.cancel()
+            case .idle:
+                let endedUserDrag = userDragging
+                userDragging = false
+                if endedUserDrag {
+                    followPaused = !transcriptNearBottom
+                    if transcriptNearBottom, followGeneration {
+                        scheduleMeasuredGrowthFollowToBottom()
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 18)
-                .frame(maxWidth: .infinity, minHeight: 0)
+            case .animating, .decelerating:
+                break
+            @unknown default:
+                break
             }
-            .scrollIndicators(.hidden)
-            // 区分「用户主动拖动」与「程序/内容增长引起的滚动」:只有前者才允许改 followPaused。
-            .onScrollPhaseChange { _, phase in
-                switch phase {
-                case .interacting: userDragging = true
-                case .idle: userDragging = false
-                default: break
+        }
+        // 跟随真实内容高度而非 body 信号。流式 Markdown 会异步发布 renderable,
+        // 其二次自撑高度没有新的文本回调；正向高度变化是唯一可靠的布局完成证据。
+        .onScrollGeometryChange(for: CouncilTranscriptScrollGeometry.self) { geometry in
+            let distanceToBottom = geometry.contentSize.height - geometry.visibleRect.maxY
+            return CouncilTranscriptScrollGeometry(
+                contentHeight: geometry.contentSize.height,
+                visibleHeight: geometry.visibleRect.height,
+                isNearBottom: CouncilTranscriptFollowPolicy.shouldResumeFollowing(
+                    distanceToBottom: distanceToBottom
+                )
+            )
+        } action: { previous, current in
+            transcriptNearBottom = current.isNearBottom
+            if userDragging {
+                followPaused = !current.isNearBottom
+            }
+            let shouldFollowMeasuredGrowth = CouncilTranscriptFollowPolicy.shouldFollowMeasuredGrowth(
+                previousContentHeight: previous.contentHeight,
+                currentContentHeight: current.contentHeight,
+                followEnabled: followGeneration,
+                followPaused: followPaused,
+                userDragging: userDragging
+            )
+            let shouldFollowViewportShrink = CouncilTranscriptFollowPolicy.shouldFollowViewportShrink(
+                previousVisibleHeight: previous.visibleHeight,
+                currentVisibleHeight: current.visibleHeight,
+                followEnabled: followGeneration,
+                followPaused: followPaused,
+                userDragging: userDragging
+            )
+            if shouldFollowMeasuredGrowth || shouldFollowViewportShrink {
+                scheduleMeasuredGrowthFollowToBottom()
+            }
+        }
+        .onChange(of: viewModel.isRunning) { wasRunning, isRunning in
+            if wasRunning, !isRunning {
+                scheduleTerminalBottomSettle()
+            }
+        }
+        .onChange(of: viewModel.messages.first?.id) { _, _ in
+            // 新房间/历史重放不继承上一房间的“用户暂停跟随”状态。
+            followPaused = false
+            scheduleTerminalBottomSettle()
+        }
+    }
+
+    private func scheduleMeasuredGrowthFollowToBottom() {
+        // A 48ms text presentation flush can be followed by multiple asynchronous
+        // Markdown height publications. Keep ownership for the full 80ms animation
+        // so later geometry callbacks cannot restart it mid-flight.
+        guard measuredGrowthFollowTask == nil else {
+            measuredGrowthFollowPending = true
+            return
+        }
+        measuredGrowthFollowPending = false
+        measuredGrowthFollowTask = Task { @MainActor in
+            defer {
+                let shouldReplay = measuredGrowthFollowPending &&
+                    followGeneration &&
+                    !followPaused &&
+                    !userDragging
+                measuredGrowthFollowPending = false
+                measuredGrowthFollowTask = nil
+                if shouldReplay {
+                    scheduleMeasuredGrowthFollowToBottom()
                 }
             }
-            // 仅在用户主动拖动时,根据是否贴底来暂停/恢复跟随;内容增长导致的几何变化不算,
-            // 因此议题→席位等阶段衔接处不会被误判为「离开底部」而丢失跟随。
-            .onScrollGeometryChange(for: Bool.self) { geo in
-                geo.contentSize.height - geo.visibleRect.maxY <= ChatLayout.bottomStickThreshold
-            } action: { _, atBottom in
-                if userDragging {
-                    followPaused = !atBottom
-                }
+            await Task.yield()
+            guard !Task.isCancelled,
+                  followGeneration,
+                  !followPaused,
+                  !userDragging else { return }
+            guard !reduceMotion else {
+                scrollToTranscriptBottom()
+                return
             }
-            .onChange(of: viewModel.messages.count) { _, _ in
-                followBottom(proxy, animated: true)
+            withAnimation(.linear(duration: CouncilTranscriptFollowPolicy.liveGrowthAnimationDuration)) {
+                scrollPosition.scrollTo(edge: .bottom)
             }
-            .onChange(of: viewModel.lastMessageBody) { _, _ in
-                followBottom(proxy, animated: false)
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(
+                        CouncilTranscriptFollowPolicy.liveGrowthAnimationDuration * 1_000_000_000
+                    )
+                )
+            } catch {
+                return
             }
         }
     }
 
-    /// 流式/新消息时把最后一条钉到底部(带恒定留白)。仅在「跟随生成」开启且用户未手动暂停时生效。
-    private func followBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard followGeneration, !followPaused, let lastId = viewModel.messages.last?.id else { return }
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(lastId, anchor: .bottom)
-            }
-        } else {
-            var transaction = Transaction()
-            transaction.animation = nil
-            withTransaction(transaction) {
-                proxy.scrollTo(lastId, anchor: .bottom)
-            }
+    private func cancelPendingMeasuredGrowthFollow() {
+        measuredGrowthFollowPending = false
+        measuredGrowthFollowTask?.cancel()
+    }
+
+    private func scheduleTerminalBottomSettle() {
+        cancelPendingMeasuredGrowthFollow()
+        terminalSettleTask?.cancel()
+        terminalSettleTask = Task { @MainActor in
+            // Give the 96pt→26pt sentinel change and the terminal Markdown parse a
+            // layout turn before the exact, non-animated bottom settle.
+            await Task.yield()
+            guard !Task.isCancelled,
+                  followGeneration,
+                  !followPaused,
+                  !userDragging else { return }
+            scrollToTranscriptBottom()
+        }
+    }
+
+    private func scrollToTranscriptBottom() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        transaction.animation = nil
+        withTransaction(transaction) {
+            scrollPosition.scrollTo(edge: .bottom)
         }
     }
 
@@ -560,10 +714,14 @@ private struct CouncilMessageRow: View, Equatable {
     }
 
     private var bubble: some View {
-        // 与聊天页共用唯一的渲染入口 `ChatAssistantMarkdownView`:跟随同一个「微软流式
-        // Markdown」开关,默认走 App 自有同步渲染器(与聊天视觉一致、吃字体/排版偏好,且
-        // 同步解析在 VStack 里不会出现微软库那种「先空高再异步撑开」的滚动乱跳)。
-        ChatAssistantMarkdownView(markdown: message.displayBody)
+        // host/guest 都由 runner 的累计流式文本产生。稳定 namespace + 明确的 live/ever
+        // 标记让 Council 与标准 Chat 共用同一套增量 Markdown、完成态 renderer latch 和缓存。
+        ChatAssistantMarkdownView(
+            markdown: message.displayBody,
+            renderCacheNamespace: message.markdownRenderCacheNamespace,
+            isStreaming: message.isStreamingMarkdown,
+            hasEverStreamed: message.hasEverStreamedMarkdown
+        )
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -1038,6 +1196,8 @@ final class CouncilChatViewModel {
     @ObservationIgnored private let transcriptDefaults: UserDefaults
     @ObservationIgnored private let archiveStore: CouncilRoomArchiveStore
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
+    @ObservationIgnored private var activeDiscussionID: UUID?
+    @ObservationIgnored private var isRuntimeAttached = false
     @ObservationIgnored private var currentObjective = ""
     @ObservationIgnored private var currentTaskId: String?
     @ObservationIgnored private var pendingObjective = ""
@@ -1074,6 +1234,15 @@ final class CouncilChatViewModel {
         // 重放历史议会时不要把只读快照写回单房间草稿,否则会覆盖实时房间的进度。
         guard !isReplay else { return }
         CouncilTranscriptStore.save(messages, defaults: transcriptDefaults)
+    }
+
+    func runtimeDidAppear() {
+        isRuntimeAttached = true
+    }
+
+    func runtimeDidDisappear() {
+        isRuntimeAttached = false
+        skipAskUser()
     }
 
     var canSend: Bool {
@@ -1179,7 +1348,7 @@ final class CouncilChatViewModel {
 
     func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isRunning else { return }
+        guard !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
         guard !settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             appendMessage(
                 kind: .system,
@@ -1200,7 +1369,7 @@ final class CouncilChatViewModel {
     func startPendingDiscussion(researchAllowed: Bool) {
         let text = pendingObjective.trimmingCharacters(in: .whitespacesAndNewlines)
         pendingObjective = ""
-        guard !text.isEmpty, !isRunning else { return }
+        guard !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
         inputText = ""
         currentObjective = text
         lastRunObjective = text
@@ -1216,16 +1385,21 @@ final class CouncilChatViewModel {
             subtitle: nil
         )
 
-        discussionTask?.cancel()
+        let discussionID = UUID()
+        activeDiscussionID = discussionID
+        isRunning = true
         discussionTask = Task { [weak self] in
-            await self?.runDiscussion(objective: text, researchAllowed: researchAllowed)
+            await self?.runDiscussion(
+                objective: text,
+                researchAllowed: researchAllowed,
+                discussionID: discussionID
+            )
         }
     }
 
     func cancelDiscussion() {
-        discussionTask?.cancel()
-        discussionTask = nil
-        runner.cancel()
+        stopActiveDiscussion()
+        finishStreamingMessages(as: .completed)
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         failedSpeakerIds.removeAll()
@@ -1263,10 +1437,11 @@ final class CouncilChatViewModel {
 
     /// 从「最近讨论」重开一场历史议会,把归档快照还原成只读对话。
     func openArchive(taskId: String) {
-        guard let room = archiveStore.load(taskId: taskId) else { return }
-        discussionTask?.cancel()
-        discussionTask = nil
-        runner.cancel()
+        guard var room = archiveStore.load(taskId: taskId) else { return }
+        stopAndCheckpointActiveDiscussion()
+        if let checkpointedRoom = archiveStore.load(taskId: taskId) {
+            room = checkpointedRoom
+        }
         isRunning = false
         isReplay = true
         currentTaskId = taskId
@@ -1326,7 +1501,12 @@ final class CouncilChatViewModel {
         startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
     }
 
-    private func runDiscussion(objective: String, researchAllowed: Bool) async {
+    private func runDiscussion(
+        objective: String,
+        researchAllowed: Bool,
+        discussionID: UUID
+    ) async {
+        guard activeDiscussionID == discussionID else { return }
         isRunning = true
         invitedSpeakerIds.removeAll()
         activeSheet = nil
@@ -1357,10 +1537,13 @@ final class CouncilChatViewModel {
             dynamicSeatGeneration: roomSettingsStore.dynamicSeatGeneration
         )
         let summary = await runner.run(request: request, onEvent: { [weak self] event in
-            self?.handle(event)
+            guard let self, self.activeDiscussionID == discussionID else { return }
+            self.handle(event)
         }, onAskUser: { [weak self] question in
             // 暂停议会，等用户回答。用户回答后恢复；跳过则返回 nil。
-            guard let self else { return nil }
+            guard let self,
+                  self.activeDiscussionID == discussionID,
+                  self.isRuntimeAttached else { return nil }
             return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
                 self.pendingAskUser = IOSCouncilAskUserState(
                     question: question,
@@ -1368,12 +1551,16 @@ final class CouncilChatViewModel {
                 )
             }
         })
+        guard activeDiscussionID == discussionID else { return }
         if currentTaskId == nil {
             currentTaskId = summary.taskId
         }
+        finishStreamingMessages(as: summary.status == .failed ? .failed : .completed)
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         isRunning = false
+        activeDiscussionID = nil
+        discussionTask = nil
         roomStateOverride = summary.status == .completed ? "就绪" : summary.status.title
         updateDetail(status: roomStateOverride ?? "就绪")
         persistTranscript()
@@ -1431,6 +1618,12 @@ final class CouncilChatViewModel {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].body = body
         messages[index].status = status
+    }
+
+    private func finishStreamingMessages(as status: CouncilMessageStatus) {
+        for index in messages.indices where messages[index].status == .speaking {
+            messages[index].status = status
+        }
     }
 
     private func handle(_ event: IOSCouncilRoomEvent) {
@@ -1557,8 +1750,7 @@ final class CouncilChatViewModel {
     }
 
     private func resetRoom() {
-        discussionTask?.cancel()
-        runner.cancel()
+        stopAndCheckpointActiveDiscussion()
         // 取消运行中的议会后,被 cancel 的 async 任务不会再走到末尾的 isRunning=false,
         // 这里显式复位,确保「重开」后输入框/发送键立刻回到就绪态。
         isRunning = false
@@ -1574,6 +1766,35 @@ final class CouncilChatViewModel {
         // 重新开始即清空历史(存盘也同步为空白开场),避免退出后又载回旧 transcript。
         persistTranscript()
         refreshSettingsBackedParticipants()
+    }
+
+    private func stopAndCheckpointActiveDiscussion() {
+        let shouldCheckpoint = activeDiscussionID != nil || isRunning
+        stopActiveDiscussion()
+        guard shouldCheckpoint else { return }
+
+        finishStreamingMessages(as: .completed)
+        activeSpeakerId = nil
+        invitedSpeakerIds.removeAll()
+        isRunning = false
+        roomStateOverride = "已取消"
+        updateDetail(status: "已取消")
+        persistTranscript()
+        archiveCurrentRoom()
+    }
+
+    private func stopActiveDiscussion() {
+        discussionTask?.cancel()
+        // The concrete streamer synchronously drains accepted FIFO chunks here.
+        // Keep ownership valid until that exact tail has reached the current bubble.
+        runner.cancel()
+        activeDiscussionID = nil
+        discussionTask = nil
+        if var pending = pendingAskUser {
+            pendingAskUser = nil
+            pending.answerDraft = ""
+            pending.resume()
+        }
     }
 }
 
@@ -1868,6 +2089,25 @@ struct CouncilChatMessage: Identifiable {
             return "思考中..."
         }
         return body
+    }
+
+    var usesStreamingMarkdown: Bool {
+        kind == .host || kind == .guest
+    }
+
+    var isStreamingMarkdown: Bool {
+        usesStreamingMarkdown && status == .speaking
+    }
+
+    /// Every host/guest message enters through a `.speaking` runner event, so this
+    /// remains true after completion and after archive restoration without adding a
+    /// persistence field or changing the generation protocol.
+    var hasEverStreamedMarkdown: Bool {
+        usesStreamingMarkdown
+    }
+
+    var markdownRenderCacheNamespace: String {
+        "council:\(id.uuidString)"
     }
 
     var backgroundColor: Color {

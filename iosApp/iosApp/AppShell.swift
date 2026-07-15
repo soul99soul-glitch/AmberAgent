@@ -22,6 +22,9 @@ struct AppShell: View {
     @State private var novelLifecycleCoordinator: NovelWorkspaceLifecycleCoordinator
     @State private var novelCreationErrorMessage: String?
     @State private var rootRouter = RouterPath()
+    @State private var pendingAgentActivityTarget: AgentActivityDeepLink.Target?
+    @State private var didBootstrapConversations = false
+    @State private var didRunStartupRecovery = false
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.system.rawValue
 
@@ -125,10 +128,25 @@ struct AppShell: View {
         }
         .task {
             // 启动时引导会话存储：加载历史摘要，选最近一条或新建。
-            // 仅做一次——SwiftUI .task 在 view identity 存活期间重启时会重跑，
-            // 但 bootstrap 是幂等的（选最近一条 / 无历史新建）。
+            // run recovery 不是幂等操作；在任务的第一个 await 前占位，避免 .task
+            // 重启时把本进程正在运行的前台 run 改写为 interrupted。
+            if !didRunStartupRecovery {
+                didRunStartupRecovery = true
+                let backgroundRunIds = IOSChatBackgroundGenerationCoordinator.shared.restorableRunIds
+                _ = await IOSRunRecovery.recoverInterruptedRuns(
+                    excludingRunIds: backgroundRunIds
+                )
+                AgentLiveActivityController.shared.restoreExistingActivity(
+                    ownedRunIds: backgroundRunIds
+                )
+            }
             await conversationStore.bootstrap()
+            didBootstrapConversations = true
             sharedSettings.repairCurrentChatModelIfNeeded(settingsStore)
+            await openPendingAgentActivityIfReady()
+        }
+        .onOpenURL { url in
+            enqueueAgentActivityURL(url)
         }
     }
 
@@ -156,6 +174,42 @@ struct AppShell: View {
         @unknown default:
             break
         }
+    }
+
+    private func enqueueAgentActivityURL(_ url: URL) {
+        guard let target = AgentActivityDeepLink.parse(url) else { return }
+        pendingAgentActivityTarget = target
+        Task { await openPendingAgentActivityIfReady() }
+    }
+
+    private func openPendingAgentActivityIfReady() async {
+        guard didBootstrapConversations,
+              let target = pendingAgentActivityTarget else { return }
+        pendingAgentActivityTarget = nil
+
+        guard let summary = conversationStore.summaries.first(where: {
+            $0.id.toHexDashString().caseInsensitiveCompare(target.conversationId) == .orderedSame
+        }) else { return }
+        let ownsActivity = AgentLiveActivityController.shared.ownsActivity(
+            runId: target.runId,
+            conversationId: target.conversationId
+        )
+        let ownsRecordedRun = ownsActivity ? true : await chatViewModel
+            .recordedAgentRunBelongsToConversation(
+                runId: target.runId,
+                conversationId: target.conversationId
+            )
+        guard ownsRecordedRun else { return }
+        if target.focus == .confirmation {
+            guard chatViewModel.canOpenActivityConfirmation(runId: target.runId) else { return }
+        }
+        guard chatViewModel.prepareForConversationChange(to: summary.id) else { return }
+
+        if conversationStore.currentConversation?.id != summary.id {
+            guard await conversationStore.selectConversationIfAvailable(id: summary.id) else { return }
+        }
+        guard conversationStore.currentConversation?.id == summary.id else { return }
+        rootRouter.path = [.chat]
     }
 
     @ViewBuilder

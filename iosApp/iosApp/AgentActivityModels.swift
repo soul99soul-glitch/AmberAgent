@@ -1,441 +1,528 @@
-import Foundation
 import ActivityKit
+import Foundation
 
 struct AgentActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var presentation: AgentActivityPresentation
+        var updatedAt: Date
     }
 
     let runId: String
+    let conversationId: String?
     let startedAt: Date
 }
 
 struct AgentActivityPresentation: Codable, Hashable {
-    var statusText: String
-    var toolTitle: String
+    var kind: AgentActivityKind
     var phase: AgentActivityPhase
-    var steps: [AgentActivityStep]
+    var stage: AgentActivityStage
+    var metric: AgentActivityMetric
+    var action: AgentActivityAction?
 
     init(
-        statusText: String,
-        toolTitle: String,
+        kind: AgentActivityKind,
         phase: AgentActivityPhase,
-        steps: [AgentActivityStep]
+        stage: AgentActivityStage,
+        metric: AgentActivityMetric = .none,
+        action: AgentActivityAction? = .openTask
     ) {
-        self.statusText = Self.sanitizedStatus(statusText)
-        self.toolTitle = Self.sanitizedToolTitle(toolTitle)
+        self.kind = kind
         self.phase = phase
-        self.steps = Self.normalizedSteps(steps)
+        self.stage = stage
+        self.metric = metric.validated
+        self.action = action
     }
+}
+
+enum AgentActivityKind: String, Codable, Hashable {
+    case research
+    case response
+    case imageGeneration
+    case document
+    case web
+    case memory
+    case command
+    case workflow
 }
 
 enum AgentActivityPhase: String, Codable, Hashable {
     case running
+    case reconnecting
     case waitingForUser
+    case stale
     case completed
     case failed
     case cancelled
 }
 
-struct AgentActivityStep: Codable, Hashable, Identifiable {
-    var id: String
-    var title: String
-    var state: AgentActivityStepState
+enum AgentActivityStage: String, Codable, Hashable {
+    case preparing
+    case searching
+    case readingSources
+    case readingWeb
+    case generating
+    case generatingImage
+    case organizing
+    case readingDocument
+    case updatingMemory
+    case runningTool
+    case waitingForConfirmation
+    case reconnecting
+    case stale
+    case completed
+    case failed
+    case cancelled
+}
 
-    init(id: String = UUID().uuidString, title: String, state: AgentActivityStepState) {
-        self.id = id
-        self.title = AgentActivityPresentation.sanitizedStepTitle(title)
-        self.state = state
+enum AgentActivityMetricUnit: String, Codable, Hashable {
+    case source
+    case file
+    case image
+    case item
+}
+
+enum AgentActivityMetric: Codable, Hashable {
+    case none
+    case count(completed: Int, unit: AgentActivityMetricUnit)
+    case progress(completed: Int, total: Int, unit: AgentActivityMetricUnit)
+
+    static func validatedProgress(
+        completed: Int,
+        total: Int,
+        unit: AgentActivityMetricUnit
+    ) -> AgentActivityMetric {
+        guard total > 0, completed >= 0, completed <= total else { return .none }
+        return .progress(completed: completed, total: total, unit: unit)
+    }
+
+    var validated: AgentActivityMetric {
+        switch self {
+        case .none:
+            .none
+        case let .count(completed, unit):
+            completed >= 0 ? .count(completed: completed, unit: unit) : .none
+        case let .progress(completed, total, unit):
+            Self.validatedProgress(completed: completed, total: total, unit: unit)
+        }
     }
 }
 
-enum AgentActivityStepState: String, Codable, Hashable {
-    case done
-    case current
-    case pending
-    case failed
+enum AgentActivityAction: String, Codable, Hashable {
+    case openTask
+    case openConfirmation
+    case viewResult
+}
 
-    var marker: String {
-        switch self {
-        case .done:
-            "✓"
-        case .current:
-            "●"
-        case .pending:
-            "○"
-        case .failed:
-            "!"
-        }
+enum AgentActivityDeepLink {
+    enum Focus: String, Codable, Hashable {
+        case task
+        case confirmation
+        case result
+    }
+
+    struct Target: Equatable {
+        let runId: String
+        let conversationId: String
+        let focus: Focus
+    }
+
+    static var scheme: String {
+        scheme(forBundleIdentifier: Bundle.main.bundleIdentifier)
+    }
+
+    static func scheme(forBundleIdentifier bundleIdentifier: String?) -> String {
+        let bundleIdentifier = bundleIdentifier ?? ""
+        return bundleIdentifier.contains(".experimental-gpl")
+            ? "amber-experimental"
+            : "amber"
+    }
+
+    static func makeURL(
+        runId: String,
+        conversationId: String,
+        focus: Focus
+    ) -> URL? {
+        guard isValid(runId, maxLength: 128),
+              isValid(conversationId, maxLength: 64) else { return nil }
+
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "activity"
+        components.path = "/\(runId)"
+        components.queryItems = [
+            URLQueryItem(name: "conversation", value: conversationId),
+            URLQueryItem(name: "focus", value: focus.rawValue)
+        ]
+        return components.url
+    }
+
+    static func parse(_ url: URL) -> Target? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme == scheme,
+              components.host == "activity" else { return nil }
+
+        let runId = components.path.trimmingCharacters(
+            in: CharacterSet(charactersIn: "/")
+        )
+        let queryItems = components.queryItems ?? []
+        guard components.path == "/\(runId)",
+              queryItems.count == 2,
+              queryItems.filter({ $0.name == "conversation" }).count == 1,
+              queryItems.filter({ $0.name == "focus" }).count == 1,
+              let conversationId = queryItems.first(where: { $0.name == "conversation" })?.value,
+              let focusValue = queryItems.first(where: { $0.name == "focus" })?.value,
+              isValid(runId, maxLength: 128),
+              isValid(conversationId, maxLength: 64),
+              let focus = Focus(rawValue: focusValue) else { return nil }
+
+        return Target(
+            runId: runId,
+            conversationId: conversationId,
+            focus: focus
+        )
+    }
+
+    private static func isValid(_ value: String, maxLength: Int) -> Bool {
+        guard !value.isEmpty, value.count <= maxLength else { return false }
+        let allowed = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        )
+        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 }
 
 extension AgentActivityPresentation {
     static let defaultRunning = AgentActivityPresentation(
-        statusText: "Amber 正在阅读 Apple 文档",
-        toolTitle: "网页搜索",
+        kind: .research,
         phase: .running,
-        steps: [
-            AgentActivityStep(id: "search", title: "搜索 ActivityKit", state: .done),
-            AgentActivityStep(id: "read", title: "阅读 Apple 文档", state: .current),
-            AgentActivityStep(id: "draft", title: "生成适配方案", state: .pending)
-        ]
+        stage: .readingSources
     )
 
-    static func generatingResponse(modelName: String) -> AgentActivityPresentation {
+    static func generatingResponse(modelName _: String) -> AgentActivityPresentation {
         AgentActivityPresentation(
-            statusText: "Amber 正在生成回复",
-            toolTitle: "生成回复",
+            kind: .response,
             phase: .running,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备上下文", state: .done),
-                AgentActivityStep(id: "generate", title: "生成回复", state: .current),
-                AgentActivityStep(id: "finish", title: "整理结果", state: .pending)
-            ]
+            stage: .generating
         )
     }
 
     static func runningTool(toolName: String) -> AgentActivityPresentation {
-        let descriptor = publicToolDescriptor(for: toolName)
-        return AgentActivityPresentation(
-            statusText: descriptor.statusText,
-            toolTitle: descriptor.toolTitle,
-            phase: .running,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备上下文", state: .done),
-                AgentActivityStep(id: "tool", title: descriptor.stepTitle, state: .current),
-                AgentActivityStep(id: "finish", title: "整理结果", state: .pending)
-            ]
-        )
+        if toolName.hasPrefix("wm_") {
+            return AgentActivityPresentation(
+                kind: .web,
+                phase: .running,
+                stage: .readingWeb
+            )
+        }
+
+        switch toolName {
+        case "search_web":
+            return AgentActivityPresentation(
+                kind: .research,
+                phase: .running,
+                stage: .searching
+            )
+        case "scrape_web":
+            return AgentActivityPresentation(
+                kind: .web,
+                phase: .running,
+                stage: .readingWeb
+            )
+        case "generate_image":
+            return AgentActivityPresentation(
+                kind: .imageGeneration,
+                phase: .running,
+                stage: .generatingImage
+            )
+        case "memory_tool":
+            return AgentActivityPresentation(
+                kind: .memory,
+                phase: .running,
+                stage: .updatingMemory
+            )
+        default:
+            if toolName.hasPrefix("workspace_") ||
+                toolName.contains("file") ||
+                toolName.contains("workspace") {
+                return AgentActivityPresentation(
+                    kind: .document,
+                    phase: .running,
+                    stage: .readingDocument
+                )
+            } else {
+                return AgentActivityPresentation(
+                    kind: .workflow,
+                    phase: .running,
+                    stage: .runningTool
+                )
+            }
+        }
     }
 
-    static func waitingForUser(toolTitle: String = "终端命令") -> AgentActivityPresentation {
+    static func waitingForUser(kind: AgentActivityKind = .command) -> AgentActivityPresentation {
         AgentActivityPresentation(
-            statusText: "Amber 需要你确认",
-            toolTitle: toolTitle,
+            kind: kind,
             phase: .waitingForUser,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备命令", state: .done),
-                AgentActivityStep(id: "confirm", title: "等待确认", state: .current),
-                AgentActivityStep(id: "execute", title: "执行任务", state: .pending)
-            ]
+            stage: .waitingForConfirmation,
+            action: .openConfirmation
         )
     }
 
     static var readingSelectedFile: AgentActivityPresentation {
         AgentActivityPresentation(
-            statusText: "Amber 正在读取文件",
-            toolTitle: "文档读取",
+            kind: .document,
             phase: .running,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备文件", state: .done),
-                AgentActivityStep(id: "read", title: "读取文件", state: .current),
-                AgentActivityStep(id: "preview", title: "整理预览", state: .pending)
-            ]
+            stage: .readingDocument
         )
     }
 
     static var selectedFileReadCompleted: AgentActivityPresentation {
-        AgentActivityPresentation(
-            statusText: "Amber 已完成处理",
-            toolTitle: "文档读取",
-            phase: .completed,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备文件", state: .done),
-                AgentActivityStep(id: "read", title: "读取文件", state: .done),
-                AgentActivityStep(id: "preview", title: "整理预览", state: .done)
-            ]
-        )
+        completed(toolTitle: "文档读取")
     }
 
     static var selectedFileReadFailed: AgentActivityPresentation {
-        AgentActivityPresentation(
-            statusText: "Amber 遇到问题",
-            toolTitle: "文档读取",
-            phase: .failed,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备文件", state: .done),
-                AgentActivityStep(id: "read", title: "读取失败", state: .failed),
-                AgentActivityStep(id: "return", title: "返回应用查看", state: .pending)
-            ]
-        )
-    }
-
-    static var selectedFileReadWaitingForUser: AgentActivityPresentation {
-        AgentActivityPresentation(
-            statusText: "Amber 需要你确认",
-            toolTitle: "文档读取",
-            phase: .waitingForUser,
-            steps: [
-                AgentActivityStep(id: "choose", title: "选择文件", state: .current),
-                AgentActivityStep(id: "read", title: "读取文件", state: .pending),
-                AgentActivityStep(id: "preview", title: "整理预览", state: .pending)
-            ]
-        )
+        failed(toolTitle: "文档读取")
     }
 
     static func completed(toolTitle: String = "生成回复") -> AgentActivityPresentation {
         AgentActivityPresentation(
-            statusText: "Amber 已完成处理",
-            toolTitle: toolTitle,
+            kind: kind(forPublicToolTitle: toolTitle),
             phase: .completed,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备上下文", state: .done),
-                AgentActivityStep(id: "generate", title: "生成回复", state: .done),
-                AgentActivityStep(id: "finish", title: "整理结果", state: .done)
-            ]
+            stage: .completed,
+            action: .viewResult
         )
     }
 
     static func failed(toolTitle: String = "生成回复") -> AgentActivityPresentation {
         AgentActivityPresentation(
-            statusText: "Amber 遇到问题",
-            toolTitle: toolTitle,
+            kind: kind(forPublicToolTitle: toolTitle),
             phase: .failed,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备上下文", state: .done),
-                AgentActivityStep(id: "fail", title: "生成失败", state: .failed),
-                AgentActivityStep(id: "return", title: "返回应用查看", state: .pending)
-            ]
+            stage: .failed,
+            action: .openTask
         )
     }
 
     static func cancelled(toolTitle: String = "生成回复") -> AgentActivityPresentation {
         AgentActivityPresentation(
-            statusText: "Amber 已停止处理",
-            toolTitle: toolTitle,
+            kind: kind(forPublicToolTitle: toolTitle),
             phase: .cancelled,
-            steps: [
-                AgentActivityStep(id: "prepare", title: "准备上下文", state: .done),
-                AgentActivityStep(id: "stop", title: "停止生成", state: .failed),
-                AgentActivityStep(id: "return", title: "返回应用查看", state: .pending)
-            ]
+            stage: .cancelled,
+            action: nil
         )
     }
 
-    static func sanitizedStatus(_ raw: String) -> String {
-        sanitize(raw, fallback: "Amber 正在处理", maxLength: 18)
+    static func measurablePreview(
+        kind: AgentActivityKind,
+        completed: Int,
+        total: Int,
+        unit: AgentActivityMetricUnit
+    ) -> AgentActivityPresentation {
+        AgentActivityPresentation(
+            kind: kind,
+            phase: .running,
+            stage: .organizing,
+            metric: .validatedProgress(
+                completed: completed,
+                total: total,
+                unit: unit
+            )
+        )
     }
 
-    static func sanitizedToolTitle(_ raw: String) -> String {
-        sanitize(raw, fallback: "工具执行", maxLength: 12)
+    static func reconnecting(
+        kind: AgentActivityKind = .workflow
+    ) -> AgentActivityPresentation {
+        AgentActivityPresentation(
+            kind: kind,
+            phase: .reconnecting,
+            stage: .reconnecting
+        )
     }
 
-    static func sanitizedStepTitle(_ raw: String) -> String {
-        sanitize(raw, fallback: "处理任务", maxLength: 16)
+    func preservingKind(from previous: AgentActivityPresentation?) -> AgentActivityPresentation {
+        guard phase == .completed || phase == .failed || phase == .cancelled,
+              let previous else { return self }
+        var presentation = self
+        presentation.kind = previous.kind
+        return presentation
     }
 
-    private static func normalizedSteps(_ rawSteps: [AgentActivityStep]) -> [AgentActivityStep] {
-        let firstThree = Array(rawSteps.prefix(3))
-        guard !firstThree.isEmpty else {
-            return [
-                AgentActivityStep(id: "prepare", title: "准备任务", state: .done),
-                AgentActivityStep(id: "current", title: "处理任务", state: .current),
-                AgentActivityStep(id: "finish", title: "整理结果", state: .pending)
-            ]
+    var progressFraction: Double? {
+        guard case let .progress(completed, total, _) = metric, total > 0 else {
+            return nil
         }
-        return firstThree.map {
-            AgentActivityStep(id: $0.id, title: $0.title, state: $0.state)
+        return Double(completed) / Double(total)
+    }
+
+    var percentValue: Int? {
+        progressFraction.map { Int(($0 * 100).rounded()) }
+    }
+
+    var showsProgressRing: Bool {
+        phase == .running && progressFraction != nil
+    }
+
+    func displayPhase(isStale: Bool) -> AgentActivityPhase {
+        if isStale, phase == .running || phase == .reconnecting {
+            return .stale
+        }
+        return phase
+    }
+
+    private static func kind(forPublicToolTitle title: String) -> AgentActivityKind {
+        switch title {
+        case "网页搜索":
+            .research
+        case "网页读取", "WebMount":
+            .web
+        case "图片生成":
+            .imageGeneration
+        case "记忆更新":
+            .memory
+        case "文档读取", "Workspace":
+            .document
+        case "终端命令":
+            .command
+        case "生成回复":
+            .response
+        default:
+            .workflow
+        }
+    }
+}
+
+enum AgentActivityCopy {
+    static func text(_ key: String) -> String {
+        NSLocalizedString(
+            key,
+            tableName: "AgentActivity",
+            bundle: .main,
+            value: key,
+            comment: ""
+        )
+    }
+}
+
+extension AgentActivityKind {
+    var title: String {
+        AgentActivityCopy.text("agent.activity.kind.\(rawValue)")
+    }
+
+    var symbolName: String {
+        switch self {
+        case .research:
+            "magnifyingglass"
+        case .response:
+            "text.bubble"
+        case .imageGeneration:
+            "photo.on.rectangle"
+        case .document:
+            "doc.text"
+        case .web:
+            "globe"
+        case .memory:
+            "brain.head.profile"
+        case .command:
+            "terminal"
+        case .workflow:
+            "sparkles"
+        }
+    }
+}
+
+extension AgentActivityStage {
+    var title: String {
+        AgentActivityCopy.text("agent.activity.stage.\(rawValue)")
+    }
+}
+
+extension AgentActivityAction {
+    var title: String {
+        AgentActivityCopy.text("agent.activity.action.\(rawValue)")
+    }
+
+    var deepLinkFocus: AgentActivityDeepLink.Focus {
+        switch self {
+        case .openTask:
+            .task
+        case .openConfirmation:
+            .confirmation
+        case .viewResult:
+            .result
+        }
+    }
+}
+
+extension AgentActivityMetric {
+    var shortText: String? {
+        switch validated {
+        case .none:
+            nil
+        case let .count(completed, unit):
+            String(
+                format: AgentActivityCopy.text(
+                    "agent.activity.metric.\(unit.rawValue).count"
+                ),
+                completed
+            )
+        case let .progress(completed, total, _):
+            "\(Int((Double(completed) / Double(total) * 100).rounded()))%"
         }
     }
 
-    private static func sanitize(_ raw: String, fallback: String, maxLength _: Int) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return fallback }
-
-        let generic = genericPrivateSummary(for: trimmed)
-        let candidate = generic ?? trimmed
-        let collapsed = candidate
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-
-        guard isAllowedPublicSummary(collapsed) else { return fallback }
-        return collapsed
-    }
-
-    private static func isAllowedPublicSummary(_ text: String) -> Bool {
-        allowedPublicSummaries.contains(text)
-    }
-
-    private static let allowedPublicSummaries: Set<String> = [
-        "Amber 正在处理",
-        "Amber 正在阅读 Apple 文档",
-            "Amber 正在生成回复",
-            "Amber 需要你确认",
-            "Amber 已完成处理",
-            "Amber 遇到问题",
-            "Amber 已停止处理",
-            "Amber 正在读取文件",
-            "Amber 正在搜索资料",
-            "Amber 正在阅读网页",
-            "Amber 正在生成图片",
-            "Amber 正在更新记忆",
-            "Amber 正在调用 MCP",
-            "Amber 正在访问网页",
-            "Amber 正在操作文件",
-            "Amber 正在调用工具",
-            "网页搜索",
-            "网页读取",
-            "图片生成",
-            "记忆更新",
-            "MCP 调用",
-            "WebMount",
-            "Workspace",
-            "工具执行",
-            "生成回复",
-            "终端命令",
-            "文档读取",
-        "搜索 ActivityKit",
-        "阅读 Apple 文档",
-        "生成适配方案",
-        "准备上下文",
-        "整理结果",
-        "准备命令",
-        "等待确认",
-        "执行任务",
-        "生成失败",
-        "停止生成",
-        "返回应用查看",
-        "准备任务",
-        "处理任务",
-        "准备文件",
-        "读取文件",
-        "整理预览",
-        "读取失败",
-        "选择文件",
-            "搜索资料",
-            "阅读文档",
-            "生成方案",
-            "阅读失败",
-            "阅读网页",
-            "生成图片",
-            "更新记忆",
-            "调用 MCP",
-            "访问网页",
-            "操作文件",
-            "调用工具",
-            "处理敏感配置",
-            "阅读网页",
-            "处理私密信息",
-            "执行终端命令"
-        ]
-
-    private static func genericPrivateSummary(for text: String) -> String? {
-        let lowercased = text.lowercased()
-        if lowercased.contains("/users/") ||
-            lowercased.contains("/var/") ||
-            lowercased.contains("/private/") ||
-            lowercased.contains("~/") ||
-            lowercased.contains("file://") ||
-            lowercased.contains("\\") {
-            return "读取文件"
+    var detailText: String? {
+        switch validated {
+        case .none:
+            nil
+        case let .count(completed, unit):
+            String(
+                format: AgentActivityCopy.text(
+                    "agent.activity.metric.\(unit.rawValue).count"
+                ),
+                completed
+            )
+        case let .progress(completed, total, unit):
+            String(
+                format: AgentActivityCopy.text(
+                    "agent.activity.metric.\(unit.rawValue).progress"
+                ),
+                completed,
+                total
+            )
         }
-        if lowercased.contains("api_key") ||
-            lowercased.contains("apikey") ||
-            lowercased.contains("bearer ") ||
-            lowercased.contains("password") ||
-            lowercased.contains("secret") ||
-            lowercased.contains("sk-") ||
-            lowercased.contains("token=") ||
-            lowercased.contains("authorization") ||
-            lowercased.contains(".env") ||
-            lowercased.contains(".pem") ||
-            lowercased.contains(".key") {
-            return "处理敏感配置"
-        }
-        if lowercased.contains("http://") || lowercased.contains("https://") {
-            return "阅读网页"
-        }
-        if looksLikeEmail(lowercased) || looksLikeIPAddress(lowercased) {
-            return "处理私密信息"
-        }
-        if lowercased.contains("rm ") ||
-            lowercased.contains("sudo ") ||
-            lowercased.contains("chmod ") ||
-            lowercased.contains("curl ") ||
-            lowercased.contains("git ") {
-            return "执行终端命令"
-        }
-        return nil
-    }
-
-    private static func publicToolDescriptor(
-        for rawToolName: String
-    ) -> (statusText: String, toolTitle: String, stepTitle: String) {
-        if rawToolName == "search_web" {
-            return ("Amber 正在搜索资料", "网页搜索", "搜索资料")
-        }
-        if rawToolName == "scrape_web" {
-            return ("Amber 正在阅读网页", "网页读取", "阅读网页")
-        }
-        if rawToolName == "generate_image" {
-            return ("Amber 正在生成图片", "图片生成", "生成图片")
-        }
-        if rawToolName == "memory_tool" {
-            return ("Amber 正在更新记忆", "记忆更新", "更新记忆")
-        }
-        if rawToolName == "mcp_call" {
-            return ("Amber 正在调用 MCP", "MCP 调用", "调用 MCP")
-        }
-        if rawToolName.hasPrefix("wm_") {
-            return ("Amber 正在访问网页", "WebMount", "访问网页")
-        }
-        if rawToolName.hasPrefix("workspace_") ||
-            rawToolName.contains("file") ||
-            rawToolName.contains("workspace") {
-            return ("Amber 正在操作文件", "Workspace", "操作文件")
-        }
-        return ("Amber 正在调用工具", "工具执行", "调用工具")
-    }
-
-    private static func looksLikeEmail(_ text: String) -> Bool {
-        text.contains("@") && text.contains(".")
-    }
-
-    private static func looksLikeIPAddress(_ text: String) -> Bool {
-        let separators = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters.subtracting(CharacterSet(charactersIn: ".")))
-        return text
-            .components(separatedBy: separators)
-            .contains { token in
-                let components = token.split(separator: ".")
-                guard components.count == 4 else { return false }
-                return components.allSatisfy { component in
-                    guard let value = Int(component) else { return false }
-                    return (0...255).contains(value)
-                }
-            }
     }
 }
 
 extension AgentActivityPresentation {
-    var currentStepTitle: String {
-        steps.first { $0.state == .current }?.title ??
-            steps.first { $0.state == .failed }?.title ??
-            steps.last?.title ??
-            toolTitle
-    }
-
-    var compactTrailingText: String {
-        switch phase {
+    func priorityFact(isStale: Bool) -> String? {
+        switch displayPhase(isStale: isStale) {
         case .running:
-            currentStepTitle
+            metric.shortText
+        case .reconnecting:
+            AgentActivityCopy.text("agent.activity.fact.reconnecting")
         case .waitingForUser:
-            "等待确认"
+            AgentActivityCopy.text("agent.activity.fact.waiting")
+        case .stale:
+            AgentActivityCopy.text("agent.activity.fact.stale")
         case .completed:
-            "已完成"
+            AgentActivityCopy.text("agent.activity.fact.completed")
         case .failed:
-            "遇到问题"
+            AgentActivityCopy.text("agent.activity.fact.failed")
         case .cancelled:
-            "已停止"
+            AgentActivityCopy.text("agent.activity.fact.cancelled")
         }
     }
 
-    var phaseSymbolName: String {
-        switch phase {
+    func displaySymbolName(isStale: Bool) -> String {
+        switch displayPhase(isStale: isStale) {
         case .running:
-            "sparkles"
+            kind.symbolName
+        case .reconnecting:
+            "wifi.exclamationmark"
         case .waitingForUser:
             "exclamationmark.circle.fill"
+        case .stale:
+            "clock.badge.exclamationmark"
         case .completed:
             "checkmark.circle.fill"
         case .failed:
@@ -445,48 +532,71 @@ extension AgentActivityPresentation {
         }
     }
 
-    var activitySymbolName: String {
-        if phase != .running {
-            return phaseSymbolName
-        }
-        switch toolTitle {
-        case "网页搜索":
-            return "magnifyingglass"
-        case "网页读取", "WebMount":
-            return "globe"
-        case "图片生成":
-            return "photo.on.rectangle"
-        case "记忆更新":
-            return "brain.head.profile"
-        case "MCP 调用":
-            return "puzzlepiece.extension"
-        case "Workspace", "文档读取":
-            return "folder"
-        case "生成回复":
-            return "text.bubble"
-        default:
-            return "sparkles"
+    func accessibilitySummary(isStale: Bool) -> String {
+        [kind.title, priorityFact(isStale: isStale) ?? stage.title]
+            .joined(separator: ", ")
+    }
+}
+
+extension AgentActivityAttributes {
+    func destinationURL(for action: AgentActivityAction?) -> URL? {
+        guard let conversationId else { return nil }
+        return AgentActivityDeepLink.makeURL(
+            runId: runId,
+            conversationId: conversationId,
+            focus: action?.deepLinkFocus ?? .task
+        )
+    }
+}
+
+enum AgentActivityLifecyclePolicy {
+    static func shouldRestore(
+        runId: String,
+        ownedRunIds: Set<String>,
+        activityState: ActivityState
+    ) -> Bool {
+        guard ownedRunIds.contains(runId) else { return false }
+        return activityState == .active || activityState == .stale
+    }
+
+    static func staleDate(for phase: AgentActivityPhase, now: Date) -> Date? {
+        switch phase {
+        case .running:
+            now.addingTimeInterval(180)
+        case .reconnecting:
+            now.addingTimeInterval(60)
+        case .waitingForUser, .stale, .completed, .failed, .cancelled:
+            nil
         }
     }
 
-    var progress: Double {
-        guard !steps.isEmpty else {
-            return phase == .completed ? 1 : 0
+    static func relevanceScore(for phase: AgentActivityPhase) -> Double {
+        switch phase {
+        case .waitingForUser:
+            100
+        case .failed, .stale:
+            90
+        case .reconnecting:
+            80
+        case .running:
+            60
+        case .completed:
+            20
+        case .cancelled:
+            0
         }
-        if phase == .completed { return 1 }
-        if phase == .failed || phase == .cancelled { return 0.92 }
-        let units = steps.reduce(0.0) { partial, step in
-            switch step.state {
-            case .done:
-                partial + 1
-            case .current:
-                partial + 0.58
-            case .pending:
-                partial
-            case .failed:
-                partial + 0.82
-            }
+    }
+
+    static func lockScreenDismissalDelay(for phase: AgentActivityPhase) -> TimeInterval {
+        switch phase {
+        case .failed, .stale:
+            60
+        case .completed:
+            20
+        case .cancelled:
+            6
+        case .running, .reconnecting, .waitingForUser:
+            0
         }
-        return min(max(units / Double(steps.count), 0), 1)
     }
 }

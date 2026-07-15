@@ -1,0 +1,45 @@
+"agent.activity.kind.research" = "Deep research";
+"agent.activity.kind.response" = "Generate response";
+"agent.activity.kind.imageGeneration" = "Image generation";
+"agent.activity.kind.document" = "Document task";
+"agent.activity.kind.web" = "Web task";
+"agent.activity.kind.memory" = "Memory update";
+"agent.activity.kind.command" = "Command task";
+"agent.activity.kind.workflow" = "Agent task";
+
+"agent.activity.stage.preparing" = "Preparing";
+"agent.activity.stage.searching" = "Searching";
+"agent.activity.stage.readingSources" = "Reading sources";
+"agent.activity.stage.readingWeb" = "Reading the web";
+"agent.activity.stage.generating" = "Generating";
+"agent.activity.stage.generatingImage" = "Generating images";
+"agent.activity.stage.organizing" = "Organizing results";
+"agent.activity.stage.readingDocument" = "Reading document";
+"agent.activity.stage.updatingMemory" = "Updating memory";
+"agent.activity.stage.runningTool" = "Working";
+"agent.activity.stage.waitingForConfirmation" = "Waiting for confirmation";
+"agent.activity.stage.reconnecting" = "Reconnecting";
+"agent.activity.stage.stale" = "Status expired";
+"agent.activity.stage.completed" = "Completed";
+"agent.activity.stage.failed" = "Needs attention";
+"agent.activity.stage.cancelled" = "Stopped";
+
+"agent.activity.action.openTask" = "Open task";
+"agent.activity.action.openConfirmation" = "Open confirmation";
+"agent.activity.action.viewResult" = "View result";
+
+"agent.activity.fact.waiting" = "Confirm";
+"agent.activity.fact.stale" = "Status expired";
+"agent.activity.fact.reconnecting" = "Reconnecting";
+"agent.activity.fact.completed" = "Done";
+"agent.activity.fact.failed" = "Issue";
+"agent.activity.fact.cancelled" = "Stopped";
+
+"agent.activity.metric.source.count" = "%ld sources";
+"agent.activity.metric.source.progress" = "%ld / %ld sources";
+"agent.activity.metric.file.count" = "%ld files";
+"agent.activity.metric.file.progress" = "%ld / %ld files";
+"agent.activity.metric.image.count" = "%ld images";
+"agent.activity.metric.image.progress" = "%ld / %ld images";
+"agent.activity.metric.item.count" = "%ld items";
+"agent.activity.metric.item.progress" = "%ld / %ld items";

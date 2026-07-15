@@ -3,6 +3,62 @@ import XCTest
 
 final class ChatViewportPolicyTests: XCTestCase {
 
+    func testSwiftUINearBottomResumeRequiresARealUserScrollAndUses96PointThreshold() {
+        XCTAssertEqual(ChatLayout.bottomStickThreshold, 40)
+        XCTAssertEqual(ChatLayout.nearBottomResumeThreshold, 96)
+
+        for distance in [CGFloat(95), CGFloat(96)] {
+            XCTAssertTrue(
+                ChatSwiftUINearBottomResumePolicy.shouldResume(
+                    followPaused: true,
+                    userScrollActive: true,
+                    userScrollJustEnded: false,
+                    distanceToBottom: distance
+                ),
+                "真实用户滚动仍 active 时，距底 \(distance)pt 应恢复跟随。"
+            )
+            XCTAssertTrue(
+                ChatSwiftUINearBottomResumePolicy.shouldResume(
+                    followPaused: true,
+                    userScrollActive: false,
+                    userScrollJustEnded: true,
+                    distanceToBottom: distance
+                ),
+                "真实用户滚动结束时，距底 \(distance)pt 应恢复跟随。"
+            )
+        }
+
+        for userScrollActive in [false, true] {
+            XCTAssertFalse(
+                ChatSwiftUINearBottomResumePolicy.shouldResume(
+                    followPaused: true,
+                    userScrollActive: userScrollActive,
+                    userScrollJustEnded: !userScrollActive,
+                    distanceToBottom: 97
+                ),
+                "距底 97pt 已越过恢复阈值，不能自动抢回视口。"
+            )
+        }
+        XCTAssertFalse(
+            ChatSwiftUINearBottomResumePolicy.shouldResume(
+                followPaused: true,
+                userScrollActive: false,
+                userScrollJustEnded: false,
+                distanceToBottom: 40
+            ),
+            "即使位于 40pt true-bottom 范围，程序滚动也不能冒充真实用户恢复跟随。"
+        )
+        XCTAssertFalse(
+            ChatSwiftUINearBottomResumePolicy.shouldResume(
+                followPaused: false,
+                userScrollActive: true,
+                userScrollJustEnded: false,
+                distanceToBottom: 0
+            ),
+            "未暂停时不需要制造一次新的恢复事件。"
+        )
+    }
+
     func testSwiftUIStreamingTailSuspendsOnlyAfterTailIsConfirmedOffscreen() {
         let messageID = "tail"
 

@@ -318,7 +318,7 @@ struct ChatGenerationBindings {
     let capturePersistMessagesBaseline: (KotlinUuid?) -> IOSConversationWriteBaseline?
     let persistMessagesSnapshot: ([UIMessage], KotlinUuid?, IOSConversationWriteBaseline?) -> Void
     let recordRun: (String, Int64, String, String, String?) async -> Void
-    let startLiveActivity: (String, AgentActivityPresentation) -> Void
+    let startLiveActivity: (String, KotlinUuid?, AgentActivityPresentation) -> Void
     let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> UIMessage?
     let messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
     let userFacingGenerationError: (String, String?) -> String
@@ -385,6 +385,10 @@ final class ChatGenerationCoordinator {
         currentConversationIdForRun
     }
 
+    func hasPendingApproval(runId: String) -> Bool {
+        currentRunId == runId && hasPendingToolApproval
+    }
+
     private var hasPendingToolApproval: Bool {
         pendingMemoryToolApproval != nil ||
             pendingSearchToolApproval != nil ||
@@ -426,6 +430,7 @@ final class ChatGenerationCoordinator {
         pendingBackgroundConversationStore = nil
         bindings.startLiveActivity(
             runId,
+            conversationId,
             .generatingResponse(modelName: params.model.modelId)
         )
 
@@ -504,7 +509,11 @@ final class ChatGenerationCoordinator {
         backgroundHandoff = nil
         pendingBackgroundConversationStore = nil
         bindings.setIsLoading(true)
-        bindings.startLiveActivity(runId, .runningTool(toolName: "generate_image"))
+        bindings.startLiveActivity(
+            runId,
+            conversationId,
+            .runningTool(toolName: "generate_image")
+        )
 
         let toolCall = toolRuntime.userInitiatedImageToolCall(input: input)
         var snapshot = bindings.getMessages()
@@ -1410,7 +1419,7 @@ final class ChatGenerationCoordinator {
         Task { @MainActor [dependencies] in
             await dependencies.liveActivityController.update(
                 runId: pending.runId,
-                presentation: .waitingForUser(toolTitle: prompt.toolTitle),
+                presentation: .waitingForUser(kind: prompt.activityKind),
                 force: true
             )
         }
@@ -1519,6 +1528,7 @@ final class ChatGenerationCoordinator {
         bindings.setIsLoading(true)
         bindings.startLiveActivity(
             pending.runId,
+            pending.conversationId,
             .generatingResponse(modelName: pending.params.model.modelId)
         )
         Task { @MainActor [weak self] in

@@ -494,6 +494,53 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    func test_recovery_preservesDurablyOwnedBackgroundRun() async throws {
+        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
+        let runId = "background-owned-recovery-\(UUID().uuidString)"
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let runningRow = AgentRunEntity(
+            runId: runId,
+            parentRunId: nil,
+            agentDescriptorId: "chat",
+            agentVersion: "1",
+            conversationId: "conversation-owned-by-background",
+            messageNodeId: nil,
+            producesMessageId: nil,
+            assistantId: nil,
+            status: "running",
+            inputDigest: "digest-\(runId)",
+            inputSnapshotRef: nil,
+            inputSchemaVersion: 1,
+            startedAt: now,
+            finishedAt: nil,
+            interruptedReason: nil
+        )
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            dao.insertRun(run: runningRow) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        _ = await IOSRunRecovery.recoverInterruptedRuns(
+            excludingRunIds: [runId],
+            reason: "process_killed",
+            now: now
+        )
+
+        let status = await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            dao.getRun(id: runId) { result, _ in
+                continuation.resume(returning: result?.status)
+            }
+        }
+        XCTAssertEqual(status, "running")
+
+        _ = await IOSRunRecovery.recoverInterruptedRuns(
+            reason: "test_cleanup",
+            now: now
+        )
+    }
+
     // MARK: - secure_store (search / TTS credential classes — discovery round 1)
 
     /// RED for P0 (discovery round 1). GREEN target: P2.
@@ -1019,15 +1066,70 @@ final class IOSParityRedLightTests: XCTestCase {
     func testBackgroundExpirationAtomicallyOwnsTheTerminalPath() {
         let expiredState = IOSChatBackgroundRunState()
 
-        XCTAssertTrue(expiredState.expireAndReserveTerminal())
+        XCTAssertEqual(expiredState.expireAndReserveTerminal(), .persistFailure)
         XCTAssertTrue(expiredState.isExpired)
-        XCTAssertFalse(expiredState.expireAndReserveTerminal())
+        XCTAssertEqual(expiredState.expireAndReserveTerminal(), .rejected)
         XCTAssertFalse(expiredState.reserveTerminal())
 
         let completedState = IOSChatBackgroundRunState()
         XCTAssertTrue(completedState.reserveTerminal())
-        XCTAssertFalse(completedState.expireAndReserveTerminal())
+        XCTAssertTrue(completedState.finalizeTerminal())
+        XCTAssertEqual(completedState.expireAndReserveTerminal(), .rejected)
         XCTAssertFalse(completedState.isExpired)
+
+        let cancelledState = IOSChatBackgroundRunState()
+        XCTAssertTrue(cancelledState.cancelAndReserveTerminal())
+        XCTAssertTrue(cancelledState.isExpired)
+        XCTAssertFalse(cancelledState.reserveTerminal())
+        XCTAssertFalse(cancelledState.cancelAndReserveTerminal())
+    }
+
+    func testBackgroundCancellationCancelsTheInstalledOperationTask() {
+        let state = IOSChatBackgroundRunState()
+        let operationTask = Task {
+            IOSAgentToolEngineResult(
+                messages: [],
+                stepsExecuted: 0,
+                pendingApproval: nil,
+                hitStepLimit: false
+            )
+        }
+        state.installOperationTask(operationTask)
+
+        XCTAssertTrue(state.cancelAndReserveTerminal())
+        XCTAssertTrue(operationTask.isCancelled)
+        XCTAssertFalse(state.reserveTerminal())
+    }
+
+    func testBackgroundCancellationCanPreemptReservedTerminalUntilItIsFinalized() {
+        let savingState = IOSChatBackgroundRunState()
+        XCTAssertTrue(savingState.reserveTerminal())
+        XCTAssertTrue(savingState.cancelAndReserveTerminal())
+        XCTAssertFalse(savingState.finalizeTerminal())
+
+        let committedState = IOSChatBackgroundRunState()
+        XCTAssertTrue(committedState.reserveTerminal())
+        XCTAssertTrue(committedState.finalizeTerminal())
+        XCTAssertFalse(committedState.cancelAndReserveTerminal())
+    }
+
+    func testBackgroundExpirationPreemptsReservedTerminalAndOwnsFinalization() {
+        let savingState = IOSChatBackgroundRunState()
+        XCTAssertTrue(savingState.reserveTerminal())
+
+        XCTAssertEqual(savingState.expireAndReserveTerminal(), .terminateInFlightSave)
+        XCTAssertTrue(savingState.isExpired)
+        XCTAssertFalse(savingState.finalizeTerminal())
+        XCTAssertTrue(savingState.finalizeTerminal(as: .expiration))
+        XCTAssertTrue(savingState.terminalWasFinalized(by: .expiration))
+        XCTAssertFalse(savingState.terminalWasFinalized(by: .completion))
+    }
+
+    func testBackgroundSystemTaskCompletionCanOnlyBeClaimedOnce() {
+        let state = IOSChatBackgroundRunState()
+
+        XCTAssertTrue(state.claimSystemTaskCompletion())
+        XCTAssertFalse(state.claimSystemTaskCompletion())
     }
 
     func testBackgroundProviderExposesRealStreamingCallbacks() {
@@ -1097,8 +1199,17 @@ final class IOSParityRedLightTests: XCTestCase {
         }
 
         XCTAssertLessThan(saveGuard.lowerBound, completedRecord.lowerBound)
+        let retainedFailureBody = source[
+            retainedFailureStart.lowerBound..<retainedFailureEnd.lowerBound
+        ]
+        XCTAssertTrue(
+            retainedFailureBody.contains(
+                "finish(requestId: backgroundTask.identifier, removePayload: false)"
+            ),
+            "A failed system task must release durable/active ownership without deleting its diagnostic payload."
+        )
         XCTAssertFalse(
-            source[retainedFailureStart.lowerBound..<retainedFailureEnd.lowerBound].contains("finish(")
+            retainedFailureBody.contains("removePayload(requestId: backgroundTask.identifier)")
         )
     }
 
